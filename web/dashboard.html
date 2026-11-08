@@ -454,6 +454,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <button class="btn" id="d-edit-idea" hidden>Edit idea</button>
       <button class="btn" id="d-discard" hidden>Discard idea</button>
       <button class="btn" id="d-follow-tracer" hidden>Follow in Tracer</button>
+      <button class="btn icon" id="d-move-host" aria-label="Move to another host" title="Move to another host" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2 5h10l-3-3M14 11H4l3 3"/></svg></button>
     </div>
     <button class="close" id="d-close" aria-label="Close">&times;</button>
   </div>
@@ -747,6 +748,16 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <div class="actions"><button class="btn" type="button" id="edit-idea-cancel">Cancel</button><button class="btn primary" type="submit" id="edit-idea-save">Save changes</button></div>
   </form>
 </dialog>
+<dialog id="move-host-dlg" aria-labelledby="move-host-h">
+  <form id="move-host-form">
+    <h2 id="move-host-h">Move to another host</h2>
+    <p class="muted" id="move-host-help"></p>
+    <label id="move-host-label">Host<select id="move-host-select"></select></label>
+    <p class="muted" id="move-host-empty" hidden></p>
+    <p class="err" id="move-host-err" role="alert" hidden></p>
+    <div class="actions"><button class="btn" type="button" id="move-host-cancel">Cancel</button><button class="btn primary" type="submit" id="move-host-save">Move job</button></div>
+  </form>
+</dialog>
 <dialog id="job-picker" aria-labelledby="job-picker-heading">
   <h2 id="job-picker-heading">Jump to job</h2>
   <label id="job-search-label" for="job-search">Search jobs</label>
@@ -1002,7 +1013,16 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer)].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move)].join('|');
+}
+
+// Where a job runs, from the board's claim and the dashboard's move. A move whose old host has not
+// stopped it yet keeps the queued stop visible.
+function hostLine(j) {
+  const m = j.move;
+  const stop = m?.from && !m.stopped ? ' · stop queued on ' + m.from : '';
+  if (j.claim?.device) return 'on ' + j.claim.device + stop;
+  return m?.to ? 'moving to ' + m.to + stop : '';
 }
 
 // An idea, or a discarded one, has no branch or round to show, so its card shows the idea text instead.
@@ -1038,6 +1058,7 @@ function card(j, inNeeds) {
       '<div class="meta">' + esc(j.branch || '') + ' &middot; round ' + esc(j.round ?? 0) +
       (buildState(j) ? ' &middot; build ' + esc(buildState(j)) : '') + '</div>') +
     (refs(j).length ? '<div class="meta refs">' + refs(j).map((r) => esc(REF_KINDS[r.kind] + ' ' + r.id)).join(' &middot; ') + '</div>' : '') +
+    (hostLine(j) ? '<div class="meta host">' + esc(hostLine(j)) + '</div>' : '') +
     (j.tracer?.building === true ? '<div class="meta tracer-building">Building in Tracer</div>' : '') +
     (ask && (inNeeds || !hiddenCardFields.has('note')) ? '<div class="note">' + esc(ask) + '</div>' : '') +
     chips(j.rounds) + '</button>';
@@ -2669,11 +2690,13 @@ async function openJob(id) {
   $('detail').hidden = false;
   $('d-title').textContent = j.title || j.id;
   $('d-meta').textContent = projectName(j) + ' · ' + j.id + ' · ' + j.stage +
-    (ideaOnly(j) ? '' : ' · round ' + (j.round ?? 0) + ' · ' + (j.branch || ''));
+    (ideaOnly(j) ? '' : ' · round ' + (j.round ?? 0) + ' · ' + (j.branch || '')) +
+    (hostLine(j) ? ' · ' + hostLine(j) : '');
   const pipeline = pipelineLabel(j);
   $('d-pipeline').textContent = pipeline;
   $('d-pipeline').hidden = !pipeline;
   $('d-discard').hidden = j.stage !== 'idea';
+  $('d-move-host').hidden = !j.project || !MOVE_STAGES.includes(j.stage);
   const following = j.tracer?.follow === true;
   $('d-follow-tracer').hidden = !j.project || !(TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) || following || !!tracerLink(j);
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
@@ -4092,6 +4115,95 @@ function closeIdeaEditor() {
     : !$('detail').hidden ? $('d-close') : $('job-jump');
   target.focus();
 }
+
+const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
+
+// Writes the move and drops the claim, so factory.py fences the old session and the target host
+// picks the job up. Returns an error message, or '' once the board is changed.
+function moveJob(board, id, to, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (!j.project || !MOVE_STAGES.includes(j.stage)) return 'This job can no longer be moved.';
+  const prior = !j.claim && j.move && !j.move.stopped ? j.move : null;
+  const from = j.claim?.device ?? prior?.from;
+  const session = j.claim?.session ?? prior?.session;
+  if (to === from) return 'This job already runs on ' + to + '.';
+  j.move = { ...(from && { from }), ...(session && { session }), to, at: now };
+  delete j.claim;
+  delete j.paseo;
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
+let moveHost = null;
+
+async function openMoveHost() {
+  const j = jobs.find((x) => x.id === openId);
+  if (moveHost || !j) return;
+  moveHost = { id: j.id, opener: $('d-move-host') };
+  const select = $('move-host-select');
+  const err = $('move-host-err');
+  const empty = $('move-host-empty');
+  err.hidden = true;
+  empty.hidden = true;
+  select.replaceChildren();
+  $('move-host-help').textContent = j.claim?.device
+    ? j.id + ' runs on ' + j.claim.device + '. Moving it stops that session and starts the job on the host you pick. If ' + j.claim.device + ' is offline, the stop waits until it comes back.'
+    : j.id + ' has no host right now. The host you pick starts it.';
+  let hosts = [];
+  try {
+    const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + j.project, { cache: 'no-store' })]);
+    if (!h.ok || !p.ok) throw new Error('load');
+    const [list, view] = [await h.json(), await p.json()];
+    const listed = view.pickup?.enabled ? view.pickup.hosts : [];
+    hosts = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== j.claim?.device);
+  } catch {
+    err.textContent = 'Could not load hosts. Try again.';
+    err.hidden = false;
+  }
+  for (const h of hosts) select.add(new Option(h.label + ' (' + h.id + ')' + (h.offline ? ' · offline' : ''), h.id));
+  select.hidden = !hosts.length;
+  $('move-host-label').hidden = !hosts.length;
+  if (!hosts.length && err.hidden) {
+    empty.textContent = 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
+    empty.hidden = false;
+  }
+  $('move-host-save').disabled = !hosts.length;
+  $('move-host-dlg').showModal();
+}
+
+function closeMoveHost() {
+  if (!moveHost) return;
+  const opener = moveHost.opener;
+  moveHost = null;
+  $('move-host-dlg').close();
+  opener.focus();
+}
+
+$('d-move-host').addEventListener('click', openMoveHost);
+$('move-host-cancel').addEventListener('click', closeMoveHost);
+$('move-host-dlg').addEventListener('cancel', (e) => { e.preventDefault(); closeMoveHost(); });
+$('move-host-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!moveHost || $('move-host-save').disabled) return;
+  const { id } = moveHost;
+  const to = $('move-host-select').value;
+  $('move-host-save').disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = moveJob(board, id, to, isoNow());
+      if (message) throw new Error(message);
+    });
+  } catch (x) {
+    $('move-host-err').textContent = String(x.message || x);
+    $('move-host-err').hidden = false;
+    $('move-host-save').disabled = false;
+    return;
+  }
+  closeMoveHost();
+  await poll();
+});
 
 $('d-edit-idea').addEventListener('click', openIdeaEditor);
 $('edit-idea-cancel').addEventListener('click', closeIdeaEditor);
