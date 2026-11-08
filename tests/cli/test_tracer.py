@@ -1119,6 +1119,26 @@ class BuildPassTest(TracerCase):
                 self.assertIn(label, lines[0])
                 self.assertIsNone(factory.NOTE_INVISIBLE.search(lines[0]))
 
+    def test_build_pass_quotes_feature_id(self):
+        patch.object(factory, "tracer_ids", return_value=("PLAN-1234", "plan 1234/x")).start()
+        with FakeTracer() as fake:
+            fake.features["plan%201234%2Fx"] = self.feature()
+            self.assertEqual(self.run_pass(fake), "")
+            self.assertEqual(fake.requests[0][1], "/api/features/plan%201234%2Fx")
+            self.assertIs(self.stored["tracer"]["building"], True)
+
+    def test_build_pass_clears_out_of_scope_mark(self):
+        for name, change, tracer, left in (
+                ("pr-open", {"stage": "pr-open"}, {"building": True, "tasks": self.TASKS}, {"tasks": self.TASKS}),
+                ("other project", {"project": "other"}, {"building": True}, None)):
+            with self.subTest(name), FakeTracer() as fake:
+                self.board = {"jobs": [dict(self.job, tracer=tracer, **change)]}
+                self.board_writes = 0
+                self.assertEqual(self.run_pass(fake), "")
+                self.assertEqual(self.stored.get("tracer"), left)
+                self.assertEqual(self.board_writes, 1)
+                self.assertEqual(fake.requests, [])
+
 
 if __name__ == "__main__":
     unittest.main()
