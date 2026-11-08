@@ -224,6 +224,38 @@ test("move host", { timeout: 240000 }, async (t) => {
         pickupHosts = PICKUP_HOSTS;
       });
 
+      await t.test(
+        `dialog after a move excludes the old host and the target ${width}`,
+        async () => {
+          await seedBoard(origin, [
+            {
+              ...JOBS[0],
+              claim: undefined,
+              paseo: undefined,
+              move: { from: "lab-linux", session: "a1b2c3", to: "studio-mac", at: NOW },
+            },
+          ]);
+          await page.evaluate(() => window.fixtureBoardPoll?.());
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await page.waitForFunction(
+            () =>
+              document.querySelector("#d-move-host") && !document.getElementById("detail").hidden,
+            wait,
+          );
+          await page.click("#d-move-host");
+          await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+          assert.equal(
+            await page.$eval("#move-host-help", (el) => el.textContent),
+            "042-sample-export is moving to studio-mac. The host you pick starts it instead.",
+          );
+          assert.deepEqual(await options(page), []);
+          await page.click("#move-host-cancel");
+          await seedBoard(origin, JOBS);
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await page.waitForSelector("#d-move-host:not([hidden])", wait);
+        },
+      );
+
       await t.test(`Move job writes move and drops the claim ${width}`, async () => {
         await page.click("#d-move-host");
         await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
