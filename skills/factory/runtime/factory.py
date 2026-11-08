@@ -4464,7 +4464,7 @@ def tracer_build_pass(home):
     while the job stays checked; a 404 drops it. A Tracer failure costs one stderr warning and leaves
     unchecked jobs as they were. Silent on a device without tracer.json. Polls only the feature id
     the job maps to, skips a job whose board names another feature, and fails the check on a feature
-    with another ticket."""
+    with another ticket. Clears the mark, with no Tracer call, from a job outside that scope."""
     home = Path(home)
     if not os.path.lexists(home / "tracer.json"):
         return
@@ -4474,18 +4474,23 @@ def tracer_build_pass(home):
             cfgs = read_tracer(home)
             for job in read_board(home)["jobs"]:
                 slug, job_id = job.get("project"), str(job.get("id"))
-                if (slug not in cfgs or job.get("stage") not in (IDEA,) + IN_FLIGHT
-                        or not JOB_ID.fullmatch(job_id) or ".." in job_id):
+                if not JOB_ID.fullmatch(job_id) or ".." in job_id:
+                    continue
+                held = job["tracer"] if isinstance(job.get("tracer"), dict) else {}
+                in_scope = slug in cfgs and job.get("stage") in (IDEA,) + IN_FLIGHT
+                if not in_scope:
+                    if tracer_building(job):
+                        found[job_id] = (False, held.get("tasks"))
                     continue
                 ticket, feature_id = tracer_ids(job)
-                held = job["tracer"] if isinstance(job.get("tracer"), dict) else {}
                 if held.get("feature") not in (None, feature_id):
                     continue
                 cfg = cfgs[slug]
+                path = f"api/features/{urllib.parse.quote(feature_id, safe='')}"
                 status, feature = tracer_call(cfg["url"], tracer_token(slug, cfg["token_file"]), "GET",
-                                              f"api/features/{feature_id}", ok=(200, 404))
+                                              path, ok=(200, 404))
                 if status == 200 and not isinstance(feature, dict):
-                    fail(f"Tracer GET api/features/{feature_id} returned a body that is not a feature", 5)
+                    fail(f"Tracer GET {path} returned a body that is not a feature", 5)
                 if status == 200 and str(feature.get("ticket") or "").strip().upper() != ticket:
                     fail(f"Tracer feature {feature_id} for job {job['id']} belongs to {tracer_ticket_label(feature.get('ticket'))}", 5)
                 building = tracer_feature_building(feature, ticket)
