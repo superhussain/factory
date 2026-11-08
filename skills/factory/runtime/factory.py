@@ -516,6 +516,17 @@ def blocking(job, device, session, minutes):
     return c if datetime.now(timezone.utc) - seen < timedelta(minutes=minutes) else None
 
 
+def moved_away(job, device, session):
+    """True when the dashboard moved this job away from this holder's session."""
+    m = (job or {}).get("move")
+    return isinstance(m, dict) and (m.get("from"), m.get("session")) == (device, session)
+
+
+def moved_message(job_id, m):
+    return (f"{job_id} was moved to {m.get('to')} from the dashboard at {m.get('at')}. "
+            "Nothing was written. Stop this session.")
+
+
 def held_by(job_id, c):
     return (f"{job_id} is held by {c['device']} session {c.get('session')} since {c['since']}, "
             f"last seen {c['seen']}")
@@ -588,6 +599,8 @@ def board(factory, job_id):
         fail("only factory.py suggest sets origin", 2)
     if "started" in patch:
         fail("only factory.py sets started", 2)
+    if "move" in patch:
+        fail("only the dashboard and factory.py pickup set move", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -618,6 +631,8 @@ def board(factory, job_id):
         held = blocking(found, device, session, minutes)
         if held:
             return None, (None, held)
+        if moved_away(found, device, session):
+            fail(moved_message(job_id, found["move"]), 6)
         origin = (found or {}).get("origin")
         if isinstance(origin, dict) and origin.get("gate") == "human" and not origin.get("approved") \
                 and "stage" in patch and patch["stage"] not in (IDEA, "closed"):
@@ -660,6 +675,8 @@ def hold(target, take=None):
             return None, ("missing", None, None)
         if job.get("project") != slug:
             fail(f"{job_id} belongs to {job.get('project')}, not {slug}", 2)
+        if take != "take" and moved_away(job, device, session):
+            fail(moved_message(job_id, job["move"]), 6)
         # Released hold is the receiving side of handoff, whose sender gate keeps
         # human and PR gates unclaimed; mirror it before claiming or accepting.
         if take == "released" and job.get("stage") not in IN_FLIGHT:
@@ -3795,6 +3812,9 @@ def stuck(*args):
     def is_stuck(job):
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
+            return False
+        # A move nobody has claimed yet belongs to its target host's pickup.
+        if isinstance(job.get("move"), dict) and "claimed" not in job["move"]:
             return False
         c = job.get("claim")
         if job.get("stage") in IN_FLIGHT:
