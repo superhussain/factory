@@ -956,59 +956,6 @@ class FactoryTest(IsolatedTestCase):
         self.assertNotIn("handoff", self.saved())
 
 
-    def moved(self, **extra):
-        job = dict(self.job, move=dict({"from": "test", "session": "sender", "to": "studio-mac",
-                                        "at": "2026-11-08T10:00:00Z"}, **extra))
-        del job["claim"]
-        self.save(job)
-        return self.store["/api/board"]
-
-    def test_board_and_hold_fence_a_moved_session(self):
-        before = self.moved()
-        message = ("001-test was moved to studio-mac from the dashboard at 2026-11-08T10:00:00Z. "
-                   "Nothing was written. Stop this session.\n")
-        for call in (lambda: factory.board(self.home, "001-test"), lambda: factory.hold(self.target),
-                     lambda: factory.hold(self.target, "released")):
-            err = io.StringIO()
-            with patch.object(factory.sys, "stdin", io.StringIO('{"note": "x"}')), \
-                    contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
-                call()
-            self.assertEqual(raised.exception.code, 6)
-            self.assertTrue(err.getvalue().endswith(message), err.getvalue())
-            self.assertEqual(self.store["/api/board"], before)
-
-    def test_move_fence_spares_other_sessions_and_hold_take(self):
-        self.moved()
-        with patch.dict(os.environ, {"FACTORY_SESSION": "other"}), \
-                patch.object(factory.sys, "stdin", io.StringIO('{"note": "x"}')):
-            factory.board(self.home, "001-test")
-        self.assertEqual(self.saved()["note"], "x")
-        factory.hold(self.target, "take")
-        self.assertEqual(self.saved()["claim"]["session"], "sender")
-
-    def test_board_refuses_a_move_patch(self):
-        before = self.store["/api/board"]
-        err = io.StringIO()
-        with patch.object(factory.sys, "stdin", io.StringIO('{"move": {"to": "studio-mac"}}')), \
-                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
-            factory.board(self.home, "001-test")
-        self.assertEqual(raised.exception.code, 2)
-        self.assertIn("only the dashboard and factory.py pickup set move", err.getvalue())
-        self.assertEqual(self.store["/api/board"], before)
-
-    def test_stuck_leaves_an_unclaimed_move_to_its_target(self):
-        (self.home / "paths.md").write_text(f"---\nsample: {self.home / 'sample'}\n---\n")
-        patch.object(factory, "paseo_server", return_value="").start()
-        self.job["updated"] = "2020-01-01T00:00:00Z"
-        before = self.moved()
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
-            factory.stuck()
-        self.assertEqual(raised.exception.code, 3)
-        self.assertEqual(self.store["/api/board"], before)
-        self.moved(claimed="2026-11-08T10:05:00Z")
-        factory.stuck()
-        self.assertEqual([j["id"] for j in json.loads(self.output.getvalue())], ["001-test"])
-
     def test_stuck_skips_a_stale_job_waiting_on_human(self):
         (self.home / "paths.md").write_text(f"---\nsample: {self.home / 'sample'}\n---\n")
         patch.object(factory, "paseo_server", return_value="").start()
@@ -1270,6 +1217,67 @@ class IdeaTest(IsolatedTestCase):
         with patch.object(factory, "pull_job", side_effect=RuntimeError("bad executable job")):
             with self.assertRaisesRegex(RuntimeError, "bad executable job"):
                 factory.sync()
+
+
+class MoveFenceTest(IsolatedTestCase):
+    setUp = FactoryTest.setUp
+    api = FactoryTest.api
+    git = FactoryTest.git
+    saved = FactoryTest.saved
+    save = FactoryTest.save
+
+    def moved(self, **extra):
+        job = dict(self.job, move=dict({"from": "test", "session": "sender", "to": "studio-mac",
+                                        "at": "2026-11-08T10:00:00Z"}, **extra))
+        del job["claim"]
+        self.save(job)
+        return self.store["/api/board"]
+
+    def test_board_and_hold_fence_a_moved_session(self):
+        before = self.moved()
+        message = ("001-test was moved to studio-mac from the dashboard at 2026-11-08T10:00:00Z. "
+                   "Nothing was written. Stop this session.\n")
+        for call in (lambda: factory.board(self.home, "001-test"), lambda: factory.hold(self.target),
+                     lambda: factory.hold(self.target, "released")):
+            err = io.StringIO()
+            with patch.object(factory.sys, "stdin", io.StringIO('{"note": "x"}')), \
+                    contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+                call()
+            self.assertEqual(raised.exception.code, 6)
+            self.assertTrue(err.getvalue().endswith(message), err.getvalue())
+            self.assertEqual(self.store["/api/board"], before)
+
+    def test_move_fence_spares_other_sessions_and_hold_take(self):
+        self.moved()
+        with patch.dict(os.environ, {"FACTORY_SESSION": "other"}), \
+                patch.object(factory.sys, "stdin", io.StringIO('{"note": "x"}')):
+            factory.board(self.home, "001-test")
+        self.assertEqual(self.saved()["note"], "x")
+        factory.hold(self.target, "take")
+        self.assertEqual(self.saved()["claim"]["session"], "sender")
+
+    def test_board_refuses_a_move_patch(self):
+        before = self.store["/api/board"]
+        err = io.StringIO()
+        with patch.object(factory.sys, "stdin", io.StringIO('{"move": {"to": "studio-mac"}}')), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            factory.board(self.home, "001-test")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("only the dashboard and factory.py pickup set move", err.getvalue())
+        self.assertEqual(self.store["/api/board"], before)
+
+    def test_stuck_leaves_an_unclaimed_move_to_its_target(self):
+        (self.home / "paths.md").write_text(f"---\nsample: {self.home / 'sample'}\n---\n")
+        patch.object(factory, "paseo_server", return_value="").start()
+        self.job["updated"] = "2020-01-01T00:00:00Z"
+        before = self.moved()
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            factory.stuck()
+        self.assertEqual(raised.exception.code, 3)
+        self.assertEqual(self.store["/api/board"], before)
+        self.moved(claimed="2026-11-08T10:05:00Z")
+        factory.stuck()
+        self.assertEqual([j["id"] for j in json.loads(self.output.getvalue())], ["001-test"])
 
 
 class TracerStartIdeaTest(IsolatedTestCase):
