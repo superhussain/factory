@@ -1109,16 +1109,19 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
                 continue
             repo = paths.get(j["project"])
             # The scheduler pastes the id into a shell command, so only well-formed ids pass.
-            if not (j.get("stage") == "idea" or builds and tracer_start(j)) \
+            if not (j.get("stage") == "idea" or builds and (tracer_start(j) or moved_here(j, device))) \
                     or not repo or not os.path.isdir(repo) \
                     or (project and j["project"] != project) \
                     or not JOB_ID.fullmatch(j["id"]) or ".." in j["id"] \
                     or blocking(j, device, session, minutes):
                 continue
             tag = session or secrets.token_hex(3)
+            claim = new_claim(device, tag)
             # Replace the claim whole, as hold does. The paseo key stays as it was.
             j.pop("claim", None)
-            patch_job(data, j["id"], {"claim": new_claim(device, tag)})
+            patch_job(data, j["id"], {"claim": claim})
+            if builds and moved_here(j, device):
+                patch_job(data, j["id"], {"move": {"claimed": claim["since"]}})
             picked.append({"id": j["id"], "project": j["project"], "repo_path": repo, "session": tag})
         return (dump_board(data) if picked else None), picked
     return cas(home, "/api/board", change)
@@ -2481,19 +2484,57 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
             print(line)
 
 
+def move_stop_pass(home, data, device, dry):
+    """Stop the worktree of each job the dashboard moved away from this host, and record it."""
+    for j in data["jobs"]:
+        m, job_id, project = j.get("move"), j.get("id"), j.get("project")
+        if not (isinstance(m, dict) and m.get("from") == device and "stopped" not in m
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(project, str) and SLUG.fullmatch(project)):
+            continue
+        line = f"{job_id} {project}: moved to {m.get('to')}"
+        if dry:
+            print(f"would stop {line}")
+            continue
+        wt = home / "worktrees" / project / job_id
+        alive = stop_pids(wt) if wt.exists() else []
+        if alive:
+            print(f"factory.py: pickup could not stop {job_id}: processes still running: "
+                  f"{' '.join(map(str, alive))}", file=sys.stderr)
+            continue
+
+        def change(text, job_id=job_id, at=m.get("at")):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            move = (found or {}).get("move")
+            if not isinstance(move, dict) or move.get("at") != at or "stopped" in move:
+                return None, False
+            patch_job(board, job_id, {"move": {"stopped": now()}})
+            return dump_board(board), True
+        if cas(home, "/api/board", change):
+            print(f"stopped {line}")
+
+
+def moved_here(j, device):
+    """True when the dashboard moved this in-flight job to this host and no pickup has claimed it yet."""
+    m = j.get("move")
+    return isinstance(m, dict) and m.get("to") == device and "claimed" not in m and j.get("stage") in IN_FLIGHT
+
+
 def pickup_pass(home, device, minutes, dry, limit, cap):
     """One pickup run after flags and the holder are resolved."""
     paths = read_paths(home)
     data = read_board(home)
+    move_stop_pass(home, data, device, dry)
     settings = {}
     stalls = read_stalls(home)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
     if not dry and taken >= limit:
         return
-    jobs = [j for j in data["jobs"] if (j.get("stage") == IDEA or tracer_start(j)) and isinstance(j.get("id"), str)
-            and JOB_ID.fullmatch(j["id"]) and ".." not in j["id"]]
-    starts = {j["id"] for j in jobs if tracer_start(j)}
+    jobs = [j for j in data["jobs"] if (j.get("stage") == IDEA or tracer_start(j) or moved_here(j, device))
+            and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"]) and ".." not in j["id"]]
+    starts = {j["id"] for j in jobs if tracer_start(j) or moved_here(j, device)}
 
     def skip(j):
         """Why this idea is not a candidate, or None."""
