@@ -166,6 +166,14 @@ changes nothing. Then install one timer per host.
 - `routes.md` order sets the fallback: pickup limits the stalled route and launches on the
   first route that is not limited, so put the route you want after a limit second.
 
+## Moving a job to another host
+
+- The dashboard's move button replaces a job's `claim` and `paseo` with `move = {from, session, to, at}`. Only the dashboard and `pickup` write `move`.
+- The old session is fenced: its next `board` or `hold` exits 6 with `<id> was moved to <host> from the dashboard`. `hold <project>/<id> take` still claims the job.
+- The old host's `pickup` stops the job's worktree processes first on every run, whatever the project's pickup settings, then sets `move.stopped`. While that host is offline the stop waits on the board. Survivors are printed on stderr and retried next run.
+- The target host's `pickup` claims the job once, sets `move.claimed` and launches `/factory recover`. The usual gates apply: pickup on, host listed, not gated, the cap and a route.
+- `factory.py stuck` leaves a move with no `claimed` to its target.
+
 ## Logs and limits
 
 Each launch writes `<home>/logs/pickup/<id>-<tag>.log` (mode 0600, one file per
