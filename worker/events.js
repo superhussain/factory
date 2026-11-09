@@ -46,7 +46,9 @@ const room = (env) => env.BoardEvents.get(env.BoardEvents.idFromName("main"));
 export async function announce(env, key) {
   if (!env.BoardEvents) return;
   try {
-    await room(env).fetch("https://board-events.invalid/notify?key=" + key, { method: "POST" });
+    await room(env).fetch("https://board-events.invalid/notify?key=" + encodeURIComponent(key), {
+      method: "POST",
+    });
   } catch {}
 }
 

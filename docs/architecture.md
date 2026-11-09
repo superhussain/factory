@@ -198,6 +198,8 @@ sequenceDiagram
 - The dashboard runs its poll timer only while the socket is closed. It reconnects
   with backoff (1, 2, 4 ... 30 s, 8 tries), then again on focus, online or show.
   A hidden tab keeps its socket only while notifications are on.
+- A socket open re-reads `board.json` but redraws only when its `ETag` changed.
+  The header dot is solid while live and a ring while polling.
 
 | Request to `/events/board` | Result |
 | --- | --- |

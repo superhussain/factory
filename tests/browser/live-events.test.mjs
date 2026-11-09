@@ -143,8 +143,32 @@ test("live board events", { timeout: 120000 }, async (t) => {
         await page.evaluate("liveSocket.close(1000)");
         await page.waitForFunction("!liveOpen && window.pollTimers.size === 1", wait);
         assert.deepEqual(await timers(page), [3000]);
+        const dot = () =>
+          page.$eval("#dot", (el) => [el.className, el.title, el.getAttribute("aria-label")]);
+        const polling = "Polling every 3 seconds until live updates reconnect";
+        assert.deepEqual(await dot(), ["dot ok polling", polling, polling]);
         await page.waitForFunction("liveOpen && window.pollTimers.size === 0", wait);
         assert.deepEqual(await timers(page), []);
+        const live = "Live: updates arrive as they happen";
+        assert.deepEqual(await dot(), ["dot ok", live, live]);
+        assert.deepEqual(errors, []);
+        await context.close();
+      },
+    );
+
+    await t.test(
+      "live L5 a socket open with an unchanged board keeps the drawn cards",
+      async () => {
+        const { context, page, errors } = await open();
+        await page.evaluate(() => {
+          window.heldCard = document.querySelector('.card[data-id="001-sample"]');
+        });
+        const read = page.waitForResponse((r) => new URL(r.url()).pathname === "/board.json");
+        await page.evaluate("liveSocket.close(1000)");
+        await page.waitForFunction("liveOpen && window.pollTimers.size === 0", wait);
+        await read;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.equal(await page.evaluate("heldCard.isConnected"), true);
         assert.deepEqual(errors, []);
         await context.close();
       },
