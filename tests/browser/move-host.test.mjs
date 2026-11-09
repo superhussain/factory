@@ -29,7 +29,7 @@ const JOBS = [
     round: 1,
     updated: "2026-01-01T00:00:00Z",
     claim: { device: "lab-linux", session: "a1b2c3", since: "2026-01-01T10:00:00Z" },
-    paseo: { agent: "synthetic" },
+    paseo: { server: "srv-lab", agent: "4cec0a47-1d21-4115-945b-9e7dfb668ef4" },
   },
   { id: "043-unclaimed", project: "sample", title: "No host", stage: "spec", updated: NOW },
   { id: "044-open-pr", project: "sample", title: "Open PR", stage: "pr-open", updated: NOW },
@@ -273,6 +273,8 @@ test("move host", { timeout: 240000 }, async (t) => {
         assert.deepEqual(job.move, {
           from: "lab-linux",
           session: "a1b2c3",
+          agent: "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+          server: "srv-lab",
           to: "studio-mac",
           at: NOW,
         });
@@ -289,6 +291,13 @@ test("move host", { timeout: 240000 }, async (t) => {
         await (
           await page.$('.card[data-id="042-sample-export"]')
         ).screenshot({ path: `${SHOTS}after-card-moving${suffix}.png` });
+      });
+
+      await t.test(`move keeps the paseo link ${width}`, async () => {
+        const board = await (await fetch(origin + "/api/board")).json();
+        const { move } = board.jobs.find((j) => j.id === "042-sample-export");
+        assert.equal(move.agent, "4cec0a47-1d21-4115-945b-9e7dfb668ef4");
+        assert.equal(move.server, "srv-lab");
       });
       await page.close();
     }

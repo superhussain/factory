@@ -164,6 +164,7 @@ changes nothing. Then install one timer per host.
   `{"version": 1, "adapter": ["python3", "<installed-skill>/runtime/paseo_stalls.py"], "takeover_minutes": 30}`.
   It reports only idle, unarchived Claude limit stalls and re-checks a session before
   archiving it, so a session a human or the sweep has woken is kept.
+  `archive <session> --force` archives without the stall re-check, for a moved job.
 - `routes.md` order sets the fallback: pickup limits the stalled route and launches on the
   first route that is not limited, so put the route you want after a limit second.
 
@@ -172,6 +173,7 @@ changes nothing. Then install one timer per host.
 - The dashboard's move button replaces a job's `claim` and `paseo` with `move = {from, session, to, at}`. Only the dashboard and `pickup` write `move`.
 - The old session is fenced: its next `board` or `hold` exits 6 with `<id> was moved to <host> from the dashboard`. `hold <project>/<id> take` still claims the job.
 - The old host's `pickup` stops the job's worktree processes first on every run, whatever the project's pickup settings, then sets `move.stopped`. While that host is offline the stop waits on the board. Survivors are printed on stderr and retried next run.
+- When stalls.json is set and the job's Paseo session ran on this host's server, the old host's pickup archives it with the adapter's archive <session> --force first. A failed archive is printed on stderr and retried next run.
 - The target host's `pickup` claims the job once, sets `move.claimed` and launches `/factory recover`. The usual gates apply: pickup on, host listed, not gated, the cap and a route.
 - `factory.py stuck` leaves a move with no `claimed` to its target.
 
