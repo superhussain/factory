@@ -976,7 +976,9 @@ handed-off job and refuses stale claims, `recover` runs under the claim `stuck` 
 `factory.py stuck`, and `factory.py pickup` runs it after a stalled-session takeover and for a job Tracer scope approval moved to `build`, and for a job moved to, or rerun on, this host from the dashboard, has claimed the job under `<tag>`, so pass `--session <tag>` to
 `hold` and every `board` call, and the claim stays this session's. Run step zero for
 an existing job, but run `worktree` only where the table says. If `hold` exits 6,
-stop. If the job isn't at spec, build, review, or approve, or at `pr-open` with
+stop. If `worktree` exits 6 with a line starting `unsafe checkout:`, patch
+`{"stage": "needs-human", "note": "<that line>"}` and stop. Never fall back to cutting
+from `$BASE`. If the job isn't at spec, build, review, or approve, or at `pr-open` with
 `automerge` true, report its stage and stop.
 
 | Stage | Action |

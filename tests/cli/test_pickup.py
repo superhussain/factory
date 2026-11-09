@@ -110,6 +110,7 @@ class PickupFixture(IsolatedTestCase):
         patch.object(factory, "LAUNCH_WAIT_SECONDS", 2).start()
         patch.object(factory, "report_status").start()
         self.sweep = patch.object(factory, "backlog_triage_pass").start()
+        self.checkout = patch.object(factory, "checkout_problem", return_value=None).start()
 
     def configure(self, line="started", code=0, sleep=0):
         (self.root / "fake.json").write_text(json.dumps({"line": line, "code": code, "sleep": sleep}),
@@ -856,6 +857,27 @@ class TakeoverTest(PickupFixture):
         self.assertEqual(len(self.launched()), 2)
         self.assertIn("took over 010-run alpha from agent-1 on fallback", out)
         self.assertIn("launched 002-alpha alpha on fallback", out)
+
+    def test_unsafe_checkout_skips_project(self):
+        line = f"unsafe checkout: {self.repo_a} main has root a1b2c3d4e5f6, which origin/main lacks"
+        self.checkout.return_value = line
+        self.views["echo"] = (200, effective("echo", {"pickup": {"enabled": True, "hosts": ["other-host"]}}))
+        self.board["jobs"] = [idea("001-alpha", "alpha"), idea("002-echo", "echo")]
+        self.assertEqual(self.pickup(), (0, "", f"factory.py: pickup skips alpha: {line}\n"))
+        self.checkout.assert_called_once_with(self.home, "alpha", str(self.repo_a))
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.launched(), [])
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn(f"skip 001-alpha alpha: {line}", out.splitlines())
+        self.set_adapter([self.stall()])
+        self.set_stalls()
+        self.board["jobs"] = [self.stall_job()]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[0], f"skip stall agent-1 010-run: {line}")
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.launched(), [])
 
 
 class MoveHostTest(PickupFixture):
