@@ -174,6 +174,8 @@ flowchart LR
   W -->|queue| I[(board.json idea)]
   W -->|hold or off| B
   I --> P[factory.py pickup]
+  P[factory.py pickup] --> S[backlog_triage_pass]
+  S --> W
 ```
 
 Settings, Pipeline holds a `triage` block per scope. A project value replaces the global
@@ -201,6 +203,14 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   changed meanwhile, it drops the row while the row is still an unclaimed idea.
 - **Hold.** The line waits in the backlog for a person, as before.
   The Worker keeps the latest hold verdict for each line, and the backlog drawer shows it under Held by triage.
+- **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
+  verdict from `backlog_triage_pass`, which `factory.py pickup` runs before it claims ideas
+  (never with `--dry-run`). Each run posts up to 5 unchecked lines, with the indented block
+  under each as context, for projects whose effective `triage.enabled` is true. Held lines,
+  and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this
+  host never sends them again. `backlog add` records its held line there too. A 409, 502,
+  503 or network failure warns, and the line is retried on the next run. Deleting the file
+  only causes rescoring.
 - **Failure.** A 404 from an older Worker means off. Any other error prints a warning,
   and the line waits. `backlog add` still exits 0.
 - **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a

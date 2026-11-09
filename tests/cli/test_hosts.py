@@ -243,7 +243,8 @@ class PickupHeartbeatTest(HostFixture):
                     beat = self.pickup()
                 self.assertEqual(beat, plain)
                 self.assertEqual(beat[0], exit_code)
-                self.assertEqual(self.keys(server), ["GET /api/board", "GET /projects.json", "GET /api/board", STATUS])
+                self.assertEqual(self.keys(server), ["GET /api/backlog", "GET /api/board", "GET /projects.json",
+                                                     "GET /api/board", STATUS])
                 body = json.loads(server.requests[-1][3])
                 cache = json.loads((self.home / "host-status.json").read_text())
                 self.assertEqual(cache, body)
@@ -256,7 +257,7 @@ class PickupHeartbeatTest(HostFixture):
             with self.subTest(args=args), http_fixture({STATUS: (200, b""), **DOCTOR}) as server:
                 self.write_config(server.origin, device)
                 self.assertEqual(self.pickup(*args), self.pickup(*args, heartbeat=False))
-                self.assertEqual(set(self.keys(server)), {"GET /api/board"})
+                self.assertEqual(set(self.keys(server)), {"GET /api/board"} | (set() if args else {"GET /api/backlog"}))
                 self.assertFalse((self.home / "host-status.json").exists())
 
     def test_failed_status_put_changes_nothing_and_writes_no_cache(self):
