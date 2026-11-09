@@ -125,6 +125,8 @@ NEW_JOB_ID = re.compile(r"[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*")
 JOB_REL = re.compile(r"(?:(round-\d+/)?[\w.-]+\.(md|png|jpe?g|gif|webp)|(round-\d+/)?[\w-]+\.walkthrough\.html|walkthrough\.html)", re.ASCII)
 # Paseo server and agent ids go on the shared board and into dashboard links.
 PASEO_ID = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
+# Agent ids the stall adapter archives. Mirrors ID_RE in paseo_stalls.py.
+ADAPTER_ID = re.compile(r"[0-9a-fA-F][0-9a-fA-F-]{7,63}")
 ROUTE_MODEL = re.compile(r"[A-Za-z0-9_./:@\[\]-]{1,200}", re.ASCII)
 ROUTE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -2738,7 +2740,7 @@ def move_stop_pass(home, data, device, dry, adapter):
         archives = {}
         for x in mine:
             agent, server = x.get("agent"), x.get("server")
-            if (adapter and isinstance(agent, str) and PASEO_ID.fullmatch(agent) and not agent.startswith("-")
+            if (adapter and isinstance(agent, str) and ADAPTER_ID.fullmatch(agent)
                     and server and server == paseo_server() and agent != os.environ.get("PASEO_AGENT_ID")):
                 archives[agent] = x.get("at")
         agent = next(iter(archives), None)
