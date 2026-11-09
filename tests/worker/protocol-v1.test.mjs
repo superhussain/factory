@@ -49,8 +49,8 @@ function fixtureBody(name) {
   if (name === "png-too-many-pixels") return png(4096, 4096);
   if (name === "text-overflow") return Buffer.alloc((1 << 20) + 1, 120);
   if (name === "image-overflow") return Buffer.alloc((5 << 20) + 1, 120);
-  if (name === "text-stream-overflow" || name === "image-stream-overflow") {
-    const max = name.startsWith("text") ? 1 << 20 : 5 << 20;
+  if (name.endsWith("-stream-overflow")) {
+    const max = { text: 1 << 20, board: 4 << 20, image: 5 << 20 }[name.split("-")[0]];
     return new ReadableStream({
       start(controller) {
         controller.enqueue(Buffer.alloc(max, 120));
@@ -461,4 +461,13 @@ test("a board write cannot change an existing row's id", async () => {
     ).status,
     412,
   );
+});
+
+test("board accepts a document over 1 MiB up to the 4 MiB board cap", async () => {
+  const s = await setup();
+  const etag = s.bucket.objects.get("board.json").httpEtag;
+  const body = JSON.stringify({ jobs: [{ id: "001", note: "x".repeat(2 << 20) }] });
+  const response = await s.request("/api/board", "PUT", body, { "If-Match": etag });
+  assert.equal(response.status, 200);
+  assert.equal(await (await s.request("/api/board")).text(), body);
 });

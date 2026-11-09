@@ -590,11 +590,11 @@
         "If-Match": "\"0a5796e93f9b57ddf7c45f860485cbb7353fc0eda3dca753a444d0fd2a1573fe\""
       },
       "body": {
-        "fixture": "text-stream-overflow"
+        "fixture": "board-stream-overflow"
       },
       "expected": {
         "status": 413,
-        "body": "body over 1 MiB",
+        "body": "body over 4 MiB",
         "headers": {
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
@@ -744,11 +744,11 @@
         "If-Match": "\"ed769bd406173a15c796f7a4a236b521ad24c64c3b9330039b3e4c13dca02112\""
       },
       "body": {
-        "fixture": "text-stream-overflow"
+        "fixture": "board-stream-overflow"
       },
       "expected": {
         "status": 413,
-        "body": "body over 1 MiB",
+        "body": "body over 4 MiB",
         "headers": {
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
