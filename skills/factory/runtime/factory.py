@@ -967,16 +967,106 @@ def backlog_add(item, context=None):
         return text + f"- [ ] {item}\n" + block, None
     cas(home, "/api/backlog", append)
     print(f"added {item}" + (" with context" if context else ""))
-    verdict = backlog_triage(home, item, context)
-    if verdict is None:
-        return
+    verdict, final = backlog_triage(home, item, context)
+    if final and (verdict is None or verdict["decision"] != "queue"):
+        triaged = read_triaged(home)
+        if f"- [ ] {item}" not in triaged:
+            save_triaged(home, triaged + [f"- [ ] {item}"])
+    if verdict is not None:
+        report_verdict(home, m.group(1), m.group(2), item, verdict)
+
+
+def report_verdict(home, slug, feature, item, verdict):
+    """Queue a line the Worker queued, or print why it holds."""
     if verdict["decision"] == "queue":
-        queue_backlog_item(home, m.group(1), m.group(2), verdict)
+        queue_backlog_item(home, slug, feature, verdict)
     elif verdict["confidence"] is None:
         print(f"held {item} for review: {verdict['reason']}")
     else:
         print(f"held {item} for review: confidence {verdict['confidence']}% "
               f"(threshold {verdict['threshold']}%): {verdict['reason']}")
+
+
+TRIAGE_SWEEP_LIMIT = 5
+
+
+def read_triaged(home):
+    """The backlog lines this host already has a final triage verdict for."""
+    try:
+        data = json.loads(Path(home, "backlog-triage.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    ok = (isinstance(data, dict) and set(data) == {"version", "lines"} and type(data["version"]) is int
+          and data["version"] == 1 and isinstance(data["lines"], list)
+          and all(isinstance(line, str) for line in data["lines"]))
+    return data["lines"] if ok else []
+
+
+def save_triaged(home, lines):
+    write_atomic(str(Path(home, "backlog-triage.json")), json.dumps({"version": 1, "lines": lines}, indent=2) + "\n")
+
+
+def unchecked_lines(text):
+    """(raw line, slug, feature, context) for each well-formed unchecked backlog line. context is
+    the indented block under the line, with its indent and blank edge lines removed."""
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    found = []
+    for i, line in enumerate(lines):
+        m = BACKLOG_LINE.match(line)
+        if not m:
+            continue
+        held = []
+        for below in lines[i + 1:]:
+            if below and not below.startswith("  "):
+                break
+            held.append(below[2:])
+        while held and not held[0].strip():
+            held.pop(0)
+        while held and not held[-1].strip():
+            held.pop()
+        found.append((line, m.group(1), m.group(2), "\n".join(held)))
+    return found
+
+
+def triage_enabled(home, slug):
+    """True when the project's effective pipeline turns backlog triage on."""
+    status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+    try:
+        view = json.loads(text) if status == 200 else None
+    except ValueError:
+        return False
+    return isinstance(view, dict) and isinstance(view.get("triage"), dict) and view["triage"].get("enabled") is True
+
+
+def backlog_triage_pass(home):
+    """Ask the Worker for a verdict on up to TRIAGE_SWEEP_LIMIT unchecked backlog lines this host
+    has no final verdict for, in projects with triage on. Queued lines become ideas."""
+    status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
+    lines = unchecked_lines(text if status == 200 else "")
+    cached = read_triaged(home)
+    raws = {raw for raw, _, _, _ in lines}
+    triaged = [line for line in cached if line in raws]
+    todo = [line for line in lines if line[0] not in triaged]
+    projects = registered(home) if todo else set()
+    enabled, sent = {}, 0
+    for raw, slug, feature, context in todo:
+        if sent == TRIAGE_SWEEP_LIMIT:
+            break
+        if raw in triaged or slug not in projects:
+            continue
+        if slug not in enabled:
+            enabled[slug] = triage_enabled(home, slug)
+        if not enabled[slug]:
+            continue
+        sent += 1
+        item = f"{slug}: {feature.rstrip()}"
+        verdict, final = backlog_triage(home, item, context or None)
+        if final and (verdict is None or verdict["decision"] != "queue"):
+            triaged.append(raw)
+        if verdict is not None:
+            report_verdict(home, slug, feature, item, verdict)
+    if triaged != cached:
+        save_triaged(home, triaged)
 
 
 def triage_verdict(text):
@@ -997,8 +1087,9 @@ def triage_verdict(text):
 
 
 def backlog_triage(home, item, context):
-    """The Worker's verdict on a new backlog line, or None when triage is off, the Worker
-    predates it, or the call failed. A failure only warns: the line is already appended."""
+    """(verdict, final) for a backlog line. verdict is None when triage is off, the Worker
+    predates it, or the call failed. A failure only warns: the line is already appended.
+    final is True for a queue or hold and for a 400, which a retry would not change."""
     body = json.dumps({"item": item, **({"context": context} if context else {})}, ensure_ascii=False)
     captured = io.StringIO()
     try:
@@ -1008,14 +1099,14 @@ def backlog_triage(home, item, context):
     except SystemExit:
         status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
     if status == 404:
-        return None
+        return None, False
     verdict = triage_verdict(text) if status == 200 else None
     if verdict is None:
         why = "malformed reply" if status == 200 else status
         print(f"factory.py: backlog triage failed ({why}); the item waits in the backlog for review",
               file=sys.stderr)
-        return None
-    return None if verdict["decision"] == "off" else verdict
+        return None, status == 400
+    return (None, False) if verdict["decision"] == "off" else (verdict, True)
 
 
 def queue_backlog_item(home, slug, feature, verdict):
@@ -2383,7 +2474,8 @@ def host_cmd(sub, host_id, code):
 def pickup(*args):
     """Claim and launch runnable ideas, and builds that Tracer scope approval released, for the
     projects whose effective pipeline enables pickup on this host. Silent when there is nothing to
-    do. Never calls a model, and no idea text reaches a launcher's arguments, environment or log name."""
+    do. Never calls a model itself; backlog triage asks the Worker, which does. No idea text
+    reaches a launcher's arguments, environment or log name."""
     flags = {}
     i = 0
     while i < len(args):
@@ -2406,6 +2498,7 @@ def pickup(*args):
         if not dry:
             tracer_follow_pass(home)
             tracer_build_pass(home)
+            backlog_triage_pass(home)
         pickup_pass(home, device, minutes, dry, limit, cap)
     finally:
         if not dry:
