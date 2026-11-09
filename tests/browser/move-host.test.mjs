@@ -388,6 +388,45 @@ test("move host", { timeout: 240000 }, async (t) => {
         );
         assert.equal(await hostLine(page, "047-done"), "on studio-mac · stop queued on lab-linux");
       });
+
+      await t.test(`dialog says which hosts have a stop queued ${width}`, async () => {
+        await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
+        await seedBoard(origin, [
+          {
+            ...JOBS[0],
+            claim: { device: "cloud-box", session: "g7h8i9", since: NOW },
+            paseo: undefined,
+            move: {
+              from: "studio-mac",
+              session: "d4e5f6",
+              to: "cloud-box",
+              at: NOW,
+              claimed: NOW,
+              earlier: [{ from: "lab-linux", session: "a1b2c3", at: "2026-01-01T10:00:00Z" }],
+            },
+          },
+        ]);
+        pickupHosts = [...PICKUP_HOSTS, "cloud-box"];
+        await page.evaluate(() => (location.hash = "#042-sample-export"));
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForSelector("#d-move-host:not([hidden])", wait);
+        await openJobActions(page);
+        await page.click("#d-move-host");
+        await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        await (
+          await page.$("#move-host-dlg")
+        ).screenshot({ path: `${SHOTS}after-move-dialog-stops-queued${suffix}.png` });
+        assert.equal(
+          await page.$eval("#move-host-empty", (el) => el.textContent),
+          "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. Try again after one of them stops the job.",
+        );
+        for (const id of ["#move-host-label", "#move-host-select"]) {
+          assert.equal(await page.$eval(id, (el) => getComputedStyle(el).display), "none");
+        }
+        assert.equal(await page.$eval("#move-host-save", (el) => el.disabled), true);
+        await page.click("#move-host-cancel");
+        pickupHosts = PICKUP_HOSTS;
+      });
       await page.close();
     }
     assert.deepEqual(errors, []);

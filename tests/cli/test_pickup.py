@@ -1108,6 +1108,7 @@ class RerunTest(MoveHostTest):
 
 class MoveArchiveTest(MoveHostTest):
     AGENT = "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
+    AGENT2 = "9b2d71e0-5a3c-4e8f-b1d2-7c6e5f4a3b21"
 
     def setUp(self):
         super().setUp()
@@ -1228,6 +1229,28 @@ class MoveArchiveTest(MoveHostTest):
         self.assertEqual(out, f"would archive session {self.AGENT} and stop 042-sample-export alpha: moved to studio-mac\n"
                               f"host {DEVICE}: would take over 0\nhost {DEVICE}: would launch 0\n")
         self.assertEqual((self.recorded(), self.stopped, self.puts()), ([], [], []))
+
+    def two_agents(self):
+        self.set_stalls()
+        self.moved(**{"agent": self.AGENT2, "server": "srv-lab", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                      "earlier": [{"from": DEVICE, "session": "a1b2c3", "agent": self.AGENT, "server": "srv-lab",
+                                   "at": self.AT}]})
+
+    def test_dry_run_names_every_agent(self):
+        self.two_agents()
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"would archive sessions {self.AGENT}, {self.AGENT2} and stop 042-sample-export alpha: "
+                              f"moved to cloud-box\nhost {DEVICE}: would take over 0\nhost {DEVICE}: would launch 0\n")
+        self.assertEqual((self.recorded(), self.stopped, self.puts()), ([], [], []))
+
+    def test_archives_every_agent_and_names_them(self):
+        self.two_agents()
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"archived sessions {self.AGENT}, {self.AGENT2} and stopped 042-sample-export alpha: "
+                              "moved to cloud-box\n")
+        self.assertEqual(self.recorded(), [["archive", self.AGENT, "--force"], ["archive", self.AGENT2, "--force"]])
 
 
 class PriorityTest(PickupFixture):
