@@ -1159,6 +1159,7 @@ class MoveArchiveTest(MoveHostTest):
         self.adapter_calls = self.root / "adapter-calls.json"
         self.set_adapter()
         patch.object(factory, "paseo_server", return_value="srv-lab").start()
+        factory.record_paseo_claim(self.home, "042-sample-export", {"agent": self.AGENT})
 
     def set_adapter(self, archive_code=0):
         (self.root / "adapter.json").write_text(json.dumps({"archive_code": archive_code}), encoding="utf-8")
@@ -1187,6 +1188,7 @@ class MoveArchiveTest(MoveHostTest):
         self.assertIn("stopped", move)
         self.assertIn("archived", move)
         self.assertEqual((move["agent"], move["server"]), (self.AGENT, "srv-lab"))
+        self.assertFalse((self.home / "paseo-claims" / "042-sample-export").exists())
         self.calls.clear()
         self.assertEqual(self.pickup(), (0, "", ""))
         self.assertEqual(len(self.recorded()), 1)
@@ -1213,10 +1215,15 @@ class MoveArchiveTest(MoveHostTest):
                  "no server": (dict(agent=self.AGENT), None),
                  "this process": (dict(agent=self.AGENT, server="srv-lab"), "self"),
                  "bad agent": (dict(agent="-bad", server="srv-lab"), None),
+                 "not claimed here": (dict(agent=self.AGENT, server="srv-lab"), "unclaimed"),
+                 "other session": (dict(agent="9f1c2d3e-0000-4000-8000-000000000001", server="srv-lab"), None),
                  "non-hex agent": (dict(agent="ab_cd", server="srv-lab"), None),
                  "short agent": (dict(agent="abc", server="srv-lab"), None)}
         for name, (move, special) in cases.items():
             with self.subTest(name):
+                factory.record_paseo_claim(self.home, "042-sample-export", {"agent": self.AGENT})
+                if special == "unclaimed":
+                    factory.forget_paseo_claim(self.home, "042-sample-export", self.AGENT)
                 self.set_stalls()
                 self.set_adapter()
                 self.calls.clear()
@@ -1232,6 +1239,18 @@ class MoveArchiveTest(MoveHostTest):
                 self.assertEqual(self.recorded(), [])
                 self.assertEqual(self.stopped, [self.wt])
                 self.assertNotIn("archived", self.job("042-sample-export")["move"])
+
+    def test_marker_for_another_job_does_not_archive(self):
+        factory.forget_paseo_claim(self.home, "042-sample-export", self.AGENT)
+        factory.record_paseo_claim(self.home, "041-other-job", {"agent": self.AGENT})
+        self.set_stalls()
+        self.moved(agent=self.AGENT, server="srv-lab")
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, "stopped 042-sample-export alpha: moved to studio-mac\n")
+        self.assertEqual(self.recorded(), [])
+        self.assertEqual(self.stopped, [self.wt])
+        self.assertNotIn("archived", self.job("042-sample-export")["move"])
 
     def test_agent_guard_matches_the_adapter_id_rule(self):
         spec = importlib.util.spec_from_file_location("paseo_stalls", SKILL / "runtime" / "paseo_stalls.py")
@@ -1273,6 +1292,7 @@ class MoveArchiveTest(MoveHostTest):
         self.assertEqual((self.recorded(), self.stopped, self.puts()), ([], [], []))
 
     def two_agents(self):
+        factory.record_paseo_claim(self.home, "042-sample-export", {"agent": self.AGENT2})
         self.set_stalls()
         self.moved(**{"agent": self.AGENT2, "server": "srv-lab", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
                       "earlier": [{"from": DEVICE, "session": "a1b2c3", "agent": self.AGENT, "server": "srv-lab",

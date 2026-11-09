@@ -505,6 +505,44 @@ def paseo_session():
     return None
 
 
+def paseo_claim_path(home, job_id, agent):
+    """<home>/paseo-claims/<job-id>/<agent>, the marker that this host's Paseo session claimed the job."""
+    if (isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+            and isinstance(agent, str) and PASEO_ID.fullmatch(agent) and not agent.startswith("-")):
+        return Path(home, "paseo-claims", job_id, agent)
+    return None
+
+
+def record_paseo_claim(home, job_id, paseo):
+    path = paseo_claim_path(home, job_id, (paseo or {}).get("agent"))
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(exist_ok=True)
+    except OSError:
+        pass
+
+
+def paseo_claimed(home, job_id, agent):
+    path = paseo_claim_path(home, job_id, agent)
+    return path is not None and path.is_file()
+
+
+def forget_paseo_claim(home, job_id, agent):
+    path = paseo_claim_path(home, job_id, agent)
+    if path is None:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    try:
+        os.rmdir(path.parent)
+    except OSError:
+        pass
+
+
 def new_claim(device, session, since=None):
     stamp = now()
     return {"device": device, "session": session, "since": since or stamp, "seen": stamp}
@@ -694,6 +732,8 @@ def board(factory, job_id):
     if held:
         fail(f"{held_by(job_id, held)}. Nothing was written. Pass --session <tag> if this session "
              "holds it, or take it over with hold <project>/<id> take", 6)
+    if paseo and job and job.get("paseo") == paseo:
+        record_paseo_claim(factory, job_id, paseo)
     print(json.dumps(job, indent=2))
     if "stage" in patch or "rounds" in patch or (patch.get("tracer") or {}).get("follow") is True:
         tracer_after_board(Path(factory), job, patch)
@@ -756,6 +796,8 @@ def hold(target, take=None):
     if result == "held":
         fail(f"{held_by(job_id, other)}. Take it over only if the user says so, with hold {target} take", 6)
     print(f"held {target} as {device} session {session}")
+    if paseo:
+        record_paseo_claim(home, job_id, paseo)
     print(f"elapsed {elapsed_seconds(started)}s")
     if other:
         print(f"took over from {other['device']} session {other.get('session')}, last seen {other['seen']}")
@@ -872,6 +914,8 @@ def claim_id(factory, feature_slug, project_slug):
         data["jobs"].append(stub)
         return dump_board(data), job_id
     job_id = cas(factory, "/api/board", add)
+    if paseo:
+        record_paseo_claim(factory, job_id, paseo)
     jobs.joinpath(project_slug, job_id).mkdir(parents=True, exist_ok=True)
     return job_id
 
@@ -2796,7 +2840,8 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
         for x in mine:
             agent, server = x.get("agent"), x.get("server")
             if (adapter and isinstance(agent, str) and ADAPTER_ID.fullmatch(agent)
-                    and server and server == paseo_server() and agent != os.environ.get("PASEO_AGENT_ID")):
+                    and server and server == paseo_server() and agent != os.environ.get("PASEO_AGENT_ID")
+                    and paseo_claimed(home, job_id, agent)):
                 archives[agent] = x.get("at")
         names = ", ".join(archives)
         noun = "sessions" if len(archives) > 1 else "session"
@@ -2840,6 +2885,8 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
             patch_job(board, job_id, {})
             return dump_board(board), True
         if cas(home, "/api/board", change):
+            for a in archives:
+                forget_paseo_claim(home, job_id, a)
             for x in mine:
                 x["stopped"] = now()
             print(f"archived {noun} {names} and stopped {line}" if archives else f"stopped {line}")

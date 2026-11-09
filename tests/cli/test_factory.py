@@ -395,6 +395,7 @@ class FactoryTest(IsolatedTestCase):
         self.assertEqual(job["handoff"]["state"], "accepted")
         self.assertEqual(job["handoff"]["from"]["session"], "sender")
         self.assertEqual(job["paseo"]["agent"], "agent_new")
+        self.assertTrue((self.home / "paseo-claims" / "001-test" / "agent_new").is_file())
         with patch.dict(os.environ, {"FACTORY_SESSION": "third"}), self.assertRaises(SystemExit):
             factory.hold(self.target)
         self.assertEqual(self.saved()["claim"]["session"], "receiver")
