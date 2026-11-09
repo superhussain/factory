@@ -101,7 +101,7 @@ class FakeCloudflare:
         if method == "GET":
             return {"success": True, "result": dict(store[item_id])}
         if method == "PUT":
-            store[item_id] = dict(store[item_id], **body)
+            store[item_id] = dict(body, id=item_id, **({"aud": store[item_id]["aud"]} if kind == "apps" else {}))
             return {"success": True, "result": dict(store[item_id])}
         del store[item_id]
         return {"success": True, "result": {"id": item_id}}
@@ -482,6 +482,44 @@ class RerunTest(Instance):
         self.assertEqual(self.fake.items["apps"]["mine"]["name"], "Factory")
         self.assertNotIn("PUT", [m for m, path, _ in self.fake.calls if "/apps/" in path])
         self.assertEqual(len(self.run.calls), 1, "no deploy")
+
+    def test_second_device_keeps_hand_set_app_settings(self):
+        self.up()
+        [app] = self.fake.items["apps"].values()
+        app.update(allowed_idps=["idp-github"], session_duration="1h", created_at="2026-01-01T00:00:00Z")
+        code, _, err = self.up(inputs=["", "", "", ""], host="Desk Top", home=self.tmp / "home2")
+        self.assertEqual(code, 0, err)
+        [put] = [body for method, path, body in self.fake.calls if method == "PUT" and "/apps/" in path]
+        self.assertNotIn("id", put)
+        self.assertNotIn("aud", put)
+        self.assertNotIn("created_at", put)
+        [app] = self.fake.items["apps"].values()
+        self.assertEqual(app["allowed_idps"], ["idp-github"])
+        self.assertEqual(app["session_duration"], "1h")
+        self.assertEqual(len(app["policies"]), 3)
+
+    def test_app_policy_without_precedence_is_not_changed(self):
+        self.up()
+        [app] = self.fake.items["apps"].values()
+        del app["policies"][0]["precedence"]
+        since = len(self.fake.calls)
+        code, _, err = self.up(inputs=["", "", "", ""], host="Desk Top", home=self.tmp / "home2")
+        self.assertEqual(code, 1)
+        self.assertEqual(err, "GET accounts/" + ACCOUNT + "/access/apps/" + app["id"]
+                         + ": a policy has no precedence in the response; nothing was changed\n")
+        self.assertNotIn("PUT", [m for m, path, _ in self.fake.calls[since:] if "/apps/" in path])
+
+    def test_app_without_a_name_is_refused_without_none(self):
+        self.up()
+        [app] = self.fake.items["apps"].values()
+        del app["name"]
+        code, _, err = self.up(inputs=["", "", "", ""])
+        self.assertEqual(code, 1)
+        self.assertIn('with the name "", so bootstrap', err)
+        code, out, err = self.main("down", ["factory.example.test"])
+        self.assertEqual(code, 0, err)
+        self.assertIn('app factory.example.test: kept, named "", which bootstrap did not create', out)
+        self.assertNotIn("None", out)
 
     def test_app_without_a_policies_list_is_not_changed(self):
         self.up()

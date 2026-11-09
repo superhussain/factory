@@ -27,6 +27,7 @@ MISSING_ORG = ("Zero Trust is not set up for this account. Open Zero Trust at "
 FOREIGN_APP = ("An Access application for {hostname} already exists with the name \"{name}\", so bootstrap "
                "did not create it. Rename it to \"{hostname} bootstrap\" to let bootstrap manage it, or delete it, "
                "then rerun.")
+READ_ONLY_APP_FIELDS = ("id", "aud", "created_at", "updated_at")
 HINTS = {
     "account_id": "Your account ID is on any domain's Overview page in https://dash.cloudflare.com/\n"
                   "Help: https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/",
@@ -300,29 +301,32 @@ def ensure_policy(api, account, name, decision, include):
     return policy["id"]
 
 
-def app_body(hostname, n, policy_ids):
-    return {"name": n["app"], "domain": hostname, "type": "self_hosted",
-            "policies": [{"id": policy_id, "precedence": index + 1} for index, policy_id in enumerate(policy_ids)]}
+def precedences(policy_ids):
+    return [{"id": policy_id, "precedence": index + 1} for index, policy_id in enumerate(policy_ids)]
 
 
 def ensure_app(api, account, hostname, n, policy_ids):
     for app in api_list(api, "accounts/{}/access/apps".format(account)):
         if app.get("domain") == hostname:
             if app.get("name") != n["app"]:
-                raise CloudflareError(FOREIGN_APP.format(hostname=hostname, name=app.get("name")))
+                raise CloudflareError(FOREIGN_APP.format(hostname=hostname, name=app.get("name") or ""))
             path = "accounts/{}/access/apps/{}".format(account, app["id"])
             app = api("GET", path)["result"]
             if not isinstance(app.get("policies"), list):
                 raise CloudflareError("GET " + path + ": no policies list in the response; nothing was changed")
+            if not all("precedence" in policy for policy in app["policies"]):
+                raise CloudflareError("GET " + path + ": a policy has no precedence in the response; nothing was changed")
             current = [policy["id"] for policy in sorted(app["policies"], key=lambda policy: policy["precedence"])]
             missing = [policy_id for policy_id in policy_ids if policy_id not in current]
             if not missing:
                 print("app " + hostname + ": kept")
                 return app["aud"]
-            app = api("PUT", path, app_body(hostname, n, current + missing))["result"]
+            body = {key: value for key, value in app.items() if key not in READ_ONLY_APP_FIELDS}
+            app = api("PUT", path, dict(body, policies=precedences(current + missing)))["result"]
             print("app " + hostname + ": updated")
             return app["aud"]
-    app = api("POST", "accounts/{}/access/apps".format(account), app_body(hostname, n, policy_ids))["result"]
+    body = {"name": n["app"], "domain": hostname, "type": "self_hosted", "policies": precedences(policy_ids)}
+    app = api("POST", "accounts/{}/access/apps".format(account), body)["result"]
     print("app " + hostname + ": created")
     return app["aud"]
 
@@ -404,7 +408,7 @@ def down(answers, api, root, confirm=input):
         if app.get("domain") != hostname:
             continue
         if app.get("name") != n["app"]:
-            print("app {}: kept, named \"{}\", which bootstrap did not create".format(hostname, app.get("name")))
+            print("app {}: kept, named \"{}\", which bootstrap did not create".format(hostname, app.get("name") or ""))
             continue
         api("DELETE", "accounts/{}/access/apps/{}".format(account, app["id"]))
         print("app " + hostname + ": deleted")
