@@ -36,36 +36,44 @@ value. Each prompt shows the saved value as its default.
 | Factory hostname | `factory.example.test`, the default is `factory.<zone>` |
 | Allowed emails, comma separated | `ada@example.test, grace@example.test` |
 
-**What gets created.** Names derive from the hostname. On a host named `laptop`:
+**What gets created.** Names carry the exact hostname, so two hostnames never
+share one. On a host named `laptop`:
 
 | Resource | Name |
 | --- | --- |
 | R2 bucket and Worker | `factory-example-test` |
-| Allow policy for the emails | `factory-example-test-people` |
-| Service token and Service Auth policy | `factory-example-test-device-laptop` |
-| Self-hosted Access application | `factory.example.test` |
+| Self-hosted Access application | `factory.example.test bootstrap` |
+| Allow policy for the emails | `factory.example.test bootstrap people` |
+| Service token and Service Auth policy | `factory.example.test bootstrap device laptop` |
 
 `up` first runs `factory.py init --connection` so this device points at the
 hostname. It writes the service token's client ID and secret to the factory
-home `.env` (mode 0600) as soon as the token exists. It then writes
-`deploy/profile.json` with the Access issuer and audience and deploys through
-`tools/deploy.py deploy`. Run `python3 tools/bootstrap.py plan --answers
-deploy/bootstrap.json` to print the names without contacting Cloudflare.
+home `.env` (mode 0600) as soon as the token exists. If that write fails, `up`
+deletes the new token and stops, so no token is left that nobody holds. It
+then writes `deploy/profile.json` with the Access issuer and audience and
+deploys through `tools/deploy.py deploy`. Run
+`python3 tools/bootstrap.py plan --answers deploy/bootstrap.json` to print the
+names without contacting Cloudflare.
 
 **Reruns.** `up` matches every resource by name and keeps no state file. A
 second run creates nothing and changes no file. It updates the policies with
 the current emails. If the service token exists but this device's `.env` does
 not hold it, `up` stops; delete the token under Zero Trust > Access > Service
-credentials and rerun. `up` never rotates a token.
+credentials and rerun. `up` never rotates a token. `up` keeps every policy
+already on the application, in its order, and appends new device policies at
+the end. If an application for the hostname exists under another name, `up`
+stops; rename it to `<hostname> bootstrap` to let `up` manage it.
 
 **A second device.** Run `up` on the other host with the same answers. It
 creates that host's token and policy and adds the policy to the application.
 
 **Teardown.** `python3 tools/bootstrap.py down` asks you to type the hostname,
-then deletes the custom domain, the Worker, the application, the policies and
-the service tokens. It deletes the bucket only when it is empty, and never
-lists or deletes objects. Local files stay; the output names the ones that now
-point at a deleted instance.
+then deletes the custom domain, the Worker, the application, the service tokens
+and the policies. It deletes only Access names that start with
+`<hostname> bootstrap`, and deletes tokens before policies, so you can rerun it
+after a failure. It keeps an application under another name. It deletes the
+bucket only when it is empty, and never lists or deletes objects. Local files
+stay; the output names the ones that now point at a deleted instance.
 
 Sections 1 to 8 below are the manual fallback.
 
