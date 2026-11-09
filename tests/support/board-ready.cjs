@@ -5,4 +5,11 @@ async function waitForBoard(page) {
 // Every poll re-renders the board and replaces each card.
 // Click in-page so the card cannot detach between find and click.
 const clickNow = (page, selector) => page.$eval(selector, (el) => el.click());
-module.exports = { waitForBoard, clickNow };
+// Opens the drawer's job actions menu so its items can be clicked.
+async function openJobActions(page) {
+  if ((await page.$eval("#d-actions", (el) => el.getAttribute("aria-expanded"))) !== "true") {
+    await page.click("#d-actions");
+  }
+  await page.waitForSelector("#d-actions-menu:not([hidden])");
+}
+module.exports = { waitForBoard, clickNow, openJobActions };
