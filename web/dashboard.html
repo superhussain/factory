@@ -293,6 +293,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .detail-head .refs:empty { display: none; }
   .detail-head .refs a { color: var(--accent); }
   .tracer-tasks ol { margin: 2px 0 0; padding-left: 14px; list-style: none; }
+  .tracer-tasks li { padding-left: 10px; text-indent: -10px; }
   .tracer-tasks summary { cursor: pointer; }
   .card.needs-you .note { color: var(--alert); }
   .card .id .chip { margin-left: 6px; }
@@ -451,7 +452,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol></ol></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>

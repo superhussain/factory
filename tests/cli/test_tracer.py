@@ -1064,9 +1064,9 @@ class BuildPassTest(TracerCase):
 
     def test_task_summary_strips_bidi(self):
         self.assertEqual(factory.tracer_task_summary({"tasks": [
-            {"id": "t2", "title": "Write CSV ‮encoder⁩", "status": "in_progress"},
-            {"id": "t9", "title": "‏‎", "status": "done"},
-            {"id": "t10", "title": "⁦" * 10 + "x" * 80, "status": "done"}]}),
+            {"id": "t2", "title": "Write CSV \u202eencoder\u2069", "status": "in_progress"},
+            {"id": "t9", "title": "\u200f\u200e", "status": "done"},
+            {"id": "t10", "title": "\u2066" * 10 + "x" * 80, "status": "done"}]}),
             [{"id": "t2", "title": "Write CSV encoder", "status": "in_progress"},
              {"id": "t9", "title": "t9", "status": "done"},
              {"id": "t10", "title": "x" * 80, "status": "done"}])
