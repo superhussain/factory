@@ -42,7 +42,18 @@ class FakeCloudflare:
         return "id-" + str(self.next_id)
 
     def error(self, method, path, status, code, message):
+        self.last_error = {"code": code, "message": message}
         raise bootstrap.CloudflareError("{} {}: {} {}".format(method, path, code, message), status)
+
+    def urlopen(self, request, timeout):
+        """Serve this fake over HTTP bytes; a None result is sent as an empty body."""
+        path = request.full_url[len(bootstrap.API) + 1:]
+        try:
+            result = self(request.get_method(), path, request.data and json.loads(request.data))
+        except bootstrap.CloudflareError as error:
+            body = json.dumps({"success": False, "errors": [self.last_error]}).encode()
+            raise bootstrap.urllib.error.HTTPError(request.full_url, error.status, "error", {}, io.BytesIO(body))
+        return HttpResponse(b"" if result is None else json.dumps(result).encode())
 
     def __call__(self, method, path, body=None):
         self.calls.append((method, path, body))
@@ -104,10 +115,20 @@ class FakeCloudflare:
             store[item_id] = dict(body, id=item_id, **({"aud": store[item_id]["aud"]} if kind == "apps" else {}))
             return {"success": True, "result": dict(store[item_id])}
         del store[item_id]
+        if kind == "domains":
+            return None
         return {"success": True, "result": {"id": item_id}}
 
     def methods(self, since=0):
         return [method for method, _, _ in self.calls[since:]]
+
+
+class HttpResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
 
 
 class FakeRun:
@@ -676,6 +697,18 @@ class DownTest(Instance):
         self.assertEqual(fake.scripts, {"a--b-example-test"})
         self.assertEqual(fake.buckets, {"a--b-example-test": 0})
         self.assertIn("token a.b.example.test bootstrap device laptop: deleted", out)
+
+    def test_down_carries_on_after_an_empty_domain_delete_body(self):
+        self.up()
+        with mock.patch("urllib.request.urlopen", self.fake.urlopen):
+            code, out, err = self.main("down", ["factory.example.test"], real_api=True)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(err, "")
+        self.assertEqual(self.fake.items, {"service_tokens": {}, "policies": {}, "apps": {}, "domains": {}})
+        self.assertEqual(self.fake.scripts, set())
+        self.assertEqual(self.fake.buckets, {})
+        self.assertIn("custom domain factory.example.test: deleted", out)
+        self.assertIn("bucket factory-example-test: deleted", out)
 
     def test_down_keeps_an_app_bootstrap_did_not_create(self):
         self.up()

@@ -125,7 +125,8 @@ def cloudflare(token):
         })
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
+                text = response.read().decode("utf-8")
+                return json.loads(text) if text else {}
         except urllib.error.HTTPError as error:
             try:
                 first = (json.loads(error.read().decode("utf-8")).get("errors") or [{}])[0]
