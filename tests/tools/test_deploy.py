@@ -103,6 +103,7 @@ class RenderTest(unittest.TestCase):
         config = json.loads(snapshot[CONFIG])
         self.assertEqual(config, {
             "account_id": "00000000000000000000000000000000",
+            "ai": {"binding": "AI"},
             "compatibility_date": "2026-06-01",
             "main": str(ROOT / "worker" / "index.js"),
             "name": "factory-example",

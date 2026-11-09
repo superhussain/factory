@@ -161,6 +161,62 @@ flowchart LR
 
 Each later stage is its own gated job.
 
+## Backlog triage
+
+Backlog triage lets a project skip the dashboard Approve click for backlog lines its
+rules clearly allow. It is off unless a person turns it on.
+
+```mermaid
+flowchart LR
+  A[factory.py backlog add] --> B[(backlog.md)]
+  A --> W[POST /api/backlog/triage]
+  W --> M[Workers AI model]
+  W -->|queue| I[(board.json idea)]
+  W -->|hold or off| B
+  I --> P[factory.py pickup]
+```
+
+Settings, Pipeline holds a `triage` block per scope. A project value replaces the global
+one whole. With neither set, triage is off.
+
+| Field | Rule |
+| --- | --- |
+| `enabled` | true or false |
+| `threshold` | an integer from 1 to 100. The dashboard fills in 80 |
+| `rules` | text, may be empty. It passes the same admission rules as stage notes, so no links, secrets or instructions to skip review |
+
+After `factory.py backlog add` appends a line, it posts the line and its `--context`
+text to the Worker. The Worker reads the effective `triage` block and answers:
+
+| Case | Model called | Decision |
+| --- | --- | --- |
+| triage off or not set | no | `off` |
+| context line 1 is `Recommend: deny` | no | `hold` |
+| context has a `## Question:` line | no | `hold` |
+| confidence at or above the threshold | yes | `queue` |
+| confidence below the threshold | yes | `hold` |
+
+- **Queue.** `factory.py` adds an `idea` row with `backlog.by: "triage"` and the verdict,
+  then checks the line off with the new id, as a dashboard Approve does. If the line
+  changed meanwhile, it drops the row while the row is still an unclaimed idea.
+- **Hold.** The line waits in the backlog for a person, as before.
+- **Failure.** A 404 from an older Worker means off. Any other error prints a warning,
+  and the line waits. `backlog add` still exits 0.
+- **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a
+  service token cannot switch triage on or move the threshold. The Worker compares the
+  score with the threshold itself.
+- **Prompt.** The rules travel in an `operator-preferences` envelope and the item in a
+  `backlog-item` envelope, both marked as data. An item or context holding either tag is
+  refused with a 400.
+- **Floors.** A queued idea still goes through the spec, four reviews, the approver, merge
+  rules and any `spec-approval` gate.
+- **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
+  Workers AI usage bills against the account. Without the binding the route answers 503,
+  and lines wait.
+
+To stop triage, set it to Off in Settings, Pipeline. Ideas it already queued stay
+ordinary ideas, and a person can discard them.
+
 ## Rollback
 
 | Scope | Rollback |

@@ -10,6 +10,7 @@ import {
   validateHostPatch,
   validateHostStatus,
 } from "./hosts.js";
+import { parseTriageReply, TRIAGE_MODEL, TRIAGE_SCHEMA, triageMessages } from "./triage.js";
 
 // A job id starts with a word character, so "." and ".." are never ids.
 const JOB_FILE =
@@ -28,6 +29,8 @@ const PIPELINE = /^\/api\/pipeline\/(global|projects\/([\w-]+))$/;
 const PIPELINE_HISTORY = /^\/api\/pipeline\/history\/(global|projects\/([\w-]+))(?:\/([1-9]\d*))?$/;
 const PIPELINE_EFFECTIVE = /^\/api\/pipeline\/effective\/([\w-]+)$/;
 const MAX_PIPELINE = 16 << 10;
+// 2000 + 6000 characters at up to 4 UTF-8 bytes each, plus JSON keys and escapes.
+const MAX_TRIAGE = 64 << 10;
 // /api/hosts, /api/hosts/<id> and /api/hosts/<id>/<action>.
 const HOSTS = /^\/api\/hosts(?:\/([^/]+)(?:\/(code|pair|status|history))?)?$/;
 const MAX_BODY = 1 << 20;
@@ -513,9 +516,12 @@ async function pipelineHistoryVersion(env, scope, version) {
     : notFound();
 }
 
-// A stored document that no longer validates is a 409, never a silent default: dropping
-// it could loosen a "human" merge.
-async function pipelineEffective(env, slug) {
+const PIPELINE_INVALID =
+  "stored pipeline configuration no longer validates; save it again from the dashboard";
+
+// [global, globalVersion, project, projectVersion], or null when a stored document no longer
+// validates. That is a 409, never a silent default: dropping it could loosen a "human" merge.
+async function pipelineDocs(env, slug) {
   const docs = [];
   for (const scope of ["global", `projects/${slug}`]) {
     const obj = await env.BUCKET.get(pipelineKey(scope));
@@ -526,14 +532,16 @@ async function pipelineEffective(env, slug) {
       } catch {
         doc = undefined;
       }
-      if (validatePipeline(doc))
-        return reply(
-          "stored pipeline configuration no longer validates; save it again from the dashboard",
-          409,
-        );
+      if (validatePipeline(doc)) return null;
     }
     docs.push(doc, pipelineVersion(obj));
   }
+  return docs;
+}
+
+async function pipelineEffective(env, slug) {
+  const docs = await pipelineDocs(env, slug);
+  if (!docs) return reply(PIPELINE_INVALID, 409);
   // Once any host is registered, pickup reaches only active ones.
   const records = await hostRecords(env);
   const active = records.filter((r) => r.host.state === "active").map((r) => r.host);
@@ -544,6 +552,80 @@ async function pipelineEffective(env, slug) {
   );
   view.active_hosts = active.map(({ id, label }) => ({ id, label }));
   return reply(JSON.stringify(view), 200, "application/json");
+}
+
+const BACKLOG_ITEM = /^([\w-]+): (\S.*)$/;
+
+// Rates one new backlog line against its project's triage rules. The Worker compares the
+// score with the threshold, so a device cannot move the bar.
+async function backlogTriage(request, env) {
+  const body = await readJson(request, MAX_TRIAGE);
+  if (body instanceof Response) return body;
+  if (typeof body !== "object" || body === null || Array.isArray(body))
+    return reply("body: must be a JSON object", 400);
+  for (const key of Object.keys(body))
+    if (key !== "item" && key !== "context") return reply(`${key}: unknown field`, 400);
+  const { item, context } = body;
+  const m = typeof item === "string" && [...item].length <= 2000 && BACKLOG_ITEM.exec(item);
+  if (!m)
+    return reply('item: must be one "<slug>: <feature>" line of at most 2000 characters', 400);
+  if (context !== undefined && typeof context !== "string")
+    return reply("context: must be text", 400);
+  if (context !== undefined && [...context].length > 6000)
+    return reply("context: over 6000 characters", 400);
+  for (const [field, text] of [
+    ["item", item],
+    ["context", context],
+  ]) {
+    if (text === undefined) continue;
+    const error = checkOperatorText(text, field, "document");
+    if (error) return reply(error, 400);
+    if (/<\/?\s*backlog-item/i.test(text))
+      return reply(`${field}: contains the reserved backlog-item tag`, 400);
+  }
+  const slug = m[1];
+  if (!(await env.BUCKET.head(`projects/${slug}.md`))) return notFound();
+  const docs = await pipelineDocs(env, slug);
+  if (!docs) return reply(PIPELINE_INVALID, 409);
+  const [, globalVersion, project, projectVersion] = docs;
+  const { triage } = effectivePipeline(slug, ...docs);
+  const json = (obj) => reply(JSON.stringify(obj), 200, "application/json");
+  if (!triage.enabled) return json({ decision: "off" });
+  const { threshold } = triage;
+  const lines = (context ?? "").split("\n");
+  const fixed =
+    lines[0] === "Recommend: deny"
+      ? "its author recommends deny"
+      : lines.some((line) => line.startsWith("## Question:"))
+        ? "it asks questions a person must answer"
+        : null;
+  if (fixed)
+    return json({ decision: "hold", confidence: null, threshold, reason: fixed, model: null });
+  if (!env.AI)
+    return reply("backlog triage needs the Workers AI binding; deploy the current Worker", 503);
+  const source = project?.triage
+    ? `pipeline:${slug}@${projectVersion}`
+    : `pipeline:global@${globalVersion}`;
+  let result;
+  try {
+    result = await env.AI.run(TRIAGE_MODEL, {
+      messages: triageMessages(slug, source, triage.rules, item, context),
+      response_format: { type: "json_schema", json_schema: TRIAGE_SCHEMA },
+      max_tokens: 256,
+      temperature: 0,
+    });
+  } catch {
+    return reply("the triage model failed", 502);
+  }
+  const verdict = parseTriageReply(result);
+  if (!verdict) return reply("the triage model gave an unusable reply", 502);
+  return json({
+    decision: verdict.confidence >= threshold ? "queue" : "hold",
+    confidence: verdict.confidence,
+    threshold,
+    reason: verdict.reason,
+    model: TRIAGE_MODEL,
+  });
 }
 
 const hostKey = (id) => `hosts/${id}.json`;
@@ -559,16 +641,16 @@ const PAIRING_FAILED = "pairing code is wrong, used or expired";
 const TOKEN_TAKEN = "this service token is already bound to another host";
 const STATUS_ONLY = "status is written only by the host's bound service token";
 
-// A JSON body under the 16 KiB cap, or the error reply.
-async function readJson(request) {
+// A JSON body under the cap, or the error reply.
+async function readJson(request, max = MAX_PIPELINE) {
   if (
     !/^application\/json(?:\s*;\s*charset\s*=\s*(?:utf-8|"utf-8"))?$/i.test(
       request.headers.get("Content-Type") || "",
     )
   )
     return reply("body needs application/json", 415);
-  const bytes = await readCapped(request, MAX_PIPELINE);
-  if (bytes === null) return reply("body over 16 KiB", 413);
+  const bytes = await readCapped(request, max);
+  if (bytes === null) return reply(`body over ${max >> 10} KiB`, 413);
   try {
     return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes));
   } catch {
@@ -985,6 +1067,7 @@ async function api(request, env, path, principal) {
     if (method === "PUT") return ideaImagePut(request, env, m[1]);
     return notFound();
   }
+  if (path === "/api/backlog/triage" && method === "POST") return backlogTriage(request, env);
   if (path === "/api/board" || path === "/api/backlog") {
     const [key, type] =
       path === "/api/board" ? ["board.json", "application/json"] : ["backlog.md", "text/markdown"];
