@@ -6,22 +6,31 @@ applying it and the other repository security settings.
 ## Main ruleset
 
 - Nobody can force-push or delete `main`, and there are no bypass actors.
-- Every change reaches `main` through a pull request, with zero approvals required.
+- Every change reaches `main` through a pull request, with zero approvals
+  required.
 - The `ci` check from GitHub Actions must pass before merge. Strict mode is off,
   so a pull request does not need a rebase after every merge.
+- The `ci` check guards against accidents, not against someone with write
+  access. `ci.yml` runs on `pull_request`, so a pull request can redefine its
+  own `ci` job to always pass.
 
 ```sh
+# Find the ruleset id, used as <id> below
+gh api repos/superhussain/factory/rulesets --jq '.[] | select(.name=="main") | .id'
 # Apply
 gh api -X POST repos/superhussain/factory/rulesets --input .github/rulesets/main.json
 # Update
 gh api -X PUT repos/superhussain/factory/rulesets/<id> --input .github/rulesets/main.json
 # Verify, prints ["deletion","non_fast_forward","pull_request","required_status_checks"]
 gh api repos/superhussain/factory/rules/branches/main --jq '[.[].type] | sort'
-# Emergency off
+# Emergency off, which also lifts deletion and force-push protection
 gh api -X PUT repos/superhussain/factory/rulesets/<id> -f enforcement=disabled
+# Re-enable after the emergency
+gh api -X PUT repos/superhussain/factory/rulesets/<id> -f enforcement=active
 ```
 
-If you rename the `ci` job in `.github/workflows/ci.yml`, update `main.json` in the same PR and re-run the update command after merge.
+If you rename the `ci` job in `.github/workflows/ci.yml`, update `main.json`
+in the same PR and re-run the update command after merge.
 
 ## Settings checklist
 
