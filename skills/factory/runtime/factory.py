@@ -1041,7 +1041,12 @@ def queue_backlog_item(home, slug, feature, verdict):
             job["refs"] = [{"id": ref.group(2), "kind": ref.group(1)}]
         data["jobs"].append(job)
         return dump_board(data), job_id
-    job_id = cas(home, "/api/board", add)
+    try:
+        job_id = cas(home, "/api/board", add)
+    except SystemExit:
+        print(f"factory.py: backlog triage could not queue {item}; the item waits in the backlog for review",
+              file=sys.stderr)
+        return
 
     def mark(backlog):
         lines = (backlog or "").split("\n")
@@ -1050,19 +1055,36 @@ def queue_backlog_item(home, slug, feature, verdict):
                 lines[i] = f"- [x] {slug}: {feature} ({job_id})"
                 return "\n".join(lines), True
         return None, False
-    if cas(home, "/api/backlog", mark):
-        print(f"queued {item} as {job_id}: {score}")
-        return
 
     def drop(board):
         data = load_board(board)
         jobs = [j for j in data["jobs"]
                 if not (j.get("id") == job_id and j.get("stage") == IDEA and j.get("claim") is None)]
         if len(jobs) == len(data["jobs"]):
-            return None, None
+            return None, False
         data["jobs"], data["updated"] = jobs, now()
-        return dump_board(data), None
-    cas(home, "/api/board", drop)
+        return dump_board(data), True
+    try:
+        marked = cas(home, "/api/backlog", mark)
+    except SystemExit:
+        try:
+            dropped = cas(home, "/api/board", drop)
+        except SystemExit:
+            dropped = False
+        if dropped:
+            print(f"factory.py: backlog triage could not check off {item}; it removed {job_id} "
+                  "and the item waits in the backlog for review", file=sys.stderr)
+        else:
+            print(f"factory.py: backlog triage queued {item} as {job_id} but could not check off its line; "
+                  f"check off the line or remove {job_id} by hand", file=sys.stderr)
+        return
+    if marked:
+        print(f"queued {item} as {job_id}: {score}")
+        return
+    try:
+        cas(home, "/api/board", drop)
+    except SystemExit:
+        pass
     print(f"kept {item} in the backlog: its line changed before triage finished")
 
 
