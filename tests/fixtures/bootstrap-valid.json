@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "account_id": "00000000000000000000000000000000",
+  "zone": "example.test",
+  "hostname": "factory.example.test",
+  "emails": ["ada@example.test", "grace@example.test"]
+}
