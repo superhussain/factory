@@ -2,18 +2,22 @@
 // SHA plus its release tag, and Dependabot keeps those pins fresh.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 
 const github = new URL("../../.github/", import.meta.url);
 const files = [
   ...readdirSync(new URL("workflows/", github))
-    .filter((name) => name.endsWith(".yml"))
+    .filter((name) => /\.ya?ml$/.test(name))
     .map((name) => new URL(`workflows/${name}`, github)),
-  ...readdirSync(new URL("actions/", github)).map(
-    (name) => new URL(`actions/${name}/action.yml`, github),
+  ...readdirSync(new URL("actions/", github)).flatMap((dir) =>
+    ["action.yml", "action.yaml"]
+      .map((file) => new URL(`actions/${dir}/${file}`, github))
+      .filter((url) => existsSync(url)),
   ),
 ];
+const usesValue = (line) => line.match(/^\s*(?:-\s+)?uses:\s*["']?([^\s"'#]+)/)?.[1];
+const pinnedLine = /@[0-9a-f]{40}["']? # v\d+\.\d+\.\d+$/;
 const texts = files.map((file) => readFileSync(file, "utf8"));
 const uses = texts.flatMap((text) => {
   const doc = parse(text);
@@ -33,11 +37,29 @@ test("every remote uses is pinned to a full commit SHA", () => {
 });
 
 test("every pinned uses line names its release", () => {
-  const lines = texts.flatMap((text) => text.split("\n")).filter((line) => /uses: [^.]/.test(line));
+  const lines = texts
+    .flatMap((text) => text.split("\n"))
+    .filter((line) => {
+      const value = usesValue(line);
+      return value !== undefined && !value.startsWith("./");
+    });
   assert.ok(lines.length > 0);
   for (const line of lines) {
-    assert.match(line, /@[0-9a-f]{40} # v\d+\.\d+\.\d+$/);
+    assert.match(line, pinnedLine);
   }
+});
+
+test("uses lines parse quoted values", () => {
+  const sha = "a".repeat(40);
+  const cases = [
+    ['- uses: "./.github/actions/ci-setup"', "./.github/actions/ci-setup"],
+    ["- uses: ./.github/actions/ci-setup", "./.github/actions/ci-setup"],
+    [`uses: 'actions/checkout@${sha}' # v7.0.1`, `actions/checkout@${sha}`],
+  ];
+  for (const [line, value] of cases) {
+    assert.equal(usesValue(line), value);
+  }
+  assert.ok(pinnedLine.test(cases[2][0]));
 });
 
 test("dependabot updates github-actions weekly for workflows and the composite action", () => {
