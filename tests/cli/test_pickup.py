@@ -729,7 +729,11 @@ class TakeoverTest(PickupFixture):
             self.board["jobs"] = [job] if job else []
             code, out, err = self.pickup("--dry-run")
             self.assertEqual((code, err), (0, ""))
-            self.assertEqual(out.splitlines()[0], line, line)
+            # close_pass runs before takeover, so a closing job's skip close line comes first.
+            if line.endswith(": closing"):
+                self.assertIn(line, out.splitlines())
+            else:
+                self.assertEqual(out.splitlines()[0], line, line)
             self.assertEqual(out.splitlines()[-2:], [f"host {DEVICE}: would take over 0",
                                                      f"host {DEVICE}: would launch 0"])
             self.assertEqual(self.puts(), [])
@@ -750,6 +754,8 @@ class TakeoverTest(PickupFixture):
                  "skip stall agent-1 010-run: stage pr-open is not resumable"),
                 (self.stall_job(needs="Which option?"), "skip stall agent-1 010-run: waiting on a human"),
                 (self.stall_job(paused={"at": "2026-01-02T12:00:00Z"}), "skip stall agent-1 010-run: paused"),
+                (self.stall_job(close={"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}),
+                 "skip stall agent-1 010-run: closing"),
                 (self.stall_job(tracer={"building": True}), "skip stall agent-1 010-run: building in Tracer"),
                 (self.stall_job(project="missing"), "skip stall agent-1 010-run: no checkout on this host"),
                 (self.stall_job(), "skip stall agent-1 010-run: runs no route in routes.md")):
@@ -1244,6 +1250,119 @@ class PauseTest(PickupFixture):
         self.assertEqual(self.pickup(), (0, "", ""))
         self.assertEqual((self.sent, self.puts()), ([], []))
 
+
+
+class CloseTest(PickupFixture):
+    DECISION = "/api/jobs/alpha/042-sample-export/decision.md"
+    REASON = "Duplicate of 041-sample-report"
+    TEXT = (
+        "CLOSED: Duplicate of 041-sample-report\n\n"
+        "**Summary.** Closed from the dashboard at 2026-01-02T12:00:00Z while at stage `build`. "
+        "The owner's reason: Duplicate of 041-sample-report. Nothing else is owed unless Left out says so.\n\n"
+        "## Evidence\n\n"
+        "- Close requested from the dashboard at 2026-01-02T12:00:00Z.\n"
+        "- Stage when closed: `build`, round 1.\n"
+        "- Branch: `factory/042-sample-export`.\n"
+        "- Pull request: none.\n"
+        "- Written by factory.py pickup on host-a.\n\n"
+        "## Left out\n\n"
+        "- No agent reviewed this close. The reason is the owner's own words.\n"
+        "- The worktree and branch stay on their host until someone runs "
+        "`factory.py cleanup alpha/042-sample-export` there. No job was queued for this.\n")
+
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.files = {}
+        self.conditions = []
+
+    def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if path != self.DECISION:
+            return super().request(home, method, path, body, ok, headers, raw)
+        self.calls.append((method, path))
+        if method == "GET":
+            return (200, {"ETag": '"decision"'}, self.files[path]) if path in self.files else (404, {}, "")
+        self.conditions.append(headers)
+        self.files[path] = body
+        return 200, {}, ""
+
+    def closing(self, **extra):
+        return dict({"id": "042-sample-export", "stage": "build", "project": "alpha", "round": 1,
+                     "branch": "factory/042-sample-export", "updated": "2026-01-01T00:00:00Z",
+                     "needs": "Which option?",
+                     "claim": {"device": "other-host", "session": "a1b2c3", "since": stamp(hours=-5),
+                               "seen": stamp(hours=-4)},
+                     "close": {"reason": self.REASON, "at": "2026-01-02T12:00:00Z"}}, **extra)
+
+    def test_close_writes_decision_then_the_stage(self):
+        self.board["jobs"] = [self.closing()]
+        self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
+        self.assertEqual(self.files, {self.DECISION: self.TEXT})
+        self.assertEqual(self.conditions, [{"If-None-Match": "*"}])
+        self.assertEqual(self.puts(), [("PUT", self.DECISION), ("PUT", "/api/board")])
+        job = self.job("042-sample-export")
+        self.assertEqual((job["stage"], job["note"]), ("closed", self.REASON))
+        self.assertNotIn("claim", job)
+        self.assertNotIn("needs", job)
+        self.assertEqual(job["done"], job["updated"])
+        self.assertEqual(set(job["close"]), {"reason", "at", "closed"})
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(self.puts(), [])
+
+    def test_close_keeps_an_earlier_decision(self):
+        self.files[self.DECISION] = "APPROVE\n\nShip it.\n"
+        self.board["jobs"] = [self.closing()]
+        self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
+        self.assertEqual(self.files[self.DECISION],
+                         self.TEXT + "\n## Earlier decision\n\nAPPROVE\n\nShip it.\n")
+        self.assertEqual(self.conditions, [{"If-Match": '"decision"'}])
+        self.assertEqual(self.job("042-sample-export")["stage"], "closed")
+
+    def test_close_leaves_an_existing_closed_decision(self):
+        self.files[self.DECISION] = "CLOSED: written by another host\n"
+        self.board["jobs"] = [self.closing()]
+        self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
+        self.assertEqual(self.files[self.DECISION], "CLOSED: written by another host\n")
+        self.assertEqual(self.puts(), [("PUT", "/api/board")])
+        self.assertEqual(self.job("042-sample-export")["stage"], "closed")
+
+    def test_close_waits_for_a_live_claim(self):
+        self.board["jobs"] = [self.closing(claim=held("other-host"))]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[0],
+                         "skip close 042-sample-export alpha: claimed by other-host session s1")
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.puts(), self.files), ([], {}))
+
+    def test_close_skips_an_invalid_reason(self):
+        for reason in ("", "   ", "two\nlines", "x" * 201, 42):
+            with self.subTest(reason=reason):
+                self.calls.clear()
+                self.board["jobs"] = [self.closing(close={"reason": reason, "at": "2026-01-02T12:00:00Z"})]
+                self.assertEqual(self.pickup(), (0, "", "factory.py: pickup skips the close of 042-sample-export: "
+                                                        "its reason is not one line of 1 to 200 characters\n"))
+                self.assertEqual((self.puts(), self.files), ([], {}))
+
+    def test_close_dry_run_writes_nothing(self):
+        self.board["jobs"] = [self.closing()]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[0], "would close 042-sample-export alpha")
+        self.assertEqual((self.puts(), self.files), ([], {}))
+
+    def test_close_decision_names_an_open_pull_request(self):
+        job = self.closing(pr="https://github.example.test/sample/pull/7")
+        text = factory.close_decision(job, self.REASON, DEVICE, None)
+        self.assertIn("- Pull request: https://github.example.test/sample/pull/7.\n", text)
+        self.assertIn("- No agent reviewed this close. The reason is the owner's own words.\n"
+                      "- Pull request https://github.example.test/sample/pull/7 stays open. "
+                      "Close it on GitHub if it should not merge.\n"
+                      "- The worktree and branch stay", text)
+        bare = factory.close_decision({"id": "042-sample-export", "project": "alpha", "stage": "spec",
+                                       "close": {"at": "2026-01-02T12:00:00Z"}}, self.REASON, DEVICE, None)
+        self.assertIn("- Stage when closed: `spec`, round 0.\n- Branch: `none`.\n- Pull request: none.\n", bare)
 
 class DenyNotesTest(PickupFixture):
     def setUp(self):
