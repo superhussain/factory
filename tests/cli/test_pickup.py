@@ -957,6 +957,128 @@ class MoveHostTest(PickupFixture):
                 self.assertEqual(self.stopped, [])
 
 
+class PriorityTest(PickupFixture):
+    AT = "2026-01-02T12:00:00Z"
+    NUDGE = ("The owner prioritized factory job 042-sample-export from the dashboard. If your turn ended "
+             "while work on it is still owed, continue with the next step now.")
+
+    def setUp(self):
+        super().setUp()
+        self.views = {slug: (200, effective(slug, {"pickup": ON})) for slug in ("alpha", "beta")}
+        self.statuses = {"synthetic-agent": "idle"}
+        self.sent = []
+        self.send_ok = True
+        patch.object(factory, "paseo_server", return_value="synthetic-server").start()
+        patch.object(factory, "paseo_statuses", side_effect=lambda: self.statuses).start()
+        patch.object(factory, "paseo_send", side_effect=self.send).start()
+
+    def send(self, agent, message):
+        self.sent.append((agent, message))
+        return self.send_ok
+
+    def export(self, **extra):
+        job = {"id": "042-sample-export", "stage": "build", "project": "alpha", "updated": "2026-01-01T00:00:00Z",
+               "claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"},
+               "paseo": {"server": "synthetic-server", "agent": "synthetic-agent"},
+               "priority": {"at": self.AT}}
+        job.update(extra)
+        self.board["jobs"] = [job]
+        return job
+
+    def test_prioritized_idea_launches_first(self):
+        self.board["jobs"] = [idea("100-sample-idea", "alpha"),
+                              idea("101-sample-urgent", "alpha", updated="2026-01-02T00:00:00Z",
+                                   priority={"at": self.AT})]
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, r"^launched 101-sample-urgent alpha on primary session [0-9a-f]{6}\n$")
+        self.assertNotIn("claim", self.job("100-sample-idea"))
+
+    def test_prioritized_idea_in_a_later_project_launches_first(self):
+        self.board["jobs"] = [idea("100-sample-idea", "alpha"),
+                              idea("101-sample-urgent", "beta", priority={"at": self.AT})]
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, r"^launched 101-sample-urgent beta on primary session [0-9a-f]{6}\n$")
+        self.assertNotIn("claim", self.job("100-sample-idea"))
+
+    def test_nudges_a_live_agent_once(self):
+        self.export()
+        code, out, err = self.pickup()
+        self.assertEqual((code, out, err), (0, "nudged 042-sample-export alpha: agent synthetic-agent\n", ""))
+        self.assertEqual(self.sent, [("synthetic-agent", self.NUDGE)])
+        priority = self.job("042-sample-export")["priority"]
+        self.assertEqual(priority["at"], self.AT)
+        self.assertRegex(priority["nudged"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((len(self.sent), self.puts()), (1, []))
+
+    def test_dry_run_prints_would_nudge(self):
+        self.export()
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, "would nudge 042-sample-export alpha: agent synthetic-agent\n"
+                              f"host {DEVICE}: would launch 0\n")
+        self.assertEqual((self.sent, self.puts()), ([], []))
+
+    def test_a_session_claimed_after_the_priority_is_not_nudged(self):
+        self.export(claim={"device": DEVICE, "session": "d4e5f6", "since": "2026-01-02T13:00:00Z"})
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.sent, self.puts()), ([], []))
+
+    def test_closed_or_missing_agent_is_skipped(self):
+        for statuses, reason in (({"synthetic-agent": "closed"}, "closed"), ({}, "missing")):
+            with self.subTest(reason=reason):
+                self.statuses = statuses
+                self.export()
+                self.assertEqual(self.pickup(), (0, "", ""))
+                code, out, err = self.pickup("--dry-run")
+                self.assertEqual((code, err), (0, ""))
+                self.assertEqual(out, f"skip nudge 042-sample-export: agent synthetic-agent is {reason}\n"
+                                      f"host {DEVICE}: would launch 0\n")
+                self.assertEqual((self.sent, self.puts()), ([], []))
+
+    def test_other_server_and_gated_jobs_are_not_nudged(self):
+        for extra in ({"paseo": {"server": "other-server", "agent": "synthetic-agent"}},
+                      {"needs": "Which option?"}, {"stage": "pr-open"}):
+            with self.subTest(extra=extra):
+                self.export(**extra)
+                self.assertEqual(self.pickup(), (0, "", ""))
+                self.assertEqual((self.sent, self.puts()), ([], []))
+
+    def test_silent_paseo_skips_nudges(self):
+        self.statuses = None
+        self.export()
+        code, out, err = self.pickup()
+        self.assertEqual((code, out), (0, ""))
+        self.assertEqual(err, "factory.py: pickup skips priority nudges: paseo did not answer\n")
+        self.assertEqual((self.sent, self.puts()), ([], []))
+
+    def test_failed_send_retries_next_run(self):
+        self.export()
+        self.send_ok = False
+        code, out, err = self.pickup()
+        self.assertEqual((code, out), (0, ""))
+        self.assertEqual(err, "factory.py: pickup could not nudge 042-sample-export: paseo send failed\n")
+        self.assertEqual(self.puts(), [])
+        self.assertNotIn("nudged", self.job("042-sample-export")["priority"])
+        self.send_ok = True
+        self.assertEqual(self.pickup()[1], "nudged 042-sample-export alpha: agent synthetic-agent\n")
+        self.assertEqual(len(self.sent), 2)
+
+    def test_a_changed_priority_is_not_stamped(self):
+        self.export()
+
+        def newer(agent, message):
+            self.board["jobs"][0]["priority"] = {"at": "2026-01-02T13:00:00Z"}
+            return True
+        factory.paseo_send.side_effect = newer
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(self.puts(), [])
+        self.assertNotIn("nudged", self.job("042-sample-export")["priority"])
+
+
 class DenyNotesTest(PickupFixture):
     def setUp(self):
         super().setUp()
