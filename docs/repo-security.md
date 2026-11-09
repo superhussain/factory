@@ -35,9 +35,11 @@ If you rename the `ci` job in `.github/workflows/ci.yml`, update `main.json` in 
 | Default workflow token | read, cannot approve PRs | keep | `gh api repos/superhussain/factory/actions/permissions/workflow` | agent verifies |
 | Dependabot security updates | on | keep | `gh api -X PUT repos/superhussain/factory/automated-security-fixes` | agent verifies |
 | Allowed Actions | all | GitHub-owned plus `pnpm/action-setup@*` | Settings, Actions, General, Actions permissions | Hussain |
-| Require SHA-pinned Actions | off | on; actions pinned in workflows, Dependabot bumps them | `gh api -X PUT repos/superhussain/factory/actions/permissions -F enabled=true -f allowed_actions=all -F sha_pinning_required=true` | agent, after merge |
+| Require SHA-pinned Actions | off | on; actions pinned in workflows, Dependabot bumps them | `gh api -X PUT repos/superhussain/factory/actions/permissions -F enabled=true -f allowed_actions="$(gh api repos/superhussain/factory/actions/permissions --jq .allowed_actions)" -F sha_pinning_required=true` (keeps the current `allowed_actions`) | agent, after merge |
 | Wiki, Projects | off | keep | `gh api -X PATCH repos/superhussain/factory -F has_wiki=false -F has_projects=false` | agent verifies |
 | Deploy secret scope | repo secret; production environment exists (main only); deploy job uses it | environment secret only | `gh secret set CLOUDFLARE_API_TOKEN --env production -R superhussain/factory`, then after one green deploy `gh secret delete CLOUDFLARE_API_TOKEN -R superhussain/factory` | Hussain |
+
+When you review a Dependabot PR that bumps an action, check that the new SHA is the commit its `# vX.Y.Z` release tag points to.
 
 ## Account hygiene
 

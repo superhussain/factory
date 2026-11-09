@@ -150,6 +150,6 @@ test("missing inputs fail fast naming both inputs and the docs", () => {
     output = String(error.stdout);
   }
   assert.match(output, /FACTORY_DEPLOY_PROFILE/);
-  assert.match(output, /CLOUDFLARE_API_TOKEN/);
+  assert.match(output, /CLOUDFLARE_API_TOKEN \(production environment secret\)/);
   assert.match(output, /docs\/cloudflare\.md/);
 });
