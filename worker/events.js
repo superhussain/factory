@@ -2,6 +2,7 @@
 // It stores nothing and never carries board content.
 export const EVENTS_PATH = "/events/board";
 const KEYS = ["board.json", "backlog.md"];
+const MAX_SOCKETS = 100;
 
 export class BoardEvents {
   constructor(ctx, env) {
@@ -11,6 +12,8 @@ export class BoardEvents {
 
   fetch(request) {
     if (request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
+      if (this.ctx.getWebSockets().length >= MAX_SOCKETS)
+        return new Response("room full", { status: 503 });
       const [client, server] = Object.values(new WebSocketPair());
       this.ctx.acceptWebSocket(server);
       return new Response(null, { status: 101, webSocket: client });

@@ -176,7 +176,8 @@ rather than loosens. The measured limit result is recorded in
 
 The `BoardEvents` Durable Object (`worker/events.js`, a plain Durable Object on the WebSocket
 Hibernation API) tells open dashboards when `board.json` or `backlog.md` changed. It
-stores nothing and never carries board content.
+stores nothing and never carries board content. The room holds at most 100 open sockets
+and answers a further upgrade with 503.
 
 ```mermaid
 sequenceDiagram

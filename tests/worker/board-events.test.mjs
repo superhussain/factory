@@ -203,3 +203,17 @@ for (const [name, url, method] of [
     assert.deepEqual(socket.sent, []);
   });
 }
+
+test("a full room answers an upgrade with 503 and accepts no socket", async () => {
+  const accepted = [];
+  const room = new BoardEvents(
+    {
+      getWebSockets: () => Array.from({ length: 100 }, recordingSocket),
+      acceptWebSocket: (socket) => accepted.push(socket),
+    },
+    {},
+  );
+  const response = await room.fetch(new Request(EVENTS, { headers: { Upgrade: "websocket" } }));
+  assert.equal(response.status, 503);
+  assert.deepEqual(accepted, []);
+});
