@@ -182,9 +182,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .host-checks input { width: auto; margin: 0; }
   .host-group-label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
   @media (max-width: 640px) { .host-card .actions { flex-direction: column; } }
-  #display-columns, #display-card-fields { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
-  #display-columns legend, #display-card-fields legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
-  #display-columns label, #display-card-fields label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); }
+  #display-columns, #display-card-fields, #display-drawer-links { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
+  #display-columns legend, #display-card-fields legend, #display-drawer-links legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+  #display-columns label, #display-card-fields label, #display-drawer-links label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); }
   #settings-notifications label { display: flex; gap: 8px; align-items: baseline; color: var(--fg); font-size: 13px; }
   .scheduler-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
   .reference-scroll { overflow-x: auto; margin: 0 0 12px; }
@@ -302,14 +302,14 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   /* The text is ~15px tall; this invisible box makes a ~41px tap target without moving the layout. */
   .pr-link::after { content: ""; position: absolute; inset: -13px -8px; }
   .card-wrap > .pr-link { position: absolute; top: 13px; right: 16px; }
-  .detail-head .links { flex: none; display: flex; gap: 16px; }
+  .detail-head .links { flex: none; display: flex; gap: 16px; align-items: center; height: var(--icon-size); }
   .detail-head .btn { flex: none; }
   .job-actions { position: relative; flex: none; }
   .job-actions-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; min-width: 200px; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .job-actions-menu[hidden] { display: none; }
   .job-actions-menu .btn { border: 0; text-align: left; border-radius: 6px; padding: 8px 12px; }
   .job-actions-menu .btn:hover, .job-actions-menu .btn:focus-visible { background: var(--line); }
-  .detail-head .pr-link { position: relative; font-size: 12px; margin-top: 3px; }
+  .detail-head .pr-link { position: relative; font-size: 12px; }
   .detail-head .pr-link[hidden] { display: none; }
   .rounds { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
   .round { display: flex; align-items: center; gap: 4px; }
@@ -335,7 +335,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .detail-head .titles { flex: 1; min-width: 0; }
   .detail-head .title { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
   .detail-head .meta, .backlog-history .meta { font: 12px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
-  .close { font: inherit; font-size: 20px; line-height: 1; background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 6px; }
+  .close { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-size); height: var(--icon-size); padding: 0; background: none; border: 0; border-radius: 8px; color: var(--muted); cursor: pointer; }
+  .close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .tabs { position: relative; display: flex; gap: 4px; padding: 10px 24px; border-bottom: 1px solid var(--line); overflow-x: auto; flex: none; }
   .tabs[hidden] { display: none; }
   .tab {
@@ -417,7 +418,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head { flex-wrap: wrap; row-gap: 0; }
     .detail-head .titles { flex: 1 1 0; min-width: 0; }
     .detail-head .close { flex: none; }
-    .detail-head .links { order: 3; flex-basis: 100%; }
+    .detail-head .links { order: 3; flex-basis: 100%; height: auto; }
     .detail-head .pr-link { margin-top: 8px; }
     .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
     .doc { padding: 16px 16px 40px; }
@@ -468,7 +469,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-follow-up" role="menuitem" tabindex="-1" hidden>Add follow-up idea</button>
       </div>
     </div>
-    <button class="close" id="d-close" aria-label="Close">&times;</button>
+    <button class="close" id="d-close" aria-label="Close"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <p class="err" id="d-edit-idea-err" role="alert" hidden></p>
   <p class="err" id="d-prioritize-err" role="alert" hidden></p>
@@ -643,6 +644,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
       <p class="muted" id="display-card-fields-help">Cards in the needs you column always show what the job is waiting on.</p>
+      <fieldset id="display-drawer-links" aria-describedby="display-drawer-links-help"><legend>Job panel links</legend></fieldset>
+      <p class="muted" id="display-drawer-links-help">Unchecked links are hidden in the job panel header.</p>
       <label for="display-idea-project">New idea project<select id="display-idea-project" aria-describedby="display-idea-project-help"></select></label>
       <p class="muted" id="display-idea-project-help">New idea starts with this project unless the board is filtered to one project.</p>
       <p class="muted" id="display-drawer"></p>
@@ -2754,6 +2757,28 @@ $('d-doc').addEventListener('click', (e) => {
   if (a.getAttribute('href') !== location.hash) window.addEventListener('hashchange', () => $('d-close').focus(), { once: true });
 });
 
+// The header links, each left out when this browser hides its kind in Display settings.
+function renderDrawerLinks(j) {
+  const shown = (kind, value) => hiddenDrawerLinks.has(kind) ? null : value;
+  const pr = shown('pr', prLink(j));
+  $('d-pr').hidden = !pr;
+  $('d-pr').textContent = pr ? 'PR #' + pr.n : '';
+  if (pr) {
+    $('d-pr').href = pr.url;
+    $('d-pr').setAttribute('aria-label', 'Open PR #' + pr.n + ' on GitHub');
+  } else {
+    $('d-pr').removeAttribute('href');
+    $('d-pr').removeAttribute('aria-label');
+  }
+  const paseo = paseoLinks(j);
+  for (const [kind, id] of [['app', 'd-paseo'], ['web', 'd-paseo-web']]) {
+    const label = factoryConfig.agent_links[kind]?.label;
+    $(id).textContent = label || '';
+    setLink($(id), shown(kind, paseo?.[kind]), "Open this job's session in " + (label || ''));
+  }
+  setLink($('d-tracer'), shown('tracer', tracerLink(j)), "Open this job's feature in Tracer");
+}
+
 async function openJob(id) {
   const j = jobs.find((x) => x.id === id);
   if (!j) return;
@@ -2814,25 +2839,8 @@ async function openJob(id) {
     if (!runs.length) head.append((head.childNodes.length ? ' · ' : '') + 'build ' + buildState(j));
     runs.forEach((u, i) => add(i ? '' : 'build ' + buildState(j) + ': ', u, 'run ' + u.match(/(\d+)$/)[1]));
   }
-  const pr = prLink(j);
-  $('d-pr').hidden = !pr;
-  $('d-pr').textContent = pr ? 'PR #' + pr.n : '';
-  if (pr) {
-    $('d-pr').href = pr.url;
-    $('d-pr').setAttribute('aria-label', 'Open PR #' + pr.n + ' on GitHub');
-  } else {
-    $('d-pr').removeAttribute('href');
-    $('d-pr').removeAttribute('aria-label');
-  }
-  const paseo = paseoLinks(j);
-  for (const [kind, id] of [['app', 'd-paseo'], ['web', 'd-paseo-web']]) {
-    const label = factoryConfig.agent_links[kind]?.label;
-    $(id).textContent = label || '';
-    setLink($(id), paseo?.[kind], "Open this job's session in " + (label || ''));
-  }
-  const tracer = tracerLink(j);
-  setLink($('d-tracer'), tracer, "Open this job's feature in Tracer");
-  if (!tracer && following) head.append((head.childNodes.length ? ' · ' : '') + 'Tracer: waiting for a device with tracer.json');
+  renderDrawerLinks(j);
+  if (!tracerLink(j) && following) head.append((head.childNodes.length ? ' · ' : '') + 'Tracer: waiting for a device with tracer.json');
   const scope = tracerScopeText(j);
   if (scope) head.append((head.childNodes.length ? ' · ' : '') + scope);
   renderTracerTasks(j);
@@ -5133,7 +5141,7 @@ loadProjects().then(() => {
 
 // Display settings live only in this browser. Each value is read against a fixed list,
 // so a bad stored value falls back to the default.
-const DISPLAY_KEYS = { theme:'factory-theme', density:'factory-density', columns:'factory-hidden-columns', poll:'factory-poll', cardFields:'factory-hidden-card-fields', ideaProject:'factory-idea-project' };
+const DISPLAY_KEYS = { theme:'factory-theme', density:'factory-density', columns:'factory-hidden-columns', poll:'factory-poll', cardFields:'factory-hidden-card-fields', ideaProject:'factory-idea-project', drawerLinks:'factory-hidden-drawer-links' };
 const THEMES = ['system', 'light', 'dark'], DENSITIES = ['comfortable', 'compact'], POLL_SECONDS = [3, 10, 30];
 const THEME_COLORS = { light: '#f9fafb', dark: '#111827' };
 const pickDisplay = (value, list) => list.includes(value) ? value : list[0];
@@ -5144,6 +5152,8 @@ let pollSeconds = pickDisplay(Number(store.get(DISPLAY_KEYS.poll)), POLL_SECONDS
 const hiddenColumns = new Set((store.get(DISPLAY_KEYS.columns) || '').split(',').filter(s => COLUMNS.includes(s) && s !== 'needs-you'));
 const CARD_FIELDS = [['note', 'Note'], ['meta', 'Branch, round and build line'], ['pr', 'PR link']];
 const hiddenCardFields = new Set((store.get(DISPLAY_KEYS.cardFields) || '').split(',').filter(f => CARD_FIELDS.some(([k]) => k === f)));
+const DRAWER_LINKS = [['pr', 'PR'], ...['app', 'web'].filter(k => factoryConfig.agent_links[k]).map(k => [k, factoryConfig.agent_links[k].label]), ['tracer', 'Tracer']];
+const hiddenDrawerLinks = new Set((store.get(DISPLAY_KEYS.drawerLinks) || '').split(',').filter(f => DRAWER_LINKS.some(([k]) => k === f)));
 let pollTimer = 0, pollStarted = false;
 function applyDisplay() {
   if (theme === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
@@ -5222,6 +5232,13 @@ $('display-card-fields').append(...CARD_FIELDS.map(([f, text]) => {
   label.append(box, ' ' + text);
   return label;
 }));
+$('display-drawer-links').append(...DRAWER_LINKS.map(([k, text]) => {
+  const box = Object.assign(document.createElement('input'), {type:'checkbox', id:'display-drawer-link-' + k});
+  box.dataset.link = k;
+  const label = Object.assign(document.createElement('label'), {htmlFor:box.id});
+  label.append(box, ' ' + text);
+  return label;
+}));
 function enterDisplaySection() {
   $('display-idea-project').replaceChildren(new Option('No default', ''), ...[...(projects || [])].map(([slug, p]) => new Option(p.title || slug, slug)));
   $('display-filter').replaceChildren(...[...$('filter').options].map(o => new Option(o.text, o.value)));
@@ -5235,6 +5252,7 @@ function renderDisplaySettings() {
   $('display-filter').value = filter;
   for (const box of $('display-columns').querySelectorAll('input')) box.checked = !hiddenColumns.has(box.dataset.stage);
   for (const box of $('display-card-fields').querySelectorAll('input')) box.checked = !hiddenCardFields.has(box.dataset.field);
+  for (const box of $('display-drawer-links').querySelectorAll('input')) box.checked = !hiddenDrawerLinks.has(box.dataset.link);
   const ideaProject = store.get(DISPLAY_KEYS.ideaProject);
   $('display-idea-project').value = projects?.has(ideaProject) ? ideaProject : '';
   const width = store.get(DRAWER_KEY);
@@ -5266,6 +5284,14 @@ $('display-card-fields').addEventListener('change', e => {
   if (loaded) renderBoard();
   displaySaved();
 });
+$('display-drawer-links').addEventListener('change', e => {
+  const k = e.target.dataset.link;
+  if (e.target.checked) hiddenDrawerLinks.delete(k); else hiddenDrawerLinks.add(k);
+  if (hiddenDrawerLinks.size) store.set(DISPLAY_KEYS.drawerLinks, [...hiddenDrawerLinks].join(',')); else store.remove(DISPLAY_KEYS.drawerLinks);
+  const j = jobs.find((x) => x.id === openId);
+  if (j) renderDrawerLinks(j);
+  displaySaved();
+});
 $('display-idea-project').addEventListener('change', () => {
   const slug = $('display-idea-project').value;
   if (projects?.has(slug)) store.set(DISPLAY_KEYS.ideaProject, slug); else store.remove(DISPLAY_KEYS.ideaProject);
@@ -5277,6 +5303,7 @@ $('display-reset').addEventListener('click', () => {
   theme = 'system'; density = 'comfortable'; pollSeconds = 3; filter = '';
   hiddenColumns.clear();
   hiddenCardFields.clear();
+  hiddenDrawerLinks.clear();
   $('filter').value = '';
   applyDisplay();
   schedulePoll();
