@@ -159,6 +159,27 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await live.waitForSelector('.host-card[data-id="test-host"]', wait);
       assert.equal(await live.$eval("#host-test-host-label", (el) => el.value), "Renamed");
       assert.equal(await live.$eval("#host-test-host-max", (el) => el.value), "3");
+      await setValue(live, "#host-test-host-max", "0");
+      await clickNow(live, '[aria-label="Save Renamed"]');
+      await waitCardMessage(live, "test-host", "Saved.");
+      await live.reload({ waitUntil: "domcontentloaded" });
+      await waitForBoard(live);
+      await live.waitForSelector('.host-card[data-id="test-host"]', wait);
+      assert.equal(await live.$eval("#host-test-host-max", (el) => el.value), "0");
+      assert.ok(
+        (await live.$eval('.host-card[data-id="test-host"]', (li) => li.textContent)).includes(
+          "Picks up: nothing while paused. Max in flight is 0.",
+        ),
+      );
+      await setValue(live, "#host-test-host-max", "");
+      await clickNow(live, '[aria-label="Save Renamed"]');
+      await waitCardMessage(
+        live,
+        "test-host",
+        "Could not save: max_inflight: must be a whole number from 0 to 5",
+      );
+      assert.equal((await (await fetch(origin + "/api/hosts")).json())[0].max_inflight, 0);
+      await setValue(live, "#host-test-host-max", "0");
 
       const [current] = await (await fetch(origin + "/api/hosts")).json();
       const patch = await fetch(origin + "/api/hosts/test-host", {
@@ -302,7 +323,10 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           document.querySelector("#host-studio-mac-max").getAttribute("aria-describedby"),
           document.querySelector("#host-studio-mac-max-help").textContent,
         ]),
-        ["host-studio-mac-max-help", "Jobs waiting on a human never count toward this limit."],
+        [
+          "host-studio-mac-max-help",
+          "Set 0 to pause pickup on this host. Jobs waiting on a human never count toward this limit.",
+        ],
       );
       const studio = await page.$eval('.host-card[data-id="studio-mac"]', (li) => li.textContent);
       assert.ok(

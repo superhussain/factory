@@ -23,9 +23,9 @@ function labelError(label) {
 }
 
 const maxInflightError = (value) =>
-  Number.isInteger(value) && value >= 1 && value <= 5
+  Number.isInteger(value) && value >= 0 && value <= 5
     ? null
-    : "max_inflight: must be a whole number from 1 to 5";
+    : "max_inflight: must be a whole number from 0 to 5";
 
 /** The first error in a POST /api/hosts body, or null. */
 export function validateHostCreate(body) {

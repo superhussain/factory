@@ -301,7 +301,8 @@ test("PATCH and status reject fields their writer does not own", async () => {
     [{ routes: [] }, "routes: unknown field"],
     [{ state: "paired" }, "state: cannot move from paired to paired"],
     [{ state: "pending" }, "state: cannot move from paired to pending"],
-    [{ max_inflight: 6 }, "max_inflight: must be a whole number from 1 to 5"],
+    [{ max_inflight: 6 }, "max_inflight: must be a whole number from 0 to 5"],
+    [{ max_inflight: -1 }, "max_inflight: must be a whole number from 0 to 5"],
     [{ label: "" }, "label: must be 1 to 80 characters"],
   ]) {
     const r = await s.patch("work-mac", body);
@@ -320,6 +321,8 @@ test("PATCH and status reject fields their writer does not own", async () => {
     [s.host("work-mac").label, s.host("work-mac").max_inflight, s.host("work-mac").state],
     ["Desk Mac", 3, "active"],
   );
+  assert.equal((await s.patch("work-mac", { max_inflight: 0 })).status, 200);
+  assert.equal(s.host("work-mac").max_inflight, 0);
 
   for (const [body, message] of [
     [

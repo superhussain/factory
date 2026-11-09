@@ -511,6 +511,21 @@ class PickupTest(PickupFixture):
         self.assertEqual(self.puts(), [])
         self.assertEqual(self.launched(), [])
 
+    def test_host_cap_zero_pauses(self):
+        self.hosts = [host(DEVICE, 0)]
+        self.host_board()
+        self.assertEqual(self.pickup("--limit", "3"), (0, "", ""))
+        self.assertEqual(self.launched(), [])
+        self.assertEqual(self.puts(), [])
+
+    def test_host_cap_zero_dry_run_line(self):
+        self.hosts = [host(DEVICE, 0)]
+        self.host_board()
+        expected = [f"skip 00{n}-alpha alpha: host {DEVICE} paused (max in flight 0)" for n in (4, 5, 6)]
+        expected.append(f"host {DEVICE}: would launch 0")
+        self.assertEqual(self.pickup("--dry-run"), (0, "\n".join(expected) + "\n", ""))
+        self.assertEqual(self.puts(), [])
+
     def test_host_cap_skips_jobs_waiting_on_a_human(self):
         self.hosts = [host(DEVICE, 2)]
         self.host_board({"id": "001-approve", "stage": "approve", "project": "beta", "updated": stamp(),
@@ -533,7 +548,7 @@ class PickupTest(PickupFixture):
         self.assertEqual(len(self.launched()), 1)
 
     def test_host_record_ignored_when_invalid(self):
-        for hosts in ([host(DEVICE, 0)], [host(DEVICE, "2")], [host(DEVICE, 9)], [host("other-host", 2)]):
+        for hosts in ([host(DEVICE, -1)], [host(DEVICE, "2")], [host(DEVICE, 9)], [host("other-host", 2)]):
             with self.subTest(hosts=hosts):
                 self.hosts = hosts
                 self.host_board({"id": "001-build", "stage": "build", "project": "beta", "updated": stamp(),
