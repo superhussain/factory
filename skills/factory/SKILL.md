@@ -307,6 +307,7 @@ says to.
 | Command | Message | Next step |
 | --- | --- | --- |
 | `hold`, `board` | `<id> is held by <device> session <tag>` | Tell the user who holds the job and when it was last seen, then stop. Take over only when the user says so, with `hold <project>/<id> take`. |
+| `hold`, `board` | `<id> was moved to <host> from the dashboard` | Stop. Do not retry or take it. |
 | `hold`, `pull`, `push` | `conflict in <files>` | Set the job to `needs-human` with the message as the note, and stop. `hold` has already claimed the job, so the board write goes through. |
 | `sync` | `conflict in <project>/<id>/<file>, ...` | Tell the user which jobs conflict. They don't block a new job. |
 | `push`, `pull`, `sync`, `hold`, `handoff` | `<path> is a symlink or junction...` or `cannot inspect job paths under <folder>...` | Report the stop and do nothing to the paths: never remove links, change permissions, or `take` the job automatically. Mark the job `needs-human` with the message as the note only if this session owns the claim (`hold` may have already claimed it). Links, their targets, and local edits are left untouched. |
@@ -952,7 +953,7 @@ worktree.
 
 Picks up a job that a dead session left mid-loop. Unlike `resume`, which continues a
 handed-off job and refuses stale claims, `recover` runs under the claim `stuck` took. The resume schedule runs it after
-`factory.py stuck`, and `factory.py pickup` runs it after a stalled-session takeover and for a job Tracer scope approval moved to `build`, has claimed the job under `<tag>`, so pass `--session <tag>` to
+`factory.py stuck`, and `factory.py pickup` runs it after a stalled-session takeover and for a job Tracer scope approval moved to `build`, and for a job moved to this host from the dashboard, has claimed the job under `<tag>`, so pass `--session <tag>` to
 `hold` and every `board` call, and the claim stays this session's. Run step zero for
 an existing job, but run `worktree` only where the table says. If `hold` exits 6,
 stop. If the job isn't at spec, build, review, or approve, or at `pr-open` with

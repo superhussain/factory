@@ -191,6 +191,7 @@ function checkCards(actual, expected, width) {
         ? { "idea-text": job.idea.slice(job.title.length).trim() }
         : { meta: job.branch + " · round 0" }),
       ...(job.refs ? { "meta refs": "follow-up of " + job.refs[0].id } : {}),
+      ...(job.claim ? { "meta host": "on " + job.claim.device } : {}),
       ...(job.needs || job.note ? { note: job.needs || job.note } : {}),
     };
     assert.deepEqual(
@@ -198,7 +199,8 @@ function checkCards(actual, expected, width) {
       expectedFields,
       job.id + " exact fields",
     );
-    if (job.claim) assert.ok(!card.text.includes(job.claim.device));
+    if (job.claim)
+      assert.equal(card.text.split(job.claim.device).length, 2, job.id + " host shown once");
     for (const bounds of [card.bounds, card.wrapper].filter(Boolean)) {
       assert.ok(
         bounds.left >= card.column.left - 1 && bounds.right <= card.column.right + 1,

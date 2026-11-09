@@ -125,6 +125,7 @@
   "tests/browser/walkthrough-map.test.mjs",
   "tests/browser/reassigned-links.test.mjs",
   "tests/browser/tracer-follow.test.mjs",
+  "tests/browser/move-host.test.mjs",
   "tests/browser/owned-fixtures.test.mjs",
   "tests/browser/pipeline-settings.test.mjs",
   "tests/browser/settings-page.test.mjs",

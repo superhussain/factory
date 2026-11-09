@@ -260,6 +260,7 @@ async function keyboard(page, fixture, label, support) {
   const sequence = [
     ...(fixture.name === "linked-job" ? ["d-pr", "d-paseo", "d-paseo-web"] : []),
     ...buttons,
+    ...(fixture.name === "non-idea" ? ["d-move-host"] : []),
     "d-close",
   ];
   for (const id of sequence) {
