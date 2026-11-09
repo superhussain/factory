@@ -516,6 +516,17 @@ def blocking(job, device, session, minutes):
     return c if datetime.now(timezone.utc) - seen < timedelta(minutes=minutes) else None
 
 
+def moved_away(job, device, session):
+    """True when the dashboard moved this job away from this holder's session."""
+    m = (job or {}).get("move")
+    return isinstance(m, dict) and (m.get("from"), m.get("session")) == (device, session)
+
+
+def moved_message(job_id, m):
+    return (f"{job_id} was moved to {m.get('to')} from the dashboard at {m.get('at')}. "
+            "Nothing was written. Stop this session.")
+
+
 def held_by(job_id, c):
     return (f"{job_id} is held by {c['device']} session {c.get('session')} since {c['since']}, "
             f"last seen {c['seen']}")
@@ -588,6 +599,8 @@ def board(factory, job_id):
         fail("only factory.py suggest sets origin", 2)
     if "started" in patch:
         fail("only factory.py sets started", 2)
+    if "move" in patch:
+        fail("only the dashboard and factory.py pickup set move", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -618,6 +631,8 @@ def board(factory, job_id):
         held = blocking(found, device, session, minutes)
         if held:
             return None, (None, held)
+        if moved_away(found, device, session):
+            fail(moved_message(job_id, found["move"]), 6)
         origin = (found or {}).get("origin")
         if isinstance(origin, dict) and origin.get("gate") == "human" and not origin.get("approved") \
                 and "stage" in patch and patch["stage"] not in (IDEA, "closed"):
@@ -660,6 +675,8 @@ def hold(target, take=None):
             return None, ("missing", None, None)
         if job.get("project") != slug:
             fail(f"{job_id} belongs to {job.get('project')}, not {slug}", 2)
+        if take != "take" and moved_away(job, device, session):
+            fail(moved_message(job_id, job["move"]), 6)
         # Released hold is the receiving side of handoff, whose sender gate keeps
         # human and PR gates unclaimed; mirror it before claiming or accepting.
         if take == "released" and job.get("stage") not in IN_FLIGHT:
@@ -950,9 +967,219 @@ def backlog_add(item, context=None):
         return text + f"- [ ] {item}\n" + block, None
     cas(home, "/api/backlog", append)
     print(f"added {item}" + (" with context" if context else ""))
+    verdict, final = backlog_triage(home, item, context)
+    if final and (verdict is None or verdict["decision"] != "queue"):
+        triaged = read_triaged(home)
+        if f"- [ ] {item}" not in triaged:
+            save_triaged(home, triaged + [f"- [ ] {item}"])
+    if verdict is not None:
+        report_verdict(home, m.group(1), m.group(2), item, verdict)
 
 
-BACKLOG_SUFFIX = re.compile(r" \((?:rework-of|follow-up-of|sub-job-of) \w[\w.-]*\)$", re.ASCII)
+def report_verdict(home, slug, feature, item, verdict):
+    """Queue a line the Worker queued, or print why it holds."""
+    if verdict["decision"] == "queue":
+        queue_backlog_item(home, slug, feature, verdict)
+    elif verdict["confidence"] is None:
+        print(f"held {item} for review: {verdict['reason']}")
+    else:
+        print(f"held {item} for review: confidence {verdict['confidence']}% "
+              f"(threshold {verdict['threshold']}%): {verdict['reason']}")
+
+
+TRIAGE_SWEEP_LIMIT = 5
+
+
+def read_triaged(home):
+    """The backlog lines this host already has a final triage verdict for."""
+    try:
+        data = json.loads(Path(home, "backlog-triage.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    ok = (isinstance(data, dict) and set(data) == {"version", "lines"} and type(data["version"]) is int
+          and data["version"] == 1 and isinstance(data["lines"], list)
+          and all(isinstance(line, str) for line in data["lines"]))
+    return data["lines"] if ok else []
+
+
+def save_triaged(home, lines):
+    write_atomic(str(Path(home, "backlog-triage.json")), json.dumps({"version": 1, "lines": lines}, indent=2) + "\n")
+
+
+def unchecked_lines(text):
+    """(raw line, slug, feature, context) for each well-formed unchecked backlog line. context is
+    the indented block under the line, with its indent and blank edge lines removed."""
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    found = []
+    for i, line in enumerate(lines):
+        m = BACKLOG_LINE.match(line)
+        if not m:
+            continue
+        held = []
+        for below in lines[i + 1:]:
+            if below and not below.startswith("  "):
+                break
+            held.append(below[2:])
+        while held and not held[0].strip():
+            held.pop(0)
+        while held and not held[-1].strip():
+            held.pop()
+        found.append((line, m.group(1), m.group(2), "\n".join(held)))
+    return found
+
+
+def triage_enabled(home, slug):
+    """True when the project's effective pipeline turns backlog triage on."""
+    status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+    try:
+        view = json.loads(text) if status == 200 else None
+    except ValueError:
+        return False
+    return isinstance(view, dict) and isinstance(view.get("triage"), dict) and view["triage"].get("enabled") is True
+
+
+def backlog_triage_pass(home):
+    """Ask the Worker for a verdict on up to TRIAGE_SWEEP_LIMIT unchecked backlog lines this host
+    has no final verdict for, in projects with triage on. Queued lines become ideas."""
+    status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
+    lines = unchecked_lines(text if status == 200 else "")
+    cached = read_triaged(home)
+    raws = {raw for raw, _, _, _ in lines}
+    triaged = [line for line in cached if line in raws]
+    todo = [line for line in lines if line[0] not in triaged]
+    projects = registered(home) if todo else set()
+    enabled, sent = {}, 0
+    for raw, slug, feature, context in todo:
+        if sent == TRIAGE_SWEEP_LIMIT:
+            break
+        if raw in triaged or slug not in projects:
+            continue
+        if slug not in enabled:
+            enabled[slug] = triage_enabled(home, slug)
+        if not enabled[slug]:
+            continue
+        sent += 1
+        item = f"{slug}: {feature.rstrip()}"
+        verdict, final = backlog_triage(home, item, context or None)
+        if final and (verdict is None or verdict["decision"] != "queue"):
+            triaged.append(raw)
+        if verdict is not None:
+            report_verdict(home, slug, feature, item, verdict)
+    if triaged != cached:
+        save_triaged(home, triaged)
+
+
+def triage_verdict(text):
+    """The Worker's triage reply, or None when it is not one."""
+    try:
+        reply = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(reply, dict) or reply.get("decision") not in ("off", "queue", "hold"):
+        return None
+    if reply["decision"] == "off":
+        return reply
+    confidence = reply.get("confidence")
+    ok = (type(reply.get("threshold")) is int and isinstance(reply.get("reason"), str) and reply["reason"]
+          and (type(confidence) is int or confidence is None and reply["decision"] == "hold")
+          and (reply.get("model") is None or isinstance(reply.get("model"), str)))
+    return reply if ok else None
+
+
+def backlog_triage(home, item, context):
+    """(verdict, final) for a backlog line. verdict is None when triage is off, the Worker
+    predates it, or the call failed. A failure only warns: the line is already appended.
+    final is True for a queue or hold and for a 400, which a retry would not change."""
+    body = json.dumps({"item": item, **({"context": context} if context else {})}, ensure_ascii=False)
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(captured):
+            status, _, text = api(home, "POST", "/api/backlog/triage", body, ok=(200, 400, 404, 409, 502, 503),
+                                  headers={"Content-Type": "application/json"})
+    except SystemExit:
+        status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
+    if status == 404:
+        return None, False
+    verdict = triage_verdict(text) if status == 200 else None
+    if verdict is None:
+        why = "malformed reply" if status == 200 else status
+        print(f"factory.py: backlog triage failed ({why}); the item waits in the backlog for review",
+              file=sys.stderr)
+        return None, status == 400
+    return (None, False) if verdict["decision"] == "off" else (verdict, True)
+
+
+def queue_backlog_item(home, slug, feature, verdict):
+    """Queue a triaged line as an idea, as a dashboard Approve does: the board row first, so the
+    id exists before the line names it. A line that changed meanwhile drops the unclaimed row."""
+    item, feature = f"{slug}: {feature}", feature.rstrip()
+    raw = f"- [ ] {item}"
+    ref = BACKLOG_SUFFIX.search(feature)
+    text = feature[:ref.start()] if ref else feature
+    score = f"confidence {verdict['confidence']}% (threshold {verdict['threshold']}%)"
+    jobs = Path(home, "jobs")
+    local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
+
+    def add(board):
+        data = load_board(board)
+        job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug(text))
+        at = data["updated"] = now()
+        job = {"id": job_id, "project": slug, "title": text.strip()[:80], "stage": IDEA, "updated": at,
+               "idea": f"{text}\n\nQueued by backlog triage: {score}. {verdict['reason']}",
+               "backlog": {"line": raw, "decision": "approved", "at": at, "by": "triage",
+                           "triage": {k: verdict[k] for k in ("model", "confidence", "threshold", "reason")}}}
+        if ref:
+            job["refs"] = [{"id": ref.group(2), "kind": ref.group(1)}]
+        data["jobs"].append(job)
+        return dump_board(data), job_id
+    try:
+        job_id = cas(home, "/api/board", add)
+    except SystemExit:
+        print(f"factory.py: backlog triage could not queue {item}; the item waits in the backlog for review",
+              file=sys.stderr)
+        return
+
+    def mark(backlog):
+        lines = (backlog or "").split("\n")
+        for i, line in enumerate(lines):
+            if line.rstrip("\r") == raw:
+                lines[i] = f"- [x] {slug}: {feature} ({job_id})"
+                return "\n".join(lines), True
+        return None, False
+
+    def drop(board):
+        data = load_board(board)
+        jobs = [j for j in data["jobs"]
+                if not (j.get("id") == job_id and j.get("stage") == IDEA and j.get("claim") is None)]
+        if len(jobs) == len(data["jobs"]):
+            return None, False
+        data["jobs"], data["updated"] = jobs, now()
+        return dump_board(data), True
+    try:
+        marked = cas(home, "/api/backlog", mark)
+    except SystemExit:
+        try:
+            dropped = cas(home, "/api/board", drop)
+        except SystemExit:
+            dropped = False
+        if dropped:
+            print(f"factory.py: backlog triage could not check off {item}; it removed {job_id} "
+                  "and the item waits in the backlog for review", file=sys.stderr)
+        else:
+            print(f"factory.py: backlog triage queued {item} as {job_id} but could not check off its line; "
+                  f"check off the line or remove {job_id} by hand", file=sys.stderr)
+        return
+    if marked:
+        print(f"queued {item} as {job_id}: {score}")
+        return
+    try:
+        cas(home, "/api/board", drop)
+    except SystemExit:
+        pass
+    print(f"kept {item} in the backlog: its line changed before triage finished")
+
+
+BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$", re.ASCII)
 
 
 def backlog_held(text, done):
@@ -1092,16 +1319,19 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
                 continue
             repo = paths.get(j["project"])
             # The scheduler pastes the id into a shell command, so only well-formed ids pass.
-            if not (j.get("stage") == "idea" or builds and tracer_start(j)) \
+            if not (j.get("stage") == "idea" or builds and (tracer_start(j) or moved_here(j, device))) \
                     or not repo or not os.path.isdir(repo) \
                     or (project and j["project"] != project) \
                     or not JOB_ID.fullmatch(j["id"]) or ".." in j["id"] \
                     or blocking(j, device, session, minutes):
                 continue
             tag = session or secrets.token_hex(3)
+            claim = new_claim(device, tag)
             # Replace the claim whole, as hold does. The paseo key stays as it was.
             j.pop("claim", None)
-            patch_job(data, j["id"], {"claim": new_claim(device, tag)})
+            patch_job(data, j["id"], {"claim": claim})
+            if builds and moved_here(j, device):
+                patch_job(data, j["id"], {"move": {"claimed": claim["since"]}})
             picked.append({"id": j["id"], "project": j["project"], "repo_path": repo, "session": tag})
         return (dump_board(data) if picked else None), picked
     return cas(home, "/api/board", change)
@@ -1783,8 +2013,8 @@ def pickup_settings(home, slug):
 
 
 def host_max_inflight(home, device):
-    """This host's max_inflight from the host registry, or None when the Worker has no registry
-    or no valid record for it."""
+    """This host's max_inflight from the host registry (0 pauses pickup), or None when the Worker
+    has no registry or no valid record for it."""
     status, _, text = api(home, "GET", "/api/hosts", ok=(200, 404))
     if status == 404:
         return None
@@ -1796,7 +2026,7 @@ def host_max_inflight(home, device):
         return None
     record = next((h for h in hosts if isinstance(h, dict) and h.get("id") == device), None)
     cap = record.get("max_inflight") if record else None
-    return cap if type(cap) is int and 1 <= cap <= 5 else None
+    return cap if type(cap) is int and 0 <= cap <= 5 else None
 
 
 def read_launchers(home):
@@ -2266,7 +2496,8 @@ def host_cmd(sub, host_id, code):
 def pickup(*args):
     """Claim and launch runnable ideas, and builds that Tracer scope approval released, for the
     projects whose effective pipeline enables pickup on this host. Silent when there is nothing to
-    do. Never calls a model, and no idea text reaches a launcher's arguments, environment or log name."""
+    do. Never calls a model itself; backlog triage asks the Worker, which does. No idea text
+    reaches a launcher's arguments, environment or log name."""
     flags = {}
     i = 0
     while i < len(args):
@@ -2289,6 +2520,7 @@ def pickup(*args):
         if not dry:
             tracer_follow_pass(home)
             tracer_build_pass(home)
+            backlog_triage_pass(home)
         pickup_pass(home, device, minutes, dry, limit, cap)
     finally:
         if not dry:
@@ -2464,19 +2696,57 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
             print(line)
 
 
+def move_stop_pass(home, data, device, dry):
+    """Stop the worktree of each job the dashboard moved away from this host, and record it."""
+    for j in data["jobs"]:
+        m, job_id, project = j.get("move"), j.get("id"), j.get("project")
+        if not (isinstance(m, dict) and m.get("from") == device and "stopped" not in m
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(project, str) and SLUG.fullmatch(project)):
+            continue
+        line = f"{job_id} {project}: moved to {m.get('to')}"
+        if dry:
+            print(f"would stop {line}")
+            continue
+        wt = home / "worktrees" / project / job_id
+        alive = stop_pids(wt) if wt.exists() else []
+        if alive:
+            print(f"factory.py: pickup could not stop {job_id}: processes still running: "
+                  f"{' '.join(map(str, alive))}", file=sys.stderr)
+            continue
+
+        def change(text, job_id=job_id, at=m.get("at")):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            move = (found or {}).get("move")
+            if not isinstance(move, dict) or move.get("at") != at or "stopped" in move:
+                return None, False
+            patch_job(board, job_id, {"move": {"stopped": now()}})
+            return dump_board(board), True
+        if cas(home, "/api/board", change):
+            print(f"stopped {line}")
+
+
+def moved_here(j, device):
+    """True when the dashboard moved this in-flight job to this host and no pickup has claimed it yet."""
+    m = j.get("move")
+    return isinstance(m, dict) and m.get("to") == device and "claimed" not in m and j.get("stage") in IN_FLIGHT
+
+
 def pickup_pass(home, device, minutes, dry, limit, cap):
     """One pickup run after flags and the holder are resolved."""
     paths = read_paths(home)
     data = read_board(home)
+    move_stop_pass(home, data, device, dry)
     settings = {}
     stalls = read_stalls(home)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
     if not dry and taken >= limit:
         return
-    jobs = [j for j in data["jobs"] if (j.get("stage") == IDEA or tracer_start(j)) and isinstance(j.get("id"), str)
-            and JOB_ID.fullmatch(j["id"]) and ".." not in j["id"]]
-    starts = {j["id"] for j in jobs if tracer_start(j)}
+    jobs = [j for j in data["jobs"] if (j.get("stage") == IDEA or tracer_start(j) or moved_here(j, device))
+            and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"]) and ".." not in j["id"]]
+    starts = {j["id"] for j in jobs if tracer_start(j) or moved_here(j, device)}
 
     def skip(j):
         """Why this idea is not a candidate, or None."""
@@ -2538,6 +2808,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
                     line = f"skip {j['id']} {slug}: pickup off"
                 elif device not in hosts:
                     line = f"skip {j['id']} {slug}: pickup does not list host {device}"
+                elif by_host and cap == 0:
+                    line = f"skip {j['id']} {slug}: host {device} paused (max in flight 0)"
                 elif count >= cap and by_host:
                     line = f"skip {j['id']} {slug}: host {device} in-flight cap full ({count}/{cap})"
                 elif count >= cap:
@@ -3796,6 +4068,9 @@ def stuck(*args):
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
             return False
+        # A move nobody has claimed yet belongs to its target host's pickup.
+        if isinstance(job.get("move"), dict) and "claimed" not in job["move"]:
+            return False
         c = job.get("claim")
         if job.get("stage") in IN_FLIGHT:
             if stale(c.get("seen") if c else job.get("updated")):
@@ -4464,7 +4739,7 @@ def tracer_build_pass(home):
     while the job stays checked; a 404 drops it. A Tracer failure costs one stderr warning and leaves
     unchecked jobs as they were. Silent on a device without tracer.json. Polls only the feature id
     the job maps to, skips a job whose board names another feature, and fails the check on a feature
-    with another ticket."""
+    with another ticket. Clears the mark, with no Tracer call, from a job outside that scope."""
     home = Path(home)
     if not os.path.lexists(home / "tracer.json"):
         return
@@ -4474,18 +4749,23 @@ def tracer_build_pass(home):
             cfgs = read_tracer(home)
             for job in read_board(home)["jobs"]:
                 slug, job_id = job.get("project"), str(job.get("id"))
-                if (slug not in cfgs or job.get("stage") not in (IDEA,) + IN_FLIGHT
-                        or not JOB_ID.fullmatch(job_id) or ".." in job_id):
+                if not JOB_ID.fullmatch(job_id) or ".." in job_id:
+                    continue
+                held = job["tracer"] if isinstance(job.get("tracer"), dict) else {}
+                in_scope = slug in cfgs and job.get("stage") in (IDEA,) + IN_FLIGHT
+                if not in_scope:
+                    if tracer_building(job):
+                        found[job_id] = (False, held.get("tasks"))
                     continue
                 ticket, feature_id = tracer_ids(job)
-                held = job["tracer"] if isinstance(job.get("tracer"), dict) else {}
                 if held.get("feature") not in (None, feature_id):
                     continue
                 cfg = cfgs[slug]
+                path = f"api/features/{urllib.parse.quote(feature_id, safe='')}"
                 status, feature = tracer_call(cfg["url"], tracer_token(slug, cfg["token_file"]), "GET",
-                                              f"api/features/{feature_id}", ok=(200, 404))
+                                              path, ok=(200, 404))
                 if status == 200 and not isinstance(feature, dict):
-                    fail(f"Tracer GET api/features/{feature_id} returned a body that is not a feature", 5)
+                    fail(f"Tracer GET {path} returned a body that is not a feature", 5)
                 if status == 200 and str(feature.get("ticket") or "").strip().upper() != ticket:
                     fail(f"Tracer feature {feature_id} for job {job['id']} belongs to {tracer_ticket_label(feature.get('ticket'))}", 5)
                 building = tracer_feature_building(feature, ticket)

@@ -181,6 +181,16 @@ const CAPTURE_BACKLOG =
   CAPTURE_BACKLOG_CONTEXT +
   "\n- [ ] sample: Synthetic follow-on slice (sub-job-of 001-capture)\n" +
   "- [ ] sample: Synthetic weekly report export with date, campaign and spend columns (rework-of 004-rework-capture)\n";
+const CAPTURE_TRIAGE_ITEM = "sample: Synthetic follow-on slice (sub-job-of 001-capture)";
+const CAPTURE_TRIAGE = {
+  item: CAPTURE_TRIAGE_ITEM,
+  decision: "hold",
+  confidence: 62,
+  threshold: 80,
+  reason: "It touches billing, which the project rules say to hold.",
+  model: "@cf/meta/llama-3.1-8b-instruct-fast",
+  at: "2026-10-27T10:00:00Z",
+};
 const CAPTURE_SPEC =
   "# Synthetic spec\n\nCapture fixture content, not real job data.\n\n## Tasks\n\n1. **Parse the fixture**\n   - Files: `sample.md`\n   - Check: synthetic\n2. **Render the list**\n   - Files: `sample.html`\n3. **Ship it**\n   - Check: synthetic\n\n```mermaid\ngraph LR; Alpha-->Beta\n```\n";
 const CAPTURE_BUILD =
@@ -300,6 +310,14 @@ async function capture(outdir, referencePath) {
             // attempt any external request. Both are blocked either way.
             if (side === "after") external.push(request.url());
             return request.abort();
+          }
+          if (target.pathname === "/api/backlog/triage") {
+            const held = target.searchParams.get("item") === CAPTURE_TRIAGE_ITEM;
+            return request.respond({
+              status: held ? 200 : 404,
+              contentType: "application/json",
+              body: held ? JSON.stringify(CAPTURE_TRIAGE) : "",
+            });
           }
           if (side === "before" && target.pathname === "/dashboard.html") {
             const body = reference
@@ -485,6 +503,13 @@ async function capture(outdir, referencePath) {
       await page.click("input[value=rework]");
       await page.type("#backlog-notes", "Split the export into its own settings page.");
     };
+    const openTriage = async (page) => {
+      await page.click('.backlog-card[data-index="1"]');
+      await page.waitForSelector("#backlog-form");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    };
+    await view("backlog-triage-desktop", 1440, 900, "light", openTriage);
+    await view("backlog-triage-mobile", 390, 844, "dark", openTriage);
     await view("backlog-decide-desktop", 1440, 900, "light", openDecision);
     await view("backlog-decide-mobile", 390, 844, "dark", openDecision);
     await view("backlog-decide-touch", 390, 844, "dark", openDecision, true);

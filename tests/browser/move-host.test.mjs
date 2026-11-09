@@ -1,0 +1,295 @@
+// Host line on cards and the drawer, the move button and dialog, and the board write, against
+// one owned local Worker, at desktop and mobile width. Also captures the review images.
+import assert from "node:assert/strict";
+import { mkdir, readFile } from "node:fs/promises";
+import test from "node:test";
+import { prepareAssets } from "../../tools/assets.mjs";
+import { openJobActions } from "../support/board-ready.cjs";
+import {
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+  serveHostList,
+} from "../support/browser-server.mjs";
+
+const HOSTS = JSON.parse(
+  await readFile(new URL("../fixtures/hosts-list.json", import.meta.url), "utf8"),
+);
+const SHOTS = new URL("../../.context/shots/", import.meta.url).pathname;
+const wait = { polling: 50 };
+const NOW = "2026-01-01T12:00:00Z";
+const JOBS = [
+  {
+    id: "042-sample-export",
+    project: "sample",
+    title: "Export the sample report",
+    stage: "build",
+    branch: "factory/042-sample-export",
+    round: 1,
+    updated: "2026-01-01T00:00:00Z",
+    claim: { device: "lab-linux", session: "a1b2c3", since: "2026-01-01T10:00:00Z" },
+    paseo: { agent: "synthetic" },
+  },
+  { id: "043-unclaimed", project: "sample", title: "No host", stage: "spec", updated: NOW },
+  { id: "044-open-pr", project: "sample", title: "Open PR", stage: "pr-open", updated: NOW },
+  { id: "045-no-project", title: "No project", stage: "build", updated: NOW },
+  {
+    id: "046-queued",
+    project: "sample",
+    title: "Queued stop",
+    stage: "build",
+    updated: NOW,
+    claim: { device: "studio-mac", session: "d4e5f6", since: NOW },
+    move: { from: "lab-linux", session: "a1b2c3", to: "studio-mac", at: NOW, claimed: NOW },
+  },
+  {
+    id: "047-done",
+    project: "sample",
+    title: "Both done",
+    stage: "build",
+    updated: NOW,
+    claim: { device: "studio-mac", session: "d4e5f6", since: NOW },
+    move: {
+      from: "lab-linux",
+      session: "a1b2c3",
+      to: "studio-mac",
+      at: NOW,
+      claimed: NOW,
+      stopped: NOW,
+    },
+  },
+];
+const PICKUP_HOSTS = ["lab-linux", "studio-mac", "new-box", "spare-pc", "old-laptop"];
+
+const freezeClock = (page) =>
+  page.evaluateOnNewDocument(() => {
+    const RealDate = Date;
+    window.Date = class extends RealDate {
+      constructor(...args) {
+        super(...(args.length ? args : ["2026-01-01T12:00:00Z"]));
+      }
+      static now() {
+        return new RealDate("2026-01-01T12:00:00Z").getTime();
+      }
+    };
+  });
+const hostLine = (page, id) =>
+  page.$eval(`.card[data-id="${id}"] .host`, (el) => el.textContent).catch(() => null);
+const options = (page) =>
+  page.$$eval("#move-host-select option", (os) => os.map((o) => o.textContent));
+
+test("move host", { timeout: 240000 }, async (t) => {
+  await prepareAssets();
+  await mkdir(SHOTS, { recursive: true });
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    const errors = [];
+    for (const [width, height, suffix] of [
+      [1440, 900, ""],
+      [390, 844, "-mobile"],
+    ]) {
+      await seedBoard(origin, JOBS);
+      let pickupHosts = PICKUP_HOSTS;
+      let effectiveFails = false;
+      const page = await browser.newPage();
+      await page.setViewport({ width, height });
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await freezeClock(page);
+      await serveHostList(page, HOSTS);
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname !== "/api/pipeline/effective/sample") return;
+        return effectiveFails
+          ? request.respond({ status: 500, body: "fixture failure" }, 1)
+          : request.respond(
+              {
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ pickup: { enabled: true, hosts: pickupHosts } }),
+              },
+              1,
+            );
+      });
+      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      const card = await page.waitForSelector('.card[data-id="042-sample-export"]');
+
+      await t.test(`host line on cards ${width}`, async () => {
+        assert.equal(await hostLine(page, "042-sample-export"), "on lab-linux");
+        assert.equal(await hostLine(page, "043-unclaimed"), null);
+        assert.equal(
+          await hostLine(page, "046-queued"),
+          "on studio-mac · stop queued on lab-linux",
+        );
+        assert.equal(await hostLine(page, "047-done"), "on studio-mac");
+        await card.screenshot({ path: `${SHOTS}after-card-host${suffix}.png` });
+      });
+
+      await t.test(`button only for movable jobs ${width}`, async () => {
+        const shown = {};
+        for (const id of ["042-sample-export", "043-unclaimed", "044-open-pr", "045-no-project"]) {
+          await page.evaluate((i) => (location.hash = "#" + i), id);
+          await page.waitForFunction(
+            (i) =>
+              document.getElementById("d-title") &&
+              document.querySelector("#d-meta")?.textContent.includes(i),
+            wait,
+            id,
+          );
+          shown[id] = await page.$eval("#d-move-host", (el) => !el.hidden);
+        }
+        assert.deepEqual(shown, {
+          "042-sample-export": true,
+          "043-unclaimed": true,
+          "044-open-pr": false,
+          "045-no-project": false,
+        });
+      });
+
+      await t.test(`drawer host line ${width}`, async () => {
+        await page.evaluate(() => (location.hash = "#042-sample-export"));
+        await page.waitForFunction(
+          () => document.getElementById("d-meta").textContent.endsWith("· on lab-linux"),
+          wait,
+        );
+        assert.equal(
+          await page.$eval("#d-move-host", (el) => el.textContent),
+          "Move to another host",
+        );
+      });
+
+      await t.test(`dialog lists eligible hosts ${width}`, async () => {
+        await openJobActions(page);
+        await page.click("#d-move-host");
+        await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        assert.equal(
+          await page.$eval("#move-host-help", (el) => el.textContent),
+          "042-sample-export runs on lab-linux. Moving it stops that session and starts the job on the host you pick. If lab-linux is offline, the stop waits until it comes back.",
+        );
+        assert.deepEqual(await options(page), ["Studio Mac (studio-mac)"]);
+        await (
+          await page.$("#move-host-dlg")
+        ).screenshot({ path: `${SHOTS}after-move-dialog${suffix}.png` });
+        await page.click("#move-host-cancel");
+        assert.equal(
+          await page.evaluate(() => document.getElementById("move-host-dlg").open),
+          false,
+        );
+      });
+
+      await t.test(`dialog for a job with no claim, empty and failure ${width}`, async () => {
+        await page.evaluate(() => (location.hash = "#043-unclaimed"));
+        await page.waitForFunction(
+          () => document.getElementById("d-title").textContent === "No host",
+          wait,
+        );
+        await openJobActions(page);
+        await page.click("#d-move-host");
+        await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        assert.equal(
+          await page.$eval("#move-host-help", (el) => el.textContent),
+          "043-unclaimed has no host right now. The host you pick starts it.",
+        );
+        assert.deepEqual(await options(page), [
+          "Lab Linux (lab-linux) · offline",
+          "Studio Mac (studio-mac)",
+        ]);
+        await page.click("#move-host-cancel");
+
+        pickupHosts = ["lab-linux"];
+        await page.evaluate(() => (location.hash = "#042-sample-export"));
+        await page.waitForFunction(
+          () => document.getElementById("d-title").textContent === "Export the sample report",
+          wait,
+        );
+        await openJobActions(page);
+        await page.click("#d-move-host");
+        await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        assert.equal(
+          await page.$eval("#move-host-empty", (el) => el.textContent),
+          "No other active host runs pickup for sample. Add one in Settings, Hosts.",
+        );
+        assert.equal(await page.$eval("#move-host-save", (el) => el.disabled), true);
+        await page.click("#move-host-cancel");
+
+        effectiveFails = true;
+        await openJobActions(page);
+        await page.click("#d-move-host");
+        await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        assert.equal(
+          await page.$eval("#move-host-err", (el) => el.textContent),
+          "Could not load hosts. Try again.",
+        );
+        await page.click("#move-host-cancel");
+        effectiveFails = false;
+        pickupHosts = PICKUP_HOSTS;
+      });
+
+      await t.test(
+        `dialog after a move excludes the old host and the target ${width}`,
+        async () => {
+          await seedBoard(origin, [
+            {
+              ...JOBS[0],
+              claim: undefined,
+              paseo: undefined,
+              move: { from: "lab-linux", session: "a1b2c3", to: "studio-mac", at: NOW },
+            },
+          ]);
+          await page.evaluate(() => window.fixtureBoardPoll?.());
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await page.waitForFunction(
+            () =>
+              document.querySelector("#d-move-host") && !document.getElementById("detail").hidden,
+            wait,
+          );
+          await openJobActions(page);
+          await page.click("#d-move-host");
+          await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+          assert.equal(
+            await page.$eval("#move-host-help", (el) => el.textContent),
+            "042-sample-export is moving to studio-mac. The host you pick starts it instead.",
+          );
+          assert.deepEqual(await options(page), []);
+          await page.click("#move-host-cancel");
+          await seedBoard(origin, JOBS);
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await page.waitForSelector("#d-move-host:not([hidden])", wait);
+        },
+      );
+
+      await t.test(`Move job writes move and drops the claim ${width}`, async () => {
+        await openJobActions(page);
+        await page.click("#d-move-host");
+        await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        await page.click("#move-host-save");
+        await page.waitForFunction(() => !document.getElementById("move-host-dlg").open, wait);
+        const board = await (await fetch(origin + "/api/board")).json();
+        const job = board.jobs.find((j) => j.id === "042-sample-export");
+        assert.deepEqual(job.move, {
+          from: "lab-linux",
+          session: "a1b2c3",
+          to: "studio-mac",
+          at: NOW,
+        });
+        assert.equal("claim" in job, false);
+        assert.equal("paseo" in job, false);
+        await page.waitForFunction(
+          () =>
+            document.querySelector('.card[data-id="042-sample-export"] .host')?.textContent ===
+            "moving to studio-mac · stop queued on lab-linux",
+          wait,
+        );
+        await page.click("#d-close");
+        await page.waitForFunction(() => document.getElementById("detail").hidden, wait);
+        await (
+          await page.$('.card[data-id="042-sample-export"]')
+        ).screenshot({ path: `${SHOTS}after-card-moving${suffix}.png` });
+      });
+      await page.close();
+    }
+    assert.deepEqual(errors, []);
+  });
+});
