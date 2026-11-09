@@ -3,7 +3,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import {
+  blockLiveEvents,
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+} from "../support/browser-server.mjs";
 
 const NOTE = { branch: "factory/001-sample", round: 1, note: "Synthetic note" };
 const JOBS = [
@@ -45,6 +50,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
     await page.setViewport({ width: 1280, height: 900 });
     const errors = [];
     page.on("pageerror", (error) => errors.push(String(error)));
+    await blockLiveEvents(page);
     await page.evaluateOnNewDocument(() => {
       const interval = window.setInterval;
       const clear = window.clearInterval;
