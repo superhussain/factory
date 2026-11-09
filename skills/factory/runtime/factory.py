@@ -1006,6 +1006,69 @@ def save_triaged(home, lines):
     write_atomic(str(Path(home, "backlog-triage.json")), json.dumps({"version": 1, "lines": lines}, indent=2) + "\n")
 
 
+def unchecked_lines(text):
+    """(raw line, slug, feature, context) for each well-formed unchecked backlog line. context is
+    the indented block under the line, with its indent and blank edge lines removed."""
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    found = []
+    for i, line in enumerate(lines):
+        m = BACKLOG_LINE.match(line)
+        if not m:
+            continue
+        held = []
+        for below in lines[i + 1:]:
+            if below and not below.startswith("  "):
+                break
+            held.append(below[2:])
+        while held and not held[0].strip():
+            held.pop(0)
+        while held and not held[-1].strip():
+            held.pop()
+        found.append((line, m.group(1), m.group(2), "\n".join(held)))
+    return found
+
+
+def triage_enabled(home, slug):
+    """True when the project's effective pipeline turns backlog triage on."""
+    status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+    try:
+        view = json.loads(text) if status == 200 else None
+    except ValueError:
+        return False
+    return isinstance(view, dict) and isinstance(view.get("triage"), dict) and view["triage"].get("enabled") is True
+
+
+def backlog_triage_pass(home):
+    """Ask the Worker for a verdict on up to TRIAGE_SWEEP_LIMIT unchecked backlog lines this host
+    has no final verdict for, in projects with triage on. Queued lines become ideas."""
+    status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
+    lines = unchecked_lines(text if status == 200 else "")
+    cached = read_triaged(home)
+    raws = {raw for raw, _, _, _ in lines}
+    triaged = [line for line in cached if line in raws]
+    todo = [line for line in lines if line[0] not in triaged]
+    projects = registered(home) if todo else set()
+    enabled, sent = {}, 0
+    for raw, slug, feature, context in todo:
+        if sent == TRIAGE_SWEEP_LIMIT:
+            break
+        if raw in triaged or slug not in projects:
+            continue
+        if slug not in enabled:
+            enabled[slug] = triage_enabled(home, slug)
+        if not enabled[slug]:
+            continue
+        sent += 1
+        item = f"{slug}: {feature.rstrip()}"
+        verdict, final = backlog_triage(home, item, context or None)
+        if final and (verdict is None or verdict["decision"] != "queue"):
+            triaged.append(raw)
+        if verdict is not None:
+            report_verdict(home, slug, feature, item, verdict)
+    if triaged != cached:
+        save_triaged(home, triaged)
+
+
 def triage_verdict(text):
     """The Worker's triage reply, or None when it is not one."""
     try:
