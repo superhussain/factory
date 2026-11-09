@@ -1107,7 +1107,8 @@ function card(j, inNeeds) {
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '">' +
     '<div class="id">' + esc(j.id) + (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
-      (j.paused?.at ? '<span class="chip">Paused</span>' : '') + '</div>' +
+      (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
+      (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') + '</div>' +
     '<div class="proj">' + esc(projectName(j)) + '</div>' +
     '<div class="title">' + esc(j.title || j.id) + '</div>' +
     (j.stage === 'idea' && !j.project ? '<div class="idea-text">Assign a project before starting.</div>' : '') +
