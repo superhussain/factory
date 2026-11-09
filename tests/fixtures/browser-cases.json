@@ -143,6 +143,7 @@
   "tests/browser/needs-you-form.test.mjs",
   "tests/browser/drawer-swipe.test.mjs",
   "tests/browser/drawer-compact.test.mjs",
-  "tests/browser/backlog-triage.test.mjs"
+  "tests/browser/backlog-triage.test.mjs",
+  "tests/browser/live-events.test.mjs"
  ]
 }

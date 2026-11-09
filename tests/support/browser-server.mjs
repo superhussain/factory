@@ -24,7 +24,17 @@ export function browserExecutable() {
   return executablePath;
 }
 
+// Live board events never connect, so a suite that drives the poll timer keeps it.
+export async function blockLiveEvents(page) {
+  await page.evaluateOnNewDocument(() => {
+    window.WebSocket = class extends EventTarget {
+      close() {}
+    };
+  });
+}
+
 export async function controlBoardPolling(page) {
+  await blockLiveEvents(page);
   await page.evaluateOnNewDocument(() => {
     const interval = window.setInterval;
     window.setInterval = (fn, ms, ...args) => {

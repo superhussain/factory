@@ -629,8 +629,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <p class="muted">These settings apply only to this browser. They are saved here and never sent to the server.</p>
       <label for="display-theme">Theme<select id="display-theme"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <label for="display-density">Density<select id="display-density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
-      <label for="display-poll">Board refresh<select id="display-poll" aria-describedby="display-poll-help"><option value="3">Every 3 seconds</option><option value="10">Every 10 seconds</option><option value="30">Every 30 seconds</option></select></label>
-      <p class="muted" id="display-poll-help">The board stops refreshing while this tab is hidden, unless notifications are on, and refreshes as soon as you return.</p>
+      <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="3">Every 3 seconds</option><option value="10">Every 10 seconds</option><option value="30">Every 30 seconds</option></select></label>
+      <p class="muted" id="display-poll-help">The board updates live while this tab is open. If the live connection drops, it refreshes on this schedule until it reconnects. A hidden tab stays live only while notifications are on.</p>
       <label for="display-filter">Show jobs from<select id="display-filter"></select></label>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
@@ -829,6 +829,8 @@ let backlogSaving = false;
 let drawerVersion = 0;
 let openStamp = null;
 let files = [];
+// True while a newly opened job's files load, so a board re-read cannot mistake them for missing.
+let filesLoading = false;
 let activeFile = null;
 // The open file's job folder and URL, which relative image paths resolve against.
 // null while no job file is open, so a relative image renders as its alt text.
@@ -864,14 +866,24 @@ function setConnection(state) {
   $('dot').title = title;
 }
 $('conn-signin').addEventListener('click', () => location.reload());
-window.addEventListener('offline', () => setConnection('offline'));
+window.addEventListener('offline', () => { setConnection('offline'); syncLive(); schedulePoll(); });
 window.addEventListener('online', async () => {
+  syncLive(); schedulePoll();
   await loadProjects();
   poll();
 });
 
 let loaded = false;
 let boardReadVersion = 0;
+let boardUpdated = '';
+
+// The live socket can leave the board unread for hours, so a timer beside the live
+// client redraws this age label on its own.
+function drawUpdated() {
+  if (!loaded) return;
+  $('updated').textContent = boardUpdated ? 'updated ' + ago(boardUpdated) : 'no jobs yet';
+  $('updated').title = boardUpdated;
+}
 
 async function poll() {
   const version = ++boardReadVersion;
@@ -890,9 +902,9 @@ async function poll() {
     if (version !== boardReadVersion) return false;
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
     setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
-    $('updated').textContent = data.updated ? 'updated ' + ago(data.updated) : 'no jobs yet';
-    $('updated').title = data.updated || '';
+    boardUpdated = data.updated || '';
     loaded = true;
+    drawUpdated();
     renderBoard();
     notifyNeeds();
     if (settingsShown === 'projects') renderProjectList();
@@ -2803,6 +2815,7 @@ async function openJob(id) {
   if (first) {
     activeFile = null;
     files = [];
+    filesLoading = true;
     $('d-tabs').innerHTML = '';
     $('d-doc').innerHTML = '<p class="muted">loading files</p>';
     refreshPicker();
@@ -2817,6 +2830,7 @@ async function openJob(id) {
   if (needsFile) needsFile.sha = await sha12(needsFile.text);
   if (openId !== id) return;
   files = got;
+  filesLoading = false;
   walkthroughs = walk;
   // The hash tab wins if its file exists, then the current tab, then the first file past the idea.
   const want = files.find((f) => f.name === hashFile());
@@ -2838,7 +2852,7 @@ function hashFile() {
 // The hash's file when it isn't loaded, or null.
 function pendingTab() {
   const name = hashFile();
-  return name && !files.find((f) => f.name === name) ? name : null;
+  return name && !filesLoading && !files.find((f) => f.name === name) ? name : null;
 }
 
 // replaceState, so a tab switch adds no history entry and fires no hashchange.
@@ -4956,7 +4970,7 @@ $('notify-needs').addEventListener('change', async () => {
   notifyOn = $('notify-needs').checked && notifySupported() && Notification.permission === 'granted';
   if (notifyOn) store.set(NOTIFY_KEY, 'on'); else store.remove(NOTIFY_KEY);
   renderNotifySettings();
-  schedulePoll();
+  syncLive(); schedulePoll();
   $('notify-status').textContent = notifyOn ? 'Notifications are on in this browser.' : 'Notifications are off.';
 });
 
@@ -4967,7 +4981,7 @@ loadProjects().then(() => {
   if (settingsShown === 'display') enterDisplaySection();
   if (settingsShown === 'notifications') enterNotificationsSection();
   referenceReady = true; if (settingsShown === 'reference') loadReferenceEffective();
-  pollStarted = true; poll(); schedulePoll();
+  pollStarted = true; poll(); syncLive(); schedulePoll();
 });
 
 // Display settings live only in this browser. Each value is read against a fixed list,
@@ -4994,13 +5008,59 @@ function applyDisplay() {
   // replace() swaps the fragment without a history entry, so Back cannot undo the theme.
   for (const f of document.querySelectorAll('.html-stepper-frame')) f.contentWindow.location.replace(f.src.replace(/#.*$/, '') + walkthroughHash());
 }
-// Hidden tabs never poll. Returning to the tab refreshes at once.
+// The board timer runs only while the live socket is closed. Hidden tabs never poll
+// unless notifications are on. Returning to the tab refreshes at once.
 function schedulePoll() {
   clearInterval(pollTimer);
-  const ms = !pollStarted ? 0 : !document.hidden ? pollSeconds * 1000 : notifyActive() ? 30000 : 0;
+  const ms = !pollStarted || liveOpen ? 0 : !document.hidden ? pollSeconds * 1000 : notifyActive() ? 30000 : 0;
   pollTimer = ms ? setInterval(poll, ms) : 0;
 }
-document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); schedulePoll(); });
+document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); syncLive(); schedulePoll(); });
+// Live board events: the Worker sends {"type":"changed","key":...} after each board or
+// backlog write, and the board re-reads at once. A dropped socket retries with backoff
+// (1, 2, 4 ... 30 s, 8 tries); focus, online or showing the tab start over after that.
+const LIVE_PATH = '/events/board';
+const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000, LIVE_MAX_RETRIES = 8;
+let liveSocket = null, liveOpen = false, liveRetries = 0, liveRetryTimer = 0;
+function liveWanted() { return pollStarted && navigator.onLine && (!document.hidden || notifyActive()); }
+function openLive() {
+  clearTimeout(liveRetryTimer);
+  liveRetryTimer = 0;
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + LIVE_PATH);
+  liveSocket = ws;
+  ws.addEventListener('open', () => {
+    if (ws !== liveSocket) return;
+    liveOpen = true;
+    liveRetries = 0;
+    schedulePoll();
+    poll();
+  });
+  ws.addEventListener('message', () => { if (ws === liveSocket) poll(); });
+  ws.addEventListener('close', () => {
+    if (ws !== liveSocket) return;
+    liveSocket = null;
+    liveOpen = false;
+    schedulePoll();
+    if (liveRetries < LIVE_MAX_RETRIES && liveWanted())
+      liveRetryTimer = setTimeout(openLive, Math.min(LIVE_FIRST_RETRY_MS * 2 ** liveRetries++, LIVE_MAX_RETRY_MS));
+  });
+}
+function closeLive() {
+  clearTimeout(liveRetryTimer);
+  liveRetryTimer = 0;
+  liveRetries = 0;
+  const ws = liveSocket;
+  liveSocket = null;
+  liveOpen = false;
+  // A status code lets the room finish the closing handshake.
+  ws?.close(1000);
+}
+function syncLive() {
+  if (!liveWanted()) closeLive();
+  else if (!liveSocket && !liveRetryTimer) { liveRetries = 0; openLive(); }
+}
+window.addEventListener('focus', syncLive);
+setInterval(() => { if (!document.hidden) drawUpdated(); }, 30000);
 $('display-columns').append(...COLUMNS.map(s => {
   const box = Object.assign(document.createElement('input'), {type:'checkbox', id:'display-column-' + s, disabled:s === 'needs-you'});
   box.dataset.stage = s;
