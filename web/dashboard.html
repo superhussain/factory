@@ -2750,10 +2750,12 @@ async function openJob(id) {
   $('d-prioritize').hidden = !j.project || !PRIORITY_STAGES.includes(j.stage) || !!j.priority;
   const following = j.tracer?.follow === true;
   $('d-follow-tracer').hidden = !j.project || !(TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) || following || !!tracerLink(j);
+  $('d-copy-link').hidden = false;
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
   if (first) {
     drawerVersion++;
     closeJobActions(false);
+    clearCopyStatus();
     $('d-edit-idea-err').hidden = true;
     $('d-prioritize-err').hidden = true;
     $('d-project').value = '';
@@ -4138,7 +4140,18 @@ async function openIdeaEditor() {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-copy-link'];
+
+let copyStatusTimer = 0;
+
+function clearCopyStatus() {
+  clearTimeout(copyStatusTimer);
+  $('d-copy-status').textContent = '';
+}
+
+function jobLink(id) {
+  return location.origin + location.pathname + location.search + '#' + encodeURIComponent(id);
+}
 
 function enabledJobActions() {
   return JOB_ACTIONS.map($).filter((el) => !el.hidden && !el.disabled);
@@ -4442,6 +4455,20 @@ $('d-prioritize').addEventListener('click', async () => {
   } finally {
     $('d-prioritize').disabled = false;
   }
+});
+$('d-copy-link').addEventListener('click', async () => {
+  const id = openId;
+  const version = drawerVersion;
+  let copied = true;
+  try {
+    await navigator.clipboard.writeText(jobLink(id));
+  } catch {
+    copied = false;
+  }
+  if (version !== drawerVersion) return;
+  clearCopyStatus();
+  $('d-copy-status').textContent = copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.';
+  if (copied) copyStatusTimer = setTimeout(clearCopyStatus, 2000);
 });
 $('idea-cancel').addEventListener('click', () => { if (!locked()) $('idea-dlg').close(); });
 // Escape closes the dialog like Cancel, except while a save runs or a submission is
@@ -4753,11 +4780,12 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-copy-link', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;
   closeJobActions(false);
+  clearCopyStatus();
   syncIdeaEditor();
   $('d-tabs').innerHTML = '';
   $('d-tabs').hidden = true;
