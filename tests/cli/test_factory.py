@@ -385,7 +385,7 @@ class FactoryTest(IsolatedTestCase):
         self.assertIsNotNone(match)
         self.assertTrue(340 <= int(match.group(1)) <= 400)
 
-    def test_receiver_accepts_with_own_claim_and_paseo_link(self):
+    def test_receiver_accepts_with_own_claim_and_paseo_link_and_paseo_claim(self):
         factory.handoff(self.target)
         with patch.dict(os.environ, {"FACTORY_SESSION": "receiver"}), patch.object(
                 factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}):
@@ -395,6 +395,7 @@ class FactoryTest(IsolatedTestCase):
         self.assertEqual(job["handoff"]["state"], "accepted")
         self.assertEqual(job["handoff"]["from"]["session"], "sender")
         self.assertEqual(job["paseo"]["agent"], "agent_new")
+        self.assertTrue((self.home / "paseo-claims" / "001-test" / "agent_new").is_file())
         with patch.dict(os.environ, {"FACTORY_SESSION": "third"}), self.assertRaises(SystemExit):
             factory.hold(self.target)
         self.assertEqual(self.saved()["claim"]["session"], "receiver")
