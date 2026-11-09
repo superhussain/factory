@@ -2328,6 +2328,7 @@ function hostCard(h) {
   const li = make('li', {className:'host-card'});
   li.dataset.id = h.id;
   li.append(make('h4', {textContent:h.label}), make('code', {className:'host-id', textContent:h.id}), make('span', {className:'host-badge', textContent:HOST_STATES[h.state] ?? h.state}));
+  if (h.max_inflight === 0 && h.state !== 'retired') li.append(make('span', {className:'host-badge', textContent:'Paused'}));
   if (h.state !== 'retired')
     li.append(make('p', {className:'host-seen', textContent:!h.status ? 'No heartbeat yet' : h.offline ? 'Offline, last seen ' + seenAgo(h.status.seen) : 'Seen ' + seenAgo(h.status.seen)}));
   li.append(make('p', {textContent:{
@@ -2367,7 +2368,7 @@ function hostCard(h) {
     if (max.valueAsNumber !== h.max_inflight) patch.max_inflight = max.valueAsNumber;
     hostWrite(h.id, 'PATCH', '/' + h.id, patch, h.etag, 'Saved.');
   }));
-  if (h.state === 'paired') actions.append(button('Confirm', () => hostWrite(h.id, 'PATCH', '/' + h.id, {state:'active'}, h.etag, 'Confirmed. It picks up work now.')));
+  if (h.state === 'paired') actions.append(button('Confirm', () => hostWrite(h.id, 'PATCH', '/' + h.id, {state:'active'}, h.etag, h.max_inflight === 0 ? 'Confirmed. It stays paused while Max in flight is 0.' : 'Confirmed. It picks up work now.')));
   if (h.state !== 'retired') actions.append(button('Retire', () => {
     if (confirm('Retire ' + h.label + '? It stops picking up work and its token is unbound.'))
       hostWrite(h.id, 'PATCH', '/' + h.id, {state:'retired'}, h.etag, 'Retired.');

@@ -38,6 +38,8 @@ class TriageFixture(IsolatedTestCase):
                 self.assertEqual(ok, (200, 404, 409))
                 self.gets.append(path)
                 status, view = self.views[path.rsplit("/", 1)[1]]
+                if status not in ok:
+                    self.module.fail(f"GET {path} returned {status}", 5)
                 return status, {}, view if isinstance(view, str) else json.dumps(view)
             self.assertEqual((method, path), ("POST", "/api/backlog/triage"))
             self.assertEqual(headers, {"Content-Type": "application/json"})
@@ -273,6 +275,15 @@ class BacklogTriagePassTests(TriageFixture):
         self.sweep()
         self.assertEqual(self.posts, [{"item": "sample: Add PDF export to reports"}])
         self.assertEqual(self.cached(), [PDF + "   "])
+
+    def test_a_worker_error_mid_sweep_keeps_the_holds_so_far(self):
+        self.files["/api/backlog"] = EXAMPLE + "- [ ] beta: Add dark mode\n"
+        self.views["beta"] = (500, "boom")
+        with self.assertRaises(SystemExit) as raised:
+            self.sweep()
+        self.assertEqual(raised.exception.code, 5)
+        self.assertEqual(self.cached(), [RENAME])
+        self.assertEqual(self.board()[-1]["id"], "009-add-pdf-export")
 
     def test_a_row_left_on_the_board_is_not_queued_twice(self):
         self.after_board = lambda: self.cas_down.update({"/api/backlog", "/api/board"})

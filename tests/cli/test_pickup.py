@@ -164,6 +164,25 @@ class PickupTest(PickupFixture):
         self.assert_silent(self.pickup())
         self.sweep.assert_called_once_with(self.home)
 
+    def test_a_worker_error_in_the_triage_pass_still_launches_ideas(self):
+        cause = "factory.py: GET https://factory.example.test/api/backlog returned 500: boom"
+        self.sweep.side_effect = lambda home: factory.fail(cause.removeprefix("factory.py: "), 5)
+        self.board["jobs"] = [idea("001-alpha", "alpha")]
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertEqual(err, cause + "\nfactory.py: backlog triage stopped; unsent lines wait for the next pickup run\n")
+        self.assertRegex(out, r"^launched 001-alpha alpha on primary session [0-9a-f]{6}\n$")
+        self.assertEqual(len(self.launched()), 1)
+
+    def test_a_non_worker_exit_in_the_triage_pass_stops_pickup(self):
+        self.sweep.side_effect = lambda home: factory.fail("boom", 2)
+        self.board["jobs"] = [idea("001-alpha", "alpha")]
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+        self.assertEqual(self.pickup()[0], 2)
+        self.assertEqual(self.launched(), [])
+        self.assertEqual(self.puts(), [])
+
     def test_dry_run_skips_the_backlog_triage_pass(self):
         self.assertEqual(self.pickup("--dry-run")[0], 0)
         self.sweep.assert_not_called()
