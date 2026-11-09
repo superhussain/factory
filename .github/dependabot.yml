@@ -1,0 +1,6 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories: ["/", "/.github/actions/ci-setup"]
+    schedule:
+      interval: weekly
