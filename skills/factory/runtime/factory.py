@@ -622,6 +622,8 @@ def board(factory, job_id):
         fail("only the dashboard and factory.py pickup set priority", 2)
     if "paused" in patch:
         fail("only the dashboard sets paused", 2)
+    if "close" in patch:
+        fail("only the dashboard and factory.py pickup set close", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -654,6 +656,12 @@ def board(factory, job_id):
             return None, (None, held)
         if moved_away(found, device, session):
             fail(moved_message(job_id, found["move"]), 6)
+        if found is not None and closing(found):
+            if not mine(found.get("claim") or {}, device, session):
+                fail(closing_message(job_id), 6)
+            found.pop("claim")
+            patch_job(data, job_id, {})
+            return dump_board(data), (None, "closing")
         origin = (found or {}).get("origin")
         if isinstance(origin, dict) and origin.get("gate") == "human" and not origin.get("approved") \
                 and "stage" in patch and patch["stage"] not in (IDEA, "closed"):
@@ -673,6 +681,8 @@ def board(factory, job_id):
             job.pop("needs", None)
         return dump_board(data), (job, None)
     job, held = cas(factory, "/api/board", change)
+    if held == "closing":
+        fail(closing_message(job_id), 6)
     if held:
         fail(f"{held_by(job_id, held)}. Nothing was written. Pass --session <tag> if this session "
              "holds it, or take it over with hold <project>/<id> take", 6)
@@ -698,6 +708,8 @@ def hold(target, take=None):
             fail(f"{job_id} belongs to {job.get('project')}, not {slug}", 2)
         if take != "take" and moved_away(job, device, session):
             fail(moved_message(job_id, job["move"]), 6)
+        if closing(job):
+            fail(closing_message(job_id), 6)
         # Released hold is the receiving side of handoff, whose sender gate keeps
         # human and PR gates unclaimed; mirror it before claiming or accepting.
         if take == "released" and job.get("stage") not in IN_FLIGHT:
@@ -1341,7 +1353,7 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
             if len(picked) == budget:
                 break
             # A job waiting on a human, or an unapproved explorer card, is never promoted.
-            if not j.get("project") or gated(j) or paused(j) or tracer_building(j):
+            if not j.get("project") or gated(j) or paused(j) or closing(j) or tracer_building(j):
                 continue
             repo = paths.get(j["project"])
             # The scheduler pastes the id into a shell command, so only well-formed ids pass.
@@ -2235,7 +2247,8 @@ def claim_stalled(home, job_id, session_id, device, tag, minutes):
         resumable = stage == IDEA or stage in IN_FLIGHT \
             or stage == "pr-open" and job.get("automerge") is True and not escalated(job)
         if (not isinstance(paseo, dict) or paseo.get("agent") != session_id
-                or claim.get("device") != device or not resumable or gated(job) or paused(job)):
+                or claim.get("device") != device or not resumable or gated(job) or paused(job)
+                or closing(job)):
             return None, None
         old = (dict(claim), dict(paseo))
         job.pop("claim", None)
@@ -2314,6 +2327,9 @@ def takeover(home, data, device, minutes, paths, settings, dry):
             continue
         if paused(job):
             skipped(session, job_id, "paused")
+            continue
+        if closing(job):
+            skipped(session, job_id, "closing")
             continue
         if tracer_building(job):
             skipped(session, job_id, "building in Tracer")
@@ -2799,6 +2815,89 @@ def paused(j):
     return isinstance(p, dict) and isinstance(p.get("at"), str)
 
 
+CLOSE_REASON = re.compile(r"[^\x00-\x1f\x7f]{1,200}")
+
+
+def closing(j):
+    """True when the dashboard queued a close that pickup has not done yet."""
+    c = j.get("close")
+    return isinstance(c, dict) and isinstance(c.get("at"), str) and "closed" not in c
+
+
+def close_reason(j):
+    """The queued close's reason when it is one line of 1 to 200 characters, else None."""
+    r = (j.get("close") or {}).get("reason")
+    r = r.strip() if isinstance(r, str) else ""
+    return r if CLOSE_REASON.fullmatch(r) else None
+
+
+def closing_message(job_id):
+    return f"{job_id} has a close queued from the dashboard. Nothing else was written. Stop this session."
+
+
+def close_decision(j, reason, device, earlier):
+    """decision.md for a job closed from the dashboard. earlier is the decision.md it replaces, or None."""
+    at, stage, pr = j["close"]["at"], j.get("stage"), j.get("pr")
+    open_pr = f"- Pull request {pr} stays open. Close it on GitHub if it should not merge.\n" if pr else ""
+    text = (f"CLOSED: {reason}\n\n"
+            f"**Summary.** Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: "
+            f"{reason}. Nothing else is owed unless Left out says so.\n\n"
+            "## Evidence\n\n"
+            f"- Close requested from the dashboard at {at}.\n"
+            f"- Stage when closed: `{stage}`, round {j.get('round', 0)}.\n"
+            f"- Branch: `{j.get('branch') or 'none'}`.\n"
+            f"- Pull request: {pr or 'none'}.\n"
+            f"- Written by factory.py pickup on {device}.\n\n"
+            "## Left out\n\n"
+            "- No agent reviewed this close. The reason is the owner's own words.\n"
+            f"{open_pr}"
+            "- The worktree and branch stay on their host until someone runs "
+            f"`factory.py cleanup {j['project']}/{j['id']}` there. No job was queued for this.\n")
+    return text + "\n## Earlier decision\n\n" + earlier if earlier else text
+
+
+def close_pass(home, data, device, minutes, dry):
+    """Close each job the dashboard queued a close for: decision.md first, then the stage."""
+    for j in data["jobs"]:
+        job_id, project = j.get("id"), j.get("project")
+        if not (closing(j) and j.get("stage") not in TERMINAL
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(project, str) and SLUG.fullmatch(project)):
+            continue
+        reason = close_reason(j)
+        if reason is None:
+            print(f"factory.py: pickup skips the close of {job_id}: "
+                  "its reason is not one line of 1 to 200 characters", file=sys.stderr)
+            continue
+        c = blocking(j, device, "", minutes)
+        if c:
+            if dry:
+                print(f"skip close {job_id} {project}: claimed by {c['device']} session {c.get('session')}")
+            continue
+        if dry:
+            print(f"would close {job_id} {project}")
+            continue
+
+        def write(text, j=j, reason=reason):
+            if text is not None and text.startswith("CLOSED:"):
+                return None, None
+            return close_decision(j, reason, device, text), None
+        cas(home, f"/api/jobs/{project}/{job_id}/decision.md", write)
+
+        def change(text, job_id=job_id, at=j["close"]["at"], reason=reason):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            if (found is None or not closing(found) or found["close"]["at"] != at
+                    or found.get("stage") in TERMINAL or blocking(found, device, "", minutes)):
+                return None, False
+            found.pop("claim", None)
+            patch_job(board, job_id, {"stage": "closed", "note": reason, "needs": None,
+                                      "close": {"closed": now()}})
+            return dump_board(board), True
+        if cas(home, "/api/board", change):
+            print(f"closed {job_id} {project}")
+
+
 PRIORITY_NUDGE = ("The owner prioritized factory job {id} from the dashboard. If your turn ended while work "
                   "on it is still owed, continue with the next step now.")
 
@@ -2825,7 +2924,7 @@ def priority_nudge_pass(home, data, device, dry):
         p, c, link, job_id = j.get("priority"), j.get("claim"), j.get("paseo"), j.get("id")
         return (prioritized(j) and "nudged" not in p
                 and (j.get("stage") == IDEA or j.get("stage") in IN_FLIGHT) and not gated(j)
-                and not paused(j)
+                and not paused(j) and not closing(j)
                 and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
                 and server and isinstance(link, dict) and link.get("server") == server
                 and isinstance(c, dict) and isinstance(c.get("since"), str) and p["at"] > c["since"])
@@ -2878,6 +2977,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     data = read_board(home)
     stalls = read_stalls(home)
     move_stop_pass(home, data, device, dry, stalls[0] if stalls else None)
+    close_pass(home, data, device, minutes, dry)
     priority_nudge_pass(home, data, device, dry)
     settings = {}
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
@@ -2900,6 +3000,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
             return f"skip {j['id']} {project}: waiting on a human"
         if paused(j):
             return f"skip {j['id']} {project}: paused"
+        if closing(j):
+            return f"skip {j['id']} {project}: closing"
         if tracer_building(j):
             return f"skip {j['id']} {project}: building in Tracer"
         c = blocking(j, device, "", minutes)
@@ -4282,7 +4384,7 @@ def stuck(*args):
         return agents is not None and agents.get(link.get("agent"), "closed") == "closed"
 
     def is_stuck(job):
-        if paused(job):
+        if paused(job) or closing(job):
             return False
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():

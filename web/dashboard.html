@@ -99,7 +99,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog h2 { font-size: 15px; margin: 0 0 12px; }
   dialog h3 { font-size: 13px; margin: 16px 0 8px; }
   dialog label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-  dialog select, dialog textarea { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  dialog select, dialog textarea, dialog input[type=text] { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   dialog textarea { resize: vertical; min-height: 140px; }
   dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
   .detail > .err { margin: 12px 20px; flex: none; }
@@ -469,6 +469,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-resume" role="menuitem" tabindex="-1" hidden>Resume pickup</button>
         <button class="btn" id="d-copy-link" role="menuitem" tabindex="-1" hidden>Copy link</button>
         <button class="btn" id="d-follow-up" role="menuitem" tabindex="-1" hidden>Add follow-up idea</button>
+        <button class="btn" id="d-close-job" role="menuitem" tabindex="-1" hidden>Close job</button>
       </div>
     </div>
     <button class="close" id="d-close" aria-label="Close"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
@@ -789,6 +790,15 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <p class="muted" id="move-host-empty" hidden></p>
     <p class="err" id="move-host-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="move-host-cancel">Cancel</button><button class="btn primary" type="submit" id="move-host-save">Move job</button></div>
+  </form>
+</dialog>
+<dialog id="close-job-dlg" aria-labelledby="close-job-h">
+  <form id="close-job-form">
+    <h2 id="close-job-h">Close job</h2>
+    <p class="muted" id="close-job-help"></p>
+    <label>Reason<input type="text" id="close-job-reason" maxlength="200" autocomplete="off"></label>
+    <p class="err" id="close-job-err" role="alert" hidden></p>
+    <div class="actions"><button class="btn" type="button" id="close-job-cancel">Cancel</button><button class="btn primary" type="submit" id="close-job-save">Close job</button></div>
   </form>
 </dialog>
 <dialog id="job-picker" aria-labelledby="job-picker-heading">
@@ -1112,6 +1122,7 @@ function card(j, inNeeds) {
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '">' +
     '<div class="id">' + esc(j.id) + (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
+      (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
       (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') + '</div>' +
     '<div class="proj">' + esc(projectName(j)) + '</div>' +
     '<div class="title">' + esc(j.title || j.id) + '</div>' +
@@ -2804,7 +2815,8 @@ async function openJob(id) {
     (ideaOnly(j) ? '' : ' · round ' + (j.round ?? 0) + ' · ' + (j.branch || '')) +
     (hostLine(j) ? ' · ' + hostLine(j) : '') +
     (j.priority?.at ? ' · prioritized' : '') +
-    (j.paused?.at ? ' · paused' : '');
+    (j.paused?.at ? ' · paused' : '') +
+    (j.close?.at && !TERMINAL.includes(j.stage) ? ' · closing' : '');
   const pipeline = pipelineLabel(j);
   $('d-pipeline').textContent = pipeline;
   $('d-pipeline').hidden = !pipeline;
@@ -2816,6 +2828,7 @@ async function openJob(id) {
   $('d-pause').hidden = !j.project || TERMINAL.includes(j.stage) || !!j.paused;
   $('d-resume').hidden = !j.paused;
   $('d-follow-up').hidden = j.stage === 'idea' || $('new-idea').hidden;
+  $('d-close-job').hidden = !j.project || j.stage === 'idea' || TERMINAL.includes(j.stage) || !!j.close;
   const following = j.tracer?.follow === true;
   $('d-follow-tracer').hidden = !j.project || !(TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) || following || !!tracerLink(j);
   $('d-copy-link').hidden = false;
@@ -4196,7 +4209,7 @@ async function openIdeaEditor() {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-prioritize', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-prioritize', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
 
 let copyStatusTimer = 0;
 
@@ -4371,6 +4384,21 @@ function resumeJob(board, id, now) {
   return '';
 }
 
+// factory.py pickup writes decision.md with the reason, then moves the job to closed.
+// Returns an error message, or '' once the board is changed.
+function closeJob(board, id, reason, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (!j.project || j.stage === 'idea' || TERMINAL.includes(j.stage)) return 'This job can no longer be closed.';
+  if (j.close) return 'A close is already queued for this job.';
+  const text = reason.trim();
+  if (!/^[^\x00-\x1f\x7f]{1,200}$/.test(text)) return 'Enter a reason of 1 to 200 characters.';
+  j.close = { reason: text, at: now };
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
 let moveHost = null;
 
 async function openMoveHost() {
@@ -4440,6 +4468,52 @@ $('move-host-form').addEventListener('submit', async (e) => {
     return;
   }
   closeMoveHost();
+  await poll();
+});
+
+let closing = null;
+
+function openCloseDialog() {
+  const j = jobs.find((x) => x.id === openId);
+  if (closing || !j) return;
+  closing = { id: j.id, opener: $('d-actions') };
+  $('close-job-help').textContent = j.id + ' stops at ' + j.stage + '. The next pickup run writes decision.md with your reason, then moves the job to Closed. If a session is running it, the close waits for that session to stop.';
+  $('close-job-reason').value = '';
+  $('close-job-err').textContent = '';
+  $('close-job-err').hidden = true;
+  $('close-job-save').disabled = false;
+  $('close-job-dlg').showModal();
+  $('close-job-reason').focus();
+}
+
+function dismissCloseDialog() {
+  if (!closing) return;
+  const opener = closing.opener;
+  closing = null;
+  $('close-job-dlg').close();
+  opener.focus();
+}
+
+$('d-close-job').addEventListener('click', openCloseDialog);
+$('close-job-cancel').addEventListener('click', dismissCloseDialog);
+$('close-job-dlg').addEventListener('cancel', (e) => { e.preventDefault(); dismissCloseDialog(); });
+$('close-job-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!closing || $('close-job-save').disabled) return;
+  const { id } = closing;
+  $('close-job-save').disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = closeJob(board, id, $('close-job-reason').value, isoNow());
+      if (message) throw new Error(message);
+    });
+  } catch (x) {
+    $('close-job-err').textContent = String(x.message || x);
+    $('close-job-err').hidden = false;
+    $('close-job-save').disabled = false;
+    return;
+  }
+  dismissCloseDialog();
   await poll();
 });
 
@@ -5016,7 +5090,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;

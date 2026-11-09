@@ -58,8 +58,9 @@ const expectedItems = {
     "d-pause",
     "d-copy-link",
     "d-follow-up",
+    "d-close-job",
   ],
-  "linked-job": ["d-pause", "d-copy-link", "d-follow-up"],
+  "linked-job": ["d-pause", "d-copy-link", "d-follow-up", "d-close-job"],
   "closed-job": ["d-copy-link", "d-follow-up"],
 };
 const PROJECT_DOC = "---\nrepo: example/layout\nbase: main\ntitle: Synthetic layout project\n---\n";
@@ -138,6 +139,7 @@ async function geometry(page) {
       "d-pause",
       "d-copy-link",
       "d-follow-up",
+      "d-close-job",
     ].filter((id) => !document.getElementById(id).hidden);
     const close = document.getElementById("d-close");
     const r = rect(close);
