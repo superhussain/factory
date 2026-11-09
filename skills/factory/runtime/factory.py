@@ -519,10 +519,23 @@ def blocking(job, device, session, minutes):
     return c if datetime.now(timezone.utc) - seen < timedelta(minutes=minutes) else None
 
 
+def earlier_moves(m):
+    e = m.get("earlier")
+    return [x for x in e if isinstance(x, dict)] if isinstance(e, list) else []
+
+
+def queued_stops(m):
+    """The move's holders whose host has not stopped them yet, earlier ones first."""
+    if not isinstance(m, dict):
+        return []
+    return [x for x in [*earlier_moves(m), m] if x.get("from") and "stopped" not in x]
+
+
 def moved_away(job, device, session):
     """True when the dashboard moved this job away from this holder's session."""
     m = (job or {}).get("move")
-    return isinstance(m, dict) and (m.get("from"), m.get("session")) == (device, session)
+    return isinstance(m, dict) and any((x.get("from"), x.get("session")) == (device, session)
+                                       for x in [m, *earlier_moves(m)])
 
 
 def moved_message(job_id, m):
@@ -2707,32 +2720,38 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
 
 
 def move_stop_pass(home, data, device, dry, adapter):
-    """Archive the Paseo session of, and stop the worktree of, each job the dashboard moved away
-    from this host, and record it."""
+    """Archive the Paseo sessions of, and stop the worktree of, each job the dashboard moved away
+    from this host, and record it. Earlier holders of a chained move count too."""
     for j in data["jobs"]:
         m, job_id, project = j.get("move"), j.get("id"), j.get("project")
-        if not (isinstance(m, dict) and m.get("from") == device and "stopped" not in m
-                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+        mine = [x for x in queued_stops(m) if x["from"] == device]
+        if not (mine and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
         line = f"{job_id} {project}: moved to {m.get('to')}"
-        agent, server = m.get("agent"), m.get("server")
-        archive = bool(adapter and isinstance(agent, str) and PASEO_ID.fullmatch(agent)
-                       and not agent.startswith("-") and server and server == paseo_server()
-                       and agent != os.environ.get("PASEO_AGENT_ID"))
+        archives = {}
+        for x in mine:
+            agent, server = x.get("agent"), x.get("server")
+            if (adapter and isinstance(agent, str) and PASEO_ID.fullmatch(agent) and not agent.startswith("-")
+                    and server and server == paseo_server() and agent != os.environ.get("PASEO_AGENT_ID")):
+                archives[agent] = x.get("at")
+        agent = next(iter(archives), None)
         if dry:
-            print(f"would archive session {agent} and stop {line}" if archive else f"would stop {line}")
+            print(f"would archive session {agent} and stop {line}" if archives else f"would stop {line}")
             continue
         failure = None
-        if archive:
+        for a in archives:
             try:
-                p = subprocess.run(adapter + ["archive", agent, "--force"], capture_output=True,
+                p = subprocess.run(adapter + ["archive", a, "--force"], capture_output=True,
                                    timeout=ADAPTER_TIMEOUT_SECONDS)
                 failure = f"exit {p.returncode}" if p.returncode else None
             except subprocess.TimeoutExpired:
                 failure = "timed out"
             except OSError as e:
                 failure = str(e)
+            if failure:
+                agent = a
+                break
         wt = home / "worktrees" / project / job_id
         alive = stop_pids(wt) if wt.exists() else []
         if failure:
@@ -2743,16 +2762,21 @@ def move_stop_pass(home, data, device, dry, adapter):
                   f"{' '.join(map(str, alive))}", file=sys.stderr)
             continue
 
-        def change(text, job_id=job_id, at=m.get("at"), archive=archive):
+        def change(text, job_id=job_id, ats={x.get("at") for x in mine}, archived=set(archives)):
             board = load_board(text)
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
-            move = (found or {}).get("move")
-            if not isinstance(move, dict) or move.get("at") != at or "stopped" in move:
+            now_mine = [x for x in queued_stops((found or {}).get("move"))
+                        if x["from"] == device and x.get("at") in ats]
+            if not now_mine:
                 return None, False
-            patch_job(board, job_id, {"move": {"stopped": now(), **({"archived": now()} if archive else {})}})
+            for x in now_mine:
+                x["stopped"] = now()
+                if x.get("agent") in archived:
+                    x["archived"] = now()
+            patch_job(board, job_id, {})
             return dump_board(board), True
         if cas(home, "/api/board", change):
-            print(f"archived session {agent} and stopped {line}" if archive else f"stopped {line}")
+            print(f"archived session {agent} and stopped {line}" if archives else f"stopped {line}")
 
 
 def prioritized(j):
