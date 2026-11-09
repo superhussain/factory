@@ -2759,9 +2759,10 @@ def move_stop_pass(home, data, device, dry, adapter):
             if (adapter and isinstance(agent, str) and ADAPTER_ID.fullmatch(agent)
                     and server and server == paseo_server() and agent != os.environ.get("PASEO_AGENT_ID")):
                 archives[agent] = x.get("at")
-        agent = next(iter(archives), None)
+        names = ", ".join(archives)
+        noun = "sessions" if len(archives) > 1 else "session"
         if dry:
-            print(f"would archive session {agent} and stop {line}" if archives else f"would stop {line}")
+            print(f"would archive {noun} {names} and stop {line}" if archives else f"would stop {line}")
             continue
         failure = None
         for a in archives:
@@ -2802,7 +2803,7 @@ def move_stop_pass(home, data, device, dry, adapter):
         if cas(home, "/api/board", change):
             for x in mine:
                 x.setdefault("stopped", now())
-            print(f"archived session {agent} and stopped {line}" if archives else f"stopped {line}")
+            print(f"archived {noun} {names} and stopped {line}" if archives else f"stopped {line}")
 
 
 def prioritized(j):
