@@ -2728,7 +2728,7 @@ def move_stop_pass(home, data, device, dry, adapter):
         if not (mine and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
-        line = f"{job_id} {project}: moved to {m.get('to')}"
+        line = f"{job_id} {project}: " + (f"rerun on {device}" if m.get("to") == device else f"moved to {m.get('to')}")
         archives = {}
         for x in mine:
             agent, server = x.get("agent"), x.get("server")
@@ -2776,6 +2776,8 @@ def move_stop_pass(home, data, device, dry, adapter):
             patch_job(board, job_id, {})
             return dump_board(board), True
         if cas(home, "/api/board", change):
+            for x in mine:
+                x.setdefault("stopped", now())
             print(f"archived session {agent} and stopped {line}" if archives else f"stopped {line}")
 
 
@@ -2857,9 +2859,11 @@ def priority_nudge_pass(home, data, device, dry):
 
 
 def moved_here(j, device):
-    """True when the dashboard moved this in-flight job to this host and no pickup has claimed it yet."""
+    """True when the dashboard moved this in-flight job to this host, no pickup has claimed it yet,
+    and no stop of it is still queued on this host, as for a rerun."""
     m = j.get("move")
-    return isinstance(m, dict) and m.get("to") == device and "claimed" not in m and j.get("stage") in IN_FLIGHT
+    return (isinstance(m, dict) and m.get("to") == device and "claimed" not in m and j.get("stage") in IN_FLIGHT
+            and not any(x["from"] == device for x in queued_stops(m)))
 
 
 def pickup_pass(home, device, minutes, dry, limit, cap):
