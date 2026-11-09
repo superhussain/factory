@@ -984,12 +984,19 @@ class FactoryTest(IsolatedTestCase):
         claim = dict(factory.new_claim("other", "s0"), seen="2020-01-01T00:00:00Z")
         self.store["/api/board"] = factory.dump_board({"jobs": [
             {"id": "002-stub", "project": "sample", "claim": claim},
-            {"id": "003-fresh", "project": "sample", "claim": factory.new_claim("other", "s1")}]}).encode()
+            {"id": "003-fresh", "project": "sample", "claim": factory.new_claim("other", "s1")},
+            {"id": "004-unclaimed", "project": "sample", "updated": "2020-01-02T00:00:00Z"},
+            {"project": "sample", "updated": "2020-01-03T00:00:00Z"},
+            {"id": "005-bad\nfake", "project": "sample", "updated": "2020-01-04T00:00:00Z"}]}).encode()
         with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit) as raised:
             factory.stuck()
         self.assertEqual(raised.exception.code, 3)
         self.assertEqual([j["id"] for j in json.loads(self.store["/api/board"])["jobs"]], ["003-fresh"])
-        self.assertEqual(err.getvalue(), "dropped stub 002-stub: no stage, last seen 2020-01-01T00:00:00Z\n")
+        self.assertEqual(err.getvalue(), (
+            "dropped stub '002-stub': no stage, last seen 2020-01-01T00:00:00Z\n"
+            "dropped stub '004-unclaimed': no stage, last seen 2020-01-02T00:00:00Z\n"
+            "dropped stub None: no stage, last seen 2020-01-03T00:00:00Z\n"
+            "dropped stub '005-bad\\nfake': no stage, last seen 2020-01-04T00:00:00Z\n"))
 
 class IdeaTest(IsolatedTestCase):
     def setUp(self):

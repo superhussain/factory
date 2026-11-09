@@ -4525,7 +4525,7 @@ def stuck(*args):
         if stubs:
             data["jobs"] = [j for j in data["jobs"] if j not in stubs]
             data["updated"] = now()
-        dropped = [f"dropped stub {s['id']}: no stage, last seen "
+        dropped = [f"dropped stub {s.get('id')!r}: no stage, last seen "
                    f"{(s.get('claim') or {}).get('seen') or s.get('updated')}" for s in stubs]
         # The id goes into a shell command and a prompt, so take only well-formed ones.
         found = [j for j in data["jobs"] if isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
