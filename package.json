@@ -15,7 +15,7 @@
     "test:deploy": "python3 -m unittest discover -s tests/tools -p test_deploy.py && python3 tools/deploy.py check --profile tests/fixtures/deployment-valid.json && python3 tools/deploy.py render --profile tests/fixtures/deployment-valid.json && python3 -m unittest discover -s tests/tools -p test_bootstrap.py && python3 tools/bootstrap.py plan --answers tests/fixtures/bootstrap-valid.json",
     "test:cli": "python3 -B -m unittest discover -s tests/cli -p 'test_*.py'",
     "test:install": "python3 -B -m unittest discover -s tests/tools -p test_install.py",
-    "test:verify": "python3 -B -m unittest discover -s tests/tools -p test_verify.py && python3 -B -m unittest discover -s tests/tools -p test_pr_screenshots.py && python3 -B -m unittest discover -s tests/tools -p test_copy_pr_screenshots.py && python3 -B -m unittest discover -s tests/tools -p test_secret_scan.py && python3 -B -m unittest discover -s tests/tools -p test_public_cutover.py && python3 -B -m unittest discover -s tests/tools -p test_rewrite_pr_links.py",
+    "test:verify": "python3 -B -m unittest discover -s tests/tools -p test_verify.py && python3 -B -m unittest discover -s tests/tools -p test_pr_screenshots.py && python3 -B -m unittest discover -s tests/tools -p test_copy_pr_screenshots.py && python3 -B -m unittest discover -s tests/tools -p test_secret_scan.py && python3 -B -m unittest discover -s tests/tools -p test_public_cutover.py && python3 -B -m unittest discover -s tests/tools -p test_rewrite_pr_links.py && python3 -B -m unittest discover -s tests/tools -p test_stage_notes_check.py",
     "check:secrets": "python3 tools/secret-scan.py",
     "check:types": "tsc -p tsconfig.json",
     "test:workflow": "node --test \"tests/ci/*.test.mjs\"",

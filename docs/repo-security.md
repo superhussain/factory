@@ -59,7 +59,7 @@ When you review a Dependabot PR that bumps an action, check that the new SHA is 
 
 ## Pipeline stage notes
 
-This repository is public, so the `factory` project pipeline adds a review note and a build note. Agents read them inside the operator-preferences envelope described in [trust.md](trust.md). `tests/worker/public-repo-notes.test.mjs` checks that both notes pass `validatePipeline`.
+This repository is public, so the `factory` project pipeline adds a review note and a build note. Agents read them inside the operator-preferences envelope described in [trust.md](trust.md). `tests/worker/public-repo-notes.test.mjs` checks that both notes pass `validatePipeline`. `tools/stage-notes-check.py` compares the live notes with this file.
 
 ### Review stage note
 
@@ -89,13 +89,13 @@ This repository is public. Everything you commit, every commit message and the b
 Only a signed-in person saves pipeline settings (F11). Apply after a PR that changes a note merges.
 
 1. Open the dashboard at `#/settings/pipeline`.
-2. Set Scope to `factory`, then select Load latest.
+2. In Scope, pick the `factory` project. Its option reads `factory`, or `<title> (factory)` when the project has a title. Then select Load latest.
 3. On the Review tab, paste the review note. On the Build tab, paste the build note. Leave every other field as loaded.
 4. Select Save. History lists the new version.
-5. On a device, run this command. It prints `2`, one line each for review and build.
+5. On a device, from a checkout of this repository at current `main`, run this command. `<installed-skill>` is the `factory` folder that `tools/install.py` created, see [device.md](device.md). It prints `review: matches` and `build: matches`. Any other line means the live note differs from this file, so repeat steps 1 to 4.
 
 ```sh
-python3 <installed-skill>/runtime/factory.py pipeline factory | grep -c 'pipeline:factory@'
+python3 <installed-skill>/runtime/factory.py pipeline factory | python3 tools/stage-notes-check.py
 ```
 
 To change a note, edit it here in a pull request first, then repeat these steps.
