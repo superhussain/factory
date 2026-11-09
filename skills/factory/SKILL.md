@@ -799,6 +799,22 @@ feature.
    the spec, for the item and for your recommendation. Then add up to three
    `## Question:` sections in the needs.md format, only for choices the person
    should settle before the item is built. The `next` that runs one sets its `refs`.
+9. After a merge, queue the job's open items. If `decision.md` already has a
+   `## Follow-ups` heading, this step is done, so skip it. Open items are what
+   `build.md`'s last run lists as unresolved or left out, and final-round review nits
+   the merged diff did not apply. Leave out spec sub-jobs (step 8 queues them),
+   `## Device check` items, and anything already on `$BASE`. Queue each agent-doable
+   item with `factory.py backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
+   writing the file first as in step 8: first line `Recommend: approve`, then
+   `Left open by <id> (PR #<n>): <source file>`. List person-only items but never
+   queue them and never set `needs` for them. Then append `## Follow-ups` to
+   `decision.md` as a table with Item, Source and Outcome (`queued` or
+   `for a person`) columns, or `None.` when there are none, and run
+   `push "$SLUG/<id>"`.
+10. As the session's last command, after the `merged:` line is sent, run
+    `python3 "$RUNTIME" archive-workspace "$SLUG/<id>"`. It archives this session's
+    Paseo workspace when it is the job's own worktree workspace, and prints a skip
+    otherwise. Exit 1 patches `{"note": "workspace archive failed: <stderr line>"}`.
 
 **Reworking an existing PR.** When the feature is "rework PR #N", the spec writer
 reads that PR's description and diff (`gh pr view N`, `gh pr diff N`) as the statement
@@ -817,6 +833,7 @@ End with a short summary: the job's final stage, its rounds, what a human needs 
 do, if anything (usually nothing), and the final stage's deep link from the table
 in Rules. If that is a decision
 for him, ask it through `needs.md` as Rules describes and link `#<id>/needs`.
+For a merged job, give that summary before step 10, since archiving can end the session.
 
 ### `/factory next`
 
