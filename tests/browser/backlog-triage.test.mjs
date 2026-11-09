@@ -10,6 +10,7 @@ const FIXED_ITEM = "sample: Rename the export button";
 const TRAILING_ITEM = "sample: Add a sidebar";
 const MISSING_ITEM = "sample: Add a footer";
 const MALFORMED_ITEM = "sample: Add a header";
+const LATE_ITEM = "sample: Add a changelog";
 const MODEL_VERDICT = {
   item: MODEL_ITEM,
   decision: "hold",
@@ -19,6 +20,7 @@ const MODEL_VERDICT = {
   model: "@cf/cloudflare/clef-flash",
   at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
 };
+const LATE_VERDICT = { ...MODEL_VERDICT, item: LATE_ITEM, confidence: 40 };
 
 test("backlog triage section", { timeout: 180000 }, async (t) => {
   await prepareAssets();
@@ -58,7 +60,14 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
       JSON.stringify({ item: TRAILING_ITEM, context: "Recommend: deny\nSynthetic reason." }),
     );
     assert.equal(trailing.status, 200);
-    const lines = [MODEL_ITEM, FIXED_ITEM, TRAILING_ITEM + "   ", MISSING_ITEM, MALFORMED_ITEM];
+    const lines = [
+      MODEL_ITEM,
+      FIXED_ITEM,
+      TRAILING_ITEM + "   ",
+      MISSING_ITEM,
+      MALFORMED_ITEM,
+      LATE_ITEM,
+    ];
     assert.equal(
       (
         await send(
@@ -78,6 +87,10 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
     await page.setViewport({ width: 1280, height: 900 });
     const errors = [];
     page.on("pageerror", (error) => errors.push(String(error)));
+    let releaseLate;
+    const late = new Promise((resolve) => {
+      releaseLate = resolve;
+    });
     await page.setRequestInterception(true);
     page.on("request", (request) => {
       const url = new URL(request.url());
@@ -92,6 +105,14 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
       if (item === MISSING_ITEM) return request.respond({ status: 404, body: "" });
       if (item === MALFORMED_ITEM)
         return request.respond({ status: 200, contentType: "application/json", body: '{"bad":1}' });
+      if (item === LATE_ITEM)
+        return late.then(() =>
+          request.respond({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify(LATE_VERDICT),
+          }),
+        );
       return request.continue();
     });
     await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
@@ -109,9 +130,30 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
       page.$eval("#backlog-triage", (el) => ({
         hidden: el.hidden,
         heading: el.querySelector("h3")?.textContent ?? null,
+        labelledBy:
+          document.getElementById(el.getAttribute("aria-labelledby"))?.textContent ?? null,
         paragraphs: [...el.querySelectorAll("p")].map((p) => p.textContent),
         before: !!(el.compareDocumentPosition(document.querySelector("#backlog-form")) & 4),
       }));
+
+    await t.test("the form does not move when the verdict is cached", async () => {
+      await page.waitForFunction(() => backlogTriageSeen.size === 5, wait);
+      const opened = await page.evaluate((text) => {
+        [...document.querySelectorAll(".backlog-card")]
+          .find((card) => card.textContent.includes(text))
+          .click();
+        return {
+          hidden: document.getElementById("backlog-triage").hidden,
+          top: document.getElementById("backlog-form").getBoundingClientRect().top,
+        };
+      }, MODEL_ITEM.slice("sample: ".length));
+      assert.equal(opened.hidden, false);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(
+        await page.$eval("#backlog-form", (el) => el.getBoundingClientRect().top),
+        opened.top,
+      );
+    });
 
     await t.test("a model hold shows the score, the threshold and the reason", async () => {
       await open(MODEL_ITEM);
@@ -119,6 +161,7 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
       assert.deepEqual(await section(), {
         hidden: false,
         heading: "Held by triage",
+        labelledBy: "Held by triage",
         paragraphs: [
           "Confidence 62% is below the 80% threshold. Rated by clef-flash against the project rules.",
           "Checked 2h ago",
@@ -155,10 +198,22 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
         assert.deepEqual(await section(), {
           hidden: true,
           heading: null,
+          labelledBy: null,
           paragraphs: [],
           before: true,
         });
       }
+    });
+
+    await t.test("a reply that lands after the open fills the section", async () => {
+      await open(LATE_ITEM);
+      assert.equal((await section()).hidden, true);
+      releaseLate();
+      await page.waitForSelector("#backlog-triage:not([hidden])", wait);
+      assert.equal(
+        (await section()).paragraphs[0],
+        "Confidence 40% is below the 80% threshold. Rated by clef-flash against the project rules.",
+      );
     });
 
     assert.deepEqual(errors, []);

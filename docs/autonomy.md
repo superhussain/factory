@@ -202,7 +202,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   then checks the line off with the new id, as a dashboard Approve does. If the line
   changed meanwhile, it drops the row while the row is still an unclaimed idea.
 - **Hold.** The line waits in the backlog for a person, as before.
-  The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage.
+  The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board fetches each listed line's verdict ahead, so the drawer opens with it in place.
 - **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
   verdict from `backlog_triage_pass`, which `factory.py pickup` runs before it claims ideas
   (never with `--dry-run`). Each run posts up to 5 unchecked lines, with the indented block
