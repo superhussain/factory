@@ -4423,7 +4423,7 @@ async function openMoveHost() {
     : j.id + ' has no host right now. The host you pick starts it.';
   let hosts = [];
   try {
-    const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + j.project, { cache: 'no-store' })]);
+    const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
     if (!h.ok || !p.ok) throw new Error('load');
     const [list, view] = [await h.json(), await p.json()];
     const listed = view.pickup?.enabled ? view.pickup.hosts : [];
@@ -4721,7 +4721,7 @@ $('d-rerun').addEventListener('click', async () => {
   try {
     let listed;
     try {
-      const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + j.project, { cache: 'no-store' })]);
+      const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
       if (!h.ok || !p.ok) throw new Error('load');
       const [list, view] = [await h.json(), await p.json()];
       listed = list.some((x) => x.id === host && x.state === 'active') && (view.pickup?.enabled ? view.pickup.hosts : []).includes(host);
