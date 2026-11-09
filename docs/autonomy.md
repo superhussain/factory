@@ -191,7 +191,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 | Case | Model called | Decision |
 | --- | --- | --- |
 | triage off or not set | no | `off` |
-| context line 1 is `Recommend: deny` | no | `hold` |
+| context line 1 is `Recommend: deny` (LF or CRLF) | no | `hold` |
 | context has a `## Question:` line | no | `hold` |
 | confidence at or above the threshold | yes | `queue` |
 | confidence below the threshold | yes | `hold` |
@@ -202,13 +202,15 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 - **Hold.** The line waits in the backlog for a person, as before.
   The Worker keeps the latest hold verdict for each line, and the backlog drawer shows it under Held by triage.
 - **Failure.** A 404 from an older Worker means off. Any other error prints a warning,
-  and the line waits. `backlog add` still exits 0.
+  and the line waits. `backlog add` still exits 0. If a board or backlog write fails while
+  queueing, it prints what is left (the line, or the new id to check off or remove by hand),
+  and `backlog add` still exits 0.
 - **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a
   service token cannot switch triage on or move the threshold. The Worker compares the
   score with the threshold itself.
 - **Prompt.** The rules travel in an `operator-preferences` envelope and the item in a
-  `backlog-item` envelope, both marked as data. An item or context holding either tag is
-  refused with a 400.
+  `backlog-item` envelope, both marked as data. An item or context holding either tag, including
+  fullwidth or other lookalike forms, is refused with a 400.
 - **Floors.** A queued idea still goes through the spec, four reviews, the approver, merge
   rules and any `spec-approval` gate.
 - **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
