@@ -36,6 +36,9 @@
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
                                             branch without forcing, print what was left as JSON
+  factory.py archive-workspace <project-slug>/<job-id>
+                                            archive this session's Paseo worktree workspace once the job
+                                            is merged; print the result as JSON
   factory.py push <project-slug>[/<job-id>] upload a project file, or a job's changed markdown and images, to R2
   factory.py pull <project-slug>[/<job-id>] download a project, or a job's changed markdown and images from R2
   factory.py idea-images <project-slug>/<job-id>
@@ -493,7 +496,7 @@ def paseo_session():
     """{"server", "agent"} of the Paseo session running this process, else None."""
     agent = os.environ.get("PASEO_AGENT_ID", "").strip()
     server = paseo_server()
-    if server and PASEO_ID.fullmatch(agent):
+    if server and PASEO_ID.fullmatch(agent) and not agent.startswith("-"):
         return {"server": server, "agent": agent}
     return None
 
@@ -4040,6 +4043,74 @@ def paseo_statuses():
     return {a.get("id"): a.get("status") for a in agents if isinstance(a, dict)}
 
 
+def paseo_run(args):
+    """(exit code, stdout) of one paseo command, or (1, "") when it can't run."""
+    argv = ["paseo"] + (["--home", os.environ["PASEO_HOME"]] if os.environ.get("PASEO_HOME") else []) + args
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return 1, ""
+    return r.returncode, r.stdout
+
+
+def archive_workspace(target):
+    """Archive this session's Paseo worktree workspace once the job is merged. The JSON
+    result prints before the archive call, since archiving can end this very session."""
+    home, slug, job_id = r2_target(target, True)
+    session = paseo_session()
+    if not session:
+        print(json.dumps({"archived": None, "reason": "not a Paseo session"}))
+        return
+    if not shutil.which("paseo"):
+        print(json.dumps({"archived": None, "reason": "paseo is not on PATH"}))
+        return
+    found = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
+    if found is None:
+        fail(f"no job {job_id} on the board", 4)
+    if found.get("stage") != "merged":
+        fail(f"{job_id} is at {found.get('stage')}, not merged", 2)
+    code, out = paseo_run(["inspect", session["agent"], "--json"])
+    try:
+        cwd = json.loads(out)["Cwd"] if not code else None
+    except (ValueError, KeyError, TypeError):
+        cwd = None
+    if not isinstance(cwd, str):
+        fail(f"paseo inspect failed: exit {code}")
+    code, out = paseo_run(["workspace", "ls", "--json"])
+    try:
+        spaces = json.loads(out) if not code else None
+    except ValueError:
+        spaces = None
+    if not isinstance(spaces, list):
+        fail(f"paseo workspace ls failed: exit {code}")
+
+    def norm(path):
+        return os.path.normcase(os.path.normpath(path))
+
+    space = next((w for w in spaces if isinstance(w, dict) and isinstance(w.get("cwd"), str)
+                  and norm(w["cwd"]) == norm(cwd)), None)
+    if space is None:
+        print(json.dumps({"archived": None, "reason": f"no Paseo workspace at {cwd}"}))
+        return
+    wks = space.get("workspaceId")
+    if (space.get("isolation") != "worktree"
+            or not (isinstance(wks, str) and PASEO_ID.fullmatch(wks) and not wks.startswith("-"))
+            or not re.fullmatch(rf"factory-{re.escape(job_id)}(-\d+)?", os.path.basename(norm(cwd)))):
+        print(json.dumps({"archived": None, "reason": f"workspace {wks} is not this job's worktree workspace"}))
+        return
+    for args, reason in ((["status", "--porcelain"], "uncommitted files"),
+                         (["rev-list", "HEAD", "--not", "--remotes"], "unpushed commits")):
+        r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True)
+        if r.returncode or r.stdout.strip():
+            why = f"git {args[0]} failed in {cwd}: exit {r.returncode}" if r.returncode else f"{reason} in {cwd}"
+            print(json.dumps({"archived": None, "reason": why}))
+            return
+    print(json.dumps({"archived": wks}), flush=True)
+    code, _ = paseo_run(["workspace", "archive", wks])
+    if code:
+        fail(f"paseo workspace archive {wks} exit {code}")
+
+
 def stuck(*args):
     """Claim up to --limit jobs that a dead session left mid-loop, and print them as JSON
     for the resume schedule. Only this function writes a job's resumes."""
@@ -4895,6 +4966,7 @@ COMMANDS["host"] = (host_cmd, 3, 3)
 COMMANDS["cleanup"] = (cleanup, 1, 1)
 COMMANDS["deny-notes"] = (deny_notes_cmd, 1, 2)
 COMMANDS["tracer"] = (tracer_cmd, 1, 2)
+COMMANDS["archive-workspace"] = (archive_workspace, 1, 1)
 
 def main(argv=None):
     global _HOME_OVERRIDE
