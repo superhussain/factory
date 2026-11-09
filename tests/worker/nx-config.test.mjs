@@ -136,6 +136,8 @@ const INPUTS = {
     "{workspaceRoot}/tests/tools/test_public_cutover.py",
     "{workspaceRoot}/tests/tools/test_rewrite_pr_links.py",
     "{workspaceRoot}/tests/tools/test_secret_scan.py",
+    "{workspaceRoot}/tests/tools/test_stage_notes_check.py",
+    "{workspaceRoot}/docs/repo-security.md",
     "{workspaceRoot}/skills/factory/runtime/pr_screenshots.py",
     "{workspaceRoot}/.gitleaks.toml",
     { runtime: "python3 --version" },
