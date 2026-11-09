@@ -55,6 +55,12 @@ Without it, claims and stale-minute checks still work. The bundle also ships
 `runtime/paseo_stalls.py`, the optional Paseo stall adapter that `factory.py pickup`
 uses to take over sessions stalled on a Claude usage limit; see references/pickup.md.
 
+`factory.py archive-workspace <slug>/<id>` runs as a merged job's last step. It
+archives the session's Paseo workspace only when the job is at `merged`, the
+workspace's `isolation` is `worktree`, and its folder is named `factory-<id>` or
+`factory-<id>-<n>`. Any other workspace is skipped. Without `PASEO_AGENT_ID`, a
+Paseo server id or `paseo` on PATH, it prints a skip and exits 0.
+
 `runtime/pr_screenshots.py` uploads PR screenshots to the configured R2 bucket:
 `python3 <installed-skill>/runtime/pr_screenshots.py --home <factory home> [--project <slug>] <label> <file>...`.
 It reads `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PR_SCREENSHOTS_BUCKET` and
