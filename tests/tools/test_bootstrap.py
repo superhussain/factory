@@ -114,6 +114,11 @@ class FakeCloudflare:
         if method == "PUT":
             store[item_id] = dict(body, id=item_id, **({"aud": store[item_id]["aud"]} if kind == "apps" else {}))
             return {"success": True, "result": dict(store[item_id])}
+        if kind == "service_tokens" and any(
+                {"service_token": {"token_id": item_id}} in policy.get("include", [])
+                for policy in self.items["policies"].values()):
+            self.error(method, path, 400, 12139, "access.api.error.service_token_in_use: cannot delete service "
+                       "token because it is used by a policy, group, or app SCIM configuration")
         del store[item_id]
         if kind == "domains":
             return None
@@ -642,7 +647,7 @@ class DownTest(Instance):
         self.assertEqual(code, 0, err)
         deletes = [path.split("?")[0].split("/")[-2] for method, path, _ in self.fake.calls[since:]
                    if method == "DELETE"]
-        self.assertEqual(deletes, ["domains", "scripts", "apps", "service_tokens", "policies", "policies",
+        self.assertEqual(deletes, ["domains", "scripts", "apps", "policies", "policies", "service_tokens",
                                    "buckets"])
         self.assertEqual(self.fake.items, {"service_tokens": {}, "policies": {}, "apps": {}, "domains": {}})
         self.assertEqual(self.fake.scripts, set())
@@ -733,14 +738,17 @@ class DownTest(Instance):
 
     def test_rerun_down_finishes_a_partial_down(self):
         self.up()
-        self.fake.fail = [("DELETE", "policies")]
+        self.up(inputs=["", "", "", ""], host="Desk Top", home=self.tmp / "home2")
+        self.fake.fail = [("DELETE", "service_tokens")]
         code, _, err = self.down("factory.example.test")
         self.assertEqual(code, 1)
         self.assertIn("synthetic failure", err)
-        self.assertEqual(self.fake.items["service_tokens"], {})
-        self.assertEqual(len(self.fake.items["policies"]), 2)
+        self.assertEqual(self.fake.items["policies"], {})
+        self.assertEqual(len(self.fake.items["service_tokens"]), 2)
         code, out, err = self.down("factory.example.test")
         self.assertEqual(code, 0, err)
+        self.assertIn("token factory.example.test bootstrap device laptop: deleted", out)
+        self.assertIn("token factory.example.test bootstrap device desk-top: deleted", out)
         self.assertEqual(self.fake.items, {"service_tokens": {}, "policies": {}, "apps": {}, "domains": {}})
         self.assertEqual(self.fake.buckets, {})
         code, out, err = self.down("factory.example.test")

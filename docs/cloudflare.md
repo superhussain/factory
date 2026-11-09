@@ -69,10 +69,10 @@ to `<hostname> bootstrap` to let `up` manage it.
 creates that host's token and policy and adds the policy to the application.
 
 **Teardown.** `python3 tools/bootstrap.py down` asks you to type the hostname,
-then deletes the custom domain, the Worker, the application, the service tokens
-and the policies. It deletes only Access names that start with
-`<hostname> bootstrap`, and deletes tokens before policies, so you can rerun it
-after a failure. It keeps an application under another name. It deletes the
+then deletes the custom domain, the Worker, the application, the policies and
+the service tokens. It deletes only Access names that start with
+`<hostname> bootstrap`. It finds tokens by name, not through their policies, so
+you can rerun it after a failure. It keeps an application under another name. It deletes the
 bucket only when it is empty, and never lists or deletes objects. Local files
 stay; the output names the ones that now point at a deleted instance.
 
