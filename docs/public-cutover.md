@@ -68,8 +68,10 @@ failure stops the run before anything changes. Then the script:
    committed as `you@example.com`, and pushes it to `main`.
 6. Repoints each `--checkout`: adds remote `archive` for the old history,
    fetches `origin`, detaches at `origin/main`, and renames every local branch
-   the new `origin/main` cannot reach to `archive/<name>`. It prints the
-   renamed branches.
+   the new `origin/main` cannot reach to `archive/<name>`. It then runs
+   `git branch --unset-upstream` on every `archive/` branch that still tracks a
+   remote, so a plain `git push` cannot send it to the public `origin`. It
+   prints the renamed branches and the cleared upstreams.
 7. Rewrites the `repo:` line of `<home>/projects/<project>.md` only if it
    differs, then pushes the project file with the runtime.
 8. Watches the first `deploy-main.yml` run on `main`.
@@ -92,7 +94,8 @@ python3 tools/public-cutover.py --repo OWNER/factory --archive OWNER/factory-pri
 
 `--repoint-only` skips the checks and runs only the checkout step, so it needs
 at least one `--checkout`. It is safe to re-run: an existing `archive` remote
-and branches already under `archive/` are left alone. The renamed branches
+is kept, branches already under `archive/` are not renamed again, and a re-run
+clears any upstream they still have. The renamed branches
 still hold private history; push them only to `archive`. Resume autonomy and
 pickup once every host is repointed. Until a host is repointed, pickup and
 `factory.py worktree` refuse it with an `unsafe checkout` line, so it claims,
@@ -134,7 +137,7 @@ The tool exits 1 without writing when `gh pr list` fails or the archive lists
 ## Recovery
 
 A failed step prints `[fail]`, the command, its error output and a pointer to
-this section. Ctrl-C at the `done` prompt stops before the push.
+this section. Ctrl-C or Ctrl-D at the `done` prompt stops before the push.
 
 - A check fails: the run prints `Checks failed: nothing changed.` Fix the cause
   and re-run.
@@ -143,5 +146,12 @@ this section. Ctrl-C at the `done` prompt stops before the push.
 - The run stops after the create: a human deletes the new `OWNER/factory` in
   the GitHub settings, then undoes the rename as above. The script never
   deletes a repository.
+- The run stops after the push, for example at a failed `fetch` while
+  repointing: do not re-run `--apply`, because the archive-name check now
+  fails. Repoint each checkout with `--repoint-only`, as in Other hosts. If
+  `repo:` in `<home>/projects/<project>.md` is not `OWNER/factory`, set it, then
+  run `FACTORY_HOME=<factory-home> python3 <installed-skill>/runtime/factory.py push <project>`.
+  Check the deploy with `gh run list -R OWNER/factory --workflow deploy-main.yml`.
+  The next pull request runs `ci.yml`.
 - The deploy or CI watch fails after the push: the archive still holds the
   full history. Fix the workflow input or code and rerun the workflow.

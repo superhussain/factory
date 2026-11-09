@@ -11,7 +11,8 @@ name, creates the public repo, waits until a human has set every workflow secret
 and variable value, pushes one commit, repoints each checkout, then watches
 deploy-main and ci. --repoint-only skips the checks and only repoints the given
 checkouts: it adds an archive remote, detaches at the new origin/main and renames
-every local branch origin/main cannot reach to archive/<name>. Only names of
+every local branch origin/main cannot reach to archive/<name>, then clears the
+upstream of every archive/* branch. Only names of
 secrets and variables are read; values never pass through this script.
 Exit 0 ok, 1 a check or step failed, 2 bad usage.
 """
@@ -106,13 +107,20 @@ def repoint(args, path):
     act([*git, "fetch", "origin", "--prune"])
     act([*git, "switch", "--detach", "origin/main"])
     # A private branch left under its own name would be reused and pushed to the public origin.
-    branches = act([*git, "for-each-ref", "--format=%(refname:short)", "refs/heads"]).split()
-    private = [name for name in branches if not name.startswith("archive/")
+    listing = act([*git, "for-each-ref", "--format=%(refname:short)%09%(upstream)", "refs/heads"])
+    refs = [line.partition("\t")[::2] for line in listing.splitlines()]
+    private = [name for name, _ in refs if not name.startswith("archive/")
                and run([*git, "merge-base", "--is-ancestor", name, "origin/main"]).returncode != 0]
     for name in private:
         act([*git, "branch", "-m", name, f"archive/{name}"])
+    tracking = [f"archive/{name}" if name in private else name for name, upstream in refs
+                if upstream and (name in private or name.startswith("archive/"))]
+    for name in tracking:
+        act([*git, "branch", "--unset-upstream", name])
     renamed = ", ".join(f"{name} -> archive/{name}" for name in private)
     print(f"[ok] {path}: {'renamed ' + renamed if private else 'no private branches left'}")
+    if tracking:
+        print(f"[ok] {path}: unset upstream on {', '.join(tracking)}")
 
 
 def watch_run(repo, workflow, branch):
@@ -138,7 +146,7 @@ def cutover(args):
         try:
             while input("Type done once every value is set: ").strip() != "done":
                 pass
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, EOFError):
             print(f"\nStopped before the push. {RECOVERY}")
             return 1
         missing = missing_names(args.repo)
