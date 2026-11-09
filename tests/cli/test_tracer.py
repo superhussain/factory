@@ -604,9 +604,9 @@ class GatherTest(TracerCase):
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 factory.tracer_follow_pass(self.home)
             self.assertEqual(len(err.getvalue().splitlines()), 1)
-            self.assertIn("Tracer mirror of sample/001-sample failed: Tracer POST "
+            self.assertIn("Tracer build stop of sample/001-sample failed: Tracer POST "
                           "api/features/factory-1/build-runs/stop returned 500: boom", err.getvalue())
-            self.assertIn("The board change was saved; the next pickup retries.", err.getvalue())
+            self.assertIn("The board change was saved; the next pickup retries (run factory.py pickup if this device has no scheduled pickup).", err.getvalue())
             self.assertNotIn("tracer sync", err.getvalue())
             job = self.board["jobs"][0]
             self.assertEqual(job["tracer"]["scope"], "approved")
@@ -623,7 +623,7 @@ class GatherTest(TracerCase):
             code, _, err = self.board_patch({"stage": "review"})
             self.assertEqual(code, 0)
             self.assertEqual(len(err.splitlines()), 1)
-            self.assertIn("The board change was saved; the next pickup retries.", err)
+            self.assertIn("The board change was saved; the next pickup retries (run factory.py pickup if this device has no scheduled pickup).", err)
             self.assertNotIn(task, [r[:2] for r in fake.requests])
             fake.stop_answer = (202, {"detail": "Stopped from Tracer."})
             code, _, err = self.board_patch({"stage": "review"})
@@ -633,6 +633,31 @@ class GatherTest(TracerCase):
             sent = [r[:2] for r in fake.requests]
             last_stop = max(i for i, r in enumerate(sent) if r[1] == "/api/features/factory-1/build-runs/stop")
             self.assertIn(task, sent[last_stop + 1:])
+
+    def test_patch_with_starting_stop_still_mirrors(self):
+        task = ("PUT", "/api/features/factory-1/tasks/t1")
+        with FakeTracer() as fake:
+            fake.stop_answer = (409, {"detail": "The companion is starting this build. Try again shortly."})
+            self.approve(fake)
+            factory.tracer_follow_pass(self.home)
+            (self.folder / "spec.md").write_text(SPEC)
+            code, _, err = self.board_patch({"stage": "review"})
+            self.assertEqual((code, err), (0, ""))
+            self.assertEqual(len(self.stops(fake)), 2)
+            self.assertNotIn("stopped", self.board["jobs"][0]["tracer"])
+            sent = [r[:2] for r in fake.requests]
+            last_stop = max(i for i, r in enumerate(sent) if r[1] == "/api/features/factory-1/build-runs/stop")
+            self.assertIn(task, sent[last_stop + 1:])
+
+    def test_gather_failure_names_the_step(self):
+        with FakeTracer() as fake:
+            self.configure(fake)
+        code, _, err = self.board_patch({"tracer": {"follow": True, "gather": True}})
+        self.assertEqual(code, 0)
+        self.assertEqual(len(err.splitlines()), 1)
+        self.assertTrue(err.startswith("factory.py: warning: Tracer gather of sample/001-sample failed: can't reach Tracer at "))
+        self.assertIn("the next pickup retries (run factory.py pickup if this device has no scheduled pickup).", err)
+        self.assertNotIn("tracer sync", err)
 
     def test_ungathered_job_never_stops(self):
         self.job.update(stage="build", tracer={"follow": True})
