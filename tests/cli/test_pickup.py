@@ -885,6 +885,33 @@ class MoveHostTest(PickupFixture):
         self.assertEqual(self.pickup(), (0, "", ""))
         self.assertEqual((self.stopped, self.puts()), ([self.wt], []))
 
+    def test_earlier_host_stops_after_a_second_move(self):
+        self.moved(**{"from": "studio-mac", "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                      "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": self.AT}]})
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, "stopped 042-sample-export alpha: moved to cloud-box\n")
+        self.assertEqual(self.stopped, [self.wt])
+        move = self.job("042-sample-export")["move"]
+        self.assertNotIn("stopped", move)
+        [entry] = move["earlier"]
+        self.assertIn("stopped", entry)
+        self.assertEqual((entry["from"], entry["session"], entry["at"]), (DEVICE, "a1b2c3", self.AT))
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.stopped, self.puts()), ([self.wt], []))
+
+    def test_one_stop_for_two_entries_on_one_host(self):
+        self.moved(**{"from": DEVICE, "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                      "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": self.AT},
+                                  {"from": "lab-linux", "session": "x", "at": self.AT}]})
+        self.assertEqual(self.pickup()[1], "stopped 042-sample-export alpha: moved to cloud-box\n")
+        self.assertEqual(self.stopped, [self.wt])
+        move = self.job("042-sample-export")["move"]
+        self.assertIn("stopped", move)
+        self.assertIn("stopped", move["earlier"][0])
+        self.assertNotIn("stopped", move["earlier"][1])
+
     def test_no_worktree_still_records_the_stop(self):
         self.moved()
         self.wt.rmdir()

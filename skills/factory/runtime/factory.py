@@ -519,10 +519,23 @@ def blocking(job, device, session, minutes):
     return c if datetime.now(timezone.utc) - seen < timedelta(minutes=minutes) else None
 
 
+def earlier_moves(m):
+    e = m.get("earlier")
+    return [x for x in e if isinstance(x, dict)] if isinstance(e, list) else []
+
+
+def queued_stops(m):
+    """The move's holders whose host has not stopped them yet, earlier ones first."""
+    if not isinstance(m, dict):
+        return []
+    return [x for x in [*earlier_moves(m), m] if x.get("from") and "stopped" not in x]
+
+
 def moved_away(job, device, session):
     """True when the dashboard moved this job away from this holder's session."""
     m = (job or {}).get("move")
-    return isinstance(m, dict) and (m.get("from"), m.get("session")) == (device, session)
+    return isinstance(m, dict) and any((x.get("from"), x.get("session")) == (device, session)
+                                       for x in [m, *earlier_moves(m)])
 
 
 def moved_message(job_id, m):
@@ -2705,7 +2718,7 @@ def move_stop_pass(home, data, device, dry):
     """Stop the worktree of each job the dashboard moved away from this host, and record it."""
     for j in data["jobs"]:
         m, job_id, project = j.get("move"), j.get("id"), j.get("project")
-        if not (isinstance(m, dict) and m.get("from") == device and "stopped" not in m
+        if not (any(x["from"] == device for x in queued_stops(m))
                 and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
@@ -2724,9 +2737,12 @@ def move_stop_pass(home, data, device, dry):
             board = load_board(text)
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
             move = (found or {}).get("move")
-            if not isinstance(move, dict) or move.get("at") != at or "stopped" in move:
+            mine = [x for x in queued_stops(move) if x["from"] == device]
+            if not mine or move.get("at") != at:
                 return None, False
-            patch_job(board, job_id, {"move": {"stopped": now()}})
+            for x in mine:
+                x["stopped"] = now()
+            patch_job(board, job_id, {})
             return dump_board(board), True
         if cas(home, "/api/board", change):
             print(f"stopped {line}")
