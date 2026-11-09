@@ -1900,8 +1900,8 @@ def pickup_settings(home, slug):
 
 
 def host_max_inflight(home, device):
-    """This host's max_inflight from the host registry, or None when the Worker has no registry
-    or no valid record for it."""
+    """This host's max_inflight from the host registry (0 pauses pickup), or None when the Worker
+    has no registry or no valid record for it."""
     status, _, text = api(home, "GET", "/api/hosts", ok=(200, 404))
     if status == 404:
         return None
@@ -1913,7 +1913,7 @@ def host_max_inflight(home, device):
         return None
     record = next((h for h in hosts if isinstance(h, dict) and h.get("id") == device), None)
     cap = record.get("max_inflight") if record else None
-    return cap if type(cap) is int and 1 <= cap <= 5 else None
+    return cap if type(cap) is int and 0 <= cap <= 5 else None
 
 
 def read_launchers(home):
@@ -2693,6 +2693,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
                     line = f"skip {j['id']} {slug}: pickup off"
                 elif device not in hosts:
                     line = f"skip {j['id']} {slug}: pickup does not list host {device}"
+                elif by_host and cap == 0:
+                    line = f"skip {j['id']} {slug}: host {device} paused (max in flight 0)"
                 elif count >= cap and by_host:
                     line = f"skip {j['id']} {slug}: host {device} in-flight cap full ({count}/{cap})"
                 elif count >= cap:
