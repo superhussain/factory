@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadProduction, memoryBucket } from "../support/worker.mjs";
 
-const { serveFactory } = await loadProduction();
+const { serveFactory, BoardEvents } = await loadProduction();
 const person = { verified: true, kind: "user", email: "person@example.test" };
 const device = { verified: true, kind: "service", client_id: "client-aaaa" };
 const ORIGIN = "https://factory.example.test";
@@ -18,7 +18,6 @@ function fakeEvents(answer = () => new Response(null, { status: 204 })) {
   const calls = [];
   const requests = [];
   const stub = {
-    setName: async (name) => calls.push(["setName", name]),
     fetch: async (input, init) => {
       const request = new Request(input, init);
       calls.push(["fetch", request.method, request.url]);
@@ -80,22 +79,18 @@ test("a person's same-origin upgrade is forwarded to the main room", async () =>
   const events = fakeEvents(() => room);
   const response = await connect({ BUCKET: memoryBucket(), BoardEvents: events });
   assert.equal(response, room);
-  assert.deepEqual(events.calls, [
-    ["setName", "main"],
-    ["fetch", "GET", EVENTS],
-  ]);
+  assert.deepEqual(events.calls, [["fetch", "GET", EVENTS]]);
 });
 
-test("the room gets only the upgrade headers, never partyserver controls", async () => {
+test("the room gets only the upgrade headers", async () => {
   const events = fakeEvents();
   await serveFactory(
-    new Request(EVENTS + "?_pk=chosen-id", {
+    new Request(EVENTS + "?room=other", {
       headers: {
         ...upgrade,
         "Sec-WebSocket-Key": NONCE,
         "Sec-WebSocket-Version": "13",
-        "x-partykit-props": "not-json",
-        "x-partykit-room": "other",
+        "X-Extra": "synthetic",
         Cookie: "session=synthetic",
       },
     }),
@@ -168,5 +163,43 @@ for (const [path, key, body, type] of writes) {
     const plain = await write({ BUCKET: memoryBucket() }, path, body, type);
     assert.deepEqual(live, plain);
     assert.equal(events.fetches().length, 1);
+  });
+}
+
+const NOTIFY = "https://board-events.invalid/notify?key=";
+
+// A socket that records every frame it is sent.
+function recordingSocket() {
+  const sent = [];
+  return { sent, send: (frame) => sent.push(frame) };
+}
+
+test("the room sends a valid notify to every socket and skips one that fails", async () => {
+  const first = recordingSocket();
+  const second = recordingSocket();
+  const broken = {
+    send() {
+      throw new Error("socket closed");
+    },
+  };
+  const sockets = [first, broken, second];
+  const room = new BoardEvents({ getWebSockets: () => sockets }, {});
+  const response = await room.fetch(new Request(NOTIFY + "board.json", { method: "POST" }));
+  assert.equal(response.status, 204);
+  const frame = JSON.stringify({ type: "changed", key: "board.json" });
+  assert.deepEqual(first.sent, [frame]);
+  assert.deepEqual(second.sent, [frame]);
+});
+
+for (const [name, url, method] of [
+  ["GET", NOTIFY + "board.json", "GET"],
+  ["an unknown key", NOTIFY + "jobs.json", "POST"],
+]) {
+  test(`the room answers ${name} with 404 and sends nothing`, async () => {
+    const socket = recordingSocket();
+    const room = new BoardEvents({ getWebSockets: () => [socket] }, {});
+    const response = await room.fetch(new Request(url, { method }));
+    assert.equal(response.status, 404);
+    assert.deepEqual(socket.sent, []);
   });
 }
