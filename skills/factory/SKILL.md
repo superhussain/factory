@@ -973,7 +973,7 @@ worktree.
 
 Picks up a job that a dead session left mid-loop. Unlike `resume`, which continues a
 handed-off job and refuses stale claims, `recover` runs under the claim `stuck` took. The resume schedule runs it after
-`factory.py stuck`, and `factory.py pickup` runs it after a stalled-session takeover and for a job Tracer scope approval moved to `build`, and for a job moved to this host from the dashboard, has claimed the job under `<tag>`, so pass `--session <tag>` to
+`factory.py stuck`, and `factory.py pickup` runs it after a stalled-session takeover and for a job Tracer scope approval moved to `build`, and for a job moved to, or rerun on, this host from the dashboard, has claimed the job under `<tag>`, so pass `--session <tag>` to
 `hold` and every `board` call, and the claim stays this session's. Run step zero for
 an existing job, but run `worktree` only where the table says. If `hold` exits 6,
 stop. If the job isn't at spec, build, review, or approve, or at `pr-open` with
