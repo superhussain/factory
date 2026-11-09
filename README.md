@@ -85,6 +85,7 @@ Captured by `tools/capture-screenshots.mjs` with synthetic fixture data (frozen 
 - [docs/autonomy.md](docs/autonomy.md) — explorer suggestions, the autonomy kill switch and human-only approval
 - [docs/troubleshooting.md](docs/troubleshooting.md) — Access, port, provisioning and sync-conflict fixes
 - [docs/public-cutover.md](docs/public-cutover.md) — moving the private repository to a fresh public one
+- [docs/repo-security.md](docs/repo-security.md) — main ruleset, repository security settings and the owner checklist
 
 ## License
 
