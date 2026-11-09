@@ -61,7 +61,7 @@ the current emails. If the service token exists but this device's `.env` does
 not hold it, `up` stops; delete the token under Zero Trust > Access > Service
 credentials and rerun. `up` never rotates a token. `up` keeps every policy
 already on the application, in its order, and appends new device policies at
-the end. If an application for the hostname exists under another name, `up`
+the end. It leaves every other application setting as it found it. If an application for the hostname exists under another name, `up`
 stops; rename it to `<hostname> bootstrap` to let `up` manage it.
 
 **A second device.** Run `up` on the other host with the same answers. It
