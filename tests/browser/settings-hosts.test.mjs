@@ -171,6 +171,15 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           "Picks up: nothing while paused. Max in flight is 0.",
         ),
       );
+      await setValue(live, "#host-test-host-max", "");
+      await clickNow(live, '[aria-label="Save Renamed"]');
+      await waitCardMessage(
+        live,
+        "test-host",
+        "Could not save: max_inflight: must be a whole number from 0 to 5",
+      );
+      assert.equal((await (await fetch(origin + "/api/hosts")).json())[0].max_inflight, 0);
+      await setValue(live, "#host-test-host-max", "0");
 
       const [current] = await (await fetch(origin + "/api/hosts")).json();
       const patch = await fetch(origin + "/api/hosts/test-host", {
