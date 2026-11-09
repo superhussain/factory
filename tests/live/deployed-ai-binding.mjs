@@ -16,12 +16,13 @@ async function api(path) {
     headers: { Authorization: `Bearer ${token}` },
   });
   const body = await response.json();
-  if (!body.success) throw new Error(`${response.status}: ${JSON.stringify(body.errors)}`);
+  if (!body.success)
+    throw new Error(`${response.status}: error codes ${body.errors.map((e) => e.code).join(", ")}`);
   return body.result;
 }
 
 const [domain] = await api(`/workers/domains?hostname=${encodeURIComponent(hostname)}`);
 if (!domain) throw new Error(`no Worker domain for ${hostname}`);
-const { bindings } = await api(`/workers/scripts/${domain.service}/settings`);
+const { bindings } = await api(`/workers/scripts/${encodeURIComponent(domain.service)}/settings`);
 console.log(`ai binding: ${bindings.some((b) => b.type === "ai") ? "yes" : "no"}`);
 for (const b of bindings) console.log(`${b.name}:${b.type}`);

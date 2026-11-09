@@ -36,6 +36,6 @@ export function triageInput(slug, source, rules, item, context) {
 /** The yes probability as an integer percent, or null when the reply is unusable. */
 export function triageConfidence(result) {
   const noul = result?.answers?.build?.noul;
-  if (typeof noul !== "number" || !(noul >= 0 && noul <= 1)) return null;
+  if (!Number.isFinite(noul) || noul < 0 || noul > 1) return null;
   return Math.round(noul * 100);
 }
