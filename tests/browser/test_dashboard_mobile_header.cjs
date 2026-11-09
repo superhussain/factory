@@ -39,11 +39,11 @@ const fixtures = [
 }));
 const expectedItems = {
   unassigned: ["d-edit-idea", "d-discard"],
-  assigned: ["d-edit-idea", "d-discard", "d-follow-tracer"],
-  claimed: ["d-discard", "d-follow-tracer"],
-  "missing-text": ["d-discard", "d-follow-tracer"],
-  "number-text": ["d-discard", "d-follow-tracer"],
-  "non-idea": ["d-follow-tracer", "d-move-host"],
+  assigned: ["d-edit-idea", "d-discard", "d-follow-tracer", "d-prioritize"],
+  claimed: ["d-discard", "d-follow-tracer", "d-prioritize"],
+  "missing-text": ["d-discard", "d-follow-tracer", "d-prioritize"],
+  "number-text": ["d-discard", "d-follow-tracer", "d-prioritize"],
+  "non-idea": ["d-follow-tracer", "d-move-host", "d-prioritize"],
   "linked-job": [],
 };
 const PROJECT_DOC = "---\nrepo: example/layout\nbase: main\ntitle: Synthetic layout project\n---\n";
@@ -113,9 +113,13 @@ async function geometry(page) {
   return page.evaluate((selectors) => {
     const rect = (el) => el.getBoundingClientRect().toJSON();
     const bounds = Object.fromEntries(selectors.map((s) => [s, rect(document.querySelector(s))]));
-    const items = ["d-edit-idea", "d-discard", "d-follow-tracer", "d-move-host"].filter(
-      (id) => !document.getElementById(id).hidden,
-    );
+    const items = [
+      "d-edit-idea",
+      "d-discard",
+      "d-follow-tracer",
+      "d-move-host",
+      "d-prioritize",
+    ].filter((id) => !document.getElementById(id).hidden);
     const close = document.getElementById("d-close");
     const r = rect(close);
     const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);

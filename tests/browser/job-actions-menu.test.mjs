@@ -12,6 +12,7 @@ const IDEA = {
   stage: "idea",
   idea: "Synthetic sample idea",
   updated: "2026-01-01T00:00:00Z",
+  priority: { at: "2026-01-01T00:00:00Z" },
 };
 const CLOSED = {
   id: "101-sample-closed",
