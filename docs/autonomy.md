@@ -202,7 +202,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   then checks the line off with the new id, as a dashboard Approve does. If the line
   changed meanwhile, it drops the row while the row is still an unclaimed idea.
 - **Hold.** The line waits in the backlog for a person, as before.
-  The Worker keeps the latest hold verdict for each line, and the backlog drawer shows it under Held by triage.
+  The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage.
 - **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
   verdict from `backlog_triage_pass`, which `factory.py pickup` runs before it claims ideas
   (never with `--dry-run`). Each run posts up to 5 unchecked lines, with the indented block
@@ -215,7 +215,9 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 - **Failure.** A 404 from an older Worker means off. Any other error prints a warning,
   and the line waits. If a board or backlog write fails while
   queueing, it prints what is left (the line, or the new id to check off or remove by hand).
-  `backlog add` still exits 0.
+  `backlog add` still exits 0. A Worker error inside the sweep, such as a 500 on GET /api/backlog,
+  prints the error and "backlog triage stopped; unsent lines wait for the next pickup run". The sweep
+  keeps the holds it recorded, and pickup still claims and launches ideas.
 - **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a
   service token cannot switch triage on or move the threshold. The Worker compares the
   score with the threshold itself.

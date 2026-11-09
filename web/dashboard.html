@@ -100,10 +100,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog h3 { font-size: 13px; margin: 16px 0 8px; }
   dialog label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
   dialog select, dialog textarea, dialog input[type=text] { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  dialog label[hidden], dialog select[hidden] { display: none; }
   dialog textarea { resize: vertical; min-height: 140px; }
   dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
-  .detail > .err { margin: 12px 20px; flex: none; }
-  .detail > .copy-status { margin: 12px 20px; flex: none; font-size: 12px; color: var(--muted); }
+  .detail > .err, .detail > .copy-status { margin: 12px 20px; flex: none; }
+  .detail > .copy-status { font-size: 12px; color: var(--muted); }
   .detail > .copy-status:empty { display: none; }
   #idea-image-list, .gallery { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
   #idea-image-list li { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
@@ -228,6 +229,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .job-option .meta, #job-count { color: var(--muted); font-size: 12px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   .dot.ok { background: var(--ok); }
+  .dot.ok.polling { background: transparent; box-shadow: inset 0 0 0 2px var(--ok); }
   .dot.err { background: var(--alert); }
   .conn-banner { position: sticky; top: 0; z-index: 20; width: 100%; padding: 8px 14px; background: var(--alert-bg); color: var(--fg); border-bottom: 1px solid var(--line); }
   .board {
@@ -441,7 +443,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     <button class="btn icon" id="job-jump" aria-label="Jump to job" title="Jump to job (J, /, ⌘K or Ctrl+K)" aria-keyshortcuts="j / Meta+K Control+K"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 4 4"/></svg></button>
     <a class="btn icon" id="settings-link" href="#/settings" aria-label="Settings" title="Settings (S)" aria-keyshortcuts="s"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="4.5"/><path class="teeth" d="M8 1v3M8 12v3M1 8h3M12 8h3M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12"/></svg></a>
   </div>
-  <div class="status"><span id="updated">loading</span><span class="dot" id="dot" title="connection"></span></div>
+  <div class="status"><span id="updated">loading</span><span class="dot" id="dot" role="img" aria-label="connection" title="connection"></span></div>
 </header>
 <main class="board" id="board"></main>
 <aside class="detail" id="detail" hidden>
@@ -643,7 +645,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="display-theme">Theme<select id="display-theme"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <label for="display-density">Density<select id="display-density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
       <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="3">Every 3 seconds</option><option value="10">Every 10 seconds</option><option value="30">Every 30 seconds</option></select></label>
-      <p class="muted" id="display-poll-help">The board updates live while this tab is open. If the live connection drops, it refreshes on this schedule until it reconnects. A hidden tab stays live only while notifications are on.</p>
+      <p class="muted" id="display-poll-help">The board updates live while this tab is visible. If the live connection drops, it refreshes on this schedule until it reconnects. A hidden tab stays live only while notifications are on.</p>
       <label for="display-filter">Show jobs from<select id="display-filter"></select></label>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
@@ -878,7 +880,7 @@ function ago(iso) {
 }
 
 const CONNECTION = {
-  online: ['', 'dot ok', 'connected'],
+  online: ['', 'dot ok', 'Live: updates arrive as they happen'],
   offline: ["You're offline. Showing the board saved on this device. Edits won't save until you reconnect.", 'dot err', 'offline'],
   signin: ['Your sign-in has expired.', 'dot err', 'sign-in expired'],
 };
@@ -887,9 +889,13 @@ function setConnection(state) {
   $('conn-banner').hidden = state === 'online';
   $('conn-text').textContent = text;
   $('conn-signin').hidden = state !== 'signin';
-  $('dot').className = dot;
-  $('dot').title = title;
+  const polling = state === 'online' && !liveOpen;
+  const label = polling ? 'Polling every ' + pollSeconds + ' seconds until live updates reconnect' : title;
+  $('dot').className = polling ? dot + ' polling' : dot;
+  $('dot').title = label;
+  $('dot').setAttribute('aria-label', label);
 }
+function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
 $('conn-signin').addEventListener('click', () => location.reload());
 window.addEventListener('offline', () => { setConnection('offline'); syncLive(); schedulePoll(); });
 window.addEventListener('online', async () => {
@@ -901,6 +907,7 @@ window.addEventListener('online', async () => {
 let loaded = false;
 let boardReadVersion = 0;
 let boardUpdated = '';
+let boardEtag = '';
 
 // The live socket can leave the board unread for hours, so a timer beside the live
 // client redraws this age label on its own.
@@ -910,7 +917,7 @@ function drawUpdated() {
   $('updated').title = boardUpdated;
 }
 
-async function poll() {
+async function poll({ ifChanged = false } = {}) {
   const version = ++boardReadVersion;
   try {
     // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
@@ -925,9 +932,16 @@ async function poll() {
     if (!r.ok && r.status !== 404) throw new Error(r.status);
     const data = r.ok ? await r.json() : { jobs: [] };
     if (version !== boardReadVersion) return false;
+    const etag = r.ok ? r.headers.get('ETag') || '' : '';
+    // A socket open only catches writes made while it was down, so an unchanged board is not redrawn.
+    if (ifChanged && loaded && etag && etag === boardEtag) {
+      setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
+      return true;
+    }
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
     setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
     boardUpdated = data.updated || '';
+    boardEtag = etag;
     loaded = true;
     drawUpdated();
     renderBoard();
@@ -941,6 +955,7 @@ async function poll() {
     if (version !== boardReadVersion) return false;
     $('dot').className = 'dot err';
     $('dot').title = 'board.json unreachable';
+    $('dot').setAttribute('aria-label', 'board.json unreachable');
     if (!loaded) $('updated').textContent = "can't reach the factory";
     if (e instanceof TypeError) setConnection('offline');
     return false;
@@ -1078,10 +1093,13 @@ function stamp(j) {
   return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused)].join('|');
 }
 
+// A holder's stop is recorded only when stopped is a string, as in factory.py.
+const moveStopped = (x) => typeof x?.stopped === 'string';
+
 // Every holder of a move whose host has not stopped it yet, earlier ones first.
 function queuedStops(m) {
   const earlier = Array.isArray(m?.earlier) ? m.earlier.filter((x) => x && typeof x === 'object') : [];
-  return m ? [...earlier, m].filter((x) => x.from && !x.stopped) : [];
+  return m ? [...earlier, m].filter((x) => x.from && !moveStopped(x)) : [];
 }
 
 // Where a job runs, from the board's claim and the dashboard's move. A move whose old host has not
@@ -2325,6 +2343,7 @@ function hostCard(h) {
   const li = make('li', {className:'host-card'});
   li.dataset.id = h.id;
   li.append(make('h4', {textContent:h.label}), make('code', {className:'host-id', textContent:h.id}), make('span', {className:'host-badge', textContent:HOST_STATES[h.state] ?? h.state}));
+  if (h.max_inflight === 0 && h.state !== 'retired') li.append(make('span', {className:'host-badge', textContent:'Paused'}));
   if (h.state !== 'retired')
     li.append(make('p', {className:'host-seen', textContent:!h.status ? 'No heartbeat yet' : h.offline ? 'Offline, last seen ' + seenAgo(h.status.seen) : 'Seen ' + seenAgo(h.status.seen)}));
   li.append(make('p', {textContent:{
@@ -2364,7 +2383,7 @@ function hostCard(h) {
     if (max.valueAsNumber !== h.max_inflight) patch.max_inflight = max.valueAsNumber;
     hostWrite(h.id, 'PATCH', '/' + h.id, patch, h.etag, 'Saved.');
   }));
-  if (h.state === 'paired') actions.append(button('Confirm', () => hostWrite(h.id, 'PATCH', '/' + h.id, {state:'active'}, h.etag, 'Confirmed. It picks up work now.')));
+  if (h.state === 'paired') actions.append(button('Confirm', () => hostWrite(h.id, 'PATCH', '/' + h.id, {state:'active'}, h.etag, h.max_inflight === 0 ? 'Confirmed. It stays paused while Max in flight is 0.' : 'Confirmed. It picks up work now.')));
   if (h.state !== 'retired') actions.append(button('Retire', () => {
     if (confirm('Retire ' + h.label + '? It stops picking up work and its token is unbound.'))
       hostWrite(h.id, 'PATCH', '/' + h.id, {state:'retired'}, h.etag, 'Retired.');
@@ -4292,7 +4311,7 @@ function moveJob(board, id, to, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
   if (!j.project || !MOVE_STAGES.includes(j.stage)) return 'This job can no longer be moved.';
-  const from = j.claim?.device ?? (!j.claim && j.move && !j.move.stopped ? j.move.from : undefined);
+  const from = j.claim?.device ?? (!j.claim && j.move && !moveStopped(j.move) ? j.move.from : undefined);
   if (to === from) return 'This job already runs on ' + to + '.';
   if (queuedStops(j.move).some((x) => x.from === to)) return 'A stop is still queued on ' + to + '. Pick another host.';
   writeMove(board, j, to, now);
@@ -4300,13 +4319,13 @@ function moveJob(board, id, to, now) {
 }
 
 function writeMove(board, j, to, now) {
-  const prior = !j.claim && j.move && !j.move.stopped ? j.move : null;
+  const prior = !j.claim && j.move && !moveStopped(j.move) ? j.move : null;
   const from = j.claim?.device ?? prior?.from;
   const session = j.claim?.session ?? prior?.session;
   const earlier = [...(Array.isArray(j.move?.earlier) ? j.move.earlier : [])];
   if (j.move?.from && !prior) {
     const { from: f, session: s, agent: a, server: v, at, stopped } = j.move;
-    earlier.push({ from: f, ...(s && { session: s }), ...(a && { agent: a }), ...(v && { server: v }), at, ...(stopped && { stopped }) });
+    earlier.push({ from: f, ...(s && { session: s }), ...(a && { agent: a }), ...(v && { server: v }), at, ...(moveStopped(j.move) && { stopped }) });
   }
   const link = j.paseo?.agent ? j.paseo : prior;
   j.move = {
@@ -4411,19 +4430,23 @@ async function openMoveHost() {
   err.hidden = true;
   empty.hidden = true;
   select.replaceChildren();
-  const pending = !j.claim && j.move && !j.move.stopped ? j.move : null;
+  const pending = !j.claim && j.move && !moveStopped(j.move) ? j.move : null;
   const current = j.claim?.device ?? pending?.from;
   $('move-host-help').textContent = j.claim?.device
     ? j.id + ' runs on ' + j.claim.device + '. Moving it stops that session and starts the job on the host you pick. If ' + j.claim.device + ' is offline, the stop waits until it comes back.'
     : pending?.to ? j.id + ' is moving to ' + pending.to + '. The host you pick starts it instead.'
     : j.id + ' has no host right now. The host you pick starts it.';
   let hosts = [];
+  let blocked = [];
   try {
-    const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + j.project, { cache: 'no-store' })]);
+    const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
     if (!h.ok || !p.ok) throw new Error('load');
     const [list, view] = [await h.json(), await p.json()];
     const listed = view.pickup?.enabled ? view.pickup.hosts : [];
-    hosts = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to && !queuedStops(j.move).some((q) => q.from === x.id));
+    const others = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to);
+    const queued = new Set(queuedStops(j.move).map((q) => q.from));
+    hosts = others.filter((x) => !queued.has(x.id));
+    blocked = others.filter((x) => queued.has(x.id)).map((x) => x.id);
   } catch {
     err.textContent = 'Could not load hosts. Try again.';
     err.hidden = false;
@@ -4432,7 +4455,9 @@ async function openMoveHost() {
   select.hidden = !hosts.length;
   $('move-host-label').hidden = !hosts.length;
   if (!hosts.length && err.hidden) {
-    empty.textContent = 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
+    empty.textContent = blocked.length
+      ? 'Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '. Try again after one of them stops the job.'
+      : 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
     empty.hidden = false;
   }
   $('move-host-save').disabled = !hosts.length;
@@ -4717,7 +4742,7 @@ $('d-rerun').addEventListener('click', async () => {
   try {
     let listed;
     try {
-      const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + j.project, { cache: 'no-store' })]);
+      const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
       if (!h.ok || !p.ok) throw new Error('load');
       const [list, view] = [await h.json(), await p.json()];
       listed = list.some((x) => x.id === host && x.state === 'active') && (view.pickup?.enabled ? view.pickup.hosts : []).includes(host);
@@ -4773,8 +4798,11 @@ $('d-copy-link').addEventListener('click', async () => {
   }
   if (version !== drawerVersion) return;
   clearCopyStatus();
-  $('d-copy-status').textContent = copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.';
-  if (copied) copyStatusTimer = setTimeout(clearCopyStatus, 2000);
+  // A separate task empties the live region first, so a repeat copy is announced again.
+  copyStatusTimer = setTimeout(() => {
+    $('d-copy-status').textContent = copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.';
+    if (copied) copyStatusTimer = setTimeout(clearCopyStatus, 2000);
+  }, 100);
 });
 $('idea-cancel').addEventListener('click', () => { if (!locked()) $('idea-dlg').close(); });
 // Escape closes the dialog like Cancel, except while a save runs or a submission is
@@ -5106,7 +5134,7 @@ function openBacklogItem(item) {
   renderBoard();
   refreshPicker();
   $('d-doc').querySelector('input[type=radio]').focus();
-  loadBacklogTriage(item.raw.slice(6));
+  loadBacklogTriage(item.project + ': ' + item.feature);
 }
 
 function backlogTriageHtml(v) {
@@ -5344,6 +5372,7 @@ function schedulePoll() {
   clearInterval(pollTimer);
   const ms = !pollStarted || liveOpen ? 0 : !document.hidden ? pollSeconds * 1000 : notifyActive() ? 30000 : 0;
   pollTimer = ms ? setInterval(poll, ms) : 0;
+  drawLiveDot();
 }
 document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); syncLive(); schedulePoll(); });
 // Live board events: the Worker sends {"type":"changed","key":...} after each board or
@@ -5363,7 +5392,7 @@ function openLive() {
     liveOpen = true;
     liveRetries = 0;
     schedulePoll();
-    poll();
+    poll({ ifChanged: true });
   });
   ws.addEventListener('message', () => { if (ws === liveSocket) poll(); });
   ws.addEventListener('close', () => {
