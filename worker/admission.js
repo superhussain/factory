@@ -44,7 +44,7 @@ export const FLOORS = Object.freeze(
 
 const REVIEWERS = ["security", "ux", "ui", "code"];
 const STAGES = ["spec", "build", "review", "approve"];
-const KEYS = ["schema", "merge", "review_rounds", "gates", "pickup", "stage_notes"];
+const KEYS = ["schema", "merge", "review_rounds", "gates", "pickup", "triage", "stage_notes"];
 export const HOST_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 // Optional gate stages. Config can switch a catalog gate on; it can never add one or
@@ -162,6 +162,20 @@ export function validatePipeline(doc) {
       if (pickup.hosts.indexOf(host) !== i) return `pickup.hosts[${i}]: listed twice`;
     }
   }
+  if ("triage" in doc) {
+    const triage = doc.triage;
+    if (!isObject(triage)) return "triage: must be an object";
+    for (const key of Object.keys(triage))
+      if (!["enabled", "threshold", "rules"].includes(key)) return `triage.${key}: unknown field`;
+    if (typeof triage.enabled !== "boolean") return "triage.enabled: must be true or false";
+    if (!(Number.isInteger(triage.threshold) && triage.threshold >= 1 && triage.threshold <= 100))
+      return "triage.threshold: must be an integer from 1 to 100";
+    if (typeof triage.rules !== "string") return "triage.rules: must be text";
+    if (triage.rules) {
+      const error = checkOperatorText(triage.rules, "triage.rules");
+      if (error) return error;
+    }
+  }
   if (!("stage_notes" in doc)) return null;
   if (!isObject(doc.stage_notes)) return "stage_notes: must be an object";
   for (const key of Object.keys(doc.stage_notes))
@@ -215,6 +229,7 @@ export function effectivePipeline(
       (id) => global?.gates?.includes(id) || project?.gates?.includes(id),
     ),
     pickup: pickupOf(project?.pickup ?? global?.pickup, activeHosts),
+    triage: project?.triage ?? global?.triage ?? { enabled: false, threshold: 80, rules: "" },
     stage_notes: stageNotes,
     versions: { global: globalVersion, project: projectVersion },
     floors: FLOORS.map((floor) => floor.id),

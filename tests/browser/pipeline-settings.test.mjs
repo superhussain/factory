@@ -613,6 +613,72 @@ test("pipeline settings page", { timeout: 180000 }, async (t) => {
       );
     });
 
+    await t.test("pipeline P17 triage fields save", async () => {
+      const fill = (id, value) =>
+        page.$eval(
+          id,
+          (el, v) => {
+            el.value = v;
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+          },
+          value,
+        );
+      const disabled = () =>
+        page.$$eval(["#pipeline-triage-threshold", "#pipeline-triage-rules"].join(","), (els) =>
+          els.map((el) => el.disabled),
+        );
+      await page.select("#pipeline-scope", "projects/sample");
+      await page.waitForFunction(
+        () => !document.getElementById("pipeline-triage-mode").disabled,
+        wait,
+      );
+      assert.equal(await page.$eval("#pipeline-triage-mode", (el) => el.value), "");
+      assert.deepEqual(await disabled(), [true, true]);
+      assert.equal(
+        await page.$eval("#pipeline-triage legend", (el) => el.textContent),
+        "Backlog triage",
+      );
+      await page.select("#pipeline-triage-mode", "on");
+      assert.deepEqual(await disabled(), [false, false]);
+      assert.equal(await page.$eval("#pipeline-triage-threshold", (el) => el.value), "80");
+      for (const bad of ["0", "101", "80.5"]) {
+        await fill("#pipeline-triage-threshold", bad);
+        await waitStatus(
+          page,
+          "Fix before saving: triage.threshold: must be an integer from 1 to 100",
+        );
+        assert.equal(await page.$eval("#pipeline-save", (el) => el.disabled), true);
+        assert.equal(
+          await page.$eval("#pipeline-triage-threshold", (el) => el.getAttribute("aria-invalid")),
+          "true",
+        );
+      }
+      await fill("#pipeline-triage-threshold", "85");
+      await fill("#pipeline-triage-rules", "Pick up small report and export features.");
+      await waitStatus(page, "Unsaved changes");
+      await clickSave(page);
+      await page.waitForFunction(
+        () => document.getElementById("pipeline-status").textContent.startsWith("Saved as version"),
+        wait,
+      );
+      const stored = JSON.parse(
+        await (await fetch(origin + "/api/pipeline/projects/sample")).text(),
+      );
+      assert.equal(validatePipeline(stored), null);
+      assert.deepEqual(stored.triage, {
+        enabled: true,
+        threshold: 85,
+        rules: "Pick up small report and export features.",
+      });
+      await page.waitForFunction(
+        () => document.getElementById("pipeline-effective").textContent.includes('"threshold": 85'),
+        wait,
+      );
+      await page.select("#pipeline-triage-mode", "");
+      assert.deepEqual(await disabled(), [true, true]);
+      await waitStatus(page, "Unsaved changes");
+    });
+
     assert.deepEqual(errors, []);
     await context.close();
   });
