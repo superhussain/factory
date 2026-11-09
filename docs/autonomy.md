@@ -170,7 +170,7 @@ rules clearly allow. It is off unless a person turns it on.
 flowchart LR
   A[factory.py backlog add] --> B[(backlog.md)]
   A --> W[POST /api/backlog/triage]
-  W --> M[Workers AI model]
+  W --> M[clef-flash on Workers AI]
   W -->|queue| I[(board.json idea)]
   W -->|hold or off| B
   I --> P[factory.py pickup]
@@ -218,14 +218,20 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 - **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a
   service token cannot switch triage on or move the threshold. The Worker compares the
   score with the threshold itself.
-- **Prompt.** The rules travel in an `operator-preferences` envelope and the item in a
-  `backlog-item` envelope, both marked as data. An item or context holding either tag, including
-  fullwidth or other lookalike forms, is refused with a 400.
+- **Prompt.** The Worker sends `@cf/cloudflare/clef-flash` a `state` text and one `build`
+  question of type `noul`. In `state` the rules travel in an `operator-preferences` envelope and
+  the item in a `backlog-item` envelope, both marked as data. The question asks whether the item
+  should be built now without a person reviewing it, and its yes probability times 100, rounded,
+  is the confidence. The verdict's `reason` is always the fixed text `Rated by clef-flash against
+  the project rules.`, so an item can move the score but write no text. An item or context
+  holding either tag, including fullwidth or other lookalike forms, is refused with a 400.
 - **Floors.** A queued idea still goes through the spec, four reviews, the approver, merge
   rules and any `spec-approval` gate.
 - **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
   Workers AI usage bills against the account. Without the binding the route answers 503,
-  and lines wait.
+  and lines wait. In a 36-call live run, a call sent a median of 292 input tokens, which costs about
+  $0.000011, or about 1 neuron. The free tier of 10,000 neurons a day covers about 9,900
+  calls.
 
 To stop triage, set it to Off in Settings, Pipeline. Ideas it already queued stay
 ordinary ideas, and a person can discard them.
