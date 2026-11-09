@@ -45,6 +45,12 @@ supported. Local dead-session detection is optional; core operations need no
 daemon or executable. Agent app/web links are hosted deployment configuration,
 disabled unless configured, not device defaults.
 
+`factory.py archive-workspace <slug>/<id>` runs as a merged job's last step. It
+archives the session's Paseo workspace only when the job is at `merged`, the
+workspace's `isolation` is `worktree`, and its folder is named `factory-<id>` or
+`factory-<id>-<n>`. Any other workspace is skipped. Without `PASEO_AGENT_ID`, a
+Paseo server id or `paseo` on PATH, it prints a skip and exits 0.
+
 `schedules/resume.md` and `schedules/explore.md` are prompt templates, not executables. Ideas are picked up by `factory.py pickup` instead (see Automatic pickup below and `references/pickup.md` in the installed skill).
 Using the scheduler's native tools, discover existing IDs and configured routes.
 Materialize `<installed-skill>`, `<python-launcher>` and the available dispatch
