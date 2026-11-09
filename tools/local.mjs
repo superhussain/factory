@@ -17,7 +17,7 @@ function runId(label) {
   return `${label}-${new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")}-${process.pid}`;
 }
 
-async function startWorkerd({ port, persistDir, config }) {
+export async function startWorkerd({ port, persistDir, config }) {
   if (!persistDir) throw new Error("startLocal requires an explicit fresh persistDir");
   const child = spawn(
     wrangler,
