@@ -4418,12 +4418,16 @@ async function openMoveHost() {
     : pending?.to ? j.id + ' is moving to ' + pending.to + '. The host you pick starts it instead.'
     : j.id + ' has no host right now. The host you pick starts it.';
   let hosts = [];
+  let blocked = [];
   try {
     const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + j.project, { cache: 'no-store' })]);
     if (!h.ok || !p.ok) throw new Error('load');
     const [list, view] = [await h.json(), await p.json()];
     const listed = view.pickup?.enabled ? view.pickup.hosts : [];
-    hosts = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to && !queuedStops(j.move).some((q) => q.from === x.id));
+    const others = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to);
+    const queued = new Set(queuedStops(j.move).map((q) => q.from));
+    hosts = others.filter((x) => !queued.has(x.id));
+    blocked = others.filter((x) => queued.has(x.id)).map((x) => x.id);
   } catch {
     err.textContent = 'Could not load hosts. Try again.';
     err.hidden = false;
@@ -4432,7 +4436,9 @@ async function openMoveHost() {
   select.hidden = !hosts.length;
   $('move-host-label').hidden = !hosts.length;
   if (!hosts.length && err.hidden) {
-    empty.textContent = 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
+    empty.textContent = blocked.length
+      ? 'Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '. Try again after one of them stops the job.'
+      : 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
     empty.hidden = false;
   }
   $('move-host-save').disabled = !hosts.length;
