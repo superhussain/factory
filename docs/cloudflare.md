@@ -138,6 +138,9 @@ one custom-domain route for your origin's hostname, and disables both
 `workers.dev` and preview URLs. The instance is reachable only at your configured
 HTTPS origin.
 
+It also binds Workers AI as AI for backlog triage. The Edit Cloudflare Workers
+token deploys it without a Workers AI permission.
+
 Arrange the Access policies (step 3) before treating a new instance as usable.
 Until a request carries a valid signed assertion and the Worker has its required
 configuration, every request is denied: missing assertion or configuration fails

@@ -14,8 +14,8 @@ const MODEL_VERDICT = {
   decision: "hold",
   confidence: 62,
   threshold: 80,
-  reason: "It touches billing, which the project rules say to hold.",
-  model: "@cf/meta/llama-3.1-8b-instruct-fast",
+  reason: "Rated by clef-flash against the project rules.",
+  model: "@cf/cloudflare/clef-flash",
   at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
 };
 
@@ -113,7 +113,7 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
         hidden: false,
         heading: "Held by triage",
         paragraphs: [
-          "Confidence 62% is below the 80% threshold. It touches billing, which the project rules say to hold.",
+          "Confidence 62% is below the 80% threshold. Rated by clef-flash against the project rules.",
           "Checked 2h ago",
         ],
         before: true,

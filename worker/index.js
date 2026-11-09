@@ -17,7 +17,7 @@ import {
   validateHostPatch,
   validateHostStatus,
 } from "./hosts.js";
-import { parseTriageReply, TRIAGE_MODEL, TRIAGE_SCHEMA, triageMessages } from "./triage.js";
+import { TRIAGE_MODEL, TRIAGE_REASON, triageConfidence, triageInput } from "./triage.js";
 
 export { BoardEvents } from "./events.js";
 
@@ -644,22 +644,17 @@ async function backlogTriage(request, env) {
     : `pipeline:global@${globalVersion}`;
   let result;
   try {
-    result = await env.AI.run(TRIAGE_MODEL, {
-      messages: triageMessages(slug, source, triage.rules, item, context),
-      response_format: { type: "json_schema", json_schema: TRIAGE_SCHEMA },
-      max_tokens: 256,
-      temperature: 0,
-    });
+    result = await env.AI.run(TRIAGE_MODEL, triageInput(slug, source, triage.rules, item, context));
   } catch {
     return reply("the triage model failed", 502);
   }
-  const verdict = parseTriageReply(result);
-  if (!verdict) return reply("the triage model gave an unusable reply", 502);
+  const confidence = triageConfidence(result);
+  if (confidence === null) return reply("the triage model gave an unusable reply", 502);
   return finish({
-    decision: verdict.confidence >= threshold ? "queue" : "hold",
-    confidence: verdict.confidence,
+    decision: confidence >= threshold ? "queue" : "hold",
+    confidence,
     threshold,
-    reason: verdict.reason,
+    reason: TRIAGE_REASON,
     model: TRIAGE_MODEL,
   });
 }
