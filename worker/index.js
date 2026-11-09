@@ -122,10 +122,11 @@ function validateProjectDocument(text) {
   const end = lines.findIndex((line, i) => i > 0 && line === "---");
   if (lines[0] !== "---" || end < 0) return "project document needs closed --- frontmatter";
   const meta = new Map();
-  const fieldsError = "project frontmatter allows one repo, base, and title only";
+  const fieldsError =
+    "project frontmatter allows one repo, base and title, plus an optional archive";
   for (const line of lines.slice(1, end)) {
     if (!line.trim() || line.trim().startsWith("#")) continue;
-    const match = /^(repo|base|title):\s*(.*)$/.exec(line);
+    const match = /^(repo|base|title|archive):\s*(.*)$/.exec(line);
     if (!match || meta.has(match[1])) return fieldsError;
     let value = match[2].trim();
     if (/^["']|["']$/.test(value)) {
@@ -134,16 +135,17 @@ function validateProjectDocument(text) {
     } else if (/^[\[{!&*|>]/.test(value)) return fieldsError;
     meta.set(match[1], value);
   }
-  if (meta.size !== 3) return fieldsError;
+  if (meta.size !== 3 + (meta.has("archive") ? 1 : 0)) return fieldsError;
   const repo = meta.get("repo"),
     base = meta.get("base"),
-    title = meta.get("title");
-  if (
-    repo &&
-    (!/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/.test(repo) ||
-      repo.split("/").some((p) => p === "." || p === ".."))
-  )
-    return "invalid project repo";
+    title = meta.get("title"),
+    archive = meta.get("archive");
+  const badRepo = (value) =>
+    value &&
+    (!/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/.test(value) ||
+      value.split("/").some((p) => p === "." || p === ".."));
+  if (badRepo(repo)) return "invalid project repo";
+  if (badRepo(archive)) return "invalid project archive";
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(base) ||
     base.includes("..") ||
@@ -170,6 +172,7 @@ async function projects(env) {
     const item = { slug, title: meta.title || slug };
     if (REPO.test(meta.repo || "")) item.repo = meta.repo;
     if (BASE.test(meta.base || "")) item.base = meta.base;
+    if (REPO.test(meta.archive || "")) item.archive = meta.archive;
     out.push(item);
   }
   return reply(JSON.stringify(out), 200, "application/json");

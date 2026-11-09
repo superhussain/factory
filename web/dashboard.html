@@ -801,7 +801,7 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
   remove: (k) => { try { localStorage.removeItem(k); } catch {} },
 };
-// board.json is agent-written and the dashboard is public, so only exact PR URLs for a job's own repo become links.
+// board.json is agent-written and the dashboard is public, so only exact PR URLs for a registered project's repo or archive become links.
 const prUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/pull/(\\d+)$');
 const runUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/actions/runs/(\\d+)$');
 const REF_KINDS = { 'rework-of': 'rework of', 'follow-up-of': 'follow-up of', 'sub-job-of': 'sub-job of' };
@@ -938,7 +938,7 @@ function pipelineLabel(j) {
 
 function prLink(j) {
   if (!['pr-open', 'merged', 'closed'].includes(j.stage)) return null;
-  const m = typeof j.pr === 'string' && projectRes(j, 're').map((re) => j.pr.match(re)).find(Boolean);
+  const m = typeof j.pr === 'string' && [...projectRes(j, 're'), ...projectRes(j, 'archiveRe')].map((re) => j.pr.match(re)).find(Boolean);
   return m ? { url: j.pr, n: m[1] } : null;
 }
 
@@ -1356,7 +1356,7 @@ async function loadProjects() {
     const r = await fetch('./projects.json', { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status);
     const list = await r.json();
-    projects = new Map(list.map((p) => [p.slug, { title: p.title, repo: p.repo || '', base: p.base || '', re: p.repo ? prUrl(p.repo) : null, runRe: p.repo ? runUrl(p.repo) : null }]));
+    projects = new Map(list.map((p) => [p.slug, { title: p.title, repo: p.repo || '', base: p.base || '', re: p.repo ? prUrl(p.repo) : null, archiveRe: p.archive ? prUrl(p.archive) : null, runRe: p.repo ? runUrl(p.repo) : null }]));
     loaded = true;
   } catch {}
   $('idea-project-help').textContent = projects === null
