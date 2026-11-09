@@ -1,5 +1,6 @@
-// The drawer's Prioritize item: which jobs show it, the board write, and a job that left the
-// board, against one owned local Worker, at mobile and desktop width. The board card's Prioritized badge shows only after the write. Also captures the review images.
+// The drawer's Prioritize and Remove priority items: which jobs show each, both board writes, and
+// a job that left the board, against one owned local Worker, at mobile and desktop width. The board
+// card's Prioritized badge shows only after Prioritize and goes after Remove priority. Also captures the review images.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -43,7 +44,14 @@ const JOBS = [
     claim: { device: "host-a", session: "a1b2c3", since: "2026-01-01T10:00:00Z" },
     paseo: { agent: "synthetic-agent", server: "synthetic-server" },
   },
-  { id: "044-open-pr", project: "sample", title: "Open PR", stage: "pr-open", updated: NOW },
+  {
+    id: "044-open-pr",
+    project: "sample",
+    title: "Open PR",
+    stage: "pr-open",
+    updated: NOW,
+    priority: { at: "2026-01-01T00:00:00Z" },
+  },
   { id: "045-no-project", title: "No project", stage: "build", updated: NOW },
 ];
 const VIEWPORTS = [
@@ -122,15 +130,24 @@ test("prioritize", { timeout: 240000 }, async (t) => {
 
       await t.test(`item only for prioritizable jobs ${width}`, async () => {
         const shown = {};
+        const removable = {};
         for (const { id } of JOBS) {
           await openDrawer(page, id);
           shown[id] = await page.$eval("#d-prioritize", (el) => !el.hidden);
+          removable[id] = await page.$eval("#d-remove-priority", (el) => !el.hidden);
         }
         assert.deepEqual(shown, {
           "100-sample-idea": true,
           "101-sample-urgent": true,
           "042-sample-export": true,
           "044-open-pr": false,
+          "045-no-project": false,
+        });
+        assert.deepEqual(removable, {
+          "100-sample-idea": false,
+          "101-sample-urgent": false,
+          "042-sample-export": false,
+          "044-open-pr": true,
           "045-no-project": false,
         });
       });
@@ -175,6 +192,38 @@ test("prioritize", { timeout: 240000 }, async (t) => {
         await (
           await page.$('.card[data-id="042-sample-export"]')
         ).screenshot({ path: `${SHOTS}after-card-${width}.png` });
+        await openDrawer(page, "042-sample-export");
+        assert.equal(await page.$eval("#d-remove-priority", (el) => el.hidden), false);
+      });
+
+      await t.test(`Remove priority deletes priority ${width}`, async () => {
+        await openDrawer(page, "042-sample-export");
+        await openJobActions(page);
+        if (width === 390)
+          await page.screenshot({
+            path: `${SHOTS}menu-prioritized-390.png`,
+            clip: await headAndMenu(page),
+          });
+        await activate("#d-remove-priority");
+        await page.waitForFunction(
+          () => !document.getElementById("d-meta").textContent.endsWith(" · prioritized"),
+          wait,
+        );
+        assert.equal("priority" in (await boardJob(origin, "042-sample-export")), false);
+        assert.equal(await page.$eval("#d-prioritize", (el) => el.hidden), false);
+        assert.equal(await page.$eval("#d-remove-priority", (el) => el.hidden), true);
+        assert.equal(await page.$eval("#d-prioritize-err", (el) => el.hidden), true);
+        if (width === 1280)
+          await page.screenshot({
+            path: `${SHOTS}after-removed-1280.png`,
+            clip: await headAndMenu(page),
+          });
+        await closeDrawer(page);
+        await page.waitForFunction(
+          () => !document.querySelector('.card[data-id="042-sample-export"] .id .chip'),
+          wait,
+        );
+        assert.deepEqual(await badges(page, "042-sample-export"), []);
       });
 
       await t.test(`a job that left the board writes nothing ${width}`, async () => {
@@ -191,6 +240,27 @@ test("prioritize", { timeout: 240000 }, async (t) => {
         );
         assert.equal(await (await fetch(origin + "/api/board")).text(), before);
       });
+
+      await t.test(
+        `Remove priority on a job that left the board writes nothing ${width}`,
+        async () => {
+          await openDrawer(page, "044-open-pr");
+          const left = JOBS.filter((j) => j.id !== "101-sample-urgent" && j.id !== "044-open-pr");
+          await seedBoard(origin, left);
+          const before = await (await fetch(origin + "/api/board")).text();
+          await openJobActions(page);
+          await activate("#d-remove-priority");
+          await page.waitForFunction(
+            () => !document.getElementById("d-prioritize-err").hidden,
+            wait,
+          );
+          assert.equal(
+            await page.$eval("#d-prioritize-err", (el) => el.textContent),
+            "This job is no longer on the board.",
+          );
+          assert.equal(await (await fetch(origin + "/api/board")).text(), before);
+        },
+      );
       await context.close();
     }
     assert.deepEqual(errors, []);
