@@ -2701,8 +2701,9 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
             print(line)
 
 
-def move_stop_pass(home, data, device, dry):
-    """Stop the worktree of each job the dashboard moved away from this host, and record it."""
+def move_stop_pass(home, data, device, dry, adapter):
+    """Archive the Paseo session of, and stop the worktree of, each job the dashboard moved away
+    from this host, and record it."""
     for j in data["jobs"]:
         m, job_id, project = j.get("move"), j.get("id"), j.get("project")
         if not (isinstance(m, dict) and m.get("from") == device and "stopped" not in m
@@ -2710,26 +2711,43 @@ def move_stop_pass(home, data, device, dry):
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
         line = f"{job_id} {project}: moved to {m.get('to')}"
+        agent, server = m.get("agent"), m.get("server")
+        archive = bool(adapter and isinstance(agent, str) and PASEO_ID.fullmatch(agent)
+                       and not agent.startswith("-") and server and server == paseo_server()
+                       and agent != os.environ.get("PASEO_AGENT_ID"))
         if dry:
-            print(f"would stop {line}")
+            print(f"would archive session {agent} and stop {line}" if archive else f"would stop {line}")
             continue
+        failure = None
+        if archive:
+            try:
+                p = subprocess.run(adapter + ["archive", agent, "--force"], capture_output=True,
+                                   timeout=ADAPTER_TIMEOUT_SECONDS)
+                failure = f"exit {p.returncode}" if p.returncode else None
+            except subprocess.TimeoutExpired:
+                failure = "timed out"
+            except OSError as e:
+                failure = str(e)
         wt = home / "worktrees" / project / job_id
         alive = stop_pids(wt) if wt.exists() else []
+        if failure:
+            print(f"factory.py: pickup could not archive session {agent} of {job_id}: {failure}", file=sys.stderr)
+            continue
         if alive:
             print(f"factory.py: pickup could not stop {job_id}: processes still running: "
                   f"{' '.join(map(str, alive))}", file=sys.stderr)
             continue
 
-        def change(text, job_id=job_id, at=m.get("at")):
+        def change(text, job_id=job_id, at=m.get("at"), archive=archive):
             board = load_board(text)
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
             move = (found or {}).get("move")
             if not isinstance(move, dict) or move.get("at") != at or "stopped" in move:
                 return None, False
-            patch_job(board, job_id, {"move": {"stopped": now()}})
+            patch_job(board, job_id, {"move": {"stopped": now(), **({"archived": now()} if archive else {})}})
             return dump_board(board), True
         if cas(home, "/api/board", change):
-            print(f"stopped {line}")
+            print(f"archived session {agent} and stopped {line}" if archive else f"stopped {line}")
 
 
 def prioritized(j):
@@ -2812,10 +2830,10 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     """One pickup run after flags and the holder are resolved."""
     paths = read_paths(home)
     data = read_board(home)
-    move_stop_pass(home, data, device, dry)
+    stalls = read_stalls(home)
+    move_stop_pass(home, data, device, dry, stalls[0] if stalls else None)
     priority_nudge_pass(home, data, device, dry)
     settings = {}
-    stalls = read_stalls(home)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
     if not dry and taken >= limit:
