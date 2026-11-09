@@ -210,6 +210,7 @@ def project_wrangler(profile, source_root, output):
         "preview_urls": False,
         "routes": [{"pattern": profile["origin"].split("://", 1)[1], "custom_domain": True}],
         "r2_buckets": [{"binding": "BUCKET", "bucket_name": profile["bucket_name"]}],
+        "ai": {"binding": "AI"},
         "vars": {
             "FACTORY_ORIGIN": profile["origin"],
             "FACTORY_TITLE": profile["title"],
