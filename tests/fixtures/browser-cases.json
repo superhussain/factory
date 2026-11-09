@@ -131,6 +131,7 @@
   "tests/browser/pause.test.mjs",
   "tests/browser/copy-link.test.mjs",
   "tests/browser/follow-up.test.mjs",
+  "tests/browser/rerun.test.mjs",
   "tests/browser/owned-fixtures.test.mjs",
   "tests/browser/pipeline-settings.test.mjs",
   "tests/browser/settings-page.test.mjs",
