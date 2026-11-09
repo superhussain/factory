@@ -401,27 +401,31 @@ def down(answers, api, root, confirm=input):
         if error.status != 404:
             raise
     for app in api_list(api, "accounts/{}/access/apps".format(account)):
-        if app.get("domain") == hostname:
-            api("DELETE", "accounts/{}/access/apps/{}".format(account, app["id"]))
-            print("app " + hostname + ": deleted")
-    devices = set()
+        if app.get("domain") != hostname:
+            continue
+        if app.get("name") != n["app"]:
+            print("app {}: kept, named \"{}\", which bootstrap did not create".format(hostname, app.get("name")))
+            continue
+        api("DELETE", "accounts/{}/access/apps/{}".format(account, app["id"]))
+        print("app " + hostname + ": deleted")
+    for token in api_list(api, "accounts/{}/access/service_tokens".format(account)):
+        if is_device_name(n, token["name"]):
+            api("DELETE", "accounts/{}/access/service_tokens/{}".format(account, token["id"]))
+            print("token " + token["name"] + ": deleted")
     for policy in api_list(api, "accounts/{}/access/policies".format(account)):
         device = policy["decision"] == "non_identity" and is_device_name(n, policy["name"])
         if device or (policy["name"] == n["people_policy"] and policy["decision"] == "allow"):
             api("DELETE", "accounts/{}/access/policies/{}".format(account, policy["id"]))
             print("policy " + policy["name"] + ": deleted")
-            if device:
-                devices.add(policy["name"])
-    for token in api_list(api, "accounts/{}/access/service_tokens".format(account)):
-        if token["name"] in devices:
-            api("DELETE", "accounts/{}/access/service_tokens/{}".format(account, token["id"]))
-            print("token " + token["name"] + ": deleted")
     bucket = profile["bucket_name"]
     try:
         api("DELETE", "accounts/{}/r2/buckets/{}".format(account, bucket))
         print("bucket " + bucket + ": deleted")
     except CloudflareError as error:
-        print("bucket " + bucket + ": kept, Cloudflare said " + str(error))
+        if error.status == 404:
+            print("bucket " + bucket + ": already deleted")
+        else:
+            print("bucket " + bucket + ": kept, Cloudflare said " + str(error))
     print("These local files still name the deleted instance: {}, {}, and the factory home "
           "config.md api_url and .env credentials, here and on every other device.".format(root / "deploy" / "profile.json",
                                                              root / "deploy" / "bootstrap.json"))

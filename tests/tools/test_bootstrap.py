@@ -130,7 +130,7 @@ class FakeRun:
         profile = json.loads(Path(args[args.index("--profile") + 1]).read_text())
         self.fake.scripts.add(profile["worker_name"])
         if not self.fake.items["domains"]:
-            self.fake.items["domains"]["dom-1"] = {"id": "dom-1", "hostname": "factory.example.test",
+            self.fake.items["domains"]["dom-1"] = {"id": "dom-1", "hostname": profile["origin"][len("https://"):],
                                                    "service": profile["worker_name"]}
         return subprocess.CompletedProcess(args, 0, "", "")
 
@@ -583,8 +583,8 @@ class DownTest(Instance):
         self.assertEqual(code, 0, err)
         deletes = [path.split("?")[0].split("/")[-2] for method, path, _ in self.fake.calls[since:]
                    if method == "DELETE"]
-        self.assertEqual(deletes, ["domains", "scripts", "apps", "policies", "policies",
-                                   "service_tokens", "buckets"])
+        self.assertEqual(deletes, ["domains", "scripts", "apps", "service_tokens", "policies", "policies",
+                                   "buckets"])
         self.assertEqual(self.fake.items, {"service_tokens": {}, "policies": {}, "apps": {}, "domains": {}})
         self.assertEqual(self.fake.scripts, set())
         self.assertEqual(self.fake.buckets, {"factory-example-test": 3})
@@ -612,6 +612,69 @@ class DownTest(Instance):
         self.assertEqual(code, 0, err)
         self.assertEqual(list(self.fake.items["policies"]), ["foreign"])
         self.assertEqual(list(self.fake.items["service_tokens"]), ["stray"])
+
+    def test_down_leaves_a_neighbor_with_a_similar_hostname(self):
+        code, _, err = self.up(inputs=[ACCOUNT, "example.test", "a.b.example.test", "ada@example.test"])
+        self.assertEqual(code, 0, err)
+        neighbor = bootstrap.names({"hostname": "a-b.example.test"}, "laptop")
+        fake = self.fake
+        fake.buckets[neighbor["bucket"]] = 0
+        fake.scripts.add(neighbor["worker"])
+        fake.items["service_tokens"]["n-token"] = {"id": "n-token", "name": neighbor["token"],
+                                                   "client_id": "client-n.access"}
+        fake.items["policies"]["n-people"] = {"id": "n-people", "name": neighbor["people_policy"],
+                                              "decision": "allow", "include": []}
+        fake.items["policies"]["n-device"] = {"id": "n-device", "name": neighbor["device_policy"],
+                                              "decision": "non_identity", "include": []}
+        fake.items["apps"]["n-app"] = {"id": "n-app", "name": neighbor["app"], "domain": "a-b.example.test",
+                                       "aud": "aud-n", "policies": []}
+        fake.items["domains"]["n-dom"] = {"id": "n-dom", "hostname": "a-b.example.test",
+                                          "service": neighbor["worker"]}
+        code, out, err = self.down("a.b.example.test")
+        self.assertEqual(code, 0, err)
+        self.assertEqual({kind: list(items) for kind, items in fake.items.items()}, {
+            "service_tokens": ["n-token"], "policies": ["n-people", "n-device"], "apps": ["n-app"],
+            "domains": ["n-dom"]})
+        self.assertEqual(fake.scripts, {"a--b-example-test"})
+        self.assertEqual(fake.buckets, {"a--b-example-test": 0})
+        self.assertIn("token a.b.example.test bootstrap device laptop: deleted", out)
+
+    def test_down_keeps_an_app_bootstrap_did_not_create(self):
+        self.up()
+        [app] = self.fake.items["apps"].values()
+        app["name"] = "Factory"
+        code, out, err = self.down("factory.example.test")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(list(self.fake.items["apps"].values()), [app])
+        self.assertIn('app factory.example.test: kept, named "Factory", which bootstrap did not create', out)
+
+    def test_down_after_a_partial_up_deletes_the_token(self):
+        self.up()
+        self.fake.fail = [("POST", "policies")]
+        code, _, err = self.up(inputs=["", "", "", ""], host="Desk Top", home=self.tmp / "home2")
+        self.assertEqual(code, 1)
+        self.assertIn("synthetic failure", err)
+        self.assertNotIn("factory.example.test bootstrap device desk-top", self.policies())
+        code, out, err = self.down("factory.example.test")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.fake.items["service_tokens"], {})
+        self.assertIn("token factory.example.test bootstrap device desk-top: deleted", out)
+
+    def test_rerun_down_finishes_a_partial_down(self):
+        self.up()
+        self.fake.fail = [("DELETE", "policies")]
+        code, _, err = self.down("factory.example.test")
+        self.assertEqual(code, 1)
+        self.assertIn("synthetic failure", err)
+        self.assertEqual(self.fake.items["service_tokens"], {})
+        self.assertEqual(len(self.fake.items["policies"]), 2)
+        code, out, err = self.down("factory.example.test")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.fake.items, {"service_tokens": {}, "policies": {}, "apps": {}, "domains": {}})
+        self.assertEqual(self.fake.buckets, {})
+        code, out, err = self.down("factory.example.test")
+        self.assertEqual(code, 0, err)
+        self.assertIn("bucket factory-example-test: already deleted", out)
 
 
 if __name__ == "__main__":
