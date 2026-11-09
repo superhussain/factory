@@ -215,7 +215,9 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 - **Failure.** A 404 from an older Worker means off. Any other error prints a warning,
   and the line waits. If a board or backlog write fails while
   queueing, it prints what is left (the line, or the new id to check off or remove by hand).
-  `backlog add` still exits 0.
+  `backlog add` still exits 0. A Worker error inside the sweep, such as a 500 on GET /api/backlog,
+  prints the error and "backlog triage stopped; unsent lines wait for the next pickup run". The sweep
+  keeps the holds it recorded, and pickup still claims and launches ideas.
 - **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a
   service token cannot switch triage on or move the threshold. The Worker compares the
   score with the threshold itself.

@@ -1081,32 +1081,35 @@ def triage_enabled(home, slug):
 
 def backlog_triage_pass(home):
     """Ask the Worker for a verdict on up to TRIAGE_SWEEP_LIMIT unchecked backlog lines this host
-    has no final verdict for, in projects with triage on. Queued lines become ideas."""
+    has no final verdict for, in projects with triage on. Queued lines become ideas.
+    A Worker error still saves the verdicts recorded so far."""
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
     lines = unchecked_lines(text if status == 200 else "")
     cached = read_triaged(home)
     raws = {raw for raw, _, _, _ in lines}
     triaged = [line for line in cached if line in raws]
     todo = [line for line in lines if line[0] not in triaged]
-    projects = registered(home) if todo else set()
-    enabled, sent = {}, 0
-    for raw, slug, feature, context in todo:
-        if sent == TRIAGE_SWEEP_LIMIT:
-            break
-        if raw in triaged or slug not in projects:
-            continue
-        if slug not in enabled:
-            enabled[slug] = triage_enabled(home, slug)
-        if not enabled[slug]:
-            continue
-        sent += 1
-        item = f"{slug}: {feature.rstrip()}"
-        verdict, final = backlog_triage(home, item, context or None)
-        left = verdict is not None and report_verdict(home, slug, feature, item, verdict)
-        if final and (verdict is None or verdict["decision"] != "queue" or left):
-            triaged.append(raw)
-    if triaged != cached:
-        save_triaged(home, triaged)
+    try:
+        projects = registered(home) if todo else set()
+        enabled, sent = {}, 0
+        for raw, slug, feature, context in todo:
+            if sent == TRIAGE_SWEEP_LIMIT:
+                break
+            if raw in triaged or slug not in projects:
+                continue
+            if slug not in enabled:
+                enabled[slug] = triage_enabled(home, slug)
+            if not enabled[slug]:
+                continue
+            sent += 1
+            item = f"{slug}: {feature.rstrip()}"
+            verdict, final = backlog_triage(home, item, context or None)
+            left = verdict is not None and report_verdict(home, slug, feature, item, verdict)
+            if final and (verdict is None or verdict["decision"] != "queue" or left):
+                triaged.append(raw)
+    finally:
+        if triaged != cached:
+            save_triaged(home, triaged)
 
 
 def triage_verdict(text):
@@ -2578,7 +2581,12 @@ def pickup(*args):
         if not dry:
             tracer_follow_pass(home)
             tracer_build_pass(home)
-            backlog_triage_pass(home)
+            try:
+                backlog_triage_pass(home)
+            except SystemExit as e:
+                if e.code != 5:
+                    raise
+                print("factory.py: backlog triage stopped; unsent lines wait for the next pickup run", file=sys.stderr)
         pickup_pass(home, device, minutes, dry, limit, cap)
     finally:
         if not dry:
