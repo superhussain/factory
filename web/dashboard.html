@@ -81,8 +81,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .ask-option { display: flex; gap: 10px; align-items: flex-start; width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
   .ask-option:hover { background: var(--accent-soft); }
   .ask-option:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .backlog-context { margin: 12px 0; }
-  .doc .backlog-context > h3 { font-size: 13px; margin: 0 0 4px; }
+  .backlog-context, .backlog-triage { margin: 12px 0; }
+  .doc .backlog-context > h3, .doc .backlog-triage > h3 { font-size: 13px; margin: 0 0 4px; }
   .ask-rec { background: var(--accent-soft); color: var(--accent); border-radius: 999px; font-size: 11px; padding: 1px 8px; }
   .ask-desc { display: block; color: var(--muted); font-size: 13px; }
   .backlog-tap-hint { display: none; }
@@ -4722,6 +4722,27 @@ function openBacklogItem(item) {
   renderBoard();
   refreshPicker();
   $('d-doc').querySelector('input[type=radio]').focus();
+  loadBacklogTriage(item.raw.slice(6));
+}
+
+function backlogTriageHtml(v) {
+  if (typeof v?.reason !== 'string' || typeof v.at !== 'string' || !Number.isInteger(v.threshold) || !(v.confidence === null || Number.isInteger(v.confidence))) return '';
+  const why = v.confidence === null ? 'Held without a model score because ' + v.reason + '.' : 'Confidence ' + v.confidence + '% is below the ' + v.threshold + '% threshold. ' + v.reason;
+  return '<h3>Held by triage</h3><p>' + esc(why) + '</p><p class="muted">Checked ' + esc(ago(v.at)) + '</p>';
+}
+
+async function loadBacklogTriage(item) {
+  const version = drawerVersion;
+  const raw = openBacklogRaw;
+  try {
+    const r = await fetch('./api/backlog/triage?item=' + encodeURIComponent(item), { cache: 'no-store' });
+    if (!r.ok) return;
+    const html = backlogTriageHtml(await r.json());
+    const section = $('backlog-triage');
+    if (!html || !section || version !== drawerVersion || raw !== openBacklogRaw) return;
+    section.innerHTML = html;
+    section.hidden = false;
+  } catch {}
 }
 
 function renderBacklogDecision(item) {
@@ -4748,6 +4769,7 @@ function renderBacklogDecision(item) {
     : '<p class="muted">This item\'s context is not in the backlog context format, so it shows as text.</p>' + md(item.context);
   const history = backlogReworkHistory(item, jobs);
   return md(item.text) + shown +
+    '<section class="backlog-triage" id="backlog-triage" aria-label="Backlog triage" hidden></section>' +
     (history.length ? '<section class="backlog-history" aria-label="Rework history"><h3>Rework history</h3><ol>' +
       history.map((h) => '<li><div class="meta"><a href="#' + esc(encodeURIComponent(h.id)) + '">' + esc(h.id) + '</a> · reworked ' + esc(ago(h.at)) + '</div>' +
         '<p>Earlier text: ' + esc(h.text) + '</p><p>Notes: ' + esc(h.notes) + '</p></li>').join('') + '</ol></section>' : '') +

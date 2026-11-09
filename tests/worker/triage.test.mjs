@@ -238,9 +238,67 @@ test("bad bodies, unknown projects, invalid stored config and model failures ret
   }
 });
 
-test("only POST reaches triage", async () => {
+test("GET reads the latest hold verdict by item", async () => {
+  const s = setup({ reply: { response: { confidence: 62, reason: "It touches billing." } } });
+  await s.save("projects/sample", on());
+  const read = (item = ITEM) =>
+    s.send("GET", "/api/backlog/triage?item=" + encodeURIComponent(item));
+  assert.equal((await read()).status, 404);
+
+  const post = await s.triage({ item: ITEM });
+  assert.deepEqual(Object.keys(JSON.parse(post.text)), [
+    "decision",
+    "confidence",
+    "threshold",
+    "reason",
+    "model",
+  ]);
+  let r = await read();
+  assert.equal(r.status, 200);
+  const first = JSON.parse(r.text);
+  assert.deepEqual(
+    { ...first, at: undefined },
+    { item: ITEM, ...JSON.parse(post.text), at: undefined },
+  );
+  assert.equal(new Date(first.at).toISOString(), first.at);
+  assert.equal((await read("sample: Another line")).status, 404);
+
+  s.env.AI.run = async () => ({ response: { confidence: 70, reason: "Still unsure." } });
+  await s.triage({ item: ITEM });
+  assert.equal(JSON.parse((await read()).text).confidence, 70);
+
+  s.env.AI.run = async () => ({ response: { confidence: 95, reason: "Clear." } });
+  await s.triage({ item: ITEM });
+  assert.equal((await read()).status, 404);
+
+  const fixed = await s.triage({ item: ITEM, context: "Recommend: deny\nNo." });
+  assert.equal(JSON.parse(fixed.text).confidence, null);
+  r = await read();
+  assert.equal(JSON.parse(r.text).confidence, null);
+  assert.equal(JSON.parse(r.text).model, null);
+
+  const bad = 'item: must be one "<slug>: <feature>" line of at most 2000 characters';
+  for (const path of [
+    "/api/backlog/triage",
+    "/api/backlog/triage?item=" + encodeURIComponent("no slug here"),
+    "/api/backlog/triage?item=" + encodeURIComponent("sample: " + "x".repeat(2000)),
+  ]) {
+    r = await s.send("GET", path);
+    assert.equal(r.status, 400, path);
+    assert.equal(r.text, bad);
+  }
+  assert.equal((await s.send("DELETE", "/api/backlog/triage")).status, 404);
+});
+
+test("a queue verdict or triage off writes no record", async () => {
   const s = setup();
-  assert.equal((await s.send("GET", "/api/backlog/triage")).status, 404);
+  assert.equal((await s.triage({ item: ITEM })).status, 200);
+  await s.save("projects/sample", on());
+  await s.triage({ item: ITEM });
+  assert.equal(
+    [...s.bucket.objects.keys()].filter((k) => k.startsWith("backlog-triage/")).length,
+    0,
+  );
 });
 
 test("the longest allowed item and context in 4-byte characters fit under the body cap", async () => {
