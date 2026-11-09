@@ -228,6 +228,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .job-option .meta, #job-count { color: var(--muted); font-size: 12px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   .dot.ok { background: var(--ok); }
+  .dot.ok.polling { background: transparent; box-shadow: inset 0 0 0 2px var(--ok); }
   .dot.err { background: var(--alert); }
   .conn-banner { position: sticky; top: 0; z-index: 20; width: 100%; padding: 8px 14px; background: var(--alert-bg); color: var(--fg); border-bottom: 1px solid var(--line); }
   .board {
@@ -441,7 +442,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     <button class="btn icon" id="job-jump" aria-label="Jump to job" title="Jump to job (J, /, ⌘K or Ctrl+K)" aria-keyshortcuts="j / Meta+K Control+K"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 4 4"/></svg></button>
     <a class="btn icon" id="settings-link" href="#/settings" aria-label="Settings" title="Settings (S)" aria-keyshortcuts="s"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="4.5"/><path class="teeth" d="M8 1v3M8 12v3M1 8h3M12 8h3M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12"/></svg></a>
   </div>
-  <div class="status"><span id="updated">loading</span><span class="dot" id="dot" title="connection"></span></div>
+  <div class="status"><span id="updated">loading</span><span class="dot" id="dot" role="img" aria-label="connection" title="connection"></span></div>
 </header>
 <main class="board" id="board"></main>
 <aside class="detail" id="detail" hidden>
@@ -643,7 +644,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="display-theme">Theme<select id="display-theme"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <label for="display-density">Density<select id="display-density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
       <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="3">Every 3 seconds</option><option value="10">Every 10 seconds</option><option value="30">Every 30 seconds</option></select></label>
-      <p class="muted" id="display-poll-help">The board updates live while this tab is open. If the live connection drops, it refreshes on this schedule until it reconnects. A hidden tab stays live only while notifications are on.</p>
+      <p class="muted" id="display-poll-help">The board updates live while this tab is visible. If the live connection drops, it refreshes on this schedule until it reconnects. A hidden tab stays live only while notifications are on.</p>
       <label for="display-filter">Show jobs from<select id="display-filter"></select></label>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
@@ -878,7 +879,7 @@ function ago(iso) {
 }
 
 const CONNECTION = {
-  online: ['', 'dot ok', 'connected'],
+  online: ['', 'dot ok', 'Live: updates arrive as they happen'],
   offline: ["You're offline. Showing the board saved on this device. Edits won't save until you reconnect.", 'dot err', 'offline'],
   signin: ['Your sign-in has expired.', 'dot err', 'sign-in expired'],
 };
@@ -887,9 +888,13 @@ function setConnection(state) {
   $('conn-banner').hidden = state === 'online';
   $('conn-text').textContent = text;
   $('conn-signin').hidden = state !== 'signin';
-  $('dot').className = dot;
-  $('dot').title = title;
+  const polling = state === 'online' && !liveOpen;
+  const label = polling ? 'Polling every ' + pollSeconds + ' seconds until live updates reconnect' : title;
+  $('dot').className = polling ? dot + ' polling' : dot;
+  $('dot').title = label;
+  $('dot').setAttribute('aria-label', label);
 }
+function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
 $('conn-signin').addEventListener('click', () => location.reload());
 window.addEventListener('offline', () => { setConnection('offline'); syncLive(); schedulePoll(); });
 window.addEventListener('online', async () => {
@@ -901,6 +906,7 @@ window.addEventListener('online', async () => {
 let loaded = false;
 let boardReadVersion = 0;
 let boardUpdated = '';
+let boardEtag = '';
 
 // The live socket can leave the board unread for hours, so a timer beside the live
 // client redraws this age label on its own.
@@ -910,7 +916,7 @@ function drawUpdated() {
   $('updated').title = boardUpdated;
 }
 
-async function poll() {
+async function poll({ ifChanged = false } = {}) {
   const version = ++boardReadVersion;
   try {
     // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
@@ -925,9 +931,16 @@ async function poll() {
     if (!r.ok && r.status !== 404) throw new Error(r.status);
     const data = r.ok ? await r.json() : { jobs: [] };
     if (version !== boardReadVersion) return false;
+    const etag = r.ok ? r.headers.get('ETag') || '' : '';
+    // A socket open only catches writes made while it was down, so an unchanged board is not redrawn.
+    if (ifChanged && loaded && etag && etag === boardEtag) {
+      setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
+      return true;
+    }
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
     setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
     boardUpdated = data.updated || '';
+    boardEtag = etag;
     loaded = true;
     drawUpdated();
     renderBoard();
@@ -941,6 +954,7 @@ async function poll() {
     if (version !== boardReadVersion) return false;
     $('dot').className = 'dot err';
     $('dot').title = 'board.json unreachable';
+    $('dot').setAttribute('aria-label', 'board.json unreachable');
     if (!loaded) $('updated').textContent = "can't reach the factory";
     if (e instanceof TypeError) setConnection('offline');
     return false;
@@ -5347,6 +5361,7 @@ function schedulePoll() {
   clearInterval(pollTimer);
   const ms = !pollStarted || liveOpen ? 0 : !document.hidden ? pollSeconds * 1000 : notifyActive() ? 30000 : 0;
   pollTimer = ms ? setInterval(poll, ms) : 0;
+  drawLiveDot();
 }
 document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); syncLive(); schedulePoll(); });
 // Live board events: the Worker sends {"type":"changed","key":...} after each board or
@@ -5366,7 +5381,7 @@ function openLive() {
     liveOpen = true;
     liveRetries = 0;
     schedulePoll();
-    poll();
+    poll({ ifChanged: true });
   });
   ws.addEventListener('message', () => { if (ws === liveSocket) poll(); });
   ws.addEventListener('close', () => {
