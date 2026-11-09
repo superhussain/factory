@@ -103,6 +103,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog textarea { resize: vertical; min-height: 140px; }
   dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
   .detail > .err { margin: 12px 20px; flex: none; }
+  .detail > .copy-status { margin: 12px 20px; flex: none; font-size: 12px; color: var(--muted); }
+  .detail > .copy-status:empty { display: none; }
   #idea-image-list, .gallery { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
   #idea-image-list li { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
   #idea-image-list li.bad { border-color: var(--alert); color: var(--alert); }
@@ -460,12 +462,14 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-follow-tracer" role="menuitem" tabindex="-1" hidden>Follow in Tracer</button>
         <button class="btn" id="d-move-host" role="menuitem" tabindex="-1" hidden>Move to another host</button>
         <button class="btn" id="d-prioritize" role="menuitem" tabindex="-1" hidden>Prioritize</button>
+        <button class="btn" id="d-copy-link" role="menuitem" tabindex="-1" hidden>Copy link</button>
       </div>
     </div>
     <button class="close" id="d-close" aria-label="Close">&times;</button>
   </div>
   <p class="err" id="d-edit-idea-err" role="alert" hidden></p>
   <p class="err" id="d-prioritize-err" role="alert" hidden></p>
+  <p class="copy-status" id="d-copy-status" role="status"></p>
   <div class="assignment" id="d-assignment" hidden>
     <p class="muted" id="d-assign-help"></p>
     <label>Project <select class="filter" id="d-project" aria-describedby="d-assign-help"></select></label>
