@@ -370,6 +370,41 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await page.close();
     });
 
+    await t.test("hosts H7 paused pill and Confirm copy", async () => {
+      const paused = HOSTS.map((h) =>
+        h.id === "new-box" || h.id === "old-laptop" ? { ...h, max_inflight: 0 } : h,
+      );
+      const page = await open("#/settings/hosts", paused);
+      page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (request.method() === "PATCH" && path === "/api/hosts/new-box")
+          return request.respond(
+            {
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({ ...paused[1], state: "active" }),
+            },
+            1,
+          );
+      });
+      await page.click("#hosts-load");
+      await page.waitForFunction(() => document.querySelectorAll(".host-card").length === 5, wait);
+      const pills = (id) =>
+        page.$$eval(`.host-card[data-id="${id}"] .host-badge`, (els) =>
+          els.map((el) => el.textContent),
+        );
+      assert.deepEqual(await pills("new-box"), ["Paired, not confirmed", "Paused"]);
+      assert.deepEqual(await pills("old-laptop"), ["Retired"]);
+      assert.deepEqual(await pills("studio-mac"), ["Active"]);
+      await page.click('[aria-label="Confirm New box"]');
+      await waitCardMessage(
+        page,
+        "new-box",
+        "Confirmed. It stays paused while Max in flight is 0.",
+      );
+      await page.close();
+    });
+
     await t.test("hosts H5 pickup checkboxes and the save-time check", async (st) => {
       const current = await fetch(origin + "/api/pipeline/projects/sample");
       const put = await fetch(origin + "/api/pipeline/projects/sample", {
