@@ -328,7 +328,8 @@ One-time operator setup, after you complete steps 1–6 for the instance:
    then `gh api -X POST repos/<owner>/<repo>/environments/production/deployment-branch-policies -f name=main`).
    Do this before any deploy runs: a run that finds no `production`
    environment makes GitHub create one with no branch restriction.
-3. Add the token as a `production` environment secret limited to `main`
+3. Add the token as a secret of the `production` environment. The branch
+   policy from step 2 keeps it to `main`
    (`gh secret set CLOUDFLARE_API_TOKEN --env production -R <owner>/<repo>`).
    The deploy job in `deploy-main.yml` runs in that environment.
 4. Add the repository variable `FACTORY_DEPLOY_PROFILE` holding the full profile
