@@ -302,7 +302,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card-wrap > .pr-link { position: absolute; top: 13px; right: 16px; }
   .detail-head .links { flex: none; display: flex; gap: 16px; }
   .detail-head .btn { flex: none; }
-  .detail-head .idea-actions { display: contents; }
+  .job-actions { position: relative; flex: none; }
+  .job-actions-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; min-width: 200px; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .job-actions-menu[hidden] { display: none; }
+  .job-actions-menu .btn { border: 0; text-align: left; border-radius: 6px; padding: 8px 12px; }
+  .job-actions-menu .btn:hover, .job-actions-menu .btn:focus-visible { background: var(--line); }
   .detail-head .pr-link { position: relative; font-size: 12px; margin-top: 3px; }
   .detail-head .pr-link[hidden] { display: none; }
   .rounds { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
@@ -410,12 +414,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     /* The links drop below the title, so they never squeeze it or push the close button off screen. */
     .detail-head { flex-wrap: wrap; row-gap: 0; }
     .detail-head .titles { flex: 1 1 0; min-width: 0; }
-    .detail-head .idea-actions { display: flex; flex: none; flex-direction: column; gap: 8px; }
-    .detail-head .idea-actions:not(:has(> button:not([hidden]))) { display: none; }
     .detail-head .close { flex: none; }
     .detail-head .links { order: 3; flex-basis: 100%; }
     .detail-head .pr-link { margin-top: 8px; }
-    .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact .detail-head .links, .detail.compact #d-assignment, .detail.compact #d-move-host { display: none; }
+    .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
     .doc { padding: 16px 16px 40px; }
     .pager > .doc, .pager > .gallery { touch-action: pan-y pinch-zoom; }
   }
@@ -450,11 +452,14 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <a class="pr-link" id="d-paseo-web" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-tracer" target="_blank" rel="noopener noreferrer" hidden>Tracer</a>
     </div>
-    <div class="idea-actions">
-      <button class="btn" id="d-edit-idea" hidden>Edit idea</button>
-      <button class="btn" id="d-discard" hidden>Discard idea</button>
-      <button class="btn" id="d-follow-tracer" hidden>Follow in Tracer</button>
-      <button class="btn icon" id="d-move-host" aria-label="Move to another host" title="Move to another host" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2 5h10l-3-3M14 11H4l3 3"/></svg></button>
+    <div class="job-actions" id="d-actions-wrap">
+      <button class="btn icon" id="d-actions" aria-label="Job actions" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="d-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>
+      <div class="job-actions-menu" id="d-actions-menu" role="menu" aria-label="Job actions" hidden>
+        <button class="btn" id="d-edit-idea" role="menuitem" tabindex="-1" hidden>Edit idea</button>
+        <button class="btn" id="d-discard" role="menuitem" tabindex="-1" hidden>Discard idea</button>
+        <button class="btn" id="d-follow-tracer" role="menuitem" tabindex="-1" hidden>Follow in Tracer</button>
+        <button class="btn" id="d-move-host" role="menuitem" tabindex="-1" hidden>Move to another host</button>
+      </div>
     </div>
     <button class="close" id="d-close" aria-label="Close">&times;</button>
   </div>
@@ -2740,6 +2745,7 @@ async function openJob(id) {
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
   if (first) {
     drawerVersion++;
+    closeJobActions(false);
     $('d-edit-idea-err').hidden = true;
     $('d-project').value = '';
     $('d-project').disabled = !projects?.size;
@@ -3401,6 +3407,7 @@ function closeDetail() {
   openId = null;
   openBacklogRaw = null;
   $('detail').hidden = true;
+  closeJobActions(false);
   syncIdeaEditor();
   renderBoard();
   if (raw !== null) focusBacklogControl(raw);
@@ -4087,7 +4094,7 @@ let ideaEditorLoad = null;
 
 async function openIdeaEditor() {
   if (ideaEditor || ideaEditorLoad || !canEditIdea(jobs.find((j) => j.id === openId))) return;
-  const loading = { id: openId, version: drawerVersion, read: ++boardReadVersion, opener: $('d-edit-idea') };
+  const loading = { id: openId, version: drawerVersion, read: ++boardReadVersion, opener: $('d-actions') };
   ideaEditorLoad = loading;
   const err = $('d-edit-idea-err');
   let message = 'Could not load the idea. Try again.';
@@ -4122,9 +4129,41 @@ async function openIdeaEditor() {
   }
 }
 
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host'];
+
+function enabledJobActions() {
+  return JOB_ACTIONS.map($).filter((el) => !el.hidden && !el.disabled);
+}
+
+function openJobActions(focus) {
+  $('d-actions').setAttribute('aria-expanded', 'true');
+  $('d-actions-menu').hidden = false;
+  const items = enabledJobActions();
+  const item = focus === 'last' ? items[items.length - 1] : items[0];
+  if (item) item.focus();
+}
+
+function closeJobActions(refocus) {
+  $('d-actions').setAttribute('aria-expanded', 'false');
+  $('d-actions-menu').hidden = true;
+  if (refocus) $('d-actions').focus();
+}
+
+function syncJobActions() {
+  // A job that left the board has nothing to act on, so its stale items go too.
+  if (!jobs.some((j) => j.id === openId)) for (const id of JOB_ACTIONS) $(id).hidden = true;
+  const any = JOB_ACTIONS.some((id) => !$(id).hidden);
+  $('d-actions-wrap').hidden = !any;
+  if (any) return;
+  const focused = document.activeElement;
+  closeJobActions(false);
+  if (focused === $('d-actions') || JOB_ACTIONS.some((id) => $(id) === focused)) $('d-close').focus();
+}
+
 function syncIdeaEditor() {
   $('d-edit-idea').hidden = !canEditIdea(jobs.find((j) => j.id === openId));
   $('d-edit-idea').disabled = !!ideaEditorLoad;
+  syncJobActions();
   if (!ideaEditor) return;
   const text = $('edit-idea-text');
   const j = jobs.find((j) => j.id === ideaEditor.id);
@@ -4179,7 +4218,7 @@ let moveHost = null;
 async function openMoveHost() {
   const j = jobs.find((x) => x.id === openId);
   if (moveHost || !j) return;
-  moveHost = { id: j.id, opener: $('d-move-host') };
+  moveHost = { id: j.id, opener: $('d-actions') };
   const select = $('move-host-select');
   const err = $('move-host-err');
   const empty = $('move-host-empty');
@@ -4247,6 +4286,33 @@ $('move-host-form').addEventListener('submit', async (e) => {
 });
 
 $('d-edit-idea').addEventListener('click', openIdeaEditor);
+$('d-actions').addEventListener('click', () => {
+  if ($('d-actions-menu').hidden) openJobActions('first'); else closeJobActions(true);
+});
+$('d-actions').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();
+  openJobActions(e.key === 'ArrowDown' ? 'first' : 'last');
+});
+$('d-actions-menu').addEventListener('click', () => closeJobActions(true), true);
+$('d-actions-menu').addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  const items = enabledJobActions();
+  const at = items.indexOf(document.activeElement);
+  const to = { ArrowDown: items[(at + 1) % items.length], ArrowUp: items[(at - 1 + items.length) % items.length], Home: items[0], End: items[items.length - 1] }[e.key];
+  if (to) {
+    e.preventDefault();
+    to.focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeJobActions(true);
+  } else if (e.key === 'Tab') {
+    closeJobActions(true);
+  }
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!$('d-actions-menu').hidden && !$('d-actions-wrap').contains(e.target)) closeJobActions(false);
+});
 $('edit-idea-cancel').addEventListener('click', closeIdeaEditor);
 $('edit-idea-dlg').addEventListener('cancel', (e) => { e.preventDefault(); closeIdeaEditor(); });
 $('edit-idea-text').addEventListener('input', () => {
@@ -4641,10 +4707,11 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;
+  closeJobActions(false);
   syncIdeaEditor();
   $('d-tabs').innerHTML = '';
   $('d-tabs').hidden = true;

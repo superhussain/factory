@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
+import { openJobActions } from "../support/board-ready.cjs";
 import {
   withBrowserFixture,
   seedProject,
@@ -76,8 +77,6 @@ const hostLine = (page, id) =>
   page.$eval(`.card[data-id="${id}"] .host`, (el) => el.textContent).catch(() => null);
 const options = (page) =>
   page.$$eval("#move-host-select option", (os) => os.map((o) => o.textContent));
-const visible = (page, selector) =>
-  page.$eval(selector, (el) => el.checkVisibility({ checkVisibilityCSS: true }));
 
 test("move host", { timeout: 240000 }, async (t) => {
   await prepareAssets();
@@ -139,7 +138,7 @@ test("move host", { timeout: 240000 }, async (t) => {
             wait,
             id,
           );
-          shown[id] = await visible(page, "#d-move-host");
+          shown[id] = await page.$eval("#d-move-host", (el) => !el.hidden);
         }
         assert.deepEqual(shown, {
           "042-sample-export": true,
@@ -156,12 +155,13 @@ test("move host", { timeout: 240000 }, async (t) => {
           wait,
         );
         assert.equal(
-          await page.$eval("#d-move-host", (el) => el.getAttribute("aria-label")),
+          await page.$eval("#d-move-host", (el) => el.textContent),
           "Move to another host",
         );
       });
 
       await t.test(`dialog lists eligible hosts ${width}`, async () => {
+        await openJobActions(page);
         await page.click("#d-move-host");
         await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
         assert.equal(
@@ -185,6 +185,7 @@ test("move host", { timeout: 240000 }, async (t) => {
           () => document.getElementById("d-title").textContent === "No host",
           wait,
         );
+        await openJobActions(page);
         await page.click("#d-move-host");
         await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
         assert.equal(
@@ -203,6 +204,7 @@ test("move host", { timeout: 240000 }, async (t) => {
           () => document.getElementById("d-title").textContent === "Export the sample report",
           wait,
         );
+        await openJobActions(page);
         await page.click("#d-move-host");
         await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
         assert.equal(
@@ -213,6 +215,7 @@ test("move host", { timeout: 240000 }, async (t) => {
         await page.click("#move-host-cancel");
 
         effectiveFails = true;
+        await openJobActions(page);
         await page.click("#d-move-host");
         await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
         assert.equal(
@@ -242,6 +245,7 @@ test("move host", { timeout: 240000 }, async (t) => {
               document.querySelector("#d-move-host") && !document.getElementById("detail").hidden,
             wait,
           );
+          await openJobActions(page);
           await page.click("#d-move-host");
           await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
           assert.equal(
@@ -257,6 +261,7 @@ test("move host", { timeout: 240000 }, async (t) => {
       );
 
       await t.test(`Move job writes move and drops the claim ${width}`, async () => {
+        await openJobActions(page);
         await page.click("#d-move-host");
         await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
         await page.click("#move-host-save");
