@@ -272,6 +272,18 @@ async function offline() {
   );
   assert.equal(create.jobs[0].title, api.ideaTitle(draft));
   assert.equal(create.jobs[0].idea, draft);
+  assert.equal("refs" in create.jobs[0], false);
+  const followUp = {
+    project: "sample",
+    text: "Export the sample report as CSV",
+    images: [],
+    capture_id: "07500000-0000-4000-8000-000000000002",
+    refs: [{ id: "042-sample-export", kind: "follow-up-of" }],
+  };
+  const followUpId = api.addIdea(create, followUp, now);
+  assert.deepEqual(create.jobs.at(-1).refs, [{ id: "042-sample-export", kind: "follow-up-of" }]);
+  assert.equal(api.addIdea(create, followUp, now), followUpId);
+  assert.equal(create.jobs.length, 2);
   for (const mutate of [
     (b) => {
       b.jobs = [];
