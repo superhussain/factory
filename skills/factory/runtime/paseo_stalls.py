@@ -3,6 +3,8 @@
 
   paseo_stalls.py list            print {"version": 1, "stalls": [...]} as JSON on stdout
   paseo_stalls.py archive <id>    archive one session after re-checking that it is still stalled
+  paseo_stalls.py archive <id> --force
+                                  archive one session without the stall check; a no-op when archived
 
 Stdlib only, Python 3.8+. Exit codes: 0 ok, 1 failure, 2 usage, 3 archive refused because
 the session is no longer stalled. It never imports factory. See references/pickup.md.
@@ -32,7 +34,7 @@ LIMIT_RE = re.compile(
 )
 ID_RE = re.compile(r"[0-9a-fA-F][0-9a-fA-F-]{7,63}")
 UTC = timezone.utc
-USAGE = "usage: paseo_stalls.py list | archive <id>"
+USAGE = "usage: paseo_stalls.py list | archive <id> [--force]"
 
 
 def parse_iso(text):
@@ -154,11 +156,28 @@ def archive(agent_id):
         sys.exit(1)
 
 
+def archive_force(agent_id):
+    """Archive a session whatever it is doing, unless it is already archived."""
+    code, raw = call(["inspect", agent_id, "--json"])
+    try:
+        info = json.loads(raw) if code == 0 else None
+    except ValueError:
+        info = None
+    if isinstance(info, dict) and info.get("Archived") is True:
+        return
+    code, _ = call(["archive", "--force", agent_id])
+    if code != 0:
+        print(f"paseo_stalls.py: paseo archive exit {code}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main(argv):
     if len(argv) == 1 and argv[0] == "list":
         list_stalls()
     elif len(argv) == 2 and argv[0] == "archive" and ID_RE.fullmatch(argv[1]):
         archive(argv[1])
+    elif len(argv) == 3 and argv[0] == "archive" and ID_RE.fullmatch(argv[1]) and argv[2] == "--force":
+        archive_force(argv[1])
     else:
         print(USAGE, file=sys.stderr)
         sys.exit(2)
