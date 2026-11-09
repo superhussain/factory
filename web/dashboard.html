@@ -460,12 +460,15 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-follow-tracer" role="menuitem" tabindex="-1" hidden>Follow in Tracer</button>
         <button class="btn" id="d-move-host" role="menuitem" tabindex="-1" hidden>Move to another host</button>
         <button class="btn" id="d-prioritize" role="menuitem" tabindex="-1" hidden>Prioritize</button>
+        <button class="btn" id="d-pause" role="menuitem" tabindex="-1" hidden>Pause pickup</button>
+        <button class="btn" id="d-resume" role="menuitem" tabindex="-1" hidden>Resume pickup</button>
       </div>
     </div>
     <button class="close" id="d-close" aria-label="Close">&times;</button>
   </div>
   <p class="err" id="d-edit-idea-err" role="alert" hidden></p>
   <p class="err" id="d-prioritize-err" role="alert" hidden></p>
+  <p class="err" id="d-pause-err" role="alert" hidden></p>
   <div class="assignment" id="d-assignment" hidden>
     <p class="muted" id="d-assign-help"></p>
     <label>Project <select class="filter" id="d-project" aria-describedby="d-assign-help"></select></label>
@@ -1043,7 +1046,7 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move)].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused)].join('|');
 }
 
 // Where a job runs, from the board's claim and the dashboard's move. A move whose old host has not
@@ -1080,7 +1083,8 @@ function card(j, inNeeds) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '">' +
-    '<div class="id">' + esc(j.id) + (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') + '</div>' +
+    '<div class="id">' + esc(j.id) + (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
+      (j.paused?.at ? '<span class="chip">Paused</span>' : '') + '</div>' +
     '<div class="proj">' + esc(projectName(j)) + '</div>' +
     '<div class="title">' + esc(j.title || j.id) + '</div>' +
     (j.stage === 'idea' && !j.project ? '<div class="idea-text">Assign a project before starting.</div>' : '') +
@@ -2749,13 +2753,16 @@ async function openJob(id) {
   $('d-meta').textContent = projectName(j) + ' · ' + j.id + ' · ' + j.stage +
     (ideaOnly(j) ? '' : ' · round ' + (j.round ?? 0) + ' · ' + (j.branch || '')) +
     (hostLine(j) ? ' · ' + hostLine(j) : '') +
-    (j.priority?.at ? ' · prioritized' : '');
+    (j.priority?.at ? ' · prioritized' : '') +
+    (j.paused?.at ? ' · paused' : '');
   const pipeline = pipelineLabel(j);
   $('d-pipeline').textContent = pipeline;
   $('d-pipeline').hidden = !pipeline;
   $('d-discard').hidden = j.stage !== 'idea';
   $('d-move-host').hidden = !j.project || !MOVE_STAGES.includes(j.stage);
   $('d-prioritize').hidden = !j.project || !PRIORITY_STAGES.includes(j.stage) || !!j.priority;
+  $('d-pause').hidden = !j.project || TERMINAL.includes(j.stage) || !!j.paused;
+  $('d-resume').hidden = !j.paused;
   const following = j.tracer?.follow === true;
   $('d-follow-tracer').hidden = !j.project || !(TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) || following || !!tracerLink(j);
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
@@ -2764,6 +2771,7 @@ async function openJob(id) {
     closeJobActions(false);
     $('d-edit-idea-err').hidden = true;
     $('d-prioritize-err').hidden = true;
+    $('d-pause-err').hidden = true;
     $('d-project').value = '';
     $('d-project').disabled = !projects?.size;
     $('d-assign').disabled = true;
@@ -4148,7 +4156,7 @@ async function openIdeaEditor() {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-pause', 'd-resume'];
 
 function enabledJobActions() {
   return JOB_ACTIONS.map($).filter((el) => !el.hidden && !el.disabled);
@@ -4250,6 +4258,29 @@ function prioritizeJob(board, id, now) {
   if (!j.project || !PRIORITY_STAGES.includes(j.stage)) return 'This job can no longer be prioritized.';
   if (j.priority) return 'unchanged';
   j.priority = { at: now };
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
+// factory.py pickup and stuck leave a paused job alone; a running session keeps running.
+// Each returns an error message, 'unchanged', or '' once the board is changed.
+function pauseJob(board, id, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (!j.project || TERMINAL.includes(j.stage)) return 'This job can no longer be paused.';
+  if (j.paused) return 'unchanged';
+  j.paused = { at: now };
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
+function resumeJob(board, id, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (!j.paused) return 'unchanged';
+  delete j.paused;
   j.updated = now;
   board.updated = now;
   return '';
@@ -4459,6 +4490,50 @@ $('d-prioritize').addEventListener('click', async () => {
     }
   } finally {
     $('d-prioritize').disabled = false;
+  }
+});
+$('d-pause').addEventListener('click', async () => {
+  const id = openId;
+  const version = drawerVersion;
+  const err = $('d-pause-err');
+  err.hidden = true;
+  $('d-pause').disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = pauseJob(board, id, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message) throw new Error(message);
+    });
+    await poll();
+  } catch (x) {
+    if (version === drawerVersion) {
+      err.textContent = String(x.message || x);
+      err.hidden = false;
+    }
+  } finally {
+    $('d-pause').disabled = false;
+  }
+});
+$('d-resume').addEventListener('click', async () => {
+  const id = openId;
+  const version = drawerVersion;
+  const err = $('d-pause-err');
+  err.hidden = true;
+  $('d-resume').disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = resumeJob(board, id, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message) throw new Error(message);
+    });
+    await poll();
+  } catch (x) {
+    if (version === drawerVersion) {
+      err.textContent = String(x.message || x);
+      err.hidden = false;
+    }
+  } finally {
+    $('d-resume').disabled = false;
   }
 });
 $('idea-cancel').addEventListener('click', () => { if (!locked()) $('idea-dlg').close(); });
@@ -4771,7 +4846,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-pause', 'd-resume', 'd-pause-err', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;
