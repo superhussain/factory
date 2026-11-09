@@ -182,6 +182,13 @@ changes nothing. Then install one timer per host.
 - When the job's session on this host was claimed before `priority.at` and its Paseo agent is not closed, `pickup` sends the agent one fixed nudge with `paseo send --no-wait`, then sets `priority.nudged`. A failed send is printed on stderr and retried next run.
 - Only the dashboard and `pickup` write `priority`. `board` refuses a `priority` patch with exit 2.
 
+## Pausing a job
+
+- The dashboard's Pause pickup item sets `paused = {at}` on a job with a project that is not merged or closed. Resume pickup deletes it.
+- `pickup` does not claim, take over or nudge a paused job, and its dry run prints `skip <id> <project>: paused` or `skip stall <agent> <id>: paused`. `stuck` does not resume it.
+- A session already running on a paused job keeps running. Pausing stops new starts only.
+- Only the dashboard writes `paused`. `board` refuses a `paused` patch with exit 2.
+
 ## Logs and limits
 
 Each launch writes `<home>/logs/pickup/<id>-<tag>.log` (mode 0600, one file per

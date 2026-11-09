@@ -1276,6 +1276,16 @@ class MoveFenceTest(IsolatedTestCase):
         self.assertIn("only the dashboard and factory.py pickup set priority", err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
+    def test_board_refuses_a_paused_patch(self):
+        before = self.store["/api/board"]
+        err = io.StringIO()
+        with patch.object(factory.sys, "stdin", io.StringIO('{"paused": {"at": "2026-01-02T12:00:00Z"}}')), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            factory.board(self.home, "001-test")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("only the dashboard sets paused", err.getvalue())
+        self.assertEqual(self.store["/api/board"], before)
+
     def test_stuck_leaves_an_unclaimed_move_to_its_target(self):
         (self.home / "paths.md").write_text(f"---\nsample: {self.home / 'sample'}\n---\n")
         patch.object(factory, "paseo_server", return_value="").start()
@@ -1286,6 +1296,20 @@ class MoveFenceTest(IsolatedTestCase):
         self.assertEqual(raised.exception.code, 3)
         self.assertEqual(self.store["/api/board"], before)
         self.moved(claimed="2026-11-08T10:05:00Z")
+        factory.stuck()
+        self.assertEqual([j["id"] for j in json.loads(self.output.getvalue())], ["001-test"])
+
+    def test_stuck_skips_a_stale_paused_job(self):
+        (self.home / "paths.md").write_text(f"---\nsample: {self.home / 'sample'}\n---\n")
+        patch.object(factory, "paseo_server", return_value="").start()
+        stale = dict(self.job, claim=dict(self.job["claim"], seen="2020-01-01T00:00:00Z"))
+        self.save(dict(stale, paused={"at": "2026-01-02T12:00:00Z"}))
+        before = self.store["/api/board"]
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            factory.stuck()
+        self.assertEqual(raised.exception.code, 3)
+        self.assertEqual(self.store["/api/board"], before)
+        self.save(stale)
         factory.stuck()
         self.assertEqual([j["id"] for j in json.loads(self.output.getvalue())], ["001-test"])
 
