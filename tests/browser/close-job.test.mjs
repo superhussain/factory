@@ -1,0 +1,223 @@
+// The drawer's Close job item and dialog: which jobs show it, the reason check, the board write,
+// the card chip, and a job that left the board, against one owned local Worker, at mobile and
+// desktop width. Also captures the review images.
+import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
+import test from "node:test";
+import { prepareAssets } from "../../tools/assets.mjs";
+import { openJobActions } from "../support/board-ready.cjs";
+import {
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+  controlBoardPolling,
+} from "../support/browser-server.mjs";
+
+const SHOTS = new URL("../../.context/shots/", import.meta.url).pathname;
+const wait = { polling: 50 };
+const NOW = "2026-01-02T12:00:00Z";
+const REASON = "Duplicate of 041-sample-report";
+const JOBS = [
+  {
+    id: "100-sample-idea",
+    project: "sample",
+    title: "Sample idea",
+    stage: "idea",
+    idea: "Sample idea",
+    updated: "2026-01-01T00:00:00Z",
+  },
+  {
+    id: "042-sample-export",
+    project: "sample",
+    title: "Export the sample report",
+    stage: "build",
+    branch: "factory/042-sample-export",
+    round: 1,
+    updated: "2026-01-01T00:00:00Z",
+    claim: { device: "host-a", session: "a1b2c3", since: "2026-01-01T10:00:00Z" },
+  },
+  { id: "044-closed", project: "sample", title: "Closed job", stage: "closed", updated: NOW },
+  { id: "045-no-project", title: "No project", stage: "build", updated: NOW },
+  {
+    id: "046-sample-pr",
+    project: "sample",
+    title: "Sample pull request",
+    stage: "pr-open",
+    branch: "factory/046-sample-pr",
+    round: 1,
+    updated: NOW,
+  },
+];
+const VIEWPORTS = [
+  { width: 390, height: 844, isMobile: true, hasTouch: true, theme: "dark" },
+  { width: 1280, height: 900, theme: "light" },
+];
+const CARD = '.card[data-id="042-sample-export"]';
+
+const freezeClock = (page) =>
+  page.evaluateOnNewDocument(() => {
+    const RealDate = Date;
+    window.Date = class extends RealDate {
+      constructor(...args) {
+        super(...(args.length ? args : ["2026-01-02T12:00:00Z"]));
+      }
+      static now() {
+        return new RealDate("2026-01-02T12:00:00Z").getTime();
+      }
+    };
+  });
+const openDrawer = async (page, id) => {
+  await page.evaluate((i) => (location.hash = "#" + i), id);
+  await page.waitForFunction(
+    (i) => document.querySelector("#d-meta")?.textContent.includes(i),
+    wait,
+    id,
+  );
+};
+const boardText = async (origin) => (await fetch(origin + "/api/board")).text();
+const boardJob = async (origin, id) =>
+  JSON.parse(await boardText(origin)).jobs.find((j) => j.id === id);
+const shown = (page, selector) => page.$eval(selector, (el) => !el.hidden);
+const chip = (page) =>
+  page.$eval(CARD + " .id", (el) => [...el.querySelectorAll(".chip")].map((c) => c.textContent));
+const errText = (page) => page.$eval("#close-job-err", (el) => (el.hidden ? null : el.textContent));
+// The drawer head plus the open menu, which hangs below it.
+const headAndMenu = (page) =>
+  page.evaluate(() => {
+    const boxes = [".detail-head", "#d-actions-menu:not([hidden])"]
+      .map((s) => document.querySelector(s)?.getBoundingClientRect())
+      .filter(Boolean);
+    const x = Math.min(...boxes.map((b) => b.left));
+    const y = Math.min(...boxes.map((b) => b.top));
+    return {
+      x,
+      y,
+      width: Math.max(...boxes.map((b) => b.right)) - x,
+      height: Math.max(...boxes.map((b) => b.bottom)) - y + 4,
+    };
+  });
+
+test("close job", { timeout: 240000 }, async (t) => {
+  await prepareAssets();
+  await mkdir(SHOTS, { recursive: true });
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    const errors = [];
+    for (const { theme, ...viewport } of VIEWPORTS) {
+      const { width } = viewport;
+      await seedBoard(origin, JOBS);
+      const context = await browser.createBrowserContext();
+      const page = await context.newPage();
+      await page.setViewport(viewport);
+      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: theme }]);
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await freezeClock(page);
+      await controlBoardPolling(page);
+      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(CARD);
+      const activate = (selector) =>
+        viewport.hasTouch ? page.tap(selector) : page.click(selector);
+      const openDialog = async (id) => {
+        await openDrawer(page, id);
+        await openJobActions(page);
+        await activate("#d-close-job");
+        await page.waitForSelector("#close-job-dlg[open]");
+      };
+
+      await t.test(`Close job only for closable jobs ${width}`, async () => {
+        const items = {};
+        for (const { id } of JOBS) {
+          await openDrawer(page, id);
+          items[id] = await shown(page, "#d-close-job");
+        }
+        assert.deepEqual(items, {
+          "100-sample-idea": false,
+          "042-sample-export": true,
+          "044-closed": false,
+          "045-no-project": false,
+          "046-sample-pr": true,
+        });
+      });
+
+      await t.test(`an empty reason writes nothing ${width}`, async () => {
+        await openDrawer(page, "042-sample-export");
+        await openJobActions(page);
+        if (width === 390)
+          await page.screenshot({
+            path: `${SHOTS}after-menu-390.png`,
+            clip: await headAndMenu(page),
+          });
+        await activate("#d-close-job");
+        await page.waitForSelector("#close-job-dlg[open]");
+        assert.equal(
+          await page.$eval("#close-job-help", (el) => el.textContent),
+          "042-sample-export stops at build. The next pickup run writes decision.md with your reason, " +
+            "then moves the job to Closed. If a session is running it, the close waits for that session to stop.",
+        );
+        assert.equal(await page.evaluate(() => document.activeElement.id), "close-job-reason");
+        const before = await boardText(origin);
+        await page.type("#close-job-reason", "   ");
+        await activate("#close-job-save");
+        await page.waitForFunction(() => !document.getElementById("close-job-err").hidden, wait);
+        assert.equal(await errText(page), "Enter a reason of 1 to 200 characters.");
+        assert.equal(await boardText(origin), before);
+        await activate("#close-job-cancel");
+        await page.waitForSelector("#close-job-dlg:not([open])");
+      });
+
+      await t.test(`a job that left the board writes nothing ${width}`, async () => {
+        await openDialog("046-sample-pr");
+        assert.equal(await errText(page), null);
+        await seedBoard(
+          origin,
+          JOBS.filter((j) => j.id !== "046-sample-pr"),
+        );
+        const before = await boardText(origin);
+        await page.type("#close-job-reason", REASON);
+        await activate("#close-job-save");
+        await page.waitForFunction(() => !document.getElementById("close-job-err").hidden, wait);
+        assert.equal(await errText(page), "This job is no longer on the board.");
+        assert.equal(await boardText(origin), before);
+        await activate("#close-job-cancel");
+        await page.waitForSelector("#close-job-dlg:not([open])");
+        await seedBoard(origin, JOBS);
+      });
+
+      await t.test(`a valid reason writes close ${width}`, async () => {
+        await openDialog("042-sample-export");
+        assert.equal(await page.$eval("#close-job-reason", (el) => el.value), "");
+        assert.equal(await errText(page), null);
+        // The desktop pass pads the reason to check that it is trimmed.
+        await page.type("#close-job-reason", width === 390 ? REASON : "  " + REASON + " ");
+        if (width === 390)
+          await (
+            await page.$("#close-job-dlg")
+          ).screenshot({ path: `${SHOTS}after-dialog-390.png` });
+        await activate("#close-job-save");
+        await page.waitForFunction(
+          () => document.getElementById("d-meta").textContent.endsWith(" · closing"),
+          wait,
+        );
+        assert.deepEqual((await boardJob(origin, "042-sample-export")).close, {
+          reason: REASON,
+          at: NOW,
+        });
+        assert.equal(await page.$eval("#close-job-dlg", (el) => el.open), false);
+        assert.equal(await page.evaluate(() => document.activeElement.id), "d-actions");
+        assert.deepEqual(await chip(page), ["Closing"]);
+        assert.equal(await shown(page, "#d-close-job"), false);
+        if (width === 1280) {
+          await page.click("#d-close");
+          await page.waitForSelector("#detail", { hidden: true });
+          await (await page.$(CARD)).screenshot({ path: `${SHOTS}after-card-1280.png` });
+        }
+      });
+      await context.close();
+    }
+    assert.deepEqual(errors, []);
+  });
+});
