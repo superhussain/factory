@@ -967,9 +967,106 @@ def backlog_add(item, context=None):
         return text + f"- [ ] {item}\n" + block, None
     cas(home, "/api/backlog", append)
     print(f"added {item}" + (" with context" if context else ""))
+    verdict = backlog_triage(home, item, context)
+    if verdict is None:
+        return
+    if verdict["decision"] == "queue":
+        queue_backlog_item(home, m.group(1), m.group(2), verdict)
+    elif verdict["confidence"] is None:
+        print(f"held {item} for review: {verdict['reason']}")
+    else:
+        print(f"held {item} for review: confidence {verdict['confidence']}% "
+              f"(threshold {verdict['threshold']}%): {verdict['reason']}")
 
 
-BACKLOG_SUFFIX = re.compile(r" \((?:rework-of|follow-up-of|sub-job-of) \w[\w.-]*\)$", re.ASCII)
+def triage_verdict(text):
+    """The Worker's triage reply, or None when it is not one."""
+    try:
+        reply = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(reply, dict) or reply.get("decision") not in ("off", "queue", "hold"):
+        return None
+    if reply["decision"] == "off":
+        return reply
+    confidence = reply.get("confidence")
+    ok = (type(reply.get("threshold")) is int and isinstance(reply.get("reason"), str) and reply["reason"]
+          and (type(confidence) is int or confidence is None and reply["decision"] == "hold")
+          and (reply.get("model") is None or isinstance(reply.get("model"), str)))
+    return reply if ok else None
+
+
+def backlog_triage(home, item, context):
+    """The Worker's verdict on a new backlog line, or None when triage is off, the Worker
+    predates it, or the call failed. A failure only warns: the line is already appended."""
+    body = json.dumps({"item": item, **({"context": context} if context else {})}, ensure_ascii=False)
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(captured):
+            status, _, text = api(home, "POST", "/api/backlog/triage", body, ok=(200, 400, 404, 409, 502, 503),
+                                  headers={"Content-Type": "application/json"})
+    except SystemExit:
+        status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
+    if status == 404:
+        return None
+    verdict = triage_verdict(text) if status == 200 else None
+    if verdict is None:
+        why = "malformed reply" if status == 200 else status
+        print(f"factory.py: backlog triage failed ({why}); the item waits in the backlog for review",
+              file=sys.stderr)
+        return None
+    return None if verdict["decision"] == "off" else verdict
+
+
+def queue_backlog_item(home, slug, feature, verdict):
+    """Queue a triaged line as an idea, as a dashboard Approve does: the board row first, so the
+    id exists before the line names it. A line that changed meanwhile drops the unclaimed row."""
+    item, feature = f"{slug}: {feature}", feature.rstrip()
+    raw = f"- [ ] {item}"
+    ref = BACKLOG_SUFFIX.search(feature)
+    text = feature[:ref.start()] if ref else feature
+    score = f"confidence {verdict['confidence']}% (threshold {verdict['threshold']}%)"
+    jobs = Path(home, "jobs")
+    local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
+
+    def add(board):
+        data = load_board(board)
+        job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug(text))
+        at = data["updated"] = now()
+        job = {"id": job_id, "project": slug, "title": text.strip()[:80], "stage": IDEA, "updated": at,
+               "idea": f"{text}\n\nQueued by backlog triage: {score}. {verdict['reason']}",
+               "backlog": {"line": raw, "decision": "approved", "at": at, "by": "triage",
+                           "triage": {k: verdict[k] for k in ("model", "confidence", "threshold", "reason")}}}
+        if ref:
+            job["refs"] = [{"id": ref.group(2), "kind": ref.group(1)}]
+        data["jobs"].append(job)
+        return dump_board(data), job_id
+    job_id = cas(home, "/api/board", add)
+
+    def mark(backlog):
+        lines = (backlog or "").split("\n")
+        for i, line in enumerate(lines):
+            if line.rstrip("\r") == raw:
+                lines[i] = f"- [x] {slug}: {feature} ({job_id})"
+                return "\n".join(lines), True
+        return None, False
+    if cas(home, "/api/backlog", mark):
+        print(f"queued {item} as {job_id}: {score}")
+        return
+
+    def drop(board):
+        data = load_board(board)
+        jobs = [j for j in data["jobs"]
+                if not (j.get("id") == job_id and j.get("stage") == IDEA and j.get("claim") is None)]
+        if len(jobs) == len(data["jobs"]):
+            return None, None
+        data["jobs"], data["updated"] = jobs, now()
+        return dump_board(data), None
+    cas(home, "/api/board", drop)
+    print(f"kept {item} in the backlog: its line changed before triage finished")
+
+
+BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$", re.ASCII)
 
 
 def backlog_held(text, done):
