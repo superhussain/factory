@@ -184,6 +184,35 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
             "archived": None, "reason": f"git status failed in {cwd}: exit 128"}, ""))
         self.assertNotIn("archive", [c[3] for c in self.calls() if len(c) > 3])
 
+    def git_raises(self, error):
+        cwd = str(self.root / "factory-042-dark-mode")
+        os.mkdir(cwd)
+        self.fixture(inspect={"Cwd": cwd},
+                     workspaces=[{"workspaceId": "wks_0a1b", "cwd": cwd, "isolation": "worktree"}])
+        real, seen = subprocess.run, {}
+
+        def fake(argv, *a, **k):
+            if argv[:2] == ["git", "-C"]:
+                seen.update(k)
+                raise error(argv)
+            return real(argv, *a, **k)
+
+        patch.object(factory.subprocess, "run", side_effect=fake).start()
+        return cwd, seen
+
+    def test_git_times_out(self):
+        cwd, seen = self.git_raises(lambda argv: subprocess.TimeoutExpired(argv, 20))
+        self.assertEqual(self.run_verb(), (0, {
+            "archived": None, "reason": f"git status failed in {cwd}: timed out after 20 s"}, ""))
+        self.assertEqual(seen["timeout"], 20)
+        self.assertNotIn("archive", [c[3] for c in self.calls() if len(c) > 3])
+
+    def test_git_not_runnable(self):
+        cwd, _ = self.git_raises(lambda argv: FileNotFoundError(2, "No such file"))
+        self.assertEqual(self.run_verb(), (0, {
+            "archived": None, "reason": f"git status failed in {cwd}: could not run git"}, ""))
+        self.assertNotIn("archive", [c[3] for c in self.calls() if len(c) > 3])
+
     def test_archive_fails(self):
         self.fixture(archive_code=3,
                      workspaces=[{"workspaceId": "wks_0a1b", "cwd": self.cwd, "isolation": "worktree"}])
