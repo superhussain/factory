@@ -967,16 +967,43 @@ def backlog_add(item, context=None):
         return text + f"- [ ] {item}\n" + block, None
     cas(home, "/api/backlog", append)
     print(f"added {item}" + (" with context" if context else ""))
-    verdict = backlog_triage(home, item, context)
-    if verdict is None:
-        return
+    verdict, final = backlog_triage(home, item, context)
+    if final and (verdict is None or verdict["decision"] != "queue"):
+        triaged = read_triaged(home)
+        if f"- [ ] {item}" not in triaged:
+            save_triaged(home, triaged + [f"- [ ] {item}"])
+    if verdict is not None:
+        report_verdict(home, m.group(1), m.group(2), item, verdict)
+
+
+def report_verdict(home, slug, feature, item, verdict):
+    """Queue a line the Worker queued, or print why it holds."""
     if verdict["decision"] == "queue":
-        queue_backlog_item(home, m.group(1), m.group(2), verdict)
+        queue_backlog_item(home, slug, feature, verdict)
     elif verdict["confidence"] is None:
         print(f"held {item} for review: {verdict['reason']}")
     else:
         print(f"held {item} for review: confidence {verdict['confidence']}% "
               f"(threshold {verdict['threshold']}%): {verdict['reason']}")
+
+
+TRIAGE_SWEEP_LIMIT = 5
+
+
+def read_triaged(home):
+    """The backlog lines this host already has a final triage verdict for."""
+    try:
+        data = json.loads(Path(home, "backlog-triage.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    ok = (isinstance(data, dict) and set(data) == {"version", "lines"} and type(data["version"]) is int
+          and data["version"] == 1 and isinstance(data["lines"], list)
+          and all(isinstance(line, str) for line in data["lines"]))
+    return data["lines"] if ok else []
+
+
+def save_triaged(home, lines):
+    write_atomic(str(Path(home, "backlog-triage.json")), json.dumps({"version": 1, "lines": lines}, indent=2) + "\n")
 
 
 def triage_verdict(text):
@@ -997,8 +1024,9 @@ def triage_verdict(text):
 
 
 def backlog_triage(home, item, context):
-    """The Worker's verdict on a new backlog line, or None when triage is off, the Worker
-    predates it, or the call failed. A failure only warns: the line is already appended."""
+    """(verdict, final) for a backlog line. verdict is None when triage is off, the Worker
+    predates it, or the call failed. A failure only warns: the line is already appended.
+    final is True for a queue or hold and for a 400, which a retry would not change."""
     body = json.dumps({"item": item, **({"context": context} if context else {})}, ensure_ascii=False)
     captured = io.StringIO()
     try:
@@ -1008,14 +1036,14 @@ def backlog_triage(home, item, context):
     except SystemExit:
         status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
     if status == 404:
-        return None
+        return None, False
     verdict = triage_verdict(text) if status == 200 else None
     if verdict is None:
         why = "malformed reply" if status == 200 else status
         print(f"factory.py: backlog triage failed ({why}); the item waits in the backlog for review",
               file=sys.stderr)
-        return None
-    return None if verdict["decision"] == "off" else verdict
+        return None, status == 400
+    return (None, False) if verdict["decision"] == "off" else (verdict, True)
 
 
 def queue_backlog_item(home, slug, feature, verdict):
