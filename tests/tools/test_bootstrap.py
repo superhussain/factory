@@ -509,6 +509,26 @@ class TokenConflictTest(Instance):
         self.assertEqual(self.fake.methods().count("POST"), 1, "only the bucket was created")
         self.assertEqual(len(self.run.calls), 1, "no deploy")
 
+    def test_env_write_failure_deletes_the_new_token(self):
+        env = self.home / ".env"
+        denied = PermissionError(13, "Permission denied")
+        with mock.patch.object(bootstrap, "write_env_credentials", side_effect=denied):
+            code, _, err = self.up()
+            self.assertEqual(code, 1)
+            self.assertEqual(err, "cannot write " + str(env) + ": Permission denied. Deleted the new service "
+                             "token factory.example.test bootstrap device laptop; fix the file, then rerun up.\n")
+            self.assertEqual(self.fake.items["service_tokens"], {})
+            self.assertEqual(self.fake.items["policies"], {})
+            self.fake.fail = [("DELETE", "service_tokens")]
+            code, _, err = self.up(inputs=["", "", "", ""])
+        self.assertEqual(code, 1)
+        [token] = self.fake.items["service_tokens"].values()
+        self.assertEqual(err, "cannot write " + str(env) + ": Permission denied. Also could not delete the new "
+                         "service token factory.example.test bootstrap device laptop (DELETE accounts/" + ACCOUNT
+                         + "/access/service_tokens/" + token["id"] + ": 10000 synthetic failure); delete it under "
+                         "Zero Trust > Access > Service credentials, then rerun up.\n")
+        self.assertNotIn(SECRET, err)
+
     def test_missing_zero_trust_org_exits_1_before_the_token(self):
         self.fake.org = None
         code, _, err = self.up()
