@@ -2299,7 +2299,7 @@ function hostCard(h) {
   actions.append(button('Save', () => {
     const patch = {};
     if (label.value !== h.label) patch.label = label.value;
-    if (Number(max.value) !== h.max_inflight) patch.max_inflight = Number(max.value);
+    if (max.valueAsNumber !== h.max_inflight) patch.max_inflight = max.valueAsNumber;
     hostWrite(h.id, 'PATCH', '/' + h.id, patch, h.etag, 'Saved.');
   }));
   if (h.state === 'paired') actions.append(button('Confirm', () => hostWrite(h.id, 'PATCH', '/' + h.id, {state:'active'}, h.etag, 'Confirmed. It picks up work now.')));
