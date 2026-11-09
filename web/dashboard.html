@@ -4150,6 +4150,8 @@ function closeJobActions(refocus) {
 }
 
 function syncJobActions() {
+  // A job that left the board has nothing to act on, so its stale items go too.
+  if (!jobs.some((j) => j.id === openId)) for (const id of JOB_ACTIONS) $(id).hidden = true;
   const any = JOB_ACTIONS.some((id) => !$(id).hidden);
   $('d-actions-wrap').hidden = !any;
   if (any) return;
