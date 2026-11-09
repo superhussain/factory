@@ -187,8 +187,8 @@ const CAPTURE_TRIAGE = {
   decision: "hold",
   confidence: 62,
   threshold: 80,
-  reason: "It touches billing, which the project rules say to hold.",
-  model: "@cf/meta/llama-3.1-8b-instruct-fast",
+  reason: "Rated by clef-flash against the project rules.",
+  model: "@cf/cloudflare/clef-flash",
   at: "2026-10-27T10:00:00Z",
 };
 const CAPTURE_SPEC =

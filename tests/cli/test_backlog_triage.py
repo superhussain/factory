@@ -8,8 +8,8 @@ from unittest.mock import patch
 from support import IsolatedTestCase, invoke, load_runtime
 
 ITEM = "sample: Add CSV export to reports"
-QUEUE = {"decision": "queue", "confidence": 86, "threshold": 80, "reason": "A small export feature.",
-         "model": "@cf/meta/llama-3.1-8b-instruct-fast"}
+QUEUE = {"decision": "queue", "confidence": 86, "threshold": 80, "reason": "Rated by clef-flash against the project rules.",
+         "model": "@cf/cloudflare/clef-flash"}
 WARN = "factory.py: backlog triage failed ({}); the item waits in the backlog for review\n"
 
 
@@ -90,10 +90,10 @@ class BacklogTriageTests(TriageFixture):
             "id": "008-add-csv-export", "project": "sample", "title": "Add CSV export to reports",
             "stage": "idea", "updated": at,
             "idea": "Add CSV export to reports\n\nQueued by backlog triage: confidence 86% (threshold 80%). "
-                    "A small export feature.",
+                    "Rated by clef-flash against the project rules.",
             "backlog": {"line": f"- [ ] {ITEM}", "decision": "approved", "at": at, "by": "triage",
                         "triage": {"model": QUEUE["model"], "confidence": 86, "threshold": 80,
-                                   "reason": "A small export feature."}},
+                                   "reason": "Rated by clef-flash against the project rules."}},
         })
         self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [x] {ITEM} (008-add-csv-export)\n")
         self.assertIsNone(self.cached())
@@ -115,9 +115,9 @@ class BacklogTriageTests(TriageFixture):
         line = f"# Backlog\n- [ ] {ITEM}\n"
         board = self.files["/api/board"]
         for reply, printed, cached in (
-            ({"decision": "hold", "confidence": 62, "threshold": 80, "reason": "Touches billing.",
+            ({"decision": "hold", "confidence": 62, "threshold": 80, "reason": "Rated by clef-flash against the project rules.",
               "model": QUEUE["model"]},
-             f"held {ITEM} for review: confidence 62% (threshold 80%): Touches billing.\n", [f"- [ ] {ITEM}"]),
+             f"held {ITEM} for review: confidence 62% (threshold 80%): Rated by clef-flash against the project rules.\n", [f"- [ ] {ITEM}"]),
             ({"decision": "hold", "confidence": None, "threshold": 80, "reason": "its author recommends deny",
               "model": None},
              f"held {ITEM} for review: its author recommends deny\n", [f"- [ ] {ITEM}"]),
@@ -211,7 +211,7 @@ class BacklogTriageTests(TriageFixture):
 PDF = "- [ ] sample: Add PDF export to reports"
 RENAME = "- [ ] sample: Rename report filters (rework-of 006-filter-names)"
 EXAMPLE = f"# Backlog\n{PDF}\n{RENAME}\n  Recommend: approve\n  Clearer names.\n\n"
-HOLD = {"decision": "hold", "confidence": 62, "threshold": 80, "reason": "Renames filters other reports share.",
+HOLD = {"decision": "hold", "confidence": 62, "threshold": 80, "reason": "Rated by clef-flash against the project rules.",
         "model": QUEUE["model"]}
 
 
@@ -234,7 +234,7 @@ class BacklogTriagePassTests(TriageFixture):
         self.assertEqual(out, "queued sample: Add PDF export to reports as 009-add-pdf-export: "
                               "confidence 86% (threshold 80%)\n"
                               "held sample: Rename report filters (rework-of 006-filter-names) for review: "
-                              "confidence 62% (threshold 80%): Renames filters other reports share.\n")
+                              "confidence 62% (threshold 80%): Rated by clef-flash against the project rules.\n")
         self.assertEqual(self.posts, [{"item": "sample: Add PDF export to reports"},
                                       {"item": "sample: Rename report filters (rework-of 006-filter-names)",
                                        "context": "Recommend: approve\nClearer names."}])
