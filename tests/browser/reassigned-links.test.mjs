@@ -2,6 +2,8 @@
 // prLink/buildRuns must match against every registered project's repo, own project
 // first — while a URL under an unregistered repo still renders no link.
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
@@ -24,6 +26,15 @@ const FOREIGN = {
   updated: "2026-01-01T00:00:00Z",
   pr: "https://github.com/example/other/pull/9",
 };
+const ARCHIVED = {
+  id: "032-archived",
+  project: "new",
+  title: "Synthetic archived job",
+  stage: "merged",
+  updated: "2026-01-01T00:00:00Z",
+  pr: "https://github.com/example/new-private/pull/5",
+};
+const captureDir = process.env.CAPTURE_DIR;
 
 async function seed(origin) {
   await seedProject(
@@ -102,3 +113,53 @@ test(
     });
   },
 );
+
+test("archived PR links only once the project names its archive", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  if (captureDir) await mkdir(captureDir, { recursive: true });
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedBoard(origin, [ARCHIVED]);
+    const context = await browser.createBrowserContext();
+    try {
+      const page = await context.newPage();
+      await page.setViewport({ width: 1440, height: 900 });
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      const wrap = '.card-wrap:has(.card[data-id="032-archived"])';
+      // Only a linked card gets a wrap, so the unlinked card is cropped on its own box.
+      const shown = wrap + ', .cards > .card[data-id="032-archived"]';
+      const open = async (frontmatter, shot) => {
+        await seedProject(origin, "new", "---\n" + frontmatter + "title: Synthetic new\n---\n");
+        await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+        await waitForBoard(page);
+        await page.click('.column-toggle[data-stage="merged"]');
+        await page.waitForSelector(shown, { visible: true });
+        if (captureDir) await (await page.$(shown)).screenshot({ path: join(captureDir, shot) });
+        return page.evaluate((sel) => {
+          const a = document.querySelector(sel + " .pr-link");
+          return a ? { href: a.href, text: a.textContent } : null;
+        }, wrap);
+      };
+
+      assert.equal(await open("repo: example/new\nbase: main\n", "before-card-archive.png"), null);
+      assert.deepEqual(
+        await open(
+          "repo: example/new\nbase: main\narchive: example/new-private\n",
+          "after-card-archive.png",
+        ),
+        { href: ARCHIVED.pr, text: "PR #5" },
+      );
+
+      await clickNow(page, '.card[data-id="032-archived"]');
+      await page.waitForFunction(
+        () =>
+          !document.getElementById("detail").hidden &&
+          document.getElementById("d-pr").textContent === "PR #5",
+      );
+      assert.equal(await page.evaluate(() => document.getElementById("d-pr").href), ARCHIVED.pr);
+      assert.deepEqual(errors, [], "no page errors");
+    } finally {
+      await context.close();
+    }
+  });
+});
