@@ -66,7 +66,7 @@ migration or reset; installing or deploying never rewrites existing state.
 
 The Worker preserves the v1 wire and storage contracts: exact routes, status
 codes, bodies, header order, validation order and limits. Text resources are
-capped at 1 MiB, images at 5 MiB (declared-length and streamed), image envelopes
+capped at 1 MiB (board and backlog at 4 MiB), images at 5 MiB (declared-length and streamed), image envelopes
 at 4096 pixels per side and 16,000,000 pixels. Storage keys, `httpEtag` handling,
 quoted ETags, uppercase weak `W/` normalization, 412 on null conditional puts,
 original-byte hashes, no CORS headers, no delete endpoint and no pagination
