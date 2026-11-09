@@ -93,6 +93,24 @@ const dialog = (page) =>
     focus: document.activeElement.id,
   }));
 
+const refA11y = async (page) => ({
+  description:
+    (
+      await page.accessibility.snapshot({
+        root: await page.$("#idea-text"),
+        interestingOnly: false,
+      })
+    )?.description ?? "",
+  ...(await page.evaluate(() => {
+    const code = document.querySelector("#idea-ref code");
+    return {
+      kids: document.getElementById("idea-ref").childNodes.length,
+      code: code ? code.textContent : null,
+      font: code ? getComputedStyle(code).fontFamily : null,
+    };
+  })),
+});
+
 test("follow-up", { timeout: 240000 }, async (t) => {
   await prepareAssets();
   await mkdir(SHOTS, { recursive: true });
@@ -151,6 +169,9 @@ test("follow-up", { timeout: 240000 }, async (t) => {
         await activate("#new-idea");
         await page.waitForFunction(() => document.getElementById("idea-dlg").open, wait);
         assert.equal((await dialog(page)).ref, null);
+        const plain = await refA11y(page);
+        assert.equal(plain.kids, 0);
+        assert.doesNotMatch(plain.description, /Follow-up/);
         await cancel();
       });
 
@@ -181,6 +202,10 @@ test("follow-up", { timeout: 240000 }, async (t) => {
           project: "sample",
           focus: "idea-text",
         });
+        const ref = await refA11y(page);
+        assert.match(ref.description, /^Follow-up of 042-sample-export/);
+        assert.equal(ref.code, "042-sample-export");
+        assert.match(ref.font, /monospace/);
         await page.keyboard.type("Export the sample report as CSV");
         if (width === 390)
           await (await page.$("#idea-dlg")).screenshot({ path: `${SHOTS}after-dialog-390.png` });
