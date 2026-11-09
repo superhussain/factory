@@ -2280,15 +2280,15 @@ function hostCard(h) {
       make('tbody', {}, ...st.routes.map(r => cells('td', [r.name, r.provider, r.model, r.effort ?? 'none', r.limited_until ? hostUtc(r.limited_until) : 'none'])))));
   }
   const picks = hostProjects.get(h.id);
-  li.append(make('p', {textContent:'Picks up: ' + (hostProjectsFailed ? 'could not load' : picks ? picks.join(', ') : 'no projects')}));
+  li.append(make('p', {textContent:'Picks up: ' + (hostProjectsFailed ? 'could not load' : h.max_inflight === 0 ? 'nothing while paused. Max in flight is 0.' : picks ? picks.join(', ') : 'no projects')}));
   const draft = hostDrafts.get(h.id);
   const label = make('input', {type:'text', id:'host-' + h.id + '-label', maxLength:80, autocomplete:'off', value:draft ? draft.label : h.label});
-  const max = make('input', {type:'number', id:'host-' + h.id + '-max', min:1, max:5, step:1, value:draft ? draft.max : String(h.max_inflight)});
+  const max = make('input', {type:'number', id:'host-' + h.id + '-max', min:0, max:5, step:1, value:draft ? draft.max : String(h.max_inflight)});
   max.setAttribute('aria-describedby', max.id + '-help');
   const remember = () => hostDrafts.set(h.id, {label:label.value, max:max.value});
   label.addEventListener('input', remember);
   max.addEventListener('input', remember);
-  li.append(make('label', {htmlFor:label.id}, 'Display name', label), make('label', {htmlFor:max.id}, 'Max in flight', max), make('p', {className:'muted', id:max.id + '-help', textContent:'Jobs waiting on a human never count toward this limit.'}));
+  li.append(make('label', {htmlFor:label.id}, 'Display name', label), make('label', {htmlFor:max.id}, 'Max in flight', max), make('p', {className:'muted', id:max.id + '-help', textContent:'Set 0 to pause pickup on this host. Jobs waiting on a human never count toward this limit.'}));
   const button = (verb, action) => {
     const b = make('button', {className:'btn', type:'button', textContent:verb});
     b.setAttribute('aria-label', verb + ' ' + h.label);
@@ -2299,7 +2299,7 @@ function hostCard(h) {
   actions.append(button('Save', () => {
     const patch = {};
     if (label.value !== h.label) patch.label = label.value;
-    if (Number(max.value) !== h.max_inflight) patch.max_inflight = Number(max.value);
+    if (max.valueAsNumber !== h.max_inflight) patch.max_inflight = max.valueAsNumber;
     hostWrite(h.id, 'PATCH', '/' + h.id, patch, h.etag, 'Saved.');
   }));
   if (h.state === 'paired') actions.append(button('Confirm', () => hostWrite(h.id, 'PATCH', '/' + h.id, {state:'active'}, h.etag, 'Confirmed. It picks up work now.')));
