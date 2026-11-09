@@ -98,18 +98,15 @@ test("Copy link copies the job's dashboard link", { timeout: 120000 }, async () 
         );
         await ok.page.keyboard.press("Escape");
         await copyLink(ok.page, viewport);
-        await ok.page.waitForFunction(
-          () => document.getElementById("d-copy-status").textContent === "Copied",
-        );
+        // Text and visibility are read together, since the 2 s timer may clear them under load.
+        await ok.page.waitForFunction(() => {
+          const el = document.getElementById("d-copy-status");
+          return el.textContent === "Copied" && el.getClientRects().length > 0;
+        });
         assert.deepEqual(
           await ok.page.evaluate(() => window.__copied),
           [origin + "/#100-sample-idea"],
           label,
-        );
-        assert.equal(
-          await ok.page.$eval("#d-copy-status", (el) => el.getClientRects().length > 0),
-          true,
-          `${label} status shown`,
         );
         assert.deepEqual(
           await ok.page.evaluate(() => ({
