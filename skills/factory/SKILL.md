@@ -813,12 +813,15 @@ feature.
    `decision.md` as a table with Item, Source and Outcome (`queued` or
    `for a person`) columns, or `None.` when there are none, and run
    `push "$SLUG/<id>"`.
-10. As the session's last command, after the `merged:` line and the final summary
-    are sent, run `python3 "$RUNTIME" archive-workspace "$SLUG/<id>"`. It archives
-    this session's Paseo workspace when it is the job's own worktree workspace with
-    nothing uncommitted or unpushed, and prints a skip otherwise. A skip for
-    uncommitted files, unpushed commits or a failed git check patches
-    `{"note": "workspace kept: <reason>"}` and never sets `needs`. Exit 1 patches `{"note": "workspace archive failed: <stderr line>"}`.
+10. After the `merged:` line and the final summary are sent, run
+    `python3 "$RUNTIME" archive-workspace "$SLUG/<id>" --check`. If the output has a
+    `reason`, stop. If `leftovers` is not empty, write a file that starts with
+    `Recommend: approve`, then `Left in Paseo workspace <would_archive> when <id> merged:`,
+    then one leftover per line, and run
+    `python3 "$RUNTIME" backlog add "<slug>: Recover or drop what <id> left in Paseo workspace <would_archive> (follow-up-of <id>)" --context <file>`.
+    As the session's last command, run `python3 "$RUNTIME" archive-workspace "$SLUG/<id>"`.
+    It archives this session's Paseo workspace when it is the job's own worktree workspace,
+    whatever its git state, and can end the session. Exit 1 patches `{"note": "workspace archive failed: <stderr line>"}`.
 
 **Reworking an existing PR.** When the feature is "rework PR #N", the spec writer
 reads that PR's description and diff (`gh pr view N`, `gh pr diff N`) as the statement

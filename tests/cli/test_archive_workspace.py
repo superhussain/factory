@@ -160,29 +160,56 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
         self.assertEqual(self.run_verb(), (0, {"archived": None, "reason": "not a Paseo session"}, ""))
         self.assertEqual(self.calls(), [])
 
+    def archived(self, leftovers):
+        self.assertEqual(self.run_verb(), (0, {"archived": "wks_0a1b", "leftovers": leftovers}, ""))
+        self.assertIn("archive", [c[3] for c in self.calls() if len(c) > 3])
+
     def test_uncommitted_files(self):
         Path(self.cwd, "notes.txt").write_text("draft\n")
-        self.assertEqual(self.run_verb(), (0, {"archived": None, "reason": f"uncommitted files in {self.cwd}"}, ""))
-        self.assertNotIn("archive", [c[3] for c in self.calls() if len(c) > 3])
+        self.archived(["uncommitted: ?? notes.txt"])
 
     def test_unpushed_commits(self):
         self.git("-C", self.cwd, "commit", "-q", "--allow-empty", "-m", "local")
-        self.assertEqual(self.run_verb(), (0, {"archived": None, "reason": f"unpushed commits in {self.cwd}"}, ""))
-        self.assertNotIn("archive", [c[3] for c in self.calls() if len(c) > 3])
+        self.archived([f"commit: {self.git('-C', self.cwd, 'log', '-1', '--format=%h local').strip()}"])
 
     def test_branch_without_upstream(self):
         self.git("-C", self.cwd, "switch", "-q", "-c", "factory/042-dark-mode")
         self.git("-C", self.cwd, "commit", "-q", "--allow-empty", "-m", "local")
-        self.assertEqual(self.run_verb(), (0, {"archived": None, "reason": f"unpushed commits in {self.cwd}"}, ""))
+        self.archived([f"commit: {self.git('-C', self.cwd, 'log', '-1', '--format=%h local').strip()}"])
+
+    def test_stale_local_main(self):
+        self.git("-C", self.cwd, "commit", "-q", "--allow-empty", "-m", "stale")
+        self.git("-C", self.cwd, "switch", "-q", "-c", "factory/042-dark-mode")
+        self.archived([])
 
     def test_git_fails(self):
         cwd = str(self.root / "factory-042-dark-mode")
         os.mkdir(cwd)
         self.fixture(inspect={"Cwd": cwd},
                      workspaces=[{"workspaceId": "wks_0a1b", "cwd": cwd, "isolation": "worktree"}])
-        self.assertEqual(self.run_verb(), (0, {
-            "archived": None, "reason": f"git status failed in {cwd}: exit 128"}, ""))
+        self.archived(["git status failed: exit 128", "git branch failed: exit 128"])
+
+    def test_check_only(self):
+        Path(self.cwd, "notes.txt").write_text("draft\n")
+        code, out, err = invoke(factory, ["archive-workspace", "sample/042-dark-mode", "--check"])
+        self.assertEqual((code, json.loads(out), err), (0, {
+            "archived": None, "would_archive": "wks_0a1b", "leftovers": ["uncommitted: ?? notes.txt"]}, ""))
         self.assertNotIn("archive", [c[3] for c in self.calls() if len(c) > 3])
+
+    def test_bad_flag(self):
+        code, out, err = invoke(factory, ["archive-workspace", "sample/042-dark-mode", "--bogus"])
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("usage: archive-workspace <project-slug>/<job-id> [--check]", err)
+        self.assertEqual(self.calls(), [])
+
+    def test_leftover_cap(self):
+        for n in range(25):
+            Path(self.cwd, f"f{n:02}.txt").write_text("x\n")
+        code, out, err = self.run_verb()
+        self.assertEqual(code, 0)
+        self.assertEqual(out["leftovers"][19], "uncommitted: ?? f19.txt")
+        self.assertEqual(out["leftovers"][20:], ["and 5 more"])
+        self.assertEqual(len(out["leftovers"]), 21)
 
     def git_raises(self, error):
         cwd = str(self.root / "factory-042-dark-mode")
@@ -201,23 +228,25 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
         return cwd, seen
 
     def test_git_times_out(self):
-        cwd, seen = self.git_raises(lambda argv: subprocess.TimeoutExpired(argv, 20))
+        _, seen = self.git_raises(lambda argv: subprocess.TimeoutExpired(argv, 20))
         self.assertEqual(self.run_verb(), (0, {
-            "archived": None, "reason": f"git status failed in {cwd}: timed out after 20 s"}, ""))
+            "archived": "wks_0a1b", "leftovers": ["git status failed: timed out after 20 s",
+                                                  "git branch failed: timed out after 20 s"]}, ""))
         self.assertEqual(seen["timeout"], 20)
-        self.assertNotIn("archive", [c[3] for c in self.calls() if len(c) > 3])
+        self.assertIn("archive", [c[3] for c in self.calls() if len(c) > 3])
 
     def test_git_not_runnable(self):
-        cwd, _ = self.git_raises(lambda argv: FileNotFoundError(2, "No such file"))
+        self.git_raises(lambda argv: FileNotFoundError(2, "No such file"))
         self.assertEqual(self.run_verb(), (0, {
-            "archived": None, "reason": f"git status failed in {cwd}: could not run git"}, ""))
-        self.assertNotIn("archive", [c[3] for c in self.calls() if len(c) > 3])
+            "archived": "wks_0a1b", "leftovers": ["git status failed: could not run git",
+                                                  "git branch failed: could not run git"]}, ""))
+        self.assertIn("archive", [c[3] for c in self.calls() if len(c) > 3])
 
     def test_archive_fails(self):
         self.fixture(archive_code=3,
                      workspaces=[{"workspaceId": "wks_0a1b", "cwd": self.cwd, "isolation": "worktree"}])
         code, out, err = self.run_verb()
-        self.assertEqual((code, out), (1, {"archived": "wks_0a1b"}))
+        self.assertEqual((code, out), (1, {"archived": "wks_0a1b", "leftovers": []}))
         self.assertIn("paseo workspace archive wks_0a1b exit 3", err)
 
     def test_archived(self):
@@ -225,7 +254,7 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
         self.fixture(inspect={"Cwd": cwd + "/"}, workspaces=[
             {"workspaceId": "wks_9", "cwd": "/elsewhere", "isolation": "worktree"},
             {"workspaceId": "wks_0a1b", "cwd": cwd, "isolation": "worktree"}])
-        self.assertEqual(self.run_verb(), (0, {"archived": "wks_0a1b"}, ""))
+        self.assertEqual(self.run_verb(), (0, {"archived": "wks_0a1b", "leftovers": []}, ""))
         home = ["--home", str(self.paseo_home)]
         self.assertEqual(self.calls(), [home + ["inspect", AGENT, "--json"],
                                         home + ["workspace", "ls", "--json"],
