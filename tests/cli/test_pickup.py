@@ -934,6 +934,29 @@ class MoveHostTest(PickupFixture):
         self.assertEqual(self.pickup(), (0, "", ""))
         self.assertEqual((self.stopped, self.puts()), ([self.wt], []))
 
+    def assert_stop_left_queued(self, project, reason):
+        self.moved()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.stopped, self.puts()), ([], []))
+        self.assertNotIn("stopped", self.job("042-sample-export")["move"])
+        self.assertEqual(self.pickup("--dry-run"),
+                         (0, f"skip stop 042-sample-export {project}: {reason}\nhost {DEVICE}: would launch 0\n", ""))
+
+    def test_unlisted_host_leaves_the_stop_queued(self):
+        self.views["alpha"] = (200, effective("alpha", {"pickup": {"enabled": True, "hosts": ["other-host"]}}))
+        self.assert_stop_left_queued("alpha", f"pickup does not list host {DEVICE}")
+
+    def test_pickup_off_leaves_the_stop_queued(self):
+        self.views["alpha"] = (200, effective("alpha", {"pickup": {"enabled": False, "hosts": [DEVICE]}}))
+        self.assert_stop_left_queued("alpha", "pickup off")
+
+    def test_no_checkout_leaves_the_stop_queued(self):
+        self.moved()["project"] = "zulu"
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.stopped, self.puts()), ([], []))
+        self.assertEqual(self.pickup("--dry-run"),
+                         (0, f"skip stop 042-sample-export zulu: no checkout on this host\nhost {DEVICE}: would launch 0\n", ""))
+
     def test_earlier_host_stops_after_a_second_move(self):
         self.moved(**{"from": "studio-mac", "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
                       "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": self.AT}]})
