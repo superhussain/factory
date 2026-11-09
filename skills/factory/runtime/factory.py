@@ -2307,6 +2307,7 @@ def takeover(home, data, device, minutes, paths, settings, dry):
         else:
             print(f"factory.py: pickup skips takeover: {reason}", file=sys.stderr)
         return 0
+    host_cap = host_max_inflight(home, device) if stalls else None
     routes = read_routes(home)
     limits = {name for name, until in read_limits(home).items() if until > now()}
 
@@ -2360,6 +2361,9 @@ def takeover(home, data, device, minutes, paths, settings, dry):
             "pickup off" if not enabled else f"pickup does not list host {device}"
         if line:
             skipped(session, job_id, line)
+            continue
+        if host_cap == 0:
+            skipped(session, job_id, f"host {device} paused (max in flight 0)")
             continue
         stalled = next((r for r in routes if r[1] == stall["provider"] and r[2] == stall["model"]), None)
         if stalled is None:

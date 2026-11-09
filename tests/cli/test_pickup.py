@@ -703,6 +703,25 @@ class TakeoverTest(PickupFixture):
         self.assertEqual(self.recorded(), [["list"], ["list"], ["list"], ["list"],
                                            ["archive", "agent-1"]])
 
+    def test_paused_host_skips_takeover(self):
+        self.hosts = [host(DEVICE, 0)]
+        self.set_adapter([self.stall()])
+        self.set_stalls()
+        self.board["jobs"] = [self.stall_job()]
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(self.recorded(), [["list"]])
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.launched(), [])
+        self.assertFalse((self.home / "route-limits.json").exists())
+        self.assertEqual(self.pickup("--dry-run"), (0, "\n".join([
+            f"skip stall agent-1 010-run: host {DEVICE} paused (max in flight 0)",
+            f"host {DEVICE}: would take over 0",
+            f"host {DEVICE}: would launch 0"]) + "\n", ""))
+        self.hosts = [host(DEVICE, 2)]
+        self.set_adapter([self.stall()])
+        code, out, err = self.pickup()
+        self.assertIn("took over 010-run alpha from agent-1 on fallback", out)
+
     def test_takeover_claims_archives_and_recovers(self):
         before = datetime.now(timezone.utc).replace(microsecond=0)
         self.set_adapter([self.stall()])
@@ -1521,6 +1540,13 @@ class DenyNotesTest(PickupFixture):
         for path in self.root.rglob("*"):
             if path.is_file():
                 self.assertNotIn(NOTES, path.read_text(encoding="utf-8", errors="replace"))
+
+    def test_paused_host_still_launches_deny_notes(self):
+        self.hosts = [host(DEVICE, 0)]
+        self.board["jobs"] = [denied("007-csv-export", "alpha")]
+        code, out, err = self.pickup()
+        tag = self.job("007-csv-export")["claim"]["session"]
+        self.assertEqual(out, f"launched deny notes 007-csv-export alpha on primary session {tag}\n")
 
     def test_not_due_is_silent(self):
         del self.views["alpha"]
