@@ -555,6 +555,17 @@ async function pipelineEffective(env, slug) {
 }
 
 const BACKLOG_ITEM = /^([\w-]+): (\S.*)$/;
+const BAD_BACKLOG_ITEM = 'item: must be one "<slug>: <feature>" line of at most 2000 characters';
+const backlogItemMatch = (item) =>
+  typeof item === "string" && [...item].length <= 2000 && BACKLOG_ITEM.exec(item);
+const triageKey = async (item) =>
+  `backlog-triage/${await sha256(new TextEncoder().encode(item))}.json`;
+
+async function backlogTriageGet(request, env) {
+  const item = new URL(request.url).searchParams.get("item");
+  if (!backlogItemMatch(item)) return reply(BAD_BACKLOG_ITEM, 400);
+  return getFile(env, await triageKey(item), "application/json");
+}
 
 // Rates one new backlog line against its project's triage rules. The Worker compares the
 // score with the threshold, so a device cannot move the bar.
@@ -566,9 +577,8 @@ async function backlogTriage(request, env) {
   for (const key of Object.keys(body))
     if (key !== "item" && key !== "context") return reply(`${key}: unknown field`, 400);
   const { item, context } = body;
-  const m = typeof item === "string" && [...item].length <= 2000 && BACKLOG_ITEM.exec(item);
-  if (!m)
-    return reply('item: must be one "<slug>: <feature>" line of at most 2000 characters', 400);
+  const m = backlogItemMatch(item);
+  if (!m) return reply(BAD_BACKLOG_ITEM, 400);
   if (context !== undefined && typeof context !== "string")
     return reply("context: must be text", 400);
   if (context !== undefined && [...context].length > 6000)
@@ -592,6 +602,17 @@ async function backlogTriage(request, env) {
   const json = (obj) => reply(JSON.stringify(obj), 200, "application/json");
   if (!triage.enabled) return json({ decision: "off" });
   const { threshold } = triage;
+  const finish = async (verdict) => {
+    const key = await triageKey(item);
+    if (verdict.decision === "hold")
+      await env.BUCKET.put(
+        key,
+        JSON.stringify({ item, ...verdict, at: new Date().toISOString() }),
+        JSON_TYPE,
+      );
+    else await env.BUCKET.delete(key);
+    return json(verdict);
+  };
   const lines = (context ?? "").split("\n");
   const fixed =
     lines[0] === "Recommend: deny"
@@ -600,7 +621,7 @@ async function backlogTriage(request, env) {
         ? "it asks questions a person must answer"
         : null;
   if (fixed)
-    return json({ decision: "hold", confidence: null, threshold, reason: fixed, model: null });
+    return finish({ decision: "hold", confidence: null, threshold, reason: fixed, model: null });
   if (!env.AI)
     return reply("backlog triage needs the Workers AI binding; deploy the current Worker", 503);
   const source = project?.triage
@@ -619,7 +640,7 @@ async function backlogTriage(request, env) {
   }
   const verdict = parseTriageReply(result);
   if (!verdict) return reply("the triage model gave an unusable reply", 502);
-  return json({
+  return finish({
     decision: verdict.confidence >= threshold ? "queue" : "hold",
     confidence: verdict.confidence,
     threshold,
@@ -1068,6 +1089,7 @@ async function api(request, env, path, principal) {
     return notFound();
   }
   if (path === "/api/backlog/triage" && method === "POST") return backlogTriage(request, env);
+  if (path === "/api/backlog/triage" && method === "GET") return backlogTriageGet(request, env);
   if (path === "/api/board" || path === "/api/backlog") {
     const [key, type] =
       path === "/api/board" ? ["board.json", "application/json"] : ["backlog.md", "text/markdown"];
