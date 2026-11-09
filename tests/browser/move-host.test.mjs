@@ -31,7 +31,7 @@ const JOBS = [
     round: 1,
     updated: "2026-01-01T00:00:00Z",
     claim: { device: "lab-linux", session: "a1b2c3", since: "2026-01-01T10:00:00Z" },
-    paseo: { agent: "synthetic" },
+    paseo: { server: "srv-lab", agent: "4cec0a47-1d21-4115-945b-9e7dfb668ef4" },
   },
   { id: "043-unclaimed", project: "sample", title: "No host", stage: "spec", updated: NOW },
   { id: "044-open-pr", project: "sample", title: "Open PR", stage: "pr-open", updated: NOW },
@@ -43,7 +43,15 @@ const JOBS = [
     stage: "build",
     updated: NOW,
     claim: { device: "studio-mac", session: "d4e5f6", since: NOW },
-    move: { from: "lab-linux", session: "a1b2c3", to: "studio-mac", at: NOW, claimed: NOW },
+    move: {
+      from: "lab-linux",
+      session: "a1b2c3",
+      agent: "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+      server: "srv-lab",
+      to: "studio-mac",
+      at: NOW,
+      claimed: NOW,
+    },
   },
   {
     id: "047-done",
@@ -275,6 +283,8 @@ test("move host", { timeout: 240000 }, async (t) => {
         assert.deepEqual(job.move, {
           from: "lab-linux",
           session: "a1b2c3",
+          agent: "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+          server: "srv-lab",
           to: "studio-mac",
           at: NOW,
         });
@@ -293,6 +303,13 @@ test("move host", { timeout: 240000 }, async (t) => {
         ).screenshot({ path: `${SHOTS}after-card-moving${suffix}.png` });
       });
 
+      await t.test(`move keeps the paseo link ${width}`, async () => {
+        const board = await (await fetch(origin + "/api/board")).json();
+        const { move } = board.jobs.find((j) => j.id === "042-sample-export");
+        assert.equal(move.agent, "4cec0a47-1d21-4115-945b-9e7dfb668ef4");
+        assert.equal(move.server, "srv-lab");
+      });
+
       await t.test(`chained move keeps the earlier stop ${width}`, async () => {
         const T1 = "2026-01-01T10:00:00Z";
         await seedBoard(origin, [
@@ -300,7 +317,15 @@ test("move host", { timeout: 240000 }, async (t) => {
             ...JOBS[0],
             claim: { device: "studio-mac", session: "d4e5f6", since: NOW },
             paseo: undefined,
-            move: { from: "lab-linux", session: "a1b2c3", to: "studio-mac", at: T1, claimed: NOW },
+            move: {
+              from: "lab-linux",
+              session: "a1b2c3",
+              agent: "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              server: "srv-lab",
+              to: "studio-mac",
+              at: T1,
+              claimed: NOW,
+            },
           },
         ]);
         pickupHosts = [...PICKUP_HOSTS, "cloud-box"];
@@ -329,7 +354,15 @@ test("move host", { timeout: 240000 }, async (t) => {
           session: "d4e5f6",
           to: "cloud-box",
           at: NOW,
-          earlier: [{ from: "lab-linux", session: "a1b2c3", at: T1 }],
+          earlier: [
+            {
+              from: "lab-linux",
+              session: "a1b2c3",
+              agent: "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              server: "srv-lab",
+              at: T1,
+            },
+          ],
         });
         assert.equal(
           await hostLine(page, "042-sample-export"),

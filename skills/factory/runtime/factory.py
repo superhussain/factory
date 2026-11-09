@@ -2714,38 +2714,64 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
             print(line)
 
 
-def move_stop_pass(home, data, device, dry):
-    """Stop the worktree of each job the dashboard moved away from this host, and record it."""
+def move_stop_pass(home, data, device, dry, adapter):
+    """Archive the Paseo sessions of, and stop the worktree of, each job the dashboard moved away
+    from this host, and record it. Earlier holders of a chained move count too."""
     for j in data["jobs"]:
         m, job_id, project = j.get("move"), j.get("id"), j.get("project")
-        if not (any(x["from"] == device for x in queued_stops(m))
-                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+        mine = [x for x in queued_stops(m) if x["from"] == device]
+        if not (mine and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
         line = f"{job_id} {project}: moved to {m.get('to')}"
+        archives = {}
+        for x in mine:
+            agent, server = x.get("agent"), x.get("server")
+            if (adapter and isinstance(agent, str) and PASEO_ID.fullmatch(agent) and not agent.startswith("-")
+                    and server and server == paseo_server() and agent != os.environ.get("PASEO_AGENT_ID")):
+                archives[agent] = x.get("at")
+        agent = next(iter(archives), None)
         if dry:
-            print(f"would stop {line}")
+            print(f"would archive session {agent} and stop {line}" if archives else f"would stop {line}")
             continue
+        failure = None
+        for a in archives:
+            try:
+                p = subprocess.run(adapter + ["archive", a, "--force"], capture_output=True,
+                                   timeout=ADAPTER_TIMEOUT_SECONDS)
+                failure = f"exit {p.returncode}" if p.returncode else None
+            except subprocess.TimeoutExpired:
+                failure = "timed out"
+            except OSError as e:
+                failure = str(e)
+            if failure:
+                agent = a
+                break
         wt = home / "worktrees" / project / job_id
         alive = stop_pids(wt) if wt.exists() else []
+        if failure:
+            print(f"factory.py: pickup could not archive session {agent} of {job_id}: {failure}", file=sys.stderr)
+            continue
         if alive:
             print(f"factory.py: pickup could not stop {job_id}: processes still running: "
                   f"{' '.join(map(str, alive))}", file=sys.stderr)
             continue
 
-        def change(text, job_id=job_id, at=m.get("at")):
+        def change(text, job_id=job_id, ats={x.get("at") for x in mine}, archived=set(archives)):
             board = load_board(text)
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
-            move = (found or {}).get("move")
-            mine = [x for x in queued_stops(move) if x["from"] == device]
-            if not mine or move.get("at") != at:
+            now_mine = [x for x in queued_stops((found or {}).get("move"))
+                        if x["from"] == device and x.get("at") in ats]
+            if not now_mine:
                 return None, False
-            for x in mine:
+            for x in now_mine:
                 x["stopped"] = now()
+                if x.get("agent") in archived:
+                    x["archived"] = now()
             patch_job(board, job_id, {})
             return dump_board(board), True
         if cas(home, "/api/board", change):
-            print(f"stopped {line}")
+            print(f"archived session {agent} and stopped {line}" if archives else f"stopped {line}")
 
 
 def prioritized(j):
@@ -2828,10 +2854,10 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     """One pickup run after flags and the holder are resolved."""
     paths = read_paths(home)
     data = read_board(home)
-    move_stop_pass(home, data, device, dry)
+    stalls = read_stalls(home)
+    move_stop_pass(home, data, device, dry, stalls[0] if stalls else None)
     priority_nudge_pass(home, data, device, dry)
     settings = {}
-    stalls = read_stalls(home)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
     if not dry and taken >= limit:

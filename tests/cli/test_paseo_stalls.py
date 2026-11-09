@@ -169,7 +169,27 @@ class PaseoStallsTest(unittest.TestCase):
         self.assertNotIn(["--home", str(self.paseo_home), "archive", ID], self.recorded()[1:])
         result = self.run_script("archive", "../escape")
         self.assertEqual((result.returncode, result.stderr),
-                         (2, "usage: paseo_stalls.py list | archive <id>\n"))
+                         (2, "usage: paseo_stalls.py list | archive <id> [--force]\n"))
+
+    def test_archive_force_skips_the_stall_check(self):
+        self.set_fixture(inspect={ID: dict(INFO, Status="running")})
+        result = self.run_script("archive", ID, "--force")
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertIn(["--home", str(self.paseo_home), "archive", "--force", ID], self.recorded())
+        for call in self.recorded():
+            self.assertNotIn("logs", call)
+
+    def test_archive_force_is_a_no_op_on_an_archived_session(self):
+        self.set_fixture(inspect={ID: dict(INFO, Archived=True)})
+        result = self.run_script("archive", ID, "--force")
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        for call in self.recorded():
+            self.assertNotIn("archive", call)
+
+    def test_archive_force_failure_exits_1(self):
+        self.set_fixture(inspect={ID: INFO}, archive_code=1)
+        result = self.run_script("archive", ID, "--force")
+        self.assertEqual((result.returncode, result.stderr), (1, "paseo_stalls.py: paseo archive exit 1\n"))
 
     def test_paseo_missing_or_failing(self):
         os.environ["PATH"] = "/usr/bin:/bin"
@@ -187,11 +207,11 @@ class PaseoStallsTest(unittest.TestCase):
                          (1, "paseo_stalls.py: paseo ls failed\n"))
 
     def test_usage(self):
-        for args in ((), ("list", "extra"), ("bogus",), ("archive",), ("archive", "x", "y")):
+        for args in ((), ("list", "extra"), ("bogus",), ("archive",), ("archive", "x", "y"), ("archive", ID, "--bogus")):
             with self.subTest(args=args):
                 result = self.run_script(*args)
                 self.assertEqual((result.returncode, result.stdout), (2, ""))
-                self.assertEqual(result.stderr, "usage: paseo_stalls.py list | archive <id>\n")
+                self.assertEqual(result.stderr, "usage: paseo_stalls.py list | archive <id> [--force]\n")
 
 
 if __name__ == "__main__":
