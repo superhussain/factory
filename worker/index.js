@@ -3,6 +3,7 @@
 import { authenticate } from "./access.ts";
 import { checkOperatorText, effectivePipeline, HOST_NAME, validatePipeline } from "./admission.js";
 import { escapeHtml, readServerConfig, renderDashboard, serveAsset } from "./assets.js";
+import { announce, connectEvents, EVENTS_PATH } from "./events.js";
 import {
   newPairingCode,
   OFFLINE_MINUTES,
@@ -10,6 +11,8 @@ import {
   validateHostPatch,
   validateHostStatus,
 } from "./hosts.js";
+
+export { BoardEvents } from "./events.js";
 
 // A job id starts with a word character, so "." and ".." are never ids.
 const JOB_FILE =
@@ -283,6 +286,7 @@ async function casPut(request, env, key, type) {
     onlyIf: cond,
     httpMetadata: { contentType: type },
   });
+  if (obj) await announce(env, key);
   return obj
     ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
     : reply("precondition failed", 412);
@@ -1060,6 +1064,19 @@ export async function serveFactory(request, env, principal) {
   if (principal?.verified !== true) return reply("forbidden", 403);
   const path = new URL(request.url).pathname;
   if (path.includes("..")) return reply("bad path", 400);
+  if (path === EVENTS_PATH) {
+    // Only a person's browser upgrades here; announce() reaches the room directly.
+    if (
+      request.method !== "GET" ||
+      request.headers.get("Upgrade")?.toLowerCase() !== "websocket" ||
+      principal.kind !== "user" ||
+      !env.BoardEvents
+    )
+      return notFound();
+    if (request.headers.get("Origin") !== new URL(request.url).origin)
+      return reply("forbidden", 403);
+    return connectEvents(request, env);
+  }
   if (path.startsWith("/api/")) return api(request, env, path, principal);
   if (request.method !== "GET") return notFound();
   if (path === "/") return renderDashboard(env.config);

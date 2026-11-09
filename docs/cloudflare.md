@@ -130,6 +130,12 @@ secrets. That descriptor is the nonsecret handoff to devices: import its
 `api_url` into device config (`docs/device.md`), or set `api_url` manually.
 Never put tokens in argv, URLs, Markdown, reports or client-visible variables.
 
+Deploy also creates the `BoardEvents` Durable Object that pushes live board
+events to open dashboards. It is a SQLite class added by migration `v1`. The
+migration is forward-only: a Worker without the `BoardEvents` export can no
+longer deploy over it, so a rollback keeps the class. Dashboards fall back to
+polling on their own if the socket cannot connect.
+
 Credentialed verification uses a private curl configuration or header file so no
 secret appears in shell arguments or output:
 

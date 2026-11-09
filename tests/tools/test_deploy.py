@@ -104,7 +104,9 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(config, {
             "account_id": "00000000000000000000000000000000",
             "compatibility_date": "2026-06-01",
+            "durable_objects": {"bindings": [{"name": "BoardEvents", "class_name": "BoardEvents"}]},
             "main": str(ROOT / "worker" / "index.js"),
+            "migrations": [{"tag": "v1", "new_sqlite_classes": ["BoardEvents"]}],
             "name": "factory-example",
             "preview_urls": False,
             "r2_buckets": [{"binding": "BUCKET", "bucket_name": "factory-example"}],

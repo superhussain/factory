@@ -4,7 +4,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import {
+  blockLiveEvents,
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+} from "../support/browser-server.mjs";
 
 const JOBS = [
   { id: "001-sample", project: "sample", title: "Synthetic sample job", stage: "spec" },
@@ -38,6 +43,7 @@ test("display settings", { timeout: 180000 }, async (t) => {
     await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
     const errors = [];
     page.on("pageerror", (error) => errors.push(String(error)));
+    await blockLiveEvents(page);
     let boardRequests = 0;
     page.on("request", (request) => {
       if (new URL(request.url()).pathname.endsWith("/board.json")) boardRequests++;

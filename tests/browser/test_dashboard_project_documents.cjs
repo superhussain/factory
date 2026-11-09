@@ -102,6 +102,7 @@ async function client(url, browser, options = {}) {
     page = await context.newPage();
   const c = { context, page, route: null, calls: [], errors: [], external: [] };
   await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  await (await import("../support/browser-server.mjs")).blockLiveEvents(page);
   await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
   await page.evaluateOnNewDocument((options) => {
     const NativeDate = Date;
