@@ -1,0 +1,15 @@
+/node_modules/
+/.build/
+/.context/
+.wrangler/
+/deploy/profile.json
+/deploy/profile.*.json
+/deploy/backups/
+/.husky/_/
+.env
+.env.*
+__pycache__/
+*.py[cod]
+credentials.json
+*.credentials
+.nx/

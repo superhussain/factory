@@ -1,0 +1,83 @@
+[
+  {
+    "id": "lab-linux",
+    "label": "Lab Linux",
+    "state": "active",
+    "max_inflight": 1,
+    "paired_at": "2025-12-20T10:00:00.000Z",
+    "token_tail": "t001",
+    "version": 3,
+    "etag": "\"etag-lab-linux\"",
+    "status": {
+      "os": "Linux",
+      "scheduler": "cron",
+      "last_pickup": null,
+      "bundle": null,
+      "doctor": ["schedule-entry"],
+      "routes": [],
+      "checkouts": [],
+      "seen": "2025-12-31T23:00:00Z"
+    },
+    "offline": true
+  },
+  {
+    "id": "new-box",
+    "label": "New box",
+    "state": "paired",
+    "max_inflight": 1,
+    "paired_at": "2026-01-01T11:30:00.000Z",
+    "token_tail": "t002",
+    "version": 1,
+    "etag": "\"etag-new-box\"",
+    "status": null,
+    "offline": true
+  },
+  {
+    "id": "old-laptop",
+    "label": "Old laptop",
+    "state": "retired",
+    "max_inflight": 1,
+    "paired_at": "2025-11-01T09:00:00.000Z",
+    "token_tail": null,
+    "version": 4,
+    "etag": "\"etag-old-laptop\"",
+    "status": null,
+    "offline": true
+  },
+  {
+    "id": "spare-pc",
+    "label": "Spare PC",
+    "state": "pending",
+    "max_inflight": 1,
+    "paired_at": null,
+    "token_tail": null,
+    "version": 1,
+    "etag": "\"etag-spare-pc\"",
+    "status": null,
+    "offline": true
+  },
+  {
+    "id": "studio-mac",
+    "label": "Studio Mac",
+    "state": "active",
+    "max_inflight": 2,
+    "paired_at": "2025-12-15T08:00:00.000Z",
+    "token_tail": "t003",
+    "version": 3,
+    "etag": "\"etag-studio-mac\"",
+    "status": {
+      "os": "macOS",
+      "scheduler": "launchd",
+      "last_pickup": "2026-01-01T11:00:00Z",
+      "bundle": { "commit": "1a2b3c4d5e6f7a8b9c0d", "tree": "0d9c8b7a6f5e4d3c2b1a" },
+      "doctor": "ok",
+      "routes": [
+        { "name": "primary", "provider": "claude", "model": "example-model-a", "effort": "medium", "limited_until": null },
+        { "name": "fallback", "provider": "opencode", "model": "example-model-b", "effort": null, "limited_until": "2026-01-01T13:00:00Z" }
+      ],
+      "checkouts": ["sample"],
+      "seen": "2026-01-01T11:57:00Z"
+    },
+    "offline": false
+  }
+]

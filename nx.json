@@ -1,0 +1,144 @@
+{
+  "defaultBase": "main",
+  "cacheDirectory": ".nx/cache",
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*"],
+    "shared": [
+      "{workspaceRoot}/package.json",
+      "{workspaceRoot}/pnpm-lock.yaml",
+      "{workspaceRoot}/.node-version"
+    ]
+  },
+  "targetDefaults": {
+    "auth": {
+      "cache": true,
+      "outputs": [],
+      "inputs": [
+        "default",
+        "shared",
+        "{workspaceRoot}/tests/worker/access.test.mjs",
+        "{workspaceRoot}/tests/worker/entry-auth.test.mjs"
+      ]
+    },
+    "protocol": {
+      "cache": true,
+      "outputs": [],
+      "inputs": [
+        "default",
+        "shared",
+        "{workspaceRoot}/tests/worker/project-settings.test.mjs",
+        "{workspaceRoot}/tests/worker/project-documents.test.mjs",
+        "{workspaceRoot}/tests/worker/protocol-v1.test.mjs",
+        "{workspaceRoot}/tests/worker/coverage.test.mjs",
+        "{workspaceRoot}/tests/worker/lockfile.test.mjs",
+        "{workspaceRoot}/nx.json",
+        "{workspaceRoot}/tests/worker/nx-config.test.mjs"
+      ]
+    },
+    "assets": {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/.build"],
+      "inputs": [
+        "default",
+        "shared",
+        "{workspaceRoot}/worker/**/*",
+        "{workspaceRoot}/tools/assets.mjs",
+        "{workspaceRoot}/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    "deploy": {
+      "cache": true,
+      "outputs": [],
+      "inputs": [
+        "default",
+        "shared",
+        "{workspaceRoot}/tests/tools/**",
+        "{workspaceRoot}/tests/fixtures/deployment-valid.json"
+      ]
+    },
+    "local": {
+      "cache": true,
+      "outputs": [],
+      "inputs": [
+        "default",
+        "shared",
+        "!{workspaceRoot}/tools/deploy.py",
+        "{workspaceRoot}/tests/support/**/*",
+        "{workspaceRoot}/tests/fixtures/project-documents.md",
+        "{workspaceRoot}/tests/fixtures/project-document-notes.md",
+        "{workspaceRoot}/tests/fixtures/project-settings.md",
+        "{workspaceRoot}/worker/**/*",
+        "{workspaceRoot}/web/**/*",
+        "{workspaceRoot}/tests/worker/*.py",
+        "{workspaceRoot}/THIRD_PARTY_NOTICES.md",
+        "{workspaceRoot}/.node-version"
+      ]
+    },
+    "browser": {
+      "cache": true,
+      "outputs": [],
+      "inputs": [
+        "default",
+        "shared",
+        "!{workspaceRoot}/tools/deploy.py",
+        "{workspaceRoot}/tests/browser/**/*",
+        "{workspaceRoot}/tests/fixtures/browser-cases.json",
+        "{workspaceRoot}/tests/fixtures/project-documents.md",
+        "{workspaceRoot}/tests/fixtures/project-document-notes.md",
+        "{workspaceRoot}/tests/fixtures/project-settings-board.json",
+        "{workspaceRoot}/tests/support/**/*",
+        "{workspaceRoot}/worker/**/*",
+        "{workspaceRoot}/web/**/*",
+        "{workspaceRoot}/THIRD_PARTY_NOTICES.md",
+        "{workspaceRoot}/.node-version",
+        { "env": "FACTORY_BROWSER_SHARD" }
+      ]
+    },
+    "cli": {
+      "cache": true,
+      "outputs": [],
+      "inputs": [
+        "default",
+        "shared",
+        "{workspaceRoot}/tests/cli/**/*",
+        "{workspaceRoot}/tools/install.py",
+        "{workspaceRoot}/tests/tools/test_install.py",
+        "{workspaceRoot}/tests/fixtures/cli-v1.json",
+        "{workspaceRoot}/docs/device.md",
+        "{workspaceRoot}/docs/integrations.md",
+        "{workspaceRoot}/worker/admission.js",
+        "{workspaceRoot}/.github/workflows/ci.yml",
+        "{workspaceRoot}/.github/actions/ci-setup/action.yml",
+        { "env": "FACTORY_FORBID_LITERALS_JSON" },
+        { "runtime": "python3 --version" }
+      ]
+    },
+    "install": {
+      "cache": true,
+      "outputs": [],
+      "inputs": [
+        "default",
+        "shared",
+        "{workspaceRoot}/tools/install.py",
+        "{workspaceRoot}/tests/tools/test_install.py",
+        "{workspaceRoot}/tests/cli/support.py",
+        "{workspaceRoot}/skills/**/*",
+        { "runtime": "python3 --version" }
+      ]
+    },
+    "verify": {
+      "cache": true,
+      "outputs": [],
+      "inputs": [
+        "default",
+        "shared",
+        "{workspaceRoot}/tests/tools/test_verify.py",
+        "{workspaceRoot}/tests/tools/test_pr_screenshots.py",
+        "{workspaceRoot}/tests/tools/test_copy_pr_screenshots.py",
+        "{workspaceRoot}/tests/tools/test_public_cutover.py",
+        "{workspaceRoot}/skills/factory/runtime/pr_screenshots.py",
+        { "runtime": "python3 --version" }
+      ]
+    }
+  }
+}

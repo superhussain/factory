@@ -1,0 +1,369 @@
+{
+  "version": 1,
+  "commands": [
+    {
+      "name": "where",
+      "min_args": 0,
+      "max_args": 1,
+      "stdout": "object:factory,runtime,project_file,repo_path,repo,base,slug,jobs,worktrees,dashboard",
+      "exit_codes": [
+        0,
+        1,
+        2,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "init",
+      "min_args": 0,
+      "max_args": 1,
+      "stdout": "human-readable setup/registration output",
+      "exit_codes": [
+        0,
+        1,
+        2,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "claim",
+      "min_args": 3,
+      "max_args": 3,
+      "stdout": "allocated ID",
+      "exit_codes": [
+        0,
+        2,
+        5
+      ]
+    },
+    {
+      "name": "board",
+      "min_args": 2,
+      "max_args": 2,
+      "stdout": "job object",
+      "exit_codes": [
+        0,
+        2,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "next",
+      "min_args": 0,
+      "max_args": 0,
+      "stdout": "object:id,project,feature",
+      "exit_codes": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "backlog",
+      "min_args": 2,
+      "max_args": 4,
+      "stdout": "append summary",
+      "exit_codes": [
+        0,
+        2,
+        4,
+        5
+      ]
+    },
+    {
+      "name": "stop",
+      "min_args": 1,
+      "max_args": 1,
+      "stdout": "remaining PIDs",
+      "exit_codes": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "push",
+      "min_args": 1,
+      "max_args": 1,
+      "stdout": "upload summary",
+      "exit_codes": [
+        0,
+        2,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "pull",
+      "min_args": 1,
+      "max_args": 1,
+      "stdout": "download summary",
+      "exit_codes": [
+        0,
+        2,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "sync",
+      "min_args": 0,
+      "max_args": 1,
+      "stdout": "per-job summaries",
+      "exit_codes": [
+        0,
+        2,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "hold",
+      "min_args": 1,
+      "max_args": 2,
+      "stdout": "ownership/pull summaries",
+      "exit_codes": [
+        0,
+        2,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "worktree",
+      "min_args": 1,
+      "max_args": 1,
+      "stdout": "worktree path",
+      "exit_codes": [
+        0,
+        1,
+        2,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "job",
+      "min_args": 1,
+      "max_args": 1,
+      "stdout": "stored job object",
+      "exit_codes": [
+        0,
+        2,
+        4,
+        5
+      ]
+    },
+    {
+      "name": "handoff",
+      "min_args": 1,
+      "max_args": 1,
+      "stdout": "released job object",
+      "exit_codes": [
+        0,
+        2,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "builds",
+      "min_args": 1,
+      "max_args": 1,
+      "stdout": "object:queued,in_flight,stale,running,due",
+      "exit_codes": [
+        0,
+        2,
+        5
+      ]
+    },
+    {
+      "name": "ideas",
+      "min_args": 0,
+      "max_args": 6,
+      "stdout": "array:id,project,repo_path,session",
+      "exit_codes": [
+        0,
+        2,
+        3,
+        5
+      ]
+    },
+    {
+      "name": "stuck",
+      "min_args": 0,
+      "max_args": 2,
+      "stdout": "array:id,project,repo_path,session,stage",
+      "exit_codes": [
+        0,
+        2,
+        3,
+        5
+      ]
+    },
+    {
+      "name": "idea-images",
+      "min_args": 1,
+      "max_args": 1,
+      "stdout": "import/push summaries",
+      "exit_codes": [
+        0,
+        2,
+        4,
+        5,
+        6
+      ]
+    }
+  ],
+  "legacy_groups": [
+    {
+      "id": "ProjectSyncTest",
+      "count": 11,
+      "methods": [
+        "test_missing_equal_and_clean_refresh",
+        "test_dirty_pull_where_and_repeated_init_keep_draft_and_paths",
+        "test_unversioned_divergence_and_marker_resolution",
+        "test_both_changed_stale_push_never_gets_or_retries",
+        "test_no_base_and_corrupt_state_fail_closed",
+        "test_local_edit_during_get_and_put",
+        "test_error_paths_preserve_draft_and_state",
+        "test_path_stripping_records_uploaded_snapshot_only",
+        "test_project_cli_and_successful_where_fields",
+        "test_registration_create_only_and_race",
+        "test_link_nonregular_unreadable_and_junction_paths"
+      ]
+    },
+    {
+      "id": "FactoryTest",
+      "count": 57,
+      "methods": [
+        "test_stuck_drops_a_stale_stub",
+        "test_hold_sets_started_once",
+        "test_hold_prints_elapsed_since_started",
+        "test_handoff_uploads_then_releases_without_resetting_stage_or_round",
+        "test_all_active_stages_and_old_acceptance_metadata",
+        "test_receiver_accepts_with_own_claim_and_paseo_link",
+        "test_non_owner_cannot_handoff_even_if_claim_is_stale",
+        "test_released_hold_refuses_stale_foreign_claim",
+        "test_released_hold_accepts_unclaimed_job_and_refreshes_own_claim",
+        "test_released_hold_rejects_inactive_stages",
+        "test_handoff_preserves_human_note_through_acceptance",
+        "test_released_hold_rejects_stage_drift_before_claiming",
+        "test_released_hold_rejects_round_drift_before_claiming",
+        "test_released_hold_after_progress_ignores_accepted_snapshot",
+        "test_released_hold_fails_on_local_only_review_verdict",
+        "test_released_hold_fails_on_local_edit_of_synced_review",
+        "test_released_hold_fails_when_r2_loses_a_synced_review",
+        "test_released_hold_fails_on_symlinked_review",
+        "test_released_hold_fails_on_symlinked_round_directory",
+        "test_released_hold_fails_when_newer_remote_replaces_a_symlink",
+        "test_released_hold_fails_on_symlinked_job_folder",
+        "test_released_hold_fails_on_symlinked_project_folder",
+        "test_released_hold_fails_on_symlinked_sync_manifest",
+        "test_released_hold_fails_on_symlinked_conflict_copy",
+        "test_released_hold_fails_on_unlistable_round_directory",
+        "test_released_hold_fails_on_unreadable_job_folder_hiding_a_link",
+        "test_scan_errors_fail_closed_but_a_missing_fresh_root_passes",
+        "test_released_hold_fails_when_a_scan_error_hits_an_existing_root",
+        "test_released_hold_fails_on_mocked_junction_round_directory",
+        "test_released_hold_fails_on_mocked_junction_job_folder",
+        "test_released_hold_fails_on_mocked_reparse_artifact",
+        "test_released_hold_fails_on_real_windows_junction",
+        "test_symlinked_factory_home_is_trusted",
+        "test_released_hold_clean_resume_downloads_and_passes_strict_check",
+        "test_released_hold_artifact_listing_failure_after_claim",
+        "test_old_sender_cannot_handoff_twice",
+        "test_missing_remote_branch",
+        "test_network_failure_keeps_claim",
+        "test_remote_deleted_artifact_keeps_claim",
+        "test_unrelated_board_race_retries",
+        "test_no_session_cannot_handoff",
+        "test_project_mismatch",
+        "test_hold_rejects_project_mismatch",
+        "test_human_and_terminal_gates_are_not_released",
+        "test_missing_checkpoint",
+        "test_blank_checkpoint",
+        "test_symlink_checkpoint",
+        "test_dirty_worktree",
+        "test_wrong_branch",
+        "test_unpublished_commit",
+        "test_failed_upload_keeps_claim",
+        "test_conflicting_checkpoint_keeps_claim",
+        "test_remote_newer_artifact_keeps_claim",
+        "test_state_change_during_upload_does_not_release_claim",
+        "test_cas_retry_cannot_release_new_owner",
+        "test_board_cannot_forge_handoff",
+        "test_stuck_skips_a_stale_job_waiting_on_human"
+      ]
+    },
+    {
+      "id": "IdeaTest",
+      "count": 19,
+      "methods": [
+        "test_ideas_skip_unassigned_without_consuming_limit",
+        "test_ideas_only_unassigned_writes_nothing",
+        "test_ideas_claim_conflict_does_not_overwrite_other_holder",
+        "test_sync_skips_discarded_unassigned_but_not_executable_records",
+        "test_ideas_rejects_bad_flags_with_usage",
+        "test_ideas_extra_or_dangling_args_exit_with_ideas_usage_not_module_help",
+        "test_ideas_max_inflight_counts_fresh_moving_job_and_puts_nothing",
+        "test_ideas_max_inflight_treats_null_timestamp_as_stale",
+        "test_ideas_max_inflight_counts_fresh_claim_from_any_holder",
+        "test_ideas_max_inflight_ignores_stale_load",
+        "test_ideas_max_inflight_skips_escalated_pr_open",
+        "test_ideas_max_inflight_and_limit_compose_in_either_order",
+        "test_ideas_without_max_inflight_claims_despite_fresh_inflight",
+        "test_ideas_max_inflight_conflict_recounts_and_puts_once",
+        "test_ideas_project_claims_only_that_project",
+        "test_ideas_project_cap_ignores_foreign_inflight",
+        "test_ideas_project_unknown_slug_fails_before_cas",
+        "test_ideas_project_without_checkout_fails_before_cas",
+        "test_ideas_without_project_counts_all_projects_toward_cap"
+      ]
+    },
+    {
+      "id": "AgentInstallTest",
+      "count": 6,
+      "methods": [
+        "test_init_installs_without_credentials_and_leaves_unrelated_files",
+        "test_install_both_runtimes_and_preserve_opencode_model",
+        "test_repeated_init_preserves_native_header_and_refreshes_body",
+        "test_init_refuses_missing_or_unsupported_header_delimiters",
+        "test_init_keeps_invalid_yaml_content_inside_valid_delimiters",
+        "test_empty_xdg_config_home_falls_back_to_default"
+      ]
+    },
+    {
+      "id": "ResumeInstructionTest",
+      "count": 2,
+      "methods": [
+        "test_resume_approve_requires_a_fresh_approver",
+        "test_resume_released_documents_strict_artifact_verification"
+      ]
+    },
+    {
+      "id": "IdeaImagesTest",
+      "count": 8,
+      "methods": [
+        "test_import_materializes_hashed_images_and_markdown_then_pushes",
+        "test_import_of_a_job_without_images_writes_nothing",
+        "test_import_stops_on_missing_or_corrupt_image_without_writing",
+        "test_import_refuses_projectless_and_malformed_metadata",
+        "test_import_preserves_a_differing_local_file_and_unresolved_remote",
+        "test_import_retries_after_a_partial_push",
+        "test_import_stops_when_the_remote_copy_of_an_import_moves",
+        "test_another_device_pulls_identical_bytes_and_links"
+      ]
+    }
+  ]
+}

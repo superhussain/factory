@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walkthrough</title>
+<h2 style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">walkthrough.html now loads only inside the dashboard frame.</h2>
+<style>
+/* Standalone theme. Drop this :root block when the host supplies these variables. */
+:root{--font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;--radius:8px;--text-primary:#1a1a1a;--text-secondary:#666;--surface-0:#fff;--surface-1:#f3f3f1;--border:#d8d8d4;--bg-accent:#e6efff;--text-accent:#1f4fbf;--border-accent:#8fb0f0;--bg-success:#e3f4e6;--text-success:#1d6b30;--bg-danger:#fbe6e4;--text-danger:#a3261b;--bg-warning:#fbf1d8;--text-warning:#8a5a00}
+@media (prefers-color-scheme:dark){:root{--text-primary:#eee;--text-secondary:#aaa;--surface-0:#1b1b1b;--surface-1:#2a2a2a;--border:#444;--bg-accent:#1e2c48;--text-accent:#9dbcff;--border-accent:#4d6fb0;--bg-success:#17331f;--text-success:#8fd7a0;--bg-danger:#3d1c19;--text-danger:#f2a49b;--bg-warning:#3a2e12;--text-warning:#f0cb73}}
+body{font-family:system-ui,sans-serif;color:var(--text-primary);background:var(--surface-0);max-width:760px;margin:2rem auto;padding:0 1rem}
+button{font:inherit;color:inherit;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:6px 14px;cursor:pointer}
+.pills{display:flex;flex-wrap:wrap;gap:6px;margin:0.5rem 0 12px}
+.pills button{width:32px;height:32px;padding:0;font-size:12px}
+.pills button.cur{background:var(--bg-accent);color:var(--text-accent);border-color:var(--border-accent)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--radius);font-size:13px}
+.card{background:var(--surface-1);border-radius:var(--radius);padding:10px 12px}
+pre.sql{font-family:var(--font-mono);font-size:12px;line-height:1.6;background:var(--surface-1);border-radius:var(--radius);padding:10px 12px;white-space:pre-wrap}
+.hg{background:var(--bg-success);color:var(--text-success)}.hb{background:var(--bg-danger);color:var(--text-danger)}.hw{background:var(--bg-warning);color:var(--text-warning)}.ha{background:var(--bg-accent);color:var(--text-accent)}
+code{font-family:var(--font-mono);font-size:12px;background:var(--surface-1);padding:1px 4px;border-radius:4px}
+table{border-collapse:collapse;font-size:13px}td,th{border:1px solid var(--border);padding:4px 8px;text-align:left}
+</style>
+<div class="pills" id="pills"></div>
+<p id="kicker" style="font-size:12px;color:var(--text-secondary);margin:0"></p>
+<h3 id="title" style="margin:0 0 12px"></h3>
+<div id="vis" style="margin:0 0 14px"></div>
+<ul id="bul" style="margin:0;padding-left:20px;font-size:15px;line-height:1.7"></ul>
+<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 4px">
+  <button id="prev">Back</button><span id="count" style="font-size:13px;color:var(--text-secondary)"></span><button id="next">Next</button>
+</div>
+<script>
+// Fill STEPS. t = title, v = visual HTML, b = bullets (HTML allowed, real identifiers in <code>).
+const STEPS=[
+{t:'Where the page opens',v:'<span class="chip hg">dashboard frame</span> <span class="chip hb">new tab</span> <span class="chip hb">typed URL</span>',b:['The frame request carries <code>Sec-Fetch-Dest: iframe</code>.','A tab or a typed URL carries <code>Sec-Fetch-Dest: document</code>.']},
+{t:'The Worker decides',v:'<pre class="sql">dest = request.headers.get("Sec-Fetch-Dest")\n<span class="hg">iframe</span>    serve the page under HTML_CSP\n<span class="hb">document</span>  403 walkthrough.html opens only inside the dashboard</pre>',b:['<code>getJobFile</code> decides before it reads R2.','Every existing header stays as it was.']},
+{t:'A device pull',v:'<div class="card"><code>factory.py pull</code> sends no Fetch Metadata and signs in as a service, so it still gets the file.</div>',b:['Every current browser sends <code>Sec-Fetch-Dest</code>.','A browser too old to send it is refused.']},
+{t:'Before and after',v:'<table><tr><th>Load</th><th>Before</th><th>After</th></tr><tr><td>dashboard frame</td><td>200</td><td>200</td></tr><tr><td>new tab</td><td>200</td><td>403</td></tr><tr><td>device pull</td><td>200</td><td>200</td></tr></table>',b:['The new-tab link is gone.','The probe line below still reads blocked.']}
+];
+const $=id=>document.getElementById(id);let i=0;
+STEPS.forEach((s,k)=>{const b=document.createElement('button');b.textContent=k+1;b.title=s.t;b.setAttribute('aria-label','Step '+(k+1)+': '+s.t);b.onclick=()=>{i=k;render();};$('pills').appendChild(b);});
+function render(){const s=STEPS[i];$('kicker').textContent='Step '+(i+1)+' of '+STEPS.length;$('title').textContent=s.t;$('vis').innerHTML=s.v;$('bul').innerHTML=s.b.map(x=>'<li>'+x+'</li>').join('');$('count').textContent=(i+1)+' / '+STEPS.length;[...$('pills').children].forEach((b,k)=>{b.classList.toggle('cur',k===i);if(k===i)b.setAttribute('aria-current','step');else b.removeAttribute('aria-current');});}
+const go=d=>{i=(i+STEPS.length+d)%STEPS.length;render();};
+$('prev').onclick=()=>go(-1);$('next').onclick=()=>go(1);
+document.addEventListener('keydown',e=>{if(e.target.closest('input,textarea,select,[contenteditable]'))return;if(e.key==='ArrowLeft')go(-1);if(e.key==='ArrowRight')go(1);});
+render();
+</script>
+<p id="probe" style="font-size:12px;color:var(--text-secondary);margin:8px 0 0"></p>
+<script>
+const out=['origin:'+self.origin];
+try{document.cookie;out.push('cookie:open');}catch{out.push('cookie:blocked');}
+try{parent.document.title;out.push('parent:open');}catch{out.push('parent:blocked');}
+try{localStorage.length;out.push('storage:open');}catch{out.push('storage:blocked');}
+fetch('/api/probe-from-walkthrough').then(()=>out.push('fetch:open'),()=>out.push('fetch:blocked')).finally(()=>{$('probe').textContent=out.join(' ');});
+</script>

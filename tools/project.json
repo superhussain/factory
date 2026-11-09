@@ -1,0 +1,9 @@
+{
+  "name": "tooling",
+  "targets": {
+    "deploy": { "command": "pnpm run test:deploy" },
+    "local": { "command": "pnpm run test:local" },
+    "browser": { "command": "pnpm run test:browser" },
+    "verify": { "command": "pnpm run test:verify" }
+  }
+}

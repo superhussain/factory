@@ -1,0 +1,93 @@
+# Deploys the latest reviewed main head. One-time operator setup:
+# docs/cloudflare.md section 8 (scoped token, repository variable, secret).
+name: Deploy main
+on:
+  push:
+    branches:
+      - main
+# Coalesce main pushes without cancelling an in-flight deploy: wrangler deploy
+# is a non-cancellable step, so cancelling mid-deploy risks a half-applied
+# version. Pending runs are replaceable and runs start in start order, not
+# push order, so queue order alone can lose the current head (an older run can
+# displace the head's pending run). Instead of trusting the queue, every run
+# reconciles first: it deploys origin/main's current head at start time, so a
+# stale, reordered or rerun holder converges on the latest reviewed head.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - name: Reconcile with origin/main
+        id: reconcile
+        env:
+          # github.token carries the workflow's own contents:read ceiling; the
+          # checkout below does not persist credentials, so an unauthenticated
+          # ls-remote would only work for public repositories.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url="${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}"
+          head="$(git ls-remote "https://x-access-token:${GH_TOKEN}@${url}" refs/heads/main | cut -f1)"
+          if [ -z "$head" ]; then
+            echo "Could not read origin/main's head; refusing to deploy an unverified SHA" >&2
+            exit 1
+          fi
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "This run's SHA ($GITHUB_SHA) is not origin/main's head ($head);"
+            echo "deploying the current head instead, so a displaced or stale run cannot lose it."
+          fi
+          echo "sha=$head" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          # Deploy the reconciled origin/main head, which a newer push may own
+          # rather than this run; it is always a reviewed main commit.
+          ref: ${{ steps.reconcile.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check deployment inputs
+        env:
+          PROFILE_JSON: ${{ vars.FACTORY_DEPLOY_PROFILE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          missing=0
+          if [ -z "$PROFILE_JSON" ]; then
+            echo "FACTORY_DEPLOY_PROFILE (repository variable) is not set; see docs/cloudflare.md section 8"
+            missing=1
+          fi
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "CLOUDFLARE_API_TOKEN (repository secret) is not set; see docs/cloudflare.md section 8"
+            missing=1
+          fi
+          exit "$missing"
+      - name: Materialize profile
+        env:
+          PROFILE_JSON: ${{ vars.FACTORY_DEPLOY_PROFILE }}
+        run: |
+          mkdir -p deploy
+          printf '%s\n' "$PROFILE_JSON" > deploy/profile.json
+          python3 tools/deploy.py check --profile deploy/profile.json
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          run_install: false
+      - run: test "$(pnpm --version)" = 11.9.0
+      # Cache-key coordination: setup-node's default pnpm key is
+      # node-cache-<OS>-<arch>-pnpm-<hash of **/pnpm-lock.yaml>. The CI
+      # workflow restores this key read-only.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python3 tools/deploy.py deploy --profile deploy/profile.json

@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic secret-shaped fixtures: repeated x and A characters and bare PEM headers"
+paths = ['''^tests/worker/admission\.test\.mjs$''']

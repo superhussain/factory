@@ -1,0 +1,430 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walkthrough</title>
+<style>
+:root{--font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;--radius:8px;--text-primary:#1a1a1a;--text-secondary:#666;--surface-0:#fff;--surface-1:#f3f3f1;--border:#d8d8d4;--bg-accent:#e6efff;--text-accent:#1f4fbf;--border-accent:#8fb0f0;--bg-success:#e3f4e6;--text-success:#1d6b30;--bg-danger:#fbe6e4;--text-danger:#a3261b;--bg-warning:#fbf1d8;--text-warning:#8a5a00}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--text-primary:#f3f4f6;--text-secondary:#9ca3af;--surface-0:#1f2937;--surface-1:#273244;--border:#374151;--bg-accent:#1e2c48;--text-accent:#9dbcff;--border-accent:#4d6fb0;--bg-success:#17331f;--text-success:#8fd7a0;--bg-danger:#3d1c19;--text-danger:#f2a49b;--bg-warning:#3a2e12;--text-warning:#f0cb73}}
+:root[data-theme=dark]{--text-primary:#f3f4f6;--text-secondary:#9ca3af;--surface-0:#1f2937;--surface-1:#273244;--border:#374151;--bg-accent:#1e2c48;--text-accent:#9dbcff;--border-accent:#4d6fb0;--bg-success:#17331f;--text-success:#8fd7a0;--bg-danger:#3d1c19;--text-danger:#f2a49b;--bg-warning:#3a2e12;--text-warning:#f0cb73}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--text-primary);background:var(--surface-0);max-width:1100px;margin:0 auto;padding:16px}
+button{font:inherit;font-size:14px;color:inherit;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:6px 14px;cursor:pointer}
+button[aria-pressed="true"],button[aria-selected="true"]{background:var(--bg-accent);color:var(--text-accent);border-color:var(--border-accent)}
+:focus-visible{outline:2px solid var(--text-accent);outline-offset:2px}
+[hidden]{display:none!important}
+.muted{font-size:12px;color:var(--text-secondary);margin:0}
+#doc-kicker{text-transform:uppercase;letter-spacing:.06em}
+h1{font-size:22px;margin:2px 0 4px}
+#doc-summary{margin:0 0 8px}
+dl{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0 0 12px;font-size:13px}
+dt{color:var(--text-secondary)}dd{margin:0 0 0 6px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 8px}
+#stage-status{font-size:13px;color:var(--text-secondary)}
+.map-wrap{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:12px}
+.map-scroll{overflow-x:auto}
+.map-wrap>*{min-width:0}
+.map-wrap.stacked{grid-template-columns:1fr}
+#map{display:block;box-sizing:border-box;width:100%;height:auto;font:16px system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--surface-0);border:1px solid var(--border);border-radius:var(--radius)}
+#map text{fill:var(--text-primary)}
+#map .sub{fill:var(--text-secondary);font-size:12px}
+svg.tl .sub{fill:var(--text-secondary);font-size:11px}
+#map .mono{font-family:var(--font-mono)}
+#map .line{stroke:var(--text-secondary);stroke-width:1.5}
+#map .ok{stroke:var(--text-success);stroke-width:1.5}
+#map .cut{stroke:var(--text-danger);stroke-width:1.5;stroke-dasharray:5 4}
+#map .tip{fill:var(--text-secondary)}
+g.node{cursor:pointer}
+g.node rect{stroke-width:1.5}
+g.node.hl rect{fill:var(--bg-accent);stroke:var(--text-accent);stroke-width:2.5}
+g.node:focus{outline:none}
+g.node:focus-visible rect{stroke:var(--text-accent);stroke-width:3}
+#detail{background:var(--surface-1);border-radius:var(--radius);padding:10px 12px}
+#detail h3{margin:2px 0 6px;font-size:15px}
+#detail ul,#bul{margin:0;padding-left:20px;line-height:1.6}
+#map-caption{font-size:13px;color:var(--text-secondary);margin:6px 0 0}
+#example{margin:16px 0}
+.pills{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.pills button{width:32px;height:32px;padding:0;font-size:12px}
+.pills button[aria-current="step"]{background:var(--bg-accent);color:var(--text-accent);border-color:var(--border-accent)}
+h2{font-size:18px;margin:0 0 10px}
+.step{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px}
+#bul{font-size:15px}
+#measured{margin:10px 0 0;font-size:13px}
+#show-map{margin-top:10px}
+.controls{display:flex;justify-content:space-between;align-items:center;margin:16px 0 4px}
+#count{font-size:13px;color:var(--text-secondary)}
+@media (max-width:720px){.map-wrap,.step{grid-template-columns:1fr}}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--radius);font-size:13px}
+.card{background:var(--surface-1);border-radius:var(--radius);padding:10px 12px}
+.hg{background:var(--bg-success);color:var(--text-success)}.hb{background:var(--bg-danger);color:var(--text-danger)}.hw{background:var(--bg-warning);color:var(--text-warning)}.ha{background:var(--bg-accent);color:var(--text-accent)}
+code{font-family:var(--font-mono);font-size:12px;background:var(--surface-1);padding:1px 4px;border-radius:4px}
+table{border-collapse:collapse;font-size:13px}td,th{border:1px solid var(--border);padding:4px 8px;text-align:left}
+svg.v{display:block;width:100%;height:auto;max-height:200px;font:13px system-ui,sans-serif}
+svg.v text{fill:var(--text-primary)}
+svg.v .sub{fill:var(--text-secondary);font-size:11px}
+svg.v .mono{font-family:var(--font-mono);font-size:12px}
+svg.v .box{fill:var(--surface-1);stroke:var(--border)}
+svg.v .ex{fill:var(--bg-accent);stroke:var(--border-accent)}
+svg.v .ok{fill:var(--bg-success);stroke:var(--text-success)}
+svg.v .bad{fill:var(--bg-danger);stroke:var(--text-danger)}
+svg.v .risk{fill:var(--bg-warning);stroke:var(--text-warning)}
+svg.v .line{fill:none;stroke:var(--text-secondary);stroke-width:1.5}
+svg.v .cut{fill:none;stroke:var(--text-danger);stroke-width:1.5;stroke-dasharray:5 4}
+svg.v .tip{fill:var(--text-secondary)}
+.pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.pair .card>b{display:block;font-size:12px;color:var(--text-secondary);margin-bottom:4px}
+.pair .card{overflow-wrap:anywhere}
+@media (max-width:720px){.pair{grid-template-columns:minmax(0,1fr)}:has(> svg.v){overflow-x:auto;contain:inline-size}svg.v{min-width:600px}}
+.t-box{fill:var(--surface-1);stroke:var(--border);background:var(--surface-1)}
+.t-ex{fill:var(--bg-accent);stroke:var(--border-accent);background:var(--bg-accent);color:var(--text-accent)}
+.t-ok{fill:var(--bg-success);stroke:var(--text-success);background:var(--bg-success);color:var(--text-success)}
+.t-bad{fill:var(--bg-danger);stroke:var(--text-danger);background:var(--bg-danger);color:var(--text-danger)}
+.t-risk{fill:var(--bg-warning);stroke:var(--text-warning);background:var(--bg-warning);color:var(--text-warning)}
+svg.tl{display:block;width:100%;height:auto;font:13px system-ui,-apple-system,"Segoe UI",sans-serif}
+svg.tl text{fill:var(--text-primary)}
+svg.tl .axis{stroke:var(--text-secondary);stroke-width:1.5}
+.heat{display:grid;gap:3px}
+.heat div{height:22px;border:1px solid var(--border);border-radius:3px}
+.cards{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.cards small{display:block;font-size:12px;color:var(--text-secondary)}
+.cards b{display:block;font-size:20px}
+</style>
+<header>
+<p id="doc-kicker" class="muted"></p>
+<h1 id="doc-title"></h1>
+<p id="doc-summary"></p>
+<dl id="doc-meta"></dl>
+</header>
+<div id="tabs" class="row" role="tablist" aria-label="Walkthrough tabs"></div>
+<section id="map-section" aria-label="System map">
+<div class="row">
+<div id="map-variant" class="row" role="group" aria-label="Map variant" style="margin:0"><button type="button" data-variant="proposed">Proposed</button><button type="button" data-variant="today">Today</button></div>
+<button type="button" id="stage-next">Next stage</button><button type="button" id="stage-reset">Reset</button><span id="stage-status" aria-live="polite"></span>
+</div>
+<div class="map-wrap">
+<div><div class="map-scroll"><svg id="map" role="group"></svg></div><p id="map-caption"></p></div>
+<aside id="detail" aria-live="polite"><p id="detail-variant" class="muted"></p><h3 id="detail-title"></h3><ul id="detail-body"></ul></aside>
+</div>
+</section>
+<p id="example"><span class="chip ha">Made-up example</span> <span id="example-text"></span></p>
+<section aria-label="Steps">
+<div class="pills" id="pills"></div>
+<p id="kicker" class="muted"></p>
+<h2 id="title"></h2>
+<div class="step">
+<div id="vis"></div>
+<div><ul id="bul"></ul><p id="measured"><span class="chip hw">Measured</span> <span id="measured-text"></span></p><button type="button" id="show-map">Show in diagram</button></div>
+</div>
+<div class="controls"><button type="button" id="prev">Back</button><span id="count"></span><button type="button" id="next">Next</button></div>
+</section>
+<script>
+// DATA START
+const DOC = {
+  kicker: 'Factory job 042-queue-batching',
+  title: 'Batch ticket writes',
+  summary: 'A batcher writes queue changes every 2 s, so the lobby display shows a new ticket in about 3 s instead of 48 s.',
+  meta: [['Status', 'Spec ready'], ['Job', '042-queue-batching']],
+  example: 'Ticket T7 from kiosk K2 at 09:00:12.',
+};
+const MAP = {
+  w: 900, h: 320,
+  caption: {
+    proposed: 'The batcher writes T7 within 2 s, so the display shows it in about 3 s.',
+    today: 'The row writer flushes every 30 s, so T7 reaches the display after 48 s.',
+  },
+  nodes: [
+    { id: 'kiosk', x: 20, y: 40, w: 150, h: 56, label: 'Kiosk K2', sub: 'POST /tickets', tone: 'ex',
+      detail: ['Prints ticket T7 and posts it.', 'Unchanged.'] },
+    { id: 'api', x: 230, y: 40, w: 150, h: 56, label: 'Ticket API', sub: 'validates',
+      detail: ['Checks the ticket and hands it on.', 'Unchanged.'] },
+    { id: 'writer', x: 440, y: 40, w: 190, h: 56, label: 'Row writer, every 30 s', sub: 'flushes rows', tone: 'bad', in: ['today'],
+      detail: ['Writes queued rows to the store every 30 s.', 'Removed: the batcher replaces it.'] },
+    { id: 'batcher', x: 440, y: 40, w: 190, h: 56, label: 'Batcher, every 2 s', sub: 'flushes changes', tone: 'ok', in: ['proposed'],
+      detail: ['Writes changed rows every 2 s.', 'New: replaces the row writer.'] },
+    { id: 'store', x: 700, y: 40, w: 170, h: 56, label: 'Queue store', sub: 'rows',
+      detail: ['Holds one row per ticket.', 'Unchanged.'] },
+    { id: 'counter', x: 700, y: 220, w: 170, h: 56, label: 'Queue counter', sub: 're-counts per kiosk',
+      detail: ['Re-counts the queue when rows change.', 'Runs after every batch.'] },
+    { id: 'display', x: 440, y: 220, w: 190, h: 56, label: 'Lobby display', sub: 'shows queue length',
+      detail: ['Shows the queue length per kiosk.', 'Unchanged.'] },
+  ],
+  edges: [
+    { from: 'kiosk', to: 'api', label: 'ticket' },
+    { from: 'api', to: 'writer', in: ['today'] },
+    { from: 'writer', to: 'store', label: 'rows', in: ['today'] },
+    { from: 'api', to: 'batcher', in: ['proposed'], tone: 'ok' },
+    { from: 'batcher', to: 'store', label: 'rows', in: ['proposed'], tone: 'ok' },
+    { from: 'store', to: 'counter' },
+    { from: 'counter', to: 'display', label: 'count' },
+  ],
+  stages: [
+    { label: 'Take the ticket', nodes: ['kiosk', 'api'] },
+    { label: 'Batch the write', nodes: ['batcher', 'store'] },
+    { label: 'Re-count and show', nodes: ['counter', 'display'] },
+  ],
+};
+const TABS = [
+  { id: 'overview', name: 'Overview', steps: [
+    { t: 'Today: T7 waits 48 s', variant: 'today', nodes: ['writer'],
+      v: { kind: 'timeline', from: 0, to: 60, unit: 's',
+        spans: [{ from: 0, to: 48, label: 'today 48 s', tone: 'bad' }, { from: 0, to: 3, label: 'proposed 3 s', tone: 'ok' }],
+        marks: [{ at: 0, label: '09:00:12 placed' }] },
+      b: ['The row writer holds T7 until its next 30 s flush.', 'The batcher writes it within 2 s.'] },
+    { t: 'Display against store', nodes: ['display'],
+      v: { kind: 'table', head: ['Moment', 'Store rows', 'Display', 'Status'],
+        rows: [['09:00:13 today', '8', '7', { s: 'mismatch', tone: 'bad' }], ['09:00:15 proposed', '8', '8', { s: 'match', tone: 'ok' }]] },
+      b: ['Today the display shows 7 while the store holds 8.', 'Proposed, both say 8 three seconds after T7.'] },
+  ] },
+  { id: 'detail', name: 'Detailed', steps: [
+    { t: 'Which 5 s buckets changed', nodes: ['batcher'],
+      v: { kind: 'heat', cols: 12, label: '24 five-second buckets, the last 3 changed',
+        cells: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1], legend: ['unchanged', 'changed'] },
+      b: ['The batcher writes only buckets that changed.', 'T7 lands in the last three.'] },
+    { t: 'Write, re-count, show', nodes: ['store', 'counter', 'display'], measured: 'fixture timing, synthetic run',
+      v: { kind: 'cards', cards: [
+        { n: 1, label: 'write T7', value: '8 rows' },
+        { n: 2, label: 're-count K2', value: '8', was: '7' },
+        { n: 3, label: 'display', value: 'Queue 8', was: '7' },
+      ] },
+      b: ['One batch write, one re-count, one display update.', 'The queue for K2 goes from 7 to 8.'] },
+    { t: 'The batcher', nodes: ['batcher'],
+      v: { kind: 'html', html: `<svg class="v" viewBox="0 0 640 120" role="img" aria-label="kiosk posts to the batcher, which writes the queue store">
+<defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path class="tip" d="M0,0L8,4L0,8z"/></marker></defs>
+<rect class="ex" x="10" y="35" width="170" height="50" rx="8"/>
+<text x="95" y="58" text-anchor="middle">Kiosk</text>
+<text class="sub mono" x="95" y="75" text-anchor="middle">K2 posts T7</text>
+<line class="line" x1="180" y1="60" x2="233" y2="60" marker-end="url(#ah)"/>
+<rect class="ok" x="235" y="35" width="170" height="50" rx="8"/>
+<text x="320" y="58" text-anchor="middle">Batcher</text>
+<text class="sub mono" x="320" y="75" text-anchor="middle">every 2 s</text>
+<line class="line" x1="405" y1="60" x2="458" y2="60" marker-end="url(#ah)"/>
+<rect class="box" x="460" y="35" width="170" height="50" rx="8"/>
+<text x="545" y="58" text-anchor="middle">Queue store</text>
+<text class="sub mono" x="545" y="75" text-anchor="middle">8 rows</text>
+</svg><div class="pair"><div class="card"><b>Before</b><span class="chip hb">row writer</span> one write per ticket</div><div class="card"><b>After</b><span class="chip hg">batcher</span> one write every 2 s</div></div>` },
+      b: ['The batcher sits where the row writer was.', 'Same inputs, same store, a 2 s cycle.'] },
+  ] },
+];
+// DATA END
+const applyTheme = () => {
+  const t = new URLSearchParams(location.hash.slice(1)).get('theme');
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+};
+applyTheme();
+addEventListener('hashchange', applyTheme);
+const $ = (id) => document.getElementById(id);
+const NS = $('map').namespaceURI;
+const svg = (tag, attrs, text) => {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  return e;
+};
+const html = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
+const both = (x) => x.in || ['today', 'proposed'];
+const NAME = { proposed: 'Proposed', today: 'Today' };
+
+$('doc-kicker').textContent = DOC.kicker;
+$('doc-title').textContent = DOC.title;
+$('doc-summary').textContent = DOC.summary;
+for (const [k, v] of DOC.meta) $('doc-meta').append(html('dt', '', k), html('dd', '', v));
+$('example-text').textContent = DOC.example;
+
+let variant = 'proposed', stage = -1;
+const nodeEls = {};
+function setDetail(title, items) {
+  $('detail-variant').textContent = NAME[variant];
+  $('detail-title').textContent = title;
+  $('detail-body').replaceChildren(...items.map((t) => html('li', '', t)));
+}
+function highlight(ids) {
+  for (const id in nodeEls) nodeEls[id].classList.toggle('hl', ids.includes(id));
+}
+function setVariant(v) {
+  variant = v;
+  for (const b of $('map-variant').children) b.setAttribute('aria-pressed', String(b.dataset.variant === v));
+  $('map').setAttribute('aria-label', 'System map, ' + NAME[v]);
+  for (const e of $('map').querySelectorAll('[data-in]')) e.style.display = e.dataset.in.split(' ').includes(v) ? '' : 'none';
+  $('map-caption').textContent = MAP.caption[v];
+  stage = -1;
+  $('stage-status').textContent = '';
+  highlight([]);
+  setDetail('Click a box', ['Each box says what its part does.']);
+}
+
+if (MAP) {
+  const map = $('map');
+  map.setAttribute('viewBox', '0 0 ' + MAP.w + ' ' + MAP.h);
+  map.style.minWidth = Math.min(MAP.w, 600) + 'px';
+  // The detail panel moves under the map when the map's column would draw it below MAP.w.
+  const wrap = document.querySelector('.map-wrap');
+  new ResizeObserver(() => wrap.classList.toggle('stacked', ((wrap.clientWidth - 12) * 2) / 3 < MAP.w)).observe(wrap);
+  const byId = Object.fromEntries(MAP.nodes.map((n) => [n.id, n]));
+  // A point on the line between the two centers, where it crosses n's border.
+  const clip = (n, dx, dy) => Math.min(n.w / 2 / Math.abs(dx || 1e-9), n.h / 2 / Math.abs(dy || 1e-9));
+  for (const e of MAP.edges) {
+    const a = byId[e.from], b = byId[e.to];
+    const ax = a.x + a.w / 2, ay = a.y + a.h / 2, dx = b.x + b.w / 2 - ax, dy = b.y + b.h / 2 - ay;
+    const s = clip(a, dx, dy), t = 1 - clip(b, dx, dy), len = Math.hypot(dx, dy);
+    const x2 = ax + dx * t, y2 = ay + dy * t, ux = dx / len, uy = dy / len;
+    const g = svg('g', { 'data-in': both(e).join(' ') });
+    g.append(svg('line', { class: e.tone || 'line', x1: ax + dx * s, y1: ay + dy * s, x2: x2 - ux * 6, y2: y2 - uy * 6 }));
+    g.append(svg('path', { class: 'tip', d: 'M' + x2 + ',' + y2 + 'L' + (x2 - ux * 8 - uy * 4) + ',' + (y2 - uy * 8 + ux * 4) + 'L' + (x2 - ux * 8 + uy * 4) + ',' + (y2 - uy * 8 - ux * 4) + 'z' }));
+    if (e.label) g.append(svg('text', { class: 'sub', x: ax + dx / 2, y: ay + dy / 2 - 6, 'text-anchor': 'middle' }, e.label));
+    map.append(g);
+  }
+  for (const n of MAP.nodes) {
+    const g = svg('g', { class: 'node', 'data-id': n.id, 'data-in': both(n).join(' '), tabindex: 0, role: 'button', 'aria-label': n.label + ', show details' });
+    g.append(svg('rect', { class: 't-' + (n.tone || 'box'), x: n.x, y: n.y, width: n.w, height: n.h, rx: 8 }));
+    g.append(svg('text', { x: n.x + 12, y: n.y + 22 }, n.label));
+    if (n.sub) g.append(svg('text', { class: 'sub mono', x: n.x + 12, y: n.y + 40 }, n.sub));
+    const open = () => setDetail(n.label, n.detail || []);
+    g.addEventListener('click', open);
+    g.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
+    });
+    nodeEls[n.id] = g;
+    map.append(g);
+  }
+  for (const b of $('map-variant').children) b.addEventListener('click', () => setVariant(b.dataset.variant));
+  $('stage-next').addEventListener('click', () => {
+    const k = (stage + 1) % MAP.stages.length;
+    setVariant('proposed');
+    stage = k;
+    highlight(MAP.stages[k].nodes);
+    $('stage-status').textContent = 'Stage ' + (k + 1) + ' of ' + MAP.stages.length + ': ' + MAP.stages[k].label;
+  });
+  $('stage-reset').addEventListener('click', () => {
+    stage = -1;
+    highlight([]);
+    $('stage-status').textContent = '';
+  });
+  setVariant('proposed');
+} else {
+  $('map-section').remove();
+}
+
+const X = (v, d) => 20 + ((v - d.from) / (d.to - d.from)) * 600;
+const KINDS = {
+  html: (d) => {
+    const box = html('div');
+    box.innerHTML = d.html;
+    return box;
+  },
+  timeline: (d) => {
+    const H = 50 + 28 * d.spans.length;
+    const s = svg('svg', { class: 'tl', viewBox: '0 0 640 ' + H, role: 'img', 'aria-label': d.spans.map((p) => p.label).join(', ') });
+    s.append(svg('line', { class: 'axis', x1: 20, y1: 24, x2: 620, y2: 24 }));
+    s.append(svg('text', { class: 'sub', x: 20, y: 14 }, d.from + ' ' + d.unit));
+    s.append(svg('text', { class: 'sub', x: 620, y: 14, 'text-anchor': 'end' }, d.to + ' ' + d.unit));
+    d.spans.forEach((p, k) => {
+      const x1 = X(p.from, d), x2 = X(p.to, d), y = 46 + 28 * k;
+      s.append(svg('rect', { class: 't-' + (p.tone || 'box'), x: x1, y, width: Math.max(x2 - x1, 2), height: 18, rx: 4 }));
+      const inside = x2 > 440;
+      s.append(svg('text', { x: inside ? x2 - 6 : x2 + 6, y: y + 13, 'text-anchor': inside ? 'end' : 'start' }, p.label));
+    });
+    for (const m of d.marks || []) {
+      s.append(svg('line', { class: 'axis', x1: X(m.at, d), y1: 18, x2: X(m.at, d), y2: 30 }));
+      s.append(svg('text', { class: 'sub', x: X(m.at, d) + 4, y: 40 }, m.label));
+    }
+    return s;
+  },
+  heat: (d) => {
+    const box = html('div');
+    const grid = html('div', 'heat');
+    grid.style.gridTemplateColumns = 'repeat(' + d.cols + ',minmax(0,1fr))';
+    grid.setAttribute('role', 'img');
+    grid.setAttribute('aria-label', d.label);
+    for (const c of d.cells) grid.append(html('div', c ? 't-ex' : 't-box'));
+    const legend = html('p', 'muted');
+    legend.append(html('span', 'chip t-box', d.legend[0]), ' ', html('span', 'chip t-ex', d.legend[1]));
+    legend.style.marginTop = '8px';
+    box.append(grid, legend);
+    return box;
+  },
+  cards: (d) => {
+    const row = html('div', 'cards');
+    d.cards.forEach((c, k) => {
+      if (k) {
+        const arrow = html('span', '', '→');
+        arrow.setAttribute('aria-hidden', 'true');
+        row.append(arrow);
+      }
+      const card = html('div', 'card');
+      card.append(html('small', '', c.n + ' · ' + c.label), html('b', '', c.value));
+      if (c.was != null) card.append(html('small', '', 'was ' + c.was));
+      row.append(card);
+    });
+    return row;
+  },
+  table: (d) => {
+    const t = html('table');
+    const head = html('tr');
+    for (const h of d.head) head.append(html('th', '', h));
+    t.append(html('thead'), html('tbody'));
+    t.tHead.append(head);
+    for (const r of d.rows) {
+      const tr = html('tr');
+      for (const c of r) tr.append(typeof c === 'string' ? html('td', '', c) : html('td', 't-' + c.tone, c.s));
+      t.tBodies[0].append(tr);
+    }
+    return t;
+  },
+};
+
+let tab = 0, i = 0;
+const steps = () => TABS[tab].steps;
+$('tabs').hidden = TABS.length === 1;
+TABS.forEach((t, k) => {
+  const b = html('button', '', t.name);
+  b.type = 'button';
+  b.setAttribute('role', 'tab');
+  b.addEventListener('click', () => { tab = k; i = 0; buildPills(); render(); });
+  $('tabs').append(b);
+});
+function buildPills() {
+  $('pills').replaceChildren(...steps().map((s, k) => {
+    const b = html('button', '', String(k + 1));
+    b.type = 'button';
+    b.title = s.t;
+    b.setAttribute('aria-label', 'Step ' + (k + 1) + ': ' + s.t);
+    b.addEventListener('click', () => { i = k; render(); });
+    return b;
+  }));
+}
+function render() {
+  const s = steps()[i], n = steps().length;
+  [...$('tabs').children].forEach((b, k) => b.setAttribute('aria-selected', String(k === tab)));
+  [...$('pills').children].forEach((b, k) => k === i ? b.setAttribute('aria-current', 'step') : b.removeAttribute('aria-current'));
+  $('kicker').textContent = 'Step ' + (i + 1) + ' of ' + n;
+  $('title').textContent = s.t;
+  $('vis').replaceChildren(KINDS[s.v.kind](s.v));
+  $('bul').innerHTML = s.b.map((x) => '<li>' + x + '</li>').join('');
+  $('measured').hidden = !s.measured;
+  $('measured-text').textContent = s.measured || '';
+  $('show-map').hidden = !MAP || !s.nodes;
+  $('count').textContent = i + 1 + ' / ' + n;
+}
+$('show-map').addEventListener('click', () => {
+  const s = steps()[i];
+  setVariant(s.variant || 'proposed');
+  highlight(s.nodes);
+  $('map').scrollIntoView({ block: 'nearest' });
+  nodeEls[s.nodes[0]].focus();
+});
+const go = (d) => { i = (i + steps().length + d) % steps().length; render(); };
+$('prev').addEventListener('click', () => go(-1));
+$('next').addEventListener('click', () => go(1));
+document.addEventListener('keydown', (e) => {
+  if (e.target.closest('input,textarea,select,[contenteditable],g.node')) return;
+  if (e.key === 'ArrowLeft') go(-1);
+  if (e.key === 'ArrowRight') go(1);
+});
+buildPills();
+render();
+</script>

@@ -1,0 +1,6 @@
+{
+  "name": "web-dashboard",
+  "targets": {
+    "assets": { "command": "pnpm run test:assets" }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "factory",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "test:auth": "node --test tests/worker/access.test.mjs tests/worker/entry-auth.test.mjs",
+    "test:protocol": "node --test tests/worker/admission.test.mjs tests/worker/hosts.test.mjs tests/worker/pipeline-config.test.mjs tests/worker/project-settings.test.mjs tests/worker/project-documents.test.mjs tests/worker/protocol-v1.test.mjs tests/worker/coverage.test.mjs tests/worker/lockfile.test.mjs tests/worker/nx-config.test.mjs tests/worker/pwa.test.mjs",
+    "test:local": "node tools/local.mjs --check",
+    "test:browser": "node tests/browser/run.mjs",
+    "test:assets": "python3 tools/deploy.py dry-run --profile tests/fixtures/deployment-valid.json && node tools/assets.mjs --verify",
+    "test:deploy": "python3 -m unittest discover -s tests/tools -p test_deploy.py && python3 tools/deploy.py check --profile tests/fixtures/deployment-valid.json && python3 tools/deploy.py render --profile tests/fixtures/deployment-valid.json",
+    "test:cli": "python3 -B -m unittest discover -s tests/cli -p 'test_*.py'",
+    "test:install": "python3 -B -m unittest discover -s tests/tools -p test_install.py",
+    "test:verify": "python3 -B -m unittest discover -s tests/tools -p test_verify.py && python3 -B -m unittest discover -s tests/tools -p test_pr_screenshots.py && python3 -B -m unittest discover -s tests/tools -p test_copy_pr_screenshots.py && python3 -B -m unittest discover -s tests/tools -p test_secret_scan.py && python3 -B -m unittest discover -s tests/tools -p test_public_cutover.py",
+    "check:secrets": "python3 tools/secret-scan.py",
+    "check:types": "tsc -p tsconfig.json",
+    "test:workflow": "node --test \"tests/ci/*.test.mjs\"",
+    "test": "pnpm run test:assets && pnpm run test:auth && pnpm run test:protocol && pnpm run test:local && pnpm run test:browser && pnpm run test:deploy && pnpm run test:workflow",
+    "lint": "oxlint worker tools tests",
+    "format": "oxfmt worker tools tests",
+    "format:check": "oxfmt --check worker tools tests",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "jose": "6.2.13"
+  },
+  "devDependencies": {
+    "@puppeteer/browsers": "3.2.6",
+    "esbuild": "0.28.2",
+    "husky": "9.1.7",
+    "mermaid": "12.2.0",
+    "nx": "24.0.2",
+    "oxfmt": "0.75.0",
+    "oxlint": "1.90.0",
+    "puppeteer-core": "25.16.0",
+    "typescript": "5.9.3",
+    "wrangler": "4.154.0",
+    "yaml": "2.9.1"
+  }
+}

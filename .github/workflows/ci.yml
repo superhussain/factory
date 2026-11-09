@@ -1,0 +1,142 @@
+name: CI
+on: pull_request
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  WRANGLER_SEND_METRICS: 'false'
+jobs:
+  targets:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/ci-setup
+      - name: Install gitleaks
+        run: |
+          curl -sSfLo "$RUNNER_TEMP/gitleaks.tar.gz" https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum -c
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP/bin" gitleaks
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Secret scan
+        run: python3 tools/secret-scan.py
+      - name: Restore browser provision
+        uses: actions/cache/restore@v4
+        with:
+          path: .context/browser
+          key: browser-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            browser-${{ runner.os }}-
+      # assets runs a browser test, so this job provisions the browser too; only the browser shards save its cache.
+      - run: node tests/browser/provision.mjs
+      - run: pnpm run format:check
+      # Workflow-only changes select no Nx target; the workflow contracts always run.
+      - run: pnpm run test:workflow
+      - name: Affected base and head
+        run: |
+          echo "NX_BASE=$(git merge-base origin/main HEAD)" >> "$GITHUB_ENV"
+          echo "NX_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Nx affected
+        run: pnpm exec nx affected -t auth protocol assets deploy local --base="$NX_BASE" --head="$NX_HEAD"
+      - run: git diff --check
+  python:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/ci-setup
+      # With no entry of its own, a pull request restores the nightly main entry (nx-cache-warm.yml).
+      - name: Restore and save the Nx folder for this pull request
+        uses: actions/cache@v4
+        with:
+          path: .nx
+          key: nx-${{ runner.os }}-pr${{ github.event.pull_request.number }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            nx-${{ runner.os }}-pr${{ github.event.pull_request.number }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            nx-${{ runner.os }}-main-${{ hashFiles('pnpm-lock.yaml') }}-
+      # Nx names its task database after the machine id, so a restored database takes this runner's name.
+      - name: Adopt the restored Nx database
+        run: |
+          shopt -s nullglob
+          mkdir -p "$RUNNER_TEMP/nx-db"
+          node -e "require('nx/src/native').connectToNxDb(process.argv[1])" "$RUNNER_TEMP/nx-db"
+          fresh=("$RUNNER_TEMP"/nx-db/*.db)
+          restored=(.nx/workspace-data/*.db)
+          if [ "${#fresh[@]}" -eq 1 ] && [ "${#restored[@]}" -eq 1 ]; then
+            name="$(basename "${fresh[0]}")"
+            if [ "${restored[0]}" != ".nx/workspace-data/$name" ]; then
+              mv "${restored[0]}" ".nx/workspace-data/$name"
+              echo "Renamed ${restored[0]} to $name"
+            fi
+          fi
+      - name: Python suites
+        run: pnpm exec nx run-many -t cli install verify
+  browser:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      FACTORY_BROWSER_SHARD: ${{ matrix.shard }}/4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/ci-setup
+      - name: Changed applications
+        id: changed
+        run: |
+          if [ -n "$(git diff --name-only "$(git merge-base origin/main HEAD)" HEAD -- . ':!docs' ':!*.md')" ]; then
+            echo "apps_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "apps_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Cache browser provision
+        uses: actions/cache@v4
+        with:
+          path: .context/browser
+          key: browser-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            browser-${{ runner.os }}-
+      - if: steps.changed.outputs.apps_changed == 'true'
+        run: node tests/browser/provision.mjs
+      - name: Affected base and head
+        run: |
+          echo "NX_BASE=$(git merge-base origin/main HEAD)" >> "$GITHUB_ENV"
+          echo "NX_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Nx affected browser
+        run: pnpm exec nx affected -t browser --base="$NX_BASE" --head="$NX_HEAD"
+  ci:
+    if: ${{ !cancelled() }}
+    needs: [targets, python, browser]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: All CI jobs passed
+        env:
+          RESULTS: targets=${{ needs.targets.result }} python=${{ needs.python.result }} browser=${{ needs.browser.result }}
+        run: |
+          status=0
+          for pair in $RESULTS; do
+            name="${pair%%=*}"
+            result="${pair#*=}"
+            echo "$name: $result"
+            if [ "$result" != "success" ]; then
+              echo "CI job $name finished as $result; see its log above." >&2
+              status=1
+            fi
+          done
+          exit "$status"
