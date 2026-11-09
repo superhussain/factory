@@ -1301,7 +1301,7 @@ async function browserTest(url) {
     );
     assert.equal(
       await page.$eval("#idea-text", (e) => e.getAttribute("aria-describedby")),
-      "idea-key-help idea-images-help",
+      "idea-ref idea-key-help idea-images-help",
     );
     await page.click("#idea-image-list li:nth-child(3) button");
     assert.equal(await page.evaluate(() => draft.images.length), 2);
