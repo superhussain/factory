@@ -178,6 +178,13 @@ changes nothing. Then install one timer per host.
 - The target host's `pickup` claims the job once, sets `move.claimed` and launches `/factory recover`. The usual gates apply: pickup on, host listed, not gated, the cap and a route.
 - `factory.py stuck` leaves a move with no `claimed` to its target.
 
+## Rerunning a stage
+
+- The dashboard's Rerun stage item writes a self-move: `move` with `to` equal to `from`, the job's own host. It shows only for a claimed job at spec, build, review or approve that is not paused and has no `needs`.
+- That host's `pickup` claims the rerun only after its own stop is recorded. While a stop from this host is still queued, the job waits.
+- When the stop succeeds, the same run claims the job, sets `move.claimed` and launches `/factory recover`, which restarts the current stage in a fresh session. Pickup prints `stopped <id> <project>: rerun on <host>` before `launched ...`. If the stop fails, nothing is claimed and the next run retries both.
+- The dashboard refuses a rerun when the host does not run pickup for the project, since nothing would restart the job. Use Move to another host instead.
+
 ## Prioritizing a job
 
 - The dashboard's Prioritize item sets `priority = {at}` on a job at `idea`, `spec`, `build`, `review` or `approve`.

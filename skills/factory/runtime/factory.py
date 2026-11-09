@@ -150,12 +150,13 @@ NOTE_INVISIBLE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f\xad\u115f\u1160\u180e
                             r"\u202a-\u202e\u2060-\u2064\u2066-\u2069\u3164\ufe00-\ufe0f\ufeff\uffa0"
                             r"\ufff9-\ufffb\U000e0000-\U000e007f\U000e0100-\U000e01ef]")
 NOTE_TAG = re.compile(r"</?\s*operator-preferences", re.I)
-# Rule 4 folds look-alikes first. NFKC handles fullwidth and other compatibility forms. This table handles the brackets, slashes, dashes and Cyrillic and Greek letters NFKC leaves alone. worker/admission.js holds the same two strings.
+# Rule 4 folds look-alikes first. NFKC handles fullwidth and other compatibility forms. This table handles the brackets, slashes, dashes and Cyrillic, Greek and Latin letters NFKC leaves alone. worker/admission.js holds the same two strings.
 TAG_LOOKALIKES_FROM = ("‹⟨〈❮˂" "⁄∕⧸╱"
                        "‐‑‒–—―−⁃"
                        "аеорсѕАЕОРСЅТ"
-                       "αορΑΕΟΡΤ")
-TAG_LOOKALIKES_TO = "<<<<<////--------aeopcsAEOPCSTaopAEOPT"
+                       "αορΑΕΟΡΤ"
+                       "\u0412\u0392\u041a\u039a\u043a\u03ba\u04c0\u04cf\u0261\u050d\u0456\u0406\u0399\u03b9\u0131\u041c\u039c\u043c")
+TAG_LOOKALIKES_TO = "<<<<<////--------aeopcsAEOPCSTaopAEOPTBBKKkkllggiIIiiMMm"
 TAG_LOOKALIKES = str.maketrans(TAG_LOOKALIKES_FROM, TAG_LOOKALIKES_TO)
 NOTE_LINK = re.compile(r"://|\bwww\.|\b[a-z0-9-]+\.[a-z]{2,}/|\b\d{1,3}(?:\.\d{1,3}){3}[:/]", re.I | re.ASCII)
 # Rules 6 and 7, copied from SECRETS and PHRASES in worker/admission.js.
@@ -1000,23 +1001,23 @@ def backlog_add(item, context=None):
     cas(home, "/api/backlog", append)
     print(f"added {item}" + (" with context" if context else ""))
     verdict, final = backlog_triage(home, item, context)
-    if final and (verdict is None or verdict["decision"] != "queue"):
+    left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict)
+    if final and (verdict is None or verdict["decision"] != "queue" or left):
         triaged = read_triaged(home)
         if f"- [ ] {item}" not in triaged:
             save_triaged(home, triaged + [f"- [ ] {item}"])
-    if verdict is not None:
-        report_verdict(home, m.group(1), m.group(2), item, verdict)
 
 
 def report_verdict(home, slug, feature, item, verdict):
-    """Queue a line the Worker queued, or print why it holds."""
+    """Queue a line the Worker queued, or print why it holds. Returns what queue_backlog_item returns for a queue, else False."""
     if verdict["decision"] == "queue":
-        queue_backlog_item(home, slug, feature, verdict)
-    elif verdict["confidence"] is None:
+        return queue_backlog_item(home, slug, feature, verdict)
+    if verdict["confidence"] is None:
         print(f"held {item} for review: {verdict['reason']}")
     else:
         print(f"held {item} for review: confidence {verdict['confidence']}% "
               f"(threshold {verdict['threshold']}%): {verdict['reason']}")
+    return False
 
 
 TRIAGE_SWEEP_LIMIT = 5
@@ -1093,10 +1094,9 @@ def backlog_triage_pass(home):
         sent += 1
         item = f"{slug}: {feature.rstrip()}"
         verdict, final = backlog_triage(home, item, context or None)
-        if final and (verdict is None or verdict["decision"] != "queue"):
+        left = verdict is not None and report_verdict(home, slug, feature, item, verdict)
+        if final and (verdict is None or verdict["decision"] != "queue" or left):
             triaged.append(raw)
-        if verdict is not None:
-            report_verdict(home, slug, feature, item, verdict)
     if triaged != cached:
         save_triaged(home, triaged)
 
@@ -1143,7 +1143,8 @@ def backlog_triage(home, item, context):
 
 def queue_backlog_item(home, slug, feature, verdict):
     """Queue a triaged line as an idea, as a dashboard Approve does: the board row first, so the
-    id exists before the line names it. A line that changed meanwhile drops the unclaimed row."""
+    id exists before the line names it. A line that changed meanwhile drops the unclaimed row.
+    Returns True when it left the new idea row on the board beside an unchecked line."""
     item, feature = f"{slug}: {feature}", feature.rstrip()
     raw = f"- [ ] {item}"
     ref = BACKLOG_SUFFIX.search(feature)
@@ -1169,7 +1170,7 @@ def queue_backlog_item(home, slug, feature, verdict):
     except SystemExit:
         print(f"factory.py: backlog triage could not queue {item}; the item waits in the backlog for review",
               file=sys.stderr)
-        return
+        return False
 
     def mark(backlog):
         lines = (backlog or "").split("\n")
@@ -1197,18 +1198,23 @@ def queue_backlog_item(home, slug, feature, verdict):
         if dropped:
             print(f"factory.py: backlog triage could not check off {item}; it removed {job_id} "
                   "and the item waits in the backlog for review", file=sys.stderr)
-        else:
-            print(f"factory.py: backlog triage queued {item} as {job_id} but could not check off its line; "
-                  f"check off the line or remove {job_id} by hand", file=sys.stderr)
-        return
+            return False
+        print(f"factory.py: backlog triage queued {item} as {job_id} but could not check off its line; "
+              f"check off the line or remove {job_id} by hand", file=sys.stderr)
+        return True
     if marked:
         print(f"queued {item} as {job_id}: {score}")
-        return
+        return False
     try:
         cas(home, "/api/board", drop)
+        left = False
     except SystemExit:
-        pass
+        left = True
     print(f"kept {item} in the backlog: its line changed before triage finished")
+    if left:
+        print(f"factory.py: backlog triage kept {item} in the backlog but could not remove {job_id}; "
+              f"remove {job_id} by hand", file=sys.stderr)
+    return left
 
 
 BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$", re.ASCII)
@@ -2744,7 +2750,7 @@ def move_stop_pass(home, data, device, dry, adapter):
         if not (mine and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
-        line = f"{job_id} {project}: moved to {m.get('to')}"
+        line = f"{job_id} {project}: " + (f"rerun on {device}" if m.get("to") == device else f"moved to {m.get('to')}")
         archives = {}
         for x in mine:
             agent, server = x.get("agent"), x.get("server")
@@ -2792,6 +2798,8 @@ def move_stop_pass(home, data, device, dry, adapter):
             patch_job(board, job_id, {})
             return dump_board(board), True
         if cas(home, "/api/board", change):
+            for x in mine:
+                x.setdefault("stopped", now())
             print(f"archived session {agent} and stopped {line}" if archives else f"stopped {line}")
 
 
@@ -2956,9 +2964,11 @@ def priority_nudge_pass(home, data, device, dry):
 
 
 def moved_here(j, device):
-    """True when the dashboard moved this in-flight job to this host and no pickup has claimed it yet."""
+    """True when the dashboard moved this in-flight job to this host, no pickup has claimed it yet,
+    and no stop of it is still queued on this host, as for a rerun."""
     m = j.get("move")
-    return isinstance(m, dict) and m.get("to") == device and "claimed" not in m and j.get("stage") in IN_FLIGHT
+    return (isinstance(m, dict) and m.get("to") == device and "claimed" not in m and j.get("stage") in IN_FLIGHT
+            and not any(x["from"] == device for x in queued_stops(m)))
 
 
 def pickup_pass(home, device, minutes, dry, limit, cap):
