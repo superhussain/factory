@@ -11,11 +11,19 @@ A portable software factory: a shared board, safe multi-device state, and a priv
 - Git
 - A Cloudflare account with an active zone (for deployment)
 
-## Quickstart
+## Run your own instance
 
 ```sh
 mise install
 mise exec -- pnpm install --frozen-lockfile
+mise exec -- python3 tools/bootstrap.py up
+```
+
+`bootstrap.py up` asks for your Cloudflare account ID, zone, factory hostname and allowed emails, then creates or reuses the R2 bucket, Access application, policies and this device's service token, writes `deploy/profile.json` and the device `.env`, and deploys. It reads the API token from `CLOUDFLARE_API_TOKEN` or a hidden prompt. Rerunning it creates nothing new. See [docs/cloudflare.md](docs/cloudflare.md#guided-setup) for token permissions, a second device and `down`.
+
+## Develop
+
+```sh
 mise exec -- node tests/browser/provision.mjs   # one-time browser download; pnpm test and test:assets need it
 mise exec -- pnpm test
 ```
@@ -85,6 +93,7 @@ Captured by `tools/capture-screenshots.mjs` with synthetic fixture data (frozen 
 - [docs/autonomy.md](docs/autonomy.md) — explorer suggestions, the autonomy kill switch and human-only approval
 - [docs/troubleshooting.md](docs/troubleshooting.md) — Access, port, provisioning and sync-conflict fixes
 - [docs/public-cutover.md](docs/public-cutover.md) — moving the private repository to a fresh public one
+- [docs/repo-security.md](docs/repo-security.md) — main ruleset, repository security settings and the owner checklist
 
 ## License
 

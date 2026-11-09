@@ -5,6 +5,7 @@
 /deploy/profile.json
 /deploy/profile.*.json
 /deploy/backups/
+/deploy/bootstrap.json
 /.husky/_/
 .env
 .env.*
