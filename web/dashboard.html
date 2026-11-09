@@ -124,8 +124,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   #pipeline-effective { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--code-bg); padding: 10px 12px; border-radius: 6px; }
   #pipeline-history { height: 160px; overflow-y: auto; padding-right: 4px; padding-bottom: 4px; scroll-padding-block: 4px; }
-  #pipeline-gates, #pipeline-pickup, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
-  #pipeline-gates legend, #pipeline-pickup legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+  #pipeline-gates, #pipeline-pickup, #pipeline-triage, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
+  #pipeline-gates legend, #pipeline-pickup legend, #pipeline-triage legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #pipeline-gates label { display: flex; gap: 8px; align-items: baseline; margin: 0; color: var(--fg); }
   a.btn { display: inline-block; text-decoration: none; }
   a.btn[aria-current="page"] { border-color: var(--accent); }
@@ -158,7 +158,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .settings-section h3 { font-size: 15px; margin: 0 0 12px; }
   .settings-section h4 { font-size: 13px; margin: 16px 0 8px; }
   .settings-section label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-  .settings-section select, .settings-section textarea { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .settings-section select, .settings-section textarea, #pipeline-triage-threshold { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .settings-section textarea { resize: vertical; min-height: 140px; }
   .settings-section .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
   .project-list { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; margin-bottom: 12px; }
@@ -563,6 +563,17 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           <span class="host-group-label" id="pipeline-pickup-hosts-label">Hosts</span>
           <div id="pipeline-pickup-hosts" class="host-checks" role="group" aria-labelledby="pipeline-pickup-hosts-label" aria-describedby="pipeline-pickup-help"></div>
           <p id="pipeline-pickup-help" class="muted">Hosts come from Settings, Hosts. Only active hosts pick up work. A project value replaces the global one whole.</p>
+        </fieldset>
+        <fieldset id="pipeline-triage">
+          <legend>Backlog triage</legend>
+          <label for="pipeline-triage-mode">Triage<select id="pipeline-triage-mode" aria-describedby="pipeline-triage-help">
+            <option value="">Not set (use the global value, else off)</option>
+            <option value="off">Off</option>
+            <option value="on">On: queue items at or above the threshold</option>
+          </select></label>
+          <label for="pipeline-triage-threshold">Confidence threshold (%)<input type="number" id="pipeline-triage-threshold" min="1" max="100" step="1"></label>
+          <label for="pipeline-triage-rules">Triage rules<textarea id="pipeline-triage-rules" spellcheck="false"></textarea></label>
+          <p id="pipeline-triage-help" class="muted">When on, factory.py backlog add asks a Cloudflare Workers AI model how confident it is that a new item is worth building. At or above the threshold, the item moves to the idea column for pickup. Below it, the item waits here for you. Items that ask questions or recommend deny always wait. Rules cannot contain links, secrets or instructions to skip review. A project value replaces the global one whole.</p>
         </fieldset>
         <div class="settings-tabs" id="pipeline-note-tabs" role="tablist" aria-label="Stage notes">
           <button type="button" role="tab" id="pipeline-note-tab-spec" data-name="spec" aria-selected="true" tabindex="0">Spec</button>
@@ -1797,6 +1808,18 @@ function pipelinePickupError(pickup) {
   }
   return null;
 }
+// Same messages as the triage block of validatePipeline in worker/admission.js.
+function pipelineTriageError(triage) {
+  if (triage === undefined) return null;
+  if (!pipelineObject(triage)) return 'triage: must be an object';
+  for (const key of Object.keys(triage))
+    if (!['enabled', 'threshold', 'rules'].includes(key)) return 'triage.' + key + ': unknown field';
+  if (typeof triage.enabled !== 'boolean') return 'triage.enabled: must be true or false';
+  if (!(Number.isInteger(triage.threshold) && triage.threshold >= 1 && triage.threshold <= 100))
+    return 'triage.threshold: must be an integer from 1 to 100';
+  if (typeof triage.rules !== 'string') return 'triage.rules: must be text';
+  return null;
+}
 function pipelineCanonical(doc) {
   const out = {schema:1};
   if (doc.merge) out.merge = doc.merge;
@@ -1804,6 +1827,7 @@ function pipelineCanonical(doc) {
   const gates = PIPELINE_GATES.filter(gate => Array.isArray(doc.gates) && doc.gates.includes(gate));
   if (gates.length) out.gates = gates;
   if (pipelineObject(doc.pickup)) out.pickup = {enabled:doc.pickup.enabled, hosts:doc.pickup.hosts};
+  if (pipelineObject(doc.triage)) out.triage = {enabled:doc.triage.enabled, threshold:doc.triage.threshold, rules:doc.triage.rules};
   const notes = {};
   for (const stage of PIPELINE_STAGES) if (doc.stage_notes?.[stage]) notes[stage] = doc.stage_notes[stage];
   if (Object.keys(notes).length) out.stage_notes = notes;
@@ -1816,6 +1840,8 @@ function pickupCheckedHosts(prefix, stored = []) {
 }
 const pickupFromFields = (prefix, current) => $(prefix + '-mode').value
   ? {enabled:$(prefix + '-mode').value === 'on', hosts:pickupCheckedHosts(prefix, Array.isArray(current?.hosts) ? current.hosts : [])} : undefined;
+const triageFromFields = () => $('pipeline-triage-mode').value
+  ? {enabled:$('pipeline-triage-mode').value === 'on', threshold:$('pipeline-triage-threshold').value === '' ? 80 : Number($('pipeline-triage-threshold').value), rules:$('pipeline-triage-rules').value} : undefined;
 // Client-side only: the Worker accepts any valid name and its effective filter drops unregistered ones.
 function pickupRegistryError(pickup) {
   if (!hostRegistry?.length || !Array.isArray(pickup?.hosts)) return null;
@@ -1825,11 +1851,11 @@ function pickupRegistryError(pickup) {
 function pipelineFormDoc(current) {
   return JSON.parse(pipelineCanonical({merge:$('pipeline-merge').value, review_rounds:Number($('pipeline-rounds').value),
     gates:PIPELINE_GATES.filter(gate => $('pipeline-gate-' + gate).checked),
-    pickup:pickupFromFields('pipeline-pickup', current.pickup),
+    pickup:pickupFromFields('pipeline-pickup', current.pickup), triage:triageFromFields(),
     stage_notes:Object.fromEntries(PIPELINE_STAGES.map(stage => [stage, $('pipeline-note-' + stage).value]))}));
 }
 const pipelineDirty = s => pipelineCanonical(s.draft) !== pipelineCanonical(s.base ?? {schema:1});
-const pipelineCanSave = s => !!s?.loaded && ['ready','error'].includes(s.phase) && (pipelineDirty(s) || s.base === null) && !pipelinePickupError(s.draft.pickup) && !pickupRegistryError(s.draft.pickup);
+const pipelineCanSave = s => !!s?.loaded && ['ready','error'].includes(s.phase) && (pipelineDirty(s) || s.base === null) && !pipelinePickupError(s.draft.pickup) && !pickupRegistryError(s.draft.pickup) && !pipelineTriageError(s.draft.triage);
 const pipelineDraftKey = scope => 'factory-pipeline-draft:' + scope;
 const pipelineMalformed = new Set(), pipelineMemory = new Set();
 const pipelineConflict = 'These pipeline settings changed elsewhere. Your draft is kept. Copy it before loading the latest version, then reapply your changes.';
@@ -1917,13 +1943,24 @@ function renderPipelineSettings() {
     box.disabled = busy;
   }
   const pickupError = renderPickupFields('pipeline-pickup', d, busy);
+  const triageMode = pipelineObject(d.triage) ? (d.triage.enabled ? 'on' : 'off') : '';
+  const triageError = pipelineTriageError(d.triage);
+  if ($('pipeline-triage-mode').value !== triageMode) $('pipeline-triage-mode').value = triageMode;
+  $('pipeline-triage-mode').disabled = busy;
+  // Typing in the threshold is not overwritten, so clearing it to retype does not snap back to 80.
+  const threshold = String(d.triage?.threshold ?? '');
+  if ($('pipeline-triage-threshold').value !== threshold && document.activeElement !== $('pipeline-triage-threshold')) $('pipeline-triage-threshold').value = threshold;
+  const rules = typeof d.triage?.rules === 'string' ? d.triage.rules : '';
+  if ($('pipeline-triage-rules').value !== rules) $('pipeline-triage-rules').value = rules;
+  $('pipeline-triage-threshold').disabled = $('pipeline-triage-rules').disabled = busy || !triageMode;
+  $('pipeline-triage-threshold').setAttribute('aria-invalid', String(!!triageError));
   $('pipeline-scope').disabled = s?.phase === 'saving';
   $('pipeline-copy').disabled = !s;
   $('pipeline-load').disabled = busy;
   $('pipeline-save').disabled = !pipelineCanSave(s);
   const scope = $('pipeline-scope').value;
   $('pipeline-status').textContent = pipelineStatusText(scope, s);
-  $('pipeline-status').setAttribute('role', pipelineStatusAlert(scope, s) || !!pickupError ? 'alert' : 'status');
+  $('pipeline-status').setAttribute('role', pipelineStatusAlert(scope, s) || !!pickupError || !!triageError ? 'alert' : 'status');
   renderProjectPickup();
 }
 
@@ -2122,13 +2159,13 @@ listenTabs('pipeline-note-tabs', PIPELINE_NOTE_TABS, id => {
   for (const stage of PIPELINE_STAGES) $('pipeline-note-panel-' + stage).hidden = id !== 'pipeline-note-tab-' + stage;
 });
 for (const id of ['pipeline-merge', 'pipeline-rounds', ...PIPELINE_GATES.map(gate => 'pipeline-gate-' + gate),
-    'pipeline-pickup-mode', 'pipeline-pickup-hosts',
+    'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules',
     ...PIPELINE_STAGES.map(stage => 'pipeline-note-' + stage)]) {
   $(id).addEventListener('input', () => {
     const s = pipelineScopes.get($('pipeline-scope').value);
     if (!s || $(id).disabled) return;
     s.draft = pipelineFormDoc(s.draft);
-    const error = pipelinePickupError(s.draft.pickup) ?? pickupRegistryError(s.draft.pickup);
+    const error = pipelinePickupError(s.draft.pickup) ?? pickupRegistryError(s.draft.pickup) ?? pipelineTriageError(s.draft.triage);
     if (s.phase !== 'conflict') s.message = error ? 'Fix before saving: ' + error : pipelineDirty(s) ? 'Unsaved changes' : 'No unsaved changes';
     persistPipelineDraft($('pipeline-scope').value);
     renderPipelineSettings();
@@ -2152,6 +2189,7 @@ function reloadPipelineScope(scope) {
   loadPipelineHistory(scope);
   loadPipelineEffective(scope);
 }
+$('pipeline-triage-threshold').addEventListener('blur', renderPipelineSettings);
 $('pipeline-load').addEventListener('click', () => reloadPipelineScope($('pipeline-scope').value));
 $('project-pickup-load').addEventListener('click', () => reloadPipelineScope(projectPickupScope()));
 $('pipeline-save').addEventListener('click', () => savePipelineScope());
