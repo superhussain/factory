@@ -58,8 +58,21 @@ uses to take over sessions stalled on a Claude usage limit; see references/picku
 `factory.py archive-workspace <slug>/<id>` runs as a merged job's last step. It
 archives the session's Paseo workspace only when the job is at `merged`, the
 workspace's `isolation` is `worktree`, and its folder is named `factory-<id>` or
-`factory-<id>-<n>`. Any other workspace is skipped. Without `PASEO_AGENT_ID`, a
+`factory-<id>-<n>`. Any other workspace is skipped. It also skips when
+`git status --porcelain` shows uncommitted files, when `git rev-list HEAD --not --remotes`
+shows unpushed commits, or when either git check fails. Without `PASEO_AGENT_ID`, a
 Paseo server id or `paseo` on PATH, it prints a skip and exits 0.
+
+Cleanup rule: on a merged or closed job, the pipeline runs
+`factory.py archive-workspace <slug>/<id>` and `factory.py cleanup <slug>/<id>`
+without asking. They remove only worktrees this pipeline created: a `factory-<id>`
+Paseo workspace, or the job's worktree under the factory home. They refuse dirty or
+unpushed work and never force. A host owner who runs Claude Code in auto mode can
+allow them with this sample entry under `autoMode.allow` in their settings:
+
+```json
+"Run factory.py archive-workspace <slug>/<id> or factory.py cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home), refuse dirty or unpushed work, and never force."
+```
 
 `runtime/pr_screenshots.py` uploads PR screenshots to the configured R2 bucket:
 `python3 <installed-skill>/runtime/pr_screenshots.py --home <factory home> [--project <slug>] <label> <file>...`.

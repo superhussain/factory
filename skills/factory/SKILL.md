@@ -811,10 +811,12 @@ feature.
    `decision.md` as a table with Item, Source and Outcome (`queued` or
    `for a person`) columns, or `None.` when there are none, and run
    `push "$SLUG/<id>"`.
-10. As the session's last command, after the `merged:` line is sent, run
-    `python3 "$RUNTIME" archive-workspace "$SLUG/<id>"`. It archives this session's
-    Paseo workspace when it is the job's own worktree workspace, and prints a skip
-    otherwise. Exit 1 patches `{"note": "workspace archive failed: <stderr line>"}`.
+10. As the session's last command, after the `merged:` line and the final summary
+    are sent, run `python3 "$RUNTIME" archive-workspace "$SLUG/<id>"`. It archives
+    this session's Paseo workspace when it is the job's own worktree workspace with
+    nothing uncommitted or unpushed, and prints a skip otherwise. A skip for
+    uncommitted files or unpushed commits patches `{"note": "workspace kept: <reason>"}`
+    and never sets `needs`. Exit 1 patches `{"note": "workspace archive failed: <stderr line>"}`.
 
 **Reworking an existing PR.** When the feature is "rework PR #N", the spec writer
 reads that PR's description and diff (`gh pr view N`, `gh pr diff N`) as the statement
