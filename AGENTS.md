@@ -19,7 +19,8 @@ they need no Node, pnpm or mise. The affected targets cache under the ignored
 `127.0.0.1:8220`/`8221`; `browser` binds owned ephemeral ports, so parallel
 jobs can run it at once. `browser` has no Nx dependency on `local`, so the two run side by side.
 
-Commits run a husky pre-commit hook that lints and format-checks only the
-staged `.js`/`.mjs`/`.cjs`/`.ts` files (see [development.md](docs/development.md)).
+Commits run a husky pre-commit hook. It runs gitleaks on the staged diff first,
+then lints and format-checks only the staged `.js`/`.mjs`/`.cjs`/`.ts` files
+(see [development.md](docs/development.md)).
 `pnpm run format:check` is a CI gate. Run `mise exec -- pnpm run format` to
 apply oxfmt over `worker tools tests`; `.oxfmtrc.json` excludes `tests/fixtures/`.
