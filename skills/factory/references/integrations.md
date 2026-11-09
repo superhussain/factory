@@ -60,18 +60,21 @@ archives the session's Paseo workspace only when the job is at `merged`, the
 workspace's `isolation` is `worktree`, and its folder is named `factory-<id>` or
 `factory-<id>-<n>`. Any other workspace is skipped. It also skips when
 `git status --porcelain` shows uncommitted files, when `git rev-list HEAD --not --remotes`
-shows unpushed commits, or when either git check fails. Without `PASEO_AGENT_ID`, a
+shows unpushed commits, or when either git check fails or runs longer than 20 seconds.
+`git status --porcelain` does not list ignored files, so ignored files such as `.context/`
+scratch are not checked and do not keep the workspace. Without `PASEO_AGENT_ID`, a
 Paseo server id or `paseo` on PATH, it prints a skip and exits 0.
 
 Cleanup rule: on a merged or closed job, the pipeline runs
 `factory.py archive-workspace <slug>/<id>` and `factory.py cleanup <slug>/<id>`
 without asking. They remove only worktrees this pipeline created: a `factory-<id>`
-Paseo workspace, or the job's worktree under the factory home. They refuse dirty or
-unpushed work and never force. A host owner who runs Claude Code in auto mode can
+Paseo workspace, or the job's worktree under the factory home. `archive-workspace` keeps
+a workspace with uncommitted files or unpushed commits. `cleanup` refuses a dirty
+worktree and keeps a branch that is not merged. Neither forces. A host owner who runs Claude Code in auto mode can
 allow them with this sample entry under `autoMode.allow` in their settings:
 
 ```json
-"Run factory.py archive-workspace <slug>/<id> or factory.py cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home), refuse dirty or unpushed work, and never force."
+"Run factory.py archive-workspace <slug>/<id> or factory.py cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home). archive-workspace keeps a workspace with uncommitted files or unpushed commits, cleanup refuses a dirty worktree and keeps unmerged branches, and neither forces."
 ```
 
 `runtime/pr_screenshots.py` uploads PR screenshots to the configured R2 bucket:

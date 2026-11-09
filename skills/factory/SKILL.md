@@ -817,8 +817,8 @@ feature.
     are sent, run `python3 "$RUNTIME" archive-workspace "$SLUG/<id>"`. It archives
     this session's Paseo workspace when it is the job's own worktree workspace with
     nothing uncommitted or unpushed, and prints a skip otherwise. A skip for
-    uncommitted files or unpushed commits patches `{"note": "workspace kept: <reason>"}`
-    and never sets `needs`. Exit 1 patches `{"note": "workspace archive failed: <stderr line>"}`.
+    uncommitted files, unpushed commits or a failed git check patches
+    `{"note": "workspace kept: <reason>"}` and never sets `needs`. Exit 1 patches `{"note": "workspace archive failed: <stderr line>"}`.
 
 **Reworking an existing PR.** When the feature is "rework PR #N", the spec writer
 reads that PR's description and diff (`gh pr view N`, `gh pr diff N`) as the statement

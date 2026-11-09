@@ -4240,9 +4240,15 @@ def archive_workspace(target):
         return
     for args, reason in ((["status", "--porcelain"], "uncommitted files"),
                          (["rev-list", "HEAD", "--not", "--remotes"], "unpushed commits")):
-        r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True)
-        if r.returncode or r.stdout.strip():
-            why = f"git {args[0]} failed in {cwd}: exit {r.returncode}" if r.returncode else f"{reason} in {cwd}"
+        try:
+            r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=20)
+            failed = f"exit {r.returncode}" if r.returncode else None
+        except subprocess.TimeoutExpired:
+            r, failed = None, "timed out after 20 s"
+        except OSError:
+            r, failed = None, "could not run git"
+        if failed or r.stdout.strip():
+            why = f"git {args[0]} failed in {cwd}: {failed}" if failed else f"{reason} in {cwd}"
             print(json.dumps({"archived": None, "reason": why}))
             return
     print(json.dumps({"archived": wks}), flush=True)
