@@ -606,6 +606,8 @@ def board(factory, job_id):
         fail("only the dashboard and factory.py pickup set move", 2)
     if "priority" in patch:
         fail("only the dashboard and factory.py pickup set priority", 2)
+    if "paused" in patch:
+        fail("only the dashboard sets paused", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -1320,7 +1322,7 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
             if len(picked) == budget:
                 break
             # A job waiting on a human, or an unapproved explorer card, is never promoted.
-            if not j.get("project") or gated(j) or tracer_building(j):
+            if not j.get("project") or gated(j) or paused(j) or tracer_building(j):
                 continue
             repo = paths.get(j["project"])
             # The scheduler pastes the id into a shell command, so only well-formed ids pass.
@@ -2214,7 +2216,7 @@ def claim_stalled(home, job_id, session_id, device, tag, minutes):
         resumable = stage == IDEA or stage in IN_FLIGHT \
             or stage == "pr-open" and job.get("automerge") is True and not escalated(job)
         if (not isinstance(paseo, dict) or paseo.get("agent") != session_id
-                or claim.get("device") != device or not resumable or gated(job)):
+                or claim.get("device") != device or not resumable or gated(job) or paused(job)):
             return None, None
         old = (dict(claim), dict(paseo))
         job.pop("claim", None)
@@ -2290,6 +2292,9 @@ def takeover(home, data, device, minutes, paths, settings, dry):
             continue
         if gated(job):
             skipped(session, job_id, "waiting on a human")
+            continue
+        if paused(job):
+            skipped(session, job_id, "paused")
             continue
         if tracer_building(job):
             skipped(session, job_id, "building in Tracer")
@@ -2756,6 +2761,12 @@ def prioritized(j):
     return isinstance(p, dict) and isinstance(p.get("at"), str)
 
 
+def paused(j):
+    """True when the dashboard paused pickup for this job."""
+    p = j.get("paused")
+    return isinstance(p, dict) and isinstance(p.get("at"), str)
+
+
 PRIORITY_NUDGE = ("The owner prioritized factory job {id} from the dashboard. If your turn ended while work "
                   "on it is still owed, continue with the next step now.")
 
@@ -2782,6 +2793,7 @@ def priority_nudge_pass(home, data, device, dry):
         p, c, link, job_id = j.get("priority"), j.get("claim"), j.get("paseo"), j.get("id")
         return (prioritized(j) and "nudged" not in p
                 and (j.get("stage") == IDEA or j.get("stage") in IN_FLIGHT) and not gated(j)
+                and not paused(j)
                 and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
                 and server and isinstance(link, dict) and link.get("server") == server
                 and isinstance(c, dict) and isinstance(c.get("since"), str) and p["at"] > c["since"])
@@ -2852,6 +2864,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
             return f"skip {j['id']} {project}: no checkout on this host"
         if gated(j):
             return f"skip {j['id']} {project}: waiting on a human"
+        if paused(j):
+            return f"skip {j['id']} {project}: paused"
         if tracer_building(j):
             return f"skip {j['id']} {project}: building in Tracer"
         c = blocking(j, device, "", minutes)
@@ -4228,6 +4242,8 @@ def stuck(*args):
         return agents is not None and agents.get(link.get("agent"), "closed") == "closed"
 
     def is_stuck(job):
+        if paused(job):
+            return False
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
             return False
