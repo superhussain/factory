@@ -613,6 +613,7 @@ async function browserTest(url) {
   });
   try {
     const page = await browser.newPage();
+    await support.blockLiveEvents(page);
     await page.evaluateOnNewDocument(() => {
       localStorage.clear();
       const interval = window.setInterval;

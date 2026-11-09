@@ -87,7 +87,7 @@
   {
    "file": "test_dashboard_mobile_header.cjs",
    "cases": [
-    "\"result\":\"PASS\",\"comparisons\":70"
+    "\"result\":\"PASS\",\"comparisons\":80"
    ]
   },
   {
@@ -128,6 +128,7 @@
   "tests/browser/job-actions-menu.test.mjs",
   "tests/browser/move-host.test.mjs",
   "tests/browser/prioritize.test.mjs",
+  "tests/browser/pause.test.mjs",
   "tests/browser/copy-link.test.mjs",
   "tests/browser/owned-fixtures.test.mjs",
   "tests/browser/pipeline-settings.test.mjs",
@@ -144,6 +145,7 @@
   "tests/browser/needs-you-form.test.mjs",
   "tests/browser/drawer-swipe.test.mjs",
   "tests/browser/drawer-compact.test.mjs",
-  "tests/browser/backlog-triage.test.mjs"
+  "tests/browser/backlog-triage.test.mjs",
+  "tests/browser/live-events.test.mjs"
  ]
 }

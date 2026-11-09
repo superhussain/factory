@@ -462,6 +462,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-follow-tracer" role="menuitem" tabindex="-1" hidden>Follow in Tracer</button>
         <button class="btn" id="d-move-host" role="menuitem" tabindex="-1" hidden>Move to another host</button>
         <button class="btn" id="d-prioritize" role="menuitem" tabindex="-1" hidden>Prioritize</button>
+        <button class="btn" id="d-pause" role="menuitem" tabindex="-1" hidden>Pause pickup</button>
+        <button class="btn" id="d-resume" role="menuitem" tabindex="-1" hidden>Resume pickup</button>
         <button class="btn" id="d-copy-link" role="menuitem" tabindex="-1" hidden>Copy link</button>
       </div>
     </div>
@@ -470,6 +472,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <p class="err" id="d-edit-idea-err" role="alert" hidden></p>
   <p class="err" id="d-prioritize-err" role="alert" hidden></p>
   <p class="copy-status" id="d-copy-status" role="status"></p>
+  <p class="err" id="d-pause-err" role="alert" hidden></p>
   <div class="assignment" id="d-assignment" hidden>
     <p class="muted" id="d-assign-help"></p>
     <label>Project <select class="filter" id="d-project" aria-describedby="d-assign-help"></select></label>
@@ -633,8 +636,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <p class="muted">These settings apply only to this browser. They are saved here and never sent to the server.</p>
       <label for="display-theme">Theme<select id="display-theme"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <label for="display-density">Density<select id="display-density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
-      <label for="display-poll">Board refresh<select id="display-poll" aria-describedby="display-poll-help"><option value="3">Every 3 seconds</option><option value="10">Every 10 seconds</option><option value="30">Every 30 seconds</option></select></label>
-      <p class="muted" id="display-poll-help">The board stops refreshing while this tab is hidden, unless notifications are on, and refreshes as soon as you return.</p>
+      <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="3">Every 3 seconds</option><option value="10">Every 10 seconds</option><option value="30">Every 30 seconds</option></select></label>
+      <p class="muted" id="display-poll-help">The board updates live while this tab is open. If the live connection drops, it refreshes on this schedule until it reconnects. A hidden tab stays live only while notifications are on.</p>
       <label for="display-filter">Show jobs from<select id="display-filter"></select></label>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
@@ -833,6 +836,8 @@ let backlogSaving = false;
 let drawerVersion = 0;
 let openStamp = null;
 let files = [];
+// True while a newly opened job's files load, so a board re-read cannot mistake them for missing.
+let filesLoading = false;
 let activeFile = null;
 // The open file's job folder and URL, which relative image paths resolve against.
 // null while no job file is open, so a relative image renders as its alt text.
@@ -868,14 +873,24 @@ function setConnection(state) {
   $('dot').title = title;
 }
 $('conn-signin').addEventListener('click', () => location.reload());
-window.addEventListener('offline', () => setConnection('offline'));
+window.addEventListener('offline', () => { setConnection('offline'); syncLive(); schedulePoll(); });
 window.addEventListener('online', async () => {
+  syncLive(); schedulePoll();
   await loadProjects();
   poll();
 });
 
 let loaded = false;
 let boardReadVersion = 0;
+let boardUpdated = '';
+
+// The live socket can leave the board unread for hours, so a timer beside the live
+// client redraws this age label on its own.
+function drawUpdated() {
+  if (!loaded) return;
+  $('updated').textContent = boardUpdated ? 'updated ' + ago(boardUpdated) : 'no jobs yet';
+  $('updated').title = boardUpdated;
+}
 
 async function poll() {
   const version = ++boardReadVersion;
@@ -894,9 +909,9 @@ async function poll() {
     if (version !== boardReadVersion) return false;
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
     setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
-    $('updated').textContent = data.updated ? 'updated ' + ago(data.updated) : 'no jobs yet';
-    $('updated').title = data.updated || '';
+    boardUpdated = data.updated || '';
     loaded = true;
+    drawUpdated();
     renderBoard();
     notifyNeeds();
     if (settingsShown === 'projects') renderProjectList();
@@ -1035,7 +1050,7 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move)].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused)].join('|');
 }
 
 // Where a job runs, from the board's claim and the dashboard's move. A move whose old host has not
@@ -1072,7 +1087,8 @@ function card(j, inNeeds) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '">' +
-    '<div class="id">' + esc(j.id) + (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') + '</div>' +
+    '<div class="id">' + esc(j.id) + (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
+      (j.paused?.at ? '<span class="chip">Paused</span>' : '') + '</div>' +
     '<div class="proj">' + esc(projectName(j)) + '</div>' +
     '<div class="title">' + esc(j.title || j.id) + '</div>' +
     (j.stage === 'idea' && !j.project ? '<div class="idea-text">Assign a project before starting.</div>' : '') +
@@ -2741,13 +2757,16 @@ async function openJob(id) {
   $('d-meta').textContent = projectName(j) + ' · ' + j.id + ' · ' + j.stage +
     (ideaOnly(j) ? '' : ' · round ' + (j.round ?? 0) + ' · ' + (j.branch || '')) +
     (hostLine(j) ? ' · ' + hostLine(j) : '') +
-    (j.priority?.at ? ' · prioritized' : '');
+    (j.priority?.at ? ' · prioritized' : '') +
+    (j.paused?.at ? ' · paused' : '');
   const pipeline = pipelineLabel(j);
   $('d-pipeline').textContent = pipeline;
   $('d-pipeline').hidden = !pipeline;
   $('d-discard').hidden = j.stage !== 'idea';
   $('d-move-host').hidden = !j.project || !MOVE_STAGES.includes(j.stage);
   $('d-prioritize').hidden = !j.project || !PRIORITY_STAGES.includes(j.stage) || !!j.priority;
+  $('d-pause').hidden = !j.project || TERMINAL.includes(j.stage) || !!j.paused;
+  $('d-resume').hidden = !j.paused;
   const following = j.tracer?.follow === true;
   $('d-follow-tracer').hidden = !j.project || !(TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) || following || !!tracerLink(j);
   $('d-copy-link').hidden = false;
@@ -2758,6 +2777,7 @@ async function openJob(id) {
     clearCopyStatus();
     $('d-edit-idea-err').hidden = true;
     $('d-prioritize-err').hidden = true;
+    $('d-pause-err').hidden = true;
     $('d-project').value = '';
     $('d-project').disabled = !projects?.size;
     $('d-assign').disabled = true;
@@ -2809,6 +2829,7 @@ async function openJob(id) {
   if (first) {
     activeFile = null;
     files = [];
+    filesLoading = true;
     $('d-tabs').innerHTML = '';
     $('d-doc').innerHTML = '<p class="muted">loading files</p>';
     refreshPicker();
@@ -2823,6 +2844,7 @@ async function openJob(id) {
   if (needsFile) needsFile.sha = await sha12(needsFile.text);
   if (openId !== id) return;
   files = got;
+  filesLoading = false;
   walkthroughs = walk;
   // The hash tab wins if its file exists, then the current tab, then the first file past the idea.
   const want = files.find((f) => f.name === hashFile());
@@ -2844,7 +2866,7 @@ function hashFile() {
 // The hash's file when it isn't loaded, or null.
 function pendingTab() {
   const name = hashFile();
-  return name && !files.find((f) => f.name === name) ? name : null;
+  return name && !filesLoading && !files.find((f) => f.name === name) ? name : null;
 }
 
 // replaceState, so a tab switch adds no history entry and fires no hashchange.
@@ -4140,7 +4162,7 @@ async function openIdeaEditor() {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-copy-link'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-pause', 'd-resume', 'd-copy-link'];
 
 let copyStatusTimer = 0;
 
@@ -4227,7 +4249,15 @@ function moveJob(board, id, to, now) {
   const from = j.claim?.device ?? prior?.from;
   const session = j.claim?.session ?? prior?.session;
   if (to === from) return 'This job already runs on ' + to + '.';
-  j.move = { ...(from && { from }), ...(session && { session }), to, at: now };
+  const link = j.paseo?.agent ? j.paseo : prior;
+  j.move = {
+    ...(from && { from }),
+    ...(session && { session }),
+    ...(link?.agent && { agent: link.agent }),
+    ...(link?.server && { server: link.server }),
+    to,
+    at: now,
+  };
   delete j.claim;
   delete j.paseo;
   j.updated = now;
@@ -4245,6 +4275,29 @@ function prioritizeJob(board, id, now) {
   if (!j.project || !PRIORITY_STAGES.includes(j.stage)) return 'This job can no longer be prioritized.';
   if (j.priority) return 'unchanged';
   j.priority = { at: now };
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
+// factory.py pickup and stuck leave a paused job alone; a running session keeps running.
+// Each returns an error message, 'unchanged', or '' once the board is changed.
+function pauseJob(board, id, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (!j.project || TERMINAL.includes(j.stage)) return 'This job can no longer be paused.';
+  if (j.paused) return 'unchanged';
+  j.paused = { at: now };
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
+function resumeJob(board, id, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (!j.paused) return 'unchanged';
+  delete j.paused;
   j.updated = now;
   board.updated = now;
   return '';
@@ -4454,6 +4507,50 @@ $('d-prioritize').addEventListener('click', async () => {
     }
   } finally {
     $('d-prioritize').disabled = false;
+  }
+});
+$('d-pause').addEventListener('click', async () => {
+  const id = openId;
+  const version = drawerVersion;
+  const err = $('d-pause-err');
+  err.hidden = true;
+  $('d-pause').disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = pauseJob(board, id, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message) throw new Error(message);
+    });
+    await poll();
+  } catch (x) {
+    if (version === drawerVersion) {
+      err.textContent = String(x.message || x);
+      err.hidden = false;
+    }
+  } finally {
+    $('d-pause').disabled = false;
+  }
+});
+$('d-resume').addEventListener('click', async () => {
+  const id = openId;
+  const version = drawerVersion;
+  const err = $('d-pause-err');
+  err.hidden = true;
+  $('d-resume').disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = resumeJob(board, id, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message) throw new Error(message);
+    });
+    await poll();
+  } catch (x) {
+    if (version === drawerVersion) {
+      err.textContent = String(x.message || x);
+      err.hidden = false;
+    }
+  } finally {
+    $('d-resume').disabled = false;
   }
 });
 $('d-copy-link').addEventListener('click', async () => {
@@ -4780,7 +4877,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-copy-link', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;
@@ -4988,7 +5085,7 @@ $('notify-needs').addEventListener('change', async () => {
   notifyOn = $('notify-needs').checked && notifySupported() && Notification.permission === 'granted';
   if (notifyOn) store.set(NOTIFY_KEY, 'on'); else store.remove(NOTIFY_KEY);
   renderNotifySettings();
-  schedulePoll();
+  syncLive(); schedulePoll();
   $('notify-status').textContent = notifyOn ? 'Notifications are on in this browser.' : 'Notifications are off.';
 });
 
@@ -4999,7 +5096,7 @@ loadProjects().then(() => {
   if (settingsShown === 'display') enterDisplaySection();
   if (settingsShown === 'notifications') enterNotificationsSection();
   referenceReady = true; if (settingsShown === 'reference') loadReferenceEffective();
-  pollStarted = true; poll(); schedulePoll();
+  pollStarted = true; poll(); syncLive(); schedulePoll();
 });
 
 // Display settings live only in this browser. Each value is read against a fixed list,
@@ -5026,13 +5123,59 @@ function applyDisplay() {
   // replace() swaps the fragment without a history entry, so Back cannot undo the theme.
   for (const f of document.querySelectorAll('.html-stepper-frame')) f.contentWindow.location.replace(f.src.replace(/#.*$/, '') + walkthroughHash());
 }
-// Hidden tabs never poll. Returning to the tab refreshes at once.
+// The board timer runs only while the live socket is closed. Hidden tabs never poll
+// unless notifications are on. Returning to the tab refreshes at once.
 function schedulePoll() {
   clearInterval(pollTimer);
-  const ms = !pollStarted ? 0 : !document.hidden ? pollSeconds * 1000 : notifyActive() ? 30000 : 0;
+  const ms = !pollStarted || liveOpen ? 0 : !document.hidden ? pollSeconds * 1000 : notifyActive() ? 30000 : 0;
   pollTimer = ms ? setInterval(poll, ms) : 0;
 }
-document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); schedulePoll(); });
+document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); syncLive(); schedulePoll(); });
+// Live board events: the Worker sends {"type":"changed","key":...} after each board or
+// backlog write, and the board re-reads at once. A dropped socket retries with backoff
+// (1, 2, 4 ... 30 s, 8 tries); focus, online or showing the tab start over after that.
+const LIVE_PATH = '/events/board';
+const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000, LIVE_MAX_RETRIES = 8;
+let liveSocket = null, liveOpen = false, liveRetries = 0, liveRetryTimer = 0;
+function liveWanted() { return pollStarted && navigator.onLine && (!document.hidden || notifyActive()); }
+function openLive() {
+  clearTimeout(liveRetryTimer);
+  liveRetryTimer = 0;
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + LIVE_PATH);
+  liveSocket = ws;
+  ws.addEventListener('open', () => {
+    if (ws !== liveSocket) return;
+    liveOpen = true;
+    liveRetries = 0;
+    schedulePoll();
+    poll();
+  });
+  ws.addEventListener('message', () => { if (ws === liveSocket) poll(); });
+  ws.addEventListener('close', () => {
+    if (ws !== liveSocket) return;
+    liveSocket = null;
+    liveOpen = false;
+    schedulePoll();
+    if (liveRetries < LIVE_MAX_RETRIES && liveWanted())
+      liveRetryTimer = setTimeout(openLive, Math.min(LIVE_FIRST_RETRY_MS * 2 ** liveRetries++, LIVE_MAX_RETRY_MS));
+  });
+}
+function closeLive() {
+  clearTimeout(liveRetryTimer);
+  liveRetryTimer = 0;
+  liveRetries = 0;
+  const ws = liveSocket;
+  liveSocket = null;
+  liveOpen = false;
+  // A status code lets the room finish the closing handshake.
+  ws?.close(1000);
+}
+function syncLive() {
+  if (!liveWanted()) closeLive();
+  else if (!liveSocket && !liveRetryTimer) { liveRetries = 0; openLive(); }
+}
+window.addEventListener('focus', syncLive);
+setInterval(() => { if (!document.hidden) drawUpdated(); }, 30000);
 $('display-columns').append(...COLUMNS.map(s => {
   const box = Object.assign(document.createElement('input'), {type:'checkbox', id:'display-column-' + s, disabled:s === 'needs-you'});
   box.dataset.stage = s;

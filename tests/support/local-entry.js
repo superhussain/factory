@@ -6,6 +6,8 @@
 // The synthetic principal is a person, so pipeline saves work locally.
 import { serveFactory } from "../../worker/index.js";
 
+export { BoardEvents } from "../../worker/events.js";
+
 const config = {
   origin: "https://factory.example.test",
   title: "Factory",

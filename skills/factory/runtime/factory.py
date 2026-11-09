@@ -606,6 +606,8 @@ def board(factory, job_id):
         fail("only the dashboard and factory.py pickup set move", 2)
     if "priority" in patch:
         fail("only the dashboard and factory.py pickup set priority", 2)
+    if "paused" in patch:
+        fail("only the dashboard sets paused", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -1320,7 +1322,7 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
             if len(picked) == budget:
                 break
             # A job waiting on a human, or an unapproved explorer card, is never promoted.
-            if not j.get("project") or gated(j) or tracer_building(j):
+            if not j.get("project") or gated(j) or paused(j) or tracer_building(j):
                 continue
             repo = paths.get(j["project"])
             # The scheduler pastes the id into a shell command, so only well-formed ids pass.
@@ -2214,7 +2216,7 @@ def claim_stalled(home, job_id, session_id, device, tag, minutes):
         resumable = stage == IDEA or stage in IN_FLIGHT \
             or stage == "pr-open" and job.get("automerge") is True and not escalated(job)
         if (not isinstance(paseo, dict) or paseo.get("agent") != session_id
-                or claim.get("device") != device or not resumable or gated(job)):
+                or claim.get("device") != device or not resumable or gated(job) or paused(job)):
             return None, None
         old = (dict(claim), dict(paseo))
         job.pop("claim", None)
@@ -2290,6 +2292,9 @@ def takeover(home, data, device, minutes, paths, settings, dry):
             continue
         if gated(job):
             skipped(session, job_id, "waiting on a human")
+            continue
+        if paused(job):
+            skipped(session, job_id, "paused")
             continue
         if tracer_building(job):
             skipped(session, job_id, "building in Tracer")
@@ -2701,8 +2706,9 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
             print(line)
 
 
-def move_stop_pass(home, data, device, dry):
-    """Stop the worktree of each job the dashboard moved away from this host, and record it."""
+def move_stop_pass(home, data, device, dry, adapter):
+    """Archive the Paseo session of, and stop the worktree of, each job the dashboard moved away
+    from this host, and record it."""
     for j in data["jobs"]:
         m, job_id, project = j.get("move"), j.get("id"), j.get("project")
         if not (isinstance(m, dict) and m.get("from") == device and "stopped" not in m
@@ -2710,31 +2716,54 @@ def move_stop_pass(home, data, device, dry):
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
         line = f"{job_id} {project}: moved to {m.get('to')}"
+        agent, server = m.get("agent"), m.get("server")
+        archive = bool(adapter and isinstance(agent, str) and PASEO_ID.fullmatch(agent)
+                       and not agent.startswith("-") and server and server == paseo_server()
+                       and agent != os.environ.get("PASEO_AGENT_ID"))
         if dry:
-            print(f"would stop {line}")
+            print(f"would archive session {agent} and stop {line}" if archive else f"would stop {line}")
             continue
+        failure = None
+        if archive:
+            try:
+                p = subprocess.run(adapter + ["archive", agent, "--force"], capture_output=True,
+                                   timeout=ADAPTER_TIMEOUT_SECONDS)
+                failure = f"exit {p.returncode}" if p.returncode else None
+            except subprocess.TimeoutExpired:
+                failure = "timed out"
+            except OSError as e:
+                failure = str(e)
         wt = home / "worktrees" / project / job_id
         alive = stop_pids(wt) if wt.exists() else []
+        if failure:
+            print(f"factory.py: pickup could not archive session {agent} of {job_id}: {failure}", file=sys.stderr)
+            continue
         if alive:
             print(f"factory.py: pickup could not stop {job_id}: processes still running: "
                   f"{' '.join(map(str, alive))}", file=sys.stderr)
             continue
 
-        def change(text, job_id=job_id, at=m.get("at")):
+        def change(text, job_id=job_id, at=m.get("at"), archive=archive):
             board = load_board(text)
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
             move = (found or {}).get("move")
             if not isinstance(move, dict) or move.get("at") != at or "stopped" in move:
                 return None, False
-            patch_job(board, job_id, {"move": {"stopped": now()}})
+            patch_job(board, job_id, {"move": {"stopped": now(), **({"archived": now()} if archive else {})}})
             return dump_board(board), True
         if cas(home, "/api/board", change):
-            print(f"stopped {line}")
+            print(f"archived session {agent} and stopped {line}" if archive else f"stopped {line}")
 
 
 def prioritized(j):
     """True when the dashboard asked pickup to take this job first."""
     p = j.get("priority")
+    return isinstance(p, dict) and isinstance(p.get("at"), str)
+
+
+def paused(j):
+    """True when the dashboard paused pickup for this job."""
+    p = j.get("paused")
     return isinstance(p, dict) and isinstance(p.get("at"), str)
 
 
@@ -2764,6 +2793,7 @@ def priority_nudge_pass(home, data, device, dry):
         p, c, link, job_id = j.get("priority"), j.get("claim"), j.get("paseo"), j.get("id")
         return (prioritized(j) and "nudged" not in p
                 and (j.get("stage") == IDEA or j.get("stage") in IN_FLIGHT) and not gated(j)
+                and not paused(j)
                 and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
                 and server and isinstance(link, dict) and link.get("server") == server
                 and isinstance(c, dict) and isinstance(c.get("since"), str) and p["at"] > c["since"])
@@ -2812,10 +2842,10 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     """One pickup run after flags and the holder are resolved."""
     paths = read_paths(home)
     data = read_board(home)
-    move_stop_pass(home, data, device, dry)
+    stalls = read_stalls(home)
+    move_stop_pass(home, data, device, dry, stalls[0] if stalls else None)
     priority_nudge_pass(home, data, device, dry)
     settings = {}
-    stalls = read_stalls(home)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
     if not dry and taken >= limit:
@@ -2834,6 +2864,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
             return f"skip {j['id']} {project}: no checkout on this host"
         if gated(j):
             return f"skip {j['id']} {project}: waiting on a human"
+        if paused(j):
+            return f"skip {j['id']} {project}: paused"
         if tracer_building(j):
             return f"skip {j['id']} {project}: building in Tracer"
         c = blocking(j, device, "", minutes)
@@ -4210,6 +4242,8 @@ def stuck(*args):
         return agents is not None and agents.get(link.get("agent"), "closed") == "closed"
 
     def is_stuck(job):
+        if paused(job):
+            return False
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
             return False

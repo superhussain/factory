@@ -749,6 +749,7 @@ class TakeoverTest(PickupFixture):
                 (self.stall_job(stage="pr-open"),
                  "skip stall agent-1 010-run: stage pr-open is not resumable"),
                 (self.stall_job(needs="Which option?"), "skip stall agent-1 010-run: waiting on a human"),
+                (self.stall_job(paused={"at": "2026-01-02T12:00:00Z"}), "skip stall agent-1 010-run: paused"),
                 (self.stall_job(tracer={"building": True}), "skip stall agent-1 010-run: building in Tracer"),
                 (self.stall_job(project="missing"), "skip stall agent-1 010-run: no checkout on this host"),
                 (self.stall_job(), "skip stall agent-1 010-run: runs no route in routes.md")):
@@ -957,6 +958,97 @@ class MoveHostTest(PickupFixture):
                 self.assertEqual(self.stopped, [])
 
 
+class MoveArchiveTest(MoveHostTest):
+    AGENT = "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
+
+    def setUp(self):
+        super().setUp()
+        self.adapter = self.root / "fake_adapter.py"
+        self.adapter.write_text(FAKE_ADAPTER, encoding="utf-8")
+        self.adapter_calls = self.root / "adapter-calls.json"
+        self.set_adapter()
+        patch.object(factory, "paseo_server", return_value="srv-lab").start()
+
+    def set_adapter(self, archive_code=0):
+        (self.root / "adapter.json").write_text(json.dumps({"archive_code": archive_code}), encoding="utf-8")
+        if self.adapter_calls.exists():
+            self.adapter_calls.unlink()
+
+    def set_stalls(self):
+        doc = {"version": 1, "adapter": [sys.executable, str(self.adapter)]}
+        (self.home / "stalls.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    def recorded(self):
+        if not self.adapter_calls.exists():
+            return []
+        calls = json.loads(self.adapter_calls.read_text(encoding="utf-8"))
+        return [c for c in calls if c[0] == "archive"]
+
+    def test_archives_then_stops_then_records_both(self):
+        self.set_stalls()
+        self.moved(agent=self.AGENT, server="srv-lab")
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"archived session {self.AGENT} and stopped 042-sample-export alpha: moved to studio-mac\n")
+        self.assertEqual(self.recorded(), [["archive", self.AGENT, "--force"]])
+        self.assertEqual(self.stopped, [self.wt])
+        move = self.job("042-sample-export")["move"]
+        self.assertIn("stopped", move)
+        self.assertIn("archived", move)
+        self.assertEqual((move["agent"], move["server"]), (self.AGENT, "srv-lab"))
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(len(self.recorded()), 1)
+
+    def test_no_adapter_call_when_a_guard_fails(self):
+        cases = {"no stalls file": (dict(agent=self.AGENT, server="srv-lab"), "gone"),
+                 "other server": (dict(agent=self.AGENT, server="srv-other"), None),
+                 "no agent": (dict(server="srv-lab"), None),
+                 "no server": (dict(agent=self.AGENT), None),
+                 "this process": (dict(agent=self.AGENT, server="srv-lab"), "self"),
+                 "bad agent": (dict(agent="-bad", server="srv-lab"), None)}
+        for name, (move, special) in cases.items():
+            with self.subTest(name):
+                self.set_stalls()
+                self.set_adapter()
+                self.calls.clear()
+                self.stopped.clear()
+                self.moved(**move)
+                env = {"PASEO_AGENT_ID": self.AGENT} if special == "self" else {}
+                if special == "gone":
+                    (self.home / "stalls.json").unlink()
+                with patch.dict(os.environ, env):
+                    code, out, err = self.pickup()
+                self.assertEqual((code, err), (0, ""))
+                self.assertEqual(out, "stopped 042-sample-export alpha: moved to studio-mac\n")
+                self.assertEqual(self.recorded(), [])
+                self.assertEqual(self.stopped, [self.wt])
+                self.assertNotIn("archived", self.job("042-sample-export")["move"])
+
+    def test_failed_archive_prints_and_retries(self):
+        self.set_stalls()
+        self.moved(agent=self.AGENT, server="srv-lab")
+        self.set_adapter(archive_code=1)
+        code, out, err = self.pickup()
+        self.assertEqual((code, out), (0, ""))
+        self.assertEqual(err, f"factory.py: pickup could not archive session {self.AGENT} of 042-sample-export: exit 1\n")
+        self.assertEqual(self.stopped, [self.wt])
+        self.assertEqual(self.puts(), [])
+        self.assertNotIn("stopped", self.job("042-sample-export")["move"])
+        self.set_adapter()
+        self.assertIn("archived session", self.pickup()[1])
+        self.assertIn("archived", self.job("042-sample-export")["move"])
+
+    def test_dry_run_prints_would_archive_and_calls_nothing(self):
+        self.set_stalls()
+        self.moved(agent=self.AGENT, server="srv-lab")
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"would archive session {self.AGENT} and stop 042-sample-export alpha: moved to studio-mac\n"
+                              f"host {DEVICE}: would take over 0\nhost {DEVICE}: would launch 0\n")
+        self.assertEqual((self.recorded(), self.stopped, self.puts()), ([], [], []))
+
+
 class PriorityTest(PickupFixture):
     AT = "2026-01-02T12:00:00Z"
     NUDGE = ("The owner prioritized factory job 042-sample-export from the dashboard. If your turn ended "
@@ -1077,6 +1169,38 @@ class PriorityTest(PickupFixture):
         self.assertEqual(self.pickup(), (0, "", ""))
         self.assertEqual(self.puts(), [])
         self.assertNotIn("nudged", self.job("042-sample-export")["priority"])
+
+
+class PauseTest(PickupFixture):
+    PAUSED = {"at": "2026-01-02T12:00:00Z"}
+
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.sent = []
+        patch.object(factory, "paseo_server", return_value="synthetic-server").start()
+        patch.object(factory, "paseo_statuses", return_value={"synthetic-agent": "idle"}).start()
+        patch.object(factory, "paseo_send", side_effect=lambda agent, message: self.sent.append(agent)).start()
+
+    def test_paused_idea_is_skipped(self):
+        self.board["jobs"] = [idea("100-sample-idea", "alpha", paused=self.PAUSED),
+                              idea("101-sample-next", "alpha")]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[0], "skip 100-sample-idea alpha: paused")
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, r"^launched 101-sample-next alpha on primary session [0-9a-f]{6}\n$")
+        self.assertNotIn("claim", self.job("100-sample-idea"))
+
+    def test_paused_prioritized_job_is_not_nudged(self):
+        self.board["jobs"] = [{"id": "042-sample-export", "stage": "build", "project": "alpha",
+                               "updated": "2026-01-01T00:00:00Z",
+                               "claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"},
+                               "paseo": {"server": "synthetic-server", "agent": "synthetic-agent"},
+                               "priority": {"at": "2026-01-02T12:00:00Z"}, "paused": self.PAUSED}]
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.sent, self.puts()), ([], []))
 
 
 class DenyNotesTest(PickupFixture):

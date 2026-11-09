@@ -30,8 +30,8 @@ context see [cloudflare.md](cloudflare.md), [device.md](device.md) and
 ## Offline or sign-in banner
 
 - "You're offline": the dashboard's service worker is showing the board saved on
-  this device. Edits won't save. The page polls again as soon as the browser
-  reports it is back online.
+  this device. Edits won't save. The page re-reads the board and reconnects live
+  updates as soon as the browser reports it is back online.
 - "Your sign-in has expired": a read met the Access login redirect, a 401 or a
   403, so the service worker cleared its cache. Choose Sign in again to reload
   through Access.

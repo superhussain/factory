@@ -21,7 +21,7 @@ const CLOSED = {
   stage: "closed",
   updated: "2026-01-01T00:00:00Z",
 };
-const ITEMS = ["d-edit-idea", "d-discard", "d-follow-tracer", "d-copy-link"];
+const ITEMS = ["d-edit-idea", "d-discard", "d-follow-tracer", "d-pause", "d-copy-link"];
 const VIEWPORTS = [
   { width: 390, height: 844, isMobile: true, hasTouch: true },
   { width: 1280, height: 900 },
@@ -95,7 +95,7 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
         await press("ArrowUp", "d-copy-link", true);
         await press("ArrowDown", "d-edit-idea", true);
         await press("ArrowUp", "d-copy-link", true);
-        await press("ArrowUp", "d-follow-tracer", true);
+        await press("ArrowUp", "d-pause", true);
         await press("Home", "d-edit-idea", true);
         await press("End", "d-copy-link", true);
         await press("Escape", "d-actions", false);
