@@ -136,12 +136,17 @@ const invalid = [
     "title: [a]",
   ].map((line) => [
     document.replace("base: main", line + "\nbase: main"),
-    "frontmatter allows one repo, base, and title only",
+    "frontmatter allows one repo, base and title, plus an optional archive",
   ]),
   ...["https://github.com/a/b", "a/b/c", "./b", "a/..", "a/" + "b".repeat(101)].map((v) => [
     document.replace("example/sample", v),
     "invalid project repo",
   ]),
+  [document.replace("base: main", "archive: a/b/c\nbase: main"), "invalid project archive"],
+  [
+    document.replace("base: main", "archive: a/b\narchive: a/c\nbase: main"),
+    "frontmatter allows one repo, base and title, plus an optional archive",
+  ],
   ...["", "a..b", "a//b", "a/", "a/.b", "a/b.", "a/b.lock", "-main", "a b", "a".repeat(201)].map(
     (v) => [document.replace("base: main", "base: " + v), "invalid project base"],
   ),
@@ -151,7 +156,7 @@ const invalid = [
   ]),
   [
     document.replace("title: Sample", "title: \"broken'"),
-    "frontmatter allows one repo, base, and title only",
+    "frontmatter allows one repo, base and title, plus an optional archive",
   ],
   [
     document + "a\u200bb\n",
@@ -256,5 +261,21 @@ test("projects.json lists repo, base and title", async () => {
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), [
     { slug: "sample", title: "Sample", repo: "example/sample", base: "main" },
+  ]);
+});
+
+test("projects.json lists an optional archive", async () => {
+  const s = setup();
+  const body = document.replace("base: main", "archive: example/sample-private\nbase: main");
+  assert.equal((await s.request(body)).status, 200);
+  const res = await s.request(undefined, {}, "/projects.json", "GET");
+  assert.deepEqual(await res.json(), [
+    {
+      slug: "sample",
+      title: "Sample",
+      repo: "example/sample",
+      base: "main",
+      archive: "example/sample-private",
+    },
   ]);
 });

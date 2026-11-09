@@ -132,6 +132,7 @@ const INPUTS = {
     "{workspaceRoot}/tests/tools/test_pr_screenshots.py",
     "{workspaceRoot}/tests/tools/test_copy_pr_screenshots.py",
     "{workspaceRoot}/tests/tools/test_public_cutover.py",
+    "{workspaceRoot}/tests/tools/test_rewrite_pr_links.py",
     "{workspaceRoot}/skills/factory/runtime/pr_screenshots.py",
     { runtime: "python3 --version" },
   ],

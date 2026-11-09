@@ -100,9 +100,34 @@ pickup once every host is repointed.
 
 - Disable `nx-cache-warm.yml` on `OWNER/factory-private`, so the archive stops
   running its daily schedule.
-- Old pull request links of the form `OWNER/factory/pull/N` now resolve to the
-  new repository, not the archive. Board links for jobs merged before the
-  cutover need rewriting to `OWNER/factory-private`.
+
+## Old pull request links
+
+Board jobs merged before the cutover still link `OWNER/factory/pull/N`, which
+now opens a new pull request or a 404. Point them at the archive in this order:
+
+1. Deploy the Worker and dashboard that accept `archive:`. The `deploy-main`
+   workflow does this when the change merges. An older dashboard drops archive
+   links, and an older Worker rejects the `archive:` line.
+2. Add `archive: OWNER/factory-private` to the frontmatter of
+   `<home>/projects/factory.md`, then push it:
+   `FACTORY_HOME=<factory-home> python3 <installed-skill>/runtime/factory.py push factory`.
+3. Dry run, and save the output. It lists every old URL, so it is also the undo
+   record:
+
+   ```sh
+   python3 tools/rewrite-pr-links.py --runtime <installed-skill>/runtime/factory.py \
+     --home <factory-home> --repo OWNER/factory --archive OWNER/factory-private
+   ```
+
+4. Review it. A `[plan]` line names a job whose archive pull request has head
+   branch `factory/<job id>`. A `[keep]` line stays as it is.
+5. Re-run the same command with `--apply`. It writes the board once and changes
+   only the planned `pr` fields and the board's `updated` time. A re-run finds
+   nothing left to rewrite.
+
+The tool exits 1 without writing when `gh pr list` fails or the archive lists
+1000 or more pull requests. To undo, swap a rewritten link back by hand.
 
 ## Recovery
 
