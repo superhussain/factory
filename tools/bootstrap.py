@@ -413,15 +413,15 @@ def down(answers, api, root, confirm=input):
             continue
         api("DELETE", "accounts/{}/access/apps/{}".format(account, app["id"]))
         print("app " + hostname + ": deleted")
-    for token in api_list(api, "accounts/{}/access/service_tokens".format(account)):
-        if is_device_name(n, token["name"]):
-            api("DELETE", "accounts/{}/access/service_tokens/{}".format(account, token["id"]))
-            print("token " + token["name"] + ": deleted")
     for policy in api_list(api, "accounts/{}/access/policies".format(account)):
         device = policy["decision"] == "non_identity" and is_device_name(n, policy["name"])
         if device or (policy["name"] == n["people_policy"] and policy["decision"] == "allow"):
             api("DELETE", "accounts/{}/access/policies/{}".format(account, policy["id"]))
             print("policy " + policy["name"] + ": deleted")
+    for token in api_list(api, "accounts/{}/access/service_tokens".format(account)):
+        if is_device_name(n, token["name"]):
+            api("DELETE", "accounts/{}/access/service_tokens/{}".format(account, token["id"]))
+            print("token " + token["name"] + ": deleted")
     bucket = profile["bucket_name"]
     try:
         api("DELETE", "accounts/{}/r2/buckets/{}".format(account, bucket))
