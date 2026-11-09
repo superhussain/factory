@@ -22,7 +22,7 @@ Credentials are covered under [Secrets stay out of configuration](#secrets-stay-
 | Project documents | R2 `project-documents/<slug>/{notes,decisions,runbook}.md` | One project | Dashboard document selector | `worker/index.js` `PROJECT_DOCUMENT_NAMES`, `projectDocumentPut` |
 | Credentials | `<home>/.env` (POSIX mode 0600 when seeded) | One device | Device owner, by hand | runtime `api`, `read_conf`, `init` seed |
 
-`board.json` and `jobs/...` in R2 are state, not configuration. `<home>/route-limits.json` is device state that `routes limit` and `routes clear` write. `<home>/logs/pickup/` is device state that `pickup` writes, one launch log per idea.
+`board.json` and `jobs/...` in R2 are state, not configuration. `<home>/route-limits.json` is device state that `routes limit` and `routes clear` write. `<home>/logs/pickup/` is device state that `pickup` writes, one launch log per idea. `<home>/paseo-claims/<job-id>/<agent>` is device state: `claim`, `board` and `hold` write one empty file when a Paseo session claims a job, and `pickup` removes it after archiving that session.
 
 ## Device config keys
 
