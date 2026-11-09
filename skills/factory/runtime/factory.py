@@ -2811,9 +2811,10 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
             print(line)
 
 
-def move_stop_pass(home, data, device, dry, adapter):
+def move_stop_pass(home, data, device, paths, settings, dry, adapter):
     """Archive the Paseo sessions of, and stop the worktree of, each job the dashboard moved away
-    from this host, and record it. Earlier holders of a chained move count too."""
+    from this host, and record it. Earlier holders of a chained move count too. Only when the project's
+    pickup is on and lists this host."""
     for j in data["jobs"]:
         m, job_id, project = j.get("move"), j.get("id"), j.get("project")
         mine = [x for x in queued_stops(m) if x["from"] == device]
@@ -2821,6 +2822,20 @@ def move_stop_pass(home, data, device, dry, adapter):
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
         line = f"{job_id} {project}: " + (f"rerun on {device}" if m.get("to") == device else f"moved to {m.get('to')}")
+        if project not in paths or not os.path.isdir(paths[project]):
+            reason = "no checkout on this host"
+        else:
+            if project not in settings:
+                settings[project] = pickup_settings(home, project, paths[project], device)
+                if settings[project][2] and not dry:
+                    print(f"factory.py: pickup skips {project}: {settings[project][2]}", file=sys.stderr)
+            enabled, hosts, why = settings[project]
+            reason = why or (None if enabled and device in hosts else
+                             "pickup off" if not enabled else f"pickup does not list host {device}")
+        if reason:
+            if dry:
+                print(f"skip stop {job_id} {project}: {reason}")
+            continue
         archives = {}
         for x in mine:
             agent, server = x.get("agent"), x.get("server")
@@ -3050,10 +3065,10 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     paths = read_paths(home)
     data = read_board(home)
     stalls = read_stalls(home)
-    move_stop_pass(home, data, device, dry, stalls[0] if stalls else None)
+    settings = {}
+    move_stop_pass(home, data, device, paths, settings, dry, stalls[0] if stalls else None)
     close_pass(home, data, device, minutes, dry)
     priority_nudge_pass(home, data, device, dry)
-    settings = {}
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
     if not dry and taken >= limit:

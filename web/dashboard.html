@@ -851,6 +851,9 @@ let jobs = [];
 let openId = null;
 // The backlog line open in the drawer's decision page, or null. Never set together with openId.
 let openBacklogRaw = null;
+const backlogTriageSeen = new Map();
+const backlogTriageAsked = new Set();
+const backlogTriageLoading = new Set();
 const backlogDrafts = new Map(); // item.raw -> { pick, notes, answers }
 let backlogSaving = false;
 let drawerVersion = 0;
@@ -2513,6 +2516,7 @@ function renderBoard() {
   }
   const shown = jobs.filter((j) => !filter || (filter === UNASSIGNED ? !j.project : j.project === filter));
   renderedBacklog = backlog;
+  for (const b of visibleBacklog()) if (!backlogTriageAsked.has(b.raw)) fetchBacklogTriage(b);
   const lists = COLUMNS.map((s) => s === 'backlog'
     ? visibleBacklog()
     : shown.filter((j) => (waitsOnYou(j) ? 'needs-you' : j.stage) === s));
@@ -5129,35 +5133,39 @@ function openBacklogItem(item) {
   $('d-tabs').hidden = true;
   $('d-gallery').replaceChildren();
   $('d-gallery').hidden = true;
-  $('d-doc').innerHTML = renderBacklogDecision(item);
+  $('d-doc').innerHTML = renderBacklogDecision(item, backlogTriageHtml(backlogTriageSeen.get(item.raw)));
   updateBacklogBar();
   renderBoard();
   refreshPicker();
   $('d-doc').querySelector('input[type=radio]').focus();
-  loadBacklogTriage(item.project + ': ' + item.feature);
+  fetchBacklogTriage(item);
 }
 
 function backlogTriageHtml(v) {
   if (typeof v?.reason !== 'string' || typeof v.at !== 'string' || !Number.isInteger(v.threshold) || !(v.confidence === null || Number.isInteger(v.confidence))) return '';
   const why = v.confidence === null ? 'Held without a model score because ' + v.reason + '.' : 'Confidence ' + v.confidence + '% is below the ' + v.threshold + '% threshold. ' + v.reason;
-  return '<h3>Held by triage</h3><p>' + esc(why) + '</p><p class="muted">Checked ' + esc(ago(v.at)) + '</p>';
+  return '<h3 id="backlog-triage-heading">Held by triage</h3><p>' + esc(why) + '</p><p class="muted">Checked ' + esc(ago(v.at)) + '</p>';
 }
 
-async function loadBacklogTriage(item) {
-  const version = drawerVersion;
-  const raw = openBacklogRaw;
+async function fetchBacklogTriage(item) {
+  const raw = item.raw;
+  if (backlogTriageLoading.has(raw)) return;
+  backlogTriageAsked.add(raw);
+  backlogTriageLoading.add(raw);
   try {
-    const r = await fetch('./api/backlog/triage?item=' + encodeURIComponent(item), { cache: 'no-store' });
-    if (!r.ok) return;
-    const html = backlogTriageHtml(await r.json());
-    const section = $('backlog-triage');
-    if (!html || !section || version !== drawerVersion || raw !== openBacklogRaw) return;
-    section.innerHTML = html;
-    section.hidden = false;
+    const r = await fetch('./api/backlog/triage?item=' + encodeURIComponent(item.project + ': ' + item.feature), { cache: 'no-store' });
+    if (r.status === 404) backlogTriageSeen.set(raw, null);
+    else if (r.ok) backlogTriageSeen.set(raw, await r.json());
   } catch {}
+  backlogTriageLoading.delete(raw);
+  const html = backlogTriageHtml(backlogTriageSeen.get(raw));
+  const section = $('backlog-triage');
+  if (!html || !section || !section.hidden || raw !== openBacklogRaw) return;
+  section.innerHTML = html;
+  section.hidden = false;
 }
 
-function renderBacklogDecision(item) {
+function renderBacklogDecision(item, triageHtml) {
   const ctx = item.context === undefined ? null : parseBacklogContext(item.context);
   const draft = backlogDrafts.get(item.raw) ?? { pick: '', notes: '', answers: [] };
   const radio = (value, name, desc, key) =>
@@ -5181,7 +5189,7 @@ function renderBacklogDecision(item) {
     : '<p class="muted">This item\'s context is not in the backlog context format, so it shows as text.</p>' + md(item.context);
   const history = backlogReworkHistory(item, jobs);
   return md(item.text) + shown +
-    '<section class="backlog-triage" id="backlog-triage" aria-label="Backlog triage" hidden></section>' +
+    '<section class="backlog-triage" id="backlog-triage" aria-labelledby="backlog-triage-heading"' + (triageHtml ? '' : ' hidden') + '>' + triageHtml + '</section>' +
     (history.length ? '<section class="backlog-history" aria-label="Rework history"><h3>Rework history</h3><ol>' +
       history.map((h) => '<li><div class="meta"><a href="#' + esc(encodeURIComponent(h.id)) + '">' + esc(h.id) + '</a> · reworked ' + esc(ago(h.at)) + '</div>' +
         '<p>Earlier text: ' + esc(h.text) + '</p><p>Notes: ' + esc(h.notes) + '</p></li>').join('') + '</ol></section>' : '') +
