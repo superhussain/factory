@@ -71,10 +71,10 @@ class FakeRunner:
                 (("git", "-C", checkout, "remote", "add"), (0, "")),
                 (("git", "-C", checkout, "fetch"), (0, "")),
                 (("git", "-C", checkout, "switch"), (0, "")),
-                (("git", "-C", checkout, "for-each-ref"), (0, "main\nfactory/650\nfresh\narchive/old\n")),
+                (("git", "-C", checkout, "for-each-ref"), (0, "main\trefs/remotes/origin/main\nfactory/650\trefs/remotes/origin/factory/650\nfresh\t\narchive/old\t\n")),
                 (("git", "-C", checkout, "merge-base", "--is-ancestor", "fresh"), (0, "")),
                 (("git", "-C", checkout, "merge-base"), (1, "")),
-                (("git", "-C", checkout, "branch", "-m"), (0, "")),
+                (("git", "-C", checkout, "branch"), (0, "")),
             ]
         self.answers = list((overrides or {}).items()) + self.answers
 
@@ -198,6 +198,8 @@ class PublicCutoverTest(unittest.TestCase):
             ("git", "-C", self.checkout),
             ("git", "-C", self.checkout),
             ("git", "-C", self.checkout),
+            ("git", "-C", self.checkout),
+            ("git", "-C", self.checkout),
             ("git", "commit-tree", "7ree"),
             ("git", "push", f"https://github.com/{REPO}.git"),
             ("gh", "pr", "create"),
@@ -260,6 +262,15 @@ class PublicCutoverTest(unittest.TestCase):
         self.assertIn("See docs/public-cutover.md, Recovery.", out)
         self.assertEqual([argv[:3] for argv in fake.mutations()], [("gh", "repo", "rename"), ("gh", "repo", "create")])
 
+    def test_ctrl_d_at_prompt(self):
+        fake = FakeRunner(checkout=self.checkout)
+        with mock.patch("builtins.input", side_effect=EOFError):
+            code, out = self.main(fake, "--apply")
+        self.assertEqual(code, 1)
+        self.assertIn("Stopped before the push.", out)
+        self.assertIn("See docs/public-cutover.md, Recovery.", out)
+        self.assertEqual([argv[:3] for argv in fake.mutations()], [("gh", "repo", "rename"), ("gh", "repo", "create")])
+
     def test_project_file_rewrite(self):
         self.project.write_text("---\nrepo: octo/old\nbase: main\n---\n# Factory\n")
         fake = FakeRunner(checkout=self.checkout)
@@ -281,24 +292,41 @@ class PublicCutoverTest(unittest.TestCase):
             (*git, "remote", "add", "archive", f"git@github.com:{ARCHIVE}.git"),
             (*git, "fetch", "origin", "--prune"),
             (*git, "switch", "--detach", "origin/main"),
-            (*git, "for-each-ref", "--format=%(refname:short)", "refs/heads"),
+            (*git, "for-each-ref", "--format=%(refname:short)%09%(upstream)", "refs/heads"),
             (*git, "merge-base", "--is-ancestor", "main", "origin/main"),
             (*git, "merge-base", "--is-ancestor", "factory/650", "origin/main"),
             (*git, "merge-base", "--is-ancestor", "fresh", "origin/main"),
             (*git, "branch", "-m", "main", "archive/main"),
             (*git, "branch", "-m", "factory/650", "archive/factory/650"),
+            (*git, "branch", "--unset-upstream", "archive/main"),
+            (*git, "branch", "--unset-upstream", "archive/factory/650"),
         ])
         self.assertIn(f"[ok] {self.checkout}: renamed main -> archive/main, factory/650 -> archive/factory/650", out)
+        self.assertIn(f"[ok] {self.checkout}: unset upstream on archive/main, archive/factory/650", out)
 
     def test_repoint_rerun(self):
         fake = FakeRunner({("git", "-C", self.checkout, "remote", "get-url", "archive"): (0, f"git@github.com:{ARCHIVE}.git\n"),
-                           ("git", "-C", self.checkout, "for-each-ref"): (0, "archive/main\n")}, checkout=self.checkout)
+                           ("git", "-C", self.checkout, "for-each-ref"): (0, "archive/main\t\n")}, checkout=self.checkout)
         code, out = self.main(fake, "--repoint-only")
         self.assertEqual(code, 0, out)
         actions = [argv[3:5] for argv in fake.argvs()]
         self.assertNotIn(("remote", "add"), actions)
         self.assertNotIn(("branch", "-m"), actions)
+        self.assertNotIn(("branch", "--unset-upstream"), actions)
         self.assertIn(f"[ok] {self.checkout}: no private branches left", out)
+
+    def test_repoint_rerun_clears_old_upstream(self):
+        fake = FakeRunner({("git", "-C", self.checkout, "remote", "get-url", "archive"): (0, f"git@github.com:{ARCHIVE}.git\n"),
+                           ("git", "-C", self.checkout, "for-each-ref"): (0, "archive/main\trefs/remotes/origin/main\n")},
+                          checkout=self.checkout)
+        code, out = self.main(fake, "--repoint-only")
+        self.assertEqual(code, 0, out)
+        argvs = fake.argvs()
+        self.assertEqual([a for a in argvs if a[3:5] == ("branch", "--unset-upstream")],
+                         [("git", "-C", self.checkout, "branch", "--unset-upstream", "archive/main")])
+        self.assertNotIn(("branch", "-m"), [argv[3:5] for argv in argvs])
+        self.assertIn("no private branches left", out)
+        self.assertIn("unset upstream on archive/main", out)
 
     def test_bad_usage_exits_2(self):
         no_checkout = [arg for arg in self.argv("--repoint-only") if arg not in ("--checkout", self.checkout)]
