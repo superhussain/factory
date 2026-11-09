@@ -95,9 +95,9 @@ const TAG_LOOKALIKES_TO = "<<<<<////--------aeopcsAEOPCSTaopAEOPT";
 const TAG_LOOKALIKES = new Map([...TAG_LOOKALIKES_FROM].map((c, i) => [c, TAG_LOOKALIKES_TO[i]]));
 const TAG_LOOKALIKE_CHARS = new RegExp(`[${TAG_LOOKALIKES_FROM}]`, "g");
 
-/** Whether text holds an operator-preferences tag as written or once NFKC and the look-alike fold apply. */
-function hasEnvelopeTag(text) {
-  const tag = /<\/?\s*operator-preferences/i;
+/** Whether text holds a `name` tag as written or once NFKC and the look-alike fold apply. */
+export function hasReservedTag(text, name) {
+  const tag = new RegExp(`<\\/?\\s*${name}`, "i");
   if (tag.test(text)) return true;
   // ASCII text is unchanged by the fold, so skip it.
   if (!/[\u0080-\uffff]/.test(text)) return false;
@@ -116,7 +116,8 @@ export function checkOperatorText(text, field, kind = "note") {
   if (note && [...text].length > 2000) return `${field}: over 2000 characters`;
   if (INVISIBLE.test(note ? text : text.replace(/[\t\r]/g, "")))
     return `${field}: contains control, invisible or bidirectional characters`;
-  if (hasEnvelopeTag(text)) return `${field}: contains the reserved envelope tag`;
+  if (hasReservedTag(text, "operator-preferences"))
+    return `${field}: contains the reserved envelope tag`;
   if (note && LINKS.some((pattern) => pattern.test(text))) return `${field}: links are not allowed`;
   if (SECRETS.some((pattern) => pattern.test(text))) return `${field}: looks like a secret`;
   if (!note) return null;
