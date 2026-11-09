@@ -1,6 +1,6 @@
 // The drawer's Prioritize and Remove priority items: which jobs show each, both board writes, and
 // a job that left the board, against one owned local Worker, at mobile and desktop width. The board
-// card's Prioritized badge shows only after Prioritize and goes after Remove priority. Also captures the review images.
+// card's Prioritized badge shows only after Prioritize and goes after Remove priority. Opening a backlog item hides a Prioritize error left from a job. Also captures the review images.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -113,6 +113,11 @@ test("prioritize", { timeout: 240000 }, async (t) => {
       "sample",
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
+    await fetch(origin + "/api/backlog", {
+      method: "PUT",
+      headers: { "If-None-Match": "*", "Content-Type": "text/markdown" },
+      body: "# Backlog\n\n- [ ] sample: Synthetic backlog item\n",
+    });
     const errors = [];
     for (const { theme, ...viewport } of VIEWPORTS) {
       const { width } = viewport;
@@ -126,6 +131,7 @@ test("prioritize", { timeout: 240000 }, async (t) => {
       await controlBoardPolling(page);
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
       await page.waitForSelector('.card[data-id="042-sample-export"]');
+      await page.waitForFunction(() => document.querySelector(".backlog-card"), wait);
       const activate = (selector) =>
         viewport.hasTouch ? page.tap(selector) : page.click(selector);
 
@@ -242,6 +248,16 @@ test("prioritize", { timeout: 240000 }, async (t) => {
           "This job is no longer on the board.",
         );
         assert.equal(await (await fetch(origin + "/api/board")).text(), before);
+      });
+
+      await t.test(`a backlog item hides the Prioritize error ${width}`, async () => {
+        assert.equal(await page.$eval("#d-prioritize-err", (el) => el.hidden), false);
+        await page.$eval(".backlog-card", (el) => el.click());
+        await page.waitForFunction(
+          () => document.getElementById("d-title").textContent === "Backlog item",
+          wait,
+        );
+        assert.equal(await page.$eval("#d-prioritize-err", (el) => el.hidden), true);
       });
 
       await t.test(
