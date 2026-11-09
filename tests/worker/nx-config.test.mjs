@@ -57,6 +57,8 @@ const INPUTS = {
     "{workspaceRoot}/tests/worker/lockfile.test.mjs",
     "{workspaceRoot}/nx.json",
     "{workspaceRoot}/tests/worker/nx-config.test.mjs",
+    "{workspaceRoot}/tests/worker/public-repo-notes.test.mjs",
+    "{workspaceRoot}/docs/repo-security.md",
   ],
   assets: [
     "default",
