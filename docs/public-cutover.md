@@ -94,7 +94,9 @@ python3 tools/public-cutover.py --repo OWNER/factory --archive OWNER/factory-pri
 at least one `--checkout`. It is safe to re-run: an existing `archive` remote
 and branches already under `archive/` are left alone. The renamed branches
 still hold private history; push them only to `archive`. Resume autonomy and
-pickup once every host is repointed.
+pickup once every host is repointed. Until a host is repointed, pickup and
+`factory.py worktree` refuse it with an `unsafe checkout` line, so it claims,
+launches and recovers nothing.
 
 ## After
 
