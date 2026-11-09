@@ -985,6 +985,46 @@ class MoveHostTest(PickupFixture):
                 self.assertEqual(self.stopped, [])
 
 
+
+class RerunTest(MoveHostTest):
+    def setUp(self):
+        super().setUp()
+        self.hosts = [host(DEVICE, 2)]
+
+    def test_one_run_stops_then_recovers(self):
+        self.moved(**{"to": DEVICE})
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        job = self.job("042-sample-export")
+        tag = job["claim"]["session"]
+        self.assertEqual(out, f"stopped 042-sample-export alpha: rerun on {DEVICE}\n"
+                              f"launched 042-sample-export alpha on primary session {tag}\n")
+        self.assertEqual(self.stopped, [self.wt])
+        self.assertEqual(job["claim"]["device"], DEVICE)
+        self.assertIn("stopped", job["move"])
+        self.assertEqual(job["move"]["claimed"], job["claim"]["since"])
+        [record] = self.launched()
+        self.assertEqual(record["env"]["FACTORY_PROMPT"],
+                         f"/factory recover 042-sample-export --session {tag}\n\n" + factory.UNATTENDED)
+
+    def test_survivors_block_the_claim(self):
+        self.moved(**{"to": DEVICE})
+        self.alive = [123]
+        code, out, err = self.pickup()
+        self.assertEqual((code, out), (0, ""))
+        self.assertEqual(err, "factory.py: pickup could not stop 042-sample-export: processes still running: 123\n")
+        self.assertEqual((self.puts(), self.launched()), ([], []))
+        self.assertNotIn("claim", self.job("042-sample-export"))
+
+    def test_dry_run_prints_would_stop(self):
+        self.moved(**{"to": DEVICE})
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"would stop 042-sample-export alpha: rerun on {DEVICE}\n"
+                              f"host {DEVICE}: would launch 0\n")
+        self.assertEqual((self.stopped, self.puts()), ([], []))
+
+
 class MoveArchiveTest(MoveHostTest):
     AGENT = "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
 

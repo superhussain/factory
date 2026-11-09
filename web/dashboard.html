@@ -461,6 +461,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-discard" role="menuitem" tabindex="-1" hidden>Discard idea</button>
         <button class="btn" id="d-follow-tracer" role="menuitem" tabindex="-1" hidden>Follow in Tracer</button>
         <button class="btn" id="d-move-host" role="menuitem" tabindex="-1" hidden>Move to another host</button>
+        <button class="btn" id="d-rerun" role="menuitem" tabindex="-1" hidden>Rerun stage</button>
         <button class="btn" id="d-prioritize" role="menuitem" tabindex="-1" hidden>Prioritize</button>
         <button class="btn" id="d-pause" role="menuitem" tabindex="-1" hidden>Pause pickup</button>
         <button class="btn" id="d-resume" role="menuitem" tabindex="-1" hidden>Resume pickup</button>
@@ -474,6 +475,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <p class="err" id="d-prioritize-err" role="alert" hidden></p>
   <p class="copy-status" id="d-copy-status" role="status"></p>
   <p class="err" id="d-pause-err" role="alert" hidden></p>
+  <p class="err" id="d-rerun-err" role="alert" hidden></p>
   <div class="assignment" id="d-assignment" hidden>
     <p class="muted" id="d-assign-help"></p>
     <label>Project <select class="filter" id="d-project" aria-describedby="d-assign-help"></select></label>
@@ -1068,6 +1070,7 @@ function hostLine(j) {
   const hosts = [...new Set(queuedStops(m).map((x) => x.from))];
   const stop = hosts.length ? ' · stop queued on ' + hosts.join(', ') : '';
   if (j.claim?.device) return 'on ' + j.claim.device + stop;
+  if (m?.to && m.to === m.from) return 'rerunning on ' + m.to + stop;
   return m?.to ? 'moving to ' + m.to + stop : '';
 }
 
@@ -2773,6 +2776,7 @@ async function openJob(id) {
   $('d-pipeline').hidden = !pipeline;
   $('d-discard').hidden = j.stage !== 'idea';
   $('d-move-host').hidden = !j.project || !MOVE_STAGES.includes(j.stage);
+  $('d-rerun').hidden = !canRerun(j);
   $('d-prioritize').hidden = !j.project || !PRIORITY_STAGES.includes(j.stage) || !!j.priority;
   $('d-pause').hidden = !j.project || TERMINAL.includes(j.stage) || !!j.paused;
   $('d-resume').hidden = !j.paused;
@@ -2788,6 +2792,7 @@ async function openJob(id) {
     $('d-edit-idea-err').hidden = true;
     $('d-prioritize-err').hidden = true;
     $('d-pause-err').hidden = true;
+    $('d-rerun-err').hidden = true;
     $('d-project').value = '';
     $('d-project').disabled = !projects?.size;
     $('d-assign').disabled = true;
@@ -4173,7 +4178,7 @@ async function openIdeaEditor() {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-prioritize', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up'];
 
 let copyStatusTimer = 0;
 
@@ -4256,11 +4261,17 @@ function moveJob(board, id, to, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
   if (!j.project || !MOVE_STAGES.includes(j.stage)) return 'This job can no longer be moved.';
+  const from = j.claim?.device ?? (!j.claim && j.move && !j.move.stopped ? j.move.from : undefined);
+  if (to === from) return 'This job already runs on ' + to + '.';
+  if (queuedStops(j.move).some((x) => x.from === to)) return 'A stop is still queued on ' + to + '. Pick another host.';
+  writeMove(board, j, to, now);
+  return '';
+}
+
+function writeMove(board, j, to, now) {
   const prior = !j.claim && j.move && !j.move.stopped ? j.move : null;
   const from = j.claim?.device ?? prior?.from;
   const session = j.claim?.session ?? prior?.session;
-  if (to === from) return 'This job already runs on ' + to + '.';
-  if (queuedStops(j.move).some((x) => x.from === to)) return 'A stop is still queued on ' + to + '. Pick another host.';
   const earlier = [...(Array.isArray(j.move?.earlier) ? j.move.earlier : [])];
   if (j.move?.from && !prior) {
     const { from: f, session: s, agent: a, server: v, at, stopped } = j.move;
@@ -4280,6 +4291,17 @@ function moveJob(board, id, to, now) {
   delete j.paseo;
   j.updated = now;
   board.updated = now;
+}
+
+// A rerun is a move back to the job's own host: that host stops the session, then its pickup
+// claims the job and runs factory recover in a fresh session.
+const canRerun = (j) => !!j.project && MOVE_STAGES.includes(j.stage) && !!j.claim?.device && !j.paused && !asks(j.needs);
+
+function rerunJob(board, id, host, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (!canRerun(j) || j.claim.device !== host) return 'This job can no longer be rerun.';
+  writeMove(board, j, host, now);
   return '';
 }
 
@@ -4557,6 +4579,41 @@ $('d-pause').addEventListener('click', async () => {
     }
   } finally {
     $('d-pause').disabled = false;
+  }
+});
+$('d-rerun').addEventListener('click', async () => {
+  const j = jobs.find((x) => x.id === openId);
+  if (!j || !canRerun(j)) return;
+  const id = j.id;
+  const version = drawerVersion;
+  const host = j.claim.device;
+  const err = $('d-rerun-err');
+  err.hidden = true;
+  $('d-rerun').disabled = true;
+  try {
+    let listed;
+    try {
+      const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + j.project, { cache: 'no-store' })]);
+      if (!h.ok || !p.ok) throw new Error('load');
+      const [list, view] = [await h.json(), await p.json()];
+      listed = list.some((x) => x.id === host && x.state === 'active') && (view.pickup?.enabled ? view.pickup.hosts : []).includes(host);
+    } catch {
+      throw new Error('Could not check ' + host + '. Try again.');
+    }
+    if (!listed) throw new Error(host + ' does not run pickup for ' + j.project + ', so nothing would restart the job. Use Move to another host instead.');
+    if (!confirm('Rerun the ' + j.stage + ' stage of ' + id + ' on ' + host + '? This stops its current session. The next pickup run on ' + host + ' starts the stage again in a fresh session.')) return;
+    await casBoard((board) => {
+      const message = rerunJob(board, id, host, isoNow());
+      if (message) throw new Error(message);
+    });
+    await poll();
+  } catch (x) {
+    if (version === drawerVersion) {
+      err.textContent = String(x.message || x);
+      err.hidden = false;
+    }
+  } finally {
+    $('d-rerun').disabled = false;
   }
 });
 $('d-resume').addEventListener('click', async () => {
@@ -4909,7 +4966,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-prioritize', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;
