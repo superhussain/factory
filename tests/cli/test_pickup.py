@@ -1,3 +1,4 @@
+import importlib.util
 import io
 import json
 import os
@@ -11,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from support import IsolatedTestCase, invoke, load_runtime, snapshot
+from support import SKILL, IsolatedTestCase, invoke, load_runtime, snapshot
 
 factory = load_runtime()
 DEVICE = "host-a"
@@ -1098,7 +1099,9 @@ class MoveArchiveTest(MoveHostTest):
                  "this process": (dict(agent=self.AGENT, server="srv-lab"), "self"),
                  "bad agent": (dict(agent="-bad", server="srv-lab"), None),
                  "not claimed here": (dict(agent=self.AGENT, server="srv-lab"), "unclaimed"),
-                 "other session": (dict(agent="9f1c2d3e-0000-4000-8000-000000000001", server="srv-lab"), None)}
+                 "other session": (dict(agent="9f1c2d3e-0000-4000-8000-000000000001", server="srv-lab"), None),
+                 "non-hex agent": (dict(agent="ab_cd", server="srv-lab"), None),
+                 "short agent": (dict(agent="abc", server="srv-lab"), None)}
         for name, (move, special) in cases.items():
             with self.subTest(name):
                 factory.record_paseo_claim(self.home, "042-sample-export", {"agent": self.AGENT})
@@ -1131,6 +1134,22 @@ class MoveArchiveTest(MoveHostTest):
         self.assertEqual(self.recorded(), [])
         self.assertEqual(self.stopped, [self.wt])
         self.assertNotIn("archived", self.job("042-sample-export")["move"])
+
+    def test_agent_guard_matches_the_adapter_id_rule(self):
+        spec = importlib.util.spec_from_file_location("paseo_stalls", SKILL / "runtime" / "paseo_stalls.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertEqual(factory.ADAPTER_ID.pattern, module.ID_RE.pattern)
+
+    def test_non_hex_agent_stops_once(self):
+        self.set_stalls()
+        self.moved(agent="ab_cd", server="srv-lab")
+        self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n", ""))
+        self.assertEqual(self.recorded(), [])
+        move = self.job("042-sample-export")["move"]
+        self.assertIn("stopped", move)
+        self.assertNotIn("archived", move)
+        self.assertEqual(self.pickup(), (0, "", ""))
 
     def test_failed_archive_prints_and_retries(self):
         self.set_stalls()
