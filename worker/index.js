@@ -1,7 +1,13 @@
 // The global factory dashboard and device API, served from one R2 bucket.
 // Cloudflare Access guards every path. Devices authenticate with a service token.
 import { authenticate } from "./access.ts";
-import { checkOperatorText, effectivePipeline, HOST_NAME, validatePipeline } from "./admission.js";
+import {
+  checkOperatorText,
+  effectivePipeline,
+  hasReservedTag,
+  HOST_NAME,
+  validatePipeline,
+} from "./admission.js";
 import { escapeHtml, readServerConfig, renderDashboard, serveAsset } from "./assets.js";
 import {
   newPairingCode,
@@ -593,7 +599,7 @@ async function backlogTriage(request, env) {
     if (text === undefined) continue;
     const error = checkOperatorText(text, field, "document");
     if (error) return reply(error, 400);
-    if (/<\/?\s*backlog-item/i.test(text))
+    if (hasReservedTag(text, "backlog-item"))
       return reply(`${field}: contains the reserved backlog-item tag`, 400);
   }
   const slug = m[1];
@@ -616,7 +622,7 @@ async function backlogTriage(request, env) {
     else await env.BUCKET.delete(key);
     return json(verdict);
   };
-  const lines = (context ?? "").split("\n");
+  const lines = (context ?? "").split(/\r\n|\r|\n/);
   const fixed =
     lines[0] === "Recommend: deny"
       ? "its author recommends deny"

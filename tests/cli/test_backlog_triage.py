@@ -23,6 +23,7 @@ class TriageFixture(IsolatedTestCase):
         self.triage = (200, json.dumps(QUEUE))
         self.posts = []
         self.after_board = None
+        self.cas_down = set()
         self.views = {"sample": (200, {"triage": {"enabled": True, "threshold": 80}})}
         self.gets = []
 
@@ -50,6 +51,8 @@ class TriageFixture(IsolatedTestCase):
             return status, {}, text
 
         def cas(home, path, change):
+            if path in self.cas_down:
+                self.module.fail(f"can't reach https://factory.example.test{path}: timed out", 5)
             new, result = change(self.files.get(path))
             if new is not None:
                 self.files[path] = new
@@ -174,6 +177,35 @@ class BacklogTriageTests(TriageFixture):
         code, out, _ = self.add()
         self.assertEqual(code, 0)
         self.assertEqual([j["id"] for j in self.board()], ["003-old-job", "004-add-csv-export"])
+
+    def test_a_failed_board_write_warns_and_exits_0(self):
+        board = self.files["/api/board"]
+        self.cas_down = {"/api/board"}
+        self.assertEqual(self.add(), (0, f"added {ITEM}\n",
+                                      "factory.py: can't reach https://factory.example.test/api/board: timed out\n"
+                                      f"factory.py: backlog triage could not queue {ITEM}; "
+                                      "the item waits in the backlog for review\n"))
+        self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [ ] {ITEM}\n")
+        self.assertEqual(self.files["/api/board"], board)
+
+    def test_a_failed_check_off_drops_the_row_and_exits_0(self):
+        self.after_board = lambda: self.cas_down.add("/api/backlog")
+        self.assertEqual(self.add(), (0, f"added {ITEM}\n",
+                                      "factory.py: can't reach https://factory.example.test/api/backlog: timed out\n"
+                                      f"factory.py: backlog triage could not check off {ITEM}; it removed "
+                                      "004-add-csv-export and the item waits in the backlog for review\n"))
+        self.assertEqual([j["id"] for j in self.board()], ["003-old-job"])
+        self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [ ] {ITEM}\n")
+
+    def test_a_failed_check_off_and_drop_names_the_row(self):
+        self.after_board = lambda: self.cas_down.update({"/api/backlog", "/api/board"})
+        self.assertEqual(self.add(), (0, f"added {ITEM}\n",
+                                      "factory.py: can't reach https://factory.example.test/api/backlog: timed out\n"
+                                      "factory.py: can't reach https://factory.example.test/api/board: timed out\n"
+                                      f"factory.py: backlog triage queued {ITEM} as 004-add-csv-export but could not "
+                                      "check off its line; check off the line or remove 004-add-csv-export by hand\n"))
+        self.assertEqual([j["id"] for j in self.board()], ["003-old-job", "004-add-csv-export"])
+        self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [ ] {ITEM}\n")
 
 
 PDF = "- [ ] sample: Add PDF export to reports"
