@@ -40,6 +40,8 @@ class BacklogContextTests(IsolatedTestCase):
         self.writes = []
 
         def api(home, method, path, *args, **kwargs):
+            if (method, path) == ("POST", "/api/backlog/triage"):
+                return 404, {}, "not found"
             self.assertEqual((method, path), ("GET", "/projects.json"))
             return 200, {}, json.dumps([{"slug": "factory"}])
 
