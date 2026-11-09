@@ -496,7 +496,7 @@ def paseo_session():
     """{"server", "agent"} of the Paseo session running this process, else None."""
     agent = os.environ.get("PASEO_AGENT_ID", "").strip()
     server = paseo_server()
-    if server and PASEO_ID.fullmatch(agent):
+    if server and PASEO_ID.fullmatch(agent) and not agent.startswith("-"):
         return {"server": server, "agent": agent}
     return None
 
@@ -3803,14 +3803,14 @@ def archive_workspace(target):
     except (ValueError, KeyError, TypeError):
         cwd = None
     if not isinstance(cwd, str):
-        fail("paseo inspect failed")
+        fail(f"paseo inspect failed: exit {code}")
     code, out = paseo_run(["workspace", "ls", "--json"])
     try:
         spaces = json.loads(out) if not code else None
     except ValueError:
         spaces = None
     if not isinstance(spaces, list):
-        fail("paseo workspace ls failed")
+        fail(f"paseo workspace ls failed: exit {code}")
 
     def norm(path):
         return os.path.normcase(os.path.normpath(path))
@@ -3821,10 +3821,18 @@ def archive_workspace(target):
         print(json.dumps({"archived": None, "reason": f"no Paseo workspace at {cwd}"}))
         return
     wks = space.get("workspaceId")
-    if space.get("isolation") != "worktree" or not re.fullmatch(
-            rf"factory-{re.escape(job_id)}(-\d+)?", os.path.basename(norm(cwd))):
+    if (space.get("isolation") != "worktree"
+            or not (isinstance(wks, str) and PASEO_ID.fullmatch(wks) and not wks.startswith("-"))
+            or not re.fullmatch(rf"factory-{re.escape(job_id)}(-\d+)?", os.path.basename(norm(cwd)))):
         print(json.dumps({"archived": None, "reason": f"workspace {wks} is not this job's worktree workspace"}))
         return
+    for args, reason in ((["status", "--porcelain"], "uncommitted files"),
+                         (["rev-list", "HEAD", "--not", "--remotes"], "unpushed commits")):
+        r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True)
+        if r.returncode or r.stdout.strip():
+            why = f"git {args[0]} failed in {cwd}: exit {r.returncode}" if r.returncode else f"{reason} in {cwd}"
+            print(json.dumps({"archived": None, "reason": why}))
+            return
     print(json.dumps({"archived": wks}), flush=True)
     code, _ = paseo_run(["workspace", "archive", wks])
     if code:
