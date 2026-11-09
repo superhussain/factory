@@ -55,6 +55,10 @@ class BacklogTriageTests(IsolatedTestCase):
     def add(self, item=ITEM, *extra):
         return invoke(self.module, ["backlog", "add", item, *extra])
 
+    def cached(self):
+        path = self.dir / "backlog-triage.json"
+        return json.loads(path.read_text(encoding="utf-8"))["lines"] if path.exists() else None
+
     def test_queue_writes_the_idea_then_checks_the_line_off(self):
         (self.dir / "jobs" / "sample" / "007-local-only").mkdir(parents=True)
         code, out, err = self.add()
@@ -73,6 +77,7 @@ class BacklogTriageTests(IsolatedTestCase):
                                    "reason": "A small export feature."}},
         })
         self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [x] {ITEM} (008-add-csv-export)\n")
+        self.assertIsNone(self.cached())
 
     def test_queue_keeps_refs_and_sends_the_context(self):
         item = ITEM + " (sub-job-of 002-reports)"
@@ -90,21 +95,23 @@ class BacklogTriageTests(IsolatedTestCase):
     def test_hold_and_off_change_nothing_after_the_append(self):
         line = f"# Backlog\n- [ ] {ITEM}\n"
         board = self.files["/api/board"]
-        for reply, printed in (
+        for reply, printed, cached in (
             ({"decision": "hold", "confidence": 62, "threshold": 80, "reason": "Touches billing.",
               "model": QUEUE["model"]},
-             f"held {ITEM} for review: confidence 62% (threshold 80%): Touches billing.\n"),
+             f"held {ITEM} for review: confidence 62% (threshold 80%): Touches billing.\n", [f"- [ ] {ITEM}"]),
             ({"decision": "hold", "confidence": None, "threshold": 80, "reason": "its author recommends deny",
               "model": None},
-             f"held {ITEM} for review: its author recommends deny\n"),
-            ({"decision": "off"}, ""),
+             f"held {ITEM} for review: its author recommends deny\n", [f"- [ ] {ITEM}"]),
+            ({"decision": "off"}, "", None),
         ):
             with self.subTest(reply=reply):
                 self.files["/api/backlog"] = "# Backlog\n"
+                (self.dir / "backlog-triage.json").unlink(missing_ok=True)
                 self.triage = (200, json.dumps(reply))
                 self.assertEqual(self.add(), (0, f"added {ITEM}\n" + printed, ""))
                 self.assertEqual(self.files["/api/backlog"], line)
                 self.assertEqual(self.files["/api/board"], board)
+                self.assertEqual(self.cached(), cached)
 
     def test_failures_warn_and_exit_0_with_the_line_waiting(self):
         board = self.files["/api/board"]
@@ -128,6 +135,8 @@ class BacklogTriageTests(IsolatedTestCase):
                 self.assertEqual(err, "" if reason is None else WARN.format(reason))
                 self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [ ] {ITEM}\n")
                 self.assertEqual(self.files["/api/board"], board)
+                self.assertEqual(self.cached(), [f"- [ ] {ITEM}"] if reason == "400" else None)
+                (self.dir / "backlog-triage.json").unlink(missing_ok=True)
 
     def test_a_lost_line_drops_the_unclaimed_row(self):
         def claim_line():
