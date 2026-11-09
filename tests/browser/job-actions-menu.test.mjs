@@ -1,5 +1,5 @@
 // The drawer's job actions sit behind one ellipsis toggle that opens an accessible menu.
-// The menu works with keyboard, mouse and touch, and hides when the job has no actions.
+// The menu works with keyboard, mouse and touch. A closed job still offers Add follow-up idea.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -148,8 +148,17 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
             hidden: el.hidden,
             rendered: el.getClientRects().length > 0,
           })),
-          { hidden: true, rendered: false },
+          { hidden: false, rendered: true },
           `${label} closed job`,
+        );
+        await closed.page.click("#d-actions");
+        await closed.page.waitForSelector("#d-actions-menu:not([hidden])");
+        assert.deepEqual(
+          await closed.page.$$eval("#d-actions-menu [role=menuitem]", (els) =>
+            els.filter((el) => el.getClientRects().length > 0).map((el) => el.id),
+          ),
+          ["d-follow-up"],
+          `${label} closed job menu`,
         );
         assert.deepEqual(closed.errors, [], label);
       } finally {
