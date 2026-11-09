@@ -60,17 +60,18 @@ const VIEWPORTS = [
 ];
 
 const freezeClock = (page) =>
-  page.evaluateOnNewDocument(() => {
+  page.evaluateOnNewDocument((now) => {
     const RealDate = Date;
+    window.now = now;
     window.Date = class extends RealDate {
       constructor(...args) {
-        super(...(args.length ? args : ["2026-01-02T12:00:00Z"]));
+        super(...(args.length ? args : [window.now]));
       }
       static now() {
-        return new RealDate("2026-01-02T12:00:00Z").getTime();
+        return new RealDate(window.now).getTime();
       }
     };
-  });
+  }, NOW);
 const openDrawer = async (page, id) => {
   await page.evaluate((i) => (location.hash = "#" + i), id);
   await page.waitForFunction(
@@ -204,6 +205,8 @@ test("prioritize", { timeout: 240000 }, async (t) => {
             path: `${SHOTS}menu-prioritized-390.png`,
             clip: await headAndMenu(page),
           });
+        // The drawer redraws when the job's updated stamp changes, so the clock moves on.
+        await page.evaluate(() => (window.now = "2026-01-02T12:00:01Z"));
         await activate("#d-remove-priority");
         await page.waitForFunction(
           () => !document.getElementById("d-meta").textContent.endsWith(" · prioritized"),

@@ -463,6 +463,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-move-host" role="menuitem" tabindex="-1" hidden>Move to another host</button>
         <button class="btn" id="d-rerun" role="menuitem" tabindex="-1" hidden>Rerun stage</button>
         <button class="btn" id="d-prioritize" role="menuitem" tabindex="-1" hidden>Prioritize</button>
+        <button class="btn" id="d-remove-priority" role="menuitem" tabindex="-1" hidden>Remove priority</button>
         <button class="btn" id="d-pause" role="menuitem" tabindex="-1" hidden>Pause pickup</button>
         <button class="btn" id="d-resume" role="menuitem" tabindex="-1" hidden>Resume pickup</button>
         <button class="btn" id="d-copy-link" role="menuitem" tabindex="-1" hidden>Copy link</button>
@@ -2786,6 +2787,7 @@ async function openJob(id) {
   $('d-move-host').hidden = !j.project || !MOVE_STAGES.includes(j.stage);
   $('d-rerun').hidden = !canRerun(j);
   $('d-prioritize').hidden = !j.project || !PRIORITY_STAGES.includes(j.stage) || !!j.priority;
+  $('d-remove-priority').hidden = !j.priority;
   $('d-pause').hidden = !j.project || TERMINAL.includes(j.stage) || !!j.paused;
   $('d-resume').hidden = !j.paused;
   $('d-follow-up').hidden = j.stage === 'idea' || $('new-idea').hidden;
@@ -4186,7 +4188,7 @@ async function openIdeaEditor() {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-prioritize', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-prioritize', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up'];
 
 let copyStatusTimer = 0;
 
@@ -4323,6 +4325,16 @@ function prioritizeJob(board, id, now) {
   if (!j.project || !PRIORITY_STAGES.includes(j.stage)) return 'This job can no longer be prioritized.';
   if (j.priority) return 'unchanged';
   j.priority = { at: now };
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
+function removePriority(board, id, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (!j.priority) return 'unchanged';
+  delete j.priority;
   j.updated = now;
   board.updated = now;
   return '';
@@ -4565,6 +4577,28 @@ $('d-prioritize').addEventListener('click', async () => {
     }
   } finally {
     $('d-prioritize').disabled = false;
+  }
+});
+$('d-remove-priority').addEventListener('click', async () => {
+  const id = openId;
+  const version = drawerVersion;
+  const err = $('d-prioritize-err');
+  err.hidden = true;
+  $('d-remove-priority').disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = removePriority(board, id, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message) throw new Error(message);
+    });
+    await poll();
+  } catch (x) {
+    if (version === drawerVersion) {
+      err.textContent = String(x.message || x);
+      err.hidden = false;
+    }
+  } finally {
+    $('d-remove-priority').disabled = false;
   }
 });
 $('d-pause').addEventListener('click', async () => {
@@ -4974,7 +5008,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-prioritize', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;
