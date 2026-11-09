@@ -13,9 +13,11 @@ import {
   blockLiveEvents,
 } from "../support/browser-server.mjs";
 
-const HOSTS = JSON.parse(
+const FIXTURE_HOSTS = JSON.parse(
   await readFile(new URL("../fixtures/hosts-list.json", import.meta.url), "utf8"),
 );
+const studio = FIXTURE_HOSTS.find((h) => h.id === "studio-mac");
+const HOSTS = [...FIXTURE_HOSTS, { ...studio, id: "cloud-box", label: "Cloud box" }];
 const SHOTS = new URL("../../.context/shots/", import.meta.url).pathname;
 const wait = { polling: 50 };
 const NOW = "2026-01-01T12:00:00Z";
@@ -289,6 +291,51 @@ test("move host", { timeout: 240000 }, async (t) => {
         await (
           await page.$('.card[data-id="042-sample-export"]')
         ).screenshot({ path: `${SHOTS}after-card-moving${suffix}.png` });
+      });
+
+      await t.test(`chained move keeps the earlier stop ${width}`, async () => {
+        const T1 = "2026-01-01T10:00:00Z";
+        await seedBoard(origin, [
+          {
+            ...JOBS[0],
+            claim: { device: "studio-mac", session: "d4e5f6", since: NOW },
+            paseo: undefined,
+            move: { from: "lab-linux", session: "a1b2c3", to: "studio-mac", at: T1, claimed: NOW },
+          },
+        ]);
+        pickupHosts = [...PICKUP_HOSTS, "cloud-box"];
+        await page.evaluate(() => (location.hash = "#042-sample-export"));
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForSelector("#d-move-host:not([hidden])", wait);
+        await openJobActions(page);
+        await page.click("#d-move-host");
+        await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        await (
+          await page.$("#move-host-dlg")
+        ).screenshot({ path: `${SHOTS}after-move-dialog-chained${suffix}.png` });
+        assert.deepEqual(await options(page), ["Cloud box (cloud-box)"]);
+        await page.select("#move-host-select", "cloud-box");
+        await page.click("#move-host-save");
+        await page.waitForFunction(() => !document.getElementById("move-host-dlg").open, wait);
+        await page.click("#d-close");
+        await page.waitForFunction(() => document.getElementById("detail").hidden, wait);
+        await (
+          await page.$('.card[data-id="042-sample-export"]')
+        ).screenshot({ path: `${SHOTS}after-card-chained${suffix}.png` });
+        const board = await (await fetch(origin + "/api/board")).json();
+        const job = board.jobs.find((j) => j.id === "042-sample-export");
+        assert.deepEqual(job.move, {
+          from: "studio-mac",
+          session: "d4e5f6",
+          to: "cloud-box",
+          at: NOW,
+          earlier: [{ from: "lab-linux", session: "a1b2c3", at: T1 }],
+        });
+        assert.equal(
+          await hostLine(page, "042-sample-export"),
+          "moving to cloud-box · stop queued on lab-linux, studio-mac",
+        );
+        pickupHosts = PICKUP_HOSTS;
       });
       await page.close();
     }
