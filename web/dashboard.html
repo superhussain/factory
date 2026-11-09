@@ -1046,11 +1046,18 @@ function stamp(j) {
   return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move)].join('|');
 }
 
+// Every holder of a move whose host has not stopped it yet, earlier ones first.
+function queuedStops(m) {
+  const earlier = Array.isArray(m?.earlier) ? m.earlier.filter((x) => x && typeof x === 'object') : [];
+  return m ? [...earlier, m].filter((x) => x.from && !x.stopped) : [];
+}
+
 // Where a job runs, from the board's claim and the dashboard's move. A move whose old host has not
 // stopped it yet keeps the queued stop visible.
 function hostLine(j) {
   const m = j.move;
-  const stop = m?.from && !m.stopped ? ' · stop queued on ' + m.from : '';
+  const hosts = [...new Set(queuedStops(m).map((x) => x.from))];
+  const stop = hosts.length ? ' · stop queued on ' + hosts.join(', ') : '';
   if (j.claim?.device) return 'on ' + j.claim.device + stop;
   return m?.to ? 'moving to ' + m.to + stop : '';
 }
@@ -4224,7 +4231,13 @@ function moveJob(board, id, to, now) {
   const from = j.claim?.device ?? prior?.from;
   const session = j.claim?.session ?? prior?.session;
   if (to === from) return 'This job already runs on ' + to + '.';
-  j.move = { ...(from && { from }), ...(session && { session }), to, at: now };
+  if (queuedStops(j.move).some((x) => x.from === to)) return 'A stop is still queued on ' + to + '. Pick another host.';
+  const earlier = [...(Array.isArray(j.move?.earlier) ? j.move.earlier : [])];
+  if (j.move?.from && !prior) {
+    const { from: f, session: s, at, stopped } = j.move;
+    earlier.push({ from: f, ...(s && { session: s }), at, ...(stopped && { stopped }) });
+  }
+  j.move = { ...(from && { from }), ...(session && { session }), to, at: now, ...(earlier.length && { earlier }) };
   delete j.claim;
   delete j.paseo;
   j.updated = now;
@@ -4271,7 +4284,7 @@ async function openMoveHost() {
     if (!h.ok || !p.ok) throw new Error('load');
     const [list, view] = [await h.json(), await p.json()];
     const listed = view.pickup?.enabled ? view.pickup.hosts : [];
-    hosts = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to);
+    hosts = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to && !queuedStops(j.move).some((q) => q.from === x.id));
   } catch {
     err.textContent = 'Could not load hosts. Try again.';
     err.hidden = false;
