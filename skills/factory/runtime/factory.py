@@ -992,6 +992,7 @@ def backlog_context(path):
 def backlog_add(item, context=None):
     if item.splitlines() != [item]:
         fail(f"bad item {item!r}: it must be one line, with no line or paragraph separators", 2)
+    item = item.rstrip()
     m = re.fullmatch(r"([\w-]+): (\S.*)", item)
     if not m:
         fail(f"bad item {item!r}: use <slug>: <feature> on one line", 2)
@@ -2307,6 +2308,7 @@ def takeover(home, data, device, minutes, paths, settings, dry):
         else:
             print(f"factory.py: pickup skips takeover: {reason}", file=sys.stderr)
         return 0
+    host_cap = host_max_inflight(home, device) if stalls else None
     routes = read_routes(home)
     limits = {name for name, until in read_limits(home).items() if until > now()}
 
@@ -2360,6 +2362,9 @@ def takeover(home, data, device, minutes, paths, settings, dry):
             "pickup off" if not enabled else f"pickup does not list host {device}"
         if line:
             skipped(session, job_id, line)
+            continue
+        if host_cap == 0:
+            skipped(session, job_id, f"host {device} paused (max in flight 0)")
             continue
         stalled = next((r for r in routes if r[1] == stall["provider"] and r[2] == stall["model"]), None)
         if stalled is None:
@@ -2778,9 +2783,10 @@ def move_stop_pass(home, data, device, dry, adapter):
             if (adapter and isinstance(agent, str) and ADAPTER_ID.fullmatch(agent)
                     and server and server == paseo_server() and agent != os.environ.get("PASEO_AGENT_ID")):
                 archives[agent] = x.get("at")
-        agent = next(iter(archives), None)
+        names = ", ".join(archives)
+        noun = "sessions" if len(archives) > 1 else "session"
         if dry:
-            print(f"would archive session {agent} and stop {line}" if archives else f"would stop {line}")
+            print(f"would archive {noun} {names} and stop {line}" if archives else f"would stop {line}")
             continue
         failure = None
         for a in archives:
@@ -2821,7 +2827,7 @@ def move_stop_pass(home, data, device, dry, adapter):
         if cas(home, "/api/board", change):
             for x in mine:
                 x["stopped"] = now()
-            print(f"archived session {agent} and stopped {line}" if archives else f"stopped {line}")
+            print(f"archived {noun} {names} and stopped {line}" if archives else f"stopped {line}")
 
 
 def prioritized(j):

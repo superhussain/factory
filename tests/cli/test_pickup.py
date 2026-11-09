@@ -703,6 +703,25 @@ class TakeoverTest(PickupFixture):
         self.assertEqual(self.recorded(), [["list"], ["list"], ["list"], ["list"],
                                            ["archive", "agent-1"]])
 
+    def test_paused_host_skips_takeover(self):
+        self.hosts = [host(DEVICE, 0)]
+        self.set_adapter([self.stall()])
+        self.set_stalls()
+        self.board["jobs"] = [self.stall_job()]
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(self.recorded(), [["list"]])
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.launched(), [])
+        self.assertFalse((self.home / "route-limits.json").exists())
+        self.assertEqual(self.pickup("--dry-run"), (0, "\n".join([
+            f"skip stall agent-1 010-run: host {DEVICE} paused (max in flight 0)",
+            f"host {DEVICE}: would take over 0",
+            f"host {DEVICE}: would launch 0"]) + "\n", ""))
+        self.hosts = [host(DEVICE, 2)]
+        self.set_adapter([self.stall()])
+        code, out, err = self.pickup()
+        self.assertIn("took over 010-run alpha from agent-1 on fallback", out)
+
     def test_takeover_claims_archives_and_recovers(self):
         before = datetime.now(timezone.utc).replace(microsecond=0)
         self.set_adapter([self.stall()])
@@ -1108,6 +1127,7 @@ class RerunTest(MoveHostTest):
 
 class MoveArchiveTest(MoveHostTest):
     AGENT = "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
+    AGENT2 = "9b2d71e0-5a3c-4e8f-b1d2-7c6e5f4a3b21"
 
     def setUp(self):
         super().setUp()
@@ -1228,6 +1248,28 @@ class MoveArchiveTest(MoveHostTest):
         self.assertEqual(out, f"would archive session {self.AGENT} and stop 042-sample-export alpha: moved to studio-mac\n"
                               f"host {DEVICE}: would take over 0\nhost {DEVICE}: would launch 0\n")
         self.assertEqual((self.recorded(), self.stopped, self.puts()), ([], [], []))
+
+    def two_agents(self):
+        self.set_stalls()
+        self.moved(**{"agent": self.AGENT2, "server": "srv-lab", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                      "earlier": [{"from": DEVICE, "session": "a1b2c3", "agent": self.AGENT, "server": "srv-lab",
+                                   "at": self.AT}]})
+
+    def test_dry_run_names_every_agent(self):
+        self.two_agents()
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"would archive sessions {self.AGENT}, {self.AGENT2} and stop 042-sample-export alpha: "
+                              f"moved to cloud-box\nhost {DEVICE}: would take over 0\nhost {DEVICE}: would launch 0\n")
+        self.assertEqual((self.recorded(), self.stopped, self.puts()), ([], [], []))
+
+    def test_archives_every_agent_and_names_them(self):
+        self.two_agents()
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"archived sessions {self.AGENT}, {self.AGENT2} and stopped 042-sample-export alpha: "
+                              "moved to cloud-box\n")
+        self.assertEqual(self.recorded(), [["archive", self.AGENT, "--force"], ["archive", self.AGENT2, "--force"]])
 
 
 class PriorityTest(PickupFixture):
@@ -1521,6 +1563,13 @@ class DenyNotesTest(PickupFixture):
         for path in self.root.rglob("*"):
             if path.is_file():
                 self.assertNotIn(NOTES, path.read_text(encoding="utf-8", errors="replace"))
+
+    def test_paused_host_still_launches_deny_notes(self):
+        self.hosts = [host(DEVICE, 0)]
+        self.board["jobs"] = [denied("007-csv-export", "alpha")]
+        code, out, err = self.pickup()
+        tag = self.job("007-csv-export")["claim"]["session"]
+        self.assertEqual(out, f"launched deny notes 007-csv-export alpha on primary session {tag}\n")
 
     def test_not_due_is_silent(self):
         del self.views["alpha"]
