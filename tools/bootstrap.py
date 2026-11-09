@@ -24,6 +24,9 @@ PER_PAGE = 50
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 MISSING_ORG = ("Zero Trust is not set up for this account. Open Zero Trust at "
                "https://one.dash.cloudflare.com/ once to choose a team name, then rerun.")
+FOREIGN_APP = ("An Access application for {hostname} already exists with the name \"{name}\", so bootstrap "
+               "did not create it. Rename it to \"{hostname} bootstrap\" to let bootstrap manage it, or delete it, "
+               "then rerun.")
 HINTS = {
     "account_id": "Your account ID is on any domain's Overview page in https://dash.cloudflare.com/\n"
                   "Help: https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/",
@@ -287,15 +290,29 @@ def ensure_policy(api, account, name, decision, include):
     return policy["id"]
 
 
-def ensure_app(api, account, hostname, name, policy_ids):
-    body = {"name": name, "domain": hostname, "type": "self_hosted",
+def app_body(hostname, n, policy_ids):
+    return {"name": n["app"], "domain": hostname, "type": "self_hosted",
             "policies": [{"id": policy_id, "precedence": index + 1} for index, policy_id in enumerate(policy_ids)]}
+
+
+def ensure_app(api, account, hostname, n, policy_ids):
     for app in api_list(api, "accounts/{}/access/apps".format(account)):
         if app.get("domain") == hostname:
-            app = api("PUT", "accounts/{}/access/apps/{}".format(account, app["id"]), body)["result"]
+            if app.get("name") != n["app"]:
+                raise CloudflareError(FOREIGN_APP.format(hostname=hostname, name=app.get("name")))
+            path = "accounts/{}/access/apps/{}".format(account, app["id"])
+            app = api("GET", path)["result"]
+            if not isinstance(app.get("policies"), list):
+                raise CloudflareError("GET " + path + ": no policies list in the response; nothing was changed")
+            current = [policy["id"] for policy in sorted(app["policies"], key=lambda policy: policy["precedence"])]
+            missing = [policy_id for policy_id in policy_ids if policy_id not in current]
+            if not missing:
+                print("app " + hostname + ": kept")
+                return app["aud"]
+            app = api("PUT", path, app_body(hostname, n, current + missing))["result"]
             print("app " + hostname + ": updated")
             return app["aud"]
-    app = api("POST", "accounts/{}/access/apps".format(account), body)["result"]
+    app = api("POST", "accounts/{}/access/apps".format(account), app_body(hostname, n, policy_ids))["result"]
     print("app " + hostname + ": created")
     return app["aud"]
 
@@ -346,7 +363,7 @@ def up(answers, api, run, root):
     devices = sorted((policy["name"], policy["id"])
                      for policy in api_list(api, "accounts/{}/access/policies".format(account))
                      if policy["decision"] == "non_identity" and is_device_name(n, policy["name"]))
-    audience = ensure_app(api, account, hostname, n["worker"], [people] + [pid for _, pid in devices])
+    audience = ensure_app(api, account, hostname, n, [people] + [pid for _, pid in devices])
     profile = write_profile(root, answers, n, existing, issuer, audience)
     print("profile " + str(profile))
     result = run([sys.executable, str(root / "tools" / "deploy.py"), "deploy", "--profile", str(profile)])

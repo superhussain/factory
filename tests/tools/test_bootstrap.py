@@ -446,8 +446,53 @@ class RerunTest(Instance):
         [app] = self.fake.items["apps"].values()
         self.assertEqual([p["id"] for p in app["policies"]], [
             policies["factory.example.test bootstrap people"]["id"],
-            policies["factory.example.test bootstrap device desk-top"]["id"],
-            policies["factory.example.test bootstrap device laptop"]["id"]])
+            policies["factory.example.test bootstrap device laptop"]["id"],
+            policies["factory.example.test bootstrap device desk-top"]["id"]])
+
+    def test_rerun_keeps_hand_added_policies(self):
+        self.up()
+        [app] = self.fake.items["apps"].values()
+        self.fake.items["policies"]["block"] = {"id": "block", "name": "Block contractors", "decision": "deny",
+                                                "include": [{"email_domain": {"domain": "contractor.test"}}]}
+        app["policies"] = [{"id": "block", "precedence": 1}] + [
+            dict(policy, precedence=policy["precedence"] + 1) for policy in app["policies"]]
+        since = len(self.fake.calls)
+        code, out, err = self.up(inputs=["", "", "", ""])
+        self.assertEqual(code, 0, err)
+        self.assertIn("app factory.example.test: kept", out)
+        self.assertNotIn("PUT", [m for m, path, _ in self.fake.calls[since:] if "/apps/" in path])
+        code, _, err = self.up(inputs=["", "", "", ""], host="Desk Top", home=self.tmp / "home2")
+        self.assertEqual(code, 0, err)
+        policies = self.policies()
+        [app] = self.fake.items["apps"].values()
+        self.assertEqual(app["policies"], [
+            {"id": "block", "precedence": 1},
+            {"id": policies["factory.example.test bootstrap people"]["id"], "precedence": 2},
+            {"id": policies["factory.example.test bootstrap device laptop"]["id"], "precedence": 3},
+            {"id": policies["factory.example.test bootstrap device desk-top"]["id"], "precedence": 4}])
+
+    def test_up_refuses_an_app_bootstrap_did_not_create(self):
+        self.fake.items["apps"]["mine"] = {"id": "mine", "name": "Factory", "domain": "factory.example.test",
+                                           "type": "self_hosted", "aud": "aud-mine", "policies": []}
+        code, _, err = self.up()
+        self.assertEqual(code, 1)
+        self.assertEqual(err, "An Access application for factory.example.test already exists with the name "
+                         "\"Factory\", so bootstrap did not create it. Rename it to \"factory.example.test "
+                         "bootstrap\" to let bootstrap manage it, or delete it, then rerun.\n")
+        self.assertEqual(self.fake.items["apps"]["mine"]["name"], "Factory")
+        self.assertNotIn("PUT", [m for m, path, _ in self.fake.calls if "/apps/" in path])
+        self.assertEqual(len(self.run.calls), 1, "no deploy")
+
+    def test_app_without_a_policies_list_is_not_changed(self):
+        self.up()
+        [app] = self.fake.items["apps"].values()
+        del app["policies"]
+        since = len(self.fake.calls)
+        code, _, err = self.up(inputs=["", "", "", ""])
+        self.assertEqual(code, 1)
+        self.assertEqual(err, "GET accounts/" + ACCOUNT + "/access/apps/" + app["id"]
+                         + ": no policies list in the response; nothing was changed\n")
+        self.assertNotIn("PUT", [m for m, path, _ in self.fake.calls[since:] if "/apps/" in path])
 
 
 class TokenConflictTest(Instance):
