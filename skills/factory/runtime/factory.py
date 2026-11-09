@@ -516,6 +516,17 @@ def blocking(job, device, session, minutes):
     return c if datetime.now(timezone.utc) - seen < timedelta(minutes=minutes) else None
 
 
+def moved_away(job, device, session):
+    """True when the dashboard moved this job away from this holder's session."""
+    m = (job or {}).get("move")
+    return isinstance(m, dict) and (m.get("from"), m.get("session")) == (device, session)
+
+
+def moved_message(job_id, m):
+    return (f"{job_id} was moved to {m.get('to')} from the dashboard at {m.get('at')}. "
+            "Nothing was written. Stop this session.")
+
+
 def held_by(job_id, c):
     return (f"{job_id} is held by {c['device']} session {c.get('session')} since {c['since']}, "
             f"last seen {c['seen']}")
@@ -588,6 +599,8 @@ def board(factory, job_id):
         fail("only factory.py suggest sets origin", 2)
     if "started" in patch:
         fail("only factory.py sets started", 2)
+    if "move" in patch:
+        fail("only the dashboard and factory.py pickup set move", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -618,6 +631,8 @@ def board(factory, job_id):
         held = blocking(found, device, session, minutes)
         if held:
             return None, (None, held)
+        if moved_away(found, device, session):
+            fail(moved_message(job_id, found["move"]), 6)
         origin = (found or {}).get("origin")
         if isinstance(origin, dict) and origin.get("gate") == "human" and not origin.get("approved") \
                 and "stage" in patch and patch["stage"] not in (IDEA, "closed"):
@@ -660,6 +675,8 @@ def hold(target, take=None):
             return None, ("missing", None, None)
         if job.get("project") != slug:
             fail(f"{job_id} belongs to {job.get('project')}, not {slug}", 2)
+        if take != "take" and moved_away(job, device, session):
+            fail(moved_message(job_id, job["move"]), 6)
         # Released hold is the receiving side of handoff, whose sender gate keeps
         # human and PR gates unclaimed; mirror it before claiming or accepting.
         if take == "released" and job.get("stage") not in IN_FLIGHT:
@@ -1092,16 +1109,19 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
                 continue
             repo = paths.get(j["project"])
             # The scheduler pastes the id into a shell command, so only well-formed ids pass.
-            if not (j.get("stage") == "idea" or builds and tracer_start(j)) \
+            if not (j.get("stage") == "idea" or builds and (tracer_start(j) or moved_here(j, device))) \
                     or not repo or not os.path.isdir(repo) \
                     or (project and j["project"] != project) \
                     or not JOB_ID.fullmatch(j["id"]) or ".." in j["id"] \
                     or blocking(j, device, session, minutes):
                 continue
             tag = session or secrets.token_hex(3)
+            claim = new_claim(device, tag)
             # Replace the claim whole, as hold does. The paseo key stays as it was.
             j.pop("claim", None)
-            patch_job(data, j["id"], {"claim": new_claim(device, tag)})
+            patch_job(data, j["id"], {"claim": claim})
+            if builds and moved_here(j, device):
+                patch_job(data, j["id"], {"move": {"claimed": claim["since"]}})
             picked.append({"id": j["id"], "project": j["project"], "repo_path": repo, "session": tag})
         return (dump_board(data) if picked else None), picked
     return cas(home, "/api/board", change)
@@ -2464,19 +2484,57 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
             print(line)
 
 
+def move_stop_pass(home, data, device, dry):
+    """Stop the worktree of each job the dashboard moved away from this host, and record it."""
+    for j in data["jobs"]:
+        m, job_id, project = j.get("move"), j.get("id"), j.get("project")
+        if not (isinstance(m, dict) and m.get("from") == device and "stopped" not in m
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(project, str) and SLUG.fullmatch(project)):
+            continue
+        line = f"{job_id} {project}: moved to {m.get('to')}"
+        if dry:
+            print(f"would stop {line}")
+            continue
+        wt = home / "worktrees" / project / job_id
+        alive = stop_pids(wt) if wt.exists() else []
+        if alive:
+            print(f"factory.py: pickup could not stop {job_id}: processes still running: "
+                  f"{' '.join(map(str, alive))}", file=sys.stderr)
+            continue
+
+        def change(text, job_id=job_id, at=m.get("at")):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            move = (found or {}).get("move")
+            if not isinstance(move, dict) or move.get("at") != at or "stopped" in move:
+                return None, False
+            patch_job(board, job_id, {"move": {"stopped": now()}})
+            return dump_board(board), True
+        if cas(home, "/api/board", change):
+            print(f"stopped {line}")
+
+
+def moved_here(j, device):
+    """True when the dashboard moved this in-flight job to this host and no pickup has claimed it yet."""
+    m = j.get("move")
+    return isinstance(m, dict) and m.get("to") == device and "claimed" not in m and j.get("stage") in IN_FLIGHT
+
+
 def pickup_pass(home, device, minutes, dry, limit, cap):
     """One pickup run after flags and the holder are resolved."""
     paths = read_paths(home)
     data = read_board(home)
+    move_stop_pass(home, data, device, dry)
     settings = {}
     stalls = read_stalls(home)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
     if not dry and taken >= limit:
         return
-    jobs = [j for j in data["jobs"] if (j.get("stage") == IDEA or tracer_start(j)) and isinstance(j.get("id"), str)
-            and JOB_ID.fullmatch(j["id"]) and ".." not in j["id"]]
-    starts = {j["id"] for j in jobs if tracer_start(j)}
+    jobs = [j for j in data["jobs"] if (j.get("stage") == IDEA or tracer_start(j) or moved_here(j, device))
+            and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"]) and ".." not in j["id"]]
+    starts = {j["id"] for j in jobs if tracer_start(j) or moved_here(j, device)}
 
     def skip(j):
         """Why this idea is not a candidate, or None."""
@@ -3795,6 +3853,9 @@ def stuck(*args):
     def is_stuck(job):
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
+            return False
+        # A move nobody has claimed yet belongs to its target host's pickup.
+        if isinstance(job.get("move"), dict) and "claimed" not in job["move"]:
             return False
         c = job.get("claim")
         if job.get("stage") in IN_FLIGHT:
