@@ -4953,7 +4953,8 @@ def tracer_gather(home, slug, job, cfg):
 
 def tracer_poll_scope(home, slug, job, cfg):
     """Record the scope of a gathering job's Tracer feature once Tracer decides it. Polls only
-    the feature id the job itself maps to, and only when the board names that feature."""
+    the feature id the job itself maps to, and only when the board names that feature.
+    Returns the scope it read, or None when it polled nothing."""
     ticket, feature_id = tracer_ids(job)
     if job["tracer"].get("feature") != feature_id:
         return
@@ -4966,8 +4967,7 @@ def tracer_poll_scope(home, slug, job, cfg):
     scope = tracer_scope(feature)
     if scope != "gathering":
         tracer_record(home, job, base, feature_id, scope=scope)
-    if scope == "approved" and job["tracer"].get("gather") is True:
-        tracer_stop_build(home, slug, job, cfg)
+    return scope
 
 
 def tracer_stop_due(j):
@@ -5254,8 +5254,7 @@ def tracer_after_board(home, job, patch):
     if not os.path.lexists(home / "tracer.json") or not JOB_ID.fullmatch(job_id) or ".." in job_id:
         return
     captured = io.StringIO()
-    sync = f"run factory.py tracer sync {slug}/{job_id} to retry"
-    retry = sync
+    step = "mirror"
     try:
         with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
             cfg = read_tracer(home, only=slug).get(slug)
@@ -5264,16 +5263,18 @@ def tracer_after_board(home, job, patch):
                 return
             if (tracer.get("follow") is True and tracer.get("gather") is True and not tracer.get("feature")
                     and job.get("stage") in TRACER_GATHER_STAGES):
-                retry = "the next pickup retries"
+                step = "gather"
                 tracer_gather(home, slug, job, cfg)
             elif tracer.get("scope") == "gathering":
-                retry = "the next pickup retries"
-                tracer_poll_scope(home, slug, job, cfg)
+                step = "scope poll"
+                if tracer_poll_scope(home, slug, job, cfg) == "approved" and tracer.get("gather") is True:
+                    step = "build stop"
+                    tracer_stop_build(home, slug, job, cfg)
             else:
                 if tracer_stop_due(job):
-                    retry = "the next pickup retries"
+                    step = "build stop"
                     tracer_stop_build(home, slug, job, cfg)
-                    retry = sync
+                    step = "mirror"
                 if job.get("stage") in TRACER_STAGES and (home / "jobs" / slug / job_id / "spec.md").is_file():
                     tracer_mirror(home, slug, job, cfg)
         return
@@ -5282,7 +5283,9 @@ def tracer_after_board(home, job, patch):
     except Exception as e:
         reason = type(e).__name__
     reason = (reason or "unknown error").rstrip(".")
-    print(f"factory.py: warning: Tracer mirror of {slug}/{job_id} failed: {reason}. "
+    retry = (f"run factory.py tracer sync {slug}/{job_id} to retry" if step == "mirror"
+             else "the next pickup retries (run factory.py pickup if this device has no scheduled pickup)")
+    print(f"factory.py: warning: Tracer {step} of {slug}/{job_id} failed: {reason}. "
           f"The board change was saved; {retry}.", file=sys.stderr)
 
 
