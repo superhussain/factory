@@ -319,15 +319,23 @@ One-time operator setup, after you complete steps 1–6 for the instance:
    **plus** Account → Workers R2 Storage → Edit, scoped to the single target
    account. The account ID itself comes from the rendered profile, so no
    separate account-id value is needed.
-2. Add the token as the repository secret `CLOUDFLARE_API_TOKEN`
-   (`gh secret set CLOUDFLARE_API_TOKEN -R <owner>/<repo>`).
-3. Add the repository variable `FACTORY_DEPLOY_PROFILE` holding the full profile
-   JSON exactly as `deploy/profile.json` (same schema as step 2):
+2. Create the `production` environment with a custom branch policy that
+   allows only `main` (Settings, Environments, or
+   `gh api -X PUT repos/<owner>/<repo>/environments/production -F 'deployment_branch_policy[protected_branches]=false' -F 'deployment_branch_policy[custom_branch_policies]=true'`,
+   then `gh api -X POST repos/<owner>/<repo>/environments/production/deployment-branch-policies -f name=main`).
+   Do this before any deploy runs: a run that finds no `production`
+   environment makes GitHub create one with no branch restriction.
+3. Add the token as a `production` environment secret limited to `main`
+   (`gh secret set CLOUDFLARE_API_TOKEN --env production -R <owner>/<repo>`).
+   The deploy job in `deploy-main.yml` runs in that environment.
+4. Add the repository variable `FACTORY_DEPLOY_PROFILE` holding the full profile
+   JSON exactly as `deploy/profile.json` (same schema as section 2):
    `gh variable set FACTORY_DEPLOY_PROFILE -R <owner>/<repo> < deploy/profile.json`.
    It is nonsecret instance configuration, validated at runtime by
    `python3 tools/deploy.py check`; keep real values out of the repository.
 
-Until both are provisioned, the workflow fails fast with a diagnostic naming the
+Until the environment, the secret and the variable are provisioned, the
+workflow fails fast on a missing secret or variable with a diagnostic naming the
 missing input and this section. Concurrency coalesces pushes without cancelling
 an in-flight deploy.
 

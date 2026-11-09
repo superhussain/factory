@@ -52,7 +52,7 @@ Keep each key once. Runtime reads take the last duplicate (`frontmatter`), while
 ## Secrets stay out of configuration
 
 - Device Access credentials, `FACTORY_ACCESS_CLIENT_ID` and `FACTORY_ACCESS_CLIENT_SECRET`, live only in `<home>/.env`, sent only as the two `CF-Access-Client-*` headers to the validated origin (`api`).
-- `CLOUDFLARE_API_TOKEN` lives only as a repository secret for `deploy-main` ([cloudflare.md §8](cloudflare.md#8-continuous-deployment-from-main)).
+- `CLOUDFLARE_API_TOKEN` lives only as a `production` environment secret for `deploy-main` ([cloudflare.md §8](cloudflare.md#8-continuous-deployment-from-main)).
 - The Tracer token stays in the file Tracer wrote. `<home>/tracer.json` holds only that file's path, and the runtime sends the token only as `Authorization: Bearer` to the configured Tracer URL (`tracer_call`).
 - Never put a credential in `config.md`, `deploy/profile.json`, the CI variable, `projects/<slug>.md` or project documents. The dashboard renders project files and documents as markdown to every Access-authenticated viewer, and the profile and connection descriptor are nonsecret by design.
 - `deploy/profile.json` is listed in `.gitignore` but is not a secret; it holds instance values that never belong in committed source.
