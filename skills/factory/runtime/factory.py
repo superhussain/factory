@@ -527,11 +527,16 @@ def earlier_moves(m):
     return [x for x in e if isinstance(x, dict)] if isinstance(e, list) else []
 
 
+def move_stopped(x):
+    """True when pickup recorded this holder's stop. Only a string counts, as in the dashboard."""
+    return isinstance(x.get("stopped"), str)
+
+
 def queued_stops(m):
     """The move's holders whose host has not stopped them yet, earlier ones first."""
     if not isinstance(m, dict):
         return []
-    return [x for x in [*earlier_moves(m), m] if x.get("from") and "stopped" not in x]
+    return [x for x in [*earlier_moves(m), m] if x.get("from") and not move_stopped(x)]
 
 
 def moved_away(job, device, session):
@@ -2786,7 +2791,7 @@ def move_stop_pass(home, data, device, dry, adapter):
                   f"{' '.join(map(str, alive))}", file=sys.stderr)
             continue
 
-        def change(text, job_id=job_id, ats={x.get("at") for x in mine}, archived=set(archives)):
+        def change(text, job_id=job_id, ats=[x.get("at") for x in mine], archived=list(archives)):
             board = load_board(text)
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
             now_mine = [x for x in queued_stops((found or {}).get("move"))
@@ -2801,7 +2806,7 @@ def move_stop_pass(home, data, device, dry, adapter):
             return dump_board(board), True
         if cas(home, "/api/board", change):
             for x in mine:
-                x.setdefault("stopped", now())
+                x["stopped"] = now()
             print(f"archived session {agent} and stopped {line}" if archives else f"stopped {line}")
 
 

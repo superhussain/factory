@@ -991,6 +991,28 @@ class MoveHostTest(PickupFixture):
                 self.assert_silent(self.pickup())
                 self.assertEqual(self.stopped, [])
 
+    def test_null_stopped_still_runs_the_stop(self):
+        self.moved(stopped=None)
+        code, out, err = self.pickup()
+        self.assertEqual((code, out, err), (0, "stopped 042-sample-export alpha: moved to studio-mac\n", ""))
+        self.assertEqual(self.stopped, [self.wt])
+        self.assertRegex(self.job("042-sample-export")["move"]["stopped"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+
+    def test_non_string_at_and_agent_stop_once(self):
+        self.moved(**{"from": DEVICE, "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                      "stopped": None,
+                      "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": ["T1"], "agent": {"id": "x"}}]})
+        code, out, err = self.pickup()
+        self.assertEqual((code, out, err), (0, "stopped 042-sample-export alpha: moved to cloud-box\n", ""))
+        self.assertEqual(self.stopped, [self.wt])
+        move = self.job("042-sample-export")["move"]
+        self.assertIsInstance(move["stopped"], str)
+        self.assertIsInstance(move["earlier"][0]["stopped"], str)
+        self.assertNotIn("archived", move["earlier"][0])
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.stopped, self.puts()), ([self.wt], []))
+
 
 
 class RerunTest(MoveHostTest):
@@ -1013,6 +1035,17 @@ class RerunTest(MoveHostTest):
         [record] = self.launched()
         self.assertEqual(record["env"]["FACTORY_PROMPT"],
                          f"/factory recover 042-sample-export --session {tag}\n\n" + factory.UNATTENDED)
+
+    def test_null_stopped_rerun_stops_before_the_claim(self):
+        self.moved(**{"to": DEVICE, "stopped": None})
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        job = self.job("042-sample-export")
+        tag = job["claim"]["session"]
+        self.assertEqual(out, f"stopped 042-sample-export alpha: rerun on {DEVICE}\n"
+                              f"launched 042-sample-export alpha on primary session {tag}\n")
+        self.assertEqual(self.stopped, [self.wt])
+        self.assertIsInstance(job["move"]["stopped"], str)
 
     def test_survivors_block_the_claim(self):
         self.moved(**{"to": DEVICE})
