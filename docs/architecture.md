@@ -172,6 +172,41 @@ must stay within the 3,000,000-byte ceiling; an unexplained discrepancy fails
 rather than loosens. The measured limit result is recorded in
 `.build/assets.json` (current: 1,631,898 of 3,000,000 bytes).
 
+## Live board events
+
+The `BoardEvents` Durable Object (`worker/events.js`, a plain Durable Object on the WebSocket
+Hibernation API) tells open dashboards when `board.json` or `backlog.md` changed. It
+stores nothing and never carries board content. The room holds at most 100 open sockets
+and answers a further upgrade with 503.
+
+```mermaid
+sequenceDiagram
+  participant D as device
+  participant W as Worker casPut
+  participant R as BoardEvents room main
+  participant B as dashboard socket
+  D->>W: PUT /api/board
+  W->>W: R2 put with onlyIf
+  W->>R: POST notify?key=board.json
+  R-->>B: {"type":"changed","key":"board.json"}
+  W-->>D: 200 ETag (unchanged)
+  B->>W: GET /board.json
+```
+
+- `casPut` announces only a committed write. A 412 announces nothing, and a
+  failed announcement leaves the reply unchanged.
+- The dashboard runs its poll timer only while the socket is closed. It reconnects
+  with backoff (1, 2, 4 ... 30 s, 8 tries), then again on focus, online or show.
+  A hidden tab keeps its socket only while notifications are on.
+
+| Request to `/events/board` | Result |
+| --- | --- |
+| no Access assertion | 403, before routing |
+| GET without `Upgrade: websocket`, or POST | 404 |
+| service token principal | 404 |
+| `Origin` other than the request origin | 403 |
+| user, same origin, upgrade | 101 from the room |
+
 ## Draft preservation
 
 The dashboard keeps draft state in browser-local records keyed

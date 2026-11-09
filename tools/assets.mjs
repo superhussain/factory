@@ -10,6 +10,7 @@ const CEILING = 3_000_000;
 // Source inputs whose change invalidates a dry-run report.
 const SOURCES = [
   "worker/index.js",
+  "worker/events.js",
   "worker/access.ts",
   "worker/assets.js",
   "worker/pwa.js",

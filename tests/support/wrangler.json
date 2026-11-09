@@ -2,5 +2,7 @@
   "name": "factory-local-test",
   "main": "local-entry.js",
   "compatibility_date": "2026-06-01",
-  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "factory-local-test" }]
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "factory-local-test" }],
+  "durable_objects": { "bindings": [{ "name": "BoardEvents", "class_name": "BoardEvents" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BoardEvents"] }]
 }
