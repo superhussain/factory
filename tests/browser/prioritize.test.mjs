@@ -1,5 +1,5 @@
 // The drawer's Prioritize item: which jobs show it, the board write, and a job that left the
-// board, against one owned local Worker, at mobile and desktop width. Also captures the review images.
+// board, against one owned local Worker, at mobile and desktop width. The board card's Prioritized badge shows only after the write. Also captures the review images.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -71,6 +71,12 @@ const openDrawer = async (page, id) => {
     id,
   );
 };
+const badges = (page, id) =>
+  page.$$eval(`.card[data-id="${id}"] .id .chip`, (els) => els.map((e) => e.textContent));
+const closeDrawer = async (page) => {
+  await page.click("#d-close");
+  await page.waitForSelector("#detail", { hidden: true });
+};
 const boardJob = async (origin, id) =>
   (await (await fetch(origin + "/api/board")).json()).jobs.find((j) => j.id === id);
 // The drawer head plus the open menu, which hangs below it.
@@ -129,6 +135,15 @@ test("prioritize", { timeout: 240000 }, async (t) => {
         });
       });
 
+      await t.test(`no badge before Prioritize ${width}`, async () => {
+        await closeDrawer(page);
+        assert.deepEqual(await badges(page, "042-sample-export"), []);
+        if (width === 1280)
+          await (
+            await page.$('.card[data-id="042-sample-export"]')
+          ).screenshot({ path: `${SHOTS}before-card-1280.png` });
+      });
+
       await t.test(`Prioritize writes priority ${width}`, async () => {
         await openDrawer(page, "042-sample-export");
         await openJobActions(page);
@@ -150,6 +165,16 @@ test("prioritize", { timeout: 240000 }, async (t) => {
             path: `${SHOTS}after-prioritized-1280.png`,
             clip: await headAndMenu(page),
           });
+        await closeDrawer(page);
+        await page.waitForFunction(
+          () => document.querySelector('.card[data-id="042-sample-export"] .id .chip'),
+          wait,
+        );
+        assert.deepEqual(await badges(page, "042-sample-export"), ["Prioritized"]);
+        assert.deepEqual(await badges(page, "100-sample-idea"), []);
+        await (
+          await page.$('.card[data-id="042-sample-export"]')
+        ).screenshot({ path: `${SHOTS}after-card-${width}.png` });
       });
 
       await t.test(`a job that left the board writes nothing ${width}`, async () => {
