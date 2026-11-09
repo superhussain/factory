@@ -965,6 +965,13 @@ function prLink(j) {
   return m ? { url: j.pr, n: m[1] } : null;
 }
 
+// A job's #N refs link to the repo that holds its board PR: the project's archive when the PR is there, else the repo.
+function docRepoFor(j) {
+  const p = projects?.get(j?.project);
+  if (!p) return null;
+  return p.archiveRe && typeof j.pr === 'string' && p.archiveRe.test(j.pr) ? p.archive : p.repo || null;
+}
+
 const factoryConfig = JSON.parse(document.getElementById('factory-config').textContent);
 // Native metadata is opaque; only these IDs can enter configured link templates.
 const PASEO_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -1387,7 +1394,7 @@ async function loadProjects() {
     const r = await fetch('./projects.json', { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status);
     const list = await r.json();
-    projects = new Map(list.map((p) => [p.slug, { title: p.title, repo: p.repo || '', base: p.base || '', re: p.repo ? prUrl(p.repo) : null, archiveRe: p.archive ? prUrl(p.archive) : null, runRe: p.repo ? runUrl(p.repo) : null }]));
+    projects = new Map(list.map((p) => [p.slug, { title: p.title, repo: p.repo || '', archive: p.archive || '', base: p.base || '', re: p.repo ? prUrl(p.repo) : null, archiveRe: p.archive ? prUrl(p.archive) : null, runRe: p.repo ? runUrl(p.repo) : null }]));
     loaded = true;
   } catch {}
   $('idea-project-help').textContent = projects === null
@@ -3135,7 +3142,7 @@ function renderDetail() {
   const f = files.find((x) => x.name === activeFile);
   const j = jobs.find((x) => x.id === openId);
   docDir = docBase = null;
-  docRepo = projects?.get(j?.project)?.repo || null;
+  docRepo = docRepoFor(j);
   if (j?.project && f) {
     docDir = new URL(jobBase(j), location.href).href;
     docBase = new URL(f.name, docDir).href;

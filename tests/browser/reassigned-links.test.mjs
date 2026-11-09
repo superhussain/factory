@@ -39,6 +39,15 @@ const ARCHIVED = {
   updated: "2026-01-01T00:00:00Z",
   pr: "https://github.com/example/new-private/pull/5",
 };
+const CURRENT = {
+  id: "033-current",
+  project: "new",
+  title: "Synthetic current job",
+  stage: "merged",
+  updated: "2026-01-01T00:00:00Z",
+  pr: "https://github.com/example/new/pull/5",
+};
+const DOC = "# Synthetic job\n\nMerged as #5.\n";
 const captureDir = process.env.CAPTURE_DIR;
 
 async function seed(origin) {
@@ -120,53 +129,94 @@ test(
   },
 );
 
-test("archived PR links only once the project names its archive", { timeout: 120000 }, async () => {
-  await prepareAssets();
-  if (captureDir) await mkdir(captureDir, { recursive: true });
-  await withBrowserFixture(async ({ browser, origin }) => {
-    await seedBoard(origin, [ARCHIVED]);
-    const context = await browser.createBrowserContext();
-    try {
-      const page = await context.newPage();
-      await page.setViewport({ width: 1440, height: 900 });
-      const errors = [];
-      page.on("pageerror", (error) => errors.push(String(error)));
-      await blockLiveEvents(page);
-      const wrap = '.card-wrap:has(.card[data-id="032-archived"])';
-      // Only a linked card gets a wrap, so the unlinked card is cropped on its own box.
-      const shown = wrap + ', .cards > .card[data-id="032-archived"]';
-      const open = async (frontmatter, shot) => {
-        await seedProject(origin, "new", "---\n" + frontmatter + "title: Synthetic new\n---\n");
+test(
+  "archived PR and document links follow the project's archive",
+  { timeout: 120000 },
+  async () => {
+    await prepareAssets();
+    if (captureDir) await mkdir(captureDir, { recursive: true });
+    await withBrowserFixture(async ({ browser, origin }) => {
+      await seedProject(
+        origin,
+        "new",
+        "---\nrepo: example/new\nbase: main\ntitle: Synthetic new\n---\n",
+      );
+      await seedBoard(origin, [ARCHIVED, CURRENT]);
+      for (const id of [ARCHIVED.id, CURRENT.id]) {
+        const response = await fetch(origin + "/api/jobs/new/" + id + "/spec.md", {
+          method: "PUT",
+          headers: { "If-None-Match": "*", "Content-Type": "text/markdown" },
+          body: DOC,
+        });
+        assert.equal(response.status, 200);
+      }
+      const context = await browser.createBrowserContext();
+      try {
+        const page = await context.newPage();
+        await page.setViewport({ width: 1440, height: 900 });
+        const errors = [];
+        page.on("pageerror", (error) => errors.push(String(error)));
+        await blockLiveEvents(page);
+        const wrap = '.card-wrap:has(.card[data-id="032-archived"])';
+        // Only a linked card gets a wrap, so the unlinked card is cropped on its own box.
+        const shown = wrap + ', .cards > .card[data-id="032-archived"]';
+        const open = async (frontmatter, shot) => {
+          await seedProject(origin, "new", "---\n" + frontmatter + "title: Synthetic new\n---\n");
+          await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+          await waitForBoard(page);
+          await page.click('.column-toggle[data-stage="merged"]');
+          await page.waitForSelector(shown, { visible: true });
+          if (captureDir) await (await page.$(shown)).screenshot({ path: join(captureDir, shot) });
+          return page.evaluate((sel) => {
+            const a = document.querySelector(sel + " .pr-link");
+            return a ? { href: a.href, text: a.textContent } : null;
+          }, wrap);
+        };
+
+        const docHref = async (id, shot) => {
+          await clickNow(page, '.card[data-id="' + id + '"]');
+          await page.waitForFunction(() =>
+            document.getElementById("d-doc").textContent.includes("Merged as"),
+          );
+          if (captureDir && shot) {
+            await (await page.$("#d-doc")).screenshot({ path: join(captureDir, shot) });
+          }
+          return page.evaluate(
+            () => document.querySelector('#d-doc a[href^="https://github.com/"]')?.href,
+          );
+        };
+
+        assert.equal(
+          await open("repo: example/new\nbase: main\n", "before-card-archive.png"),
+          null,
+        );
+        assert.equal(
+          await docHref("032-archived", "before-doc-archive-link.png"),
+          "https://github.com/example/new/pull/5",
+        );
+        assert.deepEqual(
+          await open(
+            "repo: example/new\nbase: main\narchive: example/new-private\n",
+            "after-card-archive.png",
+          ),
+          { href: ARCHIVED.pr, text: "PR #5" },
+        );
+        assert.equal(
+          await docHref("032-archived", "after-doc-archive-link.png"),
+          "https://github.com/example/new-private/pull/5",
+        );
+        await page.waitForFunction(() => document.getElementById("d-pr").textContent === "PR #5");
+        assert.equal(await page.evaluate(() => document.getElementById("d-pr").href), ARCHIVED.pr);
+
         await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
         await waitForBoard(page);
         await page.click('.column-toggle[data-stage="merged"]');
-        await page.waitForSelector(shown, { visible: true });
-        if (captureDir) await (await page.$(shown)).screenshot({ path: join(captureDir, shot) });
-        return page.evaluate((sel) => {
-          const a = document.querySelector(sel + " .pr-link");
-          return a ? { href: a.href, text: a.textContent } : null;
-        }, wrap);
-      };
-
-      assert.equal(await open("repo: example/new\nbase: main\n", "before-card-archive.png"), null);
-      assert.deepEqual(
-        await open(
-          "repo: example/new\nbase: main\narchive: example/new-private\n",
-          "after-card-archive.png",
-        ),
-        { href: ARCHIVED.pr, text: "PR #5" },
-      );
-
-      await clickNow(page, '.card[data-id="032-archived"]');
-      await page.waitForFunction(
-        () =>
-          !document.getElementById("detail").hidden &&
-          document.getElementById("d-pr").textContent === "PR #5",
-      );
-      assert.equal(await page.evaluate(() => document.getElementById("d-pr").href), ARCHIVED.pr);
-      assert.deepEqual(errors, [], "no page errors");
-    } finally {
-      await context.close();
-    }
-  });
-});
+        await page.waitForSelector('.card[data-id="033-current"]', { visible: true });
+        assert.equal(await docHref("033-current", null), "https://github.com/example/new/pull/5");
+        assert.deepEqual(errors, [], "no page errors");
+      } finally {
+        await context.close();
+      }
+    });
+  },
+);
