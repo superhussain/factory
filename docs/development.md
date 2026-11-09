@@ -131,12 +131,16 @@ Every `git commit` runs the `.husky/pre-commit` hook (installed by the
 `prepare` script through the pinned `husky` devDependency; it only sets
 `core.hooksPath` to `.husky/_`):
 
-- It lists the staged `.js`/`.mjs`/`.cjs`/`.ts` files and runs `mise exec -- pnpm
+- It first runs `mise exec -- gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml`
+  over every staged file. A finding fails the commit before any lint step runs.
+  gitleaks is pinned in `mise.toml`, and `--redact` keeps matched values out of
+  the output.
+- Next it lists the staged `.js`/`.mjs`/`.cjs`/`.ts` files and runs `mise exec -- pnpm
   exec oxlint` and `mise exec -- pnpm exec oxfmt --check` on exactly those
   files. With no staged JavaScript it exits immediately. If `pnpm` is
   unavailable it fails with a hint to install mise and run `mise exec -- pnpm
   install --frozen-lockfile`.
-- The hook filters exactly `skills/` out of the staged list — that is the only
+- The hook filters exactly `skills/` out of the staged JavaScript list; gitleaks still scans `skills/` — that is the only
   filtered path. Generated assets are excluded from the `lint`/`format:check`
   path lists by omission; other directories are not filtered.
 - oxfmt failure fails the commit with `formatting required: run 'mise exec --
