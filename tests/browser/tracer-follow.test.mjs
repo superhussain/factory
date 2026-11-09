@@ -183,6 +183,9 @@ test("The drawer lists Tracer task statuses", { timeout: 120000 }, async () => {
             summary: box.querySelector("summary").textContent,
             rows: [...box.querySelectorAll("li")].map((li) => li.textContent),
             listStyle: getComputedStyle(box.querySelector("ol")).listStyleType,
+            role: box.querySelector("ol").getAttribute("role"),
+            indent: getComputedStyle(box.querySelector("li")).textIndent,
+            pad: getComputedStyle(box.querySelector("li")).paddingLeft,
           };
         });
       assert.deepEqual(await list(), {
@@ -195,6 +198,9 @@ test("The drawer lists Tracer task statuses", { timeout: 120000 }, async () => {
           "t3 Document export: not started",
         ],
         listStyle: "none",
+        role: "list",
+        indent: "-10px",
+        pad: "10px",
       });
       await page.click("#d-tracer-tasks summary");
       await seedBoard(origin, [
