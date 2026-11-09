@@ -11,7 +11,11 @@ const ruleset = JSON.parse(
 const workflow = parse(
   readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8"),
 );
-const rule = (type) => ruleset.rules.find((r) => r.type === type);
+const rule = (type) => {
+  const found = ruleset.rules.find((r) => r.type === type);
+  assert.ok(found, `ruleset has no ${type} rule`);
+  return found;
+};
 
 test("ruleset targets the default branch, active, with no bypass", () => {
   assert.equal(ruleset.target, "branch");
@@ -42,5 +46,5 @@ test("required check is the ci aggregate", () => {
   assert.ok(job);
   assert.equal("name" in job, false);
   const others = Object.keys(workflow.jobs).filter((key) => key !== context);
-  assert.deepEqual([...job.needs].sort(), others.sort());
+  assert.deepEqual([job.needs].flat().sort(), others.sort());
 });
