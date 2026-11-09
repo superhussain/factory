@@ -1,5 +1,5 @@
 // Mobile drawer header: all seven fixture variants, long title/metadata/ref wrapping,
-// visible buttons/links/close hit area, action group geometry, Tab/Escape/discard
+// visible actions toggle/links/close hit area, menu items, Tab/menu keys/Escape/discard
 // cancel, across light/dark and 320/360/390/430/1280 widths.
 // Requires --browser <owned-loopback-origin>.
 const assert = require("node:assert/strict");
@@ -37,13 +37,13 @@ const fixtures = [
   updated: "",
   refs: [{ kind: "follow-up-of", id: "source-" + "r".repeat(48) }],
 }));
-const expectedButtons = {
+const expectedItems = {
   unassigned: ["d-edit-idea", "d-discard"],
   assigned: ["d-edit-idea", "d-discard", "d-follow-tracer"],
   claimed: ["d-discard", "d-follow-tracer"],
   "missing-text": ["d-discard", "d-follow-tracer"],
   "number-text": ["d-discard", "d-follow-tracer"],
-  "non-idea": ["d-follow-tracer"],
+  "non-idea": ["d-follow-tracer", "d-move-host"],
   "linked-job": [],
 };
 const PROJECT_DOC = "---\nrepo: example/layout\nbase: main\ntitle: Synthetic layout project\n---\n";
@@ -61,9 +61,7 @@ const selectors = [
   "#d-pr",
   "#d-paseo",
   "#d-paseo-web",
-  "#d-edit-idea",
-  "#d-discard",
-  "#d-follow-tracer",
+  "#d-actions",
   "#d-close",
 ];
 
@@ -115,10 +113,9 @@ async function geometry(page) {
   return page.evaluate((selectors) => {
     const rect = (el) => el.getBoundingClientRect().toJSON();
     const bounds = Object.fromEntries(selectors.map((s) => [s, rect(document.querySelector(s))]));
-    const buttons = ["d-edit-idea", "d-discard", "d-follow-tracer"].filter(
-      (id) => document.getElementById(id).getClientRects().length,
+    const items = ["d-edit-idea", "d-discard", "d-follow-tracer", "d-move-host"].filter(
+      (id) => !document.getElementById(id).hidden,
     );
-    const group = document.querySelector(".idea-actions");
     const close = document.getElementById("d-close");
     const r = rect(close);
     const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
@@ -137,7 +134,8 @@ async function geometry(page) {
     });
     return {
       bounds,
-      buttons,
+      items,
+      actions: document.getElementById("d-actions").getClientRects().length > 0,
       text,
       closeHit: close === hit || close.contains(hit),
       closeLabel: close.getAttribute("aria-label"),
@@ -149,13 +147,6 @@ async function geometry(page) {
         const s = getComputedStyle(document.querySelector(".detail-head .titles"));
         return { flexGrow: s.flexGrow, minWidth: s.minWidth };
       })(),
-      group: group
-        ? {
-            display: getComputedStyle(group).display,
-            boxes: group.getClientRects().length,
-            bounds: rect(group),
-          }
-        : null,
       links: ["d-pr", "d-paseo", "d-paseo-web"]
         .filter((id) => !document.getElementById(id).hidden)
         .map((id) => ({ id, href: document.getElementById(id).href })),
@@ -164,12 +155,13 @@ async function geometry(page) {
 }
 
 function checkGeometry(g, fixture, width, label) {
-  assert.deepEqual(g.buttons, expectedButtons[fixture.name], label + " visible buttons");
+  assert.deepEqual(g.items, expectedItems[fixture.name], label + " menu items");
+  assert.equal(g.actions, g.items.length > 0, label + " actions toggle shown");
   assert.equal(g.closeLabel, "Close", label + " close label");
   assert.ok(g.closeHit, label + " close hit target");
   assert.ok(g.pageWidth <= g.viewport, label + " document horizontal overflow");
   assert.ok(g.headWidth <= g.headClientWidth, label + " header horizontal overflow");
-  const boxes = [".detail-head .titles", ...g.buttons.map((id) => "#" + id), "#d-close"];
+  const boxes = [".detail-head .titles", ...(g.actions ? ["#d-actions"] : []), "#d-close"];
   if (g.links.length) boxes.push(".detail-head .links");
   for (const key of boxes) {
     const r = g.bounds[key];
@@ -205,12 +197,12 @@ function checkGeometry(g, fixture, width, label) {
     if (width < 760) assert.ok(t.lines.length > 1, label + " " + t.id + " long text wraps");
   }
   // The title takes the full remaining header width. On mobile the wrapped title row is
-  // titles, the stacked action group (when any button shows), then close, with 12px gaps.
+  // titles, the actions toggle (when any item exists), then close, with 12px gaps.
   // On desktop the empty links box also occupies a gap slot, so assert the flex contract
   // instead of gap arithmetic: titles grows and can shrink for wrapping.
   const titles = g.bounds[".detail-head .titles"];
   if (width < 760) {
-    const neighbour = g.buttons.length ? g.bounds["#" + g.buttons[0]] : g.bounds["#d-close"];
+    const neighbour = g.actions ? g.bounds["#d-actions"] : g.bounds["#d-close"];
     assert.ok(
       Math.abs(titles.right + 12 - neighbour.left) <= 1,
       label + " title takes the full remaining header width",
@@ -219,25 +211,12 @@ function checkGeometry(g, fixture, width, label) {
     assert.equal(g.titleFlex.flexGrow, "1", label + " desktop title flexes");
     assert.equal(g.titleFlex.minWidth, "0px", label + " desktop title can shrink");
   }
-  if (width < 760) {
-    for (let i = 1; i < g.buttons.length; i++) {
-      const above = g.bounds["#" + g.buttons[i - 1]],
-        below = g.bounds["#" + g.buttons[i]];
-      assert.equal(above.x, below.x, label + " action left bounds");
-      assert.equal(above.width, below.width, label + " action width");
-      assert.equal(below.top - above.bottom, 8, label + " stacked action gap");
-    }
-    assert.equal(g.group.display, g.buttons.length ? "flex" : "none", label + " group display");
-    if (!g.buttons.length) assert.equal(g.group.boxes, 0, label + " hidden group box");
-    if (g.links.length)
-      assert.ok(
-        g.bounds[".detail-head .links"].top >=
-          Math.max(g.bounds[".detail-head .titles"].bottom, g.bounds["#d-close"].bottom),
-        label + " links below title",
-      );
-  } else {
-    assert.equal(g.group.display, "contents", label + " desktop group display");
-  }
+  if (width < 760 && g.links.length)
+    assert.ok(
+      g.bounds[".detail-head .links"].top >=
+        Math.max(g.bounds[".detail-head .titles"].bottom, g.bounds["#d-close"].bottom),
+      label + " links below title",
+    );
   assert.deepEqual(
     g.links,
     fixture.name === "linked-job"
@@ -255,21 +234,29 @@ function checkGeometry(g, fixture, width, label) {
 }
 
 async function keyboard(page, fixture, label, support) {
-  const buttons = expectedButtons[fixture.name];
+  const items = expectedItems[fixture.name];
+  const focused = () => page.evaluate(() => document.activeElement.id);
   await support.focusVisible(page, "#d-refs a");
   const sequence = [
     ...(fixture.name === "linked-job" ? ["d-pr", "d-paseo", "d-paseo-web"] : []),
-    ...buttons,
+    ...(items.length ? ["d-actions"] : []),
     "d-close",
   ];
   for (const id of sequence) {
     await page.keyboard.press("Tab");
-    assert.equal(
-      await page.evaluate(() => document.activeElement.id),
-      id,
-      label + " Tab reaches " + id,
-    );
-    if (id === "d-edit-idea") {
+    assert.equal(await focused(), id, label + " Tab reaches " + id);
+    if (id !== "d-actions") continue;
+    await page.keyboard.press("Enter");
+    assert.equal(await focused(), items[0], label + " Enter opens the menu");
+    for (const item of items.slice(1)) {
+      await page.keyboard.press("ArrowDown");
+      assert.equal(await focused(), item, label + " ArrowDown reaches " + item);
+    }
+    await page.keyboard.press("Escape");
+    assert.equal(await focused(), id, label + " Escape returns focus");
+    if (items.includes("d-edit-idea")) {
+      await page.keyboard.press("Enter");
+      assert.equal(await focused(), "d-edit-idea", label + " menu opens on Edit idea");
       await page.keyboard.press("Enter");
       await page.waitForFunction(
         () =>
@@ -302,7 +289,8 @@ async function keyboard(page, fixture, label, support) {
         label + " Escape keeps drawer open",
       );
     }
-    if (id === "d-discard") {
+    if (items.includes("d-discard")) {
+      await page.keyboard.press("Enter");
       const pending = once(page, "dialog", { signal: AbortSignal.timeout(5000) });
       const clicked = page.click("#d-discard");
       const [dialog] = await pending;
@@ -321,6 +309,7 @@ async function keyboard(page, fixture, label, support) {
         false,
         label + " discard cancel keeps drawer",
       );
+      assert.equal(await focused(), id, label + " discard returns focus");
     }
   }
   await page.keyboard.press("Enter");
@@ -362,9 +351,9 @@ async function browserRun(origin) {
           await open(current.page, fixture);
           const g = await geometry(current.page);
           checkGeometry(g, fixture, width, label);
-          if (!expectedButtons[fixture.name].length && width < 760) {
+          if (!expectedItems[fixture.name].length && width < 760) {
             const withoutGroup = await current.page.evaluate(() => {
-              const group = document.querySelector(".idea-actions");
+              const group = document.getElementById("d-actions-wrap");
               group.remove();
               const width = document
                 .querySelector(".detail-head .titles")
@@ -390,7 +379,7 @@ async function browserRun(origin) {
           rerenders++;
           rows.push({
             state: fixture.name,
-            buttons: g.buttons,
+            items: g.items,
             titleWidth: g.bounds[".detail-head .titles"].width,
             result: "PASS",
           });

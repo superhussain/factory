@@ -81,8 +81,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .ask-option { display: flex; gap: 10px; align-items: flex-start; width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
   .ask-option:hover { background: var(--accent-soft); }
   .ask-option:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .backlog-context { margin: 12px 0; }
-  .doc .backlog-context > h3 { font-size: 13px; margin: 0 0 4px; }
+  .backlog-context, .backlog-triage { margin: 12px 0; }
+  .doc .backlog-context > h3, .doc .backlog-triage > h3 { font-size: 13px; margin: 0 0 4px; }
   .ask-rec { background: var(--accent-soft); color: var(--accent); border-radius: 999px; font-size: 11px; padding: 1px 8px; }
   .ask-desc { display: block; color: var(--muted); font-size: 13px; }
   .backlog-tap-hint { display: none; }
@@ -124,8 +124,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   #pipeline-effective { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--code-bg); padding: 10px 12px; border-radius: 6px; }
   #pipeline-history { height: 160px; overflow-y: auto; padding-right: 4px; padding-bottom: 4px; scroll-padding-block: 4px; }
-  #pipeline-gates, #pipeline-pickup, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
-  #pipeline-gates legend, #pipeline-pickup legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+  #pipeline-gates, #pipeline-pickup, #pipeline-triage, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
+  #pipeline-gates legend, #pipeline-pickup legend, #pipeline-triage legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #pipeline-gates label { display: flex; gap: 8px; align-items: baseline; margin: 0; color: var(--fg); }
   a.btn { display: inline-block; text-decoration: none; }
   a.btn[aria-current="page"] { border-color: var(--accent); }
@@ -158,7 +158,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .settings-section h3 { font-size: 15px; margin: 0 0 12px; }
   .settings-section h4 { font-size: 13px; margin: 16px 0 8px; }
   .settings-section label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-  .settings-section select, .settings-section textarea { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .settings-section select, .settings-section textarea, #pipeline-triage-threshold { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .settings-section textarea { resize: vertical; min-height: 140px; }
   .settings-section .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
   .project-list { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; margin-bottom: 12px; }
@@ -302,7 +302,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card-wrap > .pr-link { position: absolute; top: 13px; right: 16px; }
   .detail-head .links { flex: none; display: flex; gap: 16px; }
   .detail-head .btn { flex: none; }
-  .detail-head .idea-actions { display: contents; }
+  .job-actions { position: relative; flex: none; }
+  .job-actions-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; min-width: 200px; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .job-actions-menu[hidden] { display: none; }
+  .job-actions-menu .btn { border: 0; text-align: left; border-radius: 6px; padding: 8px 12px; }
+  .job-actions-menu .btn:hover, .job-actions-menu .btn:focus-visible { background: var(--line); }
   .detail-head .pr-link { position: relative; font-size: 12px; margin-top: 3px; }
   .detail-head .pr-link[hidden] { display: none; }
   .rounds { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
@@ -410,8 +414,6 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     /* The links drop below the title, so they never squeeze it or push the close button off screen. */
     .detail-head { flex-wrap: wrap; row-gap: 0; }
     .detail-head .titles { flex: 1 1 0; min-width: 0; }
-    .detail-head .idea-actions { display: flex; flex: none; flex-direction: column; gap: 8px; }
-    .detail-head .idea-actions:not(:has(> button:not([hidden]))) { display: none; }
     .detail-head .close { flex: none; }
     .detail-head .links { order: 3; flex-basis: 100%; }
     .detail-head .pr-link { margin-top: 8px; }
@@ -450,10 +452,14 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <a class="pr-link" id="d-paseo-web" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-tracer" target="_blank" rel="noopener noreferrer" hidden>Tracer</a>
     </div>
-    <div class="idea-actions">
-      <button class="btn" id="d-edit-idea" hidden>Edit idea</button>
-      <button class="btn" id="d-discard" hidden>Discard idea</button>
-      <button class="btn" id="d-follow-tracer" hidden>Follow in Tracer</button>
+    <div class="job-actions" id="d-actions-wrap">
+      <button class="btn icon" id="d-actions" aria-label="Job actions" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="d-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>
+      <div class="job-actions-menu" id="d-actions-menu" role="menu" aria-label="Job actions" hidden>
+        <button class="btn" id="d-edit-idea" role="menuitem" tabindex="-1" hidden>Edit idea</button>
+        <button class="btn" id="d-discard" role="menuitem" tabindex="-1" hidden>Discard idea</button>
+        <button class="btn" id="d-follow-tracer" role="menuitem" tabindex="-1" hidden>Follow in Tracer</button>
+        <button class="btn" id="d-move-host" role="menuitem" tabindex="-1" hidden>Move to another host</button>
+      </div>
     </div>
     <button class="close" id="d-close" aria-label="Close">&times;</button>
   </div>
@@ -562,6 +568,17 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           <span class="host-group-label" id="pipeline-pickup-hosts-label">Hosts</span>
           <div id="pipeline-pickup-hosts" class="host-checks" role="group" aria-labelledby="pipeline-pickup-hosts-label" aria-describedby="pipeline-pickup-help"></div>
           <p id="pipeline-pickup-help" class="muted">Hosts come from Settings, Hosts. Only active hosts pick up work. A project value replaces the global one whole.</p>
+        </fieldset>
+        <fieldset id="pipeline-triage">
+          <legend>Backlog triage</legend>
+          <label for="pipeline-triage-mode">Triage<select id="pipeline-triage-mode" aria-describedby="pipeline-triage-help">
+            <option value="">Not set (use the global value, else off)</option>
+            <option value="off">Off</option>
+            <option value="on">On: queue items at or above the threshold</option>
+          </select></label>
+          <label for="pipeline-triage-threshold">Confidence threshold (%)<input type="number" id="pipeline-triage-threshold" min="1" max="100" step="1"></label>
+          <label for="pipeline-triage-rules">Triage rules<textarea id="pipeline-triage-rules" spellcheck="false"></textarea></label>
+          <p id="pipeline-triage-help" class="muted">When on, factory.py backlog add asks a Cloudflare Workers AI model how confident it is that a new item is worth building. At or above the threshold, the item moves to the idea column for pickup. Below it, the item waits here for you. Items that ask questions or recommend deny always wait. Rules cannot contain links, secrets or instructions to skip review. A project value replaces the global one whole.</p>
         </fieldset>
         <div class="settings-tabs" id="pipeline-note-tabs" role="tablist" aria-label="Stage notes">
           <button type="button" role="tab" id="pipeline-note-tab-spec" data-name="spec" aria-selected="true" tabindex="0">Spec</button>
@@ -747,6 +764,16 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <div class="actions"><button class="btn" type="button" id="edit-idea-cancel">Cancel</button><button class="btn primary" type="submit" id="edit-idea-save">Save changes</button></div>
   </form>
 </dialog>
+<dialog id="move-host-dlg" aria-labelledby="move-host-h">
+  <form id="move-host-form">
+    <h2 id="move-host-h">Move to another host</h2>
+    <p class="muted" id="move-host-help"></p>
+    <label id="move-host-label">Host<select id="move-host-select"></select></label>
+    <p class="muted" id="move-host-empty" hidden></p>
+    <p class="err" id="move-host-err" role="alert" hidden></p>
+    <div class="actions"><button class="btn" type="button" id="move-host-cancel">Cancel</button><button class="btn primary" type="submit" id="move-host-save">Move job</button></div>
+  </form>
+</dialog>
 <dialog id="job-picker" aria-labelledby="job-picker-heading">
   <h2 id="job-picker-heading">Jump to job</h2>
   <label id="job-search-label" for="job-search">Search jobs</label>
@@ -774,7 +801,7 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
   remove: (k) => { try { localStorage.removeItem(k); } catch {} },
 };
-// board.json is agent-written and the dashboard is public, so only exact PR URLs for a job's own repo become links.
+// board.json is agent-written and the dashboard is public, so only exact PR URLs for a registered project's repo or archive become links.
 const prUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/pull/(\\d+)$');
 const runUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/actions/runs/(\\d+)$');
 const REF_KINDS = { 'rework-of': 'rework of', 'follow-up-of': 'follow-up of', 'sub-job-of': 'sub-job of' };
@@ -923,7 +950,7 @@ function pipelineLabel(j) {
 
 function prLink(j) {
   if (!['pr-open', 'merged', 'closed'].includes(j.stage)) return null;
-  const m = typeof j.pr === 'string' && projectRes(j, 're').map((re) => j.pr.match(re)).find(Boolean);
+  const m = typeof j.pr === 'string' && [...projectRes(j, 're'), ...projectRes(j, 'archiveRe')].map((re) => j.pr.match(re)).find(Boolean);
   return m ? { url: j.pr, n: m[1] } : null;
 }
 
@@ -1014,7 +1041,16 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer)].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move)].join('|');
+}
+
+// Where a job runs, from the board's claim and the dashboard's move. A move whose old host has not
+// stopped it yet keeps the queued stop visible.
+function hostLine(j) {
+  const m = j.move;
+  const stop = m?.from && !m.stopped ? ' · stop queued on ' + m.from : '';
+  if (j.claim?.device) return 'on ' + j.claim.device + stop;
+  return m?.to ? 'moving to ' + m.to + stop : '';
 }
 
 // An idea, or a discarded one, has no branch or round to show, so its card shows the idea text instead.
@@ -1050,6 +1086,7 @@ function card(j, inNeeds) {
       '<div class="meta">' + esc(j.branch || '') + ' &middot; round ' + esc(j.round ?? 0) +
       (buildState(j) ? ' &middot; build ' + esc(buildState(j)) : '') + '</div>') +
     (refs(j).length ? '<div class="meta refs">' + refs(j).map((r) => esc(REF_KINDS[r.kind] + ' ' + r.id)).join(' &middot; ') + '</div>' : '') +
+    (hostLine(j) ? '<div class="meta host">' + esc(hostLine(j)) + '</div>' : '') +
     (j.tracer?.building === true ? '<div class="meta tracer-building">Building in Tracer</div>' : '') +
     (ask && (inNeeds || !hiddenCardFields.has('note')) ? '<div class="note">' + esc(ask) + '</div>' : '') +
     chips(j.rounds) + '</button>';
@@ -1331,7 +1368,7 @@ async function loadProjects() {
     const r = await fetch('./projects.json', { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status);
     const list = await r.json();
-    projects = new Map(list.map((p) => [p.slug, { title: p.title, repo: p.repo || '', base: p.base || '', re: p.repo ? prUrl(p.repo) : null, runRe: p.repo ? runUrl(p.repo) : null }]));
+    projects = new Map(list.map((p) => [p.slug, { title: p.title, repo: p.repo || '', base: p.base || '', re: p.repo ? prUrl(p.repo) : null, archiveRe: p.archive ? prUrl(p.archive) : null, runRe: p.repo ? runUrl(p.repo) : null }]));
     loaded = true;
   } catch {}
   $('idea-project-help').textContent = projects === null
@@ -1788,6 +1825,18 @@ function pipelinePickupError(pickup) {
   }
   return null;
 }
+// Same messages as the triage block of validatePipeline in worker/admission.js.
+function pipelineTriageError(triage) {
+  if (triage === undefined) return null;
+  if (!pipelineObject(triage)) return 'triage: must be an object';
+  for (const key of Object.keys(triage))
+    if (!['enabled', 'threshold', 'rules'].includes(key)) return 'triage.' + key + ': unknown field';
+  if (typeof triage.enabled !== 'boolean') return 'triage.enabled: must be true or false';
+  if (!(Number.isInteger(triage.threshold) && triage.threshold >= 1 && triage.threshold <= 100))
+    return 'triage.threshold: must be an integer from 1 to 100';
+  if (typeof triage.rules !== 'string') return 'triage.rules: must be text';
+  return null;
+}
 function pipelineCanonical(doc) {
   const out = {schema:1};
   if (doc.merge) out.merge = doc.merge;
@@ -1795,6 +1844,7 @@ function pipelineCanonical(doc) {
   const gates = PIPELINE_GATES.filter(gate => Array.isArray(doc.gates) && doc.gates.includes(gate));
   if (gates.length) out.gates = gates;
   if (pipelineObject(doc.pickup)) out.pickup = {enabled:doc.pickup.enabled, hosts:doc.pickup.hosts};
+  if (pipelineObject(doc.triage)) out.triage = {enabled:doc.triage.enabled, threshold:doc.triage.threshold, rules:doc.triage.rules};
   const notes = {};
   for (const stage of PIPELINE_STAGES) if (doc.stage_notes?.[stage]) notes[stage] = doc.stage_notes[stage];
   if (Object.keys(notes).length) out.stage_notes = notes;
@@ -1807,6 +1857,8 @@ function pickupCheckedHosts(prefix, stored = []) {
 }
 const pickupFromFields = (prefix, current) => $(prefix + '-mode').value
   ? {enabled:$(prefix + '-mode').value === 'on', hosts:pickupCheckedHosts(prefix, Array.isArray(current?.hosts) ? current.hosts : [])} : undefined;
+const triageFromFields = () => $('pipeline-triage-mode').value
+  ? {enabled:$('pipeline-triage-mode').value === 'on', threshold:$('pipeline-triage-threshold').value === '' ? 80 : Number($('pipeline-triage-threshold').value), rules:$('pipeline-triage-rules').value} : undefined;
 // Client-side only: the Worker accepts any valid name and its effective filter drops unregistered ones.
 function pickupRegistryError(pickup) {
   if (!hostRegistry?.length || !Array.isArray(pickup?.hosts)) return null;
@@ -1816,11 +1868,11 @@ function pickupRegistryError(pickup) {
 function pipelineFormDoc(current) {
   return JSON.parse(pipelineCanonical({merge:$('pipeline-merge').value, review_rounds:Number($('pipeline-rounds').value),
     gates:PIPELINE_GATES.filter(gate => $('pipeline-gate-' + gate).checked),
-    pickup:pickupFromFields('pipeline-pickup', current.pickup),
+    pickup:pickupFromFields('pipeline-pickup', current.pickup), triage:triageFromFields(),
     stage_notes:Object.fromEntries(PIPELINE_STAGES.map(stage => [stage, $('pipeline-note-' + stage).value]))}));
 }
 const pipelineDirty = s => pipelineCanonical(s.draft) !== pipelineCanonical(s.base ?? {schema:1});
-const pipelineCanSave = s => !!s?.loaded && ['ready','error'].includes(s.phase) && (pipelineDirty(s) || s.base === null) && !pipelinePickupError(s.draft.pickup) && !pickupRegistryError(s.draft.pickup);
+const pipelineCanSave = s => !!s?.loaded && ['ready','error'].includes(s.phase) && (pipelineDirty(s) || s.base === null) && !pipelinePickupError(s.draft.pickup) && !pickupRegistryError(s.draft.pickup) && !pipelineTriageError(s.draft.triage);
 const pipelineDraftKey = scope => 'factory-pipeline-draft:' + scope;
 const pipelineMalformed = new Set(), pipelineMemory = new Set();
 const pipelineConflict = 'These pipeline settings changed elsewhere. Your draft is kept. Copy it before loading the latest version, then reapply your changes.';
@@ -1908,13 +1960,24 @@ function renderPipelineSettings() {
     box.disabled = busy;
   }
   const pickupError = renderPickupFields('pipeline-pickup', d, busy);
+  const triageMode = pipelineObject(d.triage) ? (d.triage.enabled ? 'on' : 'off') : '';
+  const triageError = pipelineTriageError(d.triage);
+  if ($('pipeline-triage-mode').value !== triageMode) $('pipeline-triage-mode').value = triageMode;
+  $('pipeline-triage-mode').disabled = busy;
+  // Typing in the threshold is not overwritten, so clearing it to retype does not snap back to 80.
+  const threshold = String(d.triage?.threshold ?? '');
+  if ($('pipeline-triage-threshold').value !== threshold && document.activeElement !== $('pipeline-triage-threshold')) $('pipeline-triage-threshold').value = threshold;
+  const rules = typeof d.triage?.rules === 'string' ? d.triage.rules : '';
+  if ($('pipeline-triage-rules').value !== rules) $('pipeline-triage-rules').value = rules;
+  $('pipeline-triage-threshold').disabled = $('pipeline-triage-rules').disabled = busy || !triageMode;
+  $('pipeline-triage-threshold').setAttribute('aria-invalid', String(!!triageError));
   $('pipeline-scope').disabled = s?.phase === 'saving';
   $('pipeline-copy').disabled = !s;
   $('pipeline-load').disabled = busy;
   $('pipeline-save').disabled = !pipelineCanSave(s);
   const scope = $('pipeline-scope').value;
   $('pipeline-status').textContent = pipelineStatusText(scope, s);
-  $('pipeline-status').setAttribute('role', pipelineStatusAlert(scope, s) || !!pickupError ? 'alert' : 'status');
+  $('pipeline-status').setAttribute('role', pipelineStatusAlert(scope, s) || !!pickupError || !!triageError ? 'alert' : 'status');
   renderProjectPickup();
 }
 
@@ -2113,13 +2176,13 @@ listenTabs('pipeline-note-tabs', PIPELINE_NOTE_TABS, id => {
   for (const stage of PIPELINE_STAGES) $('pipeline-note-panel-' + stage).hidden = id !== 'pipeline-note-tab-' + stage;
 });
 for (const id of ['pipeline-merge', 'pipeline-rounds', ...PIPELINE_GATES.map(gate => 'pipeline-gate-' + gate),
-    'pipeline-pickup-mode', 'pipeline-pickup-hosts',
+    'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules',
     ...PIPELINE_STAGES.map(stage => 'pipeline-note-' + stage)]) {
   $(id).addEventListener('input', () => {
     const s = pipelineScopes.get($('pipeline-scope').value);
     if (!s || $(id).disabled) return;
     s.draft = pipelineFormDoc(s.draft);
-    const error = pipelinePickupError(s.draft.pickup) ?? pickupRegistryError(s.draft.pickup);
+    const error = pipelinePickupError(s.draft.pickup) ?? pickupRegistryError(s.draft.pickup) ?? pipelineTriageError(s.draft.triage);
     if (s.phase !== 'conflict') s.message = error ? 'Fix before saving: ' + error : pipelineDirty(s) ? 'Unsaved changes' : 'No unsaved changes';
     persistPipelineDraft($('pipeline-scope').value);
     renderPipelineSettings();
@@ -2143,6 +2206,7 @@ function reloadPipelineScope(scope) {
   loadPipelineHistory(scope);
   loadPipelineEffective(scope);
 }
+$('pipeline-triage-threshold').addEventListener('blur', renderPipelineSettings);
 $('pipeline-load').addEventListener('click', () => reloadPipelineScope($('pipeline-scope').value));
 $('project-pickup-load').addEventListener('click', () => reloadPipelineScope(projectPickupScope()));
 $('pipeline-save').addEventListener('click', () => savePipelineScope());
@@ -2233,15 +2297,15 @@ function hostCard(h) {
       make('tbody', {}, ...st.routes.map(r => cells('td', [r.name, r.provider, r.model, r.effort ?? 'none', r.limited_until ? hostUtc(r.limited_until) : 'none'])))));
   }
   const picks = hostProjects.get(h.id);
-  li.append(make('p', {textContent:'Picks up: ' + (hostProjectsFailed ? 'could not load' : picks ? picks.join(', ') : 'no projects')}));
+  li.append(make('p', {textContent:'Picks up: ' + (hostProjectsFailed ? 'could not load' : h.max_inflight === 0 ? 'nothing while paused. Max in flight is 0.' : picks ? picks.join(', ') : 'no projects')}));
   const draft = hostDrafts.get(h.id);
   const label = make('input', {type:'text', id:'host-' + h.id + '-label', maxLength:80, autocomplete:'off', value:draft ? draft.label : h.label});
-  const max = make('input', {type:'number', id:'host-' + h.id + '-max', min:1, max:5, step:1, value:draft ? draft.max : String(h.max_inflight)});
+  const max = make('input', {type:'number', id:'host-' + h.id + '-max', min:0, max:5, step:1, value:draft ? draft.max : String(h.max_inflight)});
   max.setAttribute('aria-describedby', max.id + '-help');
   const remember = () => hostDrafts.set(h.id, {label:label.value, max:max.value});
   label.addEventListener('input', remember);
   max.addEventListener('input', remember);
-  li.append(make('label', {htmlFor:label.id}, 'Display name', label), make('label', {htmlFor:max.id}, 'Max in flight', max), make('p', {className:'muted', id:max.id + '-help', textContent:'Jobs waiting on a human never count toward this limit.'}));
+  li.append(make('label', {htmlFor:label.id}, 'Display name', label), make('label', {htmlFor:max.id}, 'Max in flight', max), make('p', {className:'muted', id:max.id + '-help', textContent:'Set 0 to pause pickup on this host. Jobs waiting on a human never count toward this limit.'}));
   const button = (verb, action) => {
     const b = make('button', {className:'btn', type:'button', textContent:verb});
     b.setAttribute('aria-label', verb + ' ' + h.label);
@@ -2252,7 +2316,7 @@ function hostCard(h) {
   actions.append(button('Save', () => {
     const patch = {};
     if (label.value !== h.label) patch.label = label.value;
-    if (Number(max.value) !== h.max_inflight) patch.max_inflight = Number(max.value);
+    if (max.valueAsNumber !== h.max_inflight) patch.max_inflight = max.valueAsNumber;
     hostWrite(h.id, 'PATCH', '/' + h.id, patch, h.etag, 'Saved.');
   }));
   if (h.state === 'paired') actions.append(button('Confirm', () => hostWrite(h.id, 'PATCH', '/' + h.id, {state:'active'}, h.etag, 'Confirmed. It picks up work now.')));
@@ -2681,16 +2745,19 @@ async function openJob(id) {
   $('detail').hidden = false;
   $('d-title').textContent = j.title || j.id;
   $('d-meta').textContent = projectName(j) + ' · ' + j.id + ' · ' + j.stage +
-    (ideaOnly(j) ? '' : ' · round ' + (j.round ?? 0) + ' · ' + (j.branch || ''));
+    (ideaOnly(j) ? '' : ' · round ' + (j.round ?? 0) + ' · ' + (j.branch || '')) +
+    (hostLine(j) ? ' · ' + hostLine(j) : '');
   const pipeline = pipelineLabel(j);
   $('d-pipeline').textContent = pipeline;
   $('d-pipeline').hidden = !pipeline;
   $('d-discard').hidden = j.stage !== 'idea';
+  $('d-move-host').hidden = !j.project || !MOVE_STAGES.includes(j.stage);
   const following = j.tracer?.follow === true;
   $('d-follow-tracer').hidden = !j.project || !(TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) || following || !!tracerLink(j);
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
   if (first) {
     drawerVersion++;
+    closeJobActions(false);
     $('d-edit-idea-err').hidden = true;
     $('d-project').value = '';
     $('d-project').disabled = !projects?.size;
@@ -3354,6 +3421,7 @@ function closeDetail() {
   openId = null;
   openBacklogRaw = null;
   $('detail').hidden = true;
+  closeJobActions(false);
   syncIdeaEditor();
   renderBoard();
   if (raw !== null) focusBacklogControl(raw);
@@ -4040,7 +4108,7 @@ let ideaEditorLoad = null;
 
 async function openIdeaEditor() {
   if (ideaEditor || ideaEditorLoad || !canEditIdea(jobs.find((j) => j.id === openId))) return;
-  const loading = { id: openId, version: drawerVersion, read: ++boardReadVersion, opener: $('d-edit-idea') };
+  const loading = { id: openId, version: drawerVersion, read: ++boardReadVersion, opener: $('d-actions') };
   ideaEditorLoad = loading;
   const err = $('d-edit-idea-err');
   let message = 'Could not load the idea. Try again.';
@@ -4075,9 +4143,41 @@ async function openIdeaEditor() {
   }
 }
 
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host'];
+
+function enabledJobActions() {
+  return JOB_ACTIONS.map($).filter((el) => !el.hidden && !el.disabled);
+}
+
+function openJobActions(focus) {
+  $('d-actions').setAttribute('aria-expanded', 'true');
+  $('d-actions-menu').hidden = false;
+  const items = enabledJobActions();
+  const item = focus === 'last' ? items[items.length - 1] : items[0];
+  if (item) item.focus();
+}
+
+function closeJobActions(refocus) {
+  $('d-actions').setAttribute('aria-expanded', 'false');
+  $('d-actions-menu').hidden = true;
+  if (refocus) $('d-actions').focus();
+}
+
+function syncJobActions() {
+  // A job that left the board has nothing to act on, so its stale items go too.
+  if (!jobs.some((j) => j.id === openId)) for (const id of JOB_ACTIONS) $(id).hidden = true;
+  const any = JOB_ACTIONS.some((id) => !$(id).hidden);
+  $('d-actions-wrap').hidden = !any;
+  if (any) return;
+  const focused = document.activeElement;
+  closeJobActions(false);
+  if (focused === $('d-actions') || JOB_ACTIONS.some((id) => $(id) === focused)) $('d-close').focus();
+}
+
 function syncIdeaEditor() {
   $('d-edit-idea').hidden = !canEditIdea(jobs.find((j) => j.id === openId));
   $('d-edit-idea').disabled = !!ideaEditorLoad;
+  syncJobActions();
   if (!ideaEditor) return;
   const text = $('edit-idea-text');
   const j = jobs.find((j) => j.id === ideaEditor.id);
@@ -4107,7 +4207,126 @@ function closeIdeaEditor() {
   target.focus();
 }
 
+const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
+
+// Writes the move and drops the claim, so factory.py fences the old session and the target host
+// picks the job up. Returns an error message, or '' once the board is changed.
+function moveJob(board, id, to, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (!j.project || !MOVE_STAGES.includes(j.stage)) return 'This job can no longer be moved.';
+  const prior = !j.claim && j.move && !j.move.stopped ? j.move : null;
+  const from = j.claim?.device ?? prior?.from;
+  const session = j.claim?.session ?? prior?.session;
+  if (to === from) return 'This job already runs on ' + to + '.';
+  j.move = { ...(from && { from }), ...(session && { session }), to, at: now };
+  delete j.claim;
+  delete j.paseo;
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
+let moveHost = null;
+
+async function openMoveHost() {
+  const j = jobs.find((x) => x.id === openId);
+  if (moveHost || !j) return;
+  moveHost = { id: j.id, opener: $('d-actions') };
+  const select = $('move-host-select');
+  const err = $('move-host-err');
+  const empty = $('move-host-empty');
+  err.hidden = true;
+  empty.hidden = true;
+  select.replaceChildren();
+  const pending = !j.claim && j.move && !j.move.stopped ? j.move : null;
+  const current = j.claim?.device ?? pending?.from;
+  $('move-host-help').textContent = j.claim?.device
+    ? j.id + ' runs on ' + j.claim.device + '. Moving it stops that session and starts the job on the host you pick. If ' + j.claim.device + ' is offline, the stop waits until it comes back.'
+    : pending?.to ? j.id + ' is moving to ' + pending.to + '. The host you pick starts it instead.'
+    : j.id + ' has no host right now. The host you pick starts it.';
+  let hosts = [];
+  try {
+    const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + j.project, { cache: 'no-store' })]);
+    if (!h.ok || !p.ok) throw new Error('load');
+    const [list, view] = [await h.json(), await p.json()];
+    const listed = view.pickup?.enabled ? view.pickup.hosts : [];
+    hosts = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to);
+  } catch {
+    err.textContent = 'Could not load hosts. Try again.';
+    err.hidden = false;
+  }
+  for (const h of hosts) select.add(new Option(h.label + ' (' + h.id + ')' + (h.offline ? ' · offline' : ''), h.id));
+  select.hidden = !hosts.length;
+  $('move-host-label').hidden = !hosts.length;
+  if (!hosts.length && err.hidden) {
+    empty.textContent = 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
+    empty.hidden = false;
+  }
+  $('move-host-save').disabled = !hosts.length;
+  $('move-host-dlg').showModal();
+}
+
+function closeMoveHost() {
+  if (!moveHost) return;
+  const opener = moveHost.opener;
+  moveHost = null;
+  $('move-host-dlg').close();
+  opener.focus();
+}
+
+$('d-move-host').addEventListener('click', openMoveHost);
+$('move-host-cancel').addEventListener('click', closeMoveHost);
+$('move-host-dlg').addEventListener('cancel', (e) => { e.preventDefault(); closeMoveHost(); });
+$('move-host-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!moveHost || $('move-host-save').disabled) return;
+  const { id } = moveHost;
+  const to = $('move-host-select').value;
+  $('move-host-save').disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = moveJob(board, id, to, isoNow());
+      if (message) throw new Error(message);
+    });
+  } catch (x) {
+    $('move-host-err').textContent = String(x.message || x);
+    $('move-host-err').hidden = false;
+    $('move-host-save').disabled = false;
+    return;
+  }
+  closeMoveHost();
+  await poll();
+});
+
 $('d-edit-idea').addEventListener('click', openIdeaEditor);
+$('d-actions').addEventListener('click', () => {
+  if ($('d-actions-menu').hidden) openJobActions('first'); else closeJobActions(true);
+});
+$('d-actions').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();
+  openJobActions(e.key === 'ArrowDown' ? 'first' : 'last');
+});
+$('d-actions-menu').addEventListener('click', () => closeJobActions(true), true);
+$('d-actions-menu').addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  const items = enabledJobActions();
+  const at = items.indexOf(document.activeElement);
+  const to = { ArrowDown: items[(at + 1) % items.length], ArrowUp: items[(at - 1 + items.length) % items.length], Home: items[0], End: items[items.length - 1] }[e.key];
+  if (to) {
+    e.preventDefault();
+    to.focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeJobActions(true);
+  } else if (e.key === 'Tab') {
+    closeJobActions(true);
+  }
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!$('d-actions-menu').hidden && !$('d-actions-wrap').contains(e.target)) closeJobActions(false);
+});
 $('edit-idea-cancel').addEventListener('click', closeIdeaEditor);
 $('edit-idea-dlg').addEventListener('cancel', (e) => { e.preventDefault(); closeIdeaEditor(); });
 $('edit-idea-text').addEventListener('input', () => {
@@ -4502,10 +4721,11 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;
+  closeJobActions(false);
   syncIdeaEditor();
   $('d-tabs').innerHTML = '';
   $('d-tabs').hidden = true;
@@ -4516,6 +4736,27 @@ function openBacklogItem(item) {
   renderBoard();
   refreshPicker();
   $('d-doc').querySelector('input[type=radio]').focus();
+  loadBacklogTriage(item.raw.slice(6));
+}
+
+function backlogTriageHtml(v) {
+  if (typeof v?.reason !== 'string' || typeof v.at !== 'string' || !Number.isInteger(v.threshold) || !(v.confidence === null || Number.isInteger(v.confidence))) return '';
+  const why = v.confidence === null ? 'Held without a model score because ' + v.reason + '.' : 'Confidence ' + v.confidence + '% is below the ' + v.threshold + '% threshold. ' + v.reason;
+  return '<h3>Held by triage</h3><p>' + esc(why) + '</p><p class="muted">Checked ' + esc(ago(v.at)) + '</p>';
+}
+
+async function loadBacklogTriage(item) {
+  const version = drawerVersion;
+  const raw = openBacklogRaw;
+  try {
+    const r = await fetch('./api/backlog/triage?item=' + encodeURIComponent(item), { cache: 'no-store' });
+    if (!r.ok) return;
+    const html = backlogTriageHtml(await r.json());
+    const section = $('backlog-triage');
+    if (!html || !section || version !== drawerVersion || raw !== openBacklogRaw) return;
+    section.innerHTML = html;
+    section.hidden = false;
+  } catch {}
 }
 
 function renderBacklogDecision(item) {
@@ -4542,6 +4783,7 @@ function renderBacklogDecision(item) {
     : '<p class="muted">This item\'s context is not in the backlog context format, so it shows as text.</p>' + md(item.context);
   const history = backlogReworkHistory(item, jobs);
   return md(item.text) + shown +
+    '<section class="backlog-triage" id="backlog-triage" aria-label="Backlog triage" hidden></section>' +
     (history.length ? '<section class="backlog-history" aria-label="Rework history"><h3>Rework history</h3><ol>' +
       history.map((h) => '<li><div class="meta"><a href="#' + esc(encodeURIComponent(h.id)) + '">' + esc(h.id) + '</a> · reworked ' + esc(ago(h.at)) + '</div>' +
         '<p>Earlier text: ' + esc(h.text) + '</p><p>Notes: ' + esc(h.notes) + '</p></li>').join('') + '</ol></section>' : '') +

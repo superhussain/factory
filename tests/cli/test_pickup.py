@@ -108,6 +108,7 @@ class PickupFixture(IsolatedTestCase):
         patch.object(factory, "api", side_effect=self.request).start()
         patch.object(factory, "LAUNCH_WAIT_SECONDS", 2).start()
         patch.object(factory, "report_status").start()
+        self.sweep = patch.object(factory, "backlog_triage_pass").start()
 
     def configure(self, line="started", code=0, sleep=0):
         (self.root / "fake.json").write_text(json.dumps({"line": line, "code": code, "sleep": sleep}),
@@ -157,6 +158,14 @@ class PickupFixture(IsolatedTestCase):
         return next(j for j in self.board["jobs"] if j["id"] == job_id)
 
 class PickupTest(PickupFixture):
+    def test_pickup_runs_the_backlog_triage_pass(self):
+        self.assert_silent(self.pickup())
+        self.sweep.assert_called_once_with(self.home)
+
+    def test_dry_run_skips_the_backlog_triage_pass(self):
+        self.assertEqual(self.pickup("--dry-run")[0], 0)
+        self.sweep.assert_not_called()
+
     def test_nothing_runnable_is_silent(self):
         self.routes.unlink()
         self.assert_silent(self.pickup())
@@ -511,6 +520,21 @@ class PickupTest(PickupFixture):
         self.assertEqual(self.puts(), [])
         self.assertEqual(self.launched(), [])
 
+    def test_host_cap_zero_pauses(self):
+        self.hosts = [host(DEVICE, 0)]
+        self.host_board()
+        self.assertEqual(self.pickup("--limit", "3"), (0, "", ""))
+        self.assertEqual(self.launched(), [])
+        self.assertEqual(self.puts(), [])
+
+    def test_host_cap_zero_dry_run_line(self):
+        self.hosts = [host(DEVICE, 0)]
+        self.host_board()
+        expected = [f"skip 00{n}-alpha alpha: host {DEVICE} paused (max in flight 0)" for n in (4, 5, 6)]
+        expected.append(f"host {DEVICE}: would launch 0")
+        self.assertEqual(self.pickup("--dry-run"), (0, "\n".join(expected) + "\n", ""))
+        self.assertEqual(self.puts(), [])
+
     def test_host_cap_skips_jobs_waiting_on_a_human(self):
         self.hosts = [host(DEVICE, 2)]
         self.host_board({"id": "001-approve", "stage": "approve", "project": "beta", "updated": stamp(),
@@ -533,7 +557,7 @@ class PickupTest(PickupFixture):
         self.assertEqual(len(self.launched()), 1)
 
     def test_host_record_ignored_when_invalid(self):
-        for hosts in ([host(DEVICE, 0)], [host(DEVICE, "2")], [host(DEVICE, 9)], [host("other-host", 2)]):
+        for hosts in ([host(DEVICE, -1)], [host(DEVICE, "2")], [host(DEVICE, 9)], [host("other-host", 2)]):
             with self.subTest(hosts=hosts):
                 self.hosts = hosts
                 self.host_board({"id": "001-build", "stage": "build", "project": "beta", "updated": stamp(),
@@ -824,6 +848,113 @@ class TakeoverTest(PickupFixture):
         self.assertEqual(len(self.launched()), 2)
         self.assertIn("took over 010-run alpha from agent-1 on fallback", out)
         self.assertIn("launched 002-alpha alpha on fallback", out)
+
+
+class MoveHostTest(PickupFixture):
+    AT = "2026-11-08T10:00:00Z"
+
+    def setUp(self):
+        super().setUp()
+        self.views["alpha"] = (200, effective("alpha", {"pickup": ON}))
+        self.wt = self.home / "worktrees" / "alpha" / "042-sample-export"
+        self.wt.mkdir(parents=True)
+        self.alive = []
+        self.stopped = []
+        patch.object(factory, "stop_pids", side_effect=self.stop).start()
+
+    def stop(self, wt):
+        self.stopped.append(Path(wt))
+        return self.alive
+
+    def moved(self, **move):
+        job = {"id": "042-sample-export", "stage": "build", "project": "alpha", "updated": stamp(),
+               "move": dict({"from": DEVICE, "session": "a1b2c3", "to": "studio-mac", "at": self.AT}, **move)}
+        self.board["jobs"] = [job]
+        return job
+
+    def test_old_host_stops_the_worktree_and_records_it(self):
+        self.moved()
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, "stopped 042-sample-export alpha: moved to studio-mac\n")
+        self.assertEqual(self.stopped, [self.wt])
+        move = self.job("042-sample-export")["move"]
+        self.assertRegex(move["stopped"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertEqual(move["at"], self.AT)
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.stopped, self.puts()), ([self.wt], []))
+
+    def test_no_worktree_still_records_the_stop(self):
+        self.moved()
+        self.wt.rmdir()
+        code, out, err = self.pickup()
+        self.assertEqual((code, out, err), (0, "stopped 042-sample-export alpha: moved to studio-mac\n", ""))
+        self.assertEqual(self.stopped, [])
+        self.assertIn("stopped", self.job("042-sample-export")["move"])
+
+    def test_survivors_leave_stopped_unset_for_a_retry(self):
+        self.moved()
+        self.alive = [123, 456]
+        code, out, err = self.pickup()
+        self.assertEqual((code, out), (0, ""))
+        self.assertEqual(err, "factory.py: pickup could not stop 042-sample-export: processes still running: 123 456\n")
+        self.assertEqual(self.puts(), [])
+        self.assertNotIn("stopped", self.job("042-sample-export")["move"])
+        self.alive = []
+        self.assertEqual(self.pickup()[1], "stopped 042-sample-export alpha: moved to studio-mac\n")
+        self.assertIn("stopped", self.job("042-sample-export")["move"])
+
+    def test_dry_run_prints_would_stop(self):
+        self.moved()
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, "would stop 042-sample-export alpha: moved to studio-mac\n"
+                              f"host {DEVICE}: would launch 0\n")
+        self.assertEqual((self.stopped, self.puts()), ([], []))
+
+    def test_a_newer_move_is_not_marked_stopped(self):
+        self.moved()
+
+        def newer(wt):
+            self.board["jobs"][0]["move"]["at"] = "2026-11-08T11:00:00Z"
+            return []
+        factory.stop_pids.side_effect = newer
+        code, out, err = self.pickup()
+        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual(self.puts(), [])
+        self.assertNotIn("stopped", self.job("042-sample-export")["move"])
+
+    def test_target_claims_once_and_recovers(self):
+        # The dashboard lists only registry hosts, so the target counts its own claims.
+        self.hosts = [host(DEVICE, 2)]
+        self.moved(**{"from": "lab-linux", "to": DEVICE})
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        job = self.job("042-sample-export")
+        tag = job["claim"]["session"]
+        self.assertEqual(out, f"launched 042-sample-export alpha on primary session {tag}\n")
+        self.assertEqual(job["claim"]["device"], DEVICE)
+        self.assertEqual(job["move"]["claimed"], job["claim"]["since"])
+        self.assertEqual((job["move"]["from"], job["move"]["at"]), ("lab-linux", self.AT))
+        [record] = self.launched()
+        self.assertEqual(record["env"]["FACTORY_PROMPT"],
+                         f"/factory recover 042-sample-export --session {tag}\n\n" + factory.UNATTENDED)
+        self.assertEqual(self.stopped, [])
+        del job["claim"]
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(len(self.launched()), 1)
+
+    def test_other_hosts_and_done_stages_skip_the_move(self):
+        for move, stage in (({"from": "lab-linux", "to": "studio-mac"}, "build"),
+                            ({"from": "lab-linux", "to": DEVICE}, "pr-open"),
+                            ({"from": "lab-linux", "to": DEVICE, "claimed": self.AT}, "build")):
+            with self.subTest(move=move, stage=stage):
+                self.moved(**move)["stage"] = stage
+                self.calls.clear()
+                self.assert_silent(self.pickup())
+                self.assertEqual(self.stopped, [])
 
 
 class DenyNotesTest(PickupFixture):

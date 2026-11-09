@@ -44,7 +44,7 @@ export const FLOORS = Object.freeze(
 
 const REVIEWERS = ["security", "ux", "ui", "code"];
 const STAGES = ["spec", "build", "review", "approve"];
-const KEYS = ["schema", "merge", "review_rounds", "gates", "pickup", "stage_notes"];
+const KEYS = ["schema", "merge", "review_rounds", "gates", "pickup", "triage", "stage_notes"];
 export const HOST_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 // Optional gate stages. Config can switch a catalog gate on; it can never add one or
@@ -95,9 +95,9 @@ const TAG_LOOKALIKES_TO = "<<<<<////--------aeopcsAEOPCSTaopAEOPT";
 const TAG_LOOKALIKES = new Map([...TAG_LOOKALIKES_FROM].map((c, i) => [c, TAG_LOOKALIKES_TO[i]]));
 const TAG_LOOKALIKE_CHARS = new RegExp(`[${TAG_LOOKALIKES_FROM}]`, "g");
 
-/** Whether text holds an operator-preferences tag as written or once NFKC and the look-alike fold apply. */
-function hasEnvelopeTag(text) {
-  const tag = /<\/?\s*operator-preferences/i;
+/** Whether text holds a `name` tag as written or once NFKC and the look-alike fold apply. */
+export function hasReservedTag(text, name) {
+  const tag = new RegExp(`<\\/?\\s*${name}`, "i");
   if (tag.test(text)) return true;
   // ASCII text is unchanged by the fold, so skip it.
   if (!/[\u0080-\uffff]/.test(text)) return false;
@@ -116,7 +116,8 @@ export function checkOperatorText(text, field, kind = "note") {
   if (note && [...text].length > 2000) return `${field}: over 2000 characters`;
   if (INVISIBLE.test(note ? text : text.replace(/[\t\r]/g, "")))
     return `${field}: contains control, invisible or bidirectional characters`;
-  if (hasEnvelopeTag(text)) return `${field}: contains the reserved envelope tag`;
+  if (hasReservedTag(text, "operator-preferences"))
+    return `${field}: contains the reserved envelope tag`;
   if (note && LINKS.some((pattern) => pattern.test(text))) return `${field}: links are not allowed`;
   if (SECRETS.some((pattern) => pattern.test(text))) return `${field}: looks like a secret`;
   if (!note) return null;
@@ -160,6 +161,20 @@ export function validatePipeline(doc) {
       if (typeof host !== "string" || !HOST_NAME.test(host))
         return `pickup.hosts[${i}]: must be a host name of letters, digits, dot, dash and underscore`;
       if (pickup.hosts.indexOf(host) !== i) return `pickup.hosts[${i}]: listed twice`;
+    }
+  }
+  if ("triage" in doc) {
+    const triage = doc.triage;
+    if (!isObject(triage)) return "triage: must be an object";
+    for (const key of Object.keys(triage))
+      if (!["enabled", "threshold", "rules"].includes(key)) return `triage.${key}: unknown field`;
+    if (typeof triage.enabled !== "boolean") return "triage.enabled: must be true or false";
+    if (!(Number.isInteger(triage.threshold) && triage.threshold >= 1 && triage.threshold <= 100))
+      return "triage.threshold: must be an integer from 1 to 100";
+    if (typeof triage.rules !== "string") return "triage.rules: must be text";
+    if (triage.rules) {
+      const error = checkOperatorText(triage.rules, "triage.rules");
+      if (error) return error;
     }
   }
   if (!("stage_notes" in doc)) return null;
@@ -215,6 +230,7 @@ export function effectivePipeline(
       (id) => global?.gates?.includes(id) || project?.gates?.includes(id),
     ),
     pickup: pickupOf(project?.pickup ?? global?.pickup, activeHosts),
+    triage: project?.triage ?? global?.triage ?? { enabled: false, threshold: 80, rules: "" },
     stage_notes: stageNotes,
     versions: { global: globalVersion, project: projectVersion },
     floors: FLOORS.map((floor) => floor.id),

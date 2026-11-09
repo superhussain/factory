@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
-import { waitForBoard, clickNow } from "../support/board-ready.cjs";
+import { waitForBoard, clickNow, openJobActions } from "../support/board-ready.cjs";
 
 const JOB = {
   id: "042-sample-export",
@@ -59,6 +59,7 @@ test(
           label: null,
           refs: "",
         });
+        await openJobActions(page);
         await page.click("#d-follow-tracer");
         await page.waitForFunction(
           (text) => document.getElementById("d-refs").textContent === text,
@@ -280,6 +281,7 @@ test(
       let { context, page, errors, drawer } = await openDrawer(browser, origin);
       try {
         assert.equal((await drawer()).follow, false);
+        await openJobActions(page);
         await page.click("#d-follow-tracer");
         await page.waitForFunction(() => document.getElementById("d-follow-tracer").hidden);
         const board = await (await fetch(origin + "/api/board")).json();

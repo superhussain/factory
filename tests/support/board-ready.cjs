@@ -7,4 +7,11 @@ async function waitForBoard(page) {
 // finds and clicks in two protocol calls, and a re-render in between eats the click.
 const clickNow = (page, selector) =>
   page.evaluate((sel) => document.querySelector(sel).click(), selector);
-module.exports = { waitForBoard, clickNow };
+// Opens the drawer's job actions menu so its items can be clicked.
+async function openJobActions(page) {
+  if ((await page.$eval("#d-actions", (el) => el.getAttribute("aria-expanded"))) !== "true") {
+    await page.click("#d-actions");
+  }
+  await page.waitForSelector("#d-actions-menu:not([hidden])");
+}
+module.exports = { waitForBoard, clickNow, openJobActions };

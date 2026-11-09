@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import { openJobActions } from "../support/board-ready.cjs";
 
 const JOBS = [
   { id: "001-sample", project: "sample", title: "Synthetic sample job", stage: "spec" },
@@ -28,14 +29,17 @@ test("text buttons get 44px tap targets on coarse pointers", { timeout: 120000 }
       await page.setViewport(viewport);
       await page.goto(origin + "/#002-idea", { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#d-discard:not([hidden])");
+      await openJobActions(page);
       return page.evaluate(() => ({
         coarse: matchMedia("(pointer: coarse)").matches,
+        actions: document.getElementById("d-actions").getBoundingClientRect().height,
         discard: document.getElementById("d-discard").getBoundingClientRect().height,
         newIdea: document.getElementById("new-idea").getBoundingClientRect().height,
       }));
     };
     const touch = await measure({ width: 390, height: 844, isMobile: true, hasTouch: true });
     assert.equal(touch.coarse, true);
+    assert.ok(touch.actions >= 44, `Actions height ${touch.actions}`);
     assert.ok(touch.discard >= 44, `Discard height ${touch.discard}`);
     assert.equal(touch.newIdea, 44);
     const mouse = await measure({ width: 1280, height: 900 });
