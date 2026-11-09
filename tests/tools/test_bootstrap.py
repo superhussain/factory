@@ -35,6 +35,7 @@ class FakeCloudflare:
         self.items = {"service_tokens": {}, "policies": {}, "apps": {}, "domains": {}}
         self.scripts = set()
         self.next_id = 0
+        self.fail = []
 
     def new_id(self):
         self.next_id += 1
@@ -56,6 +57,10 @@ class FakeCloudflare:
         if parts[:2] != ["accounts", ACCOUNT]:
             self.error(method, path, 403, 9109, "Unauthorized to access requested resource")
         rest = parts[2:]
+        kind = rest[1]
+        if (method, kind) in self.fail:
+            self.fail.remove((method, kind))
+            self.error(method, path, 500, 10000, "synthetic failure")
         if rest[:2] == ["r2", "buckets"]:
             if len(rest) == 2 and method == "POST":
                 self.buckets[body["name"]] = 0
@@ -77,9 +82,8 @@ class FakeCloudflare:
                 self.error(method, path, 404, 10007, "This Worker does not exist on your account.")
             self.scripts.discard(rest[-1])
             return {"success": True, "result": None}
-        kind = rest[1]
         store = self.items[kind]
-        if method == "GET":
+        if method == "GET" and len(rest) == 2:
             found = [{k: v for k, v in item.items() if k != "client_secret"} for item in store.values()
                      if kind != "domains" or item["hostname"] == params.get("hostname")]
             return {"success": True, "result": found}
@@ -94,6 +98,8 @@ class FakeCloudflare:
         item_id = rest[-1]
         if item_id not in store:
             self.error(method, path, 404, 12130, "not found")
+        if method == "GET":
+            return {"success": True, "result": dict(store[item_id])}
         if method == "PUT":
             store[item_id] = dict(store[item_id], **body)
             return {"success": True, "result": dict(store[item_id])}
