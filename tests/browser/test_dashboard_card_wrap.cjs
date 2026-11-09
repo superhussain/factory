@@ -81,6 +81,7 @@ async function makePage(browser, origin, width, theme) {
     const page = await context.newPage();
     await page.setViewport({ width, height: 844, deviceScaleFactor: 1 });
     await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: theme }]);
+    await (await import("../support/browser-server.mjs")).blockLiveEvents(page);
     await page.evaluateOnNewDocument(() => {
       const interval = window.setInterval;
       window.setInterval = (fn, ms, ...args) => (ms === 3000 ? 0 : interval(fn, ms, ...args));

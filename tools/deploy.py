@@ -211,6 +211,8 @@ def project_wrangler(profile, source_root, output):
         "routes": [{"pattern": profile["origin"].split("://", 1)[1], "custom_domain": True}],
         "r2_buckets": [{"binding": "BUCKET", "bucket_name": profile["bucket_name"]}],
         "ai": {"binding": "AI"},
+        "durable_objects": {"bindings": [{"name": "BoardEvents", "class_name": "BoardEvents"}]},
+        "migrations": [{"tag": "v1", "new_sqlite_classes": ["BoardEvents"]}],
         "vars": {
             "FACTORY_ORIGIN": profile["origin"],
             "FACTORY_TITLE": profile["title"],

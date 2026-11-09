@@ -6,7 +6,12 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import {
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+  blockLiveEvents,
+} from "../support/browser-server.mjs";
 import { waitForBoard, clickNow } from "../support/board-ready.cjs";
 
 const REASSIGNED = {
@@ -63,6 +68,7 @@ test(
         await page.setViewport({ width: 1440, height: 900 });
         const errors = [];
         page.on("pageerror", (error) => errors.push(String(error)));
+        await blockLiveEvents(page);
         await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
         await waitForBoard(page);
         // Terminal columns start collapsed; expand the closed column like a user would.
@@ -125,6 +131,7 @@ test("archived PR links only once the project names its archive", { timeout: 120
       await page.setViewport({ width: 1440, height: 900 });
       const errors = [];
       page.on("pageerror", (error) => errors.push(String(error)));
+      await blockLiveEvents(page);
       const wrap = '.card-wrap:has(.card[data-id="032-archived"])';
       // Only a linked card gets a wrap, so the unlinked card is cropped on its own box.
       const shown = wrap + ', .cards > .card[data-id="032-archived"]';
