@@ -77,8 +77,6 @@ const hostLine = (page, id) =>
   page.$eval(`.card[data-id="${id}"] .host`, (el) => el.textContent).catch(() => null);
 const options = (page) =>
   page.$$eval("#move-host-select option", (os) => os.map((o) => o.textContent));
-const visible = (page, selector) =>
-  page.$eval(selector, (el) => el.checkVisibility({ checkVisibilityCSS: true }));
 
 test("move host", { timeout: 240000 }, async (t) => {
   await prepareAssets();
