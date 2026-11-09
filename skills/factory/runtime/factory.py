@@ -992,6 +992,7 @@ def backlog_context(path):
 def backlog_add(item, context=None):
     if item.splitlines() != [item]:
         fail(f"bad item {item!r}: it must be one line, with no line or paragraph separators", 2)
+    item = item.rstrip()
     m = re.fullmatch(r"([\w-]+): (\S.*)", item)
     if not m:
         fail(f"bad item {item!r}: use <slug>: <feature> on one line", 2)

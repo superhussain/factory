@@ -179,7 +179,7 @@ const CAPTURE_BACKLOG_CONTEXT = [
 const CAPTURE_BACKLOG =
   "# Backlog\n\n- [ ] sample: Synthetic backlog item with a long description that runs well past three lines on a narrow card, so the board cuts it off and the drawer shows every word of it, including this closing clause\n" +
   CAPTURE_BACKLOG_CONTEXT +
-  "\n- [ ] sample: Synthetic follow-on slice (sub-job-of 001-capture)\n" +
+  "\n- [ ] sample: Synthetic follow-on slice (sub-job-of 001-capture)   \n" +
   "- [ ] sample: Synthetic weekly report export with date, campaign and spend columns (rework-of 004-rework-capture)\n";
 const CAPTURE_TRIAGE_ITEM = "sample: Synthetic follow-on slice (sub-job-of 001-capture)";
 const CAPTURE_TRIAGE = {

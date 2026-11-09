@@ -7,6 +7,7 @@ import { withBrowserFixture, seedProject } from "../support/browser-server.mjs";
 const wait = { polling: 50 };
 const MODEL_ITEM = "sample: Add billing totals to the CSV export";
 const FIXED_ITEM = "sample: Rename the export button";
+const TRAILING_ITEM = "sample: Add a sidebar";
 const MISSING_ITEM = "sample: Add a footer";
 const MALFORMED_ITEM = "sample: Add a header";
 const MODEL_VERDICT = {
@@ -51,7 +52,13 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
     );
     assert.equal(posted.status, 200);
     assert.equal((await posted.json()).decision, "hold");
-    const lines = [MODEL_ITEM, FIXED_ITEM, MISSING_ITEM, MALFORMED_ITEM];
+    const trailing = await send(
+      "POST",
+      "/api/backlog/triage",
+      JSON.stringify({ item: TRAILING_ITEM, context: "Recommend: deny\nSynthetic reason." }),
+    );
+    assert.equal(trailing.status, 200);
+    const lines = [MODEL_ITEM, FIXED_ITEM, TRAILING_ITEM + "   ", MISSING_ITEM, MALFORMED_ITEM];
     assert.equal(
       (
         await send(
@@ -128,6 +135,18 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
         "Held without a model score because its author recommends deny.",
       );
     });
+
+    await t.test(
+      "a line with trailing spaces shows the hold saved under the stripped item",
+      async () => {
+        await open(TRAILING_ITEM);
+        await page.waitForSelector("#backlog-triage:not([hidden])", wait);
+        assert.deepEqual(
+          (await section()).paragraphs[0],
+          "Held without a model score because its author recommends deny.",
+        );
+      },
+    );
 
     await t.test("a 404 or a malformed body leaves the section hidden", async () => {
       for (const line of [MISSING_ITEM, MALFORMED_ITEM]) {

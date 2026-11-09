@@ -132,6 +132,15 @@ class BacklogTriageTests(TriageFixture):
                 self.assertEqual(self.files["/api/board"], board)
                 self.assertEqual(self.cached(), cached)
 
+    def test_add_strips_trailing_spaces(self):
+        self.triage = (200, json.dumps(HOLD))
+        code, out, err = self.add(ITEM + "  ")
+        self.assertEqual((code, err), (0, ""))
+        self.assertTrue(out.startswith(f"added {ITEM}\n"))
+        self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [ ] {ITEM}\n")
+        self.assertEqual(self.posts, [{"item": ITEM}])
+        self.assertEqual(self.cached(), [f"- [ ] {ITEM}"])
+
     def test_failures_warn_and_exit_0_with_the_line_waiting(self):
         board = self.files["/api/board"]
         for triage, reason in (
@@ -257,6 +266,13 @@ class BacklogTriagePassTests(TriageFixture):
                          "- [x] sample: Add PDF export to reports (009-add-pdf-export)")
         self.assertEqual(self.cached(), [RENAME])
         self.assertEqual(self.gets, ["/api/pipeline/effective/sample"])
+
+    def test_a_line_with_trailing_spaces_posts_the_stripped_item(self):
+        self.files["/api/backlog"] = f"# Backlog\n{PDF}   \n"
+        self.triage = (200, json.dumps(HOLD))
+        self.sweep()
+        self.assertEqual(self.posts, [{"item": "sample: Add PDF export to reports"}])
+        self.assertEqual(self.cached(), [PDF + "   "])
 
     def test_a_row_left_on_the_board_is_not_queued_twice(self):
         self.after_board = lambda: self.cas_down.update({"/api/backlog", "/api/board"})
