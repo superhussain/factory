@@ -242,3 +242,17 @@ test("only POST reaches triage", async () => {
   const s = setup();
   assert.equal((await s.send("GET", "/api/backlog/triage")).status, 404);
 });
+
+test("the longest allowed item and context in 4-byte characters fit under the body cap", async () => {
+  const s = setup();
+  await s.save("projects/sample", on());
+  const item = "sample: " + "📊".repeat(1992);
+  const context = "Recommend: approve\n" + "📊".repeat(5981);
+  assert.ok(Buffer.byteLength(JSON.stringify({ item, context })) > 16 << 10);
+  const r = await s.triage({ item, context });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(JSON.parse(r.text).decision, "queue");
+  const over = await s.triage({ item, context: context + "📊" });
+  assert.equal(over.status, 400);
+  assert.equal(over.text, "context: over 6000 characters");
+});

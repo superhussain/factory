@@ -29,6 +29,8 @@ const PIPELINE = /^\/api\/pipeline\/(global|projects\/([\w-]+))$/;
 const PIPELINE_HISTORY = /^\/api\/pipeline\/history\/(global|projects\/([\w-]+))(?:\/([1-9]\d*))?$/;
 const PIPELINE_EFFECTIVE = /^\/api\/pipeline\/effective\/([\w-]+)$/;
 const MAX_PIPELINE = 16 << 10;
+// 2000 + 6000 characters at up to 4 UTF-8 bytes each, plus JSON keys and escapes.
+const MAX_TRIAGE = 64 << 10;
 // /api/hosts, /api/hosts/<id> and /api/hosts/<id>/<action>.
 const HOSTS = /^\/api\/hosts(?:\/([^/]+)(?:\/(code|pair|status|history))?)?$/;
 const MAX_BODY = 1 << 20;
@@ -557,19 +559,19 @@ const BACKLOG_ITEM = /^([\w-]+): (\S.*)$/;
 // Rates one new backlog line against its project's triage rules. The Worker compares the
 // score with the threshold, so a device cannot move the bar.
 async function backlogTriage(request, env) {
-  const body = await readJson(request);
+  const body = await readJson(request, MAX_TRIAGE);
   if (body instanceof Response) return body;
   if (typeof body !== "object" || body === null || Array.isArray(body))
     return reply("body: must be a JSON object", 400);
   for (const key of Object.keys(body))
     if (key !== "item" && key !== "context") return reply(`${key}: unknown field`, 400);
   const { item, context } = body;
-  const m = typeof item === "string" && item.length <= 2000 && BACKLOG_ITEM.exec(item);
+  const m = typeof item === "string" && [...item].length <= 2000 && BACKLOG_ITEM.exec(item);
   if (!m)
     return reply('item: must be one "<slug>: <feature>" line of at most 2000 characters', 400);
   if (context !== undefined && typeof context !== "string")
     return reply("context: must be text", 400);
-  if (context !== undefined && context.length > 6000)
+  if (context !== undefined && [...context].length > 6000)
     return reply("context: over 6000 characters", 400);
   for (const [field, text] of [
     ["item", item],
@@ -639,16 +641,16 @@ const PAIRING_FAILED = "pairing code is wrong, used or expired";
 const TOKEN_TAKEN = "this service token is already bound to another host";
 const STATUS_ONLY = "status is written only by the host's bound service token";
 
-// A JSON body under the 16 KiB cap, or the error reply.
-async function readJson(request) {
+// A JSON body under the cap, or the error reply.
+async function readJson(request, max = MAX_PIPELINE) {
   if (
     !/^application\/json(?:\s*;\s*charset\s*=\s*(?:utf-8|"utf-8"))?$/i.test(
       request.headers.get("Content-Type") || "",
     )
   )
     return reply("body needs application/json", 415);
-  const bytes = await readCapped(request, MAX_PIPELINE);
-  if (bytes === null) return reply("body over 16 KiB", 413);
+  const bytes = await readCapped(request, max);
+  if (bytes === null) return reply(`body over ${max >> 10} KiB`, 413);
   try {
     return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes));
   } catch {
