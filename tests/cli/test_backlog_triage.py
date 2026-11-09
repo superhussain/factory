@@ -206,6 +206,20 @@ class BacklogTriageTests(TriageFixture):
                                       "check off its line; check off the line or remove 004-add-csv-export by hand\n"))
         self.assertEqual([j["id"] for j in self.board()], ["003-old-job", "004-add-csv-export"])
         self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [ ] {ITEM}\n")
+        self.assertEqual(self.cached(), [f"- [ ] {ITEM}"])
+
+    def test_a_failed_drop_on_a_changed_line_names_the_row(self):
+        def claim_line():
+            self.files["/api/backlog"] = f"# Backlog\n- [x] {ITEM} (009-other)\n"
+            self.cas_down.add("/api/board")
+        self.after_board = claim_line
+        code, out, err = self.add()
+        self.assertEqual(code, 0)
+        self.assertEqual(out, f"added {ITEM}\nkept {ITEM} in the backlog: its line changed before triage finished\n")
+        self.assertEqual(err, "factory.py: can't reach https://factory.example.test/api/board: timed out\n"
+                              f"factory.py: backlog triage kept {ITEM} in the backlog but could not remove "
+                              "004-add-csv-export; remove 004-add-csv-export by hand\n")
+        self.assertEqual([j["id"] for j in self.board()], ["003-old-job", "004-add-csv-export"])
 
 
 PDF = "- [ ] sample: Add PDF export to reports"
@@ -243,6 +257,16 @@ class BacklogTriagePassTests(TriageFixture):
                          "- [x] sample: Add PDF export to reports (009-add-pdf-export)")
         self.assertEqual(self.cached(), [RENAME])
         self.assertEqual(self.gets, ["/api/pipeline/effective/sample"])
+
+    def test_a_row_left_on_the_board_is_not_queued_twice(self):
+        self.after_board = lambda: self.cas_down.update({"/api/backlog", "/api/board"})
+        self.sweep()
+        self.assertEqual(self.cached(), [PDF, RENAME])
+        self.cas_down.clear()
+        self.posts.clear()
+        self.assertEqual(self.sweep(), ("", ""))
+        self.assertEqual(self.posts, [])
+        self.assertEqual([j["id"] for j in self.board()], ["008-old-job", "009-add-pdf-export"])
 
     def test_a_second_run_sends_nothing_and_the_cache_drops_gone_lines(self):
         self.sweep()

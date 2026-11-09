@@ -210,11 +210,12 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this
   host never sends them again. `backlog add` records its held line there too. A 409, 502,
   503 or network failure warns, and the line is retried on the next run. Deleting the file
-  only causes rescoring.
+  only causes rescoring. A line whose new idea row could not be checked off or removed goes
+  there too, so it is never queued twice.
 - **Failure.** A 404 from an older Worker means off. Any other error prints a warning,
-  and the line waits. `backlog add` still exits 0. If a board or backlog write fails while
-  queueing, it prints what is left (the line, or the new id to check off or remove by hand),
-  and `backlog add` still exits 0.
+  and the line waits. If a board or backlog write fails while
+  queueing, it prints what is left (the line, or the new id to check off or remove by hand).
+  `backlog add` still exits 0.
 - **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a
   service token cannot switch triage on or move the threshold. The Worker compares the
   score with the threshold itself.
@@ -224,7 +225,8 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   should be built now without a person reviewing it, and its yes probability times 100, rounded,
   is the confidence. The verdict's `reason` is always the fixed text `Rated by clef-flash against
   the project rules.`, so an item can move the score but write no text. An item or context
-  holding either tag, including fullwidth or other lookalike forms, is refused with a 400.
+  holding either tag, including fullwidth, Cyrillic, Greek or other lookalike forms, is refused
+  with a 400.
 - **Floors.** A queued idea still goes through the spec, four reviews, the approver, merge
   rules and any `spec-approval` gate.
 - **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
