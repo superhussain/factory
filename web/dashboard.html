@@ -4224,7 +4224,15 @@ function moveJob(board, id, to, now) {
   const from = j.claim?.device ?? prior?.from;
   const session = j.claim?.session ?? prior?.session;
   if (to === from) return 'This job already runs on ' + to + '.';
-  j.move = { ...(from && { from }), ...(session && { session }), to, at: now };
+  const link = j.paseo?.agent ? j.paseo : prior;
+  j.move = {
+    ...(from && { from }),
+    ...(session && { session }),
+    ...(link?.agent && { agent: link.agent }),
+    ...(link?.server && { server: link.server }),
+    to,
+    at: now,
+  };
   delete j.claim;
   delete j.paseo;
   j.updated = now;
