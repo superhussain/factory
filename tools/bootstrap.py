@@ -273,7 +273,17 @@ def ensure_token(api, account, name, home):
             print("token " + name + ": kept")
             return token["id"]
     token = api("POST", "accounts/{}/access/service_tokens".format(account), {"name": name})["result"]
-    write_env_credentials(home, token["client_id"], token["client_secret"])
+    try:
+        write_env_credentials(home, token["client_id"], token["client_secret"])
+    except OSError as error:
+        failed = "cannot write {}: {}.".format(home / ".env", error.strerror)
+        try:
+            api("DELETE", "accounts/{}/access/service_tokens/{}".format(account, token["id"]))
+        except CloudflareError as delete_error:
+            raise CloudflareError("{} Also could not delete the new service token {} ({}); delete it under Zero "
+                                  "Trust > Access > Service credentials, then rerun up.".format(
+                                      failed, name, delete_error))
+        raise CloudflareError("{} Deleted the new service token {}; fix the file, then rerun up.".format(failed, name))
     print("token " + name + ": created, credentials written to " + str(home / ".env"))
     return token["id"]
 
