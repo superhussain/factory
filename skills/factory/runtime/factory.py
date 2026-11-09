@@ -76,7 +76,8 @@ gives each job it claims its own tag, in its JSON.
 Exit codes: 2 bad usage, 3 nothing in the backlog (or no idea, or nothing stuck) this
 device can run, 4 not found, 5 Worker or network failure, 6 another session holds the
 job, R2 or origin moved under this device, local job artifacts do not match R2, or a
-job path is a symlink or junction or cannot be inspected, or a pairing was refused.
+job path is a symlink or junction or cannot be inspected, or a pairing was refused, or
+the checkout holds history origin's base does not descend from.
 
 The board, backlog, and project files live in R2 behind the factory Worker at
 `api_url` in config.md. Job folders and worktrees stay on this device.
@@ -527,11 +528,16 @@ def earlier_moves(m):
     return [x for x in e if isinstance(x, dict)] if isinstance(e, list) else []
 
 
+def move_stopped(x):
+    """True when pickup recorded this holder's stop. Only a string counts, as in the dashboard."""
+    return isinstance(x.get("stopped"), str)
+
+
 def queued_stops(m):
     """The move's holders whose host has not stopped them yet, earlier ones first."""
     if not isinstance(m, dict):
         return []
-    return [x for x in [*earlier_moves(m), m] if x.get("from") and "stopped" not in x]
+    return [x for x in [*earlier_moves(m), m] if x.get("from") and not move_stopped(x)]
 
 
 def moved_away(job, device, session):
@@ -1075,32 +1081,35 @@ def triage_enabled(home, slug):
 
 def backlog_triage_pass(home):
     """Ask the Worker for a verdict on up to TRIAGE_SWEEP_LIMIT unchecked backlog lines this host
-    has no final verdict for, in projects with triage on. Queued lines become ideas."""
+    has no final verdict for, in projects with triage on. Queued lines become ideas.
+    A Worker error still saves the verdicts recorded so far."""
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
     lines = unchecked_lines(text if status == 200 else "")
     cached = read_triaged(home)
     raws = {raw for raw, _, _, _ in lines}
     triaged = [line for line in cached if line in raws]
     todo = [line for line in lines if line[0] not in triaged]
-    projects = registered(home) if todo else set()
-    enabled, sent = {}, 0
-    for raw, slug, feature, context in todo:
-        if sent == TRIAGE_SWEEP_LIMIT:
-            break
-        if raw in triaged or slug not in projects:
-            continue
-        if slug not in enabled:
-            enabled[slug] = triage_enabled(home, slug)
-        if not enabled[slug]:
-            continue
-        sent += 1
-        item = f"{slug}: {feature.rstrip()}"
-        verdict, final = backlog_triage(home, item, context or None)
-        left = verdict is not None and report_verdict(home, slug, feature, item, verdict)
-        if final and (verdict is None or verdict["decision"] != "queue" or left):
-            triaged.append(raw)
-    if triaged != cached:
-        save_triaged(home, triaged)
+    try:
+        projects = registered(home) if todo else set()
+        enabled, sent = {}, 0
+        for raw, slug, feature, context in todo:
+            if sent == TRIAGE_SWEEP_LIMIT:
+                break
+            if raw in triaged or slug not in projects:
+                continue
+            if slug not in enabled:
+                enabled[slug] = triage_enabled(home, slug)
+            if not enabled[slug]:
+                continue
+            sent += 1
+            item = f"{slug}: {feature.rstrip()}"
+            verdict, final = backlog_triage(home, item, context or None)
+            left = verdict is not None and report_verdict(home, slug, feature, item, verdict)
+            if final and (verdict is None or verdict["decision"] != "queue" or left):
+                triaged.append(raw)
+    finally:
+        if triaged != cached:
+            save_triaged(home, triaged)
 
 
 def triage_verdict(text):
@@ -2032,8 +2041,9 @@ ADAPTER_TIMEOUT_SECONDS = 120
 TAKEOVER_MINUTES = 30
 
 
-def pickup_settings(home, slug):
-    """(enabled, hosts, None) from the project's effective pipeline, or (None, None, reason)."""
+def pickup_settings(home, slug, repo, device):
+    """(enabled, hosts, None) from the project's effective pipeline, or (None, None, reason).
+    When pickup is on and lists device, an unsafe checkout at repo is the reason."""
     status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
     if status == 404:
         return None, None, "no pipeline view; register the project or deploy the current Worker"
@@ -2048,6 +2058,10 @@ def pickup_settings(home, slug):
     p = view.get("pickup") if isinstance(view, dict) else None
     if isinstance(p, dict) and isinstance(p.get("enabled"), bool) and isinstance(p.get("hosts"), list) \
             and all(isinstance(h, str) and HOST_NAME.fullmatch(h) for h in p["hosts"]):
+        if p["enabled"] and device in p["hosts"]:
+            problem = checkout_problem(home, slug, repo)
+            if problem:
+                return None, None, problem
         return p["enabled"], p["hosts"], None
     return None, None, "malformed pickup in the pipeline view"
 
@@ -2340,7 +2354,7 @@ def takeover(home, data, device, minutes, paths, settings, dry):
             skipped(session, job_id, "no checkout on this host")
             continue
         if slug not in settings:
-            settings[slug] = pickup_settings(home, slug)
+            settings[slug] = pickup_settings(home, slug, paths[slug], device)
         enabled, hosts, why = settings[slug]
         line = why if why else None if enabled and device in hosts else \
             "pickup off" if not enabled else f"pickup does not list host {device}"
@@ -2567,7 +2581,12 @@ def pickup(*args):
         if not dry:
             tracer_follow_pass(home)
             tracer_build_pass(home)
-            backlog_triage_pass(home)
+            try:
+                backlog_triage_pass(home)
+            except SystemExit as e:
+                if e.code != 5:
+                    raise
+                print("factory.py: backlog triage stopped; unsent lines wait for the next pickup run", file=sys.stderr)
         pickup_pass(home, device, minutes, dry, limit, cap)
     finally:
         if not dry:
@@ -2688,7 +2707,7 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
         if problem:
             return f"{head}: deny notes {problem}"
         if project not in settings:
-            settings[project] = pickup_settings(home, project)
+            settings[project] = pickup_settings(home, project, paths[project], device)
             if settings[project][2] and not dry:
                 print(f"factory.py: pickup skips {project}: {settings[project][2]}", file=sys.stderr)
         enabled, hosts, reason = settings[project]
@@ -2787,7 +2806,7 @@ def move_stop_pass(home, data, device, dry, adapter):
                   f"{' '.join(map(str, alive))}", file=sys.stderr)
             continue
 
-        def change(text, job_id=job_id, ats={x.get("at") for x in mine}, archived=set(archives)):
+        def change(text, job_id=job_id, ats=[x.get("at") for x in mine], archived=list(archives)):
             board = load_board(text)
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
             now_mine = [x for x in queued_stops((found or {}).get("move"))
@@ -2802,7 +2821,7 @@ def move_stop_pass(home, data, device, dry, adapter):
             return dump_board(board), True
         if cas(home, "/api/board", change):
             for x in mine:
-                x.setdefault("stopped", now())
+                x["stopped"] = now()
             print(f"archived {noun} {names} and stopped {line}" if archives else f"stopped {line}")
 
 
@@ -3018,7 +3037,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
         if skip(j) or slug in eligible:
             continue
         if slug not in settings:
-            settings[slug] = pickup_settings(home, slug)
+            settings[slug] = pickup_settings(home, slug, paths[slug], device)
             reason = settings[slug][2]
             if reason and not dry:
                 print(f"factory.py: pickup skips {slug}: {reason}", file=sys.stderr)
@@ -3480,6 +3499,34 @@ def origin_git(repo, *args):
         fail(f"git {args[0]} origin failed in {repo} (exit {r.returncode}). Check the network, "
              f"then run git -C {repo} fetch origin to see git's error", 5)
     return r.stdout.strip()
+
+
+def checkout_problem(home, slug, repo, branch=None):
+    """Why repo's local base branch, or the given job branch, holds history origin's base does
+    not descend from, as an "unsafe checkout:" line, or None. It fetches origin's base first,
+    so a stale origin/<base> cannot vouch for itself."""
+    project = project_files(home, slug)[0]
+    base = frontmatter(project)[0].get("base", "main") if project.exists() else "main"
+    if check_path(base) or base.startswith("-"):
+        return f"unsafe checkout: {slug} base {base} is not a safe branch name"
+    # git's stderr can carry origin's URL, credentials included, so the line leaves it out.
+    r = subprocess.run(["git", "-C", str(repo), "fetch", "-q", "origin",
+                        f"+refs/heads/{base}:refs/remotes/origin/{base}"], capture_output=True, text=True)
+    if r.returncode:
+        return f"unsafe checkout: git fetch origin {base} failed in {repo} (exit {r.returncode})"
+    roots = set(git(repo, "rev-list", "--max-parents=0", f"refs/remotes/origin/{base}").split())
+    if not roots:
+        return f"unsafe checkout: origin/{base} has no root commit in {repo}"
+    if not git(repo, "rev-parse", "--verify", "-q", f"refs/heads/{base}"):
+        return (f"unsafe checkout: {repo} has no local {base} branch; "
+                f"run git -C {repo} branch {base} origin/{base}")
+    refs = [base] + ([branch] if branch and git(repo, "rev-parse", "--verify", "-q", f"refs/heads/{branch}") else [])
+    for ref in refs:
+        foreign = sorted(set(git(repo, "rev-list", "--max-parents=0", f"refs/heads/{ref}").split()) - roots)
+        if foreign:
+            return (f"unsafe checkout: {repo} {ref} has root {foreign[0][:12]}, which origin/{base} lacks, "
+                    "so it holds archive history; repoint it as docs/public-cutover.md \"Other hosts\" says")
+    return None
 
 
 def main_checkout(cwd):
@@ -4457,6 +4504,9 @@ def worktree(target):
     repo = read_paths(home).get(slug)
     if not repo:
         fail(f"{home / 'paths.md'} has no entry for {slug}: run /factory init in this device's checkout of it", 4)
+    problem = checkout_problem(home, slug, repo, f"factory/{job_id}")
+    if problem:
+        fail(problem, 6)
     wt, branch = home / "worktrees" / slug / job_id, f"factory/{job_id}"
     # ls-remote prints nothing when origin lacks the branch.
     if origin_git(repo, "ls-remote", "origin", f"refs/heads/{branch}"):

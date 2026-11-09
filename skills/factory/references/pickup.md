@@ -16,6 +16,11 @@ Each run, in order:
 - Skips ideas that are gated, held by a live claim, or waiting on a human, and
   projects whose effective pipeline has pickup off, does not list this host, or
   cannot be read. Each skip reason is printed once and the run goes on.
+- Skips a project whose checkout fails the `unsafe checkout` check, when pickup is
+  on and lists this host. It fetches `origin/<base>` and refuses a local `<base>`
+  with a root commit that `origin/<base>` lacks, so a host still on archive history
+  claims and launches nothing for that project. `worktree` runs the same check on
+  the job branch and exits 6.
 - Deny notes: before ideas, launches at most one `/factory deny-notes <id>` session
   for a `closed` job denied from the backlog whose `backlog.notes` are unread (no
   `backlog.notes_read`). The session gets the notes from `factory.py deny-notes <id>`
@@ -173,7 +178,7 @@ changes nothing. Then install one timer per host.
 - The dashboard's move button replaces a job's `claim` and `paseo` with `move = {from, session, to, at}`. Only the dashboard and `pickup` write `move`.
 - A second move keeps each earlier holder in `move.earlier`. Those sessions stay fenced, and each earlier host's `pickup` still stops its worktree.
 - The old session is fenced: its next `board` or `hold` exits 6 with `<id> was moved to <host> from the dashboard`. `hold <project>/<id> take` still claims the job.
-- The old host's `pickup` stops the job's worktree processes first on every run, whatever the project's pickup settings, then sets `move.stopped`. While that host is offline the stop waits on the board. Survivors are printed on stderr and retried next run.
+- The old host's `pickup` stops the job's worktree processes first on every run, whatever the project's pickup settings, then sets `move.stopped`. Only a string `move.stopped` counts as done. Pickup and the dashboard treat `null` or any other value as a stop still queued. While that host is offline the stop waits on the board. Survivors are printed on stderr and retried next run.
 - When `stalls.json` is set and the job's Paseo session ran on this host's server, the old host's `pickup` archives it with the adapter's `archive <session> --force` first. A failed archive is printed on stderr and retried next run.
 - The target host's `pickup` claims the job once, sets `move.claimed` and launches `/factory recover`. The usual gates apply: pickup on, host listed, not gated, the cap and a route.
 - `factory.py stuck` leaves a move with no `claimed` to its target.

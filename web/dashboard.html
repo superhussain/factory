@@ -103,8 +103,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog label[hidden], dialog select[hidden] { display: none; }
   dialog textarea { resize: vertical; min-height: 140px; }
   dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
-  .detail > .err { margin: 12px 20px; flex: none; }
-  .detail > .copy-status { margin: 12px 20px; flex: none; font-size: 12px; color: var(--muted); }
+  .detail > .err, .detail > .copy-status { margin: 12px 20px; flex: none; }
+  .detail > .copy-status { font-size: 12px; color: var(--muted); }
   .detail > .copy-status:empty { display: none; }
   #idea-image-list, .gallery { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
   #idea-image-list li { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
@@ -1079,10 +1079,13 @@ function stamp(j) {
   return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused)].join('|');
 }
 
+// A holder's stop is recorded only when stopped is a string, as in factory.py.
+const moveStopped = (x) => typeof x?.stopped === 'string';
+
 // Every holder of a move whose host has not stopped it yet, earlier ones first.
 function queuedStops(m) {
   const earlier = Array.isArray(m?.earlier) ? m.earlier.filter((x) => x && typeof x === 'object') : [];
-  return m ? [...earlier, m].filter((x) => x.from && !x.stopped) : [];
+  return m ? [...earlier, m].filter((x) => x.from && !moveStopped(x)) : [];
 }
 
 // Where a job runs, from the board's claim and the dashboard's move. A move whose old host has not
@@ -4293,7 +4296,7 @@ function moveJob(board, id, to, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
   if (!j.project || !MOVE_STAGES.includes(j.stage)) return 'This job can no longer be moved.';
-  const from = j.claim?.device ?? (!j.claim && j.move && !j.move.stopped ? j.move.from : undefined);
+  const from = j.claim?.device ?? (!j.claim && j.move && !moveStopped(j.move) ? j.move.from : undefined);
   if (to === from) return 'This job already runs on ' + to + '.';
   if (queuedStops(j.move).some((x) => x.from === to)) return 'A stop is still queued on ' + to + '. Pick another host.';
   writeMove(board, j, to, now);
@@ -4301,13 +4304,13 @@ function moveJob(board, id, to, now) {
 }
 
 function writeMove(board, j, to, now) {
-  const prior = !j.claim && j.move && !j.move.stopped ? j.move : null;
+  const prior = !j.claim && j.move && !moveStopped(j.move) ? j.move : null;
   const from = j.claim?.device ?? prior?.from;
   const session = j.claim?.session ?? prior?.session;
   const earlier = [...(Array.isArray(j.move?.earlier) ? j.move.earlier : [])];
   if (j.move?.from && !prior) {
     const { from: f, session: s, agent: a, server: v, at, stopped } = j.move;
-    earlier.push({ from: f, ...(s && { session: s }), ...(a && { agent: a }), ...(v && { server: v }), at, ...(stopped && { stopped }) });
+    earlier.push({ from: f, ...(s && { session: s }), ...(a && { agent: a }), ...(v && { server: v }), at, ...(moveStopped(j.move) && { stopped }) });
   }
   const link = j.paseo?.agent ? j.paseo : prior;
   j.move = {
@@ -4412,7 +4415,7 @@ async function openMoveHost() {
   err.hidden = true;
   empty.hidden = true;
   select.replaceChildren();
-  const pending = !j.claim && j.move && !j.move.stopped ? j.move : null;
+  const pending = !j.claim && j.move && !moveStopped(j.move) ? j.move : null;
   const current = j.claim?.device ?? pending?.from;
   $('move-host-help').textContent = j.claim?.device
     ? j.id + ' runs on ' + j.claim.device + '. Moving it stops that session and starts the job on the host you pick. If ' + j.claim.device + ' is offline, the stop waits until it comes back.'
@@ -4780,8 +4783,11 @@ $('d-copy-link').addEventListener('click', async () => {
   }
   if (version !== drawerVersion) return;
   clearCopyStatus();
-  $('d-copy-status').textContent = copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.';
-  if (copied) copyStatusTimer = setTimeout(clearCopyStatus, 2000);
+  // A separate task empties the live region first, so a repeat copy is announced again.
+  copyStatusTimer = setTimeout(() => {
+    $('d-copy-status').textContent = copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.';
+    if (copied) copyStatusTimer = setTimeout(clearCopyStatus, 2000);
+  }, 100);
 });
 $('idea-cancel').addEventListener('click', () => { if (!locked()) $('idea-dlg').close(); });
 // Escape closes the dialog like Cancel, except while a save runs or a submission is

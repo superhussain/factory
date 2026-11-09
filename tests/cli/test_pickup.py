@@ -110,6 +110,7 @@ class PickupFixture(IsolatedTestCase):
         patch.object(factory, "LAUNCH_WAIT_SECONDS", 2).start()
         patch.object(factory, "report_status").start()
         self.sweep = patch.object(factory, "backlog_triage_pass").start()
+        self.checkout = patch.object(factory, "checkout_problem", return_value=None).start()
 
     def configure(self, line="started", code=0, sleep=0):
         (self.root / "fake.json").write_text(json.dumps({"line": line, "code": code, "sleep": sleep}),
@@ -162,6 +163,25 @@ class PickupTest(PickupFixture):
     def test_pickup_runs_the_backlog_triage_pass(self):
         self.assert_silent(self.pickup())
         self.sweep.assert_called_once_with(self.home)
+
+    def test_a_worker_error_in_the_triage_pass_still_launches_ideas(self):
+        cause = "factory.py: GET https://factory.example.test/api/backlog returned 500: boom"
+        self.sweep.side_effect = lambda home: factory.fail(cause.removeprefix("factory.py: "), 5)
+        self.board["jobs"] = [idea("001-alpha", "alpha")]
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertEqual(err, cause + "\nfactory.py: backlog triage stopped; unsent lines wait for the next pickup run\n")
+        self.assertRegex(out, r"^launched 001-alpha alpha on primary session [0-9a-f]{6}\n$")
+        self.assertEqual(len(self.launched()), 1)
+
+    def test_a_non_worker_exit_in_the_triage_pass_stops_pickup(self):
+        self.sweep.side_effect = lambda home: factory.fail("boom", 2)
+        self.board["jobs"] = [idea("001-alpha", "alpha")]
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+        self.assertEqual(self.pickup()[0], 2)
+        self.assertEqual(self.launched(), [])
+        self.assertEqual(self.puts(), [])
 
     def test_dry_run_skips_the_backlog_triage_pass(self):
         self.assertEqual(self.pickup("--dry-run")[0], 0)
@@ -857,6 +877,27 @@ class TakeoverTest(PickupFixture):
         self.assertIn("took over 010-run alpha from agent-1 on fallback", out)
         self.assertIn("launched 002-alpha alpha on fallback", out)
 
+    def test_unsafe_checkout_skips_project(self):
+        line = f"unsafe checkout: {self.repo_a} main has root a1b2c3d4e5f6, which origin/main lacks"
+        self.checkout.return_value = line
+        self.views["echo"] = (200, effective("echo", {"pickup": {"enabled": True, "hosts": ["other-host"]}}))
+        self.board["jobs"] = [idea("001-alpha", "alpha"), idea("002-echo", "echo")]
+        self.assertEqual(self.pickup(), (0, "", f"factory.py: pickup skips alpha: {line}\n"))
+        self.checkout.assert_called_once_with(self.home, "alpha", str(self.repo_a))
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.launched(), [])
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn(f"skip 001-alpha alpha: {line}", out.splitlines())
+        self.set_adapter([self.stall()])
+        self.set_stalls()
+        self.board["jobs"] = [self.stall_job()]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[0], f"skip stall agent-1 010-run: {line}")
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.launched(), [])
+
 
 class MoveHostTest(PickupFixture):
     AT = "2026-11-08T10:00:00Z"
@@ -991,6 +1032,28 @@ class MoveHostTest(PickupFixture):
                 self.assert_silent(self.pickup())
                 self.assertEqual(self.stopped, [])
 
+    def test_null_stopped_still_runs_the_stop(self):
+        self.moved(stopped=None)
+        code, out, err = self.pickup()
+        self.assertEqual((code, out, err), (0, "stopped 042-sample-export alpha: moved to studio-mac\n", ""))
+        self.assertEqual(self.stopped, [self.wt])
+        self.assertRegex(self.job("042-sample-export")["move"]["stopped"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+
+    def test_non_string_at_and_agent_stop_once(self):
+        self.moved(**{"from": DEVICE, "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                      "stopped": None,
+                      "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": ["T1"], "agent": {"id": "x"}}]})
+        code, out, err = self.pickup()
+        self.assertEqual((code, out, err), (0, "stopped 042-sample-export alpha: moved to cloud-box\n", ""))
+        self.assertEqual(self.stopped, [self.wt])
+        move = self.job("042-sample-export")["move"]
+        self.assertIsInstance(move["stopped"], str)
+        self.assertIsInstance(move["earlier"][0]["stopped"], str)
+        self.assertNotIn("archived", move["earlier"][0])
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.stopped, self.puts()), ([self.wt], []))
+
 
 
 class RerunTest(MoveHostTest):
@@ -1013,6 +1076,17 @@ class RerunTest(MoveHostTest):
         [record] = self.launched()
         self.assertEqual(record["env"]["FACTORY_PROMPT"],
                          f"/factory recover 042-sample-export --session {tag}\n\n" + factory.UNATTENDED)
+
+    def test_null_stopped_rerun_stops_before_the_claim(self):
+        self.moved(**{"to": DEVICE, "stopped": None})
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        job = self.job("042-sample-export")
+        tag = job["claim"]["session"]
+        self.assertEqual(out, f"stopped 042-sample-export alpha: rerun on {DEVICE}\n"
+                              f"launched 042-sample-export alpha on primary session {tag}\n")
+        self.assertEqual(self.stopped, [self.wt])
+        self.assertIsInstance(job["move"]["stopped"], str)
 
     def test_survivors_block_the_claim(self):
         self.moved(**{"to": DEVICE})

@@ -371,6 +371,24 @@ test("move host", { timeout: 240000 }, async (t) => {
         pickupHosts = PICKUP_HOSTS;
       });
 
+      await t.test(`non-string stopped keeps the stop queued ${width}`, async () => {
+        const q = JOBS.find((j) => j.id === "046-queued");
+        const d = JOBS.find((j) => j.id === "047-done");
+        await seedBoard(origin, [
+          { ...q, move: { ...q.move, stopped: true } },
+          { ...d, move: { ...d.move, stopped: null } },
+        ]);
+        await page.evaluate(() => (location.hash = ""));
+        await page.reload({ waitUntil: "domcontentloaded" });
+        const queued = await page.waitForSelector('.card[data-id="046-queued"]');
+        await queued.screenshot({ path: `${SHOTS}after-card-true-stopped${suffix}.png` });
+        assert.equal(
+          await hostLine(page, "046-queued"),
+          "on studio-mac · stop queued on lab-linux",
+        );
+        assert.equal(await hostLine(page, "047-done"), "on studio-mac · stop queued on lab-linux");
+      });
+
       await t.test(`dialog says which hosts have a stop queued ${width}`, async () => {
         await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
         await seedBoard(origin, [
