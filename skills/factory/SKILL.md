@@ -382,7 +382,8 @@ which ports live jobs hold. Only `factory.py` writes `claim`.
 `automerge` marks an APPROVE PR waiting to merge. `resumes` counts consecutive
 scheduled resumes without progress, and only `factory.py stuck` writes it.
 `refs` links a job to the jobs it came from, and the dashboard shows them on the
-card and as links in the job panel. `build` is set only on merged jobs that need a
+card and as links in the job panel. The drawer's Add follow-up idea item saves a
+new idea with a `follow-up-of` ref to the open job. `build` is set only on merged jobs that need a
 device build. Jobs whose `runs` match rode the same build. Both are optional, and
 `factory.py` rejects a malformed one.
 `pipeline` holds the pipeline configuration versions the job last ran under, from
