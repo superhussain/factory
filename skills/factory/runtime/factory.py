@@ -604,6 +604,8 @@ def board(factory, job_id):
         fail("only factory.py sets started", 2)
     if "move" in patch:
         fail("only the dashboard and factory.py pickup set move", 2)
+    if "priority" in patch:
+        fail("only the dashboard and factory.py pickup set priority", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -1314,7 +1316,7 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
         else:
             count = inflight_count(data, None, minutes, device) if by_host else inflight_count(data, project, minutes)
         budget = limit if max_inflight is None else min(limit, max(0, max_inflight - count))
-        for j in data["jobs"]:
+        for j in sorted(data["jobs"], key=lambda j: not prioritized(j)):
             if len(picked) == budget:
                 break
             # A job waiting on a human, or an unapproved explorer card, is never promoted.
@@ -2730,6 +2732,76 @@ def move_stop_pass(home, data, device, dry):
             print(f"stopped {line}")
 
 
+def prioritized(j):
+    """True when the dashboard asked pickup to take this job first."""
+    p = j.get("priority")
+    return isinstance(p, dict) and isinstance(p.get("at"), str)
+
+
+PRIORITY_NUDGE = ("The owner prioritized factory job {id} from the dashboard. If your turn ended while work "
+                  "on it is still owed, continue with the next step now.")
+
+
+def paseo_send(agent, message):
+    """Send one message to a Paseo agent without waiting for its turn. True when paseo accepted it."""
+    exe = shutil.which("paseo")
+    if not exe:
+        return False
+    argv = [exe, "send", "--no-wait"]
+    if os.environ.get("PASEO_HOME"):
+        argv += ["--home", os.environ["PASEO_HOME"]]
+    try:
+        return subprocess.run(argv + [agent, message], capture_output=True, timeout=20).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def priority_nudge_pass(home, data, device, dry):
+    """Nudge the live Paseo agent of each job prioritized after its session was claimed, once."""
+    server = paseo_server()
+
+    def due(j):
+        p, c, link, job_id = j.get("priority"), j.get("claim"), j.get("paseo"), j.get("id")
+        return (prioritized(j) and "nudged" not in p
+                and (j.get("stage") == IDEA or j.get("stage") in IN_FLIGHT) and not gated(j)
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and server and isinstance(link, dict) and link.get("server") == server
+                and isinstance(c, dict) and isinstance(c.get("since"), str) and p["at"] > c["since"])
+
+    jobs = [j for j in data["jobs"] if due(j)]
+    if not jobs:
+        return
+    statuses = paseo_statuses()
+    if statuses is None:
+        print("factory.py: pickup skips priority nudges: paseo did not answer", file=sys.stderr)
+        return
+    for j in jobs:
+        job_id, agent = j["id"], j["paseo"].get("agent")
+        status = statuses.get(agent)
+        if status in (None, "closed"):
+            if dry:
+                print(f"skip nudge {job_id}: agent {agent} is {status or 'missing'}")
+            continue
+        line = f"{job_id} {j.get('project')}: agent {agent}"
+        if dry:
+            print(f"would nudge {line}")
+            continue
+        if not paseo_send(agent, PRIORITY_NUDGE.format(id=job_id)):
+            print(f"factory.py: pickup could not nudge {job_id}: paseo send failed", file=sys.stderr)
+            continue
+
+        def change(text, job_id=job_id, at=j["priority"]["at"]):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            p = (found or {}).get("priority")
+            if not isinstance(p, dict) or p.get("at") != at or "nudged" in p:
+                return None, False
+            patch_job(board, job_id, {"priority": {"nudged": now()}})
+            return dump_board(board), True
+        if cas(home, "/api/board", change):
+            print(f"nudged {line}")
+
+
 def moved_here(j, device):
     """True when the dashboard moved this in-flight job to this host and no pickup has claimed it yet."""
     m = j.get("move")
@@ -2741,6 +2813,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     paths = read_paths(home)
     data = read_board(home)
     move_stop_pass(home, data, device, dry)
+    priority_nudge_pass(home, data, device, dry)
     settings = {}
     stalls = read_stalls(home)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
@@ -2749,6 +2822,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
         return
     jobs = [j for j in data["jobs"] if (j.get("stage") == IDEA or tracer_start(j) or moved_here(j, device))
             and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"]) and ".." not in j["id"]]
+    jobs.sort(key=lambda j: not prioritized(j))
     starts = {j["id"] for j in jobs if tracer_start(j) or moved_here(j, device)}
 
     def skip(j):
