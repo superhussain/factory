@@ -2474,7 +2474,8 @@ def host_cmd(sub, host_id, code):
 def pickup(*args):
     """Claim and launch runnable ideas, and builds that Tracer scope approval released, for the
     projects whose effective pipeline enables pickup on this host. Silent when there is nothing to
-    do. Never calls a model, and no idea text reaches a launcher's arguments, environment or log name."""
+    do. Never calls a model itself; backlog triage asks the Worker, which does. No idea text
+    reaches a launcher's arguments, environment or log name."""
     flags = {}
     i = 0
     while i < len(args):
@@ -2497,6 +2498,7 @@ def pickup(*args):
         if not dry:
             tracer_follow_pass(home)
             tracer_build_pass(home)
+            backlog_triage_pass(home)
         pickup_pass(home, device, minutes, dry, limit, cap)
     finally:
         if not dry:

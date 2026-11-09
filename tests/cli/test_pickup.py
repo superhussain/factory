@@ -108,6 +108,7 @@ class PickupFixture(IsolatedTestCase):
         patch.object(factory, "api", side_effect=self.request).start()
         patch.object(factory, "LAUNCH_WAIT_SECONDS", 2).start()
         patch.object(factory, "report_status").start()
+        self.sweep = patch.object(factory, "backlog_triage_pass").start()
 
     def configure(self, line="started", code=0, sleep=0):
         (self.root / "fake.json").write_text(json.dumps({"line": line, "code": code, "sleep": sleep}),
@@ -157,6 +158,14 @@ class PickupFixture(IsolatedTestCase):
         return next(j for j in self.board["jobs"] if j["id"] == job_id)
 
 class PickupTest(PickupFixture):
+    def test_pickup_runs_the_backlog_triage_pass(self):
+        self.assert_silent(self.pickup())
+        self.sweep.assert_called_once_with(self.home)
+
+    def test_dry_run_skips_the_backlog_triage_pass(self):
+        self.assertEqual(self.pickup("--dry-run")[0], 0)
+        self.sweep.assert_not_called()
+
     def test_nothing_runnable_is_silent(self):
         self.routes.unlink()
         self.assert_silent(self.pickup())
