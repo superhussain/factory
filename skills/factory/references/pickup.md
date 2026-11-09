@@ -175,6 +175,13 @@ changes nothing. Then install one timer per host.
 - The target host's `pickup` claims the job once, sets `move.claimed` and launches `/factory recover`. The usual gates apply: pickup on, host listed, not gated, the cap and a route.
 - `factory.py stuck` leaves a move with no `claimed` to its target.
 
+## Prioritizing a job
+
+- The dashboard's Prioritize item sets `priority = {at}` on a job at `idea`, `spec`, `build`, `review` or `approve`.
+- `pickup` claims prioritized ideas before older ones, across projects too. Gates, caps and routes still apply.
+- When the job's session on this host was claimed before `priority.at` and its Paseo agent is not closed, `pickup` sends the agent one fixed nudge with `paseo send --no-wait`, then sets `priority.nudged`. A failed send is printed on stderr and retried next run.
+- Only the dashboard and `pickup` write `priority`. `board` refuses a `priority` patch with exit 2.
+
 ## Logs and limits
 
 Each launch writes `<home>/logs/pickup/<id>-<tag>.log` (mode 0600, one file per
