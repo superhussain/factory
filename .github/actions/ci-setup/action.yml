@@ -1,0 +1,29 @@
+name: CI setup
+description: Python, Node and pnpm at the pinned versions, then a frozen install from main's pnpm store.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .node-version
+    - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      with:
+        run_install: false
+    - shell: bash
+      run: test "$(pnpm --version)" = 11.9.0
+    - name: pnpm store path
+      id: pnpm-store
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+    - name: Restore pnpm store
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.pnpm-store.outputs.path }}
+        key: node-cache-Linux-x64-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          node-cache-Linux-x64-pnpm-
+    - shell: bash
+      run: pnpm install --frozen-lockfile

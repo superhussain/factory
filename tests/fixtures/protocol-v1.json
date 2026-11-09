@@ -1,0 +1,1467 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "legacy-dashboard-redirect",
+      "method": "GET",
+      "path": "/dashboard.html",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 302,
+        "body": "",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8",
+          "Location": "/"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "raw-get-1",
+      "method": "GET",
+      "path": "/board.json",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 200,
+        "body": "{\"jobs\":[]}",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "application/json; charset=utf-8",
+          "ETag": "\"0a5796e93f9b57ddf7c45f860485cbb7353fc0eda3dca753a444d0fd2a1573fe\""
+        },
+        "storage": [
+          {
+            "op": "get",
+            "key": "board.json"
+          }
+        ]
+      }
+    },
+    {
+      "id": "raw-get-2",
+      "method": "GET",
+      "path": "/api/board",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 200,
+        "body": "{\"jobs\":[]}",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "application/json; charset=utf-8",
+          "ETag": "\"0a5796e93f9b57ddf7c45f860485cbb7353fc0eda3dca753a444d0fd2a1573fe\""
+        },
+        "storage": [
+          {
+            "op": "get",
+            "key": "board.json"
+          }
+        ]
+      }
+    },
+    {
+      "id": "raw-get-3",
+      "method": "GET",
+      "path": "/api/backlog",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 200,
+        "body": "# Backlog\n",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/markdown; charset=utf-8",
+          "ETag": "\"ed769bd406173a15c796f7a4a236b521ad24c64c3b9330039b3e4c13dca02112\""
+        },
+        "storage": [
+          {
+            "op": "get",
+            "key": "backlog.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "raw-get-4",
+      "method": "GET",
+      "path": "/api/projects/sample.md",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 200,
+        "body": "---\nrepo: example/sample\nbase: main\ntitle: Sample\n---\n",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/markdown; charset=utf-8",
+          "ETag": "\"f6f09492816391819677c289d06e1135bd45a2d4510846942a90c01b61c9efee\""
+        },
+        "storage": [
+          {
+            "op": "get",
+            "key": "projects/sample.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "raw-get-5",
+      "method": "GET",
+      "path": "/api/jobs/sample/001/build.md",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 200,
+        "body": "# Build\n",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/markdown; charset=utf-8",
+          "ETag": "\"bbc290c9f84e532bd47737480381f0db3afae637d696806856d95d0a186bb619\""
+        },
+        "storage": [
+          {
+            "op": "get",
+            "key": "jobs/sample/001/build.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "raw-get-6",
+      "method": "GET",
+      "path": "/jobs/sample/001/build.md",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 200,
+        "body": "# Build\n",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/markdown; charset=utf-8",
+          "ETag": "\"bbc290c9f84e532bd47737480381f0db3afae637d696806856d95d0a186bb619\""
+        },
+        "storage": [
+          {
+            "op": "get",
+            "key": "jobs/sample/001/build.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "projects-bounded-list",
+      "method": "GET",
+      "path": "/projects.json",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 200,
+        "body": "[{\"slug\":\"sample\",\"title\":\"Sample\",\"repo\":\"example/sample\",\"base\":\"main\"}]",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "list",
+            "options": {
+              "prefix": "projects/"
+            }
+          },
+          {
+            "op": "get",
+            "key": "projects/sample.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-project",
+      "method": "GET",
+      "path": "/api/projects/missing.md",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "get",
+            "key": "projects/missing.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "closed-route-1",
+      "method": "GET",
+      "path": "/missing",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-route-2",
+      "method": "GET",
+      "path": "/api/config.md",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-route-3",
+      "method": "GET",
+      "path": "/assets/unknown.js",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-route-4",
+      "method": "GET",
+      "path": "/api/project-documents/sample/%6eotes.md",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-route-5",
+      "method": "GET",
+      "path": "/api/project-documents/sample/config.md",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-route-6",
+      "method": "GET",
+      "path": "/api/projects/a%2fb.md",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-route-7",
+      "method": "GET",
+      "path": "/api/jobs/sample/001/a.remote",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-route-8",
+      "method": "GET",
+      "path": "/jobs/sample/001/a.svg",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-method-post",
+      "method": "POST",
+      "path": "/api/board",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-method-delete",
+      "method": "DELETE",
+      "path": "/api/board",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-method-patch",
+      "method": "PATCH",
+      "path": "/api/board",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-method-options",
+      "method": "OPTIONS",
+      "path": "/api/board",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "closed-method-head",
+      "method": "HEAD",
+      "path": "/api/board",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "board-condition-1",
+      "method": "PUT",
+      "path": "/api/board",
+      "headers": {},
+      "body": "{\"jobs\":[]}",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "board-condition-2",
+      "method": "PUT",
+      "path": "/api/board",
+      "headers": {
+        "If-Match": "unquoted"
+      },
+      "body": "{\"jobs\":[]}",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "board-condition-3",
+      "method": "PUT",
+      "path": "/api/board",
+      "headers": {
+        "If-Match": "*"
+      },
+      "body": "{\"jobs\":[]}",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "board-condition-4",
+      "method": "PUT",
+      "path": "/api/board",
+      "headers": {
+        "If-Match": "\"a\"",
+        "If-None-Match": "*"
+      },
+      "body": "{\"jobs\":[]}",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "board-condition-5",
+      "method": "PUT",
+      "path": "/api/board",
+      "headers": {
+        "If-None-Match": "\"a\""
+      },
+      "body": "{\"jobs\":[]}",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "board-stale",
+      "method": "PUT",
+      "path": "/api/board",
+      "headers": {
+        "If-Match": "\"stale\""
+      },
+      "body": "{\"jobs\":[]}",
+      "expected": {
+        "status": 412,
+        "body": "precondition failed",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "put",
+            "key": "board.json",
+            "options": {
+              "onlyIf": {
+                "if-match": "\"stale\""
+              },
+              "httpMetadata": {
+                "contentType": "application/json"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "board-stream-overflow",
+      "method": "PUT",
+      "path": "/api/board",
+      "headers": {
+        "If-Match": "\"0a5796e93f9b57ddf7c45f860485cbb7353fc0eda3dca753a444d0fd2a1573fe\""
+      },
+      "body": {
+        "fixture": "text-stream-overflow"
+      },
+      "expected": {
+        "status": 413,
+        "body": "body over 1 MiB",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "backlog-condition-1",
+      "method": "PUT",
+      "path": "/api/backlog",
+      "headers": {},
+      "body": "# Backlog\n",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "backlog-condition-2",
+      "method": "PUT",
+      "path": "/api/backlog",
+      "headers": {
+        "If-Match": "unquoted"
+      },
+      "body": "# Backlog\n",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "backlog-condition-3",
+      "method": "PUT",
+      "path": "/api/backlog",
+      "headers": {
+        "If-Match": "*"
+      },
+      "body": "# Backlog\n",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "backlog-condition-4",
+      "method": "PUT",
+      "path": "/api/backlog",
+      "headers": {
+        "If-Match": "\"a\"",
+        "If-None-Match": "*"
+      },
+      "body": "# Backlog\n",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "backlog-condition-5",
+      "method": "PUT",
+      "path": "/api/backlog",
+      "headers": {
+        "If-None-Match": "\"a\""
+      },
+      "body": "# Backlog\n",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "backlog-stale",
+      "method": "PUT",
+      "path": "/api/backlog",
+      "headers": {
+        "If-Match": "\"stale\""
+      },
+      "body": "# Backlog\n",
+      "expected": {
+        "status": 412,
+        "body": "precondition failed",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "put",
+            "key": "backlog.md",
+            "options": {
+              "onlyIf": {
+                "if-match": "\"stale\""
+              },
+              "httpMetadata": {
+                "contentType": "text/markdown"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "backlog-stream-overflow",
+      "method": "PUT",
+      "path": "/api/backlog",
+      "headers": {
+        "If-Match": "\"ed769bd406173a15c796f7a4a236b521ad24c64c3b9330039b3e4c13dca02112\""
+      },
+      "body": {
+        "fixture": "text-stream-overflow"
+      },
+      "expected": {
+        "status": 413,
+        "body": "body over 1 MiB",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "board-json-invalid",
+      "method": "PUT",
+      "path": "/api/board",
+      "headers": {
+        "If-None-Match": "*"
+      },
+      "body": "{",
+      "expected": {
+        "status": 400,
+        "body": "body is not JSON",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "board-jobs-required",
+      "method": "PUT",
+      "path": "/api/board",
+      "headers": {
+        "If-None-Match": "*"
+      },
+      "body": "{}",
+      "expected": {
+        "status": 400,
+        "body": "body needs a jobs array",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "project-missing-condition",
+      "method": "PUT",
+      "path": "/api/projects/fresh.md",
+      "headers": {},
+      "body": "bad",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "project-malformed-condition",
+      "method": "PUT",
+      "path": "/api/projects/fresh.md",
+      "headers": {
+        "If-Match": ""
+      },
+      "body": "bad",
+      "expected": {
+        "status": 400,
+        "body": "invalid project write condition",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "project-wrong-media",
+      "method": "PUT",
+      "path": "/api/projects/fresh.md",
+      "headers": {
+        "If-None-Match": "*",
+        "Content-Type": "text/plain"
+      },
+      "body": "bad",
+      "expected": {
+        "status": 415,
+        "body": "project document needs text/markdown",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "project-bad-utf8",
+      "method": "PUT",
+      "path": "/api/projects/fresh.md",
+      "headers": {
+        "If-None-Match": "*",
+        "Content-Type": "text/markdown"
+      },
+      "body": {
+        "fixture": "invalid-utf8"
+      },
+      "expected": {
+        "status": 400,
+        "body": "project document must be valid UTF-8",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "project-overflow",
+      "method": "PUT",
+      "path": "/api/projects/fresh.md",
+      "headers": {
+        "If-None-Match": "*",
+        "Content-Type": "text/markdown"
+      },
+      "body": {
+        "fixture": "text-overflow"
+      },
+      "expected": {
+        "status": 413,
+        "body": "body over 1 MiB",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "project-conditional-create",
+      "method": "PUT",
+      "path": "/api/projects/fresh.md",
+      "headers": {
+        "If-None-Match": "*",
+        "Content-Type": "text/markdown"
+      },
+      "body": "---\nrepo: example/sample\nbase: main\ntitle: Sample\n---\n",
+      "expected": {
+        "status": 200,
+        "body": "ok",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8",
+          "ETag": "\"f6f09492816391819677c289d06e1135bd45a2d4510846942a90c01b61c9efee\""
+        },
+        "storage": [
+          {
+            "op": "put",
+            "key": "projects/fresh.md",
+            "options": {
+              "onlyIf": {
+                "if-none-match": "*"
+              },
+              "httpMetadata": {
+                "contentType": "text/markdown; charset=utf-8"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "document-missing-condition",
+      "method": "PUT",
+      "path": "/api/project-documents/sample/runbook.md",
+      "headers": {},
+      "body": "bad",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "head",
+            "key": "projects/sample.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "document-malformed-condition",
+      "method": "PUT",
+      "path": "/api/project-documents/sample/runbook.md",
+      "headers": {
+        "If-Match": ""
+      },
+      "body": "bad",
+      "expected": {
+        "status": 400,
+        "body": "invalid document write condition",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "head",
+            "key": "projects/sample.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "document-wrong-media",
+      "method": "PUT",
+      "path": "/api/project-documents/sample/runbook.md",
+      "headers": {
+        "If-None-Match": "*",
+        "Content-Type": "text/plain"
+      },
+      "body": "bad",
+      "expected": {
+        "status": 415,
+        "body": "document needs text/markdown",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "head",
+            "key": "projects/sample.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "document-bad-utf8",
+      "method": "PUT",
+      "path": "/api/project-documents/sample/runbook.md",
+      "headers": {
+        "If-None-Match": "*",
+        "Content-Type": "text/markdown"
+      },
+      "body": {
+        "fixture": "invalid-utf8"
+      },
+      "expected": {
+        "status": 400,
+        "body": "document must be valid UTF-8",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "head",
+            "key": "projects/sample.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "document-overflow",
+      "method": "PUT",
+      "path": "/api/project-documents/sample/runbook.md",
+      "headers": {
+        "If-None-Match": "*",
+        "Content-Type": "text/markdown"
+      },
+      "body": {
+        "fixture": "text-overflow"
+      },
+      "expected": {
+        "status": 413,
+        "body": "body over 1 MiB",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "head",
+            "key": "projects/sample.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "document-conditional-create",
+      "method": "PUT",
+      "path": "/api/project-documents/sample/runbook.md",
+      "headers": {
+        "If-None-Match": "*",
+        "Content-Type": "text/markdown"
+      },
+      "body": "",
+      "expected": {
+        "status": 200,
+        "body": "ok",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8",
+          "ETag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+        },
+        "storage": [
+          {
+            "op": "head",
+            "key": "projects/sample.md"
+          },
+          {
+            "op": "put",
+            "key": "project-documents/sample/runbook.md",
+            "options": {
+              "onlyIf": {
+                "if-none-match": "*"
+              },
+              "httpMetadata": {
+                "contentType": "text/markdown; charset=utf-8"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "registration-before-list",
+      "method": "GET",
+      "path": "/api/project-documents/missing",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "head",
+            "key": "projects/missing.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "registration-before-write",
+      "method": "PUT",
+      "path": "/api/project-documents/missing/notes.md",
+      "headers": {},
+      "body": "bad",
+      "expected": {
+        "status": 404,
+        "body": "not found",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "head",
+            "key": "projects/missing.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "document-list-order",
+      "method": "GET",
+      "path": "/api/project-documents/sample",
+      "headers": {},
+      "body": null,
+      "expected": {
+        "status": 200,
+        "body": "[{\"name\":\"notes.md\",\"exists\":true},{\"name\":\"decisions.md\",\"exists\":false},{\"name\":\"runbook.md\",\"exists\":false}]",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "storage": [
+          {
+            "op": "head",
+            "key": "projects/sample.md"
+          },
+          {
+            "op": "head",
+            "key": "project-documents/sample/notes.md"
+          },
+          {
+            "op": "head",
+            "key": "project-documents/sample/decisions.md"
+          },
+          {
+            "op": "head",
+            "key": "project-documents/sample/runbook.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "job-blind-write",
+      "method": "PUT",
+      "path": "/api/jobs/sample/001/build.md",
+      "headers": {},
+      "body": "blind",
+      "expected": {
+        "status": 200,
+        "body": "ok",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8",
+          "ETag": "\"e5b84c89f624a40cdfdc0c6da3c9f0b47ce587edae0117b8c8b7c0a9523db5c4\""
+        },
+        "storage": [
+          {
+            "op": "put",
+            "key": "jobs/sample/001/build.md",
+            "options": {}
+          }
+        ]
+      }
+    },
+    {
+      "id": "job-bad-condition",
+      "method": "PUT",
+      "path": "/api/jobs/sample/001/build.md",
+      "headers": {
+        "If-Match": "unquoted"
+      },
+      "body": "bad",
+      "expected": {
+        "status": 428,
+        "body": "PUT needs If-Match: \"<etag>\" or If-None-Match: *",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "job-text-overflow",
+      "method": "PUT",
+      "path": "/api/jobs/sample/001/build.md",
+      "headers": {},
+      "body": {
+        "fixture": "text-overflow"
+      },
+      "expected": {
+        "status": 413,
+        "body": "body over 1 MiB",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "job-image-overflow",
+      "method": "PUT",
+      "path": "/api/jobs/sample/001/shot.png",
+      "headers": {},
+      "body": {
+        "fixture": "image-overflow"
+      },
+      "expected": {
+        "status": 413,
+        "body": "image over 5 MiB",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "image-envelope-1",
+      "method": "PUT",
+      "path": "/api/idea-images/0000000000000000000000000000000000000000000000000000000000000000.png",
+      "headers": {},
+      "body": "bad",
+      "expected": {
+        "status": 415,
+        "body": "Content-Type must be image/png",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "image-envelope-2",
+      "method": "PUT",
+      "path": "/api/idea-images/0000000000000000000000000000000000000000000000000000000000000000.png",
+      "headers": {
+        "Content-Type": "image/png; charset=utf-8"
+      },
+      "body": "bad",
+      "expected": {
+        "status": 415,
+        "body": "Content-Type must be image/png",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "image-envelope-3",
+      "method": "PUT",
+      "path": "/api/idea-images/0000000000000000000000000000000000000000000000000000000000000000.png",
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "body": "bad",
+      "expected": {
+        "status": 415,
+        "body": "not a PNG",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "image-envelope-4",
+      "method": "PUT",
+      "path": "/api/idea-images/0000000000000000000000000000000000000000000000000000000000000000.png",
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "body": {
+        "fixture": "png-truncated"
+      },
+      "expected": {
+        "status": 400,
+        "body": "truncated IHDR",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "image-envelope-5",
+      "method": "PUT",
+      "path": "/api/idea-images/0000000000000000000000000000000000000000000000000000000000000000.png",
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "body": {
+        "fixture": "png-wrong-chunk"
+      },
+      "expected": {
+        "status": 400,
+        "body": "first chunk must be a 13-byte IHDR",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "image-envelope-6",
+      "method": "PUT",
+      "path": "/api/idea-images/0000000000000000000000000000000000000000000000000000000000000000.png",
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "body": {
+        "fixture": "png-too-wide"
+      },
+      "expected": {
+        "status": 400,
+        "body": "image dimensions out of range",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "image-envelope-7",
+      "method": "PUT",
+      "path": "/api/idea-images/0000000000000000000000000000000000000000000000000000000000000000.png",
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "body": {
+        "fixture": "png-too-many-pixels"
+      },
+      "expected": {
+        "status": 400,
+        "body": "image dimensions out of range",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "image-envelope-8",
+      "method": "PUT",
+      "path": "/api/idea-images/0000000000000000000000000000000000000000000000000000000000000000.png",
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "body": {
+        "fixture": "png"
+      },
+      "expected": {
+        "status": 400,
+        "body": "SHA-256 does not match the file name",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    },
+    {
+      "id": "image-envelope-9",
+      "method": "PUT",
+      "path": "/api/idea-images/0000000000000000000000000000000000000000000000000000000000000000.png",
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "body": {
+        "fixture": "image-stream-overflow"
+      },
+      "expected": {
+        "status": 413,
+        "body": "image over 5 MiB",
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": null,
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "storage": []
+      }
+    }
+  ]
+}

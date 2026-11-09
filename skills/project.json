@@ -1,0 +1,7 @@
+{
+  "name": "device-bundle",
+  "targets": {
+    "cli": { "command": "pnpm run test:cli" },
+    "install": { "command": "pnpm run test:install" }
+  }
+}

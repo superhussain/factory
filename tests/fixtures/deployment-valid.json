@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "account_id": "00000000000000000000000000000000",
+  "worker_name": "factory-example",
+  "bucket_name": "factory-example",
+  "origin": "https://factory.example.test",
+  "title": "Factory",
+  "issuer": "https://example-team.cloudflareaccess.com",
+  "audience": "example-application-audience",
+  "image_origins": [],
+  "agent_links": {}
+}

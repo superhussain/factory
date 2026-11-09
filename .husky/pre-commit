@@ -1,0 +1,26 @@
+# Pre-commit: gitleaks on the staged diff, then oxlint + oxfmt --check on staged JS/TS files only.
+# skills/ is the only filtered path (see docs/development.md).
+mise exec -- gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml || exit 1
+
+files=$(mktemp) || exit 1
+trap 'rm -f "$files"' EXIT
+
+# NUL-delimited output so paths with spaces or non-ASCII characters survive
+# without word-splitting or glob expansion; a genuine git failure fails the
+# hook instead of being swallowed.
+if ! git diff --cached --name-only -z --diff-filter=ACMR -- '*.js' '*.mjs' '*.cjs' '*.ts' ':(exclude)skills/' > "$files"; then
+  echo "pre-commit: git diff --cached failed" >&2
+  exit 1
+fi
+[ -s "$files" ] || exit 0
+
+if ! mise exec -- pnpm --version >/dev/null 2>&1; then
+  echo "pre-commit: pnpm not found; install mise and run 'mise exec -- pnpm install --frozen-lockfile'" >&2
+  exit 1
+fi
+
+xargs -0 mise exec -- pnpm exec oxlint < "$files" || exit 1
+xargs -0 mise exec -- pnpm exec oxfmt --check < "$files" || {
+  echo "formatting required: run 'mise exec -- pnpm exec oxfmt <files>' and restage"
+  exit 1
+}

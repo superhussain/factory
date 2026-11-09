@@ -1,0 +1,12 @@
+{
+  "name": "factory-auth-test",
+  "main": "auth-entry.js",
+  "compatibility_date": "2026-06-01",
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "factory-auth-test" }],
+  "vars": {
+    "FACTORY_ORIGIN": "https://factory.example.test",
+    "FACTORY_TITLE": "Factory",
+    "ACCESS_ISSUER": "https://auth-test.cloudflareaccess.com",
+    "ACCESS_AUDIENCE": "example-application-audience"
+  }
+}

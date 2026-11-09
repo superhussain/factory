@@ -1,0 +1,13 @@
+{
+  "name": "worker-hosted",
+  "targets": {
+    "auth": {
+      "command": "pnpm run test:auth",
+      "dependsOn": [{ "projects": ["web-dashboard"], "target": "assets" }]
+    },
+    "protocol": {
+      "command": "pnpm run test:protocol",
+      "dependsOn": [{ "projects": ["web-dashboard"], "target": "assets" }]
+    }
+  }
+}

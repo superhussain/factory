@@ -1,0 +1,144 @@
+{
+ "version": 1,
+ "suites": [
+  {
+   "file": "test_dashboard_project_documents.cjs",
+   "cases": [
+    "PASS conditional fixture seed",
+    "PASS D1 fixed slots",
+    "PASS D2 exact legacy record",
+    "PASS D3 stale edit/conflict exact recovery",
+    "PASS focused D4 missing edit",
+    "PASS D4 network/auth/ETag/bytes/storage/clipboard failures",
+    "PASS D5 held cross-resource load",
+    "PASS D6 inert source",
+    "PASS D6 remaining keyboard reachability",
+    "PASS D1-D6 actual local Worker browser acceptance"
+   ]
+  },
+  {
+   "file": "test_dashboard_card_wrap.cjs",
+   "cases": [
+    "card wrap offline checks PASS",
+    "\"result\":\"PASS\",\"writes\":0,\"external\":0,\"browserErrors\":0"
+   ]
+  },
+  {
+   "file": "test_dashboard_column_collapse.cjs",
+   "cases": [
+    "\"result\":\"PASS\",\"violations\":0,\"browserErrors\":0"
+   ]
+  },
+  {
+   "file": "test_dashboard_idea_edit.cjs",
+   "cases": [
+    "PASS offline setup:",
+    "PASS offline: actual helpers",
+    "PASS offline UI:",
+    "PASS browser editor open/conflict/reachable",
+    "PASS integration: Cmd+K/Meta+Enter",
+    "PASS browser: native keyboard/inertness"
+   ]
+  },
+  {
+   "file": "test_dashboard_keyboard_nav.cjs",
+   "cases": [
+    "PASS offline source checks",
+    "PASS board arrows",
+    "PASS page arrows",
+    "PASS card arrows",
+    "PASS single keys",
+    "PASS regressions"
+   ]
+  },
+  {
+   "file": "test_dashboard_jumper_order.cjs",
+   "cases": [
+    "PASS synthetic local R2 seed",
+    "PASS board/drawer queries",
+    "PASS Meta/Control activation",
+    "PASS hidden, disabled, absent trigger checks",
+    "PASS command row geometry",
+    "PASS zero-project capture available",
+    "PASS jumper order regression"
+   ]
+  },
+  {
+   "file": "test_dashboard_jumper_project.cjs",
+   "cases": [
+    "PASS conditional synthetic seed",
+    "PASS command",
+    "PASS projects",
+    "PASS keyboard",
+    "PASS refresh",
+    "PASS regression"
+   ]
+  },
+  {
+   "file": "test_dashboard_jumper_sections.cjs",
+   "cases": [
+    "PASS conditional synthetic seed",
+    "PASS sections",
+    "PASS search",
+    "PASS keyboard",
+    "PASS poll"
+   ]
+  },
+  {
+   "file": "test_dashboard_mobile_header.cjs",
+   "cases": [
+    "\"result\":\"PASS\",\"comparisons\":70"
+   ]
+  },
+  {
+   "file": "test_dashboard_backlog.cjs",
+   "cases": [
+    "PASS backlog offline helpers",
+    "PASS backlog offline context",
+    "PASS backlog browser approve",
+    "PASS backlog browser deny",
+    "PASS backlog browser gone line",
+    "PASS backlog browser shortcuts",
+    "PASS backlog browser keyboard/mobile",
+    "PASS backlog browser context",
+    "PASS backlog browser shortcut gate",
+    "PASS backlog browser shortcut answered question",
+    "PASS backlog browser shortcut failed save",
+    "PASS backlog browser shortcut answers",
+    "PASS backlog browser tap submit",
+    "PASS backlog browser tap gate",
+    "PASS backlog browser tap no submit",
+    "PASS backlog browser tap hint"
+   ]
+  }
+ ],
+ "nodeTests": [
+  "tests/browser/project-document-recovery.test.mjs",
+  "tests/browser/configuration.test.mjs",
+  "tests/browser/dashboard-routing.test.mjs",
+  "tests/browser/offline-mermaid.test.mjs",
+  "tests/browser/markdown-lists.test.mjs",
+  "tests/browser/markdown-links.test.mjs",
+  "tests/browser/doc-job-link-focus.test.mjs",
+  "tests/browser/step-stepper.test.mjs",
+  "tests/browser/html-stepper.test.mjs",
+  "tests/browser/walkthrough-map.test.mjs",
+  "tests/browser/reassigned-links.test.mjs",
+  "tests/browser/tracer-follow.test.mjs",
+  "tests/browser/owned-fixtures.test.mjs",
+  "tests/browser/pipeline-settings.test.mjs",
+  "tests/browser/settings-page.test.mjs",
+  "tests/browser/settings-hosts.test.mjs",
+  "tests/browser/drawer-pipeline-save-replies.test.mjs",
+  "tests/browser/display-settings.test.mjs",
+  "tests/browser/header-icons.test.mjs",
+  "tests/browser/btn-tap-target.test.mjs",
+  "tests/browser/pwa-offline.test.mjs",
+  "tests/browser/notification-settings.test.mjs",
+  "tests/browser/scheduler-settings.test.mjs",
+  "tests/browser/reference-settings.test.mjs",
+  "tests/browser/needs-you-form.test.mjs",
+  "tests/browser/drawer-swipe.test.mjs",
+  "tests/browser/drawer-compact.test.mjs"
+ ]
+}

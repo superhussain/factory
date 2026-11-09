@@ -1,0 +1,1006 @@
+{
+ "version": 1,
+ "groups": [
+  {
+   "id": "project-document-recovery-02",
+   "source_file": "project-document-recovery.test.mjs",
+   "source_group": "assertion-group-02",
+   "replacements": [
+    {
+     "file": "tests/browser/project-document-recovery.test.mjs",
+     "case": "original"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-document-recovery-03",
+   "source_file": "project-document-recovery.test.mjs",
+   "source_group": "assertion-group-03",
+   "replacements": [
+    {
+     "file": "tests/browser/project-document-recovery.test.mjs",
+     "case": "Copy cannot unblock a missing observed edit, including denial and subsequent input"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-document-recovery-04",
+   "source_file": "project-document-recovery.test.mjs",
+   "source_group": "assertion-group-04",
+   "replacements": [
+    {
+     "file": "tests/browser/project-document-recovery.test.mjs",
+     "case": "missing observed edits persist the block immediately, including clean drafts and immediate reload"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-document-recovery-05",
+   "source_file": "project-document-recovery.test.mjs",
+   "source_group": "assertion-group-05",
+   "replacements": [
+    {
+     "file": "tests/browser/project-document-recovery.test.mjs",
+     "case": "failed replacements preserve prior uncertainty or conflict and the original edit condition"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-document-recovery-06",
+   "source_file": "project-document-recovery.test.mjs",
+   "source_group": "assertion-group-06",
+   "replacements": [
+    {
+     "file": "tests/browser/project-document-recovery.test.mjs",
+     "case": "only validated explicit replacement clears the block and the next save uses that new observed tag"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-document-recovery-07",
+   "source_file": "project-document-recovery.test.mjs",
+   "source_group": "assertion-group-07",
+   "replacements": [
+    {
+     "file": "tests/browser/project-document-recovery.test.mjs",
+     "case": "legacy configuration records, fresh empty creation and uncertain empty creates keep their contracts"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-documents-01",
+   "source_file": "project-documents.test.mjs",
+   "source_group": "assertion-group-01",
+   "replacements": [
+    {
+     "file": "tests/worker/project-documents.test.mjs",
+     "case": "registry"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-documents-02",
+   "source_file": "project-documents.test.mjs",
+   "source_group": "assertion-group-02",
+   "replacements": [
+    {
+     "file": "tests/worker/project-documents.test.mjs",
+     "case": "setup"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-documents-03",
+   "source_file": "project-documents.test.mjs",
+   "source_group": "assertion-group-03",
+   "replacements": [
+    {
+     "file": "tests/worker/project-documents.test.mjs",
+     "case": "authoritative registry and bounded advisory list"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-documents-04",
+   "source_file": "project-documents.test.mjs",
+   "source_group": "assertion-group-04",
+   "replacements": [
+    {
+     "file": "tests/worker/project-documents.test.mjs",
+     "case": "registration precedes all document storage and failures are not absence"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-documents-05",
+   "source_file": "project-documents.test.mjs",
+   "source_group": "assertion-group-05",
+   "replacements": [
+    {
+     "file": "tests/worker/project-documents.test.mjs",
+     "case": "route, method, auth and query boundaries"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-documents-06",
+   "source_file": "project-documents.test.mjs",
+   "source_group": "assertion-group-06",
+   "replacements": [
+    {
+     "file": "tests/worker/project-documents.test.mjs",
+     "case": "strict write grammar, media and validation order leave bytes unchanged"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-documents-07",
+   "source_file": "project-documents.test.mjs",
+   "source_group": "assertion-group-07",
+   "replacements": [
+    {
+     "file": "tests/worker/project-documents.test.mjs",
+     "case": "exact bytes including Unicode, CRLF, HTML, empty and byte cap"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-documents-08",
+   "source_file": "project-documents.test.mjs",
+   "source_group": "assertion-group-08",
+   "replacements": [
+    {
+     "file": "tests/worker/project-documents.test.mjs",
+     "case": "atomic same-resource create/edit races, missing edit, independent names/projects and config isolation"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-settings-01",
+   "source_file": "project-settings.test.mjs",
+   "source_group": "assertion-group-01",
+   "replacements": [
+    {
+     "file": "tests/worker/project-settings.test.mjs",
+     "case": "setup"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-settings-02",
+   "source_file": "project-settings.test.mjs",
+   "source_group": "assertion-group-02",
+   "replacements": [
+    {
+     "file": "tests/worker/project-settings.test.mjs",
+     "case": "conditional create, weak and strong update, stale and missing target, atomic race"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-settings-03",
+   "source_file": "project-settings.test.mjs",
+   "source_group": "assertion-group-03",
+   "replacements": [
+    {
+     "file": "tests/worker/project-settings.test.mjs",
+     "case": "strict conditions precede media and validation"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-settings-04",
+   "source_file": "project-settings.test.mjs",
+   "source_group": "assertion-group-04",
+   "replacements": [
+    {
+     "file": "tests/worker/project-settings.test.mjs",
+     "case": "valid source round trips without rewriting and exact byte limit"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "project-settings-05",
+   "source_file": "project-settings.test.mjs",
+   "source_group": "assertion-group-05",
+   "replacements": [
+    {
+     "file": "tests/worker/project-settings.test.mjs",
+     "case": "Access and route allowlist remain closed"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-card-wrap-02",
+   "source_file": "test_dashboard_card_wrap.cjs",
+   "source_group": "assertion-group-02",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_card_wrap.cjs",
+     "case": "browserRun"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-card-wrap-06",
+   "source_file": "test_dashboard_card_wrap.cjs",
+   "source_group": "assertion-group-06",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_card_wrap.cjs",
+     "case": "checkCards"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-card-wrap-08",
+   "source_file": "test_dashboard_card_wrap.cjs",
+   "source_group": "assertion-group-08",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_card_wrap.cjs",
+     "case": "interactions"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-card-wrap-09",
+   "source_file": "test_dashboard_card_wrap.cjs",
+   "source_group": "assertion-group-09",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_card_wrap.cjs",
+     "case": "offline"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-column-collapse-01",
+   "source_file": "test_dashboard_column_collapse.cjs",
+   "source_group": "assertion-group-01",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_column_collapse.cjs",
+     "case": "makePage"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-column-collapse-04",
+   "source_file": "test_dashboard_column_collapse.cjs",
+   "source_group": "assertion-group-04",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_column_collapse.cjs",
+     "case": "checkAX"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-column-collapse-05",
+   "source_file": "test_dashboard_column_collapse.cjs",
+   "source_group": "assertion-group-05",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_column_collapse.cjs",
+     "case": "defaults"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-column-collapse-06",
+   "source_file": "test_dashboard_column_collapse.cjs",
+   "source_group": "assertion-group-06",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_column_collapse.cjs",
+     "case": "matrix"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-column-collapse-07",
+   "source_file": "test_dashboard_column_collapse.cjs",
+   "source_group": "assertion-group-07",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_column_collapse.cjs",
+     "case": "browserRun"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-idea-edit-01",
+   "source_file": "test_dashboard_idea_edit.cjs",
+   "source_group": "assertion-group-01",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_idea_edit.cjs",
+     "case": "assertIdeaBrowserTarget"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-idea-edit-02",
+   "source_file": "test_dashboard_idea_edit.cjs",
+   "source_group": "assertion-group-02",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_idea_edit.cjs",
+     "case": "registerIdeaFixture"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-idea-edit-03",
+   "source_file": "test_dashboard_idea_edit.cjs",
+   "source_group": "assertion-group-03",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_idea_edit.cjs",
+     "case": "offlineRegistration"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-idea-edit-07",
+   "source_file": "test_dashboard_idea_edit.cjs",
+   "source_group": "assertion-group-07",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_idea_edit.cjs",
+     "case": "offline"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-idea-edit-10",
+   "source_file": "test_dashboard_idea_edit.cjs",
+   "source_group": "assertion-group-10",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_idea_edit.cjs",
+     "case": "offlineUI"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-idea-edit-11",
+   "source_file": "test_dashboard_idea_edit.cjs",
+   "source_group": "assertion-group-11",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_idea_edit.cjs",
+     "case": "browserTest"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-order-01",
+   "source_file": "test_dashboard_jumper_order.cjs",
+   "source_group": "assertion-group-01",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_order.cjs",
+     "case": "conditionalPut"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-order-02",
+   "source_file": "test_dashboard_jumper_order.cjs",
+   "source_group": "assertion-group-02",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_order.cjs",
+     "case": "seed"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-order-04",
+   "source_file": "test_dashboard_jumper_order.cjs",
+   "source_group": "assertion-group-04",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_order.cjs",
+     "case": "openPicker"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-order-05",
+   "source_file": "test_dashboard_jumper_order.cjs",
+   "source_group": "assertion-group-05",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_order.cjs",
+     "case": "query"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-order-07",
+   "source_file": "test_dashboard_jumper_order.cjs",
+   "source_group": "assertion-group-07",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_order.cjs",
+     "case": "selected"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-order-10",
+   "source_file": "test_dashboard_jumper_order.cjs",
+   "source_group": "assertion-group-10",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_order.cjs",
+     "case": "geometry"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-order-11",
+   "source_file": "test_dashboard_jumper_order.cjs",
+   "source_group": "assertion-group-11",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_order.cjs",
+     "case": "browserRun"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-project-01",
+   "source_file": "test_dashboard_jumper_project.cjs",
+   "source_group": "assertion-group-01",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_project.cjs",
+     "case": "conditionalPut"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-project-04",
+   "source_file": "test_dashboard_jumper_project.cjs",
+   "source_group": "assertion-group-04",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_project.cjs",
+     "case": "openPicker"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-project-05",
+   "source_file": "test_dashboard_jumper_project.cjs",
+   "source_group": "assertion-group-05",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_project.cjs",
+     "case": "setQuery"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-project-07",
+   "source_file": "test_dashboard_jumper_project.cjs",
+   "source_group": "assertion-group-07",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_project.cjs",
+     "case": "selected"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-project-08",
+   "source_file": "test_dashboard_jumper_project.cjs",
+   "source_group": "assertion-group-08",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_project.cjs",
+     "case": "choose"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-project-10",
+   "source_file": "test_dashboard_jumper_project.cjs",
+   "source_group": "assertion-group-10",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_project.cjs",
+     "case": "clickKey"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-project-12",
+   "source_file": "test_dashboard_jumper_project.cjs",
+   "source_group": "assertion-group-12",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_project.cjs",
+     "case": "nativeFilter"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-project-16",
+   "source_file": "test_dashboard_jumper_project.cjs",
+   "source_group": "assertion-group-16",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_project.cjs",
+     "case": "browserRun"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-sections-01",
+   "source_file": "test_dashboard_jumper_sections.cjs",
+   "source_group": "assertion-group-01",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_sections.cjs",
+     "case": "conditionalPut"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-sections-03",
+   "source_file": "test_dashboard_jumper_sections.cjs",
+   "source_group": "assertion-group-03",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_sections.cjs",
+     "case": "openPicker"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-sections-04",
+   "source_file": "test_dashboard_jumper_sections.cjs",
+   "source_group": "assertion-group-04",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_sections.cjs",
+     "case": "setQuery"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-sections-06",
+   "source_file": "test_dashboard_jumper_sections.cjs",
+   "source_group": "assertion-group-06",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_sections.cjs",
+     "case": "selected"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-sections-09",
+   "source_file": "test_dashboard_jumper_sections.cjs",
+   "source_group": "assertion-group-09",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_sections.cjs",
+     "case": "choose"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-jumper-sections-10",
+   "source_file": "test_dashboard_jumper_sections.cjs",
+   "source_group": "assertion-group-10",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_jumper_sections.cjs",
+     "case": "browserRun"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-mobile-header-04",
+   "source_file": "test_dashboard_mobile_header.cjs",
+   "source_group": "assertion-group-04",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_mobile_header.cjs",
+     "case": "checkGeometry"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-mobile-header-05",
+   "source_file": "test_dashboard_mobile_header.cjs",
+   "source_group": "assertion-group-05",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_mobile_header.cjs",
+     "case": "keyboard"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-mobile-header-06",
+   "source_file": "test_dashboard_mobile_header.cjs",
+   "source_group": "assertion-group-06",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_mobile_header.cjs",
+     "case": "browserRun"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-project-documents-01",
+   "source_file": "test_dashboard_project_documents.cjs",
+   "source_group": "assertion-group-01",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_project_documents.cjs",
+     "case": "fixtureReadback"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-project-documents-03",
+   "source_file": "test_dashboard_project_documents.cjs",
+   "source_group": "assertion-group-03",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_project_documents.cjs",
+     "case": "write"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-project-documents-09",
+   "source_file": "test_dashboard_project_documents.cjs",
+   "source_group": "assertion-group-09",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_project_documents.cjs",
+     "case": "confirmLoad"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-project-documents-10",
+   "source_file": "test_dashboard_project_documents.cjs",
+   "source_group": "assertion-group-10",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_project_documents.cjs",
+     "case": "reload"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-project-documents-13",
+   "source_file": "test_dashboard_project_documents.cjs",
+   "source_group": "assertion-group-13",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_project_documents.cjs",
+     "case": "protect"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-project-documents-14",
+   "source_file": "test_dashboard_project_documents.cjs",
+   "source_group": "assertion-group-14",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_project_documents.cjs",
+     "case": "missingEditRecovery"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-project-documents-15",
+   "source_file": "test_dashboard_project_documents.cjs",
+   "source_group": "assertion-group-15",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_project_documents.cjs",
+     "case": "recoveryControls"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-project-documents-16",
+   "source_file": "test_dashboard_project_documents.cjs",
+   "source_group": "assertion-group-16",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_project_documents.cjs",
+     "case": "focusAndViews"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-dashboard-project-documents-17",
+   "source_file": "test_dashboard_project_documents.cjs",
+   "source_group": "assertion-group-17",
+   "replacements": [
+    {
+     "file": "tests/browser/test_dashboard_project_documents.cjs",
+     "case": "browserRun"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-project-api-01",
+   "source_file": "test_project_api.py",
+   "source_group": "assertion-group-01",
+   "replacements": [
+    {
+     "file": "tests/worker/test_project_api.py",
+     "case": "test_refuses_other_targets_before_network"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-project-api-02",
+   "source_file": "test_project_api.py",
+   "source_group": "assertion-group-02",
+   "replacements": [
+    {
+     "file": "tests/worker/test_project_api.py",
+     "case": "test_real_atomic_race_and_readback"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-project-api-03",
+   "source_file": "test_project_api.py",
+   "source_group": "assertion-group-03",
+   "replacements": [
+    {
+     "file": "tests/worker/test_project_api.py",
+     "case": "test_validation_and_baseless_stale_writes_leave_bytes"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-project-api-04",
+   "source_file": "test_project_api.py",
+   "source_group": "assertion-group-04",
+   "replacements": [
+    {
+     "file": "tests/worker/test_project_api.py",
+     "case": "test_two_device_race_conflict_merge_and_where"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-project-api-05",
+   "source_file": "test_project_api.py",
+   "source_group": "assertion-group-05",
+   "replacements": [
+    {
+     "file": "tests/worker/test_project_api.py",
+     "case": "test_browser_like_and_device_conflicts_both_orders"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-project-documents-api-01",
+   "source_file": "test_project_documents_api.py",
+   "source_group": "assertion-group-01",
+   "replacements": [
+    {
+     "file": "tests/worker/test_project_documents_api.py",
+     "case": "test_guard_before_network"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-project-documents-api-02",
+   "source_file": "test_project_documents_api.py",
+   "source_group": "assertion-group-02",
+   "replacements": [
+    {
+     "file": "tests/worker/test_project_documents_api.py",
+     "case": "test_create_race"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-project-documents-api-03",
+   "source_file": "test_project_documents_api.py",
+   "source_group": "assertion-group-03",
+   "replacements": [
+    {
+     "file": "tests/worker/test_project_documents_api.py",
+     "case": "test_update_race"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-project-documents-api-04",
+   "source_file": "test_project_documents_api.py",
+   "source_group": "assertion-group-04",
+   "replacements": [
+    {
+     "file": "tests/worker/test_project_documents_api.py",
+     "case": "test_independent_names_and_projects"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  },
+  {
+   "id": "test-project-documents-api-05",
+   "source_file": "test_project_documents_api.py",
+   "source_group": "assertion-group-05",
+   "replacements": [
+    {
+     "file": "tests/worker/test_project_documents_api.py",
+     "case": "test_validation_listing_and_missing_registration"
+    }
+   ],
+   "status": "ported",
+   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+  }
+ ]
+}

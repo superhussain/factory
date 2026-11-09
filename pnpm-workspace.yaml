@@ -1,0 +1,10 @@
+nodeLinker: isolated
+lockfileIncludeTarballUrl: true
+strictDepBuilds: true
+sideEffectsCache: false
+verifyDepsBeforeRun: error
+allowBuilds:
+  esbuild@0.28.2: true
+  workerd@1.20261023.1: true
+  nx@24.0.2: true
+  fsevents@2.3.3: false

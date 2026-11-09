@@ -1,0 +1,32 @@
+name: Nx cache warm
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+concurrency:
+  group: nx-cache-warm
+  cancel-in-progress: true
+permissions:
+  contents: read
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  WRANGLER_SEND_METRICS: 'false'
+jobs:
+  python:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/ci-setup
+      - name: Python suites
+        run: pnpm exec nx run-many -t cli install verify
+      # Pull requests with no .nx entry of their own restore this one. Only main can write it.
+      - name: Save the Nx folder for pull requests
+        uses: actions/cache/save@v4
+        with:
+          path: .nx
+          key: nx-${{ runner.os }}-main-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}
