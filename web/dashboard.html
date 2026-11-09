@@ -5120,7 +5120,7 @@ function openBacklogItem(item) {
   renderBoard();
   refreshPicker();
   $('d-doc').querySelector('input[type=radio]').focus();
-  loadBacklogTriage(item.raw.slice(6));
+  loadBacklogTriage(item.project + ': ' + item.feature);
 }
 
 function backlogTriageHtml(v) {
