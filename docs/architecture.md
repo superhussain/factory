@@ -110,7 +110,7 @@ method or path under `/api/hosts` returns 404, and no route deletes a host.
 | --- | --- | --- |
 | `GET /api/hosts` | any verified principal | hosts sorted by id, with `status`, `offline`, `etag` and `token_tail`; never `token` or `created_by` |
 | `POST /api/hosts` | person | create a pending host; 201 with a one-time code |
-| `PATCH /api/hosts/<id>` | person, `If-Match` | `label`, `max_inflight`, confirm (`paired` to `active`) or retire |
+| `PATCH /api/hosts/<id>` | person, `If-Match` | `label`, `max_inflight` (0 to 5), confirm (`paired` to `active`) or retire |
 | `POST /api/hosts/<id>/code` | person | new code; a pending or retired host becomes pending and unbound |
 | `POST /api/hosts/<id>/pair` | service token with a client id | a pending host becomes paired and bound to that token |
 | `PUT /api/hosts/<id>/status` | the bound service token | write the status record; the Worker sets `seen` |
