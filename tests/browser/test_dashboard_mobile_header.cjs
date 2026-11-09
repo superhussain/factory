@@ -1,4 +1,4 @@
-// Mobile drawer header: all seven fixture variants, long title/metadata/ref wrapping,
+// Mobile drawer header: all eight fixture variants, long title/metadata/ref wrapping,
 // visible actions toggle/links/close hit area, menu items, Tab/menu keys/Escape/discard
 // cancel, across light/dark and 320/360/390/430/1280 widths.
 // Requires --browser <owned-loopback-origin>.
@@ -30,6 +30,7 @@ const fixtures = [
     paseo: { server: "synthetic-server", agent: "synthetic-agent" },
     tracer: { follow: true },
   },
+  { name: "closed-job", stage: "closed", project: "layout", idea: title },
 ].map((j) => ({
   ...j,
   id: "100-" + j.name + "-" + "x".repeat(48),
@@ -39,12 +40,13 @@ const fixtures = [
 }));
 const expectedItems = {
   unassigned: ["d-edit-idea", "d-discard"],
-  assigned: ["d-edit-idea", "d-discard", "d-follow-tracer", "d-prioritize"],
-  claimed: ["d-discard", "d-follow-tracer", "d-prioritize"],
-  "missing-text": ["d-discard", "d-follow-tracer", "d-prioritize"],
-  "number-text": ["d-discard", "d-follow-tracer", "d-prioritize"],
-  "non-idea": ["d-follow-tracer", "d-move-host", "d-prioritize"],
-  "linked-job": [],
+  assigned: ["d-edit-idea", "d-discard", "d-follow-tracer", "d-prioritize", "d-pause"],
+  claimed: ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause"],
+  "missing-text": ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause"],
+  "number-text": ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause"],
+  "non-idea": ["d-follow-tracer", "d-move-host", "d-prioritize", "d-pause"],
+  "linked-job": ["d-pause"],
+  "closed-job": [],
 };
 const PROJECT_DOC = "---\nrepo: example/layout\nbase: main\ntitle: Synthetic layout project\n---\n";
 const SPEC = "# Synthetic layout fixture\n\nNo real job data or remote content.";
@@ -119,6 +121,7 @@ async function geometry(page) {
       "d-follow-tracer",
       "d-move-host",
       "d-prioritize",
+      "d-pause",
     ].filter((id) => !document.getElementById(id).hidden);
     const close = document.getElementById("d-close");
     const r = rect(close);
