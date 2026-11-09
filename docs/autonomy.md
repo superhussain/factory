@@ -200,6 +200,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   then checks the line off with the new id, as a dashboard Approve does. If the line
   changed meanwhile, it drops the row while the row is still an unclaimed idea.
 - **Hold.** The line waits in the backlog for a person, as before.
+  The Worker keeps the latest hold verdict for each line, and the backlog drawer shows it under Held by triage.
 - **Failure.** A 404 from an older Worker means off. Any other error prints a warning,
   and the line waits. `backlog add` still exits 0.
 - **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a
