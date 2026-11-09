@@ -74,10 +74,9 @@ def validate_answers(data):
             raise bad(key, str(error))
     if not data["hostname"].endswith("." + data["zone"]):
         raise bad("hostname", "hostname " + data["hostname"] + " is not inside zone " + data["zone"])
-    base = data["hostname"].replace(".", "-")
-    if "-device-" in base or len(base) > 63:
-        raise bad("hostname", "derived name " + base + " is ambiguous; choose a hostname without "
-                  "\"-device-\" that is at most 63 characters")
+    base = base_name(data["hostname"])
+    if len(base) > 63:
+        raise bad("hostname", "derived name " + base + " is longer than 63 characters; choose a shorter hostname")
     emails = data["emails"]
     if not isinstance(emails, list) or not emails:
         raise bad("emails", "emails must be a nonempty list")
@@ -92,17 +91,23 @@ def device_label():
 
 
 def is_device_name(n, name):
-    return re.fullmatch(re.escape(n["worker"]) + "-device-[a-z0-9-]+", name) is not None
+    return re.fullmatch(re.escape(n["app"]) + " device [a-z0-9-]+", name) is not None
+
+
+def base_name(hostname):
+    return hostname.replace("-", "--").replace(".", "-")
 
 
 def names(answers, device):
-    base = answers["hostname"].replace(".", "-")[:63]
+    base = base_name(answers["hostname"])
+    app = answers["hostname"] + " bootstrap"
     return {
         "worker": base,
         "bucket": base,
-        "people_policy": base + "-people",
-        "device_policy": base + "-device-" + device,
-        "token": base + "-device-" + device,
+        "app": app,
+        "people_policy": app + " people",
+        "device_policy": app + " device " + device,
+        "token": app + " device " + device,
     }
 
 
@@ -172,10 +177,10 @@ def plan(answers):
     print("origin   https://" + answers["hostname"])
     print("worker   " + n["worker"])
     print("bucket   " + n["bucket"])
+    print("app      " + n["app"])
     print("policy   " + n["people_policy"] + " (" + ", ".join(answers["emails"]) + ")")
     print("policy   " + n["device_policy"])
     print("token    " + n["token"])
-    print("app      " + answers["hostname"])
 
 
 def read_token():

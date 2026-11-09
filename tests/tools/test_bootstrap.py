@@ -144,7 +144,8 @@ class InputTest(unittest.TestCase):
                                  str(FIXTURE)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("worker   factory-example-test", result.stdout)
-        self.assertIn("policy   factory-example-test-people (ada@example.test, grace@example.test)",
+        self.assertIn("app      factory.example.test bootstrap", result.stdout)
+        self.assertIn("policy   factory.example.test bootstrap people (ada@example.test, grace@example.test)",
                       result.stdout)
 
     def test_bad_answers_exit_2(self):
@@ -159,8 +160,7 @@ class InputTest(unittest.TestCase):
             ("bad zone", {"zone": "exa mple.test"}, "zone"),
             ("version", {"version": 2}, "version must be the number 1"),
             ("extra key", {"token": "x"}, "answers need exactly the keys"),
-            ("device in name", {"hostname": "a-device-b.example.test"}, "is ambiguous"),
-            ("truncated name", {"hostname": "a" * 52 + ".example.test"}, "is ambiguous"),
+            ("long name", {"hostname": "a" * 52 + ".example.test"}, "is longer than 63 characters"),
         ]
         for name, change, message in cases:
             with self.subTest(name):
@@ -179,9 +179,21 @@ class InputTest(unittest.TestCase):
             self.assertEqual(bootstrap.device_label(), "ada-s-macbook-local")
         n = bootstrap.names({"hostname": "factory.example.test"}, "laptop")
         self.assertEqual(n, {"worker": "factory-example-test", "bucket": "factory-example-test",
-                             "people_policy": "factory-example-test-people",
-                             "device_policy": "factory-example-test-device-laptop",
-                             "token": "factory-example-test-device-laptop"})
+                             "app": "factory.example.test bootstrap",
+                             "people_policy": "factory.example.test bootstrap people",
+                             "device_policy": "factory.example.test bootstrap device laptop",
+                             "token": "factory.example.test bootstrap device laptop"})
+
+    def test_dot_and_dash_hostnames_get_distinct_names(self):
+        dot = bootstrap.names({"hostname": "a.b.example.test"}, "laptop")
+        dash = bootstrap.names({"hostname": "a-b.example.test"}, "laptop")
+        self.assertEqual(dot["worker"], "a-b-example-test")
+        self.assertEqual(dash["worker"], "a--b-example-test")
+        self.assertEqual(dot["device_policy"], "a.b.example.test bootstrap device laptop")
+        for key in dot:
+            self.assertNotEqual(dot[key], dash[key], key)
+        self.assertFalse(bootstrap.is_device_name(dot, dash["token"]))
+        self.assertFalse(bootstrap.is_device_name(dash, dot["token"]))
 
 
 class Instance(unittest.TestCase):
@@ -242,14 +254,14 @@ class FreshUpTest(Instance):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.fake.buckets, {"factory-example-test": 0})
         [token] = self.fake.items["service_tokens"].values()
-        self.assertEqual(token["name"], "factory-example-test-device-laptop")
+        self.assertEqual(token["name"], "factory.example.test bootstrap device laptop")
         self.assertEqual(self.env()["FACTORY_ACCESS_CLIENT_ID"], token["client_id"])
         self.assertEqual(self.env()["FACTORY_ACCESS_CLIENT_SECRET"], SECRET)
         if os.name == "posix":
             self.assertEqual((self.home / ".env").stat().st_mode & 0o777, 0o600)
         policies = self.policies()
-        people = policies["factory-example-test-people"]
-        device = policies["factory-example-test-device-laptop"]
+        people = policies["factory.example.test bootstrap people"]
+        device = policies["factory.example.test bootstrap device laptop"]
         self.assertEqual(people["decision"], "allow")
         self.assertEqual(people["include"], [{"email": {"email": "ada@example.test"}},
                                              {"email": {"email": "grace@example.test"}}])
@@ -401,7 +413,7 @@ class RerunTest(Instance):
         self.assertEqual(code, 0, err)
         self.assertNotIn("POST", self.fake.methods(since))
         self.assertEqual(self.files(), before)
-        self.assertIn("token factory-example-test-device-laptop: kept", out)
+        self.assertIn("token factory.example.test bootstrap device laptop: kept", out)
 
     def test_quoted_env_client_id_still_matches(self):
         self.up()
@@ -410,10 +422,10 @@ class RerunTest(Instance):
         env.write_text('FACTORY_ACCESS_CLIENT_ID="' + client_id + '"\nFACTORY_ACCESS_CLIENT_SECRET=x\n')
         code, out, err = self.up(inputs=["", "", "", ""])
         self.assertEqual(code, 0, err)
-        self.assertIn("token factory-example-test-device-laptop: kept", out)
+        self.assertIn("token factory.example.test bootstrap device laptop: kept", out)
 
     def test_foreign_names_sharing_the_prefix_are_not_attached(self):
-        self.fake.items["policies"]["foreign"] = {"id": "foreign", "name": "factory-example-test-device-evil",
+        self.fake.items["policies"]["foreign"] = {"id": "foreign", "name": "factory.example.test bootstrap device evil",
                                                   "decision": "allow", "include": []}
         code, _, err = self.up()
         self.assertEqual(code, 0, err)
@@ -427,19 +439,19 @@ class RerunTest(Instance):
         policies = self.policies()
         [app] = self.fake.items["apps"].values()
         self.assertEqual([p["id"] for p in app["policies"]], [
-            policies["factory-example-test-people"]["id"],
-            policies["factory-example-test-device-desk-top"]["id"],
-            policies["factory-example-test-device-laptop"]["id"]])
+            policies["factory.example.test bootstrap people"]["id"],
+            policies["factory.example.test bootstrap device desk-top"]["id"],
+            policies["factory.example.test bootstrap device laptop"]["id"]])
 
 
 class TokenConflictTest(Instance):
     def test_existing_token_without_matching_env_exits_1_and_keeps_env(self):
         self.fake.items["service_tokens"]["old"] = {
-            "id": "old", "name": "factory-example-test-device-laptop", "client_id": "client-old.access"}
+            "id": "old", "name": "factory.example.test bootstrap device laptop", "client_id": "client-old.access"}
         code, out, err = self.up()
         self.assertEqual(code, 1)
         env = self.home / ".env"
-        self.assertEqual(err, "Service token factory-example-test-device-laptop already exists and "
+        self.assertEqual(err, "Service token factory.example.test bootstrap device laptop already exists and "
                          + str(env) + " does not hold it. Delete it under Zero Trust > Access > "
                          "Service credentials, then rerun.\n")
         self.assertEqual(env.read_text(), "FACTORY_ACCESS_CLIENT_ID=\nFACTORY_ACCESS_CLIENT_SECRET=\n")
@@ -521,9 +533,9 @@ class DownTest(Instance):
 
     def test_down_leaves_foreign_names_sharing_the_prefix(self):
         self.up()
-        self.fake.items["policies"]["foreign"] = {"id": "foreign", "name": "factory-example-test-device-evil",
+        self.fake.items["policies"]["foreign"] = {"id": "foreign", "name": "factory.example.test bootstrap device evil",
                                                   "decision": "allow", "include": []}
-        self.fake.items["service_tokens"]["stray"] = {"id": "stray", "name": "factory-example-test-device-gone",
+        self.fake.items["service_tokens"]["stray"] = {"id": "stray", "name": "factory.example.test bootstrapped device gone",
                                                       "client_id": "client-stray.access"}
         code, _, err = self.down("factory.example.test")
         self.assertEqual(code, 0, err)
