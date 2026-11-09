@@ -36,9 +36,10 @@
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
                                             branch without forcing, print what was left as JSON
-  factory.py archive-workspace <project-slug>/<job-id>
+  factory.py archive-workspace <project-slug>/<job-id> [--check]
                                             archive this session's Paseo worktree workspace once the job
-                                            is merged; print the result as JSON
+                                            is merged, whatever its git state; print leftovers as JSON
+                                            (--check: print only)
   factory.py push <project-slug>[/<job-id>] upload a project file, or a job's changed markdown and images, to R2
   factory.py pull <project-slug>[/<job-id>] download a project, or a job's changed markdown and images from R2
   factory.py idea-images <project-slug>/<job-id>
@@ -4365,9 +4366,36 @@ def paseo_run(args):
     return r.returncode, r.stdout
 
 
-def archive_workspace(target):
-    """Archive this session's Paseo worktree workspace once the job is merged. The JSON
-    result prints before the archive call, since archiving can end this very session."""
+def workspace_leftovers(cwd):
+    """What a workspace holds that no remote or other local branch keeps, as strings."""
+    def git(verb, *args):
+        try:
+            r = subprocess.run(["git", "-C", cwd, verb, *args], capture_output=True, text=True, timeout=20)
+            failed = f"exit {r.returncode}" if r.returncode else None
+        except subprocess.TimeoutExpired:
+            r, failed = None, "timed out after 20 s"
+        except OSError:
+            r, failed = None, "could not run git"
+        return (r.stdout.splitlines() if not failed else []), (f"git {verb} failed: {failed}" if failed else None)
+
+    lines, failed = git("status", "--porcelain")
+    found = [failed] if failed else [f"uncommitted: {line}" for line in lines]
+    branch, failed = git("branch", "--show-current")
+    if failed:
+        found.append(failed)
+    else:
+        exclude = [f"--exclude={branch[0]}"] if branch else []
+        lines, failed = git("log", "--format=%h %s", "HEAD", "--not", "--remotes", *exclude, "--branches")
+        found += [failed] if failed else [f"commit: {line}" for line in lines]
+    return found[:20] + ([f"and {len(found) - 20} more"] if len(found) > 20 else [])
+
+
+def archive_workspace(target, *flags):
+    """Archive this session's Paseo worktree workspace once the job is merged, whatever its
+    git state, and print what it held. The JSON result prints before the archive call,
+    since archiving can end this very session. --check prints it and archives nothing."""
+    if flags not in ((), ("--check",)):
+        fail("usage: archive-workspace <project-slug>/<job-id> [--check]", 2)
     home, slug, job_id = r2_target(target, True)
     session = paseo_session()
     if not session:
@@ -4410,20 +4438,11 @@ def archive_workspace(target):
             or not re.fullmatch(rf"factory-{re.escape(job_id)}(-\d+)?", os.path.basename(norm(cwd)))):
         print(json.dumps({"archived": None, "reason": f"workspace {wks} is not this job's worktree workspace"}))
         return
-    for args, reason in ((["status", "--porcelain"], "uncommitted files"),
-                         (["rev-list", "HEAD", "--not", "--remotes"], "unpushed commits")):
-        try:
-            r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=20)
-            failed = f"exit {r.returncode}" if r.returncode else None
-        except subprocess.TimeoutExpired:
-            r, failed = None, "timed out after 20 s"
-        except OSError:
-            r, failed = None, "could not run git"
-        if failed or r.stdout.strip():
-            why = f"git {args[0]} failed in {cwd}: {failed}" if failed else f"{reason} in {cwd}"
-            print(json.dumps({"archived": None, "reason": why}))
-            return
-    print(json.dumps({"archived": wks}), flush=True)
+    leftovers = workspace_leftovers(cwd)
+    if flags:
+        print(json.dumps({"archived": None, "would_archive": wks, "leftovers": leftovers}))
+        return
+    print(json.dumps({"archived": wks, "leftovers": leftovers}), flush=True)
     code, _ = paseo_run(["workspace", "archive", wks])
     if code:
         fail(f"paseo workspace archive {wks} exit {code}")
@@ -5289,7 +5308,7 @@ COMMANDS["host"] = (host_cmd, 3, 3)
 COMMANDS["cleanup"] = (cleanup, 1, 1)
 COMMANDS["deny-notes"] = (deny_notes_cmd, 1, 2)
 COMMANDS["tracer"] = (tracer_cmd, 1, 2)
-COMMANDS["archive-workspace"] = (archive_workspace, 1, 1)
+COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 
 def main(argv=None):
     global _HOME_OVERRIDE
