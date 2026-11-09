@@ -402,7 +402,9 @@ test("move host", { timeout: 240000 }, async (t) => {
           await page.$eval("#move-host-empty", (el) => el.textContent),
           "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. Try again after one of them stops the job.",
         );
-        assert.equal(await page.$eval("#move-host-select", (el) => el.hidden), true);
+        for (const id of ["#move-host-label", "#move-host-select"]) {
+          assert.equal(await page.$eval(id, (el) => getComputedStyle(el).display), "none");
+        }
         assert.equal(await page.$eval("#move-host-save", (el) => el.disabled), true);
         await page.click("#move-host-cancel");
         pickupHosts = PICKUP_HOSTS;

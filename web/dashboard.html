@@ -100,6 +100,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog h3 { font-size: 13px; margin: 16px 0 8px; }
   dialog label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
   dialog select, dialog textarea, dialog input[type=text] { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  dialog label[hidden], dialog select[hidden] { display: none; }
   dialog textarea { resize: vertical; min-height: 140px; }
   dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
   .detail > .err { margin: 12px 20px; flex: none; }
