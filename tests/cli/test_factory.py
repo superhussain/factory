@@ -1247,6 +1247,22 @@ class MoveFenceTest(IsolatedTestCase):
             self.assertTrue(err.getvalue().endswith(message), err.getvalue())
             self.assertEqual(self.store["/api/board"], before)
 
+    def test_a_second_move_keeps_earlier_sessions_fenced(self):
+        before = self.moved(session="d4e5f6", to="cloud-box", at="2026-11-08T11:00:00Z",
+                            earlier=[{"from": "test", "session": "sender", "at": "2026-11-08T10:00:00Z",
+                                      "stopped": "2026-11-08T10:30:00Z"}])
+        for call in (lambda: factory.board(self.home, "001-test"), lambda: factory.hold(self.target)):
+            err = io.StringIO()
+            with patch.object(factory.sys, "stdin", io.StringIO('{"note": "x"}')), \
+                    contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+                call()
+            self.assertEqual(raised.exception.code, 6)
+            self.assertIn("001-test was moved to cloud-box from the dashboard at 2026-11-08T11:00:00Z.",
+                          err.getvalue())
+            self.assertEqual(self.store["/api/board"], before)
+        factory.hold(self.target, "take")
+        self.assertEqual(self.saved()["claim"]["session"], "sender")
+
     def test_move_fence_spares_other_sessions_and_hold_take(self):
         self.moved()
         with patch.dict(os.environ, {"FACTORY_SESSION": "other"}), \

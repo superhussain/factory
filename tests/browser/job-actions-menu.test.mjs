@@ -1,5 +1,5 @@
 // The drawer's job actions sit behind one ellipsis toggle that opens an accessible menu.
-// The menu works with keyboard, mouse and touch. A closed job still offers Add follow-up idea.
+// The menu works with keyboard, mouse and touch. A closed job still offers Copy link and Add follow-up idea.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -21,7 +21,7 @@ const CLOSED = {
   stage: "closed",
   updated: "2026-01-01T00:00:00Z",
 };
-const ITEMS = ["d-edit-idea", "d-discard", "d-follow-tracer", "d-pause"];
+const ITEMS = ["d-edit-idea", "d-discard", "d-follow-tracer", "d-pause", "d-copy-link"];
 const VIEWPORTS = [
   { width: 390, height: 844, isMobile: true, hasTouch: true },
   { width: 1280, height: 900 },
@@ -92,12 +92,12 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
         await press("Escape", "d-actions", false);
         await press("Space", "d-edit-idea", true);
         await press("Escape", "d-actions", false);
-        await press("ArrowUp", "d-pause", true);
+        await press("ArrowUp", "d-copy-link", true);
         await press("ArrowDown", "d-edit-idea", true);
+        await press("ArrowUp", "d-copy-link", true);
         await press("ArrowUp", "d-pause", true);
-        await press("ArrowUp", "d-follow-tracer", true);
         await press("Home", "d-edit-idea", true);
-        await press("End", "d-pause", true);
+        await press("End", "d-copy-link", true);
         await press("Escape", "d-actions", false);
         await press("ArrowDown", "d-edit-idea", true);
         await press("Tab", "d-close", false);
@@ -157,7 +157,7 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
           await closed.page.$$eval("#d-actions-menu [role=menuitem]", (els) =>
             els.filter((el) => el.getClientRects().length > 0).map((el) => el.id),
           ),
-          ["d-follow-up"],
+          ["d-copy-link", "d-follow-up"],
           `${label} closed job menu`,
         );
         assert.deepEqual(closed.errors, [], label);

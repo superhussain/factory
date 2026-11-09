@@ -39,14 +39,28 @@ const fixtures = [
   refs: [{ kind: "follow-up-of", id: "source-" + "r".repeat(48) }],
 }));
 const expectedItems = {
-  unassigned: ["d-edit-idea", "d-discard"],
-  assigned: ["d-edit-idea", "d-discard", "d-follow-tracer", "d-prioritize", "d-pause"],
-  claimed: ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause"],
-  "missing-text": ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause"],
-  "number-text": ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause"],
-  "non-idea": ["d-follow-tracer", "d-move-host", "d-prioritize", "d-pause", "d-follow-up"],
-  "linked-job": ["d-pause", "d-follow-up"],
-  "closed-job": ["d-follow-up"],
+  unassigned: ["d-edit-idea", "d-discard", "d-copy-link"],
+  assigned: [
+    "d-edit-idea",
+    "d-discard",
+    "d-follow-tracer",
+    "d-prioritize",
+    "d-pause",
+    "d-copy-link",
+  ],
+  claimed: ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause", "d-copy-link"],
+  "missing-text": ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause", "d-copy-link"],
+  "number-text": ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause", "d-copy-link"],
+  "non-idea": [
+    "d-follow-tracer",
+    "d-move-host",
+    "d-prioritize",
+    "d-pause",
+    "d-copy-link",
+    "d-follow-up",
+  ],
+  "linked-job": ["d-pause", "d-copy-link", "d-follow-up"],
+  "closed-job": ["d-copy-link", "d-follow-up"],
 };
 const PROJECT_DOC = "---\nrepo: example/layout\nbase: main\ntitle: Synthetic layout project\n---\n";
 const SPEC = "# Synthetic layout fixture\n\nNo real job data or remote content.";
@@ -122,6 +136,7 @@ async function geometry(page) {
       "d-move-host",
       "d-prioritize",
       "d-pause",
+      "d-copy-link",
       "d-follow-up",
     ].filter((id) => !document.getElementById(id).hidden);
     const close = document.getElementById("d-close");
