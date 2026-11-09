@@ -22,7 +22,7 @@ const conflict =
   "This idea changed elsewhere. Your draft is still here. Cancel and reopen to review the latest text.";
 
 const { isOwnedBrowserOrigin } = require("../support/owned-origin.cjs");
-const { waitForBoard } = require("../support/board-ready.cjs");
+const { waitForBoard, openJobActions } = require("../support/board-ready.cjs");
 const OWNED_ORIGINS = ["http://127.0.0.1:8220", "http://127.0.0.1:8221"];
 
 function assertIdeaBrowserTarget(url) {
@@ -577,7 +577,7 @@ async function offlineUI() {
   v.$("edit-idea-text").listeners.input();
   assert.equal(v.$("edit-idea-save").disabled, true, "input rechecks baseline, never rebases");
   v.closeIdeaEditor();
-  assert.equal(v.document.activeElement.id, "d-edit-idea");
+  assert.equal(v.document.activeElement.id, "d-actions");
 
   let count = 0;
   const oldPoll = deferred();
@@ -701,6 +701,7 @@ async function browserTest(url) {
         text,
       );
     const open = async () => {
+      await openJobActions(page);
       await page.click("#d-edit-idea");
       await page.waitForFunction(() => document.getElementById("edit-idea-dlg").open, {
         polling: 50,
@@ -845,6 +846,7 @@ async function browserTest(url) {
     await reset();
     let held = hold("GET", "/api/board");
     let request;
+    await openJobActions(page);
     await page.click("#d-edit-idea");
     request = await held;
     assert.equal(await disabled("#d-edit-idea"), true);
@@ -862,6 +864,7 @@ async function browserTest(url) {
     });
     assert.equal(await editorOpen(), false, "delayed activation cannot open after close/reopen");
     held = hold("GET", "/api/board");
+    await openJobActions(page);
     await page.click("#d-edit-idea");
     request = await held;
     const claimed = httpFixture();
@@ -878,6 +881,7 @@ async function browserTest(url) {
     );
     assert.equal(await editorOpen(), false);
     held = hold("GET", "/api/board");
+    await openJobActions(page);
     await page.click("#d-edit-idea");
     request = await held;
     await request.abort();
@@ -956,7 +960,7 @@ async function browserTest(url) {
     await page.click("#edit-idea-text");
     await page.keyboard.press("Escape");
     await waitClosed();
-    assert.equal(await page.evaluate(() => document.activeElement.id), "d-edit-idea");
+    assert.equal(await page.evaluate(() => document.activeElement.id), "d-actions");
     assert.equal(await page.$eval("#detail", (e) => e.hidden), false);
     await open();
     await setDraft(draft);
@@ -1048,7 +1052,7 @@ async function browserTest(url) {
       await waitClosed();
       assert.equal(
         await page.evaluate(() => document.activeElement.id),
-        message === conflict ? "d-edit-idea" : "d-close",
+        message === missing ? "d-close" : "d-actions",
       );
     }
     await reset();
