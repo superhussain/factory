@@ -461,12 +461,13 @@ class GatherTest(TracerCase):
             factory.tracer_follow_pass(self.home)
             self.assertEqual(self.board["jobs"][0]["note"], "gate: tracer-scope")
             fake.features["factory-1"]["scope_approved_at"] = "2026-01-02T00:00:00Z"
-            factory.tracer_follow_pass(self.home)
+            with patch.object(factory, "now", return_value="2026-01-02T00:00:01Z"):
+                factory.tracer_follow_pass(self.home)
             job = self.board["jobs"][0]
             self.assertEqual((job["stage"], job["note"], job["tracer"]["scope"]),
                              ("build", "spec approved in Tracer", "approved"))
             self.assertNotIn("needs", job)
-            self.assertEqual(job["updated"], self.board["updated"])
+            self.assertEqual((job["updated"], self.board["updated"]), ("2026-01-02T00:00:01Z",) * 2)
             calls = len(fake.requests)
             factory.tracer_follow_pass(self.home)
             self.assertEqual(len(fake.requests), calls)
