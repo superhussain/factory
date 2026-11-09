@@ -43,6 +43,8 @@ const MAX_TRIAGE = 64 << 10;
 // /api/hosts, /api/hosts/<id> and /api/hosts/<id>/<action>.
 const HOSTS = /^\/api\/hosts(?:\/([^/]+)(?:\/(code|pair|status|history))?)?$/;
 const MAX_BODY = 1 << 20;
+// board.json holds every job, merged ones included, so it outgrows the per-file cap.
+const MAX_BOARD = 4 << 20;
 const MAX_IMAGE = 5 << 20;
 // The server picks the type from the extension and never trusts a client header.
 const IMAGE_TYPES = {
@@ -252,8 +254,8 @@ async function readCapped(request, max) {
   return body;
 }
 
-async function readBody(request) {
-  const body = await readCapped(request, MAX_BODY);
+async function readBody(request, max = MAX_BODY) {
+  const body = await readCapped(request, max);
   return body === null ? null : new TextDecoder().decode(body);
 }
 
@@ -278,8 +280,8 @@ const needsCondition = () => reply('PUT needs If-Match: "<etag>" or If-None-Matc
 async function casPut(request, env, key, type) {
   const cond = condition(request);
   if (!cond) return needsCondition();
-  const body = await readBody(request);
-  if (body === null) return reply("body over 1 MiB", 413);
+  const body = await readBody(request, MAX_BOARD);
+  if (body === null) return reply("body over 4 MiB", 413);
   if (key === "board.json") {
     let data;
     try {
