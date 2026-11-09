@@ -465,6 +465,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-pause" role="menuitem" tabindex="-1" hidden>Pause pickup</button>
         <button class="btn" id="d-resume" role="menuitem" tabindex="-1" hidden>Resume pickup</button>
         <button class="btn" id="d-copy-link" role="menuitem" tabindex="-1" hidden>Copy link</button>
+        <button class="btn" id="d-follow-up" role="menuitem" tabindex="-1" hidden>Add follow-up idea</button>
       </div>
     </div>
     <button class="close" id="d-close" aria-label="Close">&times;</button>
@@ -753,6 +754,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
 <dialog id="idea-dlg" aria-labelledby="idea-h">
   <form id="idea-form">
     <h2 id="idea-h">New idea</h2>
+    <p class="muted" id="idea-ref" hidden></p>
     <label>Project<select id="idea-project" aria-describedby="idea-project-help"></select></label>
     <p class="muted" id="idea-project-help"></p>
     <label>Idea<textarea id="idea-text" required maxlength="4000" aria-describedby="idea-key-help idea-images-help" placeholder="The feature, as you'd tell the spec writer. The first line becomes the title."></textarea></label>
@@ -2774,6 +2776,7 @@ async function openJob(id) {
   $('d-prioritize').hidden = !j.project || !PRIORITY_STAGES.includes(j.stage) || !!j.priority;
   $('d-pause').hidden = !j.project || TERMINAL.includes(j.stage) || !!j.paused;
   $('d-resume').hidden = !j.paused;
+  $('d-follow-up').hidden = j.stage === 'idea' || $('new-idea').hidden;
   const following = j.tracer?.follow === true;
   $('d-follow-tracer').hidden = !j.project || !(TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) || following || !!tracerLink(j);
   $('d-copy-link').hidden = false;
@@ -3832,14 +3835,15 @@ function addIdea(board, snap, now) {
   const names = snap.images.map((i) => i.name);
   const prior = board.jobs.find((j) => j.capture_id === snap.capture_id);
   if (prior) {
-    if (prior.idea === snap.text && JSON.stringify(prior.idea_images ?? []) === JSON.stringify(names)) return prior.id;
+    if (prior.idea === snap.text && JSON.stringify(prior.idea_images ?? []) === JSON.stringify(names) &&
+      JSON.stringify(prior.refs ?? []) === JSON.stringify(snap.refs ?? [])) return prior.id;
     throw new Error('this capture was already saved as ' + prior.id + ' with different content, so nothing was changed.');
   }
   const id = nextJobId(board, ideaSlug(snap.text));
   const title = ideaTitle(snap.text);
   board.jobs.push({
     id, ...(snap.project ? { project: snap.project } : {}), title, idea: snap.text, stage: 'idea', updated: now,
-    ...(names.length ? { idea_images: names } : {}), capture_id: snap.capture_id,
+    ...(names.length ? { idea_images: names } : {}), ...(snap.refs?.length ? { refs: snap.refs } : {}), capture_id: snap.capture_id,
   });
   board.updated = now;
   return id;
@@ -4169,7 +4173,7 @@ async function openIdeaEditor() {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-pause', 'd-resume', 'd-copy-link'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up'];
 
 let copyStatusTimer = 0;
 
@@ -4456,14 +4460,24 @@ $('edit-idea-form').addEventListener('submit', async (e) => {
   writeHash();
 });
 
-// One opener for the New idea dialog, used by the button and the jumper's command row.
-function openIdeaDialog() {
+// One opener for the New idea dialog, used by the button, the jumper's command row and the drawer's follow-up item.
+let ideaFollowUp = null;
+function openIdeaDialog(followUp = null) {
+  ideaFollowUp = followUp ? followUp.id : null;
   const ideaDefault = store.get('factory-idea-project');
-  $('idea-project').value = projects?.has(filter) ? filter : projects?.has(ideaDefault) ? ideaDefault : '';
+  $('idea-project').value = followUp ? (projects?.has(followUp.project) ? followUp.project : '')
+    : projects?.has(filter) ? filter : projects?.has(ideaDefault) ? ideaDefault : '';
+  $('idea-ref').textContent = followUp ? 'Follow-up of ' + followUp.id : '';
+  $('idea-ref').hidden = !followUp;
   $('idea-err').hidden = true;
   $('idea-dlg').showModal();
+  if (followUp) $('idea-text').focus();
 }
-$('new-idea').addEventListener('click', openIdeaDialog);
+$('new-idea').addEventListener('click', () => openIdeaDialog());
+$('d-follow-up').addEventListener('click', () => {
+  const j = jobs.find((x) => x.id === openId);
+  if (j) openIdeaDialog(j);
+});
 // Opened from the jumper, Escape should return to where the user was before Cmd+K.
 let ideaFromPicker = false;
 $('idea-dlg').addEventListener('close', () => {
@@ -4616,6 +4630,9 @@ function resetDraft() {
   draft.images.forEach((i) => URL.revokeObjectURL(i.url));
   draft = { images: [], rejects: [], pending: 0 };
   snap = null;
+  ideaFollowUp = null;
+  $('idea-ref').textContent = '';
+  $('idea-ref').hidden = true;
   uploaded.clear();
   $('idea-text').value = '';
   $('idea-err').hidden = true;
@@ -4783,6 +4800,7 @@ async function saveIdea() {
     if (draft.rejects.length) return showErr('Remove the rejected images below first.');
     snap = {
       project: $('idea-project').value, text, capture_id: crypto.randomUUID(),
+      refs: ideaFollowUp ? [{ id: ideaFollowUp, kind: 'follow-up-of' }] : [],
       images: draft.images.map(({ name, blob }) => ({ name, blob })),
     };
   }
@@ -4891,7 +4909,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-prioritize', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;

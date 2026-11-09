@@ -51,9 +51,16 @@ const expectedItems = {
   claimed: ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause", "d-copy-link"],
   "missing-text": ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause", "d-copy-link"],
   "number-text": ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause", "d-copy-link"],
-  "non-idea": ["d-follow-tracer", "d-move-host", "d-prioritize", "d-pause", "d-copy-link"],
-  "linked-job": ["d-pause", "d-copy-link"],
-  "closed-job": ["d-copy-link"],
+  "non-idea": [
+    "d-follow-tracer",
+    "d-move-host",
+    "d-prioritize",
+    "d-pause",
+    "d-copy-link",
+    "d-follow-up",
+  ],
+  "linked-job": ["d-pause", "d-copy-link", "d-follow-up"],
+  "closed-job": ["d-copy-link", "d-follow-up"],
 };
 const PROJECT_DOC = "---\nrepo: example/layout\nbase: main\ntitle: Synthetic layout project\n---\n";
 const SPEC = "# Synthetic layout fixture\n\nNo real job data or remote content.";
@@ -130,6 +137,7 @@ async function geometry(page) {
       "d-prioritize",
       "d-pause",
       "d-copy-link",
+      "d-follow-up",
     ].filter((id) => !document.getElementById(id).hidden);
     const close = document.getElementById("d-close");
     const r = rect(close);
