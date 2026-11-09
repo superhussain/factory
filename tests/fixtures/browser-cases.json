@@ -129,6 +129,7 @@
   "tests/browser/move-host.test.mjs",
   "tests/browser/prioritize.test.mjs",
   "tests/browser/pause.test.mjs",
+  "tests/browser/copy-link.test.mjs",
   "tests/browser/owned-fixtures.test.mjs",
   "tests/browser/pipeline-settings.test.mjs",
   "tests/browser/settings-page.test.mjs",
