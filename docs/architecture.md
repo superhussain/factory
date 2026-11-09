@@ -174,8 +174,8 @@ rather than loosens. The measured limit result is recorded in
 
 ## Live board events
 
-The `BoardEvents` Durable Object (`worker/events.js`, a `partyserver` room with
-hibernation) tells open dashboards when `board.json` or `backlog.md` changed. It
+The `BoardEvents` Durable Object (`worker/events.js`, a plain Durable Object on the WebSocket
+Hibernation API) tells open dashboards when `board.json` or `backlog.md` changed. It
 stores nothing and never carries board content.
 
 ```mermaid
