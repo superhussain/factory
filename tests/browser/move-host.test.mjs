@@ -10,6 +10,7 @@ import {
   seedProject,
   seedBoard,
   serveHostList,
+  blockLiveEvents,
 } from "../support/browser-server.mjs";
 
 const HOSTS = JSON.parse(
@@ -99,6 +100,7 @@ test("move host", { timeout: 240000 }, async (t) => {
       await page.setViewport({ width, height });
       page.on("pageerror", (error) => errors.push(String(error)));
       await freezeClock(page);
+      await blockLiveEvents(page);
       await serveHostList(page, HOSTS);
       page.on("request", (request) => {
         if (new URL(request.url()).pathname !== "/api/pipeline/effective/sample") return;
