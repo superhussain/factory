@@ -337,6 +337,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .detail-head .titles { flex: 1; min-width: 0; }
   .detail-head .title { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
   .detail-head .meta, .backlog-history .meta { font: 12px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+  #idea-ref code { font: 12px var(--font-mono); overflow-wrap: anywhere; }
   .close { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-size); height: var(--icon-size); padding: 0; background: none; border: 0; border-radius: 8px; color: var(--muted); cursor: pointer; }
   .close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .tabs { position: relative; display: flex; gap: 4px; padding: 10px 24px; border-bottom: 1px solid var(--line); overflow-x: auto; flex: none; }
@@ -766,7 +767,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <p class="muted" id="idea-ref" hidden></p>
     <label>Project<select id="idea-project" aria-describedby="idea-project-help"></select></label>
     <p class="muted" id="idea-project-help"></p>
-    <label>Idea<textarea id="idea-text" required maxlength="4000" aria-describedby="idea-key-help idea-images-help" placeholder="The feature, as you'd tell the spec writer. The first line becomes the title."></textarea></label>
+    <label>Idea<textarea id="idea-text" required maxlength="4000" aria-describedby="idea-ref idea-key-help idea-images-help" placeholder="The feature, as you'd tell the spec writer. The first line becomes the title."></textarea></label>
     <div id="idea-upload-row"><button class="btn" type="button" id="idea-upload" aria-describedby="idea-images-help">Add images</button><input type="file" id="idea-file" accept="image/png,image/jpeg,image/webp" multiple hidden></div>
     <p class="muted"><span id="idea-key-help">Cmd+Enter adds the idea.</span> <span id="idea-images-help">Paste or add up to 4 images (PNG, JPEG or WebP, 5 MiB each).</span></p>
     <ul id="idea-image-list" aria-label="Attached images" hidden></ul>
@@ -4616,7 +4617,7 @@ function openIdeaDialog(followUp = null) {
   const ideaDefault = store.get('factory-idea-project');
   $('idea-project').value = followUp ? (projects?.has(followUp.project) ? followUp.project : '')
     : projects?.has(filter) ? filter : projects?.has(ideaDefault) ? ideaDefault : '';
-  $('idea-ref').textContent = followUp ? 'Follow-up of ' + followUp.id : '';
+  $('idea-ref').replaceChildren(...(followUp ? ['Follow-up of ', Object.assign(document.createElement('code'), { textContent: followUp.id })] : []));
   $('idea-ref').hidden = !followUp;
   $('idea-err').hidden = true;
   $('idea-dlg').showModal();
@@ -4840,7 +4841,7 @@ function resetDraft() {
   draft = { images: [], rejects: [], pending: 0 };
   snap = null;
   ideaFollowUp = null;
-  $('idea-ref').textContent = '';
+  $('idea-ref').replaceChildren();
   $('idea-ref').hidden = true;
   uploaded.clear();
   $('idea-text').value = '';
