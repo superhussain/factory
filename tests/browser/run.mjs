@@ -191,6 +191,7 @@ const CAPTURE_TRIAGE = {
   model: "@cf/cloudflare/clef-flash",
   at: "2026-10-27T10:00:00Z",
 };
+const CAPTURE_TRIAGE_DELAY_MS = 1000;
 const CAPTURE_SPEC =
   "# Synthetic spec\n\nCapture fixture content, not real job data.\n\n## Tasks\n\n1. **Parse the fixture**\n   - Files: `sample.md`\n   - Check: synthetic\n2. **Render the list**\n   - Files: `sample.html`\n3. **Ship it**\n   - Check: synthetic\n\n```mermaid\ngraph LR; Alpha-->Beta\n```\n";
 const CAPTURE_BUILD =
@@ -313,6 +314,7 @@ async function capture(outdir, referencePath) {
           }
           if (target.pathname === "/api/backlog/triage") {
             const held = target.searchParams.get("item") === CAPTURE_TRIAGE_ITEM;
+            await new Promise((resolve) => setTimeout(resolve, CAPTURE_TRIAGE_DELAY_MS));
             return request.respond({
               status: held ? 200 : 404,
               contentType: "application/json",
@@ -506,10 +508,17 @@ async function capture(outdir, referencePath) {
     const openTriage = async (page) => {
       await page.click('.backlog-card[data-index="1"]');
       await page.waitForSelector("#backlog-form");
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await page.waitForSelector("#backlog-triage:not([hidden])");
+    };
+    const openTriageFirstPaint = async (page, side) => {
+      if (side === "after") await page.waitForFunction(() => backlogTriageSeen.size === 3);
+      await page.click('.backlog-card[data-index="1"]');
+      await page.waitForSelector("#backlog-form");
     };
     await view("backlog-triage-desktop", 1440, 900, "light", openTriage);
     await view("backlog-triage-mobile", 390, 844, "dark", openTriage);
+    await view("backlog-triage-open-desktop", 1440, 900, "light", openTriageFirstPaint);
+    await view("backlog-triage-open-mobile", 390, 844, "dark", openTriageFirstPaint);
     await view("backlog-decide-desktop", 1440, 900, "light", openDecision);
     await view("backlog-decide-mobile", 390, 844, "dark", openDecision);
     await view("backlog-decide-touch", 390, 844, "dark", openDecision, true);
