@@ -15,11 +15,12 @@ const workflowPath = new URL("../../.github/workflows/deploy-main.yml", import.m
 const workflow = parse(readFileSync(workflowPath, "utf8"));
 const workflowText = readFileSync(workflowPath, "utf8");
 const job = workflow.jobs.deploy;
+const action = (step) => step.uses?.split("@")[0];
 const step = (name) => job.steps.find((entry) => entry.name === name);
 
 const reconcile = step("Reconcile with origin/main");
 const reconcileIndex = job.steps.indexOf(reconcile);
-const checkoutIndex = job.steps.findIndex((entry) => entry.uses === "actions/checkout@v4");
+const checkoutIndex = job.steps.findIndex((entry) => action(entry) === "actions/checkout");
 
 // Runs the workflow's reconcile script body against a stub `git` whose
 // ls-remote prints `fakeHead`, returning the exit status and the outputs the
@@ -63,6 +64,10 @@ test("checkout pins the reconciled head without persisting credentials", () => {
   assert.equal(checkout.with["persist-credentials"], false);
 });
 
+test("the deploy job runs in the production environment", () => {
+  assert.equal(job.environment, "production");
+});
+
 test("permissions are the read-only ceiling with no id-token", () => {
   assert.deepEqual(workflow.permissions, { contents: "read" });
   assert.deepEqual(job.permissions, undefined);
@@ -75,7 +80,7 @@ test("concurrency coalesces main pushes without cancelling a deploy", () => {
 });
 
 test("install is cached, the deploy step is uncached and exact", () => {
-  const setupNode = job.steps.find((entry) => entry.uses === "actions/setup-node@v4");
+  const setupNode = job.steps.find((entry) => action(entry) === "actions/setup-node");
   assert.equal(setupNode.with.cache, "pnpm");
   const deploy = step("Deploy");
   assert.equal(deploy.run, "python3 tools/deploy.py deploy --profile deploy/profile.json");

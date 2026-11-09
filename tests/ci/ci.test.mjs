@@ -10,6 +10,7 @@ import { selectShard } from "../browser/shard.mjs";
 const workflow = parse(
   readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8"),
 );
+const action = (step) => step.uses?.split("@")[0];
 const fixture = JSON.parse(
   readFileSync(new URL("../fixtures/browser-cases.json", import.meta.url), "utf8"),
 );
@@ -98,14 +99,14 @@ test("the aggregate step fails on any non-success result", () => {
 });
 
 test("targets restores the browser cache read-only", () => {
-  const uses = (job) => workflow.jobs[job].steps.map((step) => step.uses);
-  assert.ok(uses("targets").includes("actions/cache/restore@v4"));
-  assert.ok(uses("browser").includes("actions/cache@v4"));
+  const uses = (job) => workflow.jobs[job].steps.map(action);
+  assert.ok(uses("targets").includes("actions/cache/restore"));
+  assert.ok(uses("browser").includes("actions/cache"));
 });
 
 test("the python job keeps .nx per pull request and falls back to main", () => {
   const steps = workflow.jobs.python.steps;
-  const cache = steps.find((step) => step.uses === "actions/cache@v4");
+  const cache = steps.find((step) => action(step) === "actions/cache");
   const prefix = "nx-${{ runner.os }}-pr${{ github.event.pull_request.number }}-";
   const suffix = "-${{ github.run_id }}-${{ github.run_attempt }}";
   assert.equal(cache.with.path, ".nx");
