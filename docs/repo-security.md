@@ -45,3 +45,46 @@ If you rename the `ci` job in `.github/workflows/ci.yml`, update `main.json` in 
 - Hussain: review the `gh auth status` scopes.
 - Hussain: remove unused tokens at github.com/settings/tokens and apps at github.com/settings/applications.
 - Hussain: keep `CLOUDFLARE_API_TOKEN` scoped to Workers deploy only.
+
+## Pipeline stage notes
+
+This repository is public, so the `factory` project pipeline adds a review note and a build note. Agents read them inside the operator-preferences envelope described in [trust.md](trust.md). `tests/worker/public-repo-notes.test.mjs` checks that both notes pass `validatePipeline`.
+
+### Review stage note
+
+```text
+This repository is public. Every reviewer owns item 1. The security reviewer also owns items 2 to 4. Report each miss as a finding with a concrete fix. Read the diff, the commit messages (git log origin/main..HEAD) and build.md, since the PR description draws on it.
+
+1. Nothing private. No tokens, keys, Access client ids or AUD tags, Cloudflare account ids, real instance hostnames, bucket names or internal URLs, real email addresses, and no employer, client or other private project names. No reference to the private history archive. Fixtures, tests and screenshots use synthetic values, such as example.test addresses and made-up board rows.
+2. Workflows. Every third-party action is pinned to a full commit SHA. Each workflow or job grants the least permissions it needs. No pull_request_target or workflow_run trigger checks out or runs pull request code. Secrets reach only a job bound to the production environment. Downloaded tools are checksum-verified, as ci.yml does for gitleaks.
+3. Dependencies. A new package needs the spec's approval, an exact version in package.json and a lockfile resolved from the public registry. Code that ships in the Worker or dashboard bundle gets a THIRD_PARTY_NOTICES.md entry with its license text.
+4. Trust model. A diff that loosens FLOORS or the admission patterns in worker/admission.js, Access verification in worker/access.ts, the operator-preferences envelope sentence, SECURITY.md or the main ruleset is a finding unless the spec names that change.
+```
+
+### Build stage note
+
+```text
+This repository is public. Everything you commit, every commit message and the build.md text the PR description draws on is public.
+
+- Use synthetic values only: example.test addresses, placeholder hostnames and ids, made-up board rows in fixtures and screenshots.
+- Never name an employer, client or other private project, a real instance hostname, or the private history archive.
+- A new or changed workflow pins third-party actions to a full commit SHA, grants the least permissions it needs, and reads secrets only in a job bound to the production environment.
+- Add no dependency the spec does not name. One that ships in the Worker or dashboard bundle gets a THIRD_PARTY_NOTICES.md entry.
+- Before each commit, read git diff --cached for the items above.
+```
+
+### Apply and verify
+
+Only a signed-in person saves pipeline settings (F11). Apply after a PR that changes a note merges.
+
+1. Open the dashboard at `#/settings/pipeline`.
+2. Set Scope to `factory`, then select Load latest.
+3. On the Review tab, paste the review note. On the Build tab, paste the build note. Leave every other field as loaded.
+4. Select Save. History lists the new version.
+5. On a device, run this command. It prints `2`, one line each for review and build.
+
+```sh
+python3 <installed-skill>/runtime/factory.py pipeline factory | grep -c 'pipeline:factory@'
+```
+
+To change a note, edit it here in a pull request first, then repeat these steps.
