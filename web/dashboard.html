@@ -102,8 +102,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog select, dialog textarea, dialog input[type=text] { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   dialog textarea { resize: vertical; min-height: 140px; }
   dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
-  .detail > .err { margin: 12px 20px; flex: none; }
-  .detail > .copy-status { margin: 12px 20px; flex: none; font-size: 12px; color: var(--muted); }
+  .detail > .err, .detail > .copy-status { margin: 12px 20px; flex: none; }
+  .detail > .copy-status { font-size: 12px; color: var(--muted); }
   .detail > .copy-status:empty { display: none; }
   #idea-image-list, .gallery { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
   #idea-image-list li { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
@@ -4773,8 +4773,11 @@ $('d-copy-link').addEventListener('click', async () => {
   }
   if (version !== drawerVersion) return;
   clearCopyStatus();
-  $('d-copy-status').textContent = copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.';
-  if (copied) copyStatusTimer = setTimeout(clearCopyStatus, 2000);
+  // A separate task empties the live region first, so a repeat copy is announced again.
+  copyStatusTimer = setTimeout(() => {
+    $('d-copy-status').textContent = copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.';
+    if (copied) copyStatusTimer = setTimeout(clearCopyStatus, 2000);
+  }, 100);
 });
 $('idea-cancel').addEventListener('click', () => { if (!locked()) $('idea-dlg').close(); });
 // Escape closes the dialog like Cancel, except while a save runs or a submission is

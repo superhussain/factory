@@ -33,6 +33,7 @@ const VIEWPORTS = [
   { width: 390, height: 844, isMobile: true, hasTouch: true },
   { width: 1280, height: 900 },
 ];
+const LINK = (origin) => origin + "/#100-sample-idea";
 const FALLBACK = "Copy is unavailable. Copy the link from the address bar.";
 
 async function openDrawer(browser, origin, viewport, id, reject) {
@@ -74,6 +75,19 @@ async function copyLink(page, viewport) {
   await activate("#d-copy-link");
 }
 
+// Logs every text the status line takes, so a repeat copy shows as a clear then a write.
+const watchStatus = (page) =>
+  page.evaluate(() => {
+    window.__status = [];
+    new MutationObserver(() =>
+      window.__status.push(document.getElementById("d-copy-status").textContent),
+    ).observe(document.getElementById("d-copy-status"), {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  });
+
 const status = (page) => page.$eval("#d-copy-status", (el) => el.textContent);
 
 test("Copy link copies the job's dashboard link", { timeout: 120000 }, async () => {
@@ -97,17 +111,14 @@ test("Copy link copies the job's dashboard link", { timeout: 120000 }, async () 
           `${label} idea items`,
         );
         await ok.page.keyboard.press("Escape");
+        await watchStatus(ok.page);
         await copyLink(ok.page, viewport);
         // Text and visibility are read together, since the 2 s timer may clear them under load.
         await ok.page.waitForFunction(() => {
           const el = document.getElementById("d-copy-status");
           return el.textContent === "Copied" && el.getClientRects().length > 0;
         });
-        assert.deepEqual(
-          await ok.page.evaluate(() => window.__copied),
-          [origin + "/#100-sample-idea"],
-          label,
-        );
+        assert.deepEqual(await ok.page.evaluate(() => window.__copied), [LINK(origin)], label);
         assert.deepEqual(
           await ok.page.evaluate(() => ({
             focus: document.activeElement.id,
@@ -116,9 +127,29 @@ test("Copy link copies the job's dashboard link", { timeout: 120000 }, async () 
           { focus: "d-actions", menu: false },
           `${label} focus`,
         );
+        await copyLink(ok.page, viewport);
+        await ok.page.waitForFunction(() => {
+          const el = document.getElementById("d-copy-status");
+          return window.__copied.length === 2 && el.textContent === "Copied";
+        });
+        assert.deepEqual(
+          await ok.page.evaluate(() => window.__copied),
+          [LINK(origin), LINK(origin)],
+          `${label} repeat`,
+        );
+        assert.deepEqual(
+          await ok.page.evaluate(() => window.__status),
+          ["Copied", "", "Copied"],
+          `${label} repeat log`,
+        );
         await ok.page.waitForFunction(
           () => document.getElementById("d-copy-status").textContent === "",
-          { timeout: 2500 },
+          { timeout: 3000 },
+        );
+        assert.deepEqual(
+          await ok.page.evaluate(() => window.__status),
+          ["Copied", "", "Copied", ""],
+          `${label} clear log`,
         );
         assert.equal(
           await ok.page.$eval("#d-copy-status", (el) => el.getClientRects().length),
@@ -137,6 +168,18 @@ test("Copy link copies the job's dashboard link", { timeout: 120000 }, async () 
           (text) => document.getElementById("d-copy-status").textContent === text,
           {},
           FALLBACK,
+        );
+        await denied.page.evaluate(() => {
+          location.hash = "#101-sample-closed";
+        });
+        await denied.page.waitForFunction(() =>
+          document.getElementById("d-meta").textContent.includes("101-sample-closed"),
+        );
+        assert.equal(await status(denied.page), "", `${label} job switch`);
+        assert.equal(
+          await denied.page.$eval("#d-copy-status", (el) => el.getClientRects().length),
+          0,
+          `${label} job switch hidden`,
         );
         assert.deepEqual(await denied.page.evaluate(() => window.__copied), [], label);
         assert.deepEqual(denied.errors, [], label);
