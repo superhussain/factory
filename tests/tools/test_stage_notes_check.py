@@ -1,8 +1,10 @@
 """Tests for tools/stage-notes-check.py with synthetic pipeline views built from the committed notes."""
 import json
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -27,10 +29,13 @@ def view(review, build):
     return {"prompts": prompts}
 
 
-def run(stdin):
-    return subprocess.run(
-        [sys.executable, "-B", str(TOOL)], input=stdin, capture_output=True, text=True, check=False
-    )
+def run(stdin, tool=TOOL):
+    if isinstance(stdin, str):
+        stdin = stdin.encode("utf8")
+    result = subprocess.run([sys.executable, "-B", str(tool)], input=stdin, capture_output=True, check=False)
+    result.stdout = result.stdout.decode("utf8")
+    result.stderr = result.stderr.decode("utf8")
+    return result
 
 
 class StageNotesCheckTest(unittest.TestCase):
@@ -63,6 +68,35 @@ class StageNotesCheckTest(unittest.TestCase):
         result = run("[]")
         self.assertEqual(result.returncode, 2)
         self.assertIn("stdin is not a factory.py pipeline view", result.stderr)
+
+    def test_prompts_not_object(self):
+        result = run(json.dumps({"prompts": []}))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("stdin is not a factory.py pipeline view", result.stderr)
+
+    def test_prompt_not_string(self):
+        result = run(json.dumps({"prompts": {"review": 1}}))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("stdin is not a factory.py pipeline view", result.stderr)
+
+    def test_invalid_utf8(self):
+        result = run(b"\xff")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("stdin is not a factory.py pipeline view", result.stderr)
+
+    def test_missing_doc_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tools").mkdir()
+            (root / "docs").mkdir()
+            tool = root / "tools" / "stage-notes-check.py"
+            shutil.copy(TOOL, tool)
+            (root / "docs" / "repo-security.md").write_text(
+                f"### Review stage note\n\n```text\n{self.review}\n```\n", encoding="utf8"
+            )
+            result = run(json.dumps(view(self.review, self.build)), tool)
+        self.assertEqual(result.stdout, "review: matches\nbuild: no note in docs/repo-security.md\n")
+        self.assertEqual(result.returncode, 1)
 
 
 if __name__ == "__main__":
