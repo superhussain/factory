@@ -137,6 +137,23 @@ class ArchiveFloorTest(IsolatedTestCase):
         self.assertEqual(self.ids()[-1], "417-add-thing")
         self.assertIn("(417-add-thing)", self.files["/api/backlog"])
 
+    def test_board_refuses_an_archived_id(self):
+        message = ("factory.py: ids up to 416 belong to archived jobs, so 412-fix-login cannot go back on "
+                   "the board. Read it with factory.py job 412-fix-login. Claim new ids with claim. "
+                   "Nothing was written.\n")
+        before = self.files["/api/board"]
+        for body in ('{"stage": "closed", "project": "sample"}', '{"note": "x"}'):
+            with self.subTest(body=body):
+                self.assertEqual(self.board("412-fix-login", body), (2, "", message))
+                self.assertEqual(self.files["/api/board"], before)
+        self.assertEqual(self.board("417-new-thing", '{"stage": "closed", "project": "sample"}')[0], 0)
+        self.assertEqual(self.board("414-retry-sync", '{"note": "x"}')[0], 0)
+
+    def board(self, job_id, body):
+        with patch.object(factory.sys, "stdin", io.StringIO(body)), \
+                patch.dict(os.environ, {"FACTORY_SESSION": "tag", "PASEO_AGENT_ID": ""}):
+            return invoke(factory, ["board", str(self.home), job_id])
+
     def test_job_falls_back_to_the_archive(self):
         with patch.object(factory, "factory_home", return_value=self.home):
             code, out, err = invoke(factory, ["job", "412-fix-login"])
