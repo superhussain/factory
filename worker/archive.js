@@ -81,6 +81,12 @@ async function readJson(env, key) {
 
 const jobsOf = (doc) => (Array.isArray(doc?.data?.jobs) ? doc.data.jobs : null);
 
+// Log why a write was refused so wrangler tail shows it. Key names only.
+const conflict = (reason) => {
+  console.warn(`archive pass conflict: ${reason}`);
+  return { status: "conflict", moved: [] };
+};
+
 /** One archive pass. Off unless a valid global pipeline document sets `archive`. */
 export async function runArchive(env, now) {
   const pipeline = await readJson(env, "pipeline/global.json");
@@ -104,7 +110,13 @@ export async function runArchive(env, now) {
       httpMetadata: { contentType: "application/json" },
     },
   );
-  if (!saved) return { status: "conflict", moved: [] };
+  if (!saved) {
+    return conflict(
+      archive
+        ? "board-archive.json changed during the pass; nothing moved"
+        : "board-archive.json is not valid JSON or appeared during the pass; nothing moved",
+    );
+  }
   if (!ids.size) return { status: "none", moved: [] };
   const next = {
     ...board.data,
@@ -115,7 +127,11 @@ export async function runArchive(env, now) {
     onlyIf: new Headers({ "If-Match": board.etag }),
     httpMetadata: { contentType: "application/json" },
   });
-  if (!written) return { status: "conflict", moved: [] };
+  if (!written) {
+    return conflict(
+      "board.json changed during the pass; rows stay on the board until the next pass",
+    );
+  }
   await announce(env, "board.json");
   return { status: "archived", moved: [...ids] };
 }

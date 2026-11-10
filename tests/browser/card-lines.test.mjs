@@ -1,5 +1,6 @@
-// One line per fact on a job card: order, one-row truncation with a title tooltip, colour per
-// kind, host label from the registry, ref links and their hover, at desktop light and mobile dark.
+// One line per fact on a job card: order, one-row truncation (a needs-you ask wraps to two rows)
+// with a title tooltip, colour per kind, host label from the registry, ref links and their hover,
+// at desktop light and mobile dark.
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
 import test from "node:test";
@@ -19,6 +20,8 @@ const SHOTS = new URL("../../.context/shots/", import.meta.url).pathname;
 const wait = { polling: 50 };
 const NOW = "2026-01-01T12:00:00Z";
 const NOTE = "resumed by owner; recovery session continuing from spec";
+const NEEDS =
+  "Pick the CSV column order for the weekly export: date first, or campaign first as the old report did. Reply in needs.md with one of the two orders.";
 const JOBS = [
   {
     id: "041-sample-report",
@@ -61,6 +64,15 @@ const JOBS = [
     branch: "factory/044-ghost",
     round: 0,
     claim: { device: "ghost-box", session: "d4e5f6", since: NOW },
+    updated: NOW,
+  },
+  {
+    id: "045-sample-needs",
+    project: "sample",
+    title: "Weekly export column order",
+    stage: "build",
+    round: 1,
+    needs: NEEDS,
     updated: NOW,
   },
 ];
@@ -148,6 +160,18 @@ test("card lines", { timeout: 240000 }, async (t) => {
         return { x, y, width, height };
       }, CARD);
       await page.screenshot({ path: `${SHOTS}card-lines${suffix}.png`, clip });
+      await page.evaluate(() =>
+        document
+          .querySelector('.card[data-id="045-sample-needs"]')
+          .scrollIntoView({ block: "center", inline: "center" }),
+      );
+      const needsClip = await page.evaluate(() => {
+        const { x, y, width, height } = document
+          .querySelector('.card[data-id="045-sample-needs"]')
+          .getBoundingClientRect();
+        return { x: x + scrollX, y: y + scrollY, width, height };
+      });
+      await page.screenshot({ path: `${SHOTS}card-needs${suffix}.png`, clip: needsClip });
 
       await t.test(`lines ${scheme}`, async () => {
         assert.deepEqual(await cardLines(page, "042-sample-export"), LINES_042);
@@ -165,12 +189,23 @@ test("card lines", { timeout: 240000 }, async (t) => {
               whiteSpace: s.whiteSpace,
               textOverflow: s.textOverflow,
               overflow: s.overflowX,
+              needsYou: el.closest(".card").classList.contains("needs-you"),
+              clamp: s.webkitLineClamp,
+              rows: Math.round(el.getBoundingClientRect().height / parseFloat(s.lineHeight)),
             };
           }),
         );
-        assert.equal(lines.length, 22);
+        assert.equal(lines.length, 26);
         for (const l of lines) {
           const where = `${l.id} ${l.cls}`;
+          if (l.needsYou && l.cls === "note line") {
+            assert.equal(l.whiteSpace, "normal", where);
+            assert.equal(l.clamp, "2", where);
+            assert.equal(l.overflow, "hidden", where);
+            assert.equal(l.title, l.text, where);
+            assert.equal(l.rows, 2, where);
+            continue;
+          }
           assert.equal(l.whiteSpace, "nowrap", where);
           assert.equal(l.textOverflow, "ellipsis", where);
           assert.equal(l.overflow, "hidden", where);

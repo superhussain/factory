@@ -568,6 +568,10 @@
         },
         "storage": [
           {
+            "op": "get",
+            "key": "board.json"
+          },
+          {
             "op": "put",
             "key": "board.json",
             "options": {

@@ -1,4 +1,4 @@
-// Card text: one-row lines with a full-text tooltip, ordinary and hostile unbroken text,
+// Card text: one-row lines (a needs-you ask wraps to two) with a full-text tooltip, ordinary and hostile unbroken text,
 // injection safety, card geometry, PR target separation, drawer interactions, across themes
 // and viewports.
 // Runs the offline source checks always; the browser matrix requires --browser <origin>.
@@ -156,6 +156,7 @@ async function measureCards(page) {
                   overflow: style.overflowX,
                   textOverflow: style.textOverflow,
                   whiteSpace: style.whiteSpace,
+                  lineHeight: parseFloat(style.lineHeight),
                   clamp: style.webkitLineClamp,
                   display: style.display,
                 };
@@ -217,6 +218,19 @@ function checkCards(actual, expected, width) {
     }
     for (const field of card.fields) {
       if (field.selector.endsWith(" line")) {
+        if ((job.needs || job.stage === "needs-human") && field.selector === "note line") {
+          const where = job.id + " " + field.selector;
+          assert.equal(field.whiteSpace, "normal", where);
+          assert.equal(field.clamp, "2", where);
+          assert.equal(field.overflow, "hidden", where);
+          assert.equal(field.title, field.text, where + " title");
+          assert.ok(field.bounds.right <= card.content.right + 1, where);
+          assert.ok(field.bounds.scrollWidth <= field.bounds.clientWidth + 1, where);
+          assert.ok(field.bounds.height <= 2 * field.lineHeight + 1, where);
+          if (expected.stress)
+            assert.equal(Math.round(field.bounds.height / field.lineHeight), 2, where + " rows");
+          continue;
+        }
         assert.equal(field.whiteSpace, "nowrap", job.id + " " + field.selector);
         assert.equal(field.textOverflow, "ellipsis", job.id + " " + field.selector);
         assert.equal(field.overflow, "hidden", job.id + " " + field.selector);

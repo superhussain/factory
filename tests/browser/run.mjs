@@ -310,6 +310,7 @@ async function capture(outdir, referencePath) {
     const servedReference = inner(/<script[^>]*id="factory-reference"[^>]*>([^<]*)<\/script>/);
     const servedMetaCsp = inner(/http-equiv="Content-Security-Policy" content="([^"]*)"/);
 
+    let archivedBoard = false;
     async function view(name, width, height, theme, prepare, touch = false) {
       const delayTriage = name.startsWith("backlog-triage-open-");
       for (const side of ["before", "after"]) {
@@ -356,6 +357,15 @@ async function capture(outdir, referencePath) {
               body: held ? JSON.stringify(CAPTURE_TRIAGE) : "",
             });
           }
+          if (archivedBoard && target.pathname === "/board.json") {
+            const board = await fetch(target.href);
+            return request.respond({
+              status: board.status,
+              contentType: "application/json",
+              headers: { ETag: board.headers.get("ETag") ?? "" },
+              body: JSON.stringify({ ...(await board.json()), archived: { max_id: 416 } }),
+            });
+          }
           if (target.pathname === "/api/board/archive") {
             if (target.searchParams.get("page") === "1")
               return request.respond({
@@ -368,6 +378,17 @@ async function capture(outdir, referencePath) {
                   total: 52,
                 }),
               });
+            const q = target.searchParams.get("q");
+            if (q !== null) {
+              const jobs = [CAPTURE_ARCHIVED].filter((j) =>
+                [j.id, j.title].some((f) => f.toLowerCase().includes(q.toLowerCase())),
+              );
+              return request.respond({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ jobs, total: jobs.length }),
+              });
+            }
             const found = target.searchParams.get("id") === CAPTURE_ARCHIVED.id;
             return request.respond({
               status: found ? 200 : 404,
@@ -613,6 +634,28 @@ async function capture(outdir, referencePath) {
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
     await view("archive-list", 1280, 900, "light", openArchiveList);
     await view("archive-list-mobile", 390, 844, "dark", openArchiveList);
+    const openArchiveJumper = async (page, side) => {
+      archivedBoard = true;
+      try {
+        await page.evaluate(() => poll());
+        await openJumper(page);
+        await page.type("#job-search", "login");
+        if (side !== "after") return;
+        await page.evaluate(() =>
+          [...document.querySelectorAll('#job-results [role="option"]')]
+            .find((o) => o.querySelector(".title").textContent === "Search archived jobs")
+            .click(),
+        );
+        await page.waitForFunction(() =>
+          [...document.querySelectorAll("#job-results .title")].some(
+            (el) => el.textContent === "Synthetic login fix",
+          ),
+        );
+      } finally {
+        archivedBoard = false;
+      }
+    };
+    await view("jumper-archive-search", 1280, 900, "light", openArchiveJumper);
     await view("backlog-triage-desktop", 1440, 900, "light", openTriage);
     await view("backlog-triage-mobile", 390, 844, "dark", openTriage);
     await view("backlog-triage-open-desktop", 1440, 900, "light", openTriageFirstPaint);
