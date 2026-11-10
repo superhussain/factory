@@ -4452,7 +4452,7 @@ def paseo_run(args):
 
 
 def workspace_leftovers(cwd):
-    """What a workspace holds that no remote or other local branch keeps, as strings."""
+    """What a workspace holds that no remote, other local branch or the branch's creation point keeps, as strings."""
     def git(verb, *args):
         try:
             r = subprocess.run(["git", "-C", cwd, verb, *args], capture_output=True, text=True, timeout=20)
@@ -4470,7 +4470,14 @@ def workspace_leftovers(cwd):
         found.append(failed)
     else:
         exclude = [f"--exclude={branch[0]}"] if branch else []
-        lines, failed = git("log", "--format=%h %s", "HEAD", "--not", "--remotes", *exclude, "--branches")
+        start = []
+        if branch:
+            lines, failed = git("reflog", "show", "--format=%H %gs", f"refs/heads/{branch[0]}")
+            if failed:
+                found.append(failed)
+            elif lines and re.fullmatch(r"[0-9a-f]{40,64} branch: Created from .*", lines[-1]):
+                start = [lines[-1].split(" ", 1)[0]]
+        lines, failed = git("log", "--format=%h %s", "HEAD", "--not", "--remotes", *exclude, "--branches", *start)
         found += [failed] if failed else [f"commit: {line}" for line in lines]
     return found[:20] + ([f"and {len(found) - 20} more"] if len(found) > 20 else [])
 
