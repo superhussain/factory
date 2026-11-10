@@ -4702,6 +4702,7 @@ async function openMoveHost() {
     : j.id + ' has no host right now. The host you pick starts it.';
   let hosts = [];
   let blocked = [];
+  let blockedOffline = [];
   try {
     const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
     if (!h.ok || !p.ok) throw new Error('load');
@@ -4711,6 +4712,7 @@ async function openMoveHost() {
     const queued = new Set(queuedStops(j.move).map((q) => q.from));
     hosts = others.filter((x) => !queued.has(x.id));
     blocked = others.filter((x) => queued.has(x.id)).map((x) => x.id);
+    blockedOffline = others.filter((x) => queued.has(x.id) && x.offline).map((x) => x.id);
   } catch {
     err.textContent = 'Could not load hosts. Try again.';
     err.hidden = false;
@@ -4719,8 +4721,9 @@ async function openMoveHost() {
   select.hidden = !hosts.length;
   $('move-host-label').hidden = !hosts.length;
   if (!hosts.length && err.hidden) {
+    const late = blockedOffline.length === 1 ? blockedOffline[0] + ' is offline and stops the job only when it comes back online.' : blockedOffline.length ? blockedOffline.join(', ') + ' are offline and stop the job only when they come back online.' : '';
     empty.textContent = blocked.length
-      ? 'Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '. Try again after one of them stops the job.'
+      ? 'Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '. Try again after one of them stops the job.' + (late ? ' ' + late : '')
       : 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
     empty.hidden = false;
   }
