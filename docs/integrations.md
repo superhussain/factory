@@ -45,8 +45,8 @@ supported. Local dead-session detection is optional; core operations need no
 daemon or executable. Agent app/web links are hosted deployment configuration,
 disabled unless configured, not device defaults.
 
-`factory.py archive-workspace <slug>/<id>` runs as a merged job's last step. It
-archives the session's Paseo workspace only when the job is at `merged`, the
+`factory.py archive-workspace <slug>/<id>` runs as the last step of a merged or closed job. It
+archives the session's Paseo workspace only when the job is at `merged` or `closed`, the
 workspace's `isolation` is `worktree`, and its folder is named `factory-<id>` or
 `factory-<id>-<n>`. Any other workspace is skipped. Git state never skips the archive.
 The JSON lists leftovers first: `uncommitted: <porcelain line>` for each uncommitted file,
@@ -55,19 +55,19 @@ The JSON lists leftovers first: `uncommitted: <porcelain line>` for each uncommi
 fails or runs longer than 20 seconds. It lists at most 20, then `and <n> more`. Ignored
 files such as `.context/` scratch are not listed. `--check` runs the guards and prints
 `would_archive` with the leftovers, and never archives, so the session can queue a follow-up
-first. Without `PASEO_AGENT_ID`, a Paseo server id or `paseo` on PATH, it prints a skip and
+first. It then archives the session's agent when the workspace archive left it running. Without `PASEO_AGENT_ID`, a Paseo server id or `paseo` on PATH, it prints a skip and
 exits 0.
 
 Cleanup rule: on a merged or closed job, the pipeline runs
 `factory.py archive-workspace <slug>/<id>` and `factory.py cleanup <slug>/<id>`
 without asking. They remove only worktrees this pipeline created: a `factory-<id>`
 Paseo workspace, or the job's worktree under the factory home. `archive-workspace` archives
-a merged job's own workspace whatever its git state and reports leftovers first. `cleanup` refuses a dirty
+a merged or closed job's own workspace whatever its git state and reports leftovers first. `cleanup` refuses a dirty
 worktree and keeps a branch that is not merged. Neither forces. A host owner who runs Claude Code in auto mode can
 allow them with this sample entry under `autoMode.allow` in their settings:
 
 ```json
-"Run factory.py archive-workspace <slug>/<id> or factory.py cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home). archive-workspace archives a merged job's own factory-<id> workspace whatever its git state and reports leftovers first, cleanup refuses a dirty worktree and keeps unmerged branches, and neither forces."
+"Run factory.py archive-workspace <slug>/<id> or factory.py cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home). archive-workspace archives a merged or closed job's own factory-<id> workspace whatever its git state and reports leftovers first, cleanup refuses a dirty worktree and keeps unmerged branches, and neither forces."
 ```
 
 `schedules/resume.md` and `schedules/explore.md` are prompt templates, not executables. Ideas are picked up by `factory.py pickup` instead (see Automatic pickup below and `references/pickup.md` in the installed skill).
