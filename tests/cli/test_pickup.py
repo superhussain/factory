@@ -1407,6 +1407,30 @@ class MoveArchiveTest(MoveHostTest):
         self.assertEqual(out, f"archived sessions {self.AGENT}, {self.AGENT2} and stopped 042-sample-export alpha: "
                               "moved to cloud-box\n")
         self.assertEqual(self.recorded(), [["archive", self.AGENT, "--force"], ["archive", self.AGENT2, "--force"]])
+        self.assertFalse((self.home / "paseo-claims" / "042-sample-export").exists())
+
+    def test_skipped_stop_keeps_the_marker(self):
+        self.views["alpha"] = (200, effective("alpha", {"pickup": {"enabled": False, "hosts": [DEVICE]}}))
+        self.set_stalls()
+        self.moved(agent=self.AGENT, server="srv-lab")
+        self.assertEqual(self.pickup(), (0, "", "factory.py: pickup skips the stop of 042-sample-export alpha: pickup off\n"))
+        self.assertEqual(self.recorded(), [])
+        self.assertTrue((self.home / "paseo-claims" / "042-sample-export" / self.AGENT).is_file())
+
+    def test_one_marker_archives_only_that_agent(self):
+        self.set_stalls()
+        self.moved(**{"agent": self.AGENT2, "server": "srv-lab", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                      "earlier": [{"from": DEVICE, "session": "a1b2c3", "agent": self.AGENT, "server": "srv-lab",
+                                   "at": self.AT}]})
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertEqual(out, f"archived session {self.AGENT} and stopped 042-sample-export alpha: moved to cloud-box\n")
+        self.assertEqual(err, self.hint(self.AGENT2))
+        self.assertEqual(self.recorded(), [["archive", self.AGENT, "--force"]])
+        move = self.job("042-sample-export")["move"]
+        self.assertIn("archived", move["earlier"][0])
+        self.assertNotIn("archived", move)
+        self.assertFalse((self.home / "paseo-claims" / "042-sample-export" / self.AGENT).is_file())
 
 
 class PriorityTest(PickupFixture):

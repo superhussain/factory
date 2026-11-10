@@ -738,7 +738,7 @@ def board(factory, job_id):
         fail(f"{held_by(job_id, held)}. Nothing was written. Pass --session <tag> if this session "
              "holds it, or take it over with hold <project>/<id> take", 6)
     if paseo and job and job.get("paseo") == paseo:
-        record_paseo_claim(factory, job_id, paseo)
+        record_paseo_claim(factory_home(), job_id, paseo)
     print(json.dumps(job, indent=2))
     if "stage" in patch or "rounds" in patch or (patch.get("tracer") or {}).get("follow") is True:
         tracer_after_board(Path(factory), job, patch)
@@ -928,7 +928,7 @@ def claim_id(factory, feature_slug, project_slug):
         return dump_board(data), job_id
     job_id = cas(factory, "/api/board", add)
     if paseo:
-        record_paseo_claim(factory, job_id, paseo)
+        record_paseo_claim(factory_home(), job_id, paseo)
     jobs.joinpath(project_slug, job_id).mkdir(parents=True, exist_ok=True)
     return job_id
 
