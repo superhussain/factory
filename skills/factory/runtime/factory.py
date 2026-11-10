@@ -4644,12 +4644,13 @@ def workspace_leftovers(cwd):
     def git(verb, *args):
         try:
             r = subprocess.run(["git", "-C", cwd, verb, *args], capture_output=True, text=True, timeout=20)
-            failed = f"exit {r.returncode}" if r.returncode else None
         except subprocess.TimeoutExpired:
-            r, failed = None, "timed out after 20 s"
+            return [], f"git {verb} failed: timed out after 20 s"
         except OSError:
-            r, failed = None, "could not run git"
-        return (r.stdout.splitlines() if not failed else []), (f"git {verb} failed: {failed}" if failed else None)
+            return [], f"git {verb} failed: could not run git"
+        if r.returncode:
+            return [], f"git {verb} failed: exit {r.returncode}"
+        return r.stdout.splitlines(), None
 
     lines, failed = git("status", "--porcelain")
     found = [failed] if failed else [f"uncommitted: {line}" for line in lines]
