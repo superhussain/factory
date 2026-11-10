@@ -2943,7 +2943,7 @@ def paused(j):
     return isinstance(p, dict) and isinstance(p.get("at"), str)
 
 
-CLOSE_REASON = re.compile(r"[^\x00-\x1f\x7f]{1,200}")
+CLOSE_REASON = re.compile(r"[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}")
 
 
 def closing(j):

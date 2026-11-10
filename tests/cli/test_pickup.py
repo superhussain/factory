@@ -1571,7 +1571,7 @@ class CloseTest(PickupFixture):
         self.assertEqual((self.puts(), self.files), ([], {}))
 
     def test_close_skips_an_invalid_reason(self):
-        for reason in ("", "   ", "two\nlines", "x" * 201, 42):
+        for reason in ("", "   ", "two\nlines", "Dup\x85x", "Dup\u2028x", "Dup\u2029x", "Dup\x9fx", "x" * 201, 42):
             with self.subTest(reason=reason):
                 self.calls.clear()
                 self.board["jobs"] = [self.closing(close={"reason": reason, "at": "2026-01-02T12:00:00Z"})]

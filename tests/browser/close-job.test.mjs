@@ -173,6 +173,24 @@ test("close job", { timeout: 240000 }, async (t) => {
         await page.waitForSelector("#close-job-dlg:not([open])");
       });
 
+      await t.test(`a reason with a line separator writes nothing ${width}`, async () => {
+        await openDialog("042-sample-export");
+        const before = await boardText(origin);
+        await page.$eval(
+          "#close-job-reason",
+          (el, v) => {
+            el.value = v;
+          },
+          "Duplicate\u2028of 041-sample-report",
+        );
+        await activate("#close-job-save");
+        await page.waitForFunction(() => !document.getElementById("close-job-err").hidden, wait);
+        assert.equal(await errText(page), "Enter a reason of 1 to 200 characters.");
+        assert.equal(await boardText(origin), before);
+        await activate("#close-job-cancel");
+        await page.waitForSelector("#close-job-dlg:not([open])");
+      });
+
       await t.test(`a job that left the board writes nothing ${width}`, async () => {
         await openDialog("046-sample-pr");
         assert.equal(await errText(page), null);
