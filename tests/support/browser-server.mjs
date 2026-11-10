@@ -116,7 +116,12 @@ export async function withBrowserFixture(callback) {
   assertBrowserTarget(service.origin, env);
   let browser;
   try {
-    browser = await puppeteer.launch({ executablePath, headless: true });
+    // Headless Chrome has no hover pointer. 2 is Blink HoverType hover; touch emulation still sets none.
+    browser = await puppeteer.launch({
+      executablePath,
+      headless: true,
+      args: ["--blink-settings=primaryHoverType=2,availableHoverTypes=2"],
+    });
     return await callback({ browser, origin: service.origin, runDir, env });
   } finally {
     await browser?.close();
