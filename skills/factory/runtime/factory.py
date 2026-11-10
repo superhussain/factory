@@ -2963,10 +2963,58 @@ def closing_message(job_id):
     return f"{job_id} has a close queued from the dashboard. Nothing else was written. Stop this session."
 
 
-def close_decision(j, reason, device, earlier):
-    """decision.md for a job closed from the dashboard. earlier is the decision.md it replaces, or None."""
+GH_PR = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/\d+", re.ASCII)
+PR_CLOSE_COMMENT = (
+    "> \U0001f916 **Agent-authored report** \u2014 written by factory.py pickup on the owner's behalf, "
+    "posted automatically. Tests not run.\n\n"
+    "The owner closed factory job `{id}` from the dashboard, so this pull request will not merge. "
+    "The decision page at {link} records the reason.")
+PR_EVIDENCE = {"closed": "closed by pickup with a comment that links this page", "merged": "already merged",
+               "already closed": "already closed", "open": "still open"}
+
+
+def gh_pr(*args):
+    """(returncode, stdout) of `gh pr <args>`, (1, "") when it cannot run, None without gh."""
+    gh = shutil.which("gh")
+    if gh is None:
+        return None
+    try:
+        r = subprocess.run([gh, "pr", *args], capture_output=True, text=True, timeout=60,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return 1, ""
+    return r.returncode, r.stdout
+
+
+def close_pull_request(home, j, device):
+    """Close the job's open PR with a comment. (state, why): closed, merged, already closed or open."""
+    pr, md = j["pr"], project_files(home, j["project"])[0]
+    repo = frontmatter(md)[0].get("repo", "") if md.exists() else ""
+    m = GH_PR.fullmatch(pr) if isinstance(pr, str) else None
+    if not (m and m[1].lower() == repo.lower()):
+        return "open", f"its URL is not a pull request in {repo or 'the project repository'}"
+    view = gh_pr("view", pr, "--json", "state", "--jq", ".state")
+    if view is None:
+        return "open", f"gh is not installed on {device}"
+    if view[0]:
+        return "open", f"gh pr view exited {view[0]}"
+    state = view[1].strip()
+    if state in ("MERGED", "CLOSED"):
+        return ("merged" if state == "MERGED" else "already closed"), ""
+    if state != "OPEN":
+        return "open", f"gh pr view reported state {state}"
+    comment = PR_CLOSE_COMMENT.format(id=j["id"], link=f"{api_url(home)}/#{j['id']}/decision")
+    code = gh_pr("close", pr, "--comment", comment)[0]
+    return ("open", f"gh pr close exited {code}") if code else ("closed", "")
+
+
+def close_decision(j, reason, device, earlier, outcome):
+    """decision.md for a job closed from the dashboard. earlier is the decision.md it replaces, or None.
+    outcome is close_pull_request's (state, why), or None without a pr."""
     at, stage, pr = j["close"]["at"], j.get("stage"), j.get("pr")
-    open_pr = f"- Pull request {pr} stays open. Close it on GitHub if it should not merge.\n" if pr else ""
+    state, why = outcome or (None, "")
+    open_pr = (f"- Pull request {pr} stays open because {why}. Close it on GitHub if it should not merge.\n"
+               if state == "open" else "")
     text = (f"CLOSED: {reason}\n\n"
             f"**Summary.** Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: "
             f"{reason}. Nothing else is owed unless Left out says so.\n\n"
@@ -2974,7 +3022,7 @@ def close_decision(j, reason, device, earlier):
             f"- Close requested from the dashboard at {at}.\n"
             f"- Stage when closed: `{stage}`, round {j.get('round', 0)}.\n"
             f"- Branch: `{j.get('branch') or 'none'}`.\n"
-            f"- Pull request: {pr or 'none'}.\n"
+            f"- Pull request: {f'{pr}, {PR_EVIDENCE[state]}' if outcome else 'none'}.\n"
             f"- Written by factory.py pickup on {device}.\n\n"
             "## Left out\n\n"
             "- No agent reviewed this close. The reason is the owner's own words.\n"
@@ -3003,14 +3051,20 @@ def close_pass(home, data, device, minutes, dry):
             if dry:
                 print(f"skip close {job_id} {project}: claimed by {c['device']} session {c.get('session')}")
             continue
+        pr = j.get("pr")
         if dry:
-            print(f"would close {job_id} {project}")
+            print(f"would close {job_id} {project}" + (f" and pull request {pr}" if pr else ""))
             continue
+        outcome = close_pull_request(home, j, device) if pr else None
+        if outcome and outcome[0] == "closed":
+            print(f"closed pull request {pr} for {job_id}")
+        elif outcome and outcome[0] == "open":
+            print(f"factory.py: pickup leaves pull request {pr} open: {outcome[1]}", file=sys.stderr)
 
-        def write(text, j=j, reason=reason):
+        def write(text, j=j, reason=reason, outcome=outcome):
             if text is not None and text.startswith("CLOSED:"):
                 return None, None
-            return close_decision(j, reason, device, text), None
+            return close_decision(j, reason, device, text, outcome), None
         cas(home, f"/api/jobs/{project}/{job_id}/decision.md", write)
 
         def change(text, job_id=job_id, at=j["close"]["at"], reason=reason):

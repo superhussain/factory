@@ -1473,6 +1473,12 @@ class PauseTest(PickupFixture):
 class CloseTest(PickupFixture):
     DECISION = "/api/jobs/alpha/042-sample-export/decision.md"
     REASON = "Duplicate of 041-sample-report"
+    PR = "https://github.com/sample/alpha/pull/7"
+    COMMENT = (
+        "> \U0001f916 **Agent-authored report** \u2014 written by factory.py pickup on the owner's behalf, "
+        "posted automatically. Tests not run.\n\n"
+        "The owner closed factory job `042-sample-export` from the dashboard, so this pull request will not "
+        "merge. The decision page at https://factory.example.test/#042-sample-export/decision records the reason.")
     TEXT = (
         "CLOSED: Duplicate of 041-sample-report\n\n"
         "**Summary.** Closed from the dashboard at 2026-01-02T12:00:00Z while at stage `build`. "
@@ -1494,6 +1500,15 @@ class CloseTest(PickupFixture):
         self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
         self.files = {}
         self.conditions = []
+        self.gh_answers = {"view": (0, "OPEN\n"), "close": (0, "")}
+        patch.object(factory, "api_url", return_value="https://factory.example.test").start()
+        patch.object(factory, "gh_pr", side_effect=self.gh).start()
+        (self.home / "projects").mkdir()
+        (self.home / "projects" / "alpha.md").write_text("---\nrepo: sample/alpha\n---\n", encoding="utf-8")
+
+    def gh(self, *args):
+        self.calls.append(("gh",) + args)
+        return None if self.gh_answers is None else self.gh_answers[args[0]]
 
     def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
         if path != self.DECISION:
@@ -1573,15 +1588,75 @@ class CloseTest(PickupFixture):
 
     def test_close_decision_names_an_open_pull_request(self):
         job = self.closing(pr="https://github.example.test/sample/pull/7")
-        text = factory.close_decision(job, self.REASON, DEVICE, None)
-        self.assertIn("- Pull request: https://github.example.test/sample/pull/7.\n", text)
+        text = factory.close_decision(job, self.REASON, DEVICE, None, ("open", "gh is not installed on host-a"))
+        self.assertIn("- Pull request: https://github.example.test/sample/pull/7, still open.\n", text)
         self.assertIn("- No agent reviewed this close. The reason is the owner's own words.\n"
-                      "- Pull request https://github.example.test/sample/pull/7 stays open. "
-                      "Close it on GitHub if it should not merge.\n"
+                      "- Pull request https://github.example.test/sample/pull/7 stays open because "
+                      "gh is not installed on host-a. Close it on GitHub if it should not merge.\n"
                       "- The next pickup run on each host", text)
         bare = factory.close_decision({"id": "042-sample-export", "project": "alpha", "stage": "spec",
-                                       "close": {"at": "2026-01-02T12:00:00Z"}}, self.REASON, DEVICE, None)
+                                       "close": {"at": "2026-01-02T12:00:00Z"}}, self.REASON, DEVICE, None, None)
         self.assertIn("- Stage when closed: `spec`, round 0.\n- Branch: `none`.\n- Pull request: none.\n", bare)
+
+    def test_close_closes_an_open_pull_request(self):
+        self.board["jobs"] = [self.closing(pr=self.PR)]
+        self.assertEqual(self.pickup(), (0, f"closed pull request {self.PR} for 042-sample-export\n"
+                                            "closed 042-sample-export alpha\n", ""))
+        gh = [call for call in self.calls if call[0] == "gh"]
+        self.assertEqual(gh, [("gh", "view", self.PR, "--json", "state", "--jq", ".state"),
+                              ("gh", "close", self.PR, "--comment", self.COMMENT)])
+        self.assertLess(self.calls.index(gh[1]), self.calls.index(("PUT", self.DECISION)))
+        self.assertIn(f"- Pull request: {self.PR}, closed by pickup with a comment that links this page.\n",
+                      self.files[self.DECISION])
+        self.assertNotIn("stays open", self.files[self.DECISION])
+        self.assertEqual(self.job("042-sample-export")["stage"], "closed")
+
+    def test_close_skips_a_finished_pull_request(self):
+        for state, line in (("MERGED", "already merged"), ("CLOSED", "already closed")):
+            with self.subTest(state=state):
+                self.calls.clear()
+                self.files.clear()
+                self.gh_answers["view"] = (0, state + "\n")
+                self.board["jobs"] = [self.closing(pr=self.PR)]
+                self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
+                self.assertEqual([call for call in self.calls if call[0] == "gh"],
+                                 [("gh", "view", self.PR, "--json", "state", "--jq", ".state")])
+                self.assertIn(f"- Pull request: {self.PR}, {line}.\n", self.files[self.DECISION])
+                self.assertNotIn("stays open", self.files[self.DECISION])
+
+    def test_close_leaves_the_pull_request_open(self):
+        other = "https://github.com/other/repo/pull/7"
+        cases = (("gh None", None, self.PR, True, "gh is not installed on host-a"),
+                 ("view exit 1", {"view": (1, "")}, self.PR, True, "gh pr view exited 1"),
+                 ("state DRAFT", {"view": (0, "DRAFT\n")}, self.PR, True, "gh pr view reported state DRAFT"),
+                 ("close exit 1", {"view": (0, "OPEN\n"), "close": (1, "")}, self.PR, True,
+                  "gh pr close exited 1"),
+                 ("other repo", {}, other, True, "its URL is not a pull request in sample/alpha"),
+                 ("no project file", {}, self.PR, False,
+                  "its URL is not a pull request in the project repository"))
+        for name, answers, pr, project_file, why in cases:
+            with self.subTest(name):
+                self.calls.clear()
+                self.files.clear()
+                self.gh_answers = answers
+                if not project_file:
+                    (self.home / "projects" / "alpha.md").unlink()
+                self.board["jobs"] = [self.closing(pr=pr)]
+                self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n",
+                                                 f"factory.py: pickup leaves pull request {pr} open: {why}\n"))
+                text = self.files[self.DECISION]
+                self.assertIn(f"- Pull request: {pr}, still open.\n", text)
+                self.assertIn(f"- Pull request {pr} stays open because {why}. "
+                              "Close it on GitHub if it should not merge.\n", text)
+                self.assertEqual(self.job("042-sample-export")["stage"], "closed")
+
+    def test_close_dry_run_names_the_pull_request(self):
+        self.board["jobs"] = [self.closing(pr=self.PR)]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[0], f"would close 042-sample-export alpha and pull request {self.PR}")
+        self.assertEqual([call for call in self.calls if call[0] == "gh"], [])
+        self.assertEqual((self.puts(), self.files), ([], {}))
 
 
 class CloseCleanupTest(PickupFixture):
