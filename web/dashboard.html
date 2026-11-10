@@ -72,7 +72,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .filter { font: inherit; font-size: 12px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
   .filter[hidden] { display: none; }
   .btn { font: inherit; font-size: 12px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
-  .btn, .card, .tab, .settings-nav a { transition: border-color .15s, background-color .15s, box-shadow .15s, color .15s; }
+  .btn, .close, .card, .tab, .settings-nav a { transition: border-color .15s, background-color .15s, box-shadow .15s, color .15s; }
   .btn:hover, .btn:focus-visible { border-color: var(--accent); outline: none; }
   .btn:disabled { opacity: .6; cursor: default; }
   /* Touch screens get a 44px tap target. Mouse layouts keep the compact button. */
@@ -360,8 +360,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .detail-head .title { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
   .detail-head .meta, .backlog-history .meta { font: 12px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
   #idea-ref code { font: 12px var(--font-mono); overflow-wrap: anywhere; }
-  .close { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-size); height: var(--icon-size); padding: 0; background: none; border: 0; border-radius: 8px; color: var(--muted); cursor: pointer; }
+  .close { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-size); height: var(--icon-size); padding: 0; background: none; border: 1px solid transparent; border-radius: 8px; color: var(--muted); cursor: pointer; }
   .close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .close:hover, .close:focus-visible { border-color: var(--accent); color: var(--fg); }
+  .close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .tabs { position: relative; display: flex; gap: 4px; padding: 10px 24px; border-bottom: 1px solid var(--line); overflow-x: auto; flex: none; }
   .tabs[hidden] { display: none; }
   .tab {
@@ -2994,6 +2996,12 @@ function renderDrawerLinks(j) {
     setLink($(id), shown(kind, paseo?.[kind]), "Open this job's session in " + (label || ''));
   }
   setLink($('d-tracer'), shown('tracer', tracerLink(j)), "Open this job's feature in Tracer");
+}
+
+// Re-renders the header links of the job open in the drawer, if any.
+function renderOpenDrawerLinks() {
+  const j = jobs.find((x) => x.id === openId);
+  if (j) renderDrawerLinks(j);
 }
 
 function drawerMeta(j) {
@@ -5759,8 +5767,7 @@ $('display-drawer-links').addEventListener('change', e => {
   const k = e.target.dataset.link;
   if (e.target.checked) hiddenDrawerLinks.delete(k); else hiddenDrawerLinks.add(k);
   if (hiddenDrawerLinks.size) store.set(DISPLAY_KEYS.drawerLinks, [...hiddenDrawerLinks].join(',')); else store.remove(DISPLAY_KEYS.drawerLinks);
-  const j = jobs.find((x) => x.id === openId);
-  if (j) renderDrawerLinks(j);
+  renderOpenDrawerLinks();
   displaySaved();
 });
 $('display-idea-project').addEventListener('change', () => {
@@ -5776,6 +5783,7 @@ $('display-reset').addEventListener('click', () => {
   hiddenColumns.clear();
   hiddenCardFields.clear();
   hiddenDrawerLinks.clear();
+  renderOpenDrawerLinks();
   syncProjectFilter();
   applyDisplay();
   schedulePoll();
