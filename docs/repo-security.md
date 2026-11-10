@@ -94,7 +94,7 @@ Only a signed-in person saves pipeline settings (F11). Apply after a PR that cha
 2. In Scope, pick the `factory` project. Its option reads `factory`, or `<title> (factory)` when the project has a title. Then select Load latest.
 3. On the Review tab, paste the review note. On the Build tab, paste the build note. Leave every other field as loaded.
 4. Select Save. History lists the new version.
-5. On a device, from a checkout of this repository at current `main`, run this command. `<installed-skill>` is the `factory` folder that `tools/install.py` created, see [device.md](device.md). It prints `review: matches` and `build: matches`. Any other line means the live note differs from this file, so repeat steps 1 to 4.
+5. On a device, from the root of a checkout of this repository at current `main`, run this command. `<installed-skill>` is the `factory` folder that `tools/install.py` created, see [device.md](device.md). It prints `review: matches` and `build: matches`. A `differs` or `missing` line means the live note is out of date, so repeat steps 1 to 4. If `factory.py` prints an error first, fix that error and run the command again. Do not re-paste the notes for it.
 
 ```sh
 python3 <installed-skill>/runtime/factory.py pipeline factory | python3 tools/stage-notes-check.py
