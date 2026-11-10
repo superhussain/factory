@@ -1119,13 +1119,13 @@ function queuedStops(m) {
   return m ? [...earlier, m].filter((x) => x.from && !moveStopped(x)) : [];
 }
 
-// Where a job runs, from the board's claim and the dashboard's move. A move whose old host has not
-// stopped it yet keeps the queued stop visible.
 // A host's label from Settings > Hosts, or its id when the registry has none.
 function hostName(id) {
   return hostRegistry?.find((h) => h.id === id)?.label || id;
 }
 
+// Where a job runs, from the board's claim and the dashboard's move. A move whose old host has not
+// stopped it yet keeps the queued stop visible.
 function hostLine(j) {
   const m = j.move;
   const hosts = [...new Set(queuedStops(m).map((x) => hostName(x.from)))];

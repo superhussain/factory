@@ -211,7 +211,7 @@ test("card lines", { timeout: 240000 }, async (t) => {
           await page.$eval('.card[data-id="043-orphan"] .refs', (el) => el.textContent),
           "follow-up of 001-gone",
         );
-        await page.click(`${CARD} .ref-link[data-ref="041-sample-report"]`);
+        await page.locator(`${CARD} .ref-link[data-ref="041-sample-report"]`).click();
         await page.waitForFunction(
           () => document.getElementById("d-title")?.textContent === "Sample report",
           wait,
