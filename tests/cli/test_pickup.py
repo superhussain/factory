@@ -1171,6 +1171,10 @@ class MoveArchiveTest(MoveHostTest):
         doc = {"version": 1, "adapter": [sys.executable, str(self.adapter)]}
         (self.home / "stalls.json").write_text(json.dumps(doc), encoding="utf-8")
 
+    def hint(self, agent):
+        return (f"factory.py: pickup kept session {agent} of 042-sample-export: "
+                "no claim recorded on this host, archive it by hand if it still runs\n")
+
     def recorded(self):
         if not self.adapter_calls.exists():
             return []
@@ -1235,7 +1239,8 @@ class MoveArchiveTest(MoveHostTest):
                     (self.home / "stalls.json").unlink()
                 with patch.dict(os.environ, env):
                     code, out, err = self.pickup()
-                self.assertEqual((code, err), (0, ""))
+                hint = self.hint(move["agent"]) if name in ("not claimed here", "other session") else ""
+                self.assertEqual((code, err), (0, hint))
                 self.assertEqual(out, "stopped 042-sample-export alpha: moved to studio-mac\n")
                 self.assertEqual(self.recorded(), [])
                 self.assertEqual(self.stopped, [self.wt])
@@ -1247,11 +1252,22 @@ class MoveArchiveTest(MoveHostTest):
         self.set_stalls()
         self.moved(agent=self.AGENT, server="srv-lab")
         code, out, err = self.pickup()
-        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((code, err), (0, self.hint(self.AGENT)))
         self.assertEqual(out, "stopped 042-sample-export alpha: moved to studio-mac\n")
         self.assertEqual(self.recorded(), [])
         self.assertEqual(self.stopped, [self.wt])
         self.assertNotIn("archived", self.job("042-sample-export")["move"])
+
+    def test_unclaimed_session_hints_once(self):
+        factory.forget_paseo_claim(self.home, "042-sample-export", self.AGENT)
+        self.set_stalls()
+        self.moved(agent="9f1c2d3e-0000-4000-8000-000000000001", server="srv-lab")
+        self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
+                                         "factory.py: pickup kept session 9f1c2d3e-0000-4000-8000-000000000001 of "
+                                         "042-sample-export: no claim recorded on this host, archive it by hand if "
+                                         "it still runs\n"))
+        self.assertEqual(self.recorded(), [])
+        self.assertEqual(self.pickup(), (0, "", ""))
 
     def test_agent_guard_matches_the_adapter_id_rule(self):
         spec = importlib.util.spec_from_file_location("paseo_stalls", SKILL / "runtime" / "paseo_stalls.py")
