@@ -919,7 +919,7 @@ class TakeoverTest(PickupFixture):
         self.assertEqual(self.launched(), [])
 
 
-class MoveHostTest(PickupFixture):
+class MoveFixture(PickupFixture):
     AT = "2026-11-08T10:00:00Z"
 
     def setUp(self):
@@ -941,6 +941,8 @@ class MoveHostTest(PickupFixture):
         self.board["jobs"] = [job]
         return job
 
+
+class MoveHostTest(MoveFixture):
     def test_old_host_stops_the_worktree_and_records_it(self):
         self.moved()
         code, out, err = self.pickup()
