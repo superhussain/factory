@@ -8,6 +8,7 @@ from support import IsolatedTestCase, invoke, load_runtime
 
 factory = load_runtime()
 JOB = "812-dark-mode"
+real = subprocess.run
 
 
 class CheckoutLineageTest(IsolatedTestCase):
@@ -51,6 +52,30 @@ class CheckoutLineageTest(IsolatedTestCase):
 
     def problem(self, branch=None):
         return factory.checkout_problem(self.home, "factory", str(self.repo), branch)
+
+    def test_fetch_has_no_prompt_and_a_timeout(self):
+        calls = []
+
+        def record(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return real(argv, **kwargs)
+
+        with patch.object(factory.subprocess, "run", side_effect=record):
+            self.assertIsNone(self.problem())
+        kwargs = next(kw for argv, kw in calls if "fetch" in argv)
+        self.assertEqual(kwargs["timeout"], factory.FETCH_TIMEOUT_SECONDS)
+        self.assertEqual(factory.FETCH_TIMEOUT_SECONDS, 60)
+        self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+
+    def test_hung_fetch_times_out(self):
+        def hang(argv, **kwargs):
+            if "fetch" in argv:
+                raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+            return real(argv, **kwargs)
+
+        with patch.object(factory.subprocess, "run", side_effect=hang):
+            self.assertEqual(self.problem(),
+                             f"unsafe checkout: git fetch origin main timed out after 60 s in {self.repo}")
 
     def test_clean_clone_is_safe(self):
         self.assertIsNone(self.problem())
