@@ -156,6 +156,7 @@
   "tests/browser/backlog-triage.test.mjs",
   "tests/browser/live-events.test.mjs",
   "tests/browser/archived-job.test.mjs",
+  "tests/browser/archive-list.test.mjs",
   "tests/browser/card-actions.test.mjs",
   "tests/browser/card-actions-shortcut.test.mjs"
  ]
