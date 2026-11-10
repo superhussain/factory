@@ -126,16 +126,21 @@ test("move host", { timeout: 240000 }, async (t) => {
             );
       });
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
-      const card = await page.waitForSelector('.card[data-id="042-sample-export"]');
 
       await t.test(`host line on cards ${width}`, async () => {
-        assert.equal(await hostLine(page, "042-sample-export"), "on lab-linux");
+        await page.waitForFunction(
+          () =>
+            document.querySelector('.card[data-id="042-sample-export"] .host')?.textContent ===
+            "on Lab Linux",
+          wait,
+        );
         assert.equal(await hostLine(page, "043-unclaimed"), null);
         assert.equal(
           await hostLine(page, "046-queued"),
-          "on studio-mac · stop queued on lab-linux",
+          "on Studio Mac · stop queued on Lab Linux",
         );
-        assert.equal(await hostLine(page, "047-done"), "on studio-mac");
+        assert.equal(await hostLine(page, "047-done"), "on Studio Mac");
+        const card = await page.waitForSelector('.card[data-id="042-sample-export"]');
         await card.screenshot({ path: `${SHOTS}after-card-host${suffix}.png` });
       });
 
@@ -163,7 +168,7 @@ test("move host", { timeout: 240000 }, async (t) => {
       await t.test(`drawer host line ${width}`, async () => {
         await page.evaluate(() => (location.hash = "#042-sample-export"));
         await page.waitForFunction(
-          () => document.getElementById("d-meta").textContent.endsWith("· on lab-linux"),
+          () => document.getElementById("d-meta").textContent.endsWith("· on Lab Linux"),
           wait,
         );
         assert.equal(
@@ -293,7 +298,7 @@ test("move host", { timeout: 240000 }, async (t) => {
         await page.waitForFunction(
           () =>
             document.querySelector('.card[data-id="042-sample-export"] .host')?.textContent ===
-            "moving to studio-mac · stop queued on lab-linux",
+            "moving to Studio Mac · stop queued on Lab Linux",
           wait,
         );
         await page.click("#d-close");
@@ -366,7 +371,7 @@ test("move host", { timeout: 240000 }, async (t) => {
         });
         assert.equal(
           await hostLine(page, "042-sample-export"),
-          "moving to cloud-box · stop queued on lab-linux, studio-mac",
+          "moving to Cloud box · stop queued on Lab Linux, Studio Mac",
         );
         pickupHosts = PICKUP_HOSTS;
       });
@@ -380,13 +385,19 @@ test("move host", { timeout: 240000 }, async (t) => {
         ]);
         await page.evaluate(() => (location.hash = ""));
         await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForFunction(
+          () =>
+            document.querySelector('.card[data-id="047-done"] .host')?.textContent ===
+            "on Studio Mac · stop queued on Lab Linux",
+          wait,
+        );
         const queued = await page.waitForSelector('.card[data-id="046-queued"]');
         await queued.screenshot({ path: `${SHOTS}after-card-true-stopped${suffix}.png` });
         assert.equal(
           await hostLine(page, "046-queued"),
-          "on studio-mac · stop queued on lab-linux",
+          "on Studio Mac · stop queued on Lab Linux",
         );
-        assert.equal(await hostLine(page, "047-done"), "on studio-mac · stop queued on lab-linux");
+        assert.equal(await hostLine(page, "047-done"), "on Studio Mac · stop queued on Lab Linux");
       });
 
       await t.test(`dialog says which hosts have a stop queued ${width}`, async () => {

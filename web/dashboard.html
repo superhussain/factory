@@ -280,8 +280,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .idea-text { font-size: 12px; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
   .card .note { font-size: 12px; margin-top: 6px; color: var(--fg); }
   .card .refs, .backlog-card .refs { margin-top: 2px; }
-  /* One fact per row: a long value is cut, and the title tooltip keeps it whole. */
-  .card .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* One fact per row: a long value is cut, and the title tooltip keeps it whole. Inline-size
+     containment keeps an unwrapped row from widening the card and its column. */
+  .card .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; contain: inline-size; }
   .card .id { display: flex; gap: 6px; align-items: center; }
   .card .id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .card .title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
