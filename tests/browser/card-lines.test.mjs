@@ -81,9 +81,15 @@ const TOKENS = {
 };
 const CARD = '.card[data-id="042-sample-export"]';
 
+// Each read queries and measures in one evaluate, so a board redraw cannot detach the nodes.
 const cardLines = (page, id) =>
-  page.$$eval(`.card[data-id="${id}"] > div`, (els) =>
-    els.map((el) => [el.className, el.textContent]),
+  page.evaluate(
+    (i) =>
+      [...document.querySelectorAll(`.card[data-id="${i}"] > div`)].map((el) => [
+        el.className,
+        el.textContent,
+      ]),
+    id,
   );
 const tokenColor = (page, name) =>
   page.evaluate((n) => {
@@ -94,7 +100,14 @@ const tokenColor = (page, name) =>
     probe.remove();
     return color;
   }, name);
-const color = (page, selector) => page.$eval(selector, (el) => getComputedStyle(el).color);
+const color = (page, selector) =>
+  page.evaluate((s) => getComputedStyle(document.querySelector(s)).color, selector);
+const hostLabelShown = (page) =>
+  page.waitForFunction(
+    (s) => document.querySelector(s + " .host")?.textContent === "on Lab Linux",
+    wait,
+    CARD,
+  );
 const settle = (page) =>
   page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 
@@ -120,18 +133,21 @@ test("card lines", { timeout: 240000 }, async (t) => {
       await blockLiveEvents(page);
       await serveHostList(page, FIXTURE_HOSTS);
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
-      await page.waitForSelector(CARD);
-      await page.waitForNetworkIdle({ idleTime: 300 });
+      await hostLabelShown(page);
       await settle(page);
-      await (await page.$(CARD)).screenshot({ path: `${SHOTS}card-lines${suffix}.png` });
+      const clip = await page.evaluate((s) => {
+        const { x, y, width, height } = document.querySelector(s).getBoundingClientRect();
+        return { x, y, width, height };
+      }, CARD);
+      await page.screenshot({ path: `${SHOTS}card-lines${suffix}.png`, clip });
 
       await t.test(`lines ${scheme}`, async () => {
         assert.deepEqual(await cardLines(page, "042-sample-export"), LINES_042);
       });
 
       await t.test(`truncation ${scheme}`, async () => {
-        const lines = await page.$$eval(".card .line", (els) =>
-          els.map((el) => {
+        const lines = await page.evaluate(() =>
+          [...document.querySelectorAll(".card .line")].map((el) => {
             const s = getComputedStyle(el);
             return {
               id: el.closest(".card").dataset.id,
@@ -153,7 +169,10 @@ test("card lines", { timeout: 240000 }, async (t) => {
           assert.equal(l.title, l.cls === "id line" ? l.id : l.text, where);
         }
         assert.equal(
-          await page.$eval(`${CARD} .title`, (el) => getComputedStyle(el).webkitLineClamp),
+          await page.evaluate(
+            (s) => getComputedStyle(document.querySelector(s)).webkitLineClamp,
+            `${CARD} .title`,
+          ),
           "2",
         );
       });
@@ -201,8 +220,7 @@ test("card lines", { timeout: 240000 }, async (t) => {
         await page.evaluate(() => localStorage.setItem("factory-hidden-card-fields", "meta"));
         try {
           await page.reload({ waitUntil: "domcontentloaded" });
-          await page.waitForSelector(CARD);
-          await page.waitForNetworkIdle({ idleTime: 300 });
+          await hostLabelShown(page);
           assert.deepEqual(
             await cardLines(page, "042-sample-export"),
             LINES_042.filter(([cls]) => cls !== "meta branch line" && cls !== "meta round line"),
