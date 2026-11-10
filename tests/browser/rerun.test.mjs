@@ -189,17 +189,23 @@ test("rerun stage", { timeout: 240000 }, async (t) => {
             path: `${SHOTS}after-menu-390.png`,
             clip: await headAnd(page, "#d-actions-menu:not([hidden])"),
           });
+        effectiveFails = true;
+        await rerun();
+        const failed = await rerunError();
+        if (width === 390)
+          await page.screenshot({
+            path: `${SHOTS}after-check-error-390.png`,
+            clip: await headAnd(page, "#d-rerun-err"),
+          });
+        assert.equal(failed, "Could not check Lab Linux. Try again.");
+        assert.equal(await page.$eval("#d-rerun-status", (el) => el.textContent), "");
+        effectiveFails = false;
         pickupHosts = ["studio-mac"];
         await rerun();
         assert.equal(
           await rerunError(),
-          "lab-linux does not run pickup for sample, so nothing would restart the job. Use Move to another host instead.",
+          "Lab Linux does not run pickup for sample, so nothing would restart the job. Use Move to another host instead.",
         );
-        effectiveFails = true;
-        await rerun();
-        assert.equal(await rerunError(), "Could not check lab-linux. Try again.");
-        assert.equal(await page.$eval("#d-rerun-status", (el) => el.textContent), "");
-        effectiveFails = false;
         pickupHosts = ["lab-linux", "studio-mac"];
         const job = await boardJob(origin, "042-sample-export");
         assert.deepEqual([job.claim, job.move], [claimed, undefined]);
@@ -230,7 +236,7 @@ test("rerun stage", { timeout: 240000 }, async (t) => {
               });
             assert.equal(
               await page.$eval("#d-rerun-status", (el) => el.textContent),
-              "Checking lab-linux…",
+              "Checking Lab Linux…",
             );
             assert.equal(await page.$eval("#d-rerun", (el) => el.disabled), true);
             release();
@@ -260,7 +266,7 @@ test("rerun stage", { timeout: 240000 }, async (t) => {
         await rerun();
         assert.equal(
           message,
-          "Rerun the build stage of 042-sample-export on lab-linux? This stops its current session. The next pickup run on lab-linux starts the stage again in a fresh session.",
+          "Rerun the build stage of 042-sample-export on Lab Linux? This stops its current session. The next pickup run on Lab Linux starts the stage again in a fresh session.",
         );
         const job = await boardJob(origin, "042-sample-export");
         assert.deepEqual([job.claim, job.move], [claimed, undefined]);

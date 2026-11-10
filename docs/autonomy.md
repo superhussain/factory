@@ -34,9 +34,9 @@ empty allowlist.
 - The project is registered and on the allowlist, and autonomy is not paused (else
   exit 3).
 - A suggestion whose fingerprint matches any card ever admitted, closed ones included,
-  is skipped. Fingerprints survive archiving: when the Worker archives a card off the
-  board, its fingerprint stays in the board's `archived.fingerprints`. So is one over the cap of 10 cards a day across the factory, or 5 open
-  cards per project.
+  is skipped. So is one over the cap of 10 cards a day across the factory, or 5 open
+  cards per project. Fingerprints survive archiving: when the Worker archives a card
+  off the board, its fingerprint stays in the board's `archived.fingerprints`.
 - A deterministic classifier records `eligible` and `reasons` (risky kinds, size L,
   no or many paths, sensitive paths such as CI, auth, deploy and lockfiles). In stage 0
   every card waits on a human whatever it says.

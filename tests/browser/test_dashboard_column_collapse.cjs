@@ -3,6 +3,7 @@
 // mobile rows. Browser matrix requires --browser <owned-loopback-origin>.
 const assert = require("node:assert/strict");
 const { showOnly } = require("../support/project-filter.cjs");
+const { waitForBoard, clickNow } = require("../support/board-ready.cjs");
 
 const stages = [
   "backlog",
@@ -81,6 +82,7 @@ async function makePage(browser, origin, support, width, theme) {
   await page.goto(origin + "/dashboard.html", { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".card", { polling: 50 });
   await page.waitForFunction(() => !document.getElementById("filter").hidden, { polling: 50 });
+  await waitForBoard(page);
   return { page, context };
 }
 
@@ -89,7 +91,7 @@ async function state(page, stage) {
 }
 
 async function click(page, stage) {
-  await page.click(toggle(stage));
+  await clickNow(page, toggle(stage));
 }
 
 async function checkAX(page, session, expanded) {
@@ -335,6 +337,7 @@ async function matrix(browser, origin, support, width, theme) {
     await page.waitForFunction(() => document.getElementById("detail").hidden, { polling: 50 });
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForSelector(toggle("merged"), { polling: 50 });
+    await waitForBoard(page);
     await defaults(page, width);
     const without = fixtures.filter((j) => !["review", "approve", "spec"].includes(j.stage));
     await click(page, "approve");
@@ -370,6 +373,7 @@ async function matrix(browser, origin, support, width, theme) {
     assert.equal(await state(page, "approve"), "true");
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForSelector(toggle("review"), { polling: 50 });
+    await waitForBoard(page);
     await update(without);
     for (const stage of ["review", "approve", "spec"]) {
       assert.equal(await state(page, stage), "false", "fresh empty default");

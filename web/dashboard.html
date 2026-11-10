@@ -271,6 +271,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .cards { display: flex; flex-direction: column; gap: 10px; min-height: 40px; }
   .cards[hidden] { display: none; }
   .empty { color: var(--muted); font-size: 12px; padding: 8px 2px; opacity: .7; }
+  .archive-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+  .archive-head { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin: 4px 0 0; }
+  .archive-count { font-size: 12px; color: var(--muted); margin: 0; }
+  .archive-error { font-size: 12px; color: var(--alert); margin: 0; }
+  .archive-more[aria-disabled="true"] { opacity: .6; cursor: default; }
   .blank { grid-column: 1 / -1; text-align: center; padding: 64px 16px; color: var(--muted); }
   .blank h2 { margin: 0 0 8px; font-size: 16px; color: var(--fg); }
   .blank p { margin: 4px 0; font-size: 13px; }
@@ -650,7 +655,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
             <option value="age">By age: archive jobs finished more than N days ago</option>
             <option value="count">By count: keep the N most recent finished jobs</option>
           </select></label>
-          <label for="pipeline-archive-n"><span id="pipeline-archive-n-text">Days</span><input type="number" id="pipeline-archive-n" min="1" max="10000" step="1"></label>
+          <label for="pipeline-archive-n"><span id="pipeline-archive-n-text">Days</span><input type="number" id="pipeline-archive-n" aria-describedby="pipeline-archive-help" min="1" max="10000" step="1"></label>
           <p id="pipeline-archive-help" class="muted">The Worker checks once an hour. Only merged and closed jobs move: never one with a claim, a question for you, an escalation, automerge, a queued or running build, unread deny notes or a pending Tracer mirror. Archived jobs keep their files and open read-only from links. This setting applies to all projects.</p>
         </fieldset>
         <div class="settings-tabs" id="pipeline-note-tabs" role="tablist" aria-label="Stage notes">
@@ -989,6 +994,8 @@ const archivedJobs = new Map();
 let boardArchived = false;
 // The jumper's one archive lookup: { query, status: 'loading' | 'done' | 'error', jobs, total }.
 let archiveSearch = null;
+// Pages of GET /api/board/archive?page=N, shown under the merged and closed columns.
+const archiveList = { open: false, rows: [], page: 0, pages: 0, total: 0, busy: false, error: '' };
 let boardReadVersion = 0;
 let boardUpdated = '';
 let boardEtag = '';
@@ -1235,11 +1242,11 @@ function refLine(r) {
 
 // The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
 // A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
-function card(j, inNeeds) {
+function card(j, inNeeds, archived = false) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
-  const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') +
-    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '" title="Press A for job actions" aria-keyshortcuts="a">' +
+  const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
+    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' title="Press A for job actions" aria-keyshortcuts="a"') + '>' +
     '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span>' +
       (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
@@ -1259,8 +1266,8 @@ function card(j, inNeeds) {
   const pr = hiddenCardFields.has('pr') ? null : prLink(j);
   return '<div class="card-wrap' + (pr ? ' has-pr' : '') + '">' + btn +
     (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub">PR #' + esc(pr.n) + '</a>' : '') +
-    '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
-    ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button></div>';
+    (archived ? '' : '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
+    ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') + '</div>';
 }
 
 // Not a .card, so arrow-key card navigation skips it.
@@ -2180,6 +2187,7 @@ const triageFromFields = () => $('pipeline-triage-mode').value
   ? {enabled:$('pipeline-triage-mode').value === 'on', threshold:$('pipeline-triage-threshold').value === '' ? 90 : Number($('pipeline-triage-threshold').value), rules:$('pipeline-triage-rules').value} : undefined;
 const archiveFromFields = () => $('pipeline-archive-mode').value
   ? {mode:$('pipeline-archive-mode').value, n:$('pipeline-archive-n').value === '' ? null : Number($('pipeline-archive-n').value)} : undefined;
+const ARCHIVE_DEFAULT_N = {age:30, count:200};
 // Client-side only: the Worker accepts any valid name and its effective filter drops unregistered ones.
 function pickupRegistryError(pickup) {
   if (!hostRegistry?.length || !Array.isArray(pickup?.hosts)) return null;
@@ -2507,6 +2515,11 @@ listenTabs('pipeline-note-tabs', PIPELINE_NOTE_TABS, id => {
   selectRovingTab(PIPELINE_NOTE_TABS, id);
   for (const stage of PIPELINE_STAGES) $('pipeline-note-panel-' + stage).hidden = id !== 'pipeline-note-tab-' + stage;
 });
+// Registered before the generic listeners so the draft reads the filled N.
+$('pipeline-archive-mode').addEventListener('input', () => {
+  const n = ARCHIVE_DEFAULT_N[$('pipeline-archive-mode').value];
+  if ($('pipeline-archive-n').value === '' && n) $('pipeline-archive-n').value = String(n);
+});
 for (const id of ['pipeline-merge', 'pipeline-rounds', ...PIPELINE_GATES.map(gate => 'pipeline-gate-' + gate),
     'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules', 'pipeline-archive-mode', 'pipeline-archive-n',
     ...PIPELINE_STAGES.map(stage => 'pipeline-note-' + stage)]) {
@@ -2771,11 +2784,26 @@ function nextBacklogItem(index) {
   return list[index] ?? list[0] ?? null;
 }
 
+// The archive list under a terminal column. One shared list feeds both columns.
+function archiveSection(s) {
+  const a = archiveList;
+  const button = (text) => '<button type="button" class="btn archive-more" data-archive data-stage="' + s + '"' +
+    (a.busy ? ' aria-disabled="true"' : '') + '>' + (a.busy ? 'Loading archived jobs' : text) + '</button>';
+  const error = a.error ? '<p class="archive-error" role="alert">' + esc(a.error) + '</p>' : '';
+  if (!a.open) return '<div class="archive-list">' + error + button('Show archived jobs') + '</div>';
+  const rows = a.rows.filter((j) => j.stage === s && isShown(j.project) && !jobs.some((x) => x.id === j.id));
+  return '<div class="archive-list"><h3 class="archive-head">Archived</h3>' +
+    (a.total === 0 ? '<div class="empty">No archived jobs</div>'
+      : (rows.length ? rows.map((j) => card(j, false, true)).join('') : '<div class="empty">none loaded</div>') +
+        '<p class="archive-count">' + a.rows.length + ' of ' + a.total + ' archived jobs loaded</p>') +
+    error + (a.page < a.pages ? button('Show more') : '') + '</div>';
+}
+
 function renderBoard() {
-  const focused = $('board').contains(document.activeElement) ? document.activeElement.closest('.column-toggle, .more, [data-backlog-open]') : null;
+  const focused = $('board').contains(document.activeElement) ? document.activeElement.closest('.column-toggle, .more, .archive-more, [data-backlog-open]') : null;
   const focusRaw = focused?.dataset.raw;
   const focusStage = focused?.dataset.stage;
-  const focusClass = focused && (focused.classList.contains('more') ? 'more' : 'column-toggle');
+  const focusClass = focused && (focused.classList.contains('more') ? 'more' : focused.classList.contains('archive-more') ? 'archive-more' : 'column-toggle');
   if (!jobs.length && !backlog.length) {
     $('board').innerHTML = '<div class="blank"><h2>No jobs yet</h2>' +
       '<p>Start one with <code>/factory &lt;feature&gt;</code> or <code>/factory next</code>.</p>' +
@@ -2818,7 +2846,8 @@ function renderBoard() {
       ' column" aria-expanded="' + !collapsed[i] + '" aria-controls="column-cards-' + s + '"><span>' + label + '</span><span>' + lists[i].length +
       '</span><span aria-hidden="true">' + (collapsed[i] ? '+' : '−') + '</span></button>' + (collapsed[i] ? '' : more) +
       '</h2><div class="cards" id="column-cards-' + s + '"' + (collapsed[i] ? ' hidden' : '') + '>' +
-      (list.length ? list.map((j, k) => s === 'backlog' ? backlogCard(j, k === 0) : card(j, s === 'needs-you')).join('') : '<div class="empty">none</div>') + '</div></section>';
+      (list.length ? list.map((j, k) => s === 'backlog' ? backlogCard(j, k === 0) : card(j, s === 'needs-you')).join('') : '<div class="empty">none</div>') +
+      (TERMINAL.includes(s) ? archiveSection(s) : '') + '</div></section>';
   }).join('');
   if (focusRaw !== undefined) focusBacklogControl(focusRaw);
   else if (focused) {
@@ -2843,6 +2872,7 @@ $('board').addEventListener('click', (e) => {
     renderBoard();
     return;
   }
+  if (e.target.closest('[data-archive]')) { loadArchivePage(); return; }
   const b = e.target.closest('[data-backlog-open]');
   if (b) {
     openBacklogItem(renderedBacklog[Number(b.dataset.index)]);
@@ -3129,6 +3159,29 @@ async function loadArchivedJob(id) {
     archivedJobs.set(id, row);
     return row;
   } catch { return null; }
+}
+
+async function loadArchivePage() {
+  if (archiveList.busy) return;
+  archiveList.busy = true;
+  archiveList.error = '';
+  renderBoard();
+  try {
+    const r = await fetch('./api/board/archive?page=' + (archiveList.page + 1), { cache: 'no-store' });
+    const body = r.ok ? await r.json() : null;
+    if (!Array.isArray(body?.jobs) || !Number.isInteger(body.page) || !Number.isInteger(body.pages) || !Number.isInteger(body.total))
+      throw new Error('bad archive page');
+    for (const row of body.jobs) {
+      if (typeof row?.id !== 'string') continue;
+      archivedJobs.set(row.id, row);
+      if (!archiveList.rows.some((x) => x.id === row.id)) archiveList.rows.push(row);
+    }
+    Object.assign(archiveList, { open: true, page: body.page, pages: body.pages, total: body.total });
+  } catch {
+    archiveList.error = 'Could not load archived jobs. Try again.';
+  }
+  archiveList.busy = false;
+  renderBoard();
 }
 
 async function openJob(id) {
@@ -5156,23 +5209,25 @@ async function rerunAction(ctx) {
   if (!j || !canRerun(j)) return;
   const id = j.id;
   const host = j.claim.device;
+  let name = hostName(host);
   ctx.report('');
   if (ctx.button) ctx.button.disabled = true;
   try {
     let listed;
-    ctx.status('Checking ' + host + '…');
+    ctx.status('Checking ' + name + '…');
     try {
       const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
       if (!h.ok || !p.ok) throw new Error('load');
       const [list, view] = [await h.json(), await p.json()];
+      name = list.find((x) => x.id === host)?.label || name;
       listed = list.some((x) => x.id === host && x.state === 'active') && (view.pickup?.enabled ? view.pickup.hosts : []).includes(host);
     } catch {
-      throw new Error('Could not check ' + host + '. Try again.');
+      throw new Error('Could not check ' + name + '. Try again.');
     } finally {
       if (ctx.live()) ctx.status('');
     }
-    if (!listed) throw new Error(host + ' does not run pickup for ' + j.project + ', so nothing would restart the job. Use Move to another host instead.');
-    if (!confirm('Rerun the ' + j.stage + ' stage of ' + id + ' on ' + host + '? This stops its current session. The next pickup run on ' + host + ' starts the stage again in a fresh session.')) return;
+    if (!listed) throw new Error(name + ' does not run pickup for ' + j.project + ', so nothing would restart the job. Use Move to another host instead.');
+    if (!confirm('Rerun the ' + j.stage + ' stage of ' + id + ' on ' + name + '? This stops its current session. The next pickup run on ' + name + ' starts the stage again in a fresh session.')) return;
     await casBoard((board) => {
       const message = rerunJob(board, id, host, isoNow());
       if (message) throw new Error(message);
