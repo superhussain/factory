@@ -513,7 +513,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <a class="pr-link" id="d-tracer" target="_blank" rel="noopener noreferrer" hidden>Tracer</a>
     </div>
     <div class="job-actions" id="d-actions-wrap">
-      <button class="btn icon" id="d-actions" aria-label="Job actions" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="d-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>
+      <button class="btn icon" id="d-actions" aria-label="Job actions" title="Job actions (A or .)" aria-keyshortcuts="a ." aria-haspopup="menu" aria-expanded="false" aria-controls="d-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>
       <div class="job-actions-menu" id="d-actions-menu" role="menu" aria-label="Job actions" hidden>
         <button class="btn" id="d-edit-idea" role="menuitem" tabindex="-1" hidden>Edit idea</button>
         <button class="btn" id="d-discard" role="menuitem" tabindex="-1" hidden>Discard idea</button>
@@ -832,7 +832,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
           <tr><td>N</td><td>New idea</td></tr>
           <tr><td>P</td><td>Select project</td></tr>
           <tr><td>S</td><td>Open Settings</td></tr>
-          <tr><td>A</td><td>Open the jumper with actions for the hovered or focused job card</td></tr>
+          <tr><td>A or .</td><td>Open the jumper with actions for the hovered or focused job card, or the open job</td></tr>
           <tr><td>B</td><td>Open the first backlog item</td></tr>
           <tr><td>A or D</td><td>Approve or deny the open backlog item</td></tr>
           <tr><td>Right or Left arrow</td><td>Move between cards and job pages</td></tr>
@@ -1265,7 +1265,7 @@ function card(j, inNeeds, archived = false) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
-    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' title="Press A for job actions" aria-keyshortcuts="a"') + '>' +
+    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' title="Press A or . for job actions" aria-keyshortcuts="a ."') + '>' +
     '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span>' +
       (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
