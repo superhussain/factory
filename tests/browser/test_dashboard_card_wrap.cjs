@@ -1,5 +1,6 @@
-// Card text wrapping: ordinary and hostile unbroken text, injection safety, card
-// geometry, PR target separation, drawer interactions, across themes and viewports.
+// Card text: one-row lines with a full-text tooltip, ordinary and hostile unbroken text,
+// injection safety, card geometry, PR target separation, drawer interactions, across themes
+// and viewports.
 // Runs the offline source checks always; the browser matrix requires --browser <origin>.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -149,6 +150,7 @@ async function measureCards(page) {
                 return {
                   selector: el.className,
                   text: el.textContent,
+                  title: el.title,
                   bounds: box(el),
                   lines: [...range.getClientRects()].map((r) => r.toJSON()),
                   overflow: style.overflowX,
@@ -171,10 +173,10 @@ function checkCards(actual, expected, width) {
   assert.deepEqual(actual.fixture, expected.jobs, "render/poll leaves fixture unchanged");
   assert.equal(Object.keys(actual.cards).length, expected.jobs.length);
   if (width < 760)
-    for (const note of overflow(actual))
+    for (const field of overflow(actual))
       assert.ok(
-        note.viewportOverflow <= 1,
-        note.id + " note outside mobile viewport by " + note.viewportOverflow,
+        field.viewportOverflow <= 1,
+        field.id + " " + field.selector + " outside mobile viewport by " + field.viewportOverflow,
       );
   if (width < 760)
     for (const key of ["document", "board"]) {
@@ -185,15 +187,18 @@ function checkCards(actual, expected, width) {
     assert.ok(card, job.id);
     assert.equal(card.injected, 0);
     const expectedFields = {
-      id: job.id + (job.needs || job.stage === "needs-human" ? job.stage : ""),
-      proj: "Wrap fixtures",
+      "id line": job.id + (job.needs || job.stage === "needs-human" ? job.stage : ""),
+      "proj line": "Wrap fixtures",
       title: job.title,
       ...(job.stage === "idea"
         ? { "idea-text": job.idea.slice(job.title.length).trim() }
-        : { meta: job.branch + " · round 0" }),
-      ...(job.refs ? { "meta refs": "follow-up of " + job.refs[0].id } : {}),
-      ...(job.claim ? { "meta host": "on " + job.claim.device } : {}),
-      ...(job.needs || job.note ? { note: job.needs || job.note } : {}),
+        : {
+            ...(job.branch ? { "meta branch line": job.branch } : {}),
+            "meta round line": "round 0",
+          }),
+      ...(job.refs ? { "meta refs line": "follow-up of " + job.refs[0].id } : {}),
+      ...(job.claim ? { "meta host line": "on " + job.claim.device } : {}),
+      ...(job.needs || job.note ? { "note line": job.needs || job.note } : {}),
     };
     assert.deepEqual(
       Object.fromEntries(card.fields.map((f) => [f.selector, f.text])),
@@ -211,37 +216,38 @@ function checkCards(actual, expected, width) {
         assert.ok(bounds.left >= -1 && bounds.right <= width + 1, job.id + " viewport bounds");
     }
     for (const field of card.fields) {
+      if (field.selector.endsWith(" line")) {
+        assert.equal(field.whiteSpace, "nowrap", job.id + " " + field.selector);
+        assert.equal(field.textOverflow, "ellipsis", job.id + " " + field.selector);
+        assert.equal(field.overflow, "hidden", job.id + " " + field.selector);
+        assert.equal(
+          field.title,
+          field.selector === "id line" ? job.id : field.text,
+          job.id + " " + field.selector + " title",
+        );
+        assert.ok(field.bounds.right <= card.content.right + 1, job.id + " " + field.selector);
+        continue;
+      }
       assert.ok(
         field.bounds.scrollWidth <= field.bounds.clientWidth + 1,
         job.id + " " + field.selector + " scroll overflow",
       );
-      if (field.selector === "idea-text") {
+      if (field.selector === "title") {
+        assert.equal(field.clamp, "2");
+        assert.equal(field.overflow, "hidden");
+      } else if (field.selector === "idea-text") {
         assert.equal(field.clamp, "3");
         assert.equal(field.overflow, "hidden");
         assert.equal(field.whiteSpace, "pre-line");
         assert.equal(field.display, "flow-root");
         continue;
       }
-      assert.equal(field.overflow, "visible");
-      assert.equal(field.textOverflow, "clip");
-      assert.equal(field.clamp, "none");
-      assert.notEqual(field.whiteSpace, "nowrap");
       for (const line of field.lines)
         assert.ok(
           line.left >= Math.max(field.bounds.left, card.content.left) - 1 &&
             line.right <= Math.min(field.bounds.right, card.content.right) + 1,
           job.id + " " + field.selector + " text fragment overflow " + JSON.stringify(line),
         );
-      if (
-        expected.stress &&
-        width < 760 &&
-        (field.selector === "note" || (field.selector === "id" && job.pr))
-      ) {
-        assert.ok(
-          new Set(field.lines.map((r) => r.top)).size > 1,
-          job.id + " multiline " + field.selector,
-        );
-      }
     }
   }
 }
@@ -249,9 +255,10 @@ function checkCards(actual, expected, width) {
 function overflow(actual) {
   return Object.entries(actual.cards).flatMap(([id, card]) =>
     card.fields
-      .filter((f) => f.selector === "note")
+      .filter((f) => !f.selector.endsWith(" line"))
       .map((f) => ({
         id,
+        selector: f.selector,
         scrollOverflow: f.bounds.scrollWidth - f.bounds.clientWidth,
         fragmentOverflow: Math.max(
           0,

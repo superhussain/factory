@@ -67,7 +67,7 @@ const VIEWPORTS = [
   { width: 1280, height: 900, theme: "light" },
 ];
 const CARD = '.card[data-id="042-sample-export"]';
-const RERUNNING = "rerunning on lab-linux · stop queued on lab-linux";
+const RERUNNING = "rerunning on Lab Linux · stop queued on Lab Linux";
 
 const freezeClock = (page) =>
   page.evaluateOnNewDocument(() => {

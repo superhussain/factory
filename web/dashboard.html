@@ -24,6 +24,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     --pass-bg: #dcf2e3; --pass-fg: #17663a;
     --changes-bg: #fde4d6; --changes-fg: #9a3b0c;
     --alert: #d1342f; --alert-bg: #fdecea; --ok: #2e9d5b; --accent: #7c3aed;
+    --info: #1d4ed8;
     --accent-soft: #ede9fe;
     --code-bg: #f3f4f6;
     --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
@@ -37,6 +38,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       --pass-bg: #163824; --pass-fg: #7fd9a1;
       --changes-bg: #45230f; --changes-fg: #f5a372;
       --alert: #ff6b5e; --alert-bg: #3a1714; --ok: #4cc47e; --accent: #a78bfa;
+      --info: #93c5fd;
       --accent-soft: rgba(167, 139, 250, 0.16);
       --code-bg: #273244;
     }
@@ -49,6 +51,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     --pass-bg: #163824; --pass-fg: #7fd9a1;
     --changes-bg: #45230f; --changes-fg: #f5a372;
     --alert: #ff6b5e; --alert-bg: #3a1714; --ok: #4cc47e; --accent: #a78bfa;
+    --info: #93c5fd;
     --accent-soft: rgba(167, 139, 250, 0.16);
     --code-bg: #273244;
   }
@@ -277,6 +280,16 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .idea-text { font-size: 12px; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
   .card .note { font-size: 12px; margin-top: 6px; color: var(--fg); }
   .card .refs, .backlog-card .refs { margin-top: 2px; }
+  /* One fact per row: a long value is cut, and the title tooltip keeps it whole. Inline-size
+     containment keeps an unwrapped row from widening the card and its column. */
+  .card .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; contain: inline-size; }
+  .card .id { display: flex; gap: 6px; align-items: center; }
+  .card .id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .card .title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+  .card .meta.branch { color: var(--info); }
+  .card .meta.refs { color: var(--changes-fg); }
+  .card .meta.host { color: var(--pass-fg); }
+  .card .ref-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   .backlog-card {
     overflow-wrap: anywhere;
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(17,24,39,.05);
@@ -296,7 +309,6 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .tracer-tasks li { padding-left: 10px; text-indent: -10px; }
   .tracer-tasks summary { cursor: pointer; }
   .card.needs-you .note { color: var(--alert); }
-  .card .id .chip { margin-left: 6px; }
   .card-wrap { position: relative; }
   .card-wrap .card .id { padding-right: 64px; }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
@@ -1107,15 +1119,20 @@ function queuedStops(m) {
   return m ? [...earlier, m].filter((x) => x.from && !moveStopped(x)) : [];
 }
 
+// A host's label from Settings > Hosts, or its id when the registry has none.
+function hostName(id) {
+  return hostRegistry?.find((h) => h.id === id)?.label || id;
+}
+
 // Where a job runs, from the board's claim and the dashboard's move. A move whose old host has not
 // stopped it yet keeps the queued stop visible.
 function hostLine(j) {
   const m = j.move;
-  const hosts = [...new Set(queuedStops(m).map((x) => x.from))];
+  const hosts = [...new Set(queuedStops(m).map((x) => hostName(x.from)))];
   const stop = hosts.length ? ' · stop queued on ' + hosts.join(', ') : '';
-  if (j.claim?.device) return 'on ' + j.claim.device + stop;
-  if (m?.to && m.to === m.from) return 'rerunning on ' + m.to + stop;
-  return m?.to ? 'moving to ' + m.to + stop : '';
+  if (j.claim?.device) return 'on ' + hostName(j.claim.device) + stop;
+  if (m?.to && m.to === m.from) return 'rerunning on ' + hostName(m.to) + stop;
+  return m?.to ? 'moving to ' + hostName(m.to) + stop : '';
 }
 
 // An idea, or a discarded one, has no branch or round to show, so its card shows the idea text instead.
@@ -1137,26 +1154,39 @@ function waitsOnYou(j) {
     (j.stage === 'pr-open' && (j.escalated === true || /^escalated:/i.test(String(j.note ?? ''))));
 }
 
+// One fact on one row, with the full text in its tooltip.
+function line(cls, text) {
+  return '<div class="' + cls + ' line" title="' + esc(text) + '">' + esc(text) + '</div>';
+}
+
+// A ref to a job on the board is a mouse target that opens it; others stay text.
+function refLine(r) {
+  const id = jobs.some((x) => x.id === r.id) ? '<span class="ref-link" data-ref="' + esc(r.id) + '">' + esc(r.id) + '</span>' : esc(r.id);
+  return esc(REF_KINDS[r.kind]) + ' ' + id;
+}
+
 // The link sits beside the button, not inside it, so a click on it never reaches the card handler.
 // A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
 function card(j, inNeeds) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
+  const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '">' +
-    '<div class="id">' + esc(j.id) + (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
+    '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span>' +
+      (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
       (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
       (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') + '</div>' +
-    '<div class="proj">' + esc(projectName(j)) + '</div>' +
+    line('proj', projectName(j)) +
     '<div class="title">' + esc(j.title || j.id) + '</div>' +
     (j.stage === 'idea' && !j.project ? '<div class="idea-text">Assign a project before starting.</div>' : '') +
     (ideaOnly(j) ? (ideaBody(j) ? '<div class="idea-text">' + esc(ideaBody(j)) + '</div>' : '') : hiddenCardFields.has('meta') ? '' :
-      '<div class="meta">' + esc(j.branch || '') + ' &middot; round ' + esc(j.round ?? 0) +
-      (buildState(j) ? ' &middot; build ' + esc(buildState(j)) : '') + '</div>') +
-    (refs(j).length ? '<div class="meta refs">' + refs(j).map((r) => esc(REF_KINDS[r.kind] + ' ' + r.id)).join(' &middot; ') + '</div>' : '') +
-    (hostLine(j) ? '<div class="meta host">' + esc(hostLine(j)) + '</div>' : '') +
-    (j.tracer?.building === true ? '<div class="meta tracer-building">Building in Tracer</div>' : '') +
-    (ask && (inNeeds || !hiddenCardFields.has('note')) ? '<div class="note">' + esc(ask) + '</div>' : '') +
+      (j.branch ? line('meta branch', j.branch) : '') +
+      line('meta round', 'round ' + (j.round ?? 0) + (buildState(j) ? ' · build ' + buildState(j) : ''))) +
+    (refText ? '<div class="meta refs line" title="' + esc(refText) + '">' + refs(j).map(refLine).join(' &middot; ') + '</div>' : '') +
+    (hostLine(j) ? line('meta host', hostLine(j)) : '') +
+    (j.tracer?.building === true ? line('meta tracer-building', 'Building in Tracer') : '') +
+    (ask && (inNeeds || !hiddenCardFields.has('note')) ? line('note', ask) : '') +
     chips(j.rounds) + '</button>';
   const pr = prLink(j);
   if (!pr || hiddenCardFields.has('pr')) return btn;
@@ -2319,6 +2349,9 @@ async function loadHosts() {
   hostsLoadFailed = !hostRegistry;
   renderHosts();
   renderPipelineSettings();
+  if (loaded) renderBoard();
+  const open = jobs.find((x) => x.id === openId);
+  if (open) $('d-meta').textContent = drawerMeta(open);
 }
 
 async function loadHostProjects() {
@@ -2577,6 +2610,8 @@ $('board').addEventListener('click', (e) => {
     openBacklogItem(renderedBacklog[Number(b.dataset.index)]);
     return;
   }
+  const ref = e.target.closest('[data-ref]');
+  if (ref) { location.hash = encodeURIComponent(ref.dataset.ref); return; }
   const c = e.target.closest('.card');
   if (c) location.hash = encodeURIComponent(c.dataset.id);
 });
@@ -2827,6 +2862,15 @@ function renderDrawerLinks(j) {
   setLink($('d-tracer'), shown('tracer', tracerLink(j)), "Open this job's feature in Tracer");
 }
 
+function drawerMeta(j) {
+  return projectName(j) + ' · ' + j.id + ' · ' + j.stage +
+    (ideaOnly(j) ? '' : ' · round ' + (j.round ?? 0) + ' · ' + (j.branch || '')) +
+    (hostLine(j) ? ' · ' + hostLine(j) : '') +
+    (j.priority?.at ? ' · prioritized' : '') +
+    (j.paused?.at ? ' · paused' : '') +
+    (j.close?.at && !TERMINAL.includes(j.stage) ? ' · closing' : '');
+}
+
 async function openJob(id) {
   const j = jobs.find((x) => x.id === id);
   if (!j) return;
@@ -2836,12 +2880,7 @@ async function openJob(id) {
   openStamp = stamp(j);
   $('detail').hidden = false;
   $('d-title').textContent = j.title || j.id;
-  $('d-meta').textContent = projectName(j) + ' · ' + j.id + ' · ' + j.stage +
-    (ideaOnly(j) ? '' : ' · round ' + (j.round ?? 0) + ' · ' + (j.branch || '')) +
-    (hostLine(j) ? ' · ' + hostLine(j) : '') +
-    (j.priority?.at ? ' · prioritized' : '') +
-    (j.paused?.at ? ' · paused' : '') +
-    (j.close?.at && !TERMINAL.includes(j.stage) ? ' · closing' : '');
+  $('d-meta').textContent = drawerMeta(j);
   const pipeline = pipelineLabel(j);
   $('d-pipeline').textContent = pipeline;
   $('d-pipeline').hidden = !pipeline;
@@ -5394,7 +5433,7 @@ loadProjects().then(() => {
   if (settingsShown === 'display') enterDisplaySection();
   if (settingsShown === 'notifications') enterNotificationsSection();
   referenceReady = true; if (settingsShown === 'reference') loadReferenceEffective();
-  pollStarted = true; poll(); syncLive(); schedulePoll();
+  pollStarted = true; loadHosts(); poll(); syncLive(); schedulePoll();
 });
 
 // Display settings live only in this browser. Each value is read against a fixed list,

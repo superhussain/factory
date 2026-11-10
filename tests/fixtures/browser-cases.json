@@ -126,6 +126,7 @@
   "tests/browser/reassigned-links.test.mjs",
   "tests/browser/tracer-follow.test.mjs",
   "tests/browser/job-actions-menu.test.mjs",
+  "tests/browser/card-lines.test.mjs",
   "tests/browser/move-host.test.mjs",
   "tests/browser/prioritize.test.mjs",
   "tests/browser/pause.test.mjs",
