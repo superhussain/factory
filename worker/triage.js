@@ -1,7 +1,8 @@
-// Backlog triage: one Workers AI call that rates a backlog item against a project's rules.
+// Backlog triage: one Workers AI call that rates a backlog item against a project's rules, if it has any.
 export const TRIAGE_MODEL = "@cf/cloudflare/clef-flash";
 
 export const TRIAGE_REASON = "Rated by clef-flash against the project rules.";
+export const TRIAGE_REASON_NO_RULES = "Rated by clef-flash.";
 
 /** The clef-flash input. Rules and the item each travel inside a data envelope in `state`. */
 export function triageInput(slug, source, rules, item, context) {
