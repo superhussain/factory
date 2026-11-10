@@ -179,6 +179,11 @@ test("card lines", { timeout: 240000 }, async (t) => {
 
       await t.test(`colours ${scheme}`, async () => {
         assert.equal(await tokenColor(page, "--info"), TOKENS[scheme]["--info"]);
+        for (const theme of ["light", "dark"]) {
+          await page.evaluate((v) => (document.documentElement.dataset.theme = v), theme);
+          assert.equal(await tokenColor(page, "--info"), TOKENS[theme]["--info"], `theme ${theme}`);
+        }
+        await page.evaluate(() => delete document.documentElement.dataset.theme);
         assert.equal(await color(page, `${CARD} .branch`), await tokenColor(page, "--info"));
         assert.equal(await color(page, `${CARD} .refs`), await tokenColor(page, "--changes-fg"));
         assert.equal(await color(page, `${CARD} .host`), await tokenColor(page, "--pass-fg"));
