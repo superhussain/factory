@@ -1,5 +1,5 @@
 // One line per fact on a job card: order, one-row truncation with a title tooltip, colour per
-// kind, host label from the registry and ref links, at desktop light and mobile dark.
+// kind, host label from the registry, ref links and their hover, at desktop light and mobile dark.
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
 import test from "node:test";
@@ -76,8 +76,16 @@ const LINES_042 = [
   ["note line", NOTE],
 ];
 const TOKENS = {
-  light: { "--info": "rgb(29, 78, 216)" },
-  dark: { "--info": "rgb(147, 197, 253)" },
+  light: {
+    "--info": "rgb(29, 78, 216)",
+    "--host-fg": "rgb(15, 118, 110)",
+    "--ref-fg": "rgb(190, 24, 93)",
+  },
+  dark: {
+    "--info": "rgb(147, 197, 253)",
+    "--host-fg": "rgb(94, 234, 212)",
+    "--ref-fg": "rgb(249, 168, 212)",
+  },
 };
 const CARD = '.card[data-id="042-sample-export"]';
 
@@ -178,15 +186,19 @@ test("card lines", { timeout: 240000 }, async (t) => {
       });
 
       await t.test(`colours ${scheme}`, async () => {
-        assert.equal(await tokenColor(page, "--info"), TOKENS[scheme]["--info"]);
+        for (const [name, value] of Object.entries(TOKENS[scheme])) {
+          assert.equal(await tokenColor(page, name), value, name);
+        }
         for (const theme of ["light", "dark"]) {
           await page.evaluate((v) => (document.documentElement.dataset.theme = v), theme);
-          assert.equal(await tokenColor(page, "--info"), TOKENS[theme]["--info"], `theme ${theme}`);
+          for (const [name, value] of Object.entries(TOKENS[theme])) {
+            assert.equal(await tokenColor(page, name), value, `theme ${theme} ${name}`);
+          }
         }
         await page.evaluate(() => delete document.documentElement.dataset.theme);
         assert.equal(await color(page, `${CARD} .branch`), await tokenColor(page, "--info"));
-        assert.equal(await color(page, `${CARD} .refs`), await tokenColor(page, "--changes-fg"));
-        assert.equal(await color(page, `${CARD} .host`), await tokenColor(page, "--pass-fg"));
+        assert.equal(await color(page, `${CARD} .refs`), await tokenColor(page, "--ref-fg"));
+        assert.equal(await color(page, `${CARD} .host`), await tokenColor(page, "--host-fg"));
       });
 
       await t.test(`host label ${scheme}`, async () => {
@@ -206,10 +218,17 @@ test("card lines", { timeout: 240000 }, async (t) => {
       });
 
       await t.test(`ref hover ${scheme}`, async () => {
-        await page.hover(`${CARD} .ref-link[data-ref="041-sample-report"]`);
+        const link = `${CARD} .ref-link[data-ref="041-sample-report"]`;
+        await page.hover(link);
         await settle(page);
         await page.screenshot({ path: `${SHOTS}card-lines-ref-hover${suffix}.png`, clip });
+        assert.equal(await color(page, link), await tokenColor(page, "--accent"));
+        assert.equal(
+          await page.$eval(link, (el) => getComputedStyle(el).textDecorationThickness),
+          "2px",
+        );
         await page.mouse.move(0, 0);
+        assert.equal(await color(page, link), await tokenColor(page, "--ref-fg"));
       });
 
       await t.test(`ref link ${scheme}`, async () => {
