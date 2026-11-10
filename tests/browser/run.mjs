@@ -544,6 +544,13 @@ async function capture(outdir, referencePath) {
     };
     await view("filter-open-desktop", 1440, 900, "light", openFilter);
     await view("filter-open-mobile", 390, 844, "dark", openFilter);
+    const hideAllProjects = async (page) => {
+      await page.click("#filter");
+      await page.click('#filter-menu [data-project=""]');
+      await page.keyboard.press("Escape");
+    };
+    await view("filter-none-desktop", 1440, 900, "light", hideAllProjects);
+    await view("filter-none-mobile", 390, 844, "dark", hideAllProjects);
     // Both pages have the decision page, so both sides open it.
     const openDecision = async (page) => {
       await page.click(".backlog-card");

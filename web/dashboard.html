@@ -280,6 +280,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .blank h2 { margin: 0 0 8px; font-size: 16px; color: var(--fg); }
   .blank p { margin: 4px 0; font-size: 13px; }
   .blank code { white-space: nowrap; font: 12px var(--font-mono); background: var(--line); border-radius: 4px; padding: 1px 5px; color: var(--fg); }
+  .filter-empty { grid-column: 1 / -1; margin: 0; padding: 8px 16px; text-align: center; font-size: 13px; color: var(--muted); }
   .card {
     overflow-wrap: anywhere;
     display: block; width: 100%; text-align: left; font: inherit; color: inherit;
@@ -2799,6 +2800,8 @@ function archiveSection(s) {
     error + (a.page < a.pages ? button('Show more') : '') + '</div>';
 }
 
+const FILTER_EMPTY_HTML = '<p class="filter-empty" id="filter-empty">No projects selected. Pick projects in the project filter to show their jobs.</p>';
+
 function renderBoard() {
   const focused = $('board').contains(document.activeElement) ? document.activeElement.closest('.column-toggle, .more, .archive-more, [data-backlog-open]') : null;
   const focusRaw = focused?.dataset.raw;
@@ -2813,6 +2816,7 @@ function renderBoard() {
     syncCardActions();
     return;
   }
+  const noneShown = !shownProjectKeys().length;
   const shown = jobs.filter((j) => isShown(j.project));
   renderedBacklog = backlog;
   for (const b of visibleBacklog()) if (!backlogTriageAsked.has(b.raw)) fetchBacklogTriage(b);
@@ -2826,7 +2830,7 @@ function renderBoard() {
   if (!settingsShown) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   $('board').style.setProperty('--cols', collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']).join(' '));
-  $('board').innerHTML = COLUMNS.map((s, i) => {
+  $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : '') + COLUMNS.map((s, i) => {
     if (hiddenColumns.has(s)) return '';
     let list = lists[i];
     let more = '';

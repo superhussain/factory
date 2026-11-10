@@ -56,6 +56,11 @@ test("project filter", { timeout: 180000 }, async (t) => {
         expanded: document.getElementById("filter").getAttribute("aria-expanded"),
         focus: document.activeElement.dataset.project ?? document.activeElement.id,
       }));
+    const emptyLine = (page) =>
+      page.evaluate(() => {
+        const el = document.getElementById("filter-empty");
+        return el && el.getClientRects().length ? el.textContent : null;
+      });
     const box = (key, root = "#filter-menu") => `${root} [data-project="${key}"]`;
     const page = await open();
 
@@ -76,6 +81,7 @@ test("project filter", { timeout: 180000 }, async (t) => {
       );
       assert.deepEqual(await menu(page), { open: false, expanded: "false", focus: "" });
       assert.deepEqual(await cards(page), ["090-alpha", "091-beta", "092-loose"]);
+      assert.equal(await emptyLine(page), null);
     });
 
     await t.test("F2 uncheck", async () => {
@@ -138,8 +144,13 @@ test("project filter", { timeout: 180000 }, async (t) => {
         "Show jobs from: no projects",
       );
       assert.deepEqual(await cards(page), []);
+      assert.equal(
+        await emptyLine(page),
+        "No projects selected. Pick projects in the project filter to show their jobs.",
+      );
       await page.click(box(""));
       assert.equal((await filterState(page)).label, "all projects");
+      assert.equal(await emptyLine(page), null);
       assert.equal((await menu(page)).open, true);
     });
 
@@ -226,6 +237,20 @@ test("project filter", { timeout: 180000 }, async (t) => {
       });
       assert.deepEqual(await cards(failed), ["090-alpha", "091-beta", "092-loose"]);
       await failed.browserContext().close();
+    });
+
+    await t.test("F9 no jobs", async () => {
+      await seedBoard(origin, []);
+      const empty = await open();
+      await empty.evaluate(() => {
+        localStorage.clear();
+        localStorage.setItem("factory-projects-hidden", "alpha,beta,:unassigned");
+      });
+      await empty.reload({ waitUntil: "domcontentloaded" });
+      await ready(empty);
+      assert.equal(await empty.$eval(".blank h2", (el) => el.textContent), "No jobs yet");
+      assert.equal(await emptyLine(empty), null);
+      await empty.browserContext().close();
     });
 
     assert.deepEqual(errors, []);
