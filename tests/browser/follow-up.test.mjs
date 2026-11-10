@@ -258,16 +258,23 @@ test("follow-up", { timeout: 240000 }, async (t) => {
 
       await t.test(`An empty job actions menu hides its toggle ${width}`, async () => {
         await openDrawer(page, "042-sample-export");
-        await openJobActions(page);
+        await page.focus("#d-actions");
+        await page.keyboard.press("ArrowDown");
+        await page.waitForSelector("#d-actions-menu:not([hidden])");
         await seedBoard(
           origin,
           JOBS.filter((j) => j.id !== "042-sample-export"),
         );
         await page.evaluate(() => window.fixtureBoardPoll());
         await page.waitForFunction(() => document.getElementById("d-actions-wrap").hidden, wait);
+        if (width === 1280)
+          await (
+            await page.$(".detail-head")
+          ).screenshot({ path: `${SHOTS}after-empty-menu-focus-1280.png` });
         assert.deepEqual(
           {
             ...(await page.evaluate(() => ({
+              focus: document.activeElement.id,
               wrap: document.getElementById("d-actions-wrap").hidden,
               menu: document.getElementById("d-actions-menu").hidden,
               expanded: document.getElementById("d-actions").getAttribute("aria-expanded"),
@@ -275,17 +282,9 @@ test("follow-up", { timeout: 240000 }, async (t) => {
             }))),
             items: await visibleItems(page),
           },
-          { wrap: true, menu: true, expanded: "false", items: [], drawer: true },
+          { focus: "d-close", wrap: true, menu: true, expanded: "false", items: [], drawer: true },
         );
       });
-
-      await t.test(
-        `The emptied menu moves focus to Close ${width}`,
-        { todo: "focus falls to body; 891-move-focus-to fixes syncJobActions" },
-        async () => {
-          assert.equal(await page.evaluate(() => document.activeElement.id), "d-close");
-        },
-      );
       await context.close();
     }
     assert.deepEqual(errors, []);
