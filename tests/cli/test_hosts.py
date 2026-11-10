@@ -200,15 +200,33 @@ class StatusTest(HostFixture):
             stamp_file.write_text("not json")
             self.assertIsNone(factory.bundle_stamp())
         cache = self.home / "host-status.json"
-        self.assertEqual(factory.cached_status(self.home), ("none", None))
+        self.assertEqual(factory.cached_status(self.home), ("none", None, None))
         for doc, expected in (({"scheduler": "cron", "last_pickup": "2026-01-01T00:00:00Z"},
-                               ("cron", "2026-01-01T00:00:00Z")),
-                              ({"scheduler": "schtasks", "last_pickup": None}, ("schtasks", None)),
-                              ({"scheduler": "systemd", "last_pickup": None}, ("none", None)),
-                              ({"scheduler": "cron", "last_pickup": "2026-1-1T00:00:00Z"}, ("none", None)),
-                              ({"scheduler": "cron"}, ("none", None)), (["cron"], ("none", None))):
+                               ("cron", "2026-01-01T00:00:00Z", None)),
+                              ({"scheduler": "schtasks", "last_pickup": None}, ("schtasks", None, None)),
+                              ({"scheduler": "systemd", "last_pickup": None}, ("none", None, None)),
+                              ({"scheduler": "cron", "last_pickup": "2026-1-1T00:00:00Z"}, ("none", None, None)),
+                              ({"scheduler": "cron", "last_pickup": None, "triage_failed_since": "2026-01-01T09:00:00Z"},
+                               ("cron", None, "2026-01-01T09:00:00Z")),
+                              ({"scheduler": "cron", "last_pickup": None, "triage_failed_since": "2026-1-1T09:00:00Z"},
+                               ("cron", None, None)),
+                              ({"scheduler": "cron"}, ("none", None, None)), (["cron"], ("none", None, None))):
             cache.write_text(json.dumps(doc))
             self.assertEqual(factory.cached_status(self.home), expected)
+
+    def test_triage_failed_since_is_sent_only_while_set(self):
+        report = {"checks": []}
+        self.assertNotIn("triage_failed_since", factory.host_status(self.home, report, "cron", None))
+        body = factory.host_status(self.home, report, "cron", None, "2026-01-01T09:00:00Z")
+        self.assertEqual(list(body)[-1], "triage_failed_since")
+        self.assertEqual(body["triage_failed_since"], "2026-01-01T09:00:00Z")
+        with http_fixture({STATUS: (200, b"")}) as server:
+            self.write_config(server.origin)
+            self.assertTrue(factory.report_status(self.home, "cron", None, report=report))
+            self.assertTrue(factory.report_status(self.home, "cron", None, "2026-01-01T09:00:00Z", report=report))
+            sent = [json.loads(body) for _, _, _, body in server.requests]
+        self.assertNotIn("triage_failed_since", sent[0])
+        self.assertEqual(sent[1]["triage_failed_since"], "2026-01-01T09:00:00Z")
 
 
 class PickupHeartbeatTest(HostFixture):
@@ -277,6 +295,37 @@ class PickupHeartbeatTest(HostFixture):
                     self.assertEqual(self.keys(server)[-1], "GET /api/board" if name == "network" else STATUS)
                     self.assertEqual(beat, self.pickup(heartbeat=False))
                 self.assertFalse((self.home / "host-status.json").exists())
+
+    def test_a_failing_triage_sweep_is_reported_until_it_recovers(self):
+        def failing(home):
+            factory.fail("GET .../api/backlog returned 500: boom", 5)
+
+        cache = self.home / "host-status.json"
+        with http_fixture({STATUS: (200, b""), **DOCTOR}) as server:
+            self.write_config(server.origin)
+
+            def sent():
+                self.assertEqual(self.keys(server)[-1], STATUS)
+                return json.loads(server.requests[-1][3])
+
+            with patch.object(factory, "backlog_triage_pass", side_effect=failing):
+                cache.write_text(json.dumps({"scheduler": factory.PICKUP_SCHEDULER, "last_pickup": None,
+                                             "triage_failed_since": "2026-01-01T09:00:00Z"}))
+                code, _, err = self.pickup()
+                self.assertEqual(code, 0)
+                self.assertIn("backlog triage stopped", err)
+                self.assertEqual(sent()["triage_failed_since"], "2026-01-01T09:00:00Z")
+                self.assertEqual(json.loads(cache.read_text())["triage_failed_since"], "2026-01-01T09:00:00Z")
+                cache.unlink()
+                self.assertEqual(self.pickup()[0], 0)
+                body = sent()
+                self.assertEqual(body["triage_failed_since"], body["last_pickup"])
+            self.run_cli("doctor")
+            self.assertEqual(sent()["triage_failed_since"], body["last_pickup"])
+            with patch.object(factory, "backlog_triage_pass", return_value=None):
+                self.assertEqual(self.pickup()[0], 0)
+            self.assertNotIn("triage_failed_since", sent())
+            self.assertNotIn("triage_failed_since", json.loads(cache.read_text()))
 
 
 class DoctorHeartbeatTest(HostFixture):

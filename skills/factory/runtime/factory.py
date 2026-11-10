@@ -2521,20 +2521,28 @@ def bundle_stamp():
 
 
 def cached_status(home):
-    """(scheduler, last_pickup) from the last status pickup sent, else ("none", None)."""
+    """(scheduler, last_pickup, triage_failed_since) from the last status pickup sent, else
+    ("none", None, None)."""
+    def utc(value):
+        try:
+            return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%dT%H:%M:%SZ") == value
+        except (ValueError, TypeError):
+            return False
+
     try:
         cache = json.loads(Path(home, "host-status.json").read_text(encoding="utf-8"))
         scheduler, last = cache["scheduler"], cache["last_pickup"]
-        if scheduler in SCHEDULERS and (last is None or datetime.strptime(
-                last, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%dT%H:%M:%SZ") == last):
-            return scheduler, last
+        if scheduler in SCHEDULERS and (last is None or utc(last)):
+            failing = cache.get("triage_failed_since")
+            return scheduler, last, failing if utc(failing) else None
     except (OSError, ValueError, UnicodeError, KeyError, TypeError):
         pass
-    return "none", None
+    return "none", None, None
 
 
-def host_status(home, report, scheduler, last_pickup):
-    """The status body the Worker's PUT /api/hosts/<id>/status accepts. Holds no path or secret."""
+def host_status(home, report, scheduler, last_pickup, triage_failed_since=None):
+    """The status body the Worker's PUT /api/hosts/<id>/status accepts. Holds no path or secret.
+    triage_failed_since is set only while backlog triage fails."""
     failed = [c["name"] for c in report["checks"] if c["status"] != "pass"]
     try:
         with contextlib.redirect_stderr(io.StringIO()):
@@ -2543,7 +2551,7 @@ def host_status(home, report, scheduler, last_pickup):
         routes, limits = [], {}
     stamp = now()
     paths = read_paths(Path(home))
-    return {
+    body = {
         "os": host_os(), "scheduler": scheduler, "last_pickup": last_pickup, "bundle": bundle_stamp(),
         "doctor": failed or "ok",
         "routes": [{"name": name, "provider": provider, "model": model, "effort": effort,
@@ -2553,9 +2561,12 @@ def host_status(home, report, scheduler, last_pickup):
                    and WORKER_MODEL.fullmatch(model)][:16],
         "checkouts": sorted(slug for slug, path in paths.items()
                             if re.fullmatch(r"[A-Za-z0-9_-]+", slug) and os.path.isdir(path))[:64]}
+    if triage_failed_since:
+        body["triage_failed_since"] = triage_failed_since
+    return body
 
 
-def report_status(home, scheduler, last_pickup, report=None, save=False):
+def report_status(home, scheduler, last_pickup, triage_failed_since=None, report=None, save=False):
     """PUT this host's status when config.md sets device:. Silent in every outcome: it never
     prints, raises or exits, so a caller's output and exit code stay as they were."""
     try:
@@ -2565,7 +2576,7 @@ def report_status(home, scheduler, last_pickup, report=None, save=False):
             if not HOST_NAME.fullmatch(device):
                 return False
             report = report or doctor(home)
-            body = host_status(home, report, scheduler, last_pickup)
+            body = host_status(home, report, scheduler, last_pickup, triage_failed_since)
             api(home, "PUT", f"/api/hosts/{device}/status", json.dumps(body),
                 headers={"Content-Type": "application/json"})
             if save:
@@ -2647,20 +2658,23 @@ def pickup(*args):
     home = factory_home()
     device, _, minutes = holder(home)
     started = now()
+    failing = cached_status(home)[2]
     try:
         if not dry:
             tracer_follow_pass(home)
             tracer_build_pass(home)
             try:
                 backlog_triage_pass(home)
+                failing = None
             except SystemExit as e:
                 if e.code != 5:
                     raise
+                failing = failing or started
                 print("factory.py: backlog triage stopped; unsent lines wait for the next pickup run", file=sys.stderr)
         pickup_pass(home, device, minutes, dry, limit, cap)
     finally:
         if not dry:
-            report_status(home, PICKUP_SCHEDULER, started, save=True)
+            report_status(home, PICKUP_SCHEDULER, started, failing, save=True)
 
 
 def launch_env(given, provider, model):
