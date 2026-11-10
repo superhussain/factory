@@ -197,6 +197,7 @@ changes nothing. Then install one timer per host.
 
 - The dashboard's Prioritize item sets `priority = {at}` on a job at `idea`, `spec`, `build`, `review` or `approve`. Remove priority deletes it.
 - `pickup` claims prioritized ideas before older ones, across projects too. Gates, caps and routes still apply.
+- The dashboard shows a prioritized job at the top of its column in idea, spec, build, review and approve.
 - When the job's session on this host was claimed before `priority.at` and its Paseo agent is not closed, `pickup` sends the agent one fixed nudge with `paseo send --no-wait`, then sets `priority.nudged`. A failed send is printed on stderr and retried next run.
 - Only the dashboard and `pickup` write `priority`. `board` refuses a `priority` patch with exit 2.
 
