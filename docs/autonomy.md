@@ -185,7 +185,7 @@ one whole. With neither set, triage is off.
 | Field | Rule |
 | --- | --- |
 | `enabled` | true or false |
-| `threshold` | an integer from 1 to 100. The dashboard fills in 80 |
+| `threshold` | an integer from 1 to 100. The dashboard fills in 90 |
 | `rules` | text, may be empty. It passes the same admission rules as stage notes, so no links, secrets or instructions to skip review |
 
 After `factory.py backlog add` appends a line, it posts the line and its `--context`

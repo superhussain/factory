@@ -2079,7 +2079,7 @@ function pickupCheckedHosts(prefix, stored = []) {
 const pickupFromFields = (prefix, current) => $(prefix + '-mode').value
   ? {enabled:$(prefix + '-mode').value === 'on', hosts:pickupCheckedHosts(prefix, Array.isArray(current?.hosts) ? current.hosts : [])} : undefined;
 const triageFromFields = () => $('pipeline-triage-mode').value
-  ? {enabled:$('pipeline-triage-mode').value === 'on', threshold:$('pipeline-triage-threshold').value === '' ? 80 : Number($('pipeline-triage-threshold').value), rules:$('pipeline-triage-rules').value} : undefined;
+  ? {enabled:$('pipeline-triage-mode').value === 'on', threshold:$('pipeline-triage-threshold').value === '' ? 90 : Number($('pipeline-triage-threshold').value), rules:$('pipeline-triage-rules').value} : undefined;
 const archiveFromFields = () => $('pipeline-archive-mode').value
   ? {mode:$('pipeline-archive-mode').value, n:$('pipeline-archive-n').value === '' ? null : Number($('pipeline-archive-n').value)} : undefined;
 // Client-side only: the Worker accepts any valid name and its effective filter drops unregistered ones.
@@ -2188,7 +2188,7 @@ function renderPipelineSettings() {
   const triageError = pipelineTriageError(d.triage);
   if ($('pipeline-triage-mode').value !== triageMode) $('pipeline-triage-mode').value = triageMode;
   $('pipeline-triage-mode').disabled = busy;
-  // Typing in the threshold is not overwritten, so clearing it to retype does not snap back to 80.
+  // Typing in the threshold is not overwritten, so clearing it to retype does not snap back to 90.
   const threshold = String(d.triage?.threshold ?? '');
   if ($('pipeline-triage-threshold').value !== threshold && document.activeElement !== $('pipeline-triage-threshold')) $('pipeline-triage-threshold').value = threshold;
   const rules = typeof d.triage?.rules === 'string' ? d.triage.rules : '';

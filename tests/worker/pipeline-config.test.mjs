@@ -267,7 +267,7 @@ test("effective view merges tighter values, 404s unregistered slugs and 409s inv
     reviewers: ["security", "ux", "ui", "code"],
     gates: [],
     pickup: { enabled: false, hosts: [] },
-    triage: { enabled: false, threshold: 80, rules: "" },
+    triage: { enabled: false, threshold: 90, rules: "" },
     stage_notes: {},
     versions: { global: 0, project: 0 },
     floors: ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11"],

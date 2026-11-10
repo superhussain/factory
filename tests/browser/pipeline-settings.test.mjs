@@ -640,7 +640,7 @@ test("pipeline settings page", { timeout: 180000 }, async (t) => {
       );
       await page.select("#pipeline-triage-mode", "on");
       assert.deepEqual(await disabled(), [false, false]);
-      assert.equal(await page.$eval("#pipeline-triage-threshold", (el) => el.value), "80");
+      assert.equal(await page.$eval("#pipeline-triage-threshold", (el) => el.value), "90");
       for (const bad of ["0", "101", "80.5"]) {
         await fill("#pipeline-triage-threshold", bad);
         await waitStatus(
