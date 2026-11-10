@@ -301,6 +301,30 @@ test("board writes cannot change archived or reuse an archived id; a fresh write
   assert.equal(stale.status, 412);
 });
 
+test("an empty jobs write keeps the archived field and its floor", async () => {
+  const s = setup();
+  await s.run();
+  const board = s.read("board.json");
+  const etag = s.bucket.objects.get("board.json").httpEtag;
+  const write = (data) =>
+    s.send("/api/board", {
+      method: "PUT",
+      body: JSON.stringify(data),
+      headers: { "If-Match": etag },
+      principal: device,
+    });
+  const dropped = await write({ updated: board.updated, jobs: [] });
+  assert.equal(dropped.status, 400);
+  assert.equal(
+    await dropped.text(),
+    "a board write cannot change the archived field. Nothing was written. Upgrade the factory skill.",
+  );
+  assert.equal(s.bucket.objects.get("board.json").httpEtag, etag);
+  const kept = await write({ ...board, jobs: [] });
+  assert.equal(kept.status, 200);
+  assert.deepEqual(s.read("board.json").archived, board.archived);
+});
+
 test("the scheduled handler runs the pass through waitUntil", async () => {
   const s = setup();
   const pending = [];

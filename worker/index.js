@@ -308,7 +308,7 @@ async function casPut(request, env, key, type) {
       return reply("body is not JSON", 400);
     }
     if (!Array.isArray(data?.jobs)) return reply("body needs a jobs array", 400);
-    const stored = data.jobs.length ? await storedBoard(env) : { etag: null, jobs: [] };
+    const stored = await storedBoard(env);
     const bad =
       (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
       (stored.etag === cond.get("If-Match")
