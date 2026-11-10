@@ -130,8 +130,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   #pipeline-effective { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--code-bg); padding: 10px 12px; border-radius: 6px; }
   #pipeline-history { height: 160px; overflow-y: auto; padding-right: 4px; padding-bottom: 4px; scroll-padding-block: 4px; }
-  #pipeline-gates, #pipeline-pickup, #pipeline-triage, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
-  #pipeline-gates legend, #pipeline-pickup legend, #pipeline-triage legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+  #pipeline-gates, #pipeline-pickup, #pipeline-triage, #pipeline-archive, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
+  #pipeline-gates legend, #pipeline-pickup legend, #pipeline-triage legend, #pipeline-archive legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #pipeline-gates label { display: flex; gap: 8px; align-items: baseline; margin: 0; color: var(--fg); }
   a.btn { display: inline-block; text-decoration: none; }
   a.btn[aria-current="page"] { border-color: var(--accent); }
@@ -164,7 +164,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .settings-section h3 { font-size: 15px; margin: 0 0 12px; }
   .settings-section h4 { font-size: 13px; margin: 16px 0 8px; }
   .settings-section label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-  .settings-section select, .settings-section textarea, #pipeline-triage-threshold { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .settings-section select, .settings-section textarea, #pipeline-triage-threshold, #pipeline-archive-n { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .settings-section textarea { resize: vertical; min-height: 140px; }
   .settings-section .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
   .project-list { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; margin-bottom: 12px; }
@@ -611,6 +611,16 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           <label for="pipeline-triage-rules">Triage rules<textarea id="pipeline-triage-rules" spellcheck="false"></textarea></label>
           <p id="pipeline-triage-help" class="muted">When on, factory.py backlog add asks Cloudflare's clef-flash model whether a new item should be built without your review under these rules. Its yes probability, as a percent, is the confidence. At or above the threshold, the item moves to the idea column for pickup. Below it, the item waits here for you. Items that ask questions or recommend deny always wait. Rules cannot contain links, secrets or instructions to skip review. A project value replaces the global one whole.</p>
         </fieldset>
+        <fieldset id="pipeline-archive">
+          <legend>Archive old jobs</legend>
+          <label for="pipeline-archive-mode">Archiving<select id="pipeline-archive-mode" aria-describedby="pipeline-archive-help">
+            <option value="">Off (keep every job on the board)</option>
+            <option value="age">By age: archive jobs finished more than N days ago</option>
+            <option value="count">By count: keep the N most recent finished jobs</option>
+          </select></label>
+          <label for="pipeline-archive-n"><span id="pipeline-archive-n-text">Days</span><input type="number" id="pipeline-archive-n" min="1" max="10000" step="1"></label>
+          <p id="pipeline-archive-help" class="muted">The Worker checks once an hour. Only merged and closed jobs move: never one with a claim, a question for you, an escalation, automerge, a queued or running build, unread deny notes or a pending Tracer mirror. Archived jobs keep their files and open read-only from links. This setting applies to all projects.</p>
+        </fieldset>
         <div class="settings-tabs" id="pipeline-note-tabs" role="tablist" aria-label="Stage notes">
           <button type="button" role="tab" id="pipeline-note-tab-spec" data-name="spec" aria-selected="true" tabindex="0">Spec</button>
           <button type="button" role="tab" id="pipeline-note-tab-build" data-name="build" aria-selected="false" tabindex="-1">Build</button>
@@ -922,6 +932,8 @@ window.addEventListener('online', async () => {
 });
 
 let loaded = false;
+// Archived jobs left the board. A link to one opens it read-only from GET /api/board/archive.
+const archivedJobs = new Map();
 let boardReadVersion = 0;
 let boardUpdated = '';
 let boardEtag = '';
@@ -1935,6 +1947,17 @@ function pipelineTriageError(triage) {
   if (typeof triage.rules !== 'string') return 'triage.rules: must be text';
   return null;
 }
+// Same messages as archiveError in worker/admission.js.
+function pipelineArchiveError(archive) {
+  if (archive === undefined) return null;
+  if (!pipelineObject(archive)) return 'archive: must be an object';
+  for (const key of Object.keys(archive))
+    if (key !== 'mode' && key !== 'n') return 'archive.' + key + ': unknown field';
+  if (archive.mode !== 'age' && archive.mode !== 'count') return 'archive.mode: must be "age" or "count"';
+  if (!(Number.isInteger(archive.n) && archive.n >= 1 && archive.n <= 10000))
+    return 'archive.n: must be a whole number from 1 to 10000';
+  return null;
+}
 function pipelineCanonical(doc) {
   const out = {schema:1};
   if (doc.merge) out.merge = doc.merge;
@@ -1943,6 +1966,7 @@ function pipelineCanonical(doc) {
   if (gates.length) out.gates = gates;
   if (pipelineObject(doc.pickup)) out.pickup = {enabled:doc.pickup.enabled, hosts:doc.pickup.hosts};
   if (pipelineObject(doc.triage)) out.triage = {enabled:doc.triage.enabled, threshold:doc.triage.threshold, rules:doc.triage.rules};
+  if (pipelineObject(doc.archive)) out.archive = {mode:doc.archive.mode, n:doc.archive.n};
   const notes = {};
   for (const stage of PIPELINE_STAGES) if (doc.stage_notes?.[stage]) notes[stage] = doc.stage_notes[stage];
   if (Object.keys(notes).length) out.stage_notes = notes;
@@ -1957,6 +1981,8 @@ const pickupFromFields = (prefix, current) => $(prefix + '-mode').value
   ? {enabled:$(prefix + '-mode').value === 'on', hosts:pickupCheckedHosts(prefix, Array.isArray(current?.hosts) ? current.hosts : [])} : undefined;
 const triageFromFields = () => $('pipeline-triage-mode').value
   ? {enabled:$('pipeline-triage-mode').value === 'on', threshold:$('pipeline-triage-threshold').value === '' ? 80 : Number($('pipeline-triage-threshold').value), rules:$('pipeline-triage-rules').value} : undefined;
+const archiveFromFields = () => $('pipeline-archive-mode').value
+  ? {mode:$('pipeline-archive-mode').value, n:$('pipeline-archive-n').value === '' ? null : Number($('pipeline-archive-n').value)} : undefined;
 // Client-side only: the Worker accepts any valid name and its effective filter drops unregistered ones.
 function pickupRegistryError(pickup) {
   if (!hostRegistry?.length || !Array.isArray(pickup?.hosts)) return null;
@@ -1967,10 +1993,11 @@ function pipelineFormDoc(current) {
   return JSON.parse(pipelineCanonical({merge:$('pipeline-merge').value, review_rounds:Number($('pipeline-rounds').value),
     gates:PIPELINE_GATES.filter(gate => $('pipeline-gate-' + gate).checked),
     pickup:pickupFromFields('pipeline-pickup', current.pickup), triage:triageFromFields(),
+    archive:$('pipeline-scope').value === 'global' ? archiveFromFields() : undefined,
     stage_notes:Object.fromEntries(PIPELINE_STAGES.map(stage => [stage, $('pipeline-note-' + stage).value]))}));
 }
 const pipelineDirty = s => pipelineCanonical(s.draft) !== pipelineCanonical(s.base ?? {schema:1});
-const pipelineCanSave = s => !!s?.loaded && ['ready','error'].includes(s.phase) && (pipelineDirty(s) || s.base === null) && !pipelinePickupError(s.draft.pickup) && !pickupRegistryError(s.draft.pickup) && !pipelineTriageError(s.draft.triage);
+const pipelineCanSave = s => !!s?.loaded && ['ready','error'].includes(s.phase) && (pipelineDirty(s) || s.base === null) && !pipelinePickupError(s.draft.pickup) && !pickupRegistryError(s.draft.pickup) && !pipelineTriageError(s.draft.triage) && !pipelineArchiveError(s.draft.archive);
 const pipelineDraftKey = scope => 'factory-pipeline-draft:' + scope;
 const pipelineMalformed = new Set(), pipelineMemory = new Set();
 const pipelineConflict = 'These pipeline settings changed elsewhere. Your draft is kept. Copy it before loading the latest version, then reapply your changes.';
@@ -2069,13 +2096,23 @@ function renderPipelineSettings() {
   if ($('pipeline-triage-rules').value !== rules) $('pipeline-triage-rules').value = rules;
   $('pipeline-triage-threshold').disabled = $('pipeline-triage-rules').disabled = busy || !triageMode;
   $('pipeline-triage-threshold').setAttribute('aria-invalid', String(!!triageError));
+  $('pipeline-archive').hidden = $('pipeline-scope').value !== 'global';
+  const archiveMode = d.archive?.mode ?? '';
+  const archiveError = pipelineArchiveError(d.archive);
+  if ($('pipeline-archive-mode').value !== archiveMode) $('pipeline-archive-mode').value = archiveMode;
+  $('pipeline-archive-mode').disabled = busy;
+  $('pipeline-archive-n-text').textContent = $('pipeline-archive-mode').value === 'count' ? 'Jobs to keep' : 'Days';
+  const keep = String(d.archive?.n ?? '');
+  if ($('pipeline-archive-n').value !== keep && document.activeElement !== $('pipeline-archive-n')) $('pipeline-archive-n').value = keep;
+  $('pipeline-archive-n').disabled = busy || !$('pipeline-archive-mode').value;
+  $('pipeline-archive-n').setAttribute('aria-invalid', String(!!archiveError));
   $('pipeline-scope').disabled = s?.phase === 'saving';
   $('pipeline-copy').disabled = !s;
   $('pipeline-load').disabled = busy;
   $('pipeline-save').disabled = !pipelineCanSave(s);
   const scope = $('pipeline-scope').value;
   $('pipeline-status').textContent = pipelineStatusText(scope, s);
-  $('pipeline-status').setAttribute('role', pipelineStatusAlert(scope, s) || !!pickupError || !!triageError ? 'alert' : 'status');
+  $('pipeline-status').setAttribute('role', pipelineStatusAlert(scope, s) || !!pickupError || !!triageError || !!archiveError ? 'alert' : 'status');
   renderProjectPickup();
 }
 
@@ -2274,13 +2311,13 @@ listenTabs('pipeline-note-tabs', PIPELINE_NOTE_TABS, id => {
   for (const stage of PIPELINE_STAGES) $('pipeline-note-panel-' + stage).hidden = id !== 'pipeline-note-tab-' + stage;
 });
 for (const id of ['pipeline-merge', 'pipeline-rounds', ...PIPELINE_GATES.map(gate => 'pipeline-gate-' + gate),
-    'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules',
+    'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules', 'pipeline-archive-mode', 'pipeline-archive-n',
     ...PIPELINE_STAGES.map(stage => 'pipeline-note-' + stage)]) {
   $(id).addEventListener('input', () => {
     const s = pipelineScopes.get($('pipeline-scope').value);
     if (!s || $(id).disabled) return;
     s.draft = pipelineFormDoc(s.draft);
-    const error = pipelinePickupError(s.draft.pickup) ?? pickupRegistryError(s.draft.pickup) ?? pipelineTriageError(s.draft.triage);
+    const error = pipelinePickupError(s.draft.pickup) ?? pickupRegistryError(s.draft.pickup) ?? pipelineTriageError(s.draft.triage) ?? pipelineArchiveError(s.draft.archive);
     if (s.phase !== 'conflict') s.message = error ? 'Fix before saving: ' + error : pipelineDirty(s) ? 'Unsaved changes' : 'No unsaved changes';
     persistPipelineDraft($('pipeline-scope').value);
     renderPipelineSettings();
@@ -2871,16 +2908,31 @@ function drawerMeta(j) {
     (j.close?.at && !TERMINAL.includes(j.stage) ? ' · closing' : '');
 }
 
+async function loadArchivedJob(id) {
+  try {
+    const r = await fetch('./api/board/archive?id=' + encodeURIComponent(id), { cache: 'no-store' });
+    const row = r.ok ? (await r.json()).jobs?.[0] : null;
+    if (row?.id !== id) return null;
+    archivedJobs.set(id, row);
+    return row;
+  } catch { return null; }
+}
+
 async function openJob(id) {
-  const j = jobs.find((x) => x.id === id);
+  let j = jobs.find((x) => x.id === id) ?? archivedJobs.get(id);
+  if (!j && loaded) {
+    j = await loadArchivedJob(id);
+    if (parseHash().id !== id) return;
+  }
   if (!j) return;
+  const archived = !jobs.some((x) => x.id === id);
   const first = openId !== id;
   openId = id;
   openBacklogRaw = null;
   openStamp = stamp(j);
   $('detail').hidden = false;
   $('d-title').textContent = j.title || j.id;
-  $('d-meta').textContent = drawerMeta(j);
+  $('d-meta').textContent = drawerMeta(j) + (archived ? ' · archived, read-only' : '');
   const pipeline = pipelineLabel(j);
   $('d-pipeline').textContent = pipeline;
   $('d-pipeline').hidden = !pipeline;
@@ -2896,6 +2948,7 @@ async function openJob(id) {
   const following = j.tracer?.follow === true;
   $('d-follow-tracer').hidden = !j.project || !(TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) || following || !!tracerLink(j);
   $('d-copy-link').hidden = false;
+  if (archived) for (const b of $('d-actions-menu').querySelectorAll('button')) b.hidden = b.id !== 'd-copy-link';
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
   if (first) {
     drawerVersion++;
@@ -3234,7 +3287,7 @@ function renderDetail() {
   $('d-tabs').hidden = !files.length;
   placePill(prev);
   const f = files.find((x) => x.name === activeFile);
-  const j = jobs.find((x) => x.id === openId);
+  const j = jobs.find((x) => x.id === openId) ?? archivedJobs.get(openId);
   docDir = docBase = null;
   docRepo = docRepoFor(j);
   if (j?.project && f) {
@@ -3966,9 +4019,10 @@ function ideaSlug(text) {
 }
 
 // factory.py claim_id's next_id, over every board id, staged or stub.
+// Ids up to archived.max_id belong to jobs the Worker archived off the board.
 function nextJobId(board, slug) {
   const used = board.jobs.map((j) => /^(\d{3,})-/.exec(String(j.id ?? ''))).filter(Boolean).map((m) => Number(m[1]));
-  return String(Math.max(0, ...used) + 1).padStart(3, '0') + '-' + slug;
+  return String(Math.max(0, Number.isInteger(board.archived?.max_id) ? board.archived.max_id : 0, ...used) + 1).padStart(3, '0') + '-' + slug;
 }
 
 function ideaTitle(text) {
@@ -4352,8 +4406,10 @@ function closeJobActions(refocus) {
 }
 
 function syncJobActions() {
-  // A job that left the board has nothing to act on, so its stale items go too.
-  if (!jobs.some((j) => j.id === openId)) for (const id of JOB_ACTIONS) $(id).hidden = true;
+  // A job that left the board has nothing to act on, so its stale items go too. An archived
+  // job keeps only Copy link.
+  if (!jobs.some((j) => j.id === openId))
+    for (const id of JOB_ACTIONS) $(id).hidden = id !== 'd-copy-link' || !archivedJobs.has(openId);
   const any = JOB_ACTIONS.some((id) => !$(id).hidden);
   $('d-actions-wrap').hidden = !any;
   if (any) return;
@@ -5227,6 +5283,31 @@ function openBacklogItem(item) {
   refreshPicker();
   $('d-doc').querySelector('input[type=radio]').focus();
   fetchBacklogTriage(item);
+  fetchReworkHistory(item);
+}
+
+function backlogHistoryHtml(history) {
+  return history.length ? '<h3>Rework history</h3><ol>' +
+    history.map((h) => '<li><div class="meta"><a href="#' + esc(encodeURIComponent(h.id)) + '">' + esc(h.id) + '</a> · reworked ' + esc(ago(h.at)) + '</div>' +
+      '<p>Earlier text: ' + esc(h.text) + '</p><p>Notes: ' + esc(h.notes) + '</p></li>').join('') + '</ol>' : '';
+}
+
+// Earlier rounds of a reworked item may be archived, so missing rework-of ids load from the archive.
+async function fetchReworkHistory(item) {
+  const known = () => [...jobs, ...archivedJobs.values()];
+  const next = (r) => (Array.isArray(r) ? r : []).find((x) => x && x.kind === 'rework-of' && typeof x.id === 'string');
+  const seen = new Set();
+  for (let ref = next(item.refs); ref && !seen.has(ref.id) && seen.size < 20;) {
+    seen.add(ref.id);
+    const j = known().find((x) => x.id === ref.id) ?? await loadArchivedJob(ref.id);
+    if (j?.backlog?.decision !== 'rework') break;
+    ref = next(j.refs);
+  }
+  const section = $('backlog-history');
+  if (openBacklogRaw !== item.raw || !section) return;
+  const history = backlogReworkHistory(item, known());
+  section.innerHTML = backlogHistoryHtml(history);
+  section.hidden = !history.length;
 }
 
 function backlogTriageHtml(v) {
@@ -5275,12 +5356,10 @@ function renderBacklogDecision(item, triageHtml) {
   const shown = item.context === undefined ? '' : ctx
     ? '<section class="backlog-context" aria-label="Context from the agent"><h3>Why this item</h3>' + md(ctx.reasons) + '</section>'
     : '<p class="muted">This item\'s context is not in the backlog context format, so it shows as text.</p>' + md(item.context);
-  const history = backlogReworkHistory(item, jobs);
+  const history = backlogReworkHistory(item, [...jobs, ...archivedJobs.values()]);
   return md(item.text) + shown +
     '<section class="backlog-triage" id="backlog-triage" aria-labelledby="backlog-triage-heading"' + (triageHtml ? '' : ' hidden') + '>' + triageHtml + '</section>' +
-    (history.length ? '<section class="backlog-history" aria-label="Rework history"><h3>Rework history</h3><ol>' +
-      history.map((h) => '<li><div class="meta"><a href="#' + esc(encodeURIComponent(h.id)) + '">' + esc(h.id) + '</a> · reworked ' + esc(ago(h.at)) + '</div>' +
-        '<p>Earlier text: ' + esc(h.text) + '</p><p>Notes: ' + esc(h.notes) + '</p></li>').join('') + '</ol></section>' : '') +
+    '<section class="backlog-history" id="backlog-history" aria-label="Rework history"' + (history.length ? '' : ' hidden') + '>' + backlogHistoryHtml(history) + '</section>' +
     '<form id="backlog-form" novalidate><fieldset class="ask"><legend>Decision</legend>' +
     '<p>What should happen to this backlog item?</p><p class="muted backlog-key-hint">' + (ctx?.questions.length ? 'Choose one. Answer the questions below first, then press A to approve or D to deny, and the next item opens.' : 'Choose one. Press A to approve or D to deny, then the next item opens.') + '</p>' +
     '<p class="muted backlog-tap-hint">On a touch screen, the decision submits by itself once you tap Approve or Deny and every question has an answer. Write any notes first.</p>' +

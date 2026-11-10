@@ -152,6 +152,7 @@
   "tests/browser/drawer-compact.test.mjs",
   "tests/browser/drawer-links.test.mjs",
   "tests/browser/backlog-triage.test.mjs",
-  "tests/browser/live-events.test.mjs"
+  "tests/browser/live-events.test.mjs",
+  "tests/browser/archived-job.test.mjs"
  ]
 }

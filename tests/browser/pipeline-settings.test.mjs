@@ -679,6 +679,86 @@ test("pipeline settings page", { timeout: 180000 }, async (t) => {
       await waitStatus(page, "Unsaved changes");
     });
 
+    await t.test("pipeline P10 archive setting", async () => {
+      const fill = (value) =>
+        page.$eval(
+          "#pipeline-archive-n",
+          (el, v) => {
+            el.value = v;
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+          },
+          value,
+        );
+      const field = () =>
+        page.$eval("#pipeline-archive", (box) => ({
+          hidden: box.hidden,
+          mode: box.querySelector("#pipeline-archive-mode").value,
+          label: box.querySelector("#pipeline-archive-n-text").textContent,
+          disabled: box.querySelector("#pipeline-archive-n").disabled,
+          invalid: box.querySelector("#pipeline-archive-n").getAttribute("aria-invalid"),
+        }));
+      assert.equal((await field()).hidden, true);
+      await page.select("#pipeline-scope", "global");
+      await page.waitForFunction(
+        () =>
+          !document.getElementById("pipeline-archive").hidden &&
+          !document.getElementById("pipeline-archive-mode").disabled,
+        wait,
+      );
+      assert.equal(
+        await page.$eval("#pipeline-archive legend", (el) => el.textContent),
+        "Archive old jobs",
+      );
+      assert.deepEqual(await field(), {
+        hidden: false,
+        mode: "",
+        label: "Days",
+        disabled: true,
+        invalid: "false",
+      });
+      await page.select("#pipeline-archive-mode", "count");
+      assert.deepEqual(await field(), {
+        hidden: false,
+        mode: "count",
+        label: "Jobs to keep",
+        disabled: false,
+        invalid: "true",
+      });
+      for (const bad of ["", "0", "10001", "2.5"]) {
+        await fill(bad);
+        await waitStatus(
+          page,
+          "Fix before saving: archive.n: must be a whole number from 1 to 10000",
+        );
+        assert.equal(await page.$eval("#pipeline-save", (el) => el.disabled), true);
+        assert.equal((await field()).invalid, "true");
+      }
+      await page.select("#pipeline-archive-mode", "age");
+      await fill("30");
+      assert.deepEqual(await field(), {
+        hidden: false,
+        mode: "age",
+        label: "Days",
+        disabled: false,
+        invalid: "false",
+      });
+      await waitStatus(page, "Unsaved changes");
+      await clickSave(page);
+      await page.waitForFunction(
+        () => document.getElementById("pipeline-status").textContent.startsWith("Saved as version"),
+        wait,
+      );
+      const stored = JSON.parse(await (await fetch(origin + "/api/pipeline/global")).text());
+      assert.equal(validatePipeline(stored), null);
+      assert.deepEqual(stored.archive, { mode: "age", n: 30 });
+      await page.select("#pipeline-scope", "projects/sample");
+      await page.waitForFunction(() => document.getElementById("pipeline-archive").hidden, wait);
+      const project = await page.evaluate(() =>
+        pipelineFormDoc(pipelineScopes.get("projects/sample").draft),
+      );
+      assert.equal("archive" in project, false);
+    });
+
     assert.deepEqual(errors, []);
     await context.close();
   });
