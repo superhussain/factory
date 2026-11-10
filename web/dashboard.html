@@ -142,7 +142,16 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .btn.icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .btn.icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .btn.icon .teeth { stroke-width: 2.5; stroke-linecap: butt; }
-  #filter { height: var(--icon-size); }
+  #filter { height: var(--icon-size); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  #filter svg { flex: none; }
+  #filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .filter-wrap { position: relative; }
+  .filter-wrap:has(> #filter[hidden]) { display: none; }
+  .filter-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; min-width: 200px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .filter-menu[hidden] { display: none; }
+  .filter-menu label { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; font-size: 12px; white-space: nowrap; cursor: pointer; }
+  .filter-menu label:hover, .filter-menu label:focus-within { background: var(--line); }
+  @media (pointer: coarse) { .filter-menu label { min-height: 44px; } }
   .header-actions { display: flex; gap: inherit; }
   body[data-view="settings"] #board, body[data-view="settings"] #detail { display: none; }
   .settings-page { max-width: 1440px; margin: 0 auto; padding: 28px; }
@@ -186,9 +195,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .host-checks input { width: auto; margin: 0; }
   .host-group-label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
   @media (max-width: 640px) { .host-card .actions { flex-direction: column; } }
-  #display-columns, #display-card-fields, #display-drawer-links { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
-  #display-columns legend, #display-card-fields legend, #display-drawer-links legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
-  #display-columns label, #display-card-fields label, #display-drawer-links label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); }
+  #display-filter, #display-columns, #display-card-fields, #display-drawer-links { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
+  #display-filter legend, #display-columns legend, #display-card-fields legend, #display-drawer-links legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+  #display-filter label, #display-columns label, #display-card-fields label, #display-drawer-links label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); }
   #settings-notifications label { display: flex; gap: 8px; align-items: baseline; color: var(--fg); font-size: 13px; }
   .scheduler-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
   .reference-scroll { overflow-x: auto; margin: 0 0 12px; }
@@ -451,7 +460,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
 <div class="conn-banner" id="conn-banner" role="status" hidden><span id="conn-text"></span> <button class="btn" id="conn-signin" hidden>Sign in again</button></div>
 <header>
   <h1><a id="board-link" href="#">__FACTORY_TITLE__</a></h1>
-  <select class="filter" id="filter" aria-label="Show jobs from" hidden></select>
+  <div class="filter-wrap" id="filter-wrap">
+    <button class="filter" id="filter" type="button" aria-expanded="false" aria-controls="filter-menu" hidden><span id="filter-label">all projects</span><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false"><path d="m3 4.5 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <div class="filter-menu" id="filter-menu" role="group" aria-label="Show jobs from" hidden></div>
+  </div>
   <div class="header-actions">
     <button class="btn icon" id="new-idea" aria-label="New idea" title="New idea (N)" aria-keyshortcuts="n" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2c.4.3.6.7.6 1.2V12h4v-1.1c0-.5.2-.9.6-1.2A4.5 4.5 0 0 0 8 1.5zM6.5 14.5h3"/></svg></button>
     <button class="btn icon" id="job-jump" aria-label="Jump to job" title="Jump to job (J, /, ⌘K or Ctrl+K)" aria-keyshortcuts="j / Meta+K Control+K"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 4 4"/></svg></button>
@@ -660,7 +672,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="display-density">Density<select id="display-density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
       <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="3">Every 3 seconds</option><option value="10">Every 10 seconds</option><option value="30">Every 30 seconds</option></select></label>
       <p class="muted" id="display-poll-help">The board updates live while this tab is visible. If the live connection drops, it refreshes on this schedule until it reconnects. A hidden tab stays live only while notifications are on.</p>
-      <label for="display-filter">Show jobs from<select id="display-filter"></select></label>
+      <fieldset id="display-filter"><legend>Show jobs from</legend></fieldset>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
       <p class="muted" id="display-card-fields-help">Cards in the needs you column always show what the job is waiting on.</p>
@@ -856,7 +868,8 @@ const TRACER_GATHER_STAGES = ['idea', 'spec'];
 // The Worker serves projects.json, and each job links PRs only for its own project's repo.
 let projects = null;
 const UNASSIGNED = ':unassigned';
-let filter = store.get('factory-project') || '';
+const PROJECTS_HIDDEN_KEY = 'factory-projects-hidden';
+let hiddenProjects = new Set((store.get(PROJECTS_HIDDEN_KEY) || '').split(',').filter(Boolean));
 
 // The server-rendered title, which renderBoard prefixes with the needs-you count.
 const BASE_TITLE = document.title;
@@ -1321,9 +1334,11 @@ function renderPickerRows(sections = null) {
 
 function renderProjectResults() {
   const query = $('job-search').value.trim().toLowerCase();
-  jobResults = Array.from($('filter').options).map((option) => ({
-    kind: 'project', key: 'project:' + option.value, value: option.value, title: option.textContent,
-    meta: option.value === $('filter').value ? 'Current project' : '',
+  const shown = projectFilterKeys().filter((k) => !hiddenProjects.has(k));
+  const current = shown.length === projectFilterKeys().length ? '' : shown.length === 1 ? shown[0] : null;
+  jobResults = projectFilterRows().map(({ key, title }) => ({
+    kind: 'project', key: 'project:' + key, value: key, title,
+    meta: key === current ? 'Current project' : '',
   })).filter((row) => row.title.toLowerCase().includes(query) || row.value.toLowerCase().includes(query));
   $('job-count').textContent = jobResults.length + (jobResults.length === 1 ? ' project' : ' projects');
   $('job-empty').textContent = 'No projects found';
@@ -1340,7 +1355,7 @@ function openProjectPicker() {
   $('job-search').value = '';
   selectedKey = null;
   renderJobResults();
-  const current = jobResults.findIndex((r) => r.value === select.value);
+  const current = jobResults.findIndex((r) => r.meta);
   selectJobResult(current < 0 && jobResults.length ? 0 : current);
   $('job-search').focus();
 }
@@ -1418,11 +1433,9 @@ function activateJobResult() {
     return;
   }
   if (row.kind === 'project') {
-    const select = $('filter');
-    const option = select && Array.from(select.options).find((o) => o.value === row.value);
-    if (!select || select.hidden || select.disabled || !option || option.disabled) return renderJobResults();
-    select.value = row.value;
-    select.dispatchEvent(new Event('change'));
+    const button = $('filter');
+    if (!button || button.hidden || button.disabled || !projectFilterRows().some((r) => r.key === row.value)) return renderJobResults();
+    setHiddenProjects(row.value === '' ? [] : projectFilterKeys().filter((k) => k !== row.value));
     closeJobPicker();
     return;
   }
@@ -1460,6 +1473,89 @@ $('job-results').addEventListener('click', (e) => {
   activateJobResult();
 });
 
+// The board shows every project except the hidden keys, so a newly registered project starts shown.
+function projectFilterRows() {
+  return [{ key: '', title: 'all projects' }, ...[...(projects || [])].map(([slug, p]) => ({ key: slug, title: p.title || slug })), { key: UNASSIGNED, title: 'No project yet' }];
+}
+const projectFilterKeys = () => projectFilterRows().slice(1).map((r) => r.key);
+const isShown = (project) => !hiddenProjects.has(project || UNASSIGNED);
+// The one shown key when it is a registered project, else ''.
+function soleProject() {
+  const shown = projectFilterKeys().filter((k) => !hiddenProjects.has(k));
+  return shown.length === 1 && projects?.has(shown[0]) ? shown[0] : '';
+}
+function saveHiddenProjects() {
+  if (hiddenProjects.size) store.set(PROJECTS_HIDDEN_KEY, [...hiddenProjects].join(',')); else store.remove(PROJECTS_HIDDEN_KEY);
+}
+function setHiddenProjects(keys) {
+  hiddenProjects = new Set(keys);
+  saveHiddenProjects();
+  syncProjectFilter();
+  if (loaded) renderBoard();
+}
+// The header menu and the Display fieldset hold the same boxes.
+function renderProjectFilter() {
+  const active = document.activeElement;
+  const focusIn = active?.matches('[data-project]') ? active.closest('#filter-menu, #display-filter') : null;
+  const rows = () => projectFilterRows().map(({ key, title }) => {
+    const box = Object.assign(document.createElement('input'), { type: 'checkbox' });
+    box.dataset.project = key;
+    const label = document.createElement('label');
+    label.append(box, ' ' + title);
+    return label;
+  });
+  $('filter-menu').replaceChildren(...rows());
+  $('display-filter').replaceChildren($('display-filter').querySelector('legend'), ...rows());
+  syncProjectFilter();
+  if (focusIn) focusIn.querySelector('[data-project="' + CSS.escape(active.dataset.project) + '"]')?.focus();
+}
+function syncProjectFilter() {
+  const rows = projectFilterRows().slice(1), shown = rows.filter((r) => !hiddenProjects.has(r.key));
+  const label = shown.length === rows.length ? 'all projects' : shown.length === 1 ? shown[0].title : shown.length ? shown.length + ' selected' : 'no projects';
+  for (const box of document.querySelectorAll('#filter-menu [data-project], #display-filter [data-project]')) {
+    const all = box.dataset.project === '';
+    box.checked = all ? shown.length === rows.length : !hiddenProjects.has(box.dataset.project);
+    box.indeterminate = all && shown.length > 0 && shown.length < rows.length;
+  }
+  $('filter-label').textContent = label;
+  $('filter').setAttribute('aria-label', 'Show jobs from: ' + label);
+}
+function openProjectFilter() {
+  $('filter-menu').hidden = false;
+  $('filter').setAttribute('aria-expanded', 'true');
+  $('filter-menu').querySelector('input')?.focus();
+}
+function closeProjectFilter(refocus) {
+  if ($('filter-menu').hidden) return;
+  $('filter-menu').hidden = true;
+  $('filter').setAttribute('aria-expanded', 'false');
+  if (refocus) $('filter').focus();
+}
+$('filter').addEventListener('click', () => $('filter-menu').hidden ? openProjectFilter() : closeProjectFilter(false));
+$('filter').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown') return;
+  e.preventDefault();
+  openProjectFilter();
+});
+$('filter-wrap').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || $('filter-menu').hidden) return;
+  e.stopPropagation();
+  closeProjectFilter(true);
+});
+document.addEventListener('pointerdown', (e) => { if (!$('filter-wrap').contains(e.target)) closeProjectFilter(false); });
+$('filter-wrap').addEventListener('focusout', (e) => { if (e.relatedTarget && !$('filter-wrap').contains(e.relatedTarget)) closeProjectFilter(false); });
+// The "all projects" box shows every key, or hides every key when all were shown.
+function changeProjectFilter(e) {
+  const key = e.target.dataset.project;
+  if (key === undefined) return;
+  const keys = projectFilterKeys();
+  if (key === '') setHiddenProjects(keys.some((k) => hiddenProjects.has(k)) ? [] : keys);
+  else setHiddenProjects(e.target.checked ? [...hiddenProjects].filter((k) => k !== key) : [...hiddenProjects, key]);
+  if (e.currentTarget.id === 'display-filter') displaySaved();
+}
+$('filter-menu').addEventListener('change', changeProjectFilter);
+$('display-filter').addEventListener('change', changeProjectFilter);
+
 async function loadProjects() {
   let loaded = false;
   try {
@@ -1477,17 +1573,20 @@ async function loadProjects() {
     ? 'Assign a registered project before starting this idea. Could not load projects; refresh this page to retry.'
     : projects.size ? 'Assign a registered project before starting this idea. Assignment does not start it.'
     : 'Assign a registered project before starting this idea. Run /factory init in a checkout, then refresh this page.';
-  const sel = $('filter');
   const ideaProject = $('idea-project').value, drawerProject = $('d-project').value;
-  sel.replaceChildren();
   $('idea-project').replaceChildren();
   $('d-project').replaceChildren();
-  sel.add(new Option('all projects', ''));
-  sel.add(new Option('No project yet', UNASSIGNED));
-  for (const [slug, p] of projects || []) sel.add(new Option(p.title || slug, slug));
-  filter = filter === UNASSIGNED || projects?.has(filter) ? filter : '';
-  sel.value = filter;
-  sel.hidden = false;
+  if (projects !== null) {
+    const keys = projectFilterKeys(), legacy = store.get('factory-project');
+    if (legacy !== null) {
+      if (keys.includes(legacy)) hiddenProjects = new Set(keys.filter((k) => k !== legacy));
+      store.remove('factory-project');
+    }
+    hiddenProjects = new Set([...hiddenProjects].filter((k) => keys.includes(k)));
+    saveHiddenProjects();
+  }
+  renderProjectFilter();
+  $('filter').hidden = false;
   $('idea-project').add(new Option('No project yet', ''));
   $('d-project').add(new Option('Choose a project', ''));
   for (const [slug, p] of projects || []) {
@@ -1501,11 +1600,6 @@ async function loadProjects() {
   refreshPicker();
   return loaded;
 }
-$('filter').addEventListener('change', () => {
-  filter = $('filter').value;
-  store.set('factory-project', filter);
-  renderBoard();
-});
 
 const projectDocuments = new Map();
 const PROJECT_DOCUMENT_NAMES = ["notes.md", "decisions.md", "runbook.md"];
@@ -1734,7 +1828,7 @@ function selectSettingsProject() {
 
 function enterProjectsSection() {
   const select = $('settings-project');
-  const selected = projects?.has(filter) ? filter : [...(projects?.keys() || [])].sort()[0];
+  const selected = soleProject() || [...(projects?.keys() || [])].sort()[0];
   select.replaceChildren();
   for (const slug of [...(projects?.keys() || [])].sort()) {
     const title = projects.get(slug).title;
@@ -2229,7 +2323,7 @@ function enterPipelineSection() {
     const title = projects.get(slug).title;
     select.add(new Option(title && title !== slug ? title + ' (' + slug + ')' : slug, 'projects/' + slug));
   }
-  select.value = projects?.has(filter) ? 'projects/' + filter : 'global';
+  select.value = soleProject() ? 'projects/' + soleProject() : 'global';
   loadHosts();
   selectPipelineScope();
   select.focus();
@@ -2527,7 +2621,7 @@ function focusBacklogControl(raw) {
 }
 
 function visibleBacklog() {
-  return backlog.filter((b) => !filter || (filter !== UNASSIGNED && b.project === filter));
+  return backlog.filter((b) => isShown(b.project));
 }
 
 // The item at index among the visible, non-busy items, else the first, else null.
@@ -2549,7 +2643,7 @@ function renderBoard() {
     if (!settingsShown) document.title = BASE_TITLE;
     return;
   }
-  const shown = jobs.filter((j) => !filter || (filter === UNASSIGNED ? !j.project : j.project === filter));
+  const shown = jobs.filter((j) => isShown(j.project));
   renderedBacklog = backlog;
   for (const b of visibleBacklog()) if (!backlogTriageAsked.has(b.raw)) fetchBacklogTriage(b);
   const lists = COLUMNS.map((s) => s === 'backlog'
@@ -4707,7 +4801,7 @@ function openIdeaDialog(followUp = null) {
   ideaFollowUp = followUp ? followUp.id : null;
   const ideaDefault = store.get('factory-idea-project');
   $('idea-project').value = followUp ? (projects?.has(followUp.project) ? followUp.project : '')
-    : projects?.has(filter) ? filter : projects?.has(ideaDefault) ? ideaDefault : '';
+    : soleProject() || (projects?.has(ideaDefault) ? ideaDefault : '');
   $('idea-ref').replaceChildren(...(followUp ? ['Follow-up of ', Object.assign(document.createElement('code'), { textContent: followUp.id })] : []));
   $('idea-ref').hidden = !followUp;
   $('idea-err').hidden = true;
@@ -5539,7 +5633,6 @@ $('display-drawer-links').append(...DRAWER_LINKS.map(([k, text]) => {
 }));
 function enterDisplaySection() {
   $('display-idea-project').replaceChildren(new Option('No default', ''), ...[...(projects || [])].map(([slug, p]) => new Option(p.title || slug, slug)));
-  $('display-filter').replaceChildren(...[...$('filter').options].map(o => new Option(o.text, o.value)));
   renderDisplaySettings();
   $('display-theme').focus();
 }
@@ -5547,7 +5640,6 @@ function renderDisplaySettings() {
   $('display-theme').value = theme;
   $('display-density').value = density;
   $('display-poll').value = String(pollSeconds);
-  $('display-filter').value = filter;
   for (const box of $('display-columns').querySelectorAll('input')) box.checked = !hiddenColumns.has(box.dataset.stage);
   for (const box of $('display-card-fields').querySelectorAll('input')) box.checked = !hiddenCardFields.has(box.dataset.field);
   for (const box of $('display-drawer-links').querySelectorAll('input')) box.checked = !hiddenDrawerLinks.has(box.dataset.link);
@@ -5560,13 +5652,6 @@ const displaySaved = () => { $('display-status').textContent = 'Saved in this br
 $('display-theme').addEventListener('change', () => { theme = pickDisplay($('display-theme').value, THEMES); store.set(DISPLAY_KEYS.theme, theme); applyDisplay(); displaySaved(); });
 $('display-density').addEventListener('change', () => { density = pickDisplay($('display-density').value, DENSITIES); store.set(DISPLAY_KEYS.density, density); applyDisplay(); displaySaved(); });
 $('display-poll').addEventListener('change', () => { pollSeconds = pickDisplay(Number($('display-poll').value), POLL_SECONDS); store.set(DISPLAY_KEYS.poll, pollSeconds); schedulePoll(); displaySaved(); });
-$('display-filter').addEventListener('change', () => {
-  filter = $('display-filter').value;
-  store.set('factory-project', filter);
-  $('filter').value = filter;
-  if (loaded) renderBoard();
-  displaySaved();
-});
 $('display-columns').addEventListener('change', e => {
   const s = e.target.dataset.stage;
   if (!s || s === 'needs-you') return;
@@ -5596,13 +5681,14 @@ $('display-idea-project').addEventListener('change', () => {
   displaySaved();
 });
 $('display-reset').addEventListener('click', () => {
-  for (const key of [...Object.values(DISPLAY_KEYS), 'factory-project']) store.remove(key);
+  for (const key of [...Object.values(DISPLAY_KEYS), PROJECTS_HIDDEN_KEY, 'factory-project']) store.remove(key);
   resetDrawerWidth();
-  theme = 'system'; density = 'comfortable'; pollSeconds = 3; filter = '';
+  theme = 'system'; density = 'comfortable'; pollSeconds = 3;
+  hiddenProjects.clear();
   hiddenColumns.clear();
   hiddenCardFields.clear();
   hiddenDrawerLinks.clear();
-  $('filter').value = '';
+  syncProjectFilter();
   applyDisplay();
   schedulePoll();
   if (loaded) renderBoard();
