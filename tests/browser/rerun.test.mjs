@@ -212,35 +212,42 @@ test("rerun stage", { timeout: 240000 }, async (t) => {
           let release;
           holdEffective = new Promise((resolve) => (release = resolve));
           const seen = new Promise((resolve) => (effectiveSeen = resolve));
-          await page.evaluate(() => {
-            window.realConfirm = window.confirm;
-            window.confirm = () => {
-              window.statusAtConfirm = document.getElementById("d-rerun-status").textContent;
-              return false;
-            };
-          });
-          await openJobActions(page);
-          await activate("#d-rerun");
-          await seen;
-          if (width === 390)
-            await page.screenshot({
-              path: `${SHOTS}after-checking-390.png`,
-              clip: await headAnd(page, "#d-rerun-status"),
+          try {
+            await page.evaluate(() => {
+              window.realConfirm = window.confirm;
+              window.confirm = () => {
+                window.statusAtConfirm = document.getElementById("d-rerun-status").textContent;
+                return false;
+              };
             });
-          assert.equal(
-            await page.$eval("#d-rerun-status", (el) => el.textContent),
-            "Checking lab-linux…",
-          );
-          assert.equal(await page.$eval("#d-rerun", (el) => el.disabled), true);
-          release();
-          holdEffective = null;
-          effectiveSeen = null;
-          await page.waitForFunction(() => !document.getElementById("d-rerun").disabled, wait);
-          assert.equal(await page.evaluate(() => window.statusAtConfirm), "");
-          assert.equal(await page.$eval("#d-rerun-status", (el) => el.textContent), "");
-          const job = await boardJob(origin, "042-sample-export");
-          assert.deepEqual([job.claim, job.move], [claimed, undefined]);
-          await page.evaluate(() => (window.confirm = window.realConfirm));
+            await openJobActions(page);
+            await activate("#d-rerun");
+            await seen;
+            if (width === 390)
+              await page.screenshot({
+                path: `${SHOTS}after-checking-390.png`,
+                clip: await headAnd(page, "#d-rerun-status"),
+              });
+            assert.equal(
+              await page.$eval("#d-rerun-status", (el) => el.textContent),
+              "Checking lab-linux…",
+            );
+            assert.equal(await page.$eval("#d-rerun", (el) => el.disabled), true);
+            release();
+            await page.waitForFunction(() => !document.getElementById("d-rerun").disabled, wait);
+            assert.equal(await page.evaluate(() => window.statusAtConfirm), "");
+            assert.equal(await page.$eval("#d-rerun-status", (el) => el.textContent), "");
+            const job = await boardJob(origin, "042-sample-export");
+            assert.deepEqual([job.claim, job.move], [claimed, undefined]);
+          } finally {
+            release();
+            holdEffective = null;
+            effectiveSeen = null;
+            await page.waitForFunction(() => !document.getElementById("d-rerun").disabled, wait);
+            await page.evaluate(() => {
+              if (window.realConfirm) window.confirm = window.realConfirm;
+            });
+          }
         },
       );
 
