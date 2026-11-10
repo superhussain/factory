@@ -106,7 +106,7 @@ svg.tl .axis{stroke:var(--text-secondary);stroke-width:1.5}
 </div>
 </section>
 <p id="example"><span class="chip ha">Made-up example</span> <span id="example-text"></span></p>
-<section aria-label="Steps">
+<section id="steps" aria-label="Steps">
 <div class="pills" id="pills"></div>
 <p id="kicker" class="muted"></p>
 <h2 id="title"></h2>
@@ -359,6 +359,32 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') go(-1);
   if (e.key === 'ArrowRight') go(1);
 });
+// A sideways swipe on the steps moves one step, like Back and Next. Sideways scrollers keep their touches.
+const sideways = (el) => {
+  for (; el && el !== $('steps'); el = el.parentElement) {
+    if (el.scrollWidth > el.clientWidth + 1 && ['auto', 'scroll'].includes(getComputedStyle(el).overflowX)) return true;
+  }
+  return false;
+};
+let x0 = 0, y0 = 0, x = 0, swiping = null;
+$('steps').addEventListener('touchstart', (e) => {
+  swiping = e.touches.length === 1 && !e.target.closest('input,textarea,select,[contenteditable]') && !sideways(e.target) ? false : null;
+  x0 = x = e.touches[0].clientX;
+  y0 = e.touches[0].clientY;
+}, { passive: true });
+$('steps').addEventListener('touchmove', (e) => {
+  if (swiping === null) return;
+  x = e.touches[0].clientX;
+  if (!swiping) {
+    if (Math.abs(e.touches[0].clientY - y0) >= 12) swiping = null;
+    else if (Math.abs(x - x0) >= 24) swiping = true;
+  }
+  if (swiping && e.cancelable) e.preventDefault();
+}, { passive: false });
+$('steps').addEventListener('touchend', () => {
+  if (swiping && Math.abs(x - x0) >= 64) go(x < x0 ? 1 : -1);
+  swiping = null;
+}, { passive: true });
 buildPills();
 render();
 </script>
