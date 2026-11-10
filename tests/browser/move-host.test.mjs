@@ -30,11 +30,27 @@ const JOBS = [
     branch: "factory/042-sample-export",
     round: 1,
     updated: "2026-01-01T00:00:00Z",
-    claim: { device: "lab-linux", session: "a1b2c3", since: "2026-01-01T10:00:00Z" },
+    claim: {
+      device: "lab-linux",
+      session: "a1b2c3",
+      since: "2026-01-01T10:00:00Z",
+    },
     paseo: { server: "srv-lab", agent: "4cec0a47-1d21-4115-945b-9e7dfb668ef4" },
   },
-  { id: "043-unclaimed", project: "sample", title: "No host", stage: "spec", updated: NOW },
-  { id: "044-open-pr", project: "sample", title: "Open PR", stage: "pr-open", updated: NOW },
+  {
+    id: "043-unclaimed",
+    project: "sample",
+    title: "No host",
+    stage: "spec",
+    updated: NOW,
+  },
+  {
+    id: "044-open-pr",
+    project: "sample",
+    title: "Open PR",
+    stage: "pr-open",
+    updated: NOW,
+  },
   { id: "045-no-project", title: "No project", stage: "build", updated: NOW },
   {
     id: "046-queued",
@@ -70,6 +86,8 @@ const JOBS = [
     },
   },
 ];
+const MOVE_HINT =
+  " The move may have saved. Press Move job again with the same host to check. It will not queue a second move.";
 const PICKUP_HOSTS = ["lab-linux", "studio-mac", "new-box", "spare-pc", "old-laptop"];
 
 const freezeClock = (page) =>
@@ -112,6 +130,27 @@ test("move host", { timeout: 240000 }, async (t) => {
       await freezeClock(page);
       await blockLiveEvents(page);
       await serveHostList(page, HOSTS);
+      await page.setBypassServiceWorker(true);
+      // Sends the page's board write from Node, then drops the page's copy of it.
+      let landPut = false;
+      page.on("request", async (request) => {
+        if (
+          !landPut ||
+          request.method() !== "PUT" ||
+          new URL(request.url()).pathname !== "/api/board"
+        )
+          return;
+        landPut = false;
+        const headers = request.headers();
+        await fetch(request.url(), {
+          method: "PUT",
+          headers: Object.fromEntries(
+            ["if-match", "if-none-match"].filter((h) => headers[h]).map((h) => [h, headers[h]]),
+          ),
+          body: request.postData(),
+        });
+        return request.abort("failed", 1);
+      });
       page.on("request", (request) => {
         if (new URL(request.url()).pathname !== "/api/pipeline/effective/sample") return;
         return effectiveFails
@@ -120,7 +159,9 @@ test("move host", { timeout: 240000 }, async (t) => {
               {
                 status: 200,
                 contentType: "application/json",
-                body: JSON.stringify({ pickup: { enabled: true, hosts: pickupHosts } }),
+                body: JSON.stringify({
+                  pickup: { enabled: true, hosts: pickupHosts },
+                }),
               },
               1,
             );
@@ -256,7 +297,12 @@ test("move host", { timeout: 240000 }, async (t) => {
               ...JOBS[0],
               claim: undefined,
               paseo: undefined,
-              move: { from: "lab-linux", session: "a1b2c3", to: "studio-mac", at: NOW },
+              move: {
+                from: "lab-linux",
+                session: "a1b2c3",
+                to: "studio-mac",
+                at: NOW,
+              },
             },
           ]);
           await page.evaluate(() => window.fixtureBoardPoll?.());
@@ -280,6 +326,31 @@ test("move host", { timeout: 240000 }, async (t) => {
           await page.waitForSelector("#d-move-host:not([hidden])", wait);
         },
       );
+
+      await t.test(`an uncertain move confirms on retry ${width}`, async () => {
+        landPut = true;
+        await openJobActions(page);
+        await page.click("#d-move-host");
+        await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        await page.click("#move-host-save");
+        await page.waitForFunction(() => !document.getElementById("move-host-err").hidden, wait);
+        const text = await page.$eval("#move-host-err", (el) => el.textContent);
+        assert.ok(text.startsWith("Not confirmed: "), text);
+        assert.ok(text.endsWith("." + MOVE_HINT), text);
+        const board = await (await fetch(origin + "/api/board")).json();
+        assert.equal(board.jobs.find((j) => j.id === "042-sample-export").move.to, "studio-mac");
+        if (width === 1440)
+          await (
+            await page.$("#move-host-dlg")
+          ).screenshot({ path: `${SHOTS}move-uncertain-1440.png` });
+        const after = await (await fetch(origin + "/api/board")).text();
+        await page.click("#move-host-save");
+        await page.waitForFunction(() => !document.getElementById("move-host-dlg").open, wait);
+        assert.equal(await (await fetch(origin + "/api/board")).text(), after);
+        await seedBoard(origin, JOBS);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForSelector("#d-move-host:not([hidden])", wait);
+      });
 
       await t.test(`Move job writes move and drops the claim ${width}`, async () => {
         await openJobActions(page);
@@ -346,7 +417,9 @@ test("move host", { timeout: 240000 }, async (t) => {
         await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
         await (
           await page.$("#move-host-dlg")
-        ).screenshot({ path: `${SHOTS}after-move-dialog-chained${suffix}.png` });
+        ).screenshot({
+          path: `${SHOTS}after-move-dialog-chained${suffix}.png`,
+        });
         assert.deepEqual(await options(page), ["Cloud box (cloud-box)"]);
         await page.select("#move-host-select", "cloud-box");
         await page.click("#move-host-save");
@@ -396,7 +469,9 @@ test("move host", { timeout: 240000 }, async (t) => {
           wait,
         );
         const queued = await page.waitForSelector('.card[data-id="046-queued"]');
-        await queued.screenshot({ path: `${SHOTS}after-card-true-stopped${suffix}.png` });
+        await queued.screenshot({
+          path: `${SHOTS}after-card-true-stopped${suffix}.png`,
+        });
         assert.equal(
           await hostLine(page, "046-queued"),
           "on Studio Mac · stop queued on Lab Linux",
@@ -417,7 +492,13 @@ test("move host", { timeout: 240000 }, async (t) => {
               to: "cloud-box",
               at: NOW,
               claimed: NOW,
-              earlier: [{ from: "lab-linux", session: "a1b2c3", at: "2026-01-01T10:00:00Z" }],
+              earlier: [
+                {
+                  from: "lab-linux",
+                  session: "a1b2c3",
+                  at: "2026-01-01T10:00:00Z",
+                },
+              ],
             },
           },
         ]);
@@ -430,7 +511,9 @@ test("move host", { timeout: 240000 }, async (t) => {
         await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
         await (
           await page.$("#move-host-dlg")
-        ).screenshot({ path: `${SHOTS}after-move-dialog-stops-queued${suffix}.png` });
+        ).screenshot({
+          path: `${SHOTS}after-move-dialog-stops-queued${suffix}.png`,
+        });
         assert.equal(
           await page.$eval("#move-host-empty", (el) => el.textContent),
           "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. Try again after one of them stops the job.",

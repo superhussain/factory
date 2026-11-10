@@ -4441,6 +4441,12 @@ async function casBoard(change) {
   throw new Error('the board kept changing, so nothing was saved after 10 tries');
 }
 
+// An uncertain save may have landed, so the dialog says so and the same retry confirms it.
+function boardSaveError(x, hint) {
+  const text = String(x.message || x);
+  return x.uncertain ? 'Not confirmed: ' + text + '. ' + hint : text;
+}
+
 let ideaEditor = null;
 let ideaEditorLoad = null;
 
@@ -4561,11 +4567,13 @@ function closeIdeaEditor() {
 const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
 
 // Writes the move and drops the claim, so factory.py fences the old session and the target host
-// picks the job up. Returns an error message, or '' once the board is changed.
+// picks the job up. Returns an error message, '' once the board is changed, or 'unchanged' when
+// the board already holds this move.
 function moveJob(board, id, to, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
   if (!j.project || !MOVE_STAGES.includes(j.stage)) return 'This job can no longer be moved.';
+  if (!j.claim && j.move?.to === to) return 'unchanged';
   const from = j.claim?.device ?? (!j.claim && j.move && !moveStopped(j.move) ? j.move.from : undefined);
   if (to === from) return 'This job already runs on ' + to + '.';
   if (queuedStops(j.move).some((x) => x.from === to)) return 'A stop is still queued on ' + to + '. Pick another host.';
@@ -4659,12 +4667,13 @@ function resumeJob(board, id, now) {
 }
 
 // factory.py pickup writes decision.md with the reason, then moves the job to closed.
-// Returns an error message, or '' once the board is changed.
+// Returns an error message, '' once the board is changed, or 'unchanged' when the board already
+// holds this close.
 function closeJob(board, id, reason, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
   if (!j.project || j.stage === 'idea' || TERMINAL.includes(j.stage)) return 'This job can no longer be closed.';
-  if (j.close) return 'A close is already queued for this job.';
+  if (j.close) return j.close.reason === reason.trim() ? 'unchanged' : 'A close is already queued for this job.';
   const text = reason.trim();
   if (!/^[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}$/.test(text)) return 'Enter a reason of 1 to 200 characters.';
   j.close = { reason: text, at: now };
@@ -4739,10 +4748,11 @@ $('move-host-form').addEventListener('submit', async (e) => {
   try {
     await casBoard((board) => {
       const message = moveJob(board, id, to, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
   } catch (x) {
-    $('move-host-err').textContent = String(x.message || x);
+    $('move-host-err').textContent = boardSaveError(x, 'The move may have saved. Press Move job again with the same host to check. It will not queue a second move.');
     $('move-host-err').hidden = false;
     $('move-host-save').disabled = false;
     return;
@@ -4785,10 +4795,11 @@ $('close-job-form').addEventListener('submit', async (e) => {
   try {
     await casBoard((board) => {
       const message = closeJob(board, id, $('close-job-reason').value, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
   } catch (x) {
-    $('close-job-err').textContent = String(x.message || x);
+    $('close-job-err').textContent = boardSaveError(x, 'The close may have saved. Press Close job again with the same reason to check. It will not queue a second close.');
     $('close-job-err').hidden = false;
     $('close-job-save').disabled = false;
     return;
