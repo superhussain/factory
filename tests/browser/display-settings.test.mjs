@@ -251,7 +251,7 @@ test("display settings", { timeout: 180000 }, async (t) => {
       assert.deepEqual(await rows("#display-filter"), await rows("#filter-menu"));
       await showOnly(page, "sample", "#display-filter");
       assert.equal((await filterState(page)).label, "Synthetic sample");
-      assert.equal((await filterState(page)).stored, ":unassigned");
+      assert.equal((await filterState(page)).stored, '[":unassigned"]');
       assert.deepEqual(await rows("#display-filter"), await rows("#filter-menu"));
     });
 

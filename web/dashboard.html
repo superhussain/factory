@@ -923,7 +923,17 @@ const TRACER_GATHER_STAGES = ['idea', 'spec'];
 let projects = null;
 const UNASSIGNED = ':unassigned';
 const PROJECTS_HIDDEN_KEY = 'factory-projects-hidden';
-let hiddenProjects = new Set((store.get(PROJECTS_HIDDEN_KEY) || '').split(',').filter(Boolean));
+// Saved as a JSON array of keys. Any other value is the older comma list.
+function readHiddenProjects() {
+  const raw = store.get(PROJECTS_HIDDEN_KEY);
+  if (!raw) return new Set();
+  try {
+    const keys = JSON.parse(raw);
+    if (Array.isArray(keys)) return new Set(keys.filter((k) => typeof k === 'string' && k));
+  } catch {}
+  return new Set(raw.split(',').filter(Boolean));
+}
+let hiddenProjects = readHiddenProjects();
 
 // The server-rendered title, which renderBoard prefixes with the needs-you count.
 const BASE_TITLE = document.title;
@@ -1615,7 +1625,7 @@ function soleProject() {
   return shown.length === 1 && projects?.has(shown[0]) ? shown[0] : '';
 }
 function saveHiddenProjects() {
-  if (hiddenProjects.size) store.set(PROJECTS_HIDDEN_KEY, [...hiddenProjects].join(',')); else store.remove(PROJECTS_HIDDEN_KEY);
+  if (hiddenProjects.size) store.set(PROJECTS_HIDDEN_KEY, JSON.stringify([...hiddenProjects])); else store.remove(PROJECTS_HIDDEN_KEY);
 }
 function setHiddenProjects(keys) {
   hiddenProjects = new Set(keys);

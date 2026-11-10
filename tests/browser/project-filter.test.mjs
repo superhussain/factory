@@ -92,7 +92,7 @@ test("project filter", { timeout: 180000 }, async (t) => {
           row("beta", "Synthetic Beta", false),
           row(":unassigned", "No project yet", true),
         ],
-        stored: "beta",
+        stored: '["beta"]',
       });
       assert.deepEqual(await menu(page), { open: true, expanded: "true", focus: "beta" });
       assert.deepEqual(await cards(page), ["090-alpha", "092-loose"]);
@@ -133,7 +133,7 @@ test("project filter", { timeout: 180000 }, async (t) => {
           row("beta", "Synthetic Beta", false),
           row(":unassigned", "No project yet", false),
         ],
-        stored: "alpha,beta,:unassigned",
+        stored: '["alpha","beta",":unassigned"]',
       });
       assert.equal(
         await page.$eval("#filter", (el) => el.getAttribute("aria-label")),
@@ -167,7 +167,7 @@ test("project filter", { timeout: 180000 }, async (t) => {
       });
       await legacy.reload({ waitUntil: "domcontentloaded" });
       await ready(legacy);
-      assert.equal((await filterState(legacy)).stored, "beta,:unassigned");
+      assert.equal((await filterState(legacy)).stored, '["beta",":unassigned"]');
       assert.equal((await filterState(legacy)).label, "Synthetic Alpha");
       assert.equal(await legacy.evaluate(() => localStorage.getItem("factory-project")), null);
       assert.deepEqual(await cards(legacy), ["090-alpha"]);
@@ -194,7 +194,7 @@ test("project filter", { timeout: 180000 }, async (t) => {
       await page.click(box("alpha", "#display-filter"));
       const state = await filterState(page);
       assert.equal(state.label, "2 selected");
-      assert.equal(state.stored, "alpha");
+      assert.equal(state.stored, '["alpha"]');
       assert.deepEqual(await display(), state.rows);
       assert.equal(
         await page.$eval("#display-status", (el) => el.textContent),
@@ -228,6 +228,30 @@ test("project filter", { timeout: 180000 }, async (t) => {
       });
       assert.deepEqual(await cards(failed), ["090-alpha", "091-beta", "092-loose"]);
       await failed.browserContext().close();
+    });
+
+    const old = await open();
+
+    await t.test("F10 comma list", async () => {
+      await old.evaluate(() => {
+        localStorage.clear();
+        localStorage.setItem("factory-projects-hidden", "beta");
+      });
+      await old.reload({ waitUntil: "domcontentloaded" });
+      await ready(old);
+      const state = await filterState(old);
+      assert.equal(state.stored, '["beta"]');
+      assert.equal(state.label, "2 selected");
+      assert.deepEqual(await cards(old), ["090-alpha", "092-loose"]);
+    });
+
+    await t.test("F11 comma in a key", async () => {
+      const keys = await old.evaluate(() => {
+        localStorage.setItem("factory-projects-hidden", JSON.stringify(["a,b"]));
+        return [...readHiddenProjects()];
+      });
+      assert.deepEqual(keys, ["a,b"]);
+      await old.browserContext().close();
     });
 
     await t.test("F9 narrow long title", async () => {
