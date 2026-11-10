@@ -1083,6 +1083,14 @@ def backlog_context(path):
     return text
 
 
+def backlog_key(line):
+    return hashlib.sha256(line.encode("utf-8")).hexdigest()[:12]
+
+
+def backlog_link(home, line):
+    return f"{api_url(home)}/#/backlog/{backlog_key(line)}"
+
+
 def backlog_add(item, context=None):
     if item.splitlines() != [item]:
         fail(f"bad item {item!r}: it must be one line, with no line or paragraph separators", 2)
@@ -1098,17 +1106,23 @@ def backlog_add(item, context=None):
 
     def append(text):
         text = BACKLOG_TEMPLATE if text is None else text
-        done = re.compile(rf"- \[x\] {re.escape(item)} \(\S+\)")
+        done = re.compile(rf"- \[x\] {re.escape(item)} \((\S+)\)")
         lines = [line.rstrip("\r") for line in text.split("\n")]
-        if f"- [ ] {item}" in lines or any(done.fullmatch(line) for line in lines):
-            return None, False
+        if f"- [ ] {item}" in lines:
+            return None, ""
+        checked = next((m.group(1) for m in map(done.fullmatch, lines) if m), None)
+        if checked:
+            return None, checked
         if text and not text.endswith("\n"):
             text += "\n"
         return text + f"- [ ] {item}\n" + block, True
-    if not cas(home, "/api/backlog", append):
+    added = cas(home, "/api/backlog", append)
+    if added is not True:
         print(f"already in backlog: {item}")
+        print(f"link: {api_url(home)}/#{added}" if added else f"link: {backlog_link(home, f'- [ ] {item}')}")
         return
     print(f"added {item}" + (" with context" if context else ""))
+    print(f"link: {backlog_link(home, f'- [ ] {item}')}")
     verdict, final = backlog_triage(home, item, context)
     left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict)
     if final and (verdict is None or verdict["decision"] != "queue" or left):
@@ -1462,6 +1476,8 @@ def backlog_rework(job_id):
         return
     msg = f"added {line}" + (" with context" if held else "")
     print(msg if added else f"kept the existing line for {job_id}")
+    if added:
+        print(f"link: {backlog_link(home, line)}")
 
 
 def backlog_cmd(sub, item, flag=None, path=None):

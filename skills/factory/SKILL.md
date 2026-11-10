@@ -273,6 +273,8 @@ to job/work commands.
 3. The first line of your reply is the deep link, `$DASHBOARD#<job-id>`. A link can
    also open one tab of the job: `$DASHBOARD#<job-id>/<file without .md>`, such as
    `#<job-id>/decision` or `#<job-id>/round-1/review-ux`.
+   A backlog line's link is `$DASHBOARD#/backlog/<key>`. `backlog add` prints it as
+   `link: <url>`. After the line is decided, the link opens the job it became.
 
 For a command that acts on an existing job (`rework`, `approve`, resuming a round,
 shipping), steps 1 and 2 are: `python3 <this skill's dir>/runtime/factory.py job <id>`
@@ -894,6 +896,7 @@ A decision from the dashboard's backlog decision page checks lines off the same 
 
 To queue work, run `factory.py backlog add "<slug>: <feature>" [--context <file>]`, or edit
 `backlog.md` in R2 by hand. Rework lines carry `(rework-of <id>)` like any other ref.
+Report a queued item with the `link:` line `backlog add` prints.
 
 A question for him about the backlog itself, such as which line to run next or
 whether to drop one, has no job folder. When the decisions-via-askuserquestion

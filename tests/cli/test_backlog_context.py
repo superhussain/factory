@@ -17,6 +17,7 @@ Pick: one
 - Visible jobs (recommended): Only the cards the current filter shows.
 - All jobs: Every job on the board.
 """
+LINK = "link: https://factory.example/#/backlog/85abcd967ecb\n"
 STORED = """- [ ] factory: Add CSV export to the board (sub-job-of 204-factory-backlog-cards)
   Recommend: approve
 
@@ -54,7 +55,8 @@ class BacklogContextTests(IsolatedTestCase):
                 self.writes.append(new)
             return result
 
-        for target, fake in (("factory_home", lambda: self.dir), ("api", api), ("cas", cas)):
+        for target, fake in (("factory_home", lambda: self.dir), ("api_url", lambda home: "https://factory.example"),
+                             ("api", api), ("cas", cas)):
             patcher = patch.object(self.module, target, fake)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -70,7 +72,7 @@ class BacklogContextTests(IsolatedTestCase):
     def test_writes_the_indented_block_and_next_still_finds_the_item(self):
         (code, out, err), _ = self.add(CONTEXT)
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, f"added {ITEM} with context\n")
+        self.assertEqual(out, f"added {ITEM} with context\n{LINK}")
         self.assertEqual(self.backlog, "# Backlog\n" + STORED)
         line = "- [ ] " + ITEM
         self.assertEqual(
@@ -78,18 +80,23 @@ class BacklogContextTests(IsolatedTestCase):
             (line, "factory", ITEM.split(": ", 1)[1]),
         )
 
+    def test_backlog_key_hashes_the_line(self):
+        self.assertEqual(self.module.backlog_key("- [ ] " + ITEM), "85abcd967ecb")
+        self.assertEqual(self.module.backlog_key("- [ ] factory: Café menu on the board"), "f3b20e9cae86")
+
     def test_without_a_file_the_line_is_added_alone(self):
         code, out, _ = invoke(self.module, ["backlog", "add", ITEM])
-        self.assertEqual((code, out), (0, f"added {ITEM}\n"))
+        self.assertEqual((code, out), (0, f"added {ITEM}\n{LINK}"))
         self.assertEqual(self.backlog, "# Backlog\n- [ ] " + ITEM + "\n")
 
     def test_skips_a_line_already_in_the_backlog(self):
-        for line in ("- [ ] " + ITEM, "- [x] " + ITEM + " (205-csv-export)"):
+        for line, link in (("- [ ] " + ITEM, LINK), ("- [x] " + ITEM + " (205-csv-export)",
+                                                       "link: https://factory.example/#205-csv-export\n")):
             with self.subTest(line=line):
                 self.backlog = "# Backlog\r\n" + line + "\r\n"
                 self.writes, self.triaged = [], []
                 code, out, _ = invoke(self.module, ["backlog", "add", ITEM])
-                self.assertEqual((code, out), (0, f"already in backlog: {ITEM}\n"))
+                self.assertEqual((code, out), (0, f"already in backlog: {ITEM}\n{link}"))
                 self.assertEqual((self.writes, self.triaged), ([], []))
                 self.assertEqual(self.backlog, "# Backlog\r\n" + line + "\r\n")
 

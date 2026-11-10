@@ -1460,6 +1460,7 @@ class BacklogReworkTest(IsolatedTestCase):
         self.addCleanup(patch.stopall)
         patch.object(factory, "factory_home", return_value=self.home).start()
         patch.object(factory.time, "sleep").start()
+        patch.object(factory, "api_url", lambda home: "https://factory.example").start()
         patch.object(factory, "api", side_effect=self.request).start()
 
     def request(self, home, method, path, body=None, ok=(200,), headers=None):
@@ -1490,7 +1491,7 @@ class BacklogReworkTest(IsolatedTestCase):
         self.assertIn("done", job)
         self.assertNotIn("claim", job)
         self.assertFalse(factory.deny_notes_due(job), "a closed rework job is not a deny-notes job")
-        self.assertTrue(out.startswith("added "))
+        self.assertEqual(out, "added " + self.LINE + "link: https://factory.example/#/backlog/355d066e943c\n")
 
     def test_copies_context_block(self):
         block = "  Recommend: approve\n\n  The operator exports the board by hand today.\n"
@@ -1500,7 +1501,7 @@ class BacklogReworkTest(IsolatedTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(self.docs["/api/backlog"],
                          "# factory backlog\n\n" + done + block + "- [ ] factory: Other item\n" + self.LINE + block)
-        self.assertTrue(out.endswith(" with context\n"))
+        self.assertTrue(out.startswith("added ") and " with context\nlink: https://factory.example/#/backlog/" in out)
 
     def test_ignores_other_lines_context(self):
         self.docs["/api/backlog"] += "- [x] sample: Other (003-other)\n  Recommend: approve\n"
@@ -1519,7 +1520,7 @@ class BacklogReworkTest(IsolatedTestCase):
                 code, out, err = self.run_rework("Add CSV export to the weekly report")
                 self.assertEqual((code, err), (0, ""))
                 self.assertEqual(self.docs["/api/backlog"], start + self.LINE)
-                self.assertEqual(out, "added " + self.LINE)
+                self.assertEqual(out, "added " + self.LINE + "link: https://factory.example/#/backlog/355d066e943c\n")
 
     def test_non_string_line_exits_2(self):
         for line in (7, ["x"]):
