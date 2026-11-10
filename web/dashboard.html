@@ -4634,6 +4634,7 @@ function closeJobActions(refocus) {
 function syncJobActions() {
   // A job that left the board has nothing to act on, so its stale items go too. An archived
   // job keeps only Copy link.
+  const wasShown = !$('d-actions-wrap').hidden;
   if (!jobs.some((j) => j.id === openId))
     for (const id of JOB_ACTIONS) $(id).hidden = id !== 'd-copy-link' || !archivedJobs.has(openId);
   const any = JOB_ACTIONS.some((id) => !$(id).hidden);
@@ -4641,7 +4642,8 @@ function syncJobActions() {
   if (any) return;
   const focused = document.activeElement;
   closeJobActions(false);
-  if (focused === $('d-actions') || JOB_ACTIONS.some((id) => $(id) === focused)) $('d-close').focus();
+  // Chrome may already have blurred the hidden item, so focus on body counts as focus lost from the menu.
+  if (wasShown && !$('detail').hidden && ($('d-actions-wrap').contains(focused) || focused === document.body)) $('d-close').focus();
 }
 
 function syncIdeaEditor() {
