@@ -1310,7 +1310,7 @@ const JOB_PICKER_STAGES = ['idea', 'spec', 'build', 'review', 'approve', 'pr-ope
 let selectedKey = null;
 let pickerFocus = null;
 let pickerMode = 'job';
-let pickerActions = null; // { id, inNeeds } while pickerMode is 'actions'
+let pickerActions = null; // { id, inNeeds, drawer } while pickerMode is 'actions'
 let savedJobQuery = '';
 const optionIds = new Map();
 
@@ -4012,12 +4012,12 @@ function handleBoardKeys(e) {
   } else if (e.key === 's') {
     e.preventDefault();
     location.hash = '#/settings/projects';
-  } else if (e.key === 'a') {
+  } else if (e.key === 'a' || e.key === '.') {
     if (openBacklogRaw !== null) return;
     const target = cardShortcutTarget(e);
     if (!target) return;
     e.preventDefault();
-    openJobActionsPicker(target.id, target.inNeeds);
+    openJobActionsPicker(target);
   }
 }
 document.addEventListener('keydown', handleBoardKeys);
@@ -5619,11 +5619,12 @@ function boardCard(id, inNeeds) {
 }
 
 // The jumper in actions mode lists what the card menu lists for one job.
-function openJobActionsPicker(id, inNeeds) {
+function openJobActionsPicker({ id, inNeeds, drawer = false }) {
   if (document.querySelector('dialog[open]')) return;
   closeCardActions(false);
+  closeJobActions(false);
   pickerMode = 'actions';
-  pickerActions = { id, inNeeds };
+  pickerActions = { id, inNeeds, drawer };
   savedJobQuery = '';
   pickerFocus = null;
   $('job-search').value = '';
@@ -5709,11 +5710,12 @@ $('board').addEventListener('pointerover', (e) => {
 });
 $('board').addEventListener('pointerleave', () => { hoveredCard = null; });
 
-// A focused card wins over a hovered one.
+// A focused card wins over a hovered one, and either wins over the open drawer's job.
 function cardShortcutTarget(e) {
   const c = e.target.closest?.('#board .card-wrap')?.querySelector('.card');
   const target = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : hoveredCard;
-  return target && jobs.some((x) => x.id === target.id) ? target : null;
+  if (target && jobs.some((x) => x.id === target.id)) return target;
+  return jobs.some((x) => x.id === openId) ? { id: openId, inNeeds: false, drawer: true } : null;
 }
 $('card-actions-menu').addEventListener('click', (e) => {
   const item = e.target.closest('[data-action]');
