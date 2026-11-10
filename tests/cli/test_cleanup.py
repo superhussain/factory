@@ -165,7 +165,7 @@ class CleanupTest(IsolatedTestCase):
         code, out, _ = self.git_raises(None, FileNotFoundError("git"))
         self.assertEqual(code, 1)
         self.assertEqual(out, {"removed": [], "left": [
-            f"worktree {self.wt}: could not run git",
+            f"worktree {self.wt}: could not run git worktree",
             "branch factory/001-test: kept because its worktree remains"]})
         self.assertTrue(self.wt.exists())
 
@@ -181,7 +181,7 @@ class CleanupTest(IsolatedTestCase):
         self.merge()
         code, out, _ = self.git_raises("rev-parse", OSError())
         self.assertEqual(code, 1)
-        self.assertEqual(out["left"], ["branch factory/001-test: could not run git"])
+        self.assertEqual(out["left"], ["branch factory/001-test: could not run git rev-parse"])
         self.assertTrue(self.branch_exists())
 
     def test_bad_target_and_unknown_project(self):
