@@ -1,6 +1,6 @@
-// The a key on a hovered or focused board card: the jumper opens in actions mode with the
-// card menu's items, filters and runs one, and Settings > Reference lists the keys.
-// Also captures the Reference section and the actions jumper for review.
+// The a and . keys on a hovered or focused board card, or with a job drawer open: the jumper
+// opens in actions mode with the card menu's items, filters and runs one, and Settings >
+// Reference lists the keys. Also captures the Reference section and the actions jumper for review.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -43,7 +43,7 @@ const KEYS = [
   ["N", "New idea"],
   ["P", "Select project"],
   ["S", "Open Settings"],
-  ["A", "Open the jumper with actions for the hovered or focused job card"],
+  ["A or .", "Open the jumper with actions for the hovered or focused job card, or the open job"],
   ["B", "Open the first backlog item"],
   ["A or D", "Approve or deny the open backlog item"],
   ["Right or Left arrow", "Move between cards and job pages"],
@@ -128,6 +128,17 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
       assert.equal(await focused(page, ID), true);
     });
 
+    await t.test("period", async () => {
+      await page.evaluate(() => document.activeElement.blur());
+      await page.hover(CARD(ID));
+      await page.keyboard.press(".");
+      await page.waitForFunction(() => document.getElementById("job-picker").open);
+      assert.equal((await picker(page)).heading, `Actions for ${ID}`);
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => !document.getElementById("job-picker").open);
+      assert.equal(await focused(page, ID), true);
+    });
+
     await t.test("focus", async () => {
       await page.hover(CARD(ID));
       await page.focus(CARD(IDEA));
@@ -183,9 +194,53 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
         ),
         false,
       );
-      await page.keyboard.press("a");
-      assert.equal(await page.$eval("#job-picker", (el) => el.open), false);
-      assert.equal(await page.evaluate(() => !!document.querySelector("dialog[open]")), false);
+      for (const key of ["a", "."]) {
+        await page.keyboard.press(key);
+        assert.equal(await page.$eval("#job-picker", (el) => el.open), false);
+        assert.equal(await page.evaluate(() => !!document.querySelector("dialog[open]")), false);
+      }
+    });
+
+    await t.test("drawer", async () => {
+      await page.evaluate((id) => (location.hash = "#" + id), ID);
+      await page.waitForSelector("#detail:not([hidden])");
+      await page.evaluate(() => document.activeElement.blur());
+      const point = await page.$eval("#detail", (el) => {
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      });
+      await page.mouse.move(point.x, point.y);
+      for (const key of ["a", "."]) {
+        await page.keyboard.press(key);
+        await page.waitForFunction(() => document.getElementById("job-picker").open);
+        assert.equal((await picker(page)).heading, `Actions for ${ID}`);
+        if (key === ".") await page.screenshot({ path: `${SHOTS}jumper-actions-drawer-1440.png` });
+        await page.keyboard.press("Escape");
+        await page.waitForFunction(() => !document.getElementById("job-picker").open);
+        assert.equal(await page.evaluate(() => document.activeElement.id), "d-actions");
+        assert.equal(await page.$eval("#detail", (el) => el.hidden), false);
+      }
+      assert.deepEqual(
+        await page.$eval("#d-actions", (el) => [el.title, el.getAttribute("aria-keyshortcuts")]),
+        ["Job actions (A or .)", "a ."],
+      );
+    });
+
+    await t.test("drawer run", async () => {
+      assert.equal(typeof (await boardJob(origin, ID)).paused?.at, "string");
+      await page.keyboard.press(".");
+      await page.waitForFunction(() => document.getElementById("job-picker").open);
+      await page.keyboard.type("resume");
+      assert.deepEqual((await picker(page)).options, ["Resume pickup"]);
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        (sel) =>
+          ![...document.querySelectorAll(`${sel} .chip`)].some((c) => c.textContent === "Paused"),
+        {},
+        CARD(ID),
+      );
+      assert.equal((await boardJob(origin, ID)).paused, undefined);
+      assert.equal(await page.$eval("#detail", (el) => el.hidden), false);
     });
 
     await t.test("title", async () => {
@@ -193,7 +248,7 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
         els.map((c) => [c.title, c.getAttribute("aria-keyshortcuts")]),
       );
       assert.equal(cards.length, JOBS.length);
-      for (const c of cards) assert.deepEqual(c, ["Press A for job actions", "a"]);
+      for (const c of cards) assert.deepEqual(c, ["Press A or . for job actions", "a ."]);
     });
 
     await t.test("reference", async () => {
