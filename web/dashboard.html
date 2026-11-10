@@ -891,8 +891,11 @@ let jobs = [];
 let openId = null;
 // The backlog line open in the drawer's decision page, or null. Never set together with openId.
 let openBacklogRaw = null;
+// item.raw -> triage verdict object, or null when the API answers 404.
 const backlogTriageSeen = new Map();
+// item.raw values fetched at least once, so a board render does not prefetch them again.
 const backlogTriageAsked = new Set();
+// item.raw values with a fetch in flight, so a second call for the same line returns early.
 const backlogTriageLoading = new Set();
 const backlogDrafts = new Map(); // item.raw -> { pick, notes, answers }
 let backlogSaving = false;
