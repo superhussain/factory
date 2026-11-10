@@ -16,10 +16,12 @@ async function api(path) {
     headers: { Authorization: `Bearer ${token}` },
   });
   const body = await response.json();
-  if (!body.success)
+  if (!body.success) {
+    const codes = (body.errors ?? []).map((e) => e.code);
     throw new Error(
-      `${response.status}: error codes ${(body.errors ?? []).map((e) => e.code).join(", ")}`,
+      `${response.status}: ${codes.length ? `error codes ${codes.join(", ")}` : "no error codes"}`,
     );
+  }
   return body.result;
 }
 
