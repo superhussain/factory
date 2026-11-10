@@ -323,7 +323,7 @@ async function browserTest(url) {
     // while other cards stay visible) and first for Left.
     await page.evaluate(() => {
       jobs.find((j) => j.id === "903-arrow-third").project = "other";
-      filter = "sample";
+      hiddenProjects = new Set(["other"]);
       renderBoard();
       window.__cardOpens = [];
       const oc = openCard;
@@ -365,7 +365,7 @@ async function browserTest(url) {
     });
     await page.evaluate(() => {
       jobs.find((j) => j.id === "903-arrow-third").project = "sample";
-      filter = "";
+      hiddenProjects = new Set();
       renderBoard();
     });
     console.log(

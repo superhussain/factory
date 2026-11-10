@@ -10,7 +10,9 @@ import {
   seedProject,
   seedBoard,
 } from "../support/browser-server.mjs";
+import projectFilter from "../support/project-filter.cjs";
 
+const { filterState, showOnly } = projectFilter;
 const JOBS = [
   { id: "001-sample", project: "sample", title: "Synthetic sample job", stage: "spec" },
   { id: "002-sample-build", project: "sample", title: "Synthetic build job", stage: "build" },
@@ -21,7 +23,7 @@ const KEYS = [
   "factory-density",
   "factory-hidden-columns",
   "factory-poll",
-  "factory-project",
+  "factory-projects-hidden",
   "factory-drawer-width",
 ];
 const LIGHT = "rgb(249, 250, 251)";
@@ -242,13 +244,15 @@ test("display settings", { timeout: 180000 }, async (t) => {
     });
 
     await t.test("display V6 project filter mirrors the header", async () => {
-      assert.deepEqual(
-        await page.$$eval("#display-filter option", (els) => els.map((el) => [el.value, el.text])),
-        await page.$$eval("#filter option", (els) => els.map((el) => [el.value, el.text])),
-      );
-      await page.select("#display-filter", "sample");
-      assert.equal(await page.$eval("#filter", (el) => el.value), "sample");
-      assert.equal(await page.evaluate(() => localStorage.getItem("factory-project")), "sample");
+      const rows = (root) =>
+        page.$$eval(root + " [data-project]", (els) =>
+          els.map((el) => [el.dataset.project, el.closest("label").textContent.trim(), el.checked]),
+        );
+      assert.deepEqual(await rows("#display-filter"), await rows("#filter-menu"));
+      await showOnly(page, "sample", "#display-filter");
+      assert.equal((await filterState(page)).label, "Synthetic sample");
+      assert.equal((await filterState(page)).stored, ":unassigned");
+      assert.deepEqual(await rows("#display-filter"), await rows("#filter-menu"));
     });
 
     await t.test("display V7 panel width line", async () => {
@@ -278,17 +282,18 @@ test("display settings", { timeout: 180000 }, async (t) => {
       assert.deepEqual(await themeColors(), SYSTEM_BARS);
       assert.equal(await page.evaluate(() => document.body.classList.contains("compact")), false);
       assert.deepEqual(await liveTimers(), [3000]);
-      assert.equal(await page.$eval("#filter", (el) => el.value), "");
+      assert.equal((await filterState(page)).label, "all projects");
       assert.deepEqual(
-        await page.$$eval("#display-columns input", (els) => els.every((el) => el.checked)),
+        await page.$$eval("#display-columns input, #display-filter input", (els) =>
+          els.every((el) => el.checked),
+        ),
         true,
       );
       assert.deepEqual(
-        await page.$$eval(
-          "#display-theme, #display-density, #display-poll, #display-filter",
-          (els) => els.map((el) => el.value),
+        await page.$$eval("#display-theme, #display-density, #display-poll", (els) =>
+          els.map((el) => el.value),
         ),
-        ["system", "comfortable", "3", ""],
+        ["system", "comfortable", "3"],
       );
       assert.equal(
         await page.$eval("#detail", (el) => el.style.getPropertyValue("--drawer-w")),

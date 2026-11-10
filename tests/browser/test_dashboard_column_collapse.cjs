@@ -2,6 +2,7 @@
 // keyboard toggles, accessibility tree, focus/poll/filter persistence, reload reset,
 // mobile rows. Browser matrix requires --browser <owned-loopback-origin>.
 const assert = require("node:assert/strict");
+const { showOnly } = require("../support/project-filter.cjs");
 
 const stages = [
   "backlog",
@@ -295,7 +296,7 @@ async function matrix(browser, origin, support, width, theme) {
     );
     await support.focusVisible(page, "#filter");
     for (const value of ["second", ":unassigned", "sample", ""]) {
-      await page.select("#filter", value);
+      await showOnly(page, value);
       assert.equal(
         await page.evaluate(() => document.activeElement.id),
         "filter",

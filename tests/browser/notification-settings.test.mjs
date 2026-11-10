@@ -9,7 +9,9 @@ import {
   seedProject,
   seedBoard,
 } from "../support/browser-server.mjs";
+import projectFilter from "../support/project-filter.cjs";
 
+const { showOnly } = projectFilter;
 const NOTE = { branch: "factory/001-sample", round: 1, note: "Synthetic note" };
 const JOBS = [
   { id: "001-sample", project: "sample", title: "Synthetic sample job", stage: "spec", ...NOTE },
@@ -247,11 +249,11 @@ test("notification settings", { timeout: 180000 }, async (t) => {
         await page.evaluate(() => document.getElementById("idea-dlg").close());
         return value;
       };
-      await page.select("#display-filter", "");
+      await showOnly(page, "", "#display-filter");
       assert.equal(await ideaProject(), "other");
-      await page.select("#display-filter", "sample");
+      await showOnly(page, "sample", "#display-filter");
       assert.equal(await ideaProject(), "sample");
-      await page.select("#display-filter", "");
+      await showOnly(page, "", "#display-filter");
       await setStorage("factory-idea-project", "ghost");
       await reload("#settings-display:not([hidden])");
       assert.equal(await page.$eval("#display-idea-project", (el) => el.value), "");

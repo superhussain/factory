@@ -42,9 +42,10 @@ test("project filter", { timeout: 180000 }, async (t) => {
       await page.waitForFunction(() => loaded === true, wait);
       await page.waitForSelector("#filter:not([hidden])", wait);
     };
+    // One evaluate, so a poll re-render cannot detach the cards between finding and reading them.
     const cards = (page) =>
-      page.$$eval("#board .card", (els) =>
-        els
+      page.evaluate(() =>
+        [...document.querySelectorAll("#board .card")]
           .filter((el) => el.getClientRects().length)
           .map((el) => el.dataset.id)
           .sort(),
