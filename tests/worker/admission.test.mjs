@@ -323,7 +323,7 @@ test("effectivePipeline keeps notes from both scopes in order with their sources
     reviewers: ["security", "ux", "ui", "code"],
     gates: [],
     pickup: { enabled: false, hosts: [] },
-    triage: { enabled: false, threshold: 80, rules: "" },
+    triage: { enabled: false, threshold: 90, rules: "" },
     stage_notes: {
       spec: [{ source: "pipeline:global@3", text: "global spec" }],
       build: [

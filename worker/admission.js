@@ -256,7 +256,7 @@ export function effectivePipeline(
       (id) => global?.gates?.includes(id) || project?.gates?.includes(id),
     ),
     pickup: pickupOf(project?.pickup ?? global?.pickup, activeHosts),
-    triage: project?.triage ?? global?.triage ?? { enabled: false, threshold: 80, rules: "" },
+    triage: project?.triage ?? global?.triage ?? { enabled: false, threshold: 90, rules: "" },
     stage_notes: stageNotes,
     versions: { global: globalVersion, project: projectVersion },
     floors: FLOORS.map((floor) => floor.id),
