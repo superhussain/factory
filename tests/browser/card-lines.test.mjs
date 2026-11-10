@@ -205,6 +205,13 @@ test("card lines", { timeout: 240000 }, async (t) => {
         await page.waitForFunction(() => document.getElementById("detail").hidden, wait);
       });
 
+      await t.test(`ref hover ${scheme}`, async () => {
+        await page.hover(`${CARD} .ref-link[data-ref="041-sample-report"]`);
+        await settle(page);
+        await page.screenshot({ path: `${SHOTS}card-lines-ref-hover${suffix}.png`, clip });
+        await page.mouse.move(0, 0);
+      });
+
       await t.test(`ref link ${scheme}`, async () => {
         assert.equal(await page.$('.card[data-id="043-orphan"] .ref-link'), null);
         assert.equal(
