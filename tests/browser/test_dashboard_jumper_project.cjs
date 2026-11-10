@@ -1,9 +1,10 @@
-// Jumper project mode: command visibility, native-filter parity and persisted choices,
+// Jumper project mode: command visibility, header-filter parity and persisted choices,
 // project/slug search, all/no-project rows, Back/Escape query restore, modal guard,
 // refreshed labels/stale options, history/page/link ownership.
 // Requires --browser <owned-loopback-origin>.
 const assert = require("node:assert/strict");
 const { waitForBoard, clickNow } = require("../support/board-ready.cjs");
+const { filterState, showOnly } = require("../support/project-filter.cjs");
 
 const command = "command:select-project";
 const fixtureJobs = [
@@ -247,27 +248,25 @@ async function clickKey(page, key) {
   await page.click("#" + row.id);
 }
 async function options(page) {
-  return page.$$eval("#filter option", (os) =>
-    os.map((o) => ({ value: o.value, title: o.textContent })),
-  );
+  return (await filterState(page)).rows.map((r) => ({ value: r.key, title: r.title }));
 }
-async function nativeFilter(page, value, support) {
-  const os = await options(page),
-    index = os.findIndex((o) => o.value === value);
-  assert.ok(index >= 0);
-  await page.bringToFront();
-  await support.focusVisible(page, "#filter");
-  await page.keyboard.type(os[index].title);
-  await page.keyboard.press("Tab");
-  assert.equal(await page.$eval("#filter", (el) => el.value), value);
+// The only shown key, '' when every key shows, else null.
+async function current(page) {
+  const rows = (await filterState(page)).rows.slice(1),
+    shown = rows.filter((r) => r.checked);
+  return shown.length === rows.length ? "" : shown.length === 1 ? shown[0].key : null;
+}
+async function headerFilter(page, value) {
+  await showOnly(page, value);
+  assert.equal(await current(page), value);
 }
 async function snapshot(page) {
   return page.evaluate(() => ({
-    value: document.getElementById("filter").value,
+    label: document.getElementById("filter-label").textContent,
     ids: [...document.querySelectorAll("#board .card")]
       .filter((c) => c.getClientRects().length)
       .map((c) => c.dataset.id),
-    storage: localStorage.getItem("factory-project"),
+    storage: localStorage.getItem("factory-projects-hidden"),
     hash: location.hash,
     drawer: document.getElementById("detail").hidden,
     owner: openId,
@@ -315,10 +314,12 @@ async function browserRun(origin) {
     await page.emulateMediaFeatures([
       { name: "prefers-color-scheme", value: mobile ? "dark" : "light" },
     ]);
+    // The legacy single filter, seeded once per tab: it migrates on load and is then removed.
     if (stored !== undefined)
       await page.evaluateOnNewDocument((value) => {
-        if (localStorage.getItem("factory-project") === null)
-          localStorage.setItem("factory-project", value);
+        if (sessionStorage.getItem("seeded")) return;
+        sessionStorage.setItem("seeded", "1");
+        localStorage.setItem("factory-project", value);
       }, stored);
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("response", (r) => {
@@ -459,14 +460,14 @@ async function browserRun(origin) {
   }
   async function projectsCase() {
     const page = await makePage();
-    await nativeFilter(page, "alpha", support);
+    await headerFilter(page, "alpha");
     await drawer(page);
     const os = await options(page),
       response = await (await fetch(origin + "/projects.json")).json();
     assert.deepEqual(os, [
       { value: "", title: "all projects" },
-      { value: ":unassigned", title: "No project yet" },
       ...response.map((p) => ({ value: p.slug, title: p.title || p.slug })),
+      { value: ":unassigned", title: "No project yet" },
     ]);
     await openPicker(page);
     await setQuery(page, "SELECT PROJECT");
@@ -528,7 +529,7 @@ async function browserRun(origin) {
       await drawer(native);
       await drawer(picker);
       const initial = await snapshot(picker);
-      await nativeFilter(native, option.value, support);
+      await headerFilter(native, option.value);
       await openPicker(picker);
       await projectMode(picker, true);
       await clickKey(picker, "project:" + option.value);
@@ -550,13 +551,13 @@ async function browserRun(origin) {
         await snapshot(native),
         "persisted parity " + option.value,
       );
-      assert.equal(await picker.$eval("#filter", (el) => el.value), option.value);
+      assert.equal(await current(picker), option.value);
       await native.browserContext().close();
       await picker.browserContext().close();
     }
     for (const stored of ["gone-slug", "beta"]) {
       const p = await makePage({ stored });
-      assert.equal(await p.$eval("#filter", (el) => el.value), stored === "beta" ? "beta" : "");
+      assert.equal(await current(p), stored === "beta" ? "beta" : "");
       await openPicker(p);
       await projectMode(p);
       assert.equal(selected(await state(p)).key, "project:" + (stored === "beta" ? "beta" : ""));
@@ -625,7 +626,7 @@ async function browserRun(origin) {
       await projectMode(p);
       await choose(p, "project:beta");
       assert.equal((await enter(p)).key, "project:beta");
-      assert.equal(await p.$eval("#filter", (el) => el.value), "beta");
+      assert.equal(await current(p), "beta");
       await support.focusVisible(p, "#d-close");
     }
     await openPicker(p);
@@ -671,18 +672,11 @@ async function browserRun(origin) {
       await setQuery(p, "");
       await choose(p, "project:beta");
       const old = await snapshot(p);
-      await p.$eval("#filter", (el) => el.querySelector('option[value="beta"]').remove());
+      await p.evaluate(() => projects.delete("beta"));
       await enter(p);
       assert.deepEqual(await snapshot(p), old);
       assert.ok(!(await state(p)).rows.some((r) => r.key === "project:beta"));
       assert.equal(await p.$eval("#job-picker", (el) => el.open), true);
-      await p.evaluate(() => loadProjects());
-      await choose(p, "project:beta");
-      await p.$eval('#filter option[value="beta"]', (el) => {
-        el.disabled = true;
-      });
-      await enter(p);
-      assert.deepEqual(await snapshot(p), old);
       await p.evaluate(() => loadProjects());
       await choose(p, "project:beta");
       await p.$eval("#filter", (el) => {
@@ -761,7 +755,7 @@ async function browserRun(origin) {
       await p.browserContext().close();
     }
     const p = await makePage();
-    await nativeFilter(p, "alpha", support);
+    await headerFilter(p, "alpha");
     await drawer(p);
     await openPicker(p);
     let s = await state(p);
@@ -802,7 +796,7 @@ async function browserRun(origin) {
     await setQuery(p, "beta");
     assert.equal((await enter(p)).key, "job:091-beta");
     await p.waitForFunction(() => openId === "091-beta", { polling: 50 });
-    assert.equal(await p.$eval("#filter", (el) => el.value), "alpha");
+    assert.equal(await current(p), "alpha");
     await openPicker(p);
     await projectMode(p);
     await p.goBack();

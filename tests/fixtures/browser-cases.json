@@ -140,6 +140,7 @@
   "tests/browser/settings-hosts.test.mjs",
   "tests/browser/drawer-pipeline-save-replies.test.mjs",
   "tests/browser/display-settings.test.mjs",
+  "tests/browser/project-filter.test.mjs",
   "tests/browser/header-icons.test.mjs",
   "tests/browser/btn-tap-target.test.mjs",
   "tests/browser/pwa-offline.test.mjs",

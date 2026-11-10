@@ -495,6 +495,11 @@ async function capture(outdir, referencePath) {
     await view("jumper-desktop", 1440, 900, "light", openJumper);
     await view("jumper-mobile", 390, 844, "dark", openJumper);
     await view("idea-desktop", 1440, 900, "light", openIdea);
+    const openFilter = async (page) => {
+      await page.click("#filter");
+    };
+    await view("filter-open-desktop", 1440, 900, "light", openFilter);
+    await view("filter-open-mobile", 390, 844, "dark", openFilter);
     // Both pages have the decision page, so both sides open it.
     const openDecision = async (page) => {
       await page.click(".backlog-card");
