@@ -716,14 +716,21 @@ test("pipeline settings page", { timeout: 180000 }, async (t) => {
         disabled: true,
         invalid: "false",
       });
+      const value = () => page.$eval("#pipeline-archive-n", (el) => el.value);
+      assert.equal(
+        await page.$eval("#pipeline-archive-n", (el) => el.getAttribute("aria-describedby")),
+        "pipeline-archive-help",
+      );
       await page.select("#pipeline-archive-mode", "count");
       assert.deepEqual(await field(), {
         hidden: false,
         mode: "count",
         label: "Jobs to keep",
         disabled: false,
-        invalid: "true",
+        invalid: "false",
       });
+      assert.equal(await value(), "200");
+      await waitStatus(page, "Unsaved changes");
       for (const bad of ["", "0", "10001", "2.5"]) {
         await fill(bad);
         await waitStatus(
@@ -733,7 +740,17 @@ test("pipeline settings page", { timeout: 180000 }, async (t) => {
         assert.equal(await page.$eval("#pipeline-save", (el) => el.disabled), true);
         assert.equal((await field()).invalid, "true");
       }
+      assert.equal(await value(), "2.5");
       await page.select("#pipeline-archive-mode", "age");
+      assert.equal(await value(), "2.5");
+      await fill("");
+      await page.select("#pipeline-archive-mode", "count");
+      await page.select("#pipeline-archive-mode", "age");
+      assert.equal(await value(), "200");
+      await fill("");
+      await page.select("#pipeline-archive-mode", "");
+      await page.select("#pipeline-archive-mode", "age");
+      assert.equal(await value(), "30");
       await fill("30");
       assert.deepEqual(await field(), {
         hidden: false,
