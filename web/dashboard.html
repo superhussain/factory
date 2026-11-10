@@ -1210,7 +1210,7 @@ function card(j, inNeeds) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') +
-    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '">' +
+    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '" title="Press A for job actions" aria-keyshortcuts="a">' +
     '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span>' +
       (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
@@ -3805,7 +3805,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && openId && !document.querySelector('dialog[open]')) closeDetail();
 });
 
-// Arrow navigation over cards and job pages, plus n, j or /, p and s single-key openers.
+// Arrow navigation over cards and job pages, plus n, j or /, p, s and a single-key openers.
 // A separate listener, so the Esc/Cmd+K handler above stays byte-identical.
 function handleBoardKeys(e) {
   if (settingsRoute() !== null) return;
@@ -3853,6 +3853,12 @@ function handleBoardKeys(e) {
   } else if (e.key === 's') {
     e.preventDefault();
     location.hash = '#/settings/projects';
+  } else if (e.key === 'a') {
+    if (openBacklogRaw !== null) return;
+    const target = cardShortcutTarget(e);
+    if (!target) return;
+    e.preventDefault();
+    openJobActionsPicker(target.id, target.inNeeds);
   }
 }
 document.addEventListener('keydown', handleBoardKeys);
@@ -5529,6 +5535,22 @@ $('board').addEventListener('keydown', (e) => {
   e.preventDefault();
   openCardActions(trigger, e.key === 'ArrowDown' ? 'first' : 'last');
 });
+
+// The card under a mouse or pen. Ids survive a poll redraw; nodes do not.
+let hoveredCard = null;
+$('board').addEventListener('pointerover', (e) => {
+  if (e.pointerType === 'touch') return;
+  const c = e.target.closest('.card-wrap')?.querySelector('.card');
+  hoveredCard = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : null;
+});
+$('board').addEventListener('pointerleave', () => { hoveredCard = null; });
+
+// A focused card wins over a hovered one.
+function cardShortcutTarget(e) {
+  const c = e.target.closest?.('#board .card-wrap')?.querySelector('.card');
+  const target = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : hoveredCard;
+  return target && jobs.some((x) => x.id === target.id) ? target : null;
+}
 $('card-actions-menu').addEventListener('click', (e) => {
   const item = e.target.closest('[data-action]');
   if (!item || !cardMenu) return;
