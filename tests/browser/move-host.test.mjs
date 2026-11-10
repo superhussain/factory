@@ -185,6 +185,10 @@ test("move host", { timeout: 240000 }, async (t) => {
           await page.$eval("#move-host-help", (el) => el.textContent),
           "042-sample-export runs on lab-linux. Moving it stops that session and starts the job on the host you pick. If lab-linux is offline, the stop waits until it comes back.",
         );
+        assert.equal(
+          await page.$eval("#move-host-select", (el) => el.getAttribute("aria-describedby")),
+          "move-host-help",
+        );
         assert.deepEqual(await options(page), ["Studio Mac (studio-mac)"]);
         await (
           await page.$("#move-host-dlg")

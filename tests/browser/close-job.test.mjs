@@ -158,6 +158,10 @@ test("close job", { timeout: 240000 }, async (t) => {
           "042-sample-export stops at build. The next pickup run writes decision.md with your reason, " +
             "then moves the job to Closed. If a session is running it, the close waits for that session to stop.",
         );
+        assert.equal(
+          await page.$eval("#close-job-reason", (el) => el.getAttribute("aria-describedby")),
+          "close-job-help",
+        );
         assert.equal(await page.evaluate(() => document.activeElement.id), "close-job-reason");
         const before = await boardText(origin);
         await page.type("#close-job-reason", "   ");
