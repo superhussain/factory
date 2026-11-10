@@ -1860,6 +1860,7 @@ class DenyNotesTest(PickupFixture):
         self.hosts = [host(DEVICE, 0)]
         self.board["jobs"] = [denied("007-csv-export", "alpha")]
         code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
         tag = self.job("007-csv-export")["claim"]["session"]
         self.assertEqual(out, f"launched deny notes 007-csv-export alpha on primary session {tag}\n")
 
