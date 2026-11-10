@@ -5566,7 +5566,7 @@ def tracer_after_board(home, job, patch):
         reason = type(e).__name__
     reason = (reason or "unknown error").rstrip(".")
     retry = (f"run factory.py tracer sync {slug}/{job_id} to retry" if step == "mirror"
-             else "the next pickup retries (run factory.py pickup if this device has no scheduled pickup)")
+             else "the next pickup retries (or run factory.py pickup)")
     print(f"factory.py: warning: Tracer {step} of {slug}/{job_id} failed: {reason}. "
           f"The board change was saved; {retry}.", file=sys.stderr)
 

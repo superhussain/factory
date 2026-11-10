@@ -15,6 +15,7 @@ from support import IsolatedTestCase, invoke, load_runtime
 factory = load_runtime()
 TOKEN = "synthetic-token-0123456789"
 API_URL = "https://factory.example.invalid"
+PICKUP_TAIL = "the next pickup retries (or run factory.py pickup)."
 
 SPEC = """# Spec: Sample feature
 
@@ -606,7 +607,7 @@ class GatherTest(TracerCase):
             self.assertEqual(len(err.getvalue().splitlines()), 1)
             self.assertIn("Tracer build stop of sample/001-sample failed: Tracer POST "
                           "api/features/factory-1/build-runs/stop returned 500: boom", err.getvalue())
-            self.assertIn("The board change was saved; the next pickup retries (run factory.py pickup if this device has no scheduled pickup).", err.getvalue())
+            self.assertIn(f"The board change was saved; {PICKUP_TAIL}", err.getvalue())
             self.assertNotIn("tracer sync", err.getvalue())
             job = self.board["jobs"][0]
             self.assertEqual(job["tracer"]["scope"], "approved")
@@ -623,7 +624,7 @@ class GatherTest(TracerCase):
             code, _, err = self.board_patch({"stage": "review"})
             self.assertEqual(code, 0)
             self.assertEqual(len(err.splitlines()), 1)
-            self.assertIn("The board change was saved; the next pickup retries (run factory.py pickup if this device has no scheduled pickup).", err)
+            self.assertIn(f"The board change was saved; {PICKUP_TAIL}", err)
             self.assertNotIn(task, [r[:2] for r in fake.requests])
             fake.stop_answer = (202, {"detail": "Stopped from Tracer."})
             code, _, err = self.board_patch({"stage": "review"})
@@ -656,7 +657,7 @@ class GatherTest(TracerCase):
         self.assertEqual(code, 0)
         self.assertEqual(len(err.splitlines()), 1)
         self.assertTrue(err.startswith("factory.py: warning: Tracer gather of sample/001-sample failed: can't reach Tracer at "))
-        self.assertIn("the next pickup retries (run factory.py pickup if this device has no scheduled pickup).", err)
+        self.assertIn(PICKUP_TAIL, err)
         self.assertNotIn("tracer sync", err)
 
     def test_ungathered_job_never_stops(self):
