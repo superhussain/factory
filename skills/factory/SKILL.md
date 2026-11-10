@@ -607,9 +607,11 @@ migration; their command and JSON output contract are unchanged.
   Then `## Evidence`, with commits, commands and results a reader can check, and
   `## Left out`, with anything not done and whether a job was queued for it. If
   `decision.md` already holds an approver verdict, keep its full text under a
-  final `## Earlier decision` heading. Run `python3 "$RUNTIME" push "$SLUG/<id>"`.
+  final `## Earlier decision` heading. Then queue its left-out items as
+  **Closing without shipping** step 1 describes. Run `python3 "$RUNTIME" push "$SLUG/<id>"`.
   Only when it exits 0, patch `{"stage": "closed", "note": "<reason>", "needs": null}`,
   run `cleanup` on it, and send `closed: <reason> · $DASHBOARD#<id>/decision`.
+  Then give the final summary and finish with **Closing without shipping** step 2.
   A non-zero push moves the job to `needs-human` with the push error as the note.
   Approver verdicts never start with `CLOSED:`, and no reader treats it as one.
 - A merged or closed job stays that way. New work on it is a new job with `refs`
@@ -810,8 +812,8 @@ feature.
    writing the file first as in step 8: first line `Recommend: approve`, then
    `Left open by <id> (PR #<n>): <source file>`. List person-only items but never
    queue them and never set `needs` for them. Then append `## Follow-ups` to
-   `decision.md` as a table with Item, Source and Outcome (`queued` or
-   `for a person`) columns, or `None.` when there are none, and run
+   `decision.md` as a table with Item, Source and Outcome (`queued`,
+   `already queued` or `for a person`) columns, or `None.` when there are none, and run
    `push "$SLUG/<id>"`.
 10. After the `merged:` line and the final summary are sent, run
     `python3 "$RUNTIME" archive-workspace "$SLUG/<id>" --check`. If the output has a
@@ -821,7 +823,8 @@ feature.
     `python3 "$RUNTIME" backlog add "<slug>: Recover or drop what <id> left in Paseo workspace <would_archive> (follow-up-of <id>)" --context <file>`.
     As the session's last command, run `python3 "$RUNTIME" archive-workspace "$SLUG/<id>"`.
     It archives this session's Paseo workspace when it is the job's own worktree workspace,
-    whatever its git state, and can end the session. Exit 1 patches `{"note": "workspace archive failed: <stderr line>"}`.
+    whatever its git state, and can end the session. When the workspace archive leaves
+    this session's agent running, it archives the agent too. Exit 1 patches `{"note": "workspace archive failed: <stderr line>"}`.
 
 **Reworking an existing PR.** When the feature is "rework PR #N", the spec writer
 reads that PR's description and diff (`gh pr view N`, `gh pr diff N`) as the statement
@@ -833,14 +836,25 @@ replacement of that base and open the new PR against it.
 **Closing without shipping.** When a stage shows the job should not ship (the
 fix is already on `$BASE`, another job carries the same work, or the request is
 out of scope), stop the loop and close it as Rules describes: `decision.md` with
-first line `CLOSED: <reason>`, pushed before the stage moves to `closed`. The
-final summary links `#<id>/decision`.
+first line `CLOSED: <reason>`, pushed before the stage moves to `closed`.
+
+1. If `decision.md` already has a `## Follow-ups` heading, skip this step. Open items
+   are each `## Left out` bullet and, when `build.md` exists, what its last run lists
+   as unresolved or left out. Leave out anything already on `$BASE` and any item whose
+   bullet names an existing job. Queue each agent-doable item with
+   `factory.py backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
+   writing the file first as in step 8: first line `Recommend: approve`, then
+   `Left out by <id> (closed at <stage>): <source file>`. An `already in backlog:` line
+   means it is queued. List person-only items but never queue them or set `needs`.
+   Append `## Follow-ups` as step 9 describes.
+2. After the `closed:` line and the final summary are sent, run step 10 with `closed`
+   in place of `merged`, so the archive is the session's last command.
 
 End with a short summary: the job's final stage, its rounds, what a human needs to
 do, if anything (usually nothing), and the final stage's deep link from the table
 in Rules. If that is a decision
 for him, ask it through `needs.md` as Rules describes and link `#<id>/needs`.
-For a merged job, give that summary before step 10, since archiving can end the session.
+For a merged or closed job, give that summary before step 10, since archiving can end the session.
 
 ### `/factory next`
 

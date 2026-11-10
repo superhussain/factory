@@ -30,13 +30,16 @@ args = sys.argv[1:]
 if args[:1] == ["--home"]:
     args = args[2:]
 if args[:1] == ["inspect"]:
-    print(json.dumps(conf.get("inspect", {})))
+    after = len(calls) > 1 and calls[-2][-3:-1] == ["workspace", "archive"]
+    print(json.dumps(conf.get("inspect_after", {"Archived": True}) if after else conf.get("inspect", {})))
     sys.exit(conf.get("inspect_code", 0))
 if args[:2] == ["workspace", "ls"]:
     print(json.dumps(conf.get("workspaces", [])))
     sys.exit(conf.get("ls_code", 0))
 if args[:2] == ["workspace", "archive"]:
     sys.exit(conf.get("archive_code", 0))
+if args[:1] == ["archive"]:
+    sys.exit(conf.get("agent_archive_code", 0))
 sys.exit(9)
 """
 
@@ -119,7 +122,7 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
     def test_job_not_merged(self):
         code, out, err = self.run_verb("sample/043-other")
         self.assertEqual((code, out), (2, None))
-        self.assertIn("043-other is at building, not merged", err)
+        self.assertIn("043-other is at building, not merged or closed", err)
         self.assertEqual(self.calls(), [])
 
     def test_inspect_fails(self):
@@ -258,7 +261,27 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
         home = ["--home", str(self.paseo_home)]
         self.assertEqual(self.calls(), [home + ["inspect", AGENT, "--json"],
                                         home + ["workspace", "ls", "--json"],
-                                        home + ["workspace", "archive", "wks_0a1b"]])
+                                        home + ["workspace", "archive", "wks_0a1b"],
+                                        home + ["inspect", AGENT, "--json"]])
+
+    def test_closed_job_archives(self):
+        self.board.return_value = {"jobs": [{"id": "042-dark-mode", "stage": "closed"}]}
+        self.assertEqual(self.run_verb(), (0, {"archived": "wks_0a1b", "leftovers": []}, ""))
+        self.assertIn(["workspace", "archive", "wks_0a1b"], [c[2:] for c in self.calls()])
+
+    def test_agent_left_running(self):
+        self.fixture(inspect_after={"Archived": False},
+                     workspaces=[{"workspaceId": "wks_0a1b", "cwd": self.cwd, "isolation": "worktree"}])
+        self.assertEqual(self.run_verb(), (0, {"archived": "wks_0a1b", "leftovers": []}, ""))
+        self.assertEqual([c[2:] for c in self.calls()][-2:], [["inspect", AGENT, "--json"],
+                                                              ["archive", AGENT, "--force"]])
+
+    def test_agent_archive_fails(self):
+        self.fixture(inspect_after={}, agent_archive_code=3,
+                     workspaces=[{"workspaceId": "wks_0a1b", "cwd": self.cwd, "isolation": "worktree"}])
+        code, out, err = self.run_verb()
+        self.assertEqual((code, out), (1, {"archived": "wks_0a1b", "leftovers": []}))
+        self.assertIn(f"paseo archive {AGENT} exit 3", err)
 
 
 if __name__ == "__main__":

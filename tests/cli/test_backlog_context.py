@@ -38,17 +38,20 @@ class BacklogContextTests(IsolatedTestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(self.dir, ignore_errors=True))
         self.backlog = "# Backlog\n"
         self.writes = []
+        self.triaged = []
 
         def api(home, method, path, *args, **kwargs):
             if (method, path) == ("POST", "/api/backlog/triage"):
+                self.triaged.append(path)
                 return 404, {}, "not found"
             self.assertEqual((method, path), ("GET", "/projects.json"))
             return 200, {}, json.dumps([{"slug": "factory"}])
 
         def cas(home, path, change):
             new, result = change(self.backlog)
-            self.backlog = new
-            self.writes.append(new)
+            if new is not None:
+                self.backlog = new
+                self.writes.append(new)
             return result
 
         for target, fake in (("factory_home", lambda: self.dir), ("api", api), ("cas", cas)):
@@ -79,6 +82,16 @@ class BacklogContextTests(IsolatedTestCase):
         code, out, _ = invoke(self.module, ["backlog", "add", ITEM])
         self.assertEqual((code, out), (0, f"added {ITEM}\n"))
         self.assertEqual(self.backlog, "# Backlog\n- [ ] " + ITEM + "\n")
+
+    def test_skips_a_line_already_in_the_backlog(self):
+        for line in ("- [ ] " + ITEM, "- [x] " + ITEM + " (205-csv-export)"):
+            with self.subTest(line=line):
+                self.backlog = "# Backlog\r\n" + line + "\r\n"
+                self.writes, self.triaged = [], []
+                code, out, _ = invoke(self.module, ["backlog", "add", ITEM])
+                self.assertEqual((code, out), (0, f"already in backlog: {ITEM}\n"))
+                self.assertEqual((self.writes, self.triaged), ([], []))
+                self.assertEqual(self.backlog, "# Backlog\r\n" + line + "\r\n")
 
     def test_normalizes_line_endings_and_edge_blank_lines(self):
         (code, _, _), _ = self.add("", raw=b"\r\n\r\n" + CONTEXT.replace("\n", "\r\n").encode() + b"\r\n\r\n")

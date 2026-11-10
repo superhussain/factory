@@ -37,8 +37,9 @@
                                             stop the job's processes, remove its worktree and merged
                                             branch without forcing, print what was left as JSON
   factory.py archive-workspace <project-slug>/<job-id> [--check]
-                                            archive this session's Paseo worktree workspace once the job
-                                            is merged, whatever its git state; print leftovers as JSON
+                                            archive this session's Paseo worktree workspace and agent once
+                                            the job is merged or closed, whatever its git state; print
+                                            leftovers as JSON
                                             (--check: print only)
   factory.py push <project-slug>[/<job-id>] upload a project file, or a job's changed markdown and images, to R2
   factory.py pull <project-slug>[/<job-id>] download a project, or a job's changed markdown and images from R2
@@ -1057,10 +1058,16 @@ def backlog_add(item, context=None):
 
     def append(text):
         text = BACKLOG_TEMPLATE if text is None else text
+        done = re.compile(rf"- \[x\] {re.escape(item)} \(\S+\)")
+        lines = [line.rstrip("\r") for line in text.split("\n")]
+        if f"- [ ] {item}" in lines or any(done.fullmatch(line) for line in lines):
+            return None, False
         if text and not text.endswith("\n"):
             text += "\n"
-        return text + f"- [ ] {item}\n" + block, None
-    cas(home, "/api/backlog", append)
+        return text + f"- [ ] {item}\n" + block, True
+    if not cas(home, "/api/backlog", append):
+        print(f"already in backlog: {item}")
+        return
     print(f"added {item}" + (" with context" if context else ""))
     verdict, final = backlog_triage(home, item, context)
     left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict)
@@ -4455,9 +4462,9 @@ def workspace_leftovers(cwd):
 
 
 def archive_workspace(target, *flags):
-    """Archive this session's Paseo worktree workspace once the job is merged, whatever its
-    git state, and print what it held. The JSON result prints before the archive call,
-    since archiving can end this very session. --check prints it and archives nothing."""
+    """Archive this session's Paseo worktree workspace once the job is merged or closed,
+    whatever its git state, and print what it held. The JSON result prints before the archive
+    call, since archiving can end this very session. --check prints it and archives nothing."""
     if flags not in ((), ("--check",)):
         fail("usage: archive-workspace <project-slug>/<job-id> [--check]", 2)
     home, slug, job_id = r2_target(target, True)
@@ -4471,8 +4478,8 @@ def archive_workspace(target, *flags):
     found = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
     if found is None:
         fail(f"no job {job_id} on the board", 4)
-    if found.get("stage") != "merged":
-        fail(f"{job_id} is at {found.get('stage')}, not merged", 2)
+    if found.get("stage") not in ("merged", "closed"):
+        fail(f"{job_id} is at {found.get('stage')}, not merged or closed", 2)
     code, out = paseo_run(["inspect", session["agent"], "--json"])
     try:
         cwd = json.loads(out)["Cwd"] if not code else None
@@ -4510,6 +4517,16 @@ def archive_workspace(target, *flags):
     code, _ = paseo_run(["workspace", "archive", wks])
     if code:
         fail(f"paseo workspace archive {wks} exit {code}")
+    agent = session["agent"]
+    code, out = paseo_run(["inspect", agent, "--json"])
+    try:
+        archived = not code and json.loads(out).get("Archived") is True
+    except (ValueError, AttributeError):
+        archived = False
+    if not archived:
+        code, _ = paseo_run(["archive", agent, "--force"])
+        if code:
+            fail(f"paseo archive {agent} exit {code}")
 
 
 def stuck(*args):
