@@ -2931,14 +2931,19 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
             continue
         archives = {}
         kept = []
+        refused = []
         for x in mine:
             agent, server = x.get("agent"), x.get("server")
-            if (adapter and isinstance(agent, str) and ADAPTER_ID.fullmatch(agent)
-                    and server and server == paseo_server() and agent != os.environ.get("PASEO_AGENT_ID")):
-                if paseo_claimed(home, job_id, agent):
-                    archives[agent] = x.get("at")
-                elif agent not in kept:
-                    kept.append(agent)
+            if not (adapter and isinstance(agent, str) and agent and server and server == paseo_server()
+                    and agent != os.environ.get("PASEO_AGENT_ID")):
+                continue
+            if not ADAPTER_ID.fullmatch(agent):
+                if agent not in refused:
+                    refused.append(agent)
+            elif paseo_claimed(home, job_id, agent):
+                archives[agent] = x.get("at")
+            elif agent not in kept:
+                kept.append(agent)
         names = ", ".join(archives)
         noun = "sessions" if len(archives) > 1 else "session"
         if dry:
@@ -2989,6 +2994,10 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
             for a in kept:
                 print(f"factory.py: pickup kept session {a} of {job_id}: no claim recorded on this host, "
                       "archive it by hand if it still runs", file=sys.stderr)
+            for a in refused:
+                shown = a if PASEO_ID.fullmatch(a) else ascii(a[:64])
+                print(f"factory.py: pickup skipped archive of session {shown} of {job_id}: not an id the stall adapter "
+                      "accepts, archive it by hand if it still runs", file=sys.stderr)
 
 
 def prioritized(j):

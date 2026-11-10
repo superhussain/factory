@@ -1191,6 +1191,10 @@ class MoveArchiveTest(MoveHostTest):
         return (f"factory.py: pickup kept session {agent} of 042-sample-export: "
                 "no claim recorded on this host, archive it by hand if it still runs\n")
 
+    def skipped(self, shown):
+        return (f"factory.py: pickup skipped archive of session {shown} of 042-sample-export: "
+                "not an id the stall adapter accepts, archive it by hand if it still runs\n")
+
     def recorded(self):
         if not self.adapter_calls.exists():
             return []
@@ -1239,7 +1243,9 @@ class MoveArchiveTest(MoveHostTest):
                  "not claimed here": (dict(agent=self.AGENT, server="srv-lab"), "unclaimed"),
                  "other session": (dict(agent="9f1c2d3e-0000-4000-8000-000000000001", server="srv-lab"), None),
                  "non-hex agent": (dict(agent="ab_cd", server="srv-lab"), None),
-                 "short agent": (dict(agent="abc", server="srv-lab"), None)}
+                 "short agent": (dict(agent="abc", server="srv-lab"), None),
+                 "non-hex other server": (dict(agent="ab_cd", server="srv-other"), None),
+                 "unsafe agent": (dict(agent="ab\x1b[2Jcd", server="srv-lab"), None)}
         for name, (move, special) in cases.items():
             with self.subTest(name):
                 factory.record_paseo_claim(self.home, "042-sample-export", {"agent": self.AGENT})
@@ -1255,7 +1261,12 @@ class MoveArchiveTest(MoveHostTest):
                     (self.home / "stalls.json").unlink()
                 with patch.dict(os.environ, env):
                     code, out, err = self.pickup()
-                hint = self.hint(move["agent"]) if name in ("not claimed here", "other session") else ""
+                hint = {"not claimed here": self.hint(self.AGENT),
+                        "other session": self.hint("9f1c2d3e-0000-4000-8000-000000000001"),
+                        "bad agent": self.skipped("-bad"),
+                        "non-hex agent": self.skipped("ab_cd"),
+                        "short agent": self.skipped("abc"),
+                        "unsafe agent": self.skipped("'ab\\x1b[2Jcd'")}.get(name, "")
                 self.assertEqual((code, err), (0, hint))
                 self.assertEqual(out, "stopped 042-sample-export alpha: moved to studio-mac\n")
                 self.assertEqual(self.recorded(), [])
@@ -1294,7 +1305,8 @@ class MoveArchiveTest(MoveHostTest):
     def test_non_hex_agent_stops_once(self):
         self.set_stalls()
         self.moved(agent="ab_cd", server="srv-lab")
-        self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n", ""))
+        self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
+                                         self.skipped("ab_cd")))
         self.assertEqual(self.recorded(), [])
         move = self.job("042-sample-export")["move"]
         self.assertIn("stopped", move)
