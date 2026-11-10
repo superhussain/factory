@@ -181,6 +181,8 @@ const CAPTURE_BACKLOG =
   CAPTURE_BACKLOG_CONTEXT +
   "\n- [ ] sample: Synthetic follow-on slice (sub-job-of 001-capture)   \n" +
   "- [ ] sample: Synthetic weekly report export with date, campaign and spend columns (rework-of 004-rework-capture)\n";
+const CAPTURE_LONG_TITLE =
+  "Synthetic project with a very long title that runs well past the edge of a narrow phone screen";
 const CAPTURE_TRIAGE_ITEM = "sample: Synthetic follow-on slice (sub-job-of 001-capture)";
 const CAPTURE_TRIAGE = {
   item: CAPTURE_TRIAGE_ITEM,
@@ -311,6 +313,7 @@ async function capture(outdir, referencePath) {
     const servedMetaCsp = inner(/http-equiv="Content-Security-Policy" content="([^"]*)"/);
 
     let archivedBoard = false;
+    let longProject = false;
     async function view(name, width, height, theme, prepare, touch = false) {
       const delayTriage = name.startsWith("backlog-triage-open-");
       for (const side of ["before", "after"]) {
@@ -357,6 +360,17 @@ async function capture(outdir, referencePath) {
               body: held ? JSON.stringify(CAPTURE_TRIAGE) : "",
             });
           }
+          if (longProject && target.pathname === "/projects.json") {
+            const projects = await fetch(target.href);
+            return request.respond({
+              status: projects.status,
+              contentType: "application/json",
+              body: JSON.stringify([
+                ...(await projects.json()),
+                { slug: "long", title: CAPTURE_LONG_TITLE, repo: "example/long", base: "main" },
+              ]),
+            });
+          }
           if (archivedBoard && target.pathname === "/board.json") {
             const board = await fetch(target.href);
             return request.respond({
@@ -389,6 +403,12 @@ async function capture(outdir, referencePath) {
                 body: JSON.stringify({ jobs, total: jobs.length }),
               });
             }
+            if (target.searchParams.get("id") === "411-sync-retry")
+              return request.respond({
+                status: 503,
+                contentType: "text/plain",
+                body: "unavailable",
+              });
             const found = target.searchParams.get("id") === CAPTURE_ARCHIVED.id;
             return request.respond({
               status: found ? 200 : 404,
@@ -544,6 +564,13 @@ async function capture(outdir, referencePath) {
     };
     await view("filter-open-desktop", 1440, 900, "light", openFilter);
     await view("filter-open-mobile", 390, 844, "dark", openFilter);
+    longProject = true;
+    try {
+      await view("filter-long-desktop", 1440, 900, "light", openFilter);
+      await view("filter-long-mobile", 390, 844, "dark", openFilter);
+    } finally {
+      longProject = false;
+    }
     // Both pages have the decision page, so both sides open it.
     const openDecision = async (page) => {
       await page.click(".backlog-card");
@@ -650,6 +677,19 @@ async function capture(outdir, referencePath) {
     };
     await view("archive-prefill", 1280, 900, "light", openArchivePrefill);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
+    const openArchivedLoadFailed = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#411-sync-retry";
+      });
+      if (side === "after")
+        await page.waitForFunction(() =>
+          document
+            .getElementById("board-status")
+            .textContent.startsWith("Could not load archived job"),
+        );
+      else await new Promise((resolve) => setTimeout(resolve, 1000));
+    };
+    await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
     await view("archive-list", 1280, 900, "light", openArchiveList);
     await view("archive-list-mobile", 390, 844, "dark", openArchiveList);
     const openArchiveJumper = async (page, side) => {

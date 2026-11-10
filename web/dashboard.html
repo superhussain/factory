@@ -150,9 +150,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .filter-wrap { position: relative; }
   .filter-wrap:has(> #filter[hidden]) { display: none; }
-  .filter-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; min-width: 200px; max-width: calc(100vw - 32px); max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .filter-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; min-width: 200px; max-width: 360px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .filter-menu[hidden] { display: none; }
   .filter-menu label { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; font-size: 12px; white-space: nowrap; overflow: hidden; cursor: pointer; }
+  .filter-menu input { flex: none; accent-color: var(--accent); }
+  .filter-menu .filter-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .filter-menu label:hover, .filter-menu label:focus-within { background: var(--line); }
   @media (pointer: coarse) { .filter-menu label { min-height: 44px; } }
   .header-actions { display: flex; gap: inherit; }
@@ -450,7 +452,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .assignment { padding: 12px 20px; flex: none; }
 
   @media (max-width: 760px) {
-    header { padding: 14px 16px; gap: 10px; }
+    header { position: relative; padding: 14px 16px; gap: 10px; }
+    .filter-wrap { position: static; }
+    .filter-menu { left: 16px; right: 16px; min-width: 0; max-width: none; }
     :root { --icon-size: 32px; }
     .filter { padding: 4px 8px; }
 
@@ -1000,6 +1004,10 @@ window.addEventListener('online', async () => {
 let loaded = false;
 // Archived jobs left the board. A link to one opens it read-only from GET /api/board/archive.
 const archivedJobs = new Map();
+// Ids the archive answered 404 for, so a link to one is fetched once per page session.
+const archiveMisses = new Set();
+// The id whose failed archive load was already reported, so retries on each poll stay quiet.
+let archiveFailNoted = '';
 // The board carries archived.max_id once the Worker has archived a job, so only then is there an archive to search.
 let boardArchived = false;
 // The jumper's one archive lookup: { query, status: 'loading' | 'done' | 'error', jobs, total }.
@@ -1633,7 +1641,7 @@ function renderProjectFilter() {
     const box = Object.assign(document.createElement('input'), { type: 'checkbox' });
     box.dataset.project = key;
     const label = document.createElement('label');
-    label.append(box, ' ' + title);
+    label.append(box, Object.assign(document.createElement('span'), { className: 'filter-title', textContent: title, title }));
     return label;
   });
   $('filter-menu').replaceChildren(...rows());
@@ -3162,13 +3170,18 @@ function drawerMeta(j) {
 }
 
 async function loadArchivedJob(id) {
+  if (archiveMisses.has(id)) return { job: null };
   try {
     const r = await fetch('./api/board/archive?id=' + encodeURIComponent(id), { cache: 'no-store' });
+    if (r.status === 404) {
+      archiveMisses.add(id);
+      return { job: null };
+    }
     const row = r.ok ? (await r.json()).jobs?.[0] : null;
-    if (row?.id !== id) return null;
+    if (row?.id !== id) return { job: null, failed: true };
     archivedJobs.set(id, row);
-    return row;
-  } catch { return null; }
+    return { job: row };
+  } catch { return { job: null, failed: true }; }
 }
 
 async function loadArchivePage() {
@@ -3197,8 +3210,13 @@ async function loadArchivePage() {
 async function openJob(id) {
   let j = jobs.find((x) => x.id === id) ?? archivedJobs.get(id);
   if (!j && loaded) {
-    j = await loadArchivedJob(id);
+    const got = await loadArchivedJob(id);
     if (parseHash().id !== id) return;
+    j = got.job;
+    if (got.failed && archiveFailNoted !== id) {
+      archiveFailNoted = id;
+      showBoardStatus(`Could not load archived job ${id}. Retrying while the link stays open.`);
+    }
   }
   if (!j) return;
   const archived = !jobs.some((x) => x.id === id);
@@ -4105,6 +4123,7 @@ function syncDetail() {
 }
 
 window.addEventListener('hashchange', () => {
+  archiveFailNoted = '';
   const { id } = parseHash();
   if (id) openJob(id); else if (openId) closeDetail();
   renderRoute();
@@ -5779,7 +5798,7 @@ async function fetchReworkHistory(item) {
   const seen = new Set();
   for (let ref = next(item.refs); ref && !seen.has(ref.id) && seen.size < 20;) {
     seen.add(ref.id);
-    const j = known().find((x) => x.id === ref.id) ?? await loadArchivedJob(ref.id);
+    const j = known().find((x) => x.id === ref.id) ?? (await loadArchivedJob(ref.id)).job;
     if (j?.backlog?.decision !== 'rework') break;
     ref = next(j.refs);
   }

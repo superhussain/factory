@@ -424,6 +424,12 @@ test("move host", { timeout: 240000 }, async (t) => {
         await page.select("#move-host-select", "cloud-box");
         await page.click("#move-host-save");
         await page.waitForFunction(() => !document.getElementById("move-host-dlg").open, wait);
+        await page.waitForFunction(
+          () =>
+            document.querySelector('.card[data-id="042-sample-export"] .host')?.textContent ===
+            "moving to Cloud box · stop queued on Lab Linux, Studio Mac",
+          wait,
+        );
         await page.click("#d-close");
         await page.waitForFunction(() => document.getElementById("detail").hidden, wait);
         await (
