@@ -2,7 +2,8 @@
 // retire and new code against one owned local Worker, then the fixture registry for cards,
 // presence, Confirm, the checkbox controls, the save-time check, keyboard and mobile width.
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import {
@@ -19,6 +20,7 @@ const HOSTS = JSON.parse(
 const CODE = /^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/;
 const CONFLICT = "This host changed elsewhere. Your edits are kept. Load latest, then try again.";
 const wait = { polling: 50 };
+const captureDir = process.env.FACTORY_CAPTURE_DIR;
 
 const freezeClock = (page) =>
   page.evaluateOnNewDocument(() => {
@@ -402,6 +404,31 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
         "new-box",
         "Confirmed. It stays paused while Max in flight is 0.",
       );
+      await page.close();
+    });
+
+    await t.test("hosts H8 a failing triage sweep shows on the host card", async () => {
+      const failing = HOSTS.map((h) =>
+        h.id === "studio-mac"
+          ? { ...h, status: { ...h.status, triage_failed_since: "2026-01-01T09:00:00Z" } }
+          : h,
+      );
+      const page = await open("#/settings/hosts", failing);
+      await page.click("#hosts-load");
+      await page.waitForFunction(() => document.querySelectorAll(".host-card").length === 5, wait);
+      const card = '.host-card[data-id="studio-mac"]';
+      if (captureDir) {
+        await mkdir(captureDir, { recursive: true });
+        await (await page.$(card)).screenshot({ path: join(captureDir, "host-card-1280.png") });
+        await page.setViewport({ width: 390, height: 844 });
+        await (await page.$(card)).screenshot({ path: join(captureDir, "host-card-390.png") });
+      }
+      assert.equal(
+        await page.$eval(`${card} .host-triage`, (el) => el.textContent),
+        "Backlog triage failing since 2026-01-01 09:00 UTC. Pickup still launches ideas. " +
+          "See the host's pickup log for the error.",
+      );
+      assert.equal(await page.$('.host-card[data-id="lab-linux"] .host-triage'), null);
       await page.close();
     });
 
