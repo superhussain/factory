@@ -338,7 +338,8 @@ async function capture(outdir, referencePath) {
             }
           };
           const interval = window.setInterval;
-          window.setInterval = (fn, ms, ...args) => (ms === 3000 ? 0 : interval(fn, ms, ...args));
+          window.setInterval = (fn, ms, ...args) =>
+            fn.name === "poll" || fn.name === "pollTick" ? 0 : interval(fn, ms, ...args);
           localStorage.setItem("factory-project-document-draft:sample:notes.md", recovery);
         }, JSON.stringify(CAPTURE_RECOVERY));
         await page.setRequestInterception(true);
@@ -658,6 +659,16 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("archive-settings", 1280, 900, "light", openArchiveSettings);
+    const openPollSettings = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/display";
+      });
+      await page.waitForSelector("#settings-display:not([hidden])");
+      await page.evaluate(() =>
+        document.querySelector("#display-poll").scrollIntoView({ block: "center" }),
+      );
+    };
+    await view("display-poll-settings", 1280, 900, "light", openPollSettings);
     const openArchivePrefill = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/pipeline";

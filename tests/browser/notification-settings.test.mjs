@@ -59,7 +59,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       window.pollTimers = new Map();
       window.setInterval = (fn, ms, ...args) => {
         const id = interval(fn, ms, ...args);
-        if (fn.name === "poll") window.pollTimers.set(id, ms);
+        if (fn.name === "pollTick") window.pollTimers.set(id, ms);
         return id;
       };
       window.clearInterval = (id) => {
@@ -176,7 +176,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       );
       assert.deepEqual(await liveTimers(), [30000]);
       await setHidden(false);
-      await page.waitForFunction(() => [...window.pollTimers.values()].includes(3000), wait);
+      await page.waitForFunction(() => [...window.pollTimers.values()].includes(30000), wait);
     });
 
     await t.test("notify N4 one notification per newly waiting job", async () => {

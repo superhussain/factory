@@ -199,9 +199,12 @@ sequenceDiagram
 
 - `casPut` announces only a committed write. A 412 announces nothing, and a
   failed announcement leaves the reply unchanged.
-- The dashboard runs its poll timer only while the socket is closed. It reconnects
-  with backoff (1, 2, 4 ... 30 s, 8 tries), then again on focus, online or show.
-  A hidden tab keeps its socket only while notifications are on.
+- The dashboard runs its poll timer only while the socket is closed: the board on
+  the Settings schedule (30 s by default) and the backlog every 2 minutes, paused
+  while the window is hidden or unfocused unless notifications are on. A dropped
+  socket retries with backoff (1, 2, 4 ... 30 s), then every 30 s until it opens.
+  A hidden tab keeps its socket only while notifications are on. A `changed` event
+  re-reads only its key.
 - A socket open re-reads `board.json` but redraws only when its `ETag` changed.
   The header dot is solid while live and a ring while polling.
 
