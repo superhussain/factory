@@ -340,6 +340,11 @@ test("PATCH and status reject fields their writer does not own", async () => {
       "routes[0].cwd: unknown field",
     ],
     [{ ...status(), os: undefined }, "os: required"],
+    [
+      status({ triage_failed_since: "yesterday" }),
+      "triage_failed_since: must be an ISO 8601 UTC time",
+    ],
+    [status({ triage_failed_since: null }), "triage_failed_since: must be an ISO 8601 UTC time"],
   ]) {
     const r = await s.putStatus("work-mac", JSON.parse(JSON.stringify(body)));
     assert.equal(r.status, 400, JSON.stringify(body));
@@ -354,6 +359,13 @@ test("PATCH and status reject fields their writer does not own", async () => {
   assert.equal(wrongType.status, 415);
   const large = await s.putStatus("work-mac", status({ os: "x".repeat(17 << 10) }));
   assert.equal(large.status, 413);
+  const failing = await s.putStatus(
+    "work-mac",
+    status({ triage_failed_since: "2026-01-01T09:00:00Z" }),
+  );
+  assert.equal(failing.status, 200);
+  const stored = JSON.parse(s.bucket.objects.get("host-status/work-mac.json").bytes.toString());
+  assert.equal(stored.triage_failed_since, "2026-01-01T09:00:00Z");
 });
 
 test("the effective view keeps only active hosts once any host is registered", async () => {

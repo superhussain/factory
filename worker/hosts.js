@@ -7,6 +7,7 @@ const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const MOVES = { paired: ["active", "retired"], pending: ["retired"], active: ["retired"] };
 const SCHEDULERS = ["launchd", "cron", "schtasks", "none"];
 const STATUS_KEYS = ["os", "scheduler", "last_pickup", "bundle", "doctor", "routes", "checkouts"];
+const OPTIONAL_STATUS_KEYS = ["triage_failed_since"];
 const ROUTE_KEYS = ["name", "provider", "model", "effort", "limited_until"];
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const SHA = /^[0-9a-f]{7,64}$/;
@@ -78,7 +79,7 @@ function routeError(route, i) {
 export function validateHostStatus(body) {
   if (!isObject(body)) return "body: must be a JSON object";
   if ("seen" in body) return "seen: set by the server";
-  const extra = unknownKey(body, STATUS_KEYS);
+  const extra = unknownKey(body, [...STATUS_KEYS, ...OPTIONAL_STATUS_KEYS]);
   if (extra !== undefined) return `${extra}: unknown field`;
   const missing = STATUS_KEYS.find((key) => !(key in body));
   if (missing !== undefined) return `${missing}: required`;
@@ -125,6 +126,8 @@ export function validateHostStatus(body) {
     !body.checkouts.every((slug) => typeof slug === "string" && /^[\w-]+$/.test(slug))
   )
     return "checkouts: must be a list of at most 64 project slugs";
+  if ("triage_failed_since" in body && !isIso(body.triage_failed_since))
+    return "triage_failed_since: must be an ISO 8601 UTC time";
   return null;
 }
 
