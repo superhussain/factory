@@ -1058,10 +1058,16 @@ def backlog_add(item, context=None):
 
     def append(text):
         text = BACKLOG_TEMPLATE if text is None else text
+        done = re.compile(rf"- \[x\] {re.escape(item)} \(\S+\)")
+        lines = [line.rstrip("\r") for line in text.split("\n")]
+        if f"- [ ] {item}" in lines or any(done.fullmatch(line) for line in lines):
+            return None, False
         if text and not text.endswith("\n"):
             text += "\n"
-        return text + f"- [ ] {item}\n" + block, None
-    cas(home, "/api/backlog", append)
+        return text + f"- [ ] {item}\n" + block, True
+    if not cas(home, "/api/backlog", append):
+        print(f"already in backlog: {item}")
+        return
     print(f"added {item}" + (" with context" if context else ""))
     verdict, final = backlog_triage(home, item, context)
     left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict)
