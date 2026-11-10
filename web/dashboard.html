@@ -3070,6 +3070,7 @@ function makeStepper(steps, saveKey) {
     const b = e.target.closest('.step-pill');
     if (b) show([...pills.children].indexOf(b));
   });
+  addStepSwipe(box, (d) => show(at + d));
   back.addEventListener('click', () => show(at - 1));
   next.addEventListener('click', () => show(at + 1));
   // Arrows step only while focus is inside the stepper; elsewhere they still move between tabs and cards.
@@ -3349,13 +3350,59 @@ function syncCompact() {
 $('d-doc').addEventListener('scroll', syncCompact, { passive: true });
 swipeMedia.addEventListener('change', syncCompact);
 
-// Form fields and sideways scrollers (tables, code, diagrams) keep their own touches.
+// Form fields, steppers and sideways scrollers (tables, code, diagrams) keep their own touches.
 function swipeBlocked(target) {
-  if (target.closest('input, textarea, select')) return true;
-  for (let el = target; el && el !== $('d-pager'); el = el.parentElement) {
+  if (target.closest('input, textarea, select, .stepper')) return true;
+  return sidewaysScroller(target, $('d-pager'));
+}
+
+function sidewaysScroller(target, stop) {
+  for (let el = target; el && el !== stop; el = el.parentElement) {
     if (el.scrollWidth > el.clientWidth + 1 && ['auto', 'scroll'].includes(getComputedStyle(el).overflowX)) return true;
   }
   return false;
+}
+
+// A sideways swipe inside a stepper moves one step, like Back and Next, and never changes the page.
+function addStepSwipe(box, step) {
+  let g = null;
+  box.addEventListener('touchstart', (e) => {
+    g = null;
+    if (!swipeMedia.matches || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (t.clientX < SWIPE_EDGE || t.clientX > innerWidth - SWIPE_EDGE) return;
+    if (e.target.closest('input, textarea, select') || sidewaysScroller(e.target, box)) return;
+    g = { x0: t.clientX, y0: t.clientY, x: t.clientX, t: e.timeStamp, v: 0, active: false };
+  }, { passive: true });
+  box.addEventListener('touchmove', (e) => {
+    if (!g) return;
+    if (e.touches.length > 1) {
+      g = null;
+      return;
+    }
+    const t = e.touches[0];
+    if (!g.active) {
+      if (Math.abs(t.clientY - g.y0) >= SWIPE_FAIL_Y) {
+        g = null;
+        return;
+      }
+      if (Math.abs(t.clientX - g.x0) < SWIPE_ACTIVATE_X) return;
+      g.active = true;
+    }
+    if (e.cancelable) e.preventDefault();
+    if (e.timeStamp - g.t > 0) g.v = (t.clientX - g.x) / (e.timeStamp - g.t);
+    g.x = t.clientX;
+    g.t = e.timeStamp;
+  }, { passive: false });
+  box.addEventListener('touchend', (e) => {
+    const s = g;
+    g = null;
+    if (!s?.active) return;
+    const dx = s.x - s.x0;
+    const v = e.timeStamp - s.t > 100 ? 0 : s.v;
+    if (Math.abs(dx) >= SWIPE_COMMIT_X || (Math.abs(v) >= SWIPE_COMMIT_V && Math.sign(v) === Math.sign(dx))) step(dx < 0 ? 1 : -1);
+  }, { passive: true });
+  box.addEventListener('touchcancel', () => { g = null; }, { passive: true });
 }
 
 // The neighbour page, rendered beside the current one. It is inert and carries no ids.
