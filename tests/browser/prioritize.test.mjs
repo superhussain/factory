@@ -83,6 +83,8 @@ const openDrawer = async (page, id) => {
 };
 const badges = (page, id) =>
   page.$$eval(`.card[data-id="${id}"] .id .chip`, (els) => els.map((e) => e.textContent));
+const ideaOrder = (page) =>
+  page.$$eval("#column-cards-idea .card", (els) => els.map((e) => e.dataset.id));
 const closeDrawer = async (page) => {
   await page.click("#d-close");
   await page.waitForSelector("#detail", { hidden: true });
@@ -234,6 +236,50 @@ test("prioritize", { timeout: 240000 }, async (t) => {
           wait,
         );
         assert.deepEqual(await badges(page, "042-sample-export"), []);
+      });
+
+      await t.test(`prioritized card leads its column ${width}`, async () => {
+        const boardOrder = ["100-sample-idea", "101-sample-urgent"];
+        const sameOrder = (order) =>
+          page.waitForFunction(
+            (o) =>
+              [...document.querySelectorAll("#column-cards-idea .card")]
+                .map((e) => e.dataset.id)
+                .join() === o.join(),
+            wait,
+            order,
+          );
+        assert.deepEqual(await ideaOrder(page), boardOrder);
+        await page.evaluate(() => (window.now = "2026-01-02T12:00:01Z"));
+        await openDrawer(page, "101-sample-urgent");
+        await openJobActions(page);
+        await activate("#d-prioritize");
+        await page.waitForFunction(
+          () => document.getElementById("d-meta").textContent.endsWith(" · prioritized"),
+          wait,
+        );
+        await closeDrawer(page);
+        await page.waitForFunction(
+          () => document.querySelector('.card[data-id="101-sample-urgent"] .id .chip'),
+          wait,
+        );
+        if (width === 1280)
+          await (
+            await page.$("section.col.idea")
+          ).screenshot({ path: `${SHOTS}after-idea-column-1280.png` });
+        await sameOrder(["101-sample-urgent", "100-sample-idea"]);
+        assert.deepEqual(await ideaOrder(page), ["101-sample-urgent", "100-sample-idea"]);
+        await page.evaluate(() => (window.now = "2026-01-02T12:00:02Z"));
+        await openDrawer(page, "101-sample-urgent");
+        await openJobActions(page);
+        await activate("#d-remove-priority");
+        await page.waitForFunction(
+          () => !document.getElementById("d-meta").textContent.endsWith(" · prioritized"),
+          wait,
+        );
+        await closeDrawer(page);
+        await sameOrder(boardOrder);
+        assert.deepEqual(await ideaOrder(page), boardOrder);
       });
 
       await t.test(`a job that left the board writes nothing ${width}`, async () => {
