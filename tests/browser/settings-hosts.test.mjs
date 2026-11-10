@@ -407,7 +407,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await page.close();
     });
 
-    await t.test("hosts H8 a failing triage sweep shows on the host card", async () => {
+    await t.test("hosts H8 triage and doctor failures show in the alert color", async () => {
       const failing = HOSTS.map((h) =>
         h.id === "studio-mac"
           ? { ...h, status: { ...h.status, triage_failed_since: "2026-01-01T09:00:00Z" } }
@@ -420,6 +420,11 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       if (captureDir) {
         await mkdir(captureDir, { recursive: true });
         await (await page.$(card)).screenshot({ path: join(captureDir, "host-card-1280.png") });
+        await (
+          await page.$('.host-card[data-id="lab-linux"]')
+        ).screenshot({
+          path: join(captureDir, "host-card-doctor-1280.png"),
+        });
         await page.setViewport({ width: 390, height: 844 });
         await (await page.$(card)).screenshot({ path: join(captureDir, "host-card-390.png") });
       }
@@ -429,6 +434,23 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           "See the host's pickup log for the error.",
       );
       assert.equal(await page.$('.host-card[data-id="lab-linux"] .host-triage'), null);
+      const color = (sel) => page.$eval(sel, (el) => getComputedStyle(el).color);
+      const alert = "rgb(209, 52, 47)";
+      assert.equal(await color(`${card} .host-triage`), alert);
+      const doctor = '.host-card[data-id="lab-linux"] .host-doctor';
+      assert.equal(
+        await page.$eval(doctor, (el) => el.textContent),
+        "Doctor failed: schedule-entry.",
+      );
+      assert.equal(await color(doctor), alert);
+      assert.equal(await page.$(`${card} .host-doctor`), null);
+      assert.equal(
+        await page.$$eval(`${card} p`, (ps) => {
+          const el = ps.find((p) => p.textContent.startsWith("macOS, launchd"));
+          return getComputedStyle(el).color;
+        }),
+        "rgb(107, 114, 128)",
+      );
       await page.close();
     });
 
