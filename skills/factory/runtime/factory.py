@@ -2846,6 +2846,19 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
             print(line)
 
 
+def pickup_reason(home, project, paths, settings, device, dry):
+    """Why pickup on this host may not act on project, or None when it may."""
+    if project not in paths or not os.path.isdir(paths[project]):
+        return "no checkout on this host"
+    if project not in settings:
+        settings[project] = pickup_settings(home, project, paths[project], device)
+        if settings[project][2] and not dry:
+            print(f"factory.py: pickup skips {project}: {settings[project][2]}", file=sys.stderr)
+    enabled, hosts, why = settings[project]
+    return why or (None if enabled and device in hosts else
+                   "pickup off" if not enabled else f"pickup does not list host {device}")
+
+
 def move_stop_pass(home, data, device, paths, settings, dry, adapter):
     """Archive the Paseo sessions of, and stop the worktree of, each job the dashboard moved away
     from this host, and record it. Earlier holders of a chained move count too. Only when the project's
@@ -2857,16 +2870,7 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
         line = f"{job_id} {project}: " + (f"rerun on {device}" if m.get("to") == device else f"moved to {m.get('to')}")
-        if project not in paths or not os.path.isdir(paths[project]):
-            reason = "no checkout on this host"
-        else:
-            if project not in settings:
-                settings[project] = pickup_settings(home, project, paths[project], device)
-                if settings[project][2] and not dry:
-                    print(f"factory.py: pickup skips {project}: {settings[project][2]}", file=sys.stderr)
-            enabled, hosts, why = settings[project]
-            reason = why or (None if enabled and device in hosts else
-                             "pickup off" if not enabled else f"pickup does not list host {device}")
+        reason = pickup_reason(home, project, paths, settings, device, dry)
         if reason:
             if dry:
                 print(f"skip stop {job_id} {project}: {reason}")
@@ -3023,8 +3027,9 @@ def close_decision(j, reason, device, earlier, outcome):
             "## Left out\n\n"
             "- No agent reviewed this close. The reason is the owner's own words.\n"
             f"{open_pr}"
-            "- The worktree and branch stay on their host until someone runs "
-            f"`factory.py cleanup {j['project']}/{j['id']}` there. No job was queued for this.\n")
+            "- The next pickup run on each host that holds the worktree or branch runs "
+            f"`factory.py cleanup {j['project']}/{j['id']}` there. It keeps a dirty worktree and a branch "
+            "that is not merged.\n")
     return text + "\n## Earlier decision\n\n" + earlier if earlier else text
 
 
@@ -3074,6 +3079,48 @@ def close_pass(home, data, device, minutes, dry):
             return dump_board(board), True
         if cas(home, "/api/board", change):
             print(f"closed {job_id} {project}")
+
+
+def cleaned_here(j, device):
+    """True when this host already recorded its cleanup of a dashboard-closed job."""
+    done = j["close"].get("cleanup")
+    return isinstance(done, dict) and device in done
+
+
+def close_cleanup_pass(home, data, device, paths, settings, dry):
+    """Run cleanup once per host on each dashboard-closed job whose worktree or branch this host
+    still holds, and record what it left."""
+    for j in data["jobs"]:
+        c, job_id, project = j.get("close"), j.get("id"), j.get("project")
+        if not (j.get("stage") == "closed" and isinstance(c, dict) and isinstance(c.get("closed"), str)
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(project, str) and SLUG.fullmatch(project)):
+            continue
+        if cleaned_here(j, device) or project not in paths or not os.path.isdir(paths[project]):
+            continue
+        repo, wt, branch = paths[project], home / "worktrees" / project / job_id, f"factory/{job_id}"
+        if not (wt.exists() or git(repo, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")):
+            continue
+        reason = pickup_reason(home, project, paths, settings, device, dry)
+        if reason:
+            if dry:
+                print(f"skip cleanup {job_id} {project}: {reason}")
+            continue
+        if dry:
+            print(f"would clean up {job_id} {project}")
+            continue
+        removed, left = cleanup_job(repo, wt, branch)
+
+        def change(text, job_id=job_id, closed=c["closed"], left=left):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            if (found is None or found.get("stage") != "closed" or not isinstance(found.get("close"), dict)
+                    or found["close"].get("closed") != closed or cleaned_here(found, device)):
+                return None, False
+            patch_job(board, job_id, {"close": {"cleanup": {device: {"at": now(), "left": left}}}, "port": None})
+            return dump_board(board), True
+        if cas(home, "/api/board", change):
+            print(f"cleaned up {job_id} {project}" + (f", left: {'; '.join(left)}" if left else ""))
 
 
 PRIORITY_NUDGE = ("The owner prioritized factory job {id} from the dashboard. If your turn ended while work "
@@ -3157,6 +3204,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     settings = {}
     move_stop_pass(home, data, device, paths, settings, dry, stalls[0] if stalls else None)
     close_pass(home, data, device, minutes, dry)
+    close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
@@ -4798,8 +4846,13 @@ def cleanup(target):
     repo = read_paths(home).get(slug)
     if not repo:
         fail(f"{home / 'paths.md'} has no entry for {slug}: run /factory init in this device's checkout of it", 4)
-    wt, branch = home / "worktrees" / slug / job_id, f"factory/{job_id}"
+    removed, left = cleanup_job(repo, home / "worktrees" / slug / job_id, f"factory/{job_id}")
+    print(json.dumps({"removed": removed, "left": left}, indent=2))
+    sys.exit(1 if left else 0)
 
+
+def cleanup_job(repo, wt, branch):
+    """Stop and remove a job's worktree, then delete its branch when merged. (removed, left)."""
     def run_git(*args):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
@@ -4847,8 +4900,7 @@ def cleanup(target):
                 removed.append(f"branch {branch}")
         if error:
             left.append(f"branch {branch}: {error}")
-    print(json.dumps({"removed": removed, "left": left}, indent=2))
-    sys.exit(1 if left else 0)
+    return removed, left
 
 
 TRACER_TIMEOUT_SECONDS = 5

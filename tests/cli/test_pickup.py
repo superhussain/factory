@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -1490,8 +1491,9 @@ class CloseTest(PickupFixture):
         "- Written by factory.py pickup on host-a.\n\n"
         "## Left out\n\n"
         "- No agent reviewed this close. The reason is the owner's own words.\n"
-        "- The worktree and branch stay on their host until someone runs "
-        "`factory.py cleanup alpha/042-sample-export` there. No job was queued for this.\n")
+        "- The next pickup run on each host that holds the worktree or branch runs "
+        "`factory.py cleanup alpha/042-sample-export` there. It keeps a dirty worktree and a branch "
+        "that is not merged.\n")
 
     def setUp(self):
         super().setUp()
@@ -1591,7 +1593,7 @@ class CloseTest(PickupFixture):
         self.assertIn("- No agent reviewed this close. The reason is the owner's own words.\n"
                       "- Pull request https://github.example.test/sample/pull/7 stays open because "
                       "gh is not installed on host-a. Close it on GitHub if it should not merge.\n"
-                      "- The worktree and branch stay", text)
+                      "- The next pickup run on each host", text)
         bare = factory.close_decision({"id": "042-sample-export", "project": "alpha", "stage": "spec",
                                        "close": {"at": "2026-01-02T12:00:00Z"}}, self.REASON, DEVICE, None, None)
         self.assertIn("- Stage when closed: `spec`, round 0.\n- Branch: `none`.\n- Pull request: none.\n", bare)
@@ -1655,6 +1657,93 @@ class CloseTest(PickupFixture):
         self.assertEqual(out.splitlines()[0], f"would close 042-sample-export alpha and pull request {self.PR}")
         self.assertEqual([call for call in self.calls if call[0] == "gh"], [])
         self.assertEqual((self.puts(), self.files), ([], {}))
+
+
+class CloseCleanupTest(PickupFixture):
+    LEFT = "branch factory/042-sample-export: not merged into main"
+
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        patch.object(factory, "worktree_pids", return_value=[]).start()
+        self.git(self.repo_a, "init", "-q")
+        self.git(self.repo_a, "symbolic-ref", "HEAD", "refs/heads/main")
+        self.git(self.repo_a, "commit", "-q", "--allow-empty", "-m", "base")
+        self.wt = self.home / "worktrees" / "alpha" / "042-sample-export"
+        self.git(self.repo_a, "worktree", "add", "-q", str(self.wt), "-b", "factory/042-sample-export")
+        (self.wt / "work.txt").write_text("work\n")
+        self.git(self.wt, "add", "work.txt")
+        self.git(self.wt, "commit", "-q", "-m", "work")
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", str(cwd), *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def closed(self, **close):
+        return {"id": "042-sample-export", "stage": "closed", "project": "alpha", "port": 8230,
+                "updated": "2026-01-02T12:05:00Z", "done": "2026-01-02T12:05:00Z",
+                "close": dict({"reason": "Duplicate of 041-sample-report", "at": "2026-01-02T12:00:00Z",
+                               "closed": "2026-01-02T12:05:00Z"}, **close)}
+
+    def branch_exists(self):
+        return bool(self.git(self.repo_a, "branch", "--list", "factory/042-sample-export"))
+
+    def test_cleanup_keeps_an_unmerged_branch(self):
+        self.board["jobs"] = [self.closed()]
+        self.assertEqual(self.pickup(), (0, f"cleaned up 042-sample-export alpha, left: {self.LEFT}\n", ""))
+        self.assertFalse(self.wt.exists())
+        self.assertTrue(self.branch_exists())
+        job = self.job("042-sample-export")
+        record = job["close"]["cleanup"][DEVICE]
+        self.assertEqual(set(record), {"at", "left"})
+        self.assertEqual(record["left"], [self.LEFT])
+        self.assertNotIn("port", job)
+        self.calls.clear()
+        self.assert_silent(self.pickup())
+
+    def test_cleanup_removes_a_merged_job(self):
+        self.git(self.repo_a, "merge", "-q", "--no-ff", "-m", "merge", "factory/042-sample-export")
+        self.board["jobs"] = [self.closed()]
+        self.assertEqual(self.pickup(), (0, "cleaned up 042-sample-export alpha\n", ""))
+        self.assertFalse(self.wt.exists())
+        self.assertFalse(self.branch_exists())
+        self.assertEqual(self.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"], [])
+
+    def test_cleanup_dry_run(self):
+        self.board["jobs"] = [self.closed()]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[0], "would clean up 042-sample-export alpha")
+        self.assertEqual(self.puts(), [])
+        self.assertTrue(self.wt.exists())
+
+    def test_cleanup_skips_pickup_off(self):
+        self.views["alpha"] = (200, effective("alpha"))
+        self.board["jobs"] = [self.closed()]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[0], "skip cleanup 042-sample-export alpha: pickup off")
+        self.calls.clear()
+        self.assert_silent(self.pickup())
+        self.assertTrue(self.wt.exists())
+
+    def test_cleanup_skips_without_local_work(self):
+        self.git(self.repo_a, "worktree", "remove", str(self.wt))
+        self.git(self.repo_a, "branch", "-D", "factory/042-sample-export")
+        self.board["jobs"] = [self.closed()]
+        self.assert_silent(self.pickup())
+
+    def test_cleanup_skips_a_recorded_host(self):
+        self.board["jobs"] = [self.closed(cleanup={DEVICE: {"at": "2026-01-02T12:10:00Z", "left": []}})]
+        self.assert_silent(self.pickup())
+        self.assertTrue(self.wt.exists())
+
+    def test_cleanup_skips_an_agent_close(self):
+        job = self.closed()
+        del job["close"]
+        self.board["jobs"] = [job]
+        self.assert_silent(self.pickup())
+        self.assertTrue(self.wt.exists())
 
 
 class DenyNotesTest(PickupFixture):
