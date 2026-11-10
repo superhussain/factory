@@ -5156,23 +5156,25 @@ async function rerunAction(ctx) {
   if (!j || !canRerun(j)) return;
   const id = j.id;
   const host = j.claim.device;
+  let name = hostName(host);
   ctx.report('');
   if (ctx.button) ctx.button.disabled = true;
   try {
     let listed;
-    ctx.status('Checking ' + host + '…');
+    ctx.status('Checking ' + name + '…');
     try {
       const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
       if (!h.ok || !p.ok) throw new Error('load');
       const [list, view] = [await h.json(), await p.json()];
+      name = list.find((x) => x.id === host)?.label || name;
       listed = list.some((x) => x.id === host && x.state === 'active') && (view.pickup?.enabled ? view.pickup.hosts : []).includes(host);
     } catch {
-      throw new Error('Could not check ' + host + '. Try again.');
+      throw new Error('Could not check ' + name + '. Try again.');
     } finally {
       if (ctx.live()) ctx.status('');
     }
-    if (!listed) throw new Error(host + ' does not run pickup for ' + j.project + ', so nothing would restart the job. Use Move to another host instead.');
-    if (!confirm('Rerun the ' + j.stage + ' stage of ' + id + ' on ' + host + '? This stops its current session. The next pickup run on ' + host + ' starts the stage again in a fresh session.')) return;
+    if (!listed) throw new Error(name + ' does not run pickup for ' + j.project + ', so nothing would restart the job. Use Move to another host instead.');
+    if (!confirm('Rerun the ' + j.stage + ' stage of ' + id + ' on ' + name + '? This stops its current session. The next pickup run on ' + name + ' starts the stage again in a fresh session.')) return;
     await casBoard((board) => {
       const message = rerunJob(board, id, host, isoNow());
       if (message) throw new Error(message);
