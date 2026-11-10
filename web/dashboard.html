@@ -1255,6 +1255,7 @@ const JOB_PICKER_STAGES = ['idea', 'spec', 'build', 'review', 'approve', 'pr-ope
 let selectedKey = null;
 let pickerFocus = null;
 let pickerMode = 'job';
+let pickerActions = null; // { id, inNeeds } while pickerMode is 'actions'
 let savedJobQuery = '';
 const optionIds = new Map();
 
@@ -1302,11 +1303,13 @@ function jobResultSection(j) {
 
 function renderJobResults() {
   const projectMode = pickerMode === 'project';
-  $('job-picker-heading').textContent = projectMode ? 'Select project' : 'Jump to job';
-  $('job-search-label').textContent = projectMode ? 'Search projects' : 'Search jobs';
-  $('job-results').setAttribute('aria-label', projectMode ? 'Projects' : 'Jobs');
+  const actionsMode = pickerMode === 'actions';
+  $('job-picker-heading').textContent = projectMode ? 'Select project' : actionsMode ? 'Actions for ' + pickerActions.id : 'Jump to job';
+  $('job-search-label').textContent = projectMode ? 'Search projects' : actionsMode ? 'Search actions' : 'Search jobs';
+  $('job-results').setAttribute('aria-label', projectMode ? 'Projects' : actionsMode ? 'Actions' : 'Jobs');
   $('job-picker-back').hidden = !projectMode;
   if (projectMode) return renderProjectResults();
+  if (actionsMode) return renderJobActionResults();
   const query = $('job-search').value.trim().toLowerCase();
   const actions = actionRows(query);
   const matched = jobs.filter((j) => [j.id, j.title, j.project, projectName(j)]
@@ -1416,11 +1419,13 @@ function openJobPicker() {
 }
 
 function closeJobPicker(activate = false) {
+  const card = pickerActions && boardCard(pickerActions.id, pickerActions.inNeeds);
   pickerMode = 'job';
+  pickerActions = null;
   savedJobQuery = '';
   $('job-picker').close();
   $('job-search').setAttribute('aria-expanded', 'false');
-  if (!activate) (pickerFocus?.isConnected ? pickerFocus : $('job-jump')).focus();
+  if (!activate) (card || (pickerFocus?.isConnected ? pickerFocus : $('job-jump'))).focus();
 }
 
 function activateJobResult() {
@@ -1446,6 +1451,14 @@ function activateJobResult() {
     document.body.append(a);
     a.click();
     a.remove();
+    return;
+  }
+  if (row.kind === 'job-action') {
+    const { id, inNeeds } = pickerActions;
+    const j = jobs.find((x) => x.id === id);
+    if (!j || !jobActionsFor(j).includes(row.action)) return renderJobResults();
+    closeJobPicker();
+    JOB_ACTION_RUN[row.action](cardAction(id, inNeeds));
     return;
   }
   if (row.key === 'command:select-project') return openProjectPicker();
@@ -5429,6 +5442,38 @@ buildCardActionsMenu();
 
 function cardTrigger(id, inNeeds) {
   return [...$('board').querySelectorAll('.card-actions')].find((b) => b.dataset.actions === id && b.hasAttribute('data-in-needs') === inNeeds) ?? null;
+}
+
+function boardCard(id, inNeeds) {
+  return [...$('board').querySelectorAll('.card')].find((c) => c.dataset.id === id && c.classList.contains('needs-you') === inNeeds) ?? null;
+}
+
+// The jumper in actions mode lists what the card menu lists for one job.
+function openJobActionsPicker(id, inNeeds) {
+  if (document.querySelector('dialog[open]')) return;
+  closeCardActions(false);
+  pickerMode = 'actions';
+  pickerActions = { id, inNeeds };
+  savedJobQuery = '';
+  pickerFocus = null;
+  $('job-search').value = '';
+  selectedKey = null;
+  $('job-picker').showModal();
+  $('job-search').setAttribute('aria-expanded', 'true');
+  renderJobResults();
+  $('job-search').focus();
+}
+
+function renderJobActionResults() {
+  const j = jobs.find((x) => x.id === pickerActions.id);
+  const tokens = $('job-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  jobResults = (j ? jobActionsFor(j) : []).map((action) => ({
+    kind: 'job-action', key: 'job-action:' + action, action, title: $(action).textContent, meta: 'Action · ' + j.id,
+  })).filter((r) => tokens.every((t) => r.title.toLowerCase().includes(t)));
+  $('job-count').textContent = jobResults.length + (jobResults.length === 1 ? ' action' : ' actions');
+  $('job-empty').textContent = j ? 'No matching actions' : 'This job is no longer on the board';
+  $('job-empty').hidden = jobResults.length !== 0;
+  renderPickerRows();
 }
 
 const cardActionItems = () => [...$('card-actions-menu').children].filter((b) => !b.hidden);
