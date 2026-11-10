@@ -21,6 +21,8 @@ mise exec -- python3 tools/bootstrap.py up
 
 `bootstrap.py up` asks for your Cloudflare account ID, zone, factory hostname and allowed emails, then creates or reuses the R2 bucket, Access application, policies and this device's service token, writes `deploy/profile.json` and the device `.env`, and deploys. It reads the API token from `CLOUDFLARE_API_TOKEN` or a hidden prompt. Rerunning it creates nothing new. See [docs/cloudflare.md](docs/cloudflare.md#guided-setup) for token permissions, a second device and `down`.
 
+Then follow [docs/getting-started.md](docs/getting-started.md) to install the skill, register a project and run a first job. To be walked through it, run `/factory-setup` in Claude Code from this checkout.
+
 ## Develop
 
 ```sh
@@ -80,6 +82,7 @@ Captured by `tools/capture-screenshots.mjs` with synthetic fixture data (frozen 
 
 ## More
 
+- [docs/getting-started.md](docs/getting-started.md) — first job after deploy, then what to set up next
 - [docs/architecture.md](docs/architecture.md) — ownership, request boundary, protocol, toolchain and bundle proofs
 - [docs/configuration.md](docs/configuration.md) — configuration layers, precedence and the secrets boundary
 - [docs/trust.md](docs/trust.md) — trust model for configurable text
