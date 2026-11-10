@@ -4750,12 +4750,12 @@ $('move-host-form').addEventListener('submit', async (e) => {
   await poll();
 });
 
-let closing = null;
+let closeDialog = null;
 
 function openCloseDialog() {
   const j = jobs.find((x) => x.id === openId);
-  if (closing || !j) return;
-  closing = { id: j.id, opener: $('d-actions') };
+  if (closeDialog || !j) return;
+  closeDialog = { id: j.id, opener: $('d-actions') };
   $('close-job-help').textContent = j.id + ' stops at ' + j.stage + '. The next pickup run writes decision.md with your reason, then moves the job to Closed. If a session is running it, the close waits for that session to stop.';
   $('close-job-reason').value = '';
   $('close-job-err').textContent = '';
@@ -4766,9 +4766,9 @@ function openCloseDialog() {
 }
 
 function dismissCloseDialog() {
-  if (!closing) return;
-  const opener = closing.opener;
-  closing = null;
+  if (!closeDialog) return;
+  const opener = closeDialog.opener;
+  closeDialog = null;
   $('close-job-dlg').close();
   opener.focus();
 }
@@ -4778,8 +4778,8 @@ $('close-job-cancel').addEventListener('click', dismissCloseDialog);
 $('close-job-dlg').addEventListener('cancel', (e) => { e.preventDefault(); dismissCloseDialog(); });
 $('close-job-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (!closing || $('close-job-save').disabled) return;
-  const { id } = closing;
+  if (!closeDialog || $('close-job-save').disabled) return;
+  const { id } = closeDialog;
   $('close-job-save').disabled = true;
   try {
     await casBoard((board) => {
