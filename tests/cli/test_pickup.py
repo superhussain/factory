@@ -973,6 +973,7 @@ class MoveHostTest(PickupFixture):
         self.moved()["project"] = "zulu"
         self.assertEqual(self.pickup(), (0, "", ""))
         self.assertEqual((self.stopped, self.puts()), ([], []))
+        self.assertNotIn("stopped", self.job("042-sample-export")["move"])
         self.assertEqual(self.pickup("--dry-run"),
                          (0, f"skip stop 042-sample-export zulu: no checkout on this host\nhost {DEVICE}: would launch 0\n", ""))
 
