@@ -1513,7 +1513,7 @@ function openJobPicker() {
 }
 
 function closeJobPicker(activate = false) {
-  const card = pickerActions && boardCard(pickerActions.id, pickerActions.inNeeds);
+  const card = pickerActions && (pickerActions.drawer && !$('detail').hidden ? $('d-actions') : boardCard(pickerActions.id, pickerActions.inNeeds));
   pickerMode = 'job';
   pickerActions = null;
   savedJobQuery = '';
@@ -1549,11 +1549,11 @@ function activateJobResult() {
     return;
   }
   if (row.kind === 'job-action') {
-    const { id, inNeeds } = pickerActions;
+    const { id, inNeeds, drawer } = pickerActions;
     const j = jobs.find((x) => x.id === id);
     if (!j || !jobActionsFor(j).includes(row.action)) return renderJobResults();
     closeJobPicker();
-    JOB_ACTION_RUN[row.action](cardAction(id, inNeeds));
+    JOB_ACTION_RUN[row.action](drawer && openId === id ? drawerAction(row.action) : cardAction(id, inNeeds));
     return;
   }
   if (row.kind === 'archive-search') {
