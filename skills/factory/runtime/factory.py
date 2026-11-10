@@ -32,6 +32,7 @@
   factory.py documents <project-slug>       write the project's notes, decisions and runbook, wrapped as
                                             operator-preferences data, to projects/<slug>.documents.md
                                             and print its path
+  factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 4 of them
   factory.py escalation <project-slug>/<job-id> <round>
                                             ask whether a review round's CHANGES findings need a person,
                                             print one JSON verdict
@@ -143,7 +144,11 @@ RELEASE = ("needs-human", "pr-open", "merged", "closed")
 # Stages a job finishes in. Entering one stamps done, leaving one clears it.
 TERMINAL = ("merged", "closed")
 # How one job relates to another, in a job's refs.
-REF_KINDS = ("rework-of", "follow-up-of", "sub-job-of")
+REF_KINDS = ("rework-of", "follow-up-of", "sub-job-of", "batched-into")
+# A rider is an idea that ships inside another job. It follows that lead's stage and PR.
+BATCH_REF = "batched-into"
+MAX_RIDERS = 4
+MAX_CANDIDATES = 20
 BUILD_STATES = ("queued", "running", "done", "failed")
 # Ideas wait on the board with no claim, branch, or files until a pickup moves them to spec.
 IDEA = "idea"
@@ -441,7 +446,33 @@ def patch_job(data, job_id, patch):
             job["done"] = job["updated"]
         else:
             job.pop("done", None)
+    if (job.get("stage") != prev or "pr" in patch) and lead_of(job) is None:
+        mirror_batch(data, job)
     return job
+
+
+def lead_of(j):
+    """The id of the job this idea is batched into, else None."""
+    refs = j.get("refs")
+    return next((r["id"] for r in refs if isinstance(r, dict) and r.get("kind") == BATCH_REF), None) \
+        if isinstance(refs, list) else None
+
+
+def riders_of(data, lead_id):
+    return [j for j in data["jobs"] if lead_of(j) == lead_id]
+
+
+def mirror_batch(data, lead):
+    """Move a lead's riders with it: its stage and PR, or back to idea when it closes."""
+    for rider in riders_of(data, lead["id"]):
+        if rider.get("stage") in TERMINAL:
+            continue
+        if lead.get("stage") == "closed":
+            refs = [r for r in rider["refs"] if r.get("kind") != BATCH_REF]
+            patch_job(data, rider["id"], {"stage": IDEA, "refs": refs or None,
+                                          "note": f"unbatched: {lead['id']} closed"})
+        else:
+            patch_job(data, rider["id"], {"stage": lead.get("stage"), "pr": lead.get("pr")})
 
 
 def merge_patch(target, patch):
@@ -1445,7 +1476,7 @@ def inflight_count(data, project, minutes, device=None):
             continue
         if device and (j.get("claim") or {}).get("device") != device:
             continue
-        if gated(j):
+        if gated(j) or lead_of(j):
             continue
         stage = j.get("stage")
         if stage == IDEA or tracer_start(j):
@@ -1500,6 +1531,80 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
             picked.append({"id": j["id"], "project": j["project"], "repo_path": repo, "session": tag})
         return (dump_board(data) if picked else None), picked
     return cas(home, "/api/board", change)
+
+
+def batch_problem(data, j, slug, device, session, minutes):
+    """Why this idea cannot ride in a batch, else None."""
+    if j.get("project") != slug:
+        return "another project"
+    if j.get("stage") != IDEA:
+        return "not an idea"
+    if gated(j):
+        return "waits on a human"
+    if paused(j):
+        return "paused"
+    if closing(j):
+        return "closing"
+    if j.get("idea_images"):
+        return "has pasted images"
+    if "tracer" in j:
+        return "follows Tracer"
+    if (j.get("backlog") or {}).get("decision") == "rework":
+        return "marked for rework"
+    held = blocking(j, device, session, minutes)
+    if held:
+        return f"held by {held['device']} session {held['session']}"
+    if lead_of(j):
+        return f"already batched into {lead_of(j)}"
+    if riders_of(data, j["id"]):
+        return "leads a batch"
+    return None
+
+
+def batch_cmd(target, *idea_ids):
+    """List the project's ideas that can ride in a job at spec, or attach up to 4 of them as
+    riders in one board write. Prints {"lead", "riders", "candidates"} as JSON."""
+    home, slug, lead_id = r2_target(target, True)
+    device, session, minutes = holder(home)
+    idea_ids = list(dict.fromkeys(idea_ids))
+
+    def entry(j):
+        return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title")}
+
+    def change(text):
+        data = load_board(text)
+        lead = next((j for j in data["jobs"] if j.get("id") == lead_id), None)
+        if lead is None:
+            fail(f"no job {lead_id} on the board", 4)
+        if idea_ids:
+            if not mine(lead.get("claim") or {}, device, session):
+                fail(f"{lead_id} is not held by this session. Nothing was written.", 6)
+            if lead.get("stage") != "spec":
+                fail(f"batch runs while {lead_id} is at spec, not {lead.get('stage')}", 2)
+            if "tracer" in lead:
+                fail(f"cannot batch into {lead_id}: follows Tracer", 2)
+            if len(riders_of(data, lead_id)) + len(idea_ids) > MAX_RIDERS:
+                fail(f"a batch holds at most {MAX_RIDERS} ideas", 2)
+            picked = []
+            for idea_id in idea_ids:
+                j = next((x for x in data["jobs"] if x.get("id") == idea_id), None)
+                if j is None:
+                    fail(f"no job {idea_id} on the board", 4)
+                problem = batch_problem(data, j, slug, device, session, minutes)
+                if problem:
+                    fail(f"cannot batch {idea_id}: {problem}. Nothing was written.", 2)
+                picked.append(j)
+            for j in picked:
+                j.pop("claim", None)
+                patch_job(data, j["id"], {"stage": "spec", "note": f"batched into {lead_id}",
+                                          "refs": [*(j.get("refs") or []), {"id": lead_id, "kind": BATCH_REF}]})
+        candidates = [entry(j) for j in data["jobs"]
+                      if j.get("id") != lead_id and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
+                      and batch_problem(data, j, slug, device, session, minutes) is None]
+        result = {"lead": lead_id, "riders": [entry(j) for j in riders_of(data, lead_id)],
+                  "candidates": candidates[:MAX_CANDIDATES]}
+        return (dump_board(data) if idea_ids else None), result
+    print(json.dumps(cas(home, "/api/board", change), indent=2))
 
 
 def ideas(*args):
@@ -4764,7 +4869,7 @@ def stuck(*args):
         return agents is not None and agents.get(link.get("agent"), "closed") == "closed"
 
     def is_stuck(job):
-        if paused(job) or closing(job):
+        if paused(job) or closing(job) or lead_of(job):
             return False
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
@@ -5624,6 +5729,7 @@ COMMANDS["deny-notes"] = (deny_notes_cmd, 1, 2)
 COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
+COMMANDS["batch"] = (batch_cmd, 1, 5)
 
 def main(argv=None):
     global _HOME_OVERRIDE
