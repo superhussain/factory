@@ -17,7 +17,9 @@ async function api(path) {
   });
   const body = await response.json();
   if (!body.success)
-    throw new Error(`${response.status}: error codes ${body.errors.map((e) => e.code).join(", ")}`);
+    throw new Error(
+      `${response.status}: error codes ${(body.errors ?? []).map((e) => e.code).join(", ")}`,
+    );
   return body.result;
 }
 
