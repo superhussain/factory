@@ -1,5 +1,5 @@
 // Job panel header against one owned local Worker: every header control shares one vertical
-// center, the close button gives the same hover and focus feedback as the actions button, and
+// center, the close button gives the same hover and focus feedback as the actions button, a tap on touch leaves no hover style, and
 // Display settings hide header links per browser in localStorage, including on reset.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -163,6 +163,16 @@ test("drawer header links", { timeout: 180000 }, async (t) => {
       await page.keyboard.up("Shift");
       assert.equal(await page.evaluate(() => document.activeElement.id), "d-actions");
       assert.deepEqual(close, await focusStyle("#d-actions"));
+    });
+
+    await t.test("tap leaves no hover on touch", async () => {
+      await openJob(MOBILE);
+      await page.addStyleTag({ content: "*{transition:none!important}" });
+      assert.equal(await page.evaluate(() => matchMedia("(hover: hover)").matches), false);
+      const border = () => page.$eval("#d-actions", (el) => getComputedStyle(el).borderTopColor);
+      const rest = await border();
+      await page.tap("#d-actions");
+      assert.equal(await border(), rest);
     });
 
     await t.test("reset re-renders open links", async () => {
