@@ -2609,6 +2609,8 @@ $('board').addEventListener('click', (e) => {
     openBacklogItem(renderedBacklog[Number(b.dataset.index)]);
     return;
   }
+  const ref = e.target.closest('[data-ref]');
+  if (ref) { location.hash = encodeURIComponent(ref.dataset.ref); return; }
   const c = e.target.closest('.card');
   if (c) location.hash = encodeURIComponent(c.dataset.id);
 });
