@@ -1,6 +1,7 @@
 // The drawer's Prioritize and Remove priority items: which jobs show each, both board writes, and
 // a job that left the board, against one owned local Worker, at mobile and desktop width. The board
-// card's Prioritized badge shows only after Prioritize and goes after Remove priority. Opening a backlog item hides a Prioritize error left from a job. Also captures the review images.
+// card's Prioritized badge shows only after Prioritize and goes after Remove priority. Opening a
+// backlog item hides a Prioritize error left from a job. Also captures the review images.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
