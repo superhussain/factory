@@ -319,13 +319,22 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .tracer-tasks summary { cursor: pointer; }
   .card.needs-you .note { color: var(--alert); }
   .card-wrap { position: relative; }
-  .card-wrap .card .id { padding-right: 64px; }
+  .card-wrap .card .id, .card-wrap .card .proj { padding-right: 28px; }
+  .card-wrap.has-pr .card .id { padding-right: 96px; }
+  .card-actions { position: absolute; top: 7px; right: 8px; width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+  .card-actions:hover, .card-actions:focus-visible { background: var(--line); }
+  .card-actions:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .card-actions svg { width: 16px; height: 16px; }
+  @media (pointer: coarse) { .card-actions::after { content: ""; position: absolute; inset: -8px -8px -8px -4px; } }
+  .card-actions-menu { position: fixed; right: auto; z-index: 30; }
+  .board-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .board-status[hidden] { display: none; }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
   .pr-link:hover { text-decoration: underline; }
   .pr-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   /* The text is ~15px tall; this invisible box makes a ~41px tap target without moving the layout. */
   .pr-link::after { content: ""; position: absolute; inset: -13px -8px; }
-  .card-wrap > .pr-link { position: absolute; top: 13px; right: 16px; }
+  .card-wrap > .pr-link { position: absolute; top: 13px; right: 48px; }
   .detail-head .links { flex: none; display: flex; gap: 16px; align-items: center; height: var(--icon-size); }
   .detail-head .btn { flex: none; }
   .job-actions { position: relative; flex: none; }
@@ -474,6 +483,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="status"><span id="updated">loading</span><span class="dot" id="dot" role="img" aria-label="connection" title="connection"></span></div>
 </header>
 <main class="board" id="board"></main>
+<div class="job-actions-menu card-actions-menu" id="card-actions-menu" role="menu" aria-label="Job actions" hidden></div>
+<p class="board-status" id="board-status" role="status" hidden></p>
 <aside class="detail" id="detail" hidden>
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
@@ -900,6 +911,7 @@ const backlogTriageLoading = new Set();
 const backlogDrafts = new Map(); // item.raw -> { pick, notes, answers }
 let backlogSaving = false;
 let drawerVersion = 0;
+let cardMenu = null; // the open card actions menu: { id, inNeeds }
 let openStamp = null;
 let files = [];
 // True while a newly opened job's files load, so a board re-read cannot mistake them for missing.
@@ -1192,7 +1204,7 @@ function refLine(r) {
   return esc(REF_KINDS[r.kind]) + ' ' + id;
 }
 
-// The link sits beside the button, not inside it, so a click on it never reaches the card handler.
+// The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
 // A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
 function card(j, inNeeds) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
@@ -1215,10 +1227,11 @@ function card(j, inNeeds) {
     (j.tracer?.building === true ? line('meta tracer-building', 'Building in Tracer') : '') +
     (ask && (inNeeds || !hiddenCardFields.has('note')) ? line('note', ask) : '') +
     chips(j.rounds) + '</button>';
-  const pr = prLink(j);
-  if (!pr || hiddenCardFields.has('pr')) return btn;
-  return '<div class="card-wrap">' + btn + '<a class="pr-link" href="' + esc(pr.url) +
-    '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub">PR #' + esc(pr.n) + '</a></div>';
+  const pr = hiddenCardFields.has('pr') ? null : prLink(j);
+  return '<div class="card-wrap' + (pr ? ' has-pr' : '') + '">' + btn +
+    (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub">PR #' + esc(pr.n) + '</a>' : '') +
+    '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
+    ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button></div>';
 }
 
 // Not a .card, so arrow-key card navigation skips it.
@@ -2683,6 +2696,7 @@ function renderBoard() {
       '<p>Jobs show up here as they move through the loop.</p></div>';
     $('board').style.removeProperty('--cols');
     if (!settingsShown) document.title = BASE_TITLE;
+    syncCardActions();
     return;
   }
   const shown = jobs.filter((j) => isShown(j.project));
@@ -2725,6 +2739,7 @@ function renderBoard() {
       $('board').querySelector('.column-toggle[data-stage="' + focusStage + '"]');
     control.focus({ preventScroll: true });
   }
+  syncCardActions();
 }
 
 $('board').addEventListener('click', (e) => {
@@ -2748,6 +2763,12 @@ $('board').addEventListener('click', (e) => {
   }
   const ref = e.target.closest('[data-ref]');
   if (ref) { location.hash = encodeURIComponent(ref.dataset.ref); return; }
+  const trigger = e.target.closest('.card-actions');
+  if (trigger) {
+    if (cardMenu && trigger === cardTrigger(cardMenu.id, cardMenu.inNeeds)) closeCardActions(true);
+    else openCardActions(trigger, 'first');
+    return;
+  }
   const c = e.target.closest('.card');
   if (c) location.hash = encodeURIComponent(c.dataset.id);
 });
@@ -5398,6 +5419,100 @@ const JOB_ACTION_RUN = {
   'd-close-job': openCloseDialog,
 };
 for (const id of JOB_ACTIONS) $(id).addEventListener('click', () => JOB_ACTION_RUN[id](drawerAction(id)));
+
+// One menu for every card. It lives outside #board, so a poll redraw keeps it and syncCardActions re-finds its trigger.
+function buildCardActionsMenu() {
+  $('card-actions-menu').innerHTML = JOB_ACTIONS.map((id) =>
+    '<button class="btn" role="menuitem" tabindex="-1" data-action="' + id + '">' + esc($(id).textContent) + '</button>').join('');
+}
+buildCardActionsMenu();
+
+function cardTrigger(id, inNeeds) {
+  return [...$('board').querySelectorAll('.card-actions')].find((b) => b.dataset.actions === id && b.hasAttribute('data-in-needs') === inNeeds) ?? null;
+}
+
+const cardActionItems = () => [...$('card-actions-menu').children].filter((b) => !b.hidden);
+
+function openCardActions(trigger, focus) {
+  closeCardActions(false);
+  cardMenu = { id: trigger.dataset.actions, inNeeds: trigger.hasAttribute('data-in-needs') };
+  syncCardActions(focus);
+}
+
+function closeCardActions(refocus) {
+  if (!cardMenu) return;
+  const trigger = cardTrigger(cardMenu.id, cardMenu.inNeeds);
+  cardMenu = null;
+  $('card-actions-menu').hidden = true;
+  trigger?.setAttribute('aria-expanded', 'false');
+  if (refocus) trigger?.focus();
+}
+
+// Refreshes the open menu after a redraw: same trigger, current items, or closed when either is gone.
+function syncCardActions(focus) {
+  if (!cardMenu) return;
+  const trigger = cardTrigger(cardMenu.id, cardMenu.inNeeds);
+  const j = jobs.find((x) => x.id === cardMenu.id);
+  if (!trigger || !j) {
+    closeCardActions(false);
+    return;
+  }
+  const shown = jobActionsFor(j);
+  for (const b of $('card-actions-menu').children) b.hidden = !shown.includes(b.dataset.action);
+  trigger.setAttribute('aria-expanded', 'true');
+  $('card-actions-menu').hidden = false;
+  placeCardActions(trigger);
+  const items = cardActionItems();
+  if (focus) (focus === 'last' ? items[items.length - 1] : items[0])?.focus();
+}
+
+// Below the trigger when it fits, else above, right edges aligned, 8px inside the viewport.
+function placeCardActions(trigger) {
+  const menu = $('card-actions-menu');
+  const t = trigger.getBoundingClientRect();
+  const { width, height } = menu.getBoundingClientRect();
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  const top = t.bottom + 4 + height <= vh - 8 ? t.bottom + 4 : t.top - 4 - height;
+  menu.style.top = Math.max(8, Math.min(top, vh - 8 - height)) + 'px';
+  menu.style.left = Math.max(8, Math.min(t.right - width, vw - 8 - width)) + 'px';
+}
+
+$('board').addEventListener('keydown', (e) => {
+  const trigger = e.target.closest('.card-actions');
+  if (!trigger || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+  e.preventDefault();
+  openCardActions(trigger, e.key === 'ArrowDown' ? 'first' : 'last');
+});
+$('card-actions-menu').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-action]');
+  if (!item || !cardMenu) return;
+  const { id, inNeeds } = cardMenu;
+  closeCardActions(true);
+  JOB_ACTION_RUN[item.dataset.action](cardAction(id, inNeeds));
+});
+$('card-actions-menu').addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  const items = cardActionItems();
+  const at = items.indexOf(document.activeElement);
+  const to = { ArrowDown: items[(at + 1) % items.length], ArrowUp: items[(at - 1 + items.length) % items.length], Home: items[0], End: items[items.length - 1] }[e.key];
+  if (to) {
+    e.preventDefault();
+    to.focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeCardActions(true);
+  } else if (e.key === 'Tab') {
+    closeCardActions(true);
+  }
+});
+document.addEventListener('pointerdown', (e) => {
+  if (cardMenu && !$('card-actions-menu').contains(e.target) && !e.target.closest('.card-actions')) closeCardActions(false);
+});
+document.addEventListener('scroll', (e) => {
+  if (cardMenu && !$('card-actions-menu').contains(e.target)) closeCardActions(false);
+}, true);
+window.addEventListener('resize', () => closeCardActions(false));
 
 function openBacklogItem(item) {
   drawerVersion++;
