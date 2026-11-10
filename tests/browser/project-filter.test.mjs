@@ -1,6 +1,6 @@
 // Header project filter: a checkbox menu over a saved set of hidden project keys, its
-// label and "all projects" toggle, closing, reload, the legacy single-filter migration and
-// the mirrored Display fieldset.
+// label and "all projects" toggle, closing, reload, the legacy single-filter migration, the
+// mirrored Display fieldset and the menu layout with a long title on a narrow screen.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -18,6 +18,8 @@ const JOBS = [
   { id: "091-beta", project: "beta", title: "Synthetic Beta job", stage: "spec" },
   { id: "092-loose", title: "Synthetic unassigned job", stage: "idea", idea: "Synthetic idea" },
 ].map((job) => ({ ...job, updated: "2026-01-01T00:00:00Z" }));
+const LONG =
+  "Synthetic Gamma project with a very long title that runs well past the edge of a narrow phone screen";
 const project = (title) => `---\nrepo: example/sample\nbase: main\ntitle: ${title}\n---\n`;
 const row = (key, title, checked, mixed = false) => ({ key, title, checked, mixed });
 const wait = { polling: 50 };
@@ -96,7 +98,7 @@ test("project filter", { timeout: 180000 }, async (t) => {
           row("beta", "Synthetic Beta", false),
           row(":unassigned", "No project yet", true),
         ],
-        stored: "beta",
+        stored: '["beta"]',
       });
       assert.deepEqual(await menu(page), { open: true, expanded: "true", focus: "beta" });
       assert.deepEqual(await cards(page), ["090-alpha", "092-loose"]);
@@ -137,7 +139,7 @@ test("project filter", { timeout: 180000 }, async (t) => {
           row("beta", "Synthetic Beta", false),
           row(":unassigned", "No project yet", false),
         ],
-        stored: "alpha,beta,:unassigned",
+        stored: '["alpha","beta",":unassigned"]',
       });
       assert.equal(
         await page.$eval("#filter", (el) => el.getAttribute("aria-label")),
@@ -176,7 +178,7 @@ test("project filter", { timeout: 180000 }, async (t) => {
       });
       await legacy.reload({ waitUntil: "domcontentloaded" });
       await ready(legacy);
-      assert.equal((await filterState(legacy)).stored, "beta,:unassigned");
+      assert.equal((await filterState(legacy)).stored, '["beta",":unassigned"]');
       assert.equal((await filterState(legacy)).label, "Synthetic Alpha");
       assert.equal(await legacy.evaluate(() => localStorage.getItem("factory-project")), null);
       assert.deepEqual(await cards(legacy), ["090-alpha"]);
@@ -203,7 +205,7 @@ test("project filter", { timeout: 180000 }, async (t) => {
       await page.click(box("alpha", "#display-filter"));
       const state = await filterState(page);
       assert.equal(state.label, "2 selected");
-      assert.equal(state.stored, "alpha");
+      assert.equal(state.stored, '["alpha"]');
       assert.deepEqual(await display(), state.rows);
       assert.equal(
         await page.$eval("#display-status", (el) => el.textContent),
@@ -239,12 +241,87 @@ test("project filter", { timeout: 180000 }, async (t) => {
       await failed.browserContext().close();
     });
 
-    await t.test("F9 no jobs", async () => {
+    const old = await open();
+
+    await t.test("F10 comma list", async () => {
+      await old.evaluate(() => {
+        localStorage.clear();
+        localStorage.setItem("factory-projects-hidden", "beta");
+      });
+      await old.reload({ waitUntil: "domcontentloaded" });
+      await ready(old);
+      const state = await filterState(old);
+      assert.equal(state.stored, '["beta"]');
+      assert.equal(state.label, "2 selected");
+      assert.deepEqual(await cards(old), ["090-alpha", "092-loose"]);
+    });
+
+    await t.test("F11 comma in a key", async () => {
+      const keys = await old.evaluate(() => {
+        localStorage.setItem("factory-projects-hidden", JSON.stringify(["a,b"]));
+        return [...readHiddenProjects()];
+      });
+      assert.deepEqual(keys, ["a,b"]);
+      await old.browserContext().close();
+    });
+
+    await t.test("F9 narrow long title", async () => {
+      await seedProject(origin, "gamma", project(LONG));
+      const narrow = await open();
+      await narrow.setViewport({ width: 390, height: 844 });
+      await narrow.click("#filter");
+      const measure = () =>
+        narrow.evaluate(() => {
+          const rect = document.getElementById("filter-menu").getBoundingClientRect();
+          const title = document
+            .querySelector('#filter-menu [data-project="gamma"]')
+            .closest("label")
+            .querySelector(".filter-title");
+          const accent = document.createElement("i");
+          accent.style.color = "var(--accent)";
+          document.body.append(accent);
+          const accentColor = getComputedStyle(accent).color;
+          accent.remove();
+          return {
+            left: rect.left,
+            right: rect.right,
+            width: rect.width,
+            innerWidth,
+            scrollWidth: title.scrollWidth,
+            clientWidth: title.clientWidth,
+            textOverflow: getComputedStyle(title).textOverflow,
+            title: title.title,
+            accents: [...document.querySelectorAll("#filter-menu input")].map(
+              (el) => getComputedStyle(el).accentColor === accentColor,
+            ),
+          };
+        });
+      const title = (m) => {
+        assert.ok(m.scrollWidth > m.clientWidth);
+        assert.equal(m.textOverflow, "ellipsis");
+        assert.equal(m.title, LONG);
+      };
+      const phone = await measure();
+      assert.equal(phone.left, 16);
+      assert.equal(phone.right, 374);
+      title(phone);
+      assert.ok(phone.accents.length > 0 && phone.accents.every(Boolean));
+      await narrow.setViewport({ width: 1280, height: 900 });
+      const desktop = await measure();
+      assert.ok(desktop.width <= 360);
+      title(desktop);
+      await narrow.browserContext().close();
+    });
+
+    await t.test("F12 no jobs", async () => {
       await seedBoard(origin, []);
       const empty = await open();
       await empty.evaluate(() => {
         localStorage.clear();
-        localStorage.setItem("factory-projects-hidden", "alpha,beta,:unassigned");
+        localStorage.setItem(
+          "factory-projects-hidden",
+          JSON.stringify(["alpha", "beta", ":unassigned"]),
+        );
       });
       await empty.reload({ waitUntil: "domcontentloaded" });
       await ready(empty);
