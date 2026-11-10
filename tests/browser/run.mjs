@@ -191,6 +191,8 @@ const CAPTURE_TRIAGE = {
   model: "@cf/cloudflare/clef-flash",
   at: "2026-10-27T10:00:00Z",
 };
+// Capture holds each triage reply this long, only in the backlog-triage-open views,
+// the one place a capture opens a card without waiting for the verdict.
 const CAPTURE_TRIAGE_DELAY_MS = 1000;
 const CAPTURE_SPEC =
   "# Synthetic spec\n\nCapture fixture content, not real job data.\n\n## Tasks\n\n1. **Parse the fixture**\n   - Files: `sample.md`\n   - Check: synthetic\n2. **Render the list**\n   - Files: `sample.html`\n3. **Ship it**\n   - Check: synthetic\n\n```mermaid\ngraph LR; Alpha-->Beta\n```\n";
@@ -301,6 +303,7 @@ async function capture(outdir, referencePath) {
     const servedMetaCsp = inner(/http-equiv="Content-Security-Policy" content="([^"]*)"/);
 
     async function view(name, width, height, theme, prepare, touch = false) {
+      const delayTriage = name.startsWith("backlog-triage-open-");
       for (const side of ["before", "after"]) {
         const context = await browser.createBrowserContext();
         const page = await context.newPage();
@@ -337,7 +340,8 @@ async function capture(outdir, referencePath) {
           }
           if (target.pathname === "/api/backlog/triage") {
             const held = target.searchParams.get("item") === CAPTURE_TRIAGE_ITEM;
-            await new Promise((resolve) => setTimeout(resolve, CAPTURE_TRIAGE_DELAY_MS));
+            if (delayTriage)
+              await new Promise((resolve) => setTimeout(resolve, CAPTURE_TRIAGE_DELAY_MS));
             return request.respond({
               status: held ? 200 : 404,
               contentType: "application/json",
