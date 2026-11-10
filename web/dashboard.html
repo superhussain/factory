@@ -322,6 +322,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .tracer-tasks li { padding-left: 10px; text-indent: -10px; }
   .tracer-tasks summary { cursor: pointer; }
   .card.needs-you .note { color: var(--alert); }
+  /* A needs-you ask wraps to two rows, so a touch user can read it without the tooltip. */
+  .card.needs-you .note.line { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
   .card-wrap { position: relative; }
   .card-wrap .card .id, .card-wrap .card .proj { padding-right: 28px; }
   .card-wrap.has-pr .card .id { padding-right: 96px; }
