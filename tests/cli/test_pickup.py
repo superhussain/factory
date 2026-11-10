@@ -1468,7 +1468,6 @@ class PauseTest(PickupFixture):
         self.assertEqual((self.sent, self.puts()), ([], []))
 
 
-
 class CloseTest(PickupFixture):
     DECISION = "/api/jobs/alpha/042-sample-export/decision.md"
     REASON = "Duplicate of 041-sample-report"
@@ -1580,6 +1579,7 @@ class CloseTest(PickupFixture):
         bare = factory.close_decision({"id": "042-sample-export", "project": "alpha", "stage": "spec",
                                        "close": {"at": "2026-01-02T12:00:00Z"}}, self.REASON, DEVICE, None)
         self.assertIn("- Stage when closed: `spec`, round 0.\n- Branch: `none`.\n- Pull request: none.\n", bare)
+
 
 class DenyNotesTest(PickupFixture):
     def setUp(self):
