@@ -177,6 +177,28 @@ test("close job", { timeout: 240000 }, async (t) => {
         });
       });
 
+      await t.test(`hidden dialog fields stay hidden ${width}`, async () => {
+        const display = await page.evaluate(
+          (ids) => {
+            const out = {};
+            for (const id of ids) {
+              const el = document.getElementById(id);
+              el.hidden = true;
+              const hidden = getComputedStyle(el).display;
+              el.hidden = false;
+              out[id] = [hidden, getComputedStyle(el).display];
+            }
+            return out;
+          },
+          ["idea-text", "edit-idea-text", "close-job-reason"],
+        );
+        assert.deepEqual(display, {
+          "idea-text": ["none", "block"],
+          "edit-idea-text": ["none", "block"],
+          "close-job-reason": ["none", "block"],
+        });
+      });
+
       await t.test(`an empty reason writes nothing ${width}`, async () => {
         await openDrawer(page, "042-sample-export");
         await openJobActions(page);
