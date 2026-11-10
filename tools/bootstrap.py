@@ -386,6 +386,7 @@ def up(answers, api, run, root):
         raise CloudflareError("tools/deploy.py deploy failed; fix the cause above, then rerun up")
     print("Factory is live at " + origin)
     print("Next: open it in a browser and sign in as one of " + ", ".join(answers["emails"]) + ".")
+    print("Then follow docs/getting-started.md to install the skill, add a project and start a first job.")
     print("To add another device, run python3 tools/bootstrap.py up on that host.")
 
 

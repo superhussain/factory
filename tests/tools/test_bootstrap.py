@@ -312,6 +312,7 @@ class FreshUpTest(Instance):
         saved = json.loads((self.root / "deploy" / "bootstrap.json").read_text())
         self.assertEqual(saved, json.loads(FIXTURE.read_text()))
         self.assertIn("Factory is live at https://factory.example.test", out)
+        self.assertIn("Then follow docs/getting-started.md", out)
 
     def test_first_run_shows_where_to_find_each_value(self):
         code, out, err = self.up(inputs=[ACCOUNT, "example.test", "", "ada@example.test"], token_env=False)
