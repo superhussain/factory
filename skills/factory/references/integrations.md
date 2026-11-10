@@ -61,8 +61,9 @@ workspace's `isolation` is `worktree`, and its folder is named `factory-<id>` or
 `factory-<id>-<n>`. Any other workspace is skipped. Git state never skips the archive.
 The JSON lists leftovers first: `uncommitted: <porcelain line>` for each uncommitted file,
 `commit: <hash> <subject>` for each commit that no remote and no other local branch holds
-(a stale local `main` does not count), and `git <verb> failed: <reason>` when a git call
-fails or runs longer than 20 seconds. It lists at most 20, then `and <n> more`. Ignored
+(a stale local `main` does not count, and neither does history the branch was created from
+while its reflog keeps that entry), and `git <verb> failed: <reason>` when a git call fails
+or runs longer than 20 seconds. It lists at most 20, then `and <n> more`. Ignored
 files such as `.context/` scratch are not listed. `--check` runs the guards and prints
 `would_archive` with the leftovers, and never archives, so the session can queue a follow-up
 first. It then archives the session's agent when the workspace archive left it running.
