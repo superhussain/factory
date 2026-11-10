@@ -10,15 +10,17 @@ applying it and the other repository security settings.
   required.
 - The `ci` check from GitHub Actions must pass before merge. Strict mode is off,
   so a pull request does not need a rebase after every merge.
-- The `ci` check guards against accidents, not against someone with write
-  access. `ci.yml` runs on `pull_request`, so a pull request can redefine its
-  own `ci` job to always pass.
+- The `ci` check guards against accidents, not against a hostile pull
+  request. `ci.yml` runs on `pull_request`, so a pull request from a writer
+  or from a fork can redefine its own `ci` job to always pass. Read workflow
+  changes in any pull request before merging, since a green `ci` does not
+  prove the tests ran.
 
 ```sh
-# Find the ruleset id, used as <id> below
-gh api repos/superhussain/factory/rulesets --jq '.[] | select(.name=="main") | .id'
 # Apply
 gh api -X POST repos/superhussain/factory/rulesets --input .github/rulesets/main.json
+# Find the ruleset id, used as <id> below
+gh api repos/superhussain/factory/rulesets --jq '.[] | select(.name=="main") | .id'
 # Update
 gh api -X PUT repos/superhussain/factory/rulesets/<id> --input .github/rulesets/main.json
 # Verify, prints ["deletion","non_fast_forward","pull_request","required_status_checks"]
