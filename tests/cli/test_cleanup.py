@@ -52,6 +52,20 @@ class CleanupTest(IsolatedTestCase):
     def branch_exists(self):
         return bool(self.git(self.repo, "branch", "--list", "factory/001-test"))
 
+    def git_raises(self, verb, error):
+        real_run, seen = subprocess.run, []
+
+        def run(argv, *rest, **kwargs):
+            if argv[0] == "git":
+                seen.append(kwargs.get("timeout"))
+                if verb is None or argv[3] == verb:
+                    raise error
+            return real_run(argv, *rest, **kwargs)
+
+        with patch.object(factory.subprocess, "run", side_effect=run):
+            code, out, _ = self.cleanup()
+        return code, out, seen
+
     def test_merged_job_is_removed(self):
         self.merge()
         code, out, _ = self.cleanup()
@@ -130,6 +144,45 @@ class CleanupTest(IsolatedTestCase):
         self.assertEqual(out, {"removed": ["branch factory/001-test"], "left": []})
         self.assertNotIn(str(self.wt), self.git(self.repo, "worktree", "list"))
         self.assertFalse(self.branch_exists())
+
+    def test_every_git_call_has_timeout(self):
+        self.merge()
+        self.push()
+        code, _, seen = self.git_raises("no-such-verb", None)
+        self.assertEqual(code, 0)
+        self.assertTrue(seen)
+        self.assertEqual(set(seen), {20})
+
+    def test_git_times_out(self):
+        code, out, _ = self.git_raises("worktree", subprocess.TimeoutExpired(["git"], 20))
+        self.assertEqual(code, 1)
+        self.assertEqual(out, {"removed": [], "left": [
+            f"worktree {self.wt}: git worktree timed out after 20 s",
+            "branch factory/001-test: kept because its worktree remains"]})
+        self.assertTrue(self.wt.exists())
+
+    def test_git_not_runnable(self):
+        code, out, _ = self.git_raises(None, FileNotFoundError("git"))
+        self.assertEqual(code, 1)
+        self.assertEqual(out, {"removed": [], "left": [
+            f"worktree {self.wt}: could not run git",
+            "branch factory/001-test: kept because its worktree remains"]})
+        self.assertTrue(self.wt.exists())
+
+    def test_branch_check_times_out(self):
+        self.merge()
+        code, out, _ = self.git_raises("merge-base", subprocess.TimeoutExpired(["git"], 20))
+        self.assertEqual(code, 1)
+        self.assertEqual(out, {"removed": [f"worktree {self.wt}"],
+                               "left": ["branch factory/001-test: git merge-base timed out after 20 s"]})
+        self.assertTrue(self.branch_exists())
+
+    def test_branch_lookup_not_runnable(self):
+        self.merge()
+        code, out, _ = self.git_raises("rev-parse", OSError())
+        self.assertEqual(code, 1)
+        self.assertEqual(out["left"], ["branch factory/001-test: could not run git"])
+        self.assertTrue(self.branch_exists())
 
     def test_bad_target_and_unknown_project(self):
         code, out, err = self.cleanup("bad")

@@ -4725,12 +4725,24 @@ def cleanup(target):
         fail(f"{home / 'paths.md'} has no entry for {slug}: run /factory init in this device's checkout of it", 4)
     wt, branch = home / "worktrees" / slug / job_id, f"factory/{job_id}"
 
+    def run_git(*args):
+        """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
+        try:
+            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=20)
+        except subprocess.TimeoutExpired:
+            return None, "", f"git {args[0]} timed out after 20 s"
+        except OSError:
+            return None, "", "could not run git"
+        return r.returncode, r.stdout.strip(), r.stderr
+
     def first_error(*args):
-        r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
-        if not r.returncode:
+        code, _, err = run_git(*args)
+        if code is None:
+            return err
+        if code == 0:
             return None
-        lines = re.sub(r", use --\w+ to .*", "", r.stderr).strip().splitlines()
-        return (lines or [f"git exited {r.returncode}"])[0]
+        lines = re.sub(r", use --\w+ to .*", "", err).strip().splitlines()
+        return (lines or [f"git exited {code}"])[0]
 
     removed, left = [], []
     if wt.exists():
@@ -4743,19 +4755,23 @@ def cleanup(target):
             removed.append(f"worktree {wt}")
     else:
         first_error("worktree", "prune")
-    if not left and git(repo, "rev-parse", "--verify", "-q", f"refs/heads/{branch}"):
-        merged = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", f"refs/heads/{branch}", "HEAD"],
-                                capture_output=True).returncode == 0
-        if not merged:
-            error = f"not merged into {git(repo, 'rev-parse', '--abbrev-ref', 'HEAD') or 'HEAD'}"
-        elif git(repo, "config", "--get", f"branch.{branch}.merge"):
-            error = first_error("branch", "--unset-upstream", branch) or first_error("branch", "-d", branch)
-        else:
-            error = first_error("branch", "-d", branch)
+    if not left:
+        code, _, err = run_git("rev-parse", "--verify", "-q", f"refs/heads/{branch}")
+        error = err if code is None else None
+        if code == 0:
+            code, _, err = run_git("merge-base", "--is-ancestor", f"refs/heads/{branch}", "HEAD")
+            if code is None:
+                error = err
+            elif code:
+                error = f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}"
+            elif run_git("config", "--get", f"branch.{branch}.merge")[1]:
+                error = first_error("branch", "--unset-upstream", branch) or first_error("branch", "-d", branch)
+            else:
+                error = first_error("branch", "-d", branch)
+            if not error:
+                removed.append(f"branch {branch}")
         if error:
             left.append(f"branch {branch}: {error}")
-        else:
-            removed.append(f"branch {branch}")
     print(json.dumps({"removed": removed, "left": left}, indent=2))
     sys.exit(1 if left else 0)
 
