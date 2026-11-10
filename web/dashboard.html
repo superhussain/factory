@@ -4873,6 +4873,7 @@ function openIdeaDialog(followUp = null) {
     : soleProject() || (projects?.has(ideaDefault) ? ideaDefault : '');
   $('idea-ref').replaceChildren(...(followUp ? ['Follow-up of ', Object.assign(document.createElement('code'), { textContent: followUp.id })] : []));
   $('idea-ref').hidden = !followUp;
+  $('idea-h').textContent = followUp ? 'New follow-up idea' : 'New idea';
   $('idea-err').hidden = true;
   $('idea-dlg').showModal();
   if (followUp) $('idea-text').focus();

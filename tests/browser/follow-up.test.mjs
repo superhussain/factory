@@ -94,9 +94,13 @@ const dialog = (page) =>
     ref: document.getElementById("idea-ref").hidden
       ? null
       : document.getElementById("idea-ref").textContent,
+    title: document.getElementById("idea-h").textContent,
     project: document.getElementById("idea-project").value,
     focus: document.activeElement.id,
   }));
+const dialogName = async (page) =>
+  (await page.accessibility.snapshot({ root: await page.$("#idea-dlg"), interestingOnly: false }))
+    ?.name ?? "";
 
 const refA11y = async (page) => ({
   description:
@@ -174,6 +178,8 @@ test("follow-up", { timeout: 240000 }, async (t) => {
         await activate("#new-idea");
         await page.waitForFunction(() => document.getElementById("idea-dlg").open, wait);
         assert.equal((await dialog(page)).ref, null);
+        assert.equal((await dialog(page)).title, "New idea");
+        assert.equal(await dialogName(page), "New idea");
         const plain = await refA11y(page);
         assert.equal(plain.kids, 0);
         assert.doesNotMatch(plain.description, /Follow-up/);
@@ -185,6 +191,7 @@ test("follow-up", { timeout: 240000 }, async (t) => {
         assert.deepEqual(await dialog(page), {
           open: true,
           ref: "Follow-up of 045-no-project",
+          title: "New follow-up idea",
           project: "",
           focus: "idea-text",
         });
@@ -204,9 +211,11 @@ test("follow-up", { timeout: 240000 }, async (t) => {
         assert.deepEqual(await dialog(page), {
           open: true,
           ref: "Follow-up of 042-sample-export",
+          title: "New follow-up idea",
           project: "sample",
           focus: "idea-text",
         });
+        assert.equal(await dialogName(page), "New follow-up idea");
         const ref = await refA11y(page);
         assert.match(ref.description, /^Follow-up of 042-sample-export/);
         assert.equal(ref.code, "042-sample-export");
