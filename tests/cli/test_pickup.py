@@ -1102,6 +1102,18 @@ class MoveEntryShapeTest(MoveFixture):
         self.assertEqual(self.pickup(), (0, "", ""))
         self.assertEqual((self.stopped, self.puts()), ([self.wt], []))
 
+    def test_list_at_on_the_top_level_entry_stops_once(self):
+        self.moved(at=["T1"], stopped=None)
+        code, out, err = self.pickup()
+        self.assertEqual((code, out, err), (0, "stopped 042-sample-export alpha: moved to studio-mac\n", ""))
+        self.assertEqual(self.stopped, [self.wt])
+        move = self.job("042-sample-export")["move"]
+        self.assertIsInstance(move["stopped"], str)
+        self.assertEqual(move["at"], ["T1"])
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.stopped, self.puts()), ([self.wt], []))
+
 
 class RerunTest(MoveHostTest):
     def setUp(self):
