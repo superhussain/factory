@@ -1097,7 +1097,6 @@ class MoveHostTest(PickupFixture):
         self.assertEqual((self.stopped, self.puts()), ([self.wt], []))
 
 
-
 class RerunTest(MoveHostTest):
     def setUp(self):
         super().setUp()
