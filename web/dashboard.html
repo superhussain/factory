@@ -3041,18 +3041,8 @@ async function openJob(id) {
   const pipeline = pipelineLabel(j);
   $('d-pipeline').textContent = pipeline;
   $('d-pipeline').hidden = !pipeline;
-  $('d-discard').hidden = j.stage !== 'idea';
-  $('d-move-host').hidden = !j.project || !MOVE_STAGES.includes(j.stage);
-  $('d-rerun').hidden = !canRerun(j);
-  $('d-prioritize').hidden = !j.project || !PRIORITY_STAGES.includes(j.stage) || !!j.priority;
-  $('d-remove-priority').hidden = !j.priority;
-  $('d-pause').hidden = !j.project || TERMINAL.includes(j.stage) || !!j.paused;
-  $('d-resume').hidden = !j.paused;
-  $('d-follow-up').hidden = j.stage === 'idea' || $('new-idea').hidden;
-  $('d-close-job').hidden = !j.project || j.stage === 'idea' || TERMINAL.includes(j.stage) || !!j.close;
-  const following = j.tracer?.follow === true;
-  $('d-follow-tracer').hidden = !j.project || !(TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) || following || !!tracerLink(j);
-  $('d-copy-link').hidden = false;
+  const shown = jobActionsFor(j);
+  for (const id of JOB_ACTIONS) $(id).hidden = !shown.includes(id);
   if (archived) for (const b of $('d-actions-menu').querySelectorAll('button')) b.hidden = b.id !== 'd-copy-link';
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
   if (first) {
@@ -3091,7 +3081,7 @@ async function openJob(id) {
     runs.forEach((u, i) => add(i ? '' : 'build ' + buildState(j) + ': ', u, 'run ' + u.match(/(\d+)$/)[1]));
   }
   renderDrawerLinks(j);
-  if (!tracerLink(j) && following) head.append((head.childNodes.length ? ' · ' : '') + 'Tracer: waiting for a device with tracer.json');
+  if (!tracerLink(j) && j.tracer?.follow === true) head.append((head.childNodes.length ? ' · ' : '') + 'Tracer: waiting for a device with tracer.json');
   const scope = tracerScopeText(j);
   if (scope) head.append((head.childNodes.length ? ' · ' : '') + scope);
   renderTracerTasks(j);
@@ -4487,6 +4477,25 @@ async function openIdeaEditor() {
 }
 
 const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-prioritize', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
+
+// The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
+function jobActionsFor(j) {
+  const shown = {
+    'd-edit-idea': canEditIdea(j),
+    'd-discard': j.stage === 'idea',
+    'd-follow-tracer': !!j.project && (TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) && j.tracer?.follow !== true && !tracerLink(j),
+    'd-move-host': !!j.project && MOVE_STAGES.includes(j.stage),
+    'd-rerun': canRerun(j),
+    'd-prioritize': !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
+    'd-remove-priority': !!j.priority,
+    'd-pause': !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
+    'd-resume': !!j.paused,
+    'd-copy-link': true,
+    'd-follow-up': j.stage !== 'idea' && !$('new-idea').hidden,
+    'd-close-job': !!j.project && j.stage !== 'idea' && !TERMINAL.includes(j.stage) && !j.close,
+  };
+  return JOB_ACTIONS.filter((id) => shown[id]);
+}
 
 let copyStatusTimer = 0;
 
