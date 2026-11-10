@@ -827,6 +827,9 @@ feature.
     `Recommend: approve`, then `Left in Paseo workspace <would_archive> when <id> merged:`,
     then one leftover per line, and run
     `python3 "$RUNTIME" backlog add "<slug>: Recover or drop what <id> left in Paseo workspace <would_archive> (follow-up-of <id>)" --context <file>`.
+    If that exits non-zero, skip the archive: patch
+    `{"note": "workspace kept: leftovers follow-up not queued: <stderr line>"}` and stop.
+    An `already in backlog:` line exits 0 and counts as queued.
     As the session's last command, run `python3 "$RUNTIME" archive-workspace "$SLUG/<id>"`.
     It archives this session's Paseo workspace when it is the job's own worktree workspace,
     whatever its git state, and can end the session. When the workspace archive leaves

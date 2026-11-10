@@ -56,7 +56,8 @@ while its reflog keeps that entry), and `git <verb> failed: <reason>` when a git
 or runs longer than 20 seconds. It lists at most 20, then `and <n> more`. Ignored
 files such as `.context/` scratch are not listed. `--check` runs the guards and prints
 `would_archive` with the leftovers, and never archives, so the session can queue a follow-up
-first. It then archives the session's agent when the workspace archive left it running.
+first. When that follow-up cannot be queued, the pipeline skips the archive and keeps the
+workspace. It then archives the session's agent when the workspace archive left it running.
 Without `PASEO_AGENT_ID`, a Paseo server id or `paseo` on PATH, it prints a skip and
 exits 0.
 
