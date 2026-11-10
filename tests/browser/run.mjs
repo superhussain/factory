@@ -389,6 +389,12 @@ async function capture(outdir, referencePath) {
                 body: JSON.stringify({ jobs, total: jobs.length }),
               });
             }
+            if (target.searchParams.get("id") === "411-sync-retry")
+              return request.respond({
+                status: 503,
+                contentType: "text/plain",
+                body: "unavailable",
+              });
             const found = target.searchParams.get("id") === CAPTURE_ARCHIVED.id;
             return request.respond({
               status: found ? 200 : 404,
@@ -650,6 +656,19 @@ async function capture(outdir, referencePath) {
     };
     await view("archive-prefill", 1280, 900, "light", openArchivePrefill);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
+    const openArchivedLoadFailed = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#411-sync-retry";
+      });
+      if (side === "after")
+        await page.waitForFunction(() =>
+          document
+            .getElementById("board-status")
+            .textContent.startsWith("Could not load archived job"),
+        );
+      else await new Promise((resolve) => setTimeout(resolve, 1000));
+    };
+    await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
     await view("archive-list", 1280, 900, "light", openArchiveList);
     await view("archive-list-mobile", 390, 844, "dark", openArchiveList);
     const openArchiveJumper = async (page, side) => {
