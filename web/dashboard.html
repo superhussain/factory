@@ -985,6 +985,10 @@ window.addEventListener('online', async () => {
 let loaded = false;
 // Archived jobs left the board. A link to one opens it read-only from GET /api/board/archive.
 const archivedJobs = new Map();
+// Ids the archive answered 404 for, so a link to one is fetched once per page session.
+const archiveMisses = new Set();
+// The id whose failed archive load was already reported, so retries on each poll stay quiet.
+let archiveFailNoted = '';
 // The board carries archived.max_id once the Worker has archived a job, so only then is there an archive to search.
 let boardArchived = false;
 // The jumper's one archive lookup: { query, status: 'loading' | 'done' | 'error', jobs, total }.
@@ -3118,20 +3122,30 @@ function drawerMeta(j) {
 }
 
 async function loadArchivedJob(id) {
+  if (archiveMisses.has(id)) return { job: null };
   try {
     const r = await fetch('./api/board/archive?id=' + encodeURIComponent(id), { cache: 'no-store' });
+    if (r.status === 404) {
+      archiveMisses.add(id);
+      return { job: null };
+    }
     const row = r.ok ? (await r.json()).jobs?.[0] : null;
-    if (row?.id !== id) return null;
+    if (row?.id !== id) return { job: null, failed: true };
     archivedJobs.set(id, row);
-    return row;
-  } catch { return null; }
+    return { job: row };
+  } catch { return { job: null, failed: true }; }
 }
 
 async function openJob(id) {
   let j = jobs.find((x) => x.id === id) ?? archivedJobs.get(id);
   if (!j && loaded) {
-    j = await loadArchivedJob(id);
+    const got = await loadArchivedJob(id);
     if (parseHash().id !== id) return;
+    j = got.job;
+    if (got.failed && archiveFailNoted !== id) {
+      archiveFailNoted = id;
+      showBoardStatus(`Could not load archived job ${id}. Retrying while the link stays open.`);
+    }
   }
   if (!j) return;
   const archived = !jobs.some((x) => x.id === id);
@@ -4038,6 +4052,7 @@ function syncDetail() {
 }
 
 window.addEventListener('hashchange', () => {
+  archiveFailNoted = '';
   const { id } = parseHash();
   if (id) openJob(id); else if (openId) closeDetail();
   renderRoute();
@@ -5710,7 +5725,7 @@ async function fetchReworkHistory(item) {
   const seen = new Set();
   for (let ref = next(item.refs); ref && !seen.has(ref.id) && seen.size < 20;) {
     seen.add(ref.id);
-    const j = known().find((x) => x.id === ref.id) ?? await loadArchivedJob(ref.id);
+    const j = known().find((x) => x.id === ref.id) ?? (await loadArchivedJob(ref.id)).job;
     if (j?.backlog?.decision !== 'rework') break;
     ref = next(j.refs);
   }
