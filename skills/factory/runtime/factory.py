@@ -2846,6 +2846,19 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
             print(line)
 
 
+def pickup_reason(home, project, paths, settings, device, dry):
+    """Why pickup on this host may not act on project, or None when it may."""
+    if project not in paths or not os.path.isdir(paths[project]):
+        return "no checkout on this host"
+    if project not in settings:
+        settings[project] = pickup_settings(home, project, paths[project], device)
+        if settings[project][2] and not dry:
+            print(f"factory.py: pickup skips {project}: {settings[project][2]}", file=sys.stderr)
+    enabled, hosts, why = settings[project]
+    return why or (None if enabled and device in hosts else
+                   "pickup off" if not enabled else f"pickup does not list host {device}")
+
+
 def move_stop_pass(home, data, device, paths, settings, dry, adapter):
     """Archive the Paseo sessions of, and stop the worktree of, each job the dashboard moved away
     from this host, and record it. Earlier holders of a chained move count too. Only when the project's
@@ -2857,16 +2870,7 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
         line = f"{job_id} {project}: " + (f"rerun on {device}" if m.get("to") == device else f"moved to {m.get('to')}")
-        if project not in paths or not os.path.isdir(paths[project]):
-            reason = "no checkout on this host"
-        else:
-            if project not in settings:
-                settings[project] = pickup_settings(home, project, paths[project], device)
-                if settings[project][2] and not dry:
-                    print(f"factory.py: pickup skips {project}: {settings[project][2]}", file=sys.stderr)
-            enabled, hosts, why = settings[project]
-            reason = why or (None if enabled and device in hosts else
-                             "pickup off" if not enabled else f"pickup does not list host {device}")
+        reason = pickup_reason(home, project, paths, settings, device, dry)
         if reason:
             if dry:
                 print(f"skip stop {job_id} {project}: {reason}")
@@ -4737,8 +4741,13 @@ def cleanup(target):
     repo = read_paths(home).get(slug)
     if not repo:
         fail(f"{home / 'paths.md'} has no entry for {slug}: run /factory init in this device's checkout of it", 4)
-    wt, branch = home / "worktrees" / slug / job_id, f"factory/{job_id}"
+    removed, left = cleanup_job(repo, home / "worktrees" / slug / job_id, f"factory/{job_id}")
+    print(json.dumps({"removed": removed, "left": left}, indent=2))
+    sys.exit(1 if left else 0)
 
+
+def cleanup_job(repo, wt, branch):
+    """Stop and remove a job's worktree, then delete its branch when merged. (removed, left)."""
     def run_git(*args):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
@@ -4786,8 +4795,7 @@ def cleanup(target):
                 removed.append(f"branch {branch}")
         if error:
             left.append(f"branch {branch}: {error}")
-    print(json.dumps({"removed": removed, "left": left}, indent=2))
-    sys.exit(1 if left else 0)
+    return removed, left
 
 
 TRACER_TIMEOUT_SECONDS = 5
