@@ -34,9 +34,19 @@ const JOBS = [
     branch: "factory/042-sample-export",
     round: 1,
     updated: "2026-01-01T00:00:00Z",
-    claim: { device: "host-a", session: "a1b2c3", since: "2026-01-01T10:00:00Z" },
+    claim: {
+      device: "host-a",
+      session: "a1b2c3",
+      since: "2026-01-01T10:00:00Z",
+    },
   },
-  { id: "044-closed", project: "sample", title: "Closed job", stage: "closed", updated: NOW },
+  {
+    id: "044-closed",
+    project: "sample",
+    title: "Closed job",
+    stage: "closed",
+    updated: NOW,
+  },
   { id: "045-no-project", title: "No project", stage: "build", updated: NOW },
   {
     id: "046-sample-pr",
@@ -53,6 +63,10 @@ const VIEWPORTS = [
   { width: 1280, height: 900, theme: "light" },
 ];
 const CARD = '.card[data-id="042-sample-export"]';
+const CLOSE_HINT =
+  " The close may have saved. Press Close job again with the same reason to check. It will not queue a second close.";
+// null sends board writes through, 'drop' aborts them unsent, 'land' sends then aborts the page's copy.
+let putMode = null;
 
 const freezeClock = (page) =>
   page.evaluateOnNewDocument(() => {
@@ -117,6 +131,26 @@ test("close job", { timeout: 240000 }, async (t) => {
       page.on("pageerror", (error) => errors.push(String(error)));
       await freezeClock(page);
       await controlBoardPolling(page);
+      await page.setBypassServiceWorker(true);
+      await page.setRequestInterception(true);
+      page.on("request", async (request) => {
+        if (request.method() !== "PUT" || new URL(request.url()).pathname !== "/api/board")
+          return request.continue();
+        const mode = putMode;
+        if (mode === "land") {
+          putMode = null;
+          const headers = request.headers();
+          await fetch(request.url(), {
+            method: "PUT",
+            headers: Object.fromEntries(
+              ["if-match", "if-none-match"].filter((h) => headers[h]).map((h) => [h, headers[h]]),
+            ),
+            body: request.postData(),
+          });
+        }
+        if (mode) return request.abort("failed");
+        return request.continue();
+      });
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
       await page.waitForSelector(CARD);
       const activate = (selector) =>
@@ -209,6 +243,59 @@ test("close job", { timeout: 240000 }, async (t) => {
         await seedBoard(origin, JOBS);
       });
 
+      const reseed = async () => {
+        await seedBoard(origin, JOBS);
+        await openDrawer(page, "042-sample-export");
+        await page.evaluate(() => window.fixtureBoardPoll());
+        await page.waitForFunction(
+          () => !document.getElementById("d-meta").textContent.endsWith(" · closing"),
+          wait,
+        );
+      };
+      const failedSave = async () => {
+        await activate("#close-job-save");
+        await page.waitForFunction(() => !document.getElementById("close-job-err").hidden, wait);
+        return errText(page);
+      };
+
+      await t.test(`a dropped save retries cleanly ${width}`, async () => {
+        await openDialog("042-sample-export");
+        const before = await boardText(origin);
+        putMode = "drop";
+        await page.type("#close-job-reason", REASON);
+        assert.match(await failedSave(), /^Not confirmed: /);
+        assert.equal(await boardText(origin), before);
+        await activate("#close-job-save");
+        await page.waitForSelector("#close-job-dlg:not([open])");
+        assert.deepEqual((await boardJob(origin, "042-sample-export")).close, {
+          reason: REASON,
+          at: NOW,
+        });
+      });
+
+      await t.test(`a landed save confirms on retry ${width}`, async () => {
+        await reseed();
+        await openDialog("042-sample-export");
+        putMode = "land";
+        await page.type("#close-job-reason", REASON);
+        const text = await failedSave();
+        assert.ok(text.startsWith("Not confirmed: "), text);
+        assert.ok(text.endsWith("." + CLOSE_HINT), text);
+        assert.deepEqual((await boardJob(origin, "042-sample-export")).close, {
+          reason: REASON,
+          at: NOW,
+        });
+        if (width === 390)
+          await (
+            await page.$("#close-job-dlg")
+          ).screenshot({ path: `${SHOTS}close-uncertain-390.png` });
+        const after = await boardText(origin);
+        await activate("#close-job-save");
+        await page.waitForSelector("#close-job-dlg:not([open])");
+        assert.equal(await boardText(origin), after);
+      });
+
+      await reseed();
       await t.test(`a valid reason writes close ${width}`, async () => {
         await openDialog("042-sample-export");
         assert.equal(await page.$eval("#close-job-reason", (el) => el.value), "");
