@@ -1078,6 +1078,8 @@ class MoveHostTest(MoveFixture):
                 self.assert_silent(self.pickup())
                 self.assertEqual(self.stopped, [])
 
+
+class MoveEntryShapeTest(MoveFixture):
     def test_null_stopped_still_runs_the_stop(self):
         self.moved(stopped=None)
         code, out, err = self.pickup()
