@@ -98,6 +98,37 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
           ?.textContent,
         peeks: document.querySelectorAll(".doc-peek").length,
       }));
+    const touches = (type, points) =>
+      cdp.send("Input.dispatchTouchEvent", {
+        type,
+        touchPoints: points.map(([x, y]) => ({ x, y })),
+        timestamp: clock / 1000,
+      });
+    const openFrame = async () => {
+      await page.click(".html-stepper-bar .btn");
+      let frame;
+      const deadline = Date.now() + 30000;
+      while (!frame && Date.now() < deadline) {
+        for (const f of page.frames()) {
+          if (f.detached || !f.url().split("#")[0].endsWith("/walkthrough.html")) continue;
+          const title = await f.$eval("#doc-title", (e) => e.textContent).catch(() => "");
+          if (title === "Batch ticket writes") frame = f;
+        }
+        if (!frame) await new Promise((r) => setTimeout(r, 100));
+      }
+      assert.ok(frame, "no live walkthrough frame");
+      const y = await frame.evaluate(() => {
+        const el = document.getElementById("title");
+        el.scrollIntoView({ block: "center" });
+        const r = el.getBoundingClientRect();
+        return Math.round(r.top + r.height / 2);
+      });
+      const top = await page.$eval(".html-stepper-frame", (el) => {
+        el.scrollIntoView({ block: "start" });
+        return el.getBoundingClientRect().top;
+      });
+      return { frame, y: Math.round(top + y) };
+    };
     const capture = (name) => captureDir && page.screenshot({ path: join(captureDir, name) });
     const stepY = () =>
       page.$eval("#d-doc .step-panel:not([hidden]) .step-title", (el) => {
@@ -151,36 +182,71 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
 
     await t.test("T5 left swipe in the frame shows frame step 2", async () => {
       await open();
-      await page.click(".html-stepper-bar .btn");
-      let frame;
-      const deadline = Date.now() + 30000;
-      while (!frame && Date.now() < deadline) {
-        for (const f of page.frames()) {
-          if (f.detached || !f.url().split("#")[0].endsWith("/walkthrough.html")) continue;
-          const title = await f.$eval("#doc-title", (e) => e.textContent).catch(() => "");
-          if (title === "Batch ticket writes") frame = f;
-        }
-        if (!frame) await new Promise((r) => setTimeout(r, 100));
-      }
-      assert.ok(frame, "no live walkthrough frame");
-      const y = await frame.evaluate(() => {
-        const el = document.getElementById("title");
-        el.scrollIntoView({ block: "center" });
-        const r = el.getBoundingClientRect();
-        return Math.round(r.top + r.height / 2);
-      });
-      const top = await page.$eval(".html-stepper-frame", (el) => {
-        el.scrollIntoView({ block: "start" });
-        return el.getBoundingClientRect().top;
-      });
+      const { frame, y } = await openFrame();
       const kicker = () => frame.$eval("#kicker", (e) => e.textContent);
       const before = await kicker();
-      await drag(line(300, 150, Math.round(top + y)), 16);
+      await drag(line(300, 150, y), 16);
       await settled();
       await capture("frame-swipe.png");
       assert.match(before, /Step 1 of 2/);
       assert.match(await kicker(), /Step 2 of 2/);
       assert.equal((await state()).tab, "spec.md");
+    });
+
+    await t.test("T6 a drag that becomes a pinch keeps frame step 1", async () => {
+      await open();
+      const { frame, y } = await openFrame();
+      for (const [type, points] of [
+        ["touchStart", [[300, y]]],
+        ["touchMove", [[270, y]]],
+        ["touchMove", [[240, y]]],
+        [
+          "touchStart",
+          [
+            [240, y],
+            [200, y + 60],
+          ],
+        ],
+        [
+          "touchMove",
+          [
+            [150, y],
+            [200, y + 60],
+          ],
+        ],
+        ["touchEnd", []],
+      ]) {
+        await touches(type, points);
+        await sleep(16);
+      }
+      await settled();
+      assert.match(await frame.$eval("#kicker", (e) => e.textContent), /Step 1 of 2/);
+    });
+
+    await t.test("T7 touchcancel drops the frame swipe", async () => {
+      await open();
+      const { frame, y } = await openFrame();
+      const kicker = () => frame.$eval("#kicker", (e) => e.textContent);
+      await touches("touchStart", [[300, y]]);
+      for (const point of line(300, 150, y)) {
+        await touches("touchMove", [point]);
+        await sleep(16);
+      }
+      await touches("touchCancel", []);
+      await settled();
+      assert.match(await kicker(), /Step 1 of 2/);
+      await drag(line(300, 150, y), 16);
+      await settled();
+      assert.match(await kicker(), /Step 2 of 2/);
+    });
+
+    await t.test("T8 swipe names stay out of the frame globals", async () => {
+      await open();
+      const { frame } = await openFrame();
+      assert.deepEqual(
+        await frame.evaluate(() => [typeof x0, typeof y0, typeof swiping, typeof sideways]),
+        ["undefined", "undefined", "undefined", "undefined"],
+      );
     });
 
     assert.deepEqual(errors, []);
