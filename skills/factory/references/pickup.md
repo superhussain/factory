@@ -36,9 +36,10 @@ Each run, in order:
   It is silent when there is nothing to do, and it never calls a model.
 - Caps in-flight work. On a host with a registry record, the cap is the host's
   `max_inflight` from Settings, Hosts, counted over this host's fresh claims in
-  every project. A `max_inflight` of 0 pauses pickup on that host, stall takeover included;
-  jobs already in flight and deny-notes launches keep running. Jobs waiting on a human
-  never count. `--max-inflight N` lowers it further. A host with no record caps each project at `--max-inflight`
+  every project. A `max_inflight` of 0 pauses pickup on that host, stall
+  takeover included; jobs already in flight and deny-notes launches keep
+  running. Jobs waiting on a human never count. `--max-inflight N` lowers it
+  further. A host with no record caps each project at `--max-inflight`
   (default 1), as before.
 - On a host paired with `factory.py host pair`, sends the host's status to
   the Worker after every run but `--dry-run`, failed runs included. It carries the OS,
