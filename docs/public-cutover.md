@@ -95,11 +95,11 @@ python3 tools/public-cutover.py --repo OWNER/factory --archive OWNER/factory-pri
 `--repoint-only` skips the checks and runs only the checkout step, so it needs
 at least one `--checkout`. It is safe to re-run: an existing `archive` remote
 is kept, branches already under `archive/` are not renamed again, and a re-run
-clears any upstream they still have. The renamed branches
-still hold private history; push them only to `archive`. Resume autonomy and
-pickup once every host is repointed. Until a host is repointed, pickup and
-`factory.py worktree` refuse it with an `unsafe checkout` line, so it claims,
-launches and recovers nothing.
+clears any upstream they still have. The renamed branches still hold private
+history; push them only to `archive`. Resume autonomy and pickup once every
+host is repointed. Until a host is repointed, pickup and `factory.py worktree`
+refuse it with an `unsafe checkout` line, so it claims, launches and recovers
+nothing.
 
 ## After
 
@@ -149,8 +149,13 @@ this section. Ctrl-C or Ctrl-D at the `done` prompt stops before the push.
 - The run stops after the push, for example at a failed `fetch` while
   repointing: do not re-run `--apply`, because the archive-name check now
   fails. Repoint each checkout with `--repoint-only`, as in Other hosts. If
-  `repo:` in `<home>/projects/<project>.md` is not `OWNER/factory`, set it, then
-  run `FACTORY_HOME=<factory-home> python3 <installed-skill>/runtime/factory.py push <project>`.
+  `repo:` in `<home>/projects/<project>.md` is not `OWNER/factory`, set it,
+  then push the project:
+
+  ```sh
+  FACTORY_HOME=<factory-home> python3 <installed-skill>/runtime/factory.py push <project>
+  ```
+
   Check the deploy with `gh run list -R OWNER/factory --workflow deploy-main.yml`.
   The next pull request runs `ci.yml`.
 - The deploy or CI watch fails after the push: the archive still holds the

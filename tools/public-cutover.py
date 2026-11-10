@@ -12,8 +12,8 @@ and variable value, pushes one commit, repoints each checkout, then watches
 deploy-main and ci. --repoint-only skips the checks and only repoints the given
 checkouts: it adds an archive remote, detaches at the new origin/main and renames
 every local branch origin/main cannot reach to archive/<name>, then clears the
-upstream of every archive/* branch. Only names of
-secrets and variables are read; values never pass through this script.
+upstream of every archive/* branch. Only names of secrets and variables are
+read; values never pass through this script.
 Exit 0 ok, 1 a check or step failed, 2 bad usage.
 """
 import argparse
@@ -113,6 +113,7 @@ def repoint(args, path):
                and run([*git, "merge-base", "--is-ancestor", name, "origin/main"]).returncode != 0]
     for name in private:
         act([*git, "branch", "-m", name, f"archive/{name}"])
+    # Each renamed branch under its new archive/ name, plus older archive/* branches, if it tracks an upstream.
     tracking = [f"archive/{name}" if name in private else name for name, upstream in refs
                 if upstream and (name in private or name.startswith("archive/"))]
     for name in tracking:
