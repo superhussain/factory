@@ -7,6 +7,7 @@ const person = { verified: true, kind: "user", email: "person@example.test" };
 const device = { verified: true, kind: "service" };
 const MODEL = "@cf/cloudflare/clef-flash";
 const REASON = "Rated by clef-flash against the project rules.";
+const NO_RULES_REASON = "Rated by clef-flash.";
 const RULES =
   "Pick up small report and export features. Hold anything that touches auth, deploy or billing.";
 const ITEM = "sample: Add CSV export to reports";
@@ -127,8 +128,13 @@ test("confidence at or above the threshold queues, below holds, and the prompt c
   const exact = setup({ reply: clef(0.796) });
   await exact.save("projects/sample", on({ rules: "" }));
   const queued = JSON.parse((await exact.triage({ item: ITEM })).text);
-  assert.equal(queued.decision, "queue");
-  assert.equal(queued.confidence, 80);
+  assert.deepEqual(queued, {
+    decision: "queue",
+    confidence: 80,
+    threshold: 80,
+    reason: NO_RULES_REASON,
+    model: MODEL,
+  });
   assert.equal(exact.runs[0][1].state, `<backlog-item trust="data">\n${ITEM}\n</backlog-item>`);
 
   const under = setup({ reply: clef(0.794) });
