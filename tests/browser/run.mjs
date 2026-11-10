@@ -464,7 +464,6 @@ async function capture(outdir, referencePath) {
     await view("jumper-desktop", 1440, 900, "light", openJumper);
     await view("jumper-mobile", 390, 844, "dark", openJumper);
     await view("idea-desktop", 1440, 900, "light", openIdea);
-    // The reference page's native select opens an OS popup that screenshots do not show.
     const openFilter = async (page) => {
       await page.click("#filter");
     };
