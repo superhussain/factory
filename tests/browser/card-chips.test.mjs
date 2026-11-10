@@ -116,6 +116,8 @@ test("card chips", { timeout: 120000 }, async (t) => {
 
     await (await page.$(WRAP)).screenshot({ path: `${SHOTS}chips-card-390.png` });
     await context.close();
-    assert.deepEqual(errors, []);
+    await t.test("no page errors", () => {
+      assert.deepEqual(errors, []);
+    });
   });
 });
