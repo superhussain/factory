@@ -827,7 +827,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
   <form id="move-host-form">
     <h2 id="move-host-h">Move to another host</h2>
     <p class="muted" id="move-host-help"></p>
-    <label id="move-host-label">Host<select id="move-host-select"></select></label>
+    <label id="move-host-label">Host<select id="move-host-select" aria-describedby="move-host-help"></select></label>
     <p class="muted" id="move-host-empty" hidden></p>
     <p class="err" id="move-host-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="move-host-cancel">Cancel</button><button class="btn primary" type="submit" id="move-host-save">Move job</button></div>
@@ -837,7 +837,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
   <form id="close-job-form">
     <h2 id="close-job-h">Close job</h2>
     <p class="muted" id="close-job-help"></p>
-    <label>Reason<input type="text" id="close-job-reason" maxlength="200" autocomplete="off"></label>
+    <label>Reason<input type="text" id="close-job-reason" maxlength="200" autocomplete="off" aria-describedby="close-job-help"></label>
     <p class="err" id="close-job-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="close-job-cancel">Cancel</button><button class="btn primary" type="submit" id="close-job-save">Close job</button></div>
   </form>
