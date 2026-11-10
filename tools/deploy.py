@@ -213,6 +213,7 @@ def project_wrangler(profile, source_root, output):
         "ai": {"binding": "AI"},
         "durable_objects": {"bindings": [{"name": "BoardEvents", "class_name": "BoardEvents"}]},
         "migrations": [{"tag": "v1", "new_sqlite_classes": ["BoardEvents"]}],
+        "triggers": {"crons": ["17 * * * *"]},
         "vars": {
             "FACTORY_ORIGIN": profile["origin"],
             "FACTORY_TITLE": profile["title"],
