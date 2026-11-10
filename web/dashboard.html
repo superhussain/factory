@@ -150,9 +150,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .filter-wrap { position: relative; }
   .filter-wrap:has(> #filter[hidden]) { display: none; }
-  .filter-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; min-width: 200px; max-width: calc(100vw - 32px); max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .filter-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; min-width: 200px; max-width: 360px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .filter-menu[hidden] { display: none; }
   .filter-menu label { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; font-size: 12px; white-space: nowrap; overflow: hidden; cursor: pointer; }
+  .filter-menu input { flex: none; accent-color: var(--accent); }
+  .filter-menu .filter-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .filter-menu label:hover, .filter-menu label:focus-within { background: var(--line); }
   @media (pointer: coarse) { .filter-menu label { min-height: 44px; } }
   .header-actions { display: flex; gap: inherit; }
@@ -450,7 +452,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .assignment { padding: 12px 20px; flex: none; }
 
   @media (max-width: 760px) {
-    header { padding: 14px 16px; gap: 10px; }
+    header { position: relative; padding: 14px 16px; gap: 10px; }
+    .filter-wrap { position: static; }
+    .filter-menu { left: 16px; right: 16px; min-width: 0; max-width: none; }
     :root { --icon-size: 32px; }
     .filter { padding: 4px 8px; }
 
@@ -1627,7 +1631,7 @@ function renderProjectFilter() {
     const box = Object.assign(document.createElement('input'), { type: 'checkbox' });
     box.dataset.project = key;
     const label = document.createElement('label');
-    label.append(box, ' ' + title);
+    label.append(box, Object.assign(document.createElement('span'), { className: 'filter-title', textContent: title, title }));
     return label;
   });
   $('filter-menu').replaceChildren(...rows());
