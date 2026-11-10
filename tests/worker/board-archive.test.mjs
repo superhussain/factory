@@ -108,7 +108,8 @@ test("an age pass moves 412, 413 and 416, archive first, and leaves a floor", as
   assert.equal(s.bucket.calls.slice(before).filter(([op]) => op === "put").length, 0);
 });
 
-test("Off, an invalid setting and every keep rule leave the board alone", async () => {
+test("Off, an invalid setting and every keep rule leave the board alone", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
   for (const archive of [null, { mode: "age" }, { mode: "weeks", n: 3 }]) {
     const s = setup({ archive });
     assert.deepEqual(await s.run(), { status: "off", moved: [] });
@@ -153,6 +154,7 @@ test("Off, an invalid setting and every keep rule leave the board alone", async 
     ],
   });
   assert.deepEqual((await done.run()).moved, ["510-deny-notes", "511-tracer"]);
+  assert.equal(warn.mock.calls.length, 0);
 });
 
 test("a count pass keeps the N newest finished rows", async () => {
@@ -167,7 +169,8 @@ test("a count pass keeps the N newest finished rows", async () => {
   assert.equal(s.read("board.json").archived.max_id, 413);
 });
 
-test("a lost board race loses nothing, reads hide board ids, and the next pass reconciles", async () => {
+test("a lost board race loses nothing, reads hide board ids, and the next pass reconciles", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
   const s = setup();
   const put = s.bucket.put;
   s.bucket.put = async (key, value, options) => {
@@ -179,6 +182,14 @@ test("a lost board race loses nothing, reads hide board ids, and the next pass r
     return put(key, value, options);
   };
   assert.deepEqual(await s.run(), { status: "conflict", moved: [] });
+  assert.deepEqual(
+    warn.mock.calls.map((c) => c.arguments),
+    [
+      [
+        "archive pass conflict: board.json changed during the pass; rows stay on the board until the next pass",
+      ],
+    ],
+  );
   s.bucket.put = put;
   assert.equal(s.read("board.json").jobs.length, 5);
   assert.equal(s.read("board-archive.json").jobs.length, 3);
@@ -192,12 +203,47 @@ test("a lost board race loses nothing, reads hide board ids, and the next pass r
     "412-fix-login",
     "413-old-suggestion",
   ]);
+  assert.equal(warn.mock.calls.length, 1);
   // A stale copy whose row stays on the board is dropped even when nothing moves.
   const stale = setup({ archive: { mode: "age", n: 1000 } });
   stale.seed("board-archive.json", { jobs: [ROWS[0]] });
   assert.deepEqual(await stale.run(), { status: "none", moved: [] });
   assert.deepEqual(stale.read("board-archive.json").jobs, []);
   assert.equal(stale.read("board.json").jobs.length, 5);
+  assert.equal(warn.mock.calls.length, 1);
+});
+
+test("a refused archive write warns with its cause and moves nothing", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const bad = setup();
+  bad.seed("board-archive.json", "{not json");
+  const bytes = (s) => [...s.bucket.objects.values()].map((o) => o.bytes.toString());
+  const before = bytes(bad);
+  assert.deepEqual(await bad.run(), { status: "conflict", moved: [] });
+  assert.deepEqual(
+    warn.mock.calls.map((c) => c.arguments),
+    [
+      [
+        "archive pass conflict: board-archive.json is not valid JSON or appeared during the pass; nothing moved",
+      ],
+    ],
+  );
+  assert.deepEqual(bytes(bad), before);
+
+  warn.mock.resetCalls();
+  const s = setup();
+  s.seed("board-archive.json", { jobs: [] });
+  const put = s.bucket.put;
+  s.bucket.put = async (key, value, options) => {
+    // Another writer replaces the archive between its read and the pass write.
+    if (key === "board-archive.json") await put(key, JSON.stringify({ jobs: [] }));
+    return put(key, value, options);
+  };
+  assert.deepEqual(await s.run(), { status: "conflict", moved: [] });
+  assert.deepEqual(
+    warn.mock.calls.map((c) => c.arguments),
+    [["archive pass conflict: board-archive.json changed during the pass; nothing moved"]],
+  );
 });
 
 test("the archive API serves id, page and q, and rejects bad queries", async () => {
