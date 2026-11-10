@@ -184,6 +184,46 @@ class PickupTest(PickupFixture):
         self.assertEqual(self.launched(), [])
         self.assertEqual(self.puts(), [])
 
+    def test_a_worker_error_in_the_tracer_build_pass_still_launches_ideas(self):
+        patch.object(factory, "tracer_follow_pass").start()
+        build = patch.object(factory, "tracer_build_pass").start()
+        cause = "factory.py: PUT https://factory.example.test/api/board returned 503: busy"
+        build.side_effect = lambda home: factory.fail(cause.removeprefix("factory.py: "), 5)
+        self.board["jobs"] = [idea("001-alpha", "alpha")]
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertEqual(err, cause + "\nfactory.py: Tracer build pass stopped; Building in Tracer marks wait for the next pickup run\n")
+        self.assertRegex(out, r"^launched 001-alpha alpha on primary session [0-9a-f]{6}\n$")
+        self.assertEqual(len(self.launched()), 1)
+        self.sweep.assert_called_once_with(self.home)
+
+    def test_a_worker_error_in_the_tracer_follow_pass_still_launches_ideas(self):
+        follow = patch.object(factory, "tracer_follow_pass").start()
+        build = patch.object(factory, "tracer_build_pass").start()
+        cause = "factory.py: GET https://factory.example.test/api/board returned 503: busy"
+        follow.side_effect = lambda home: factory.fail(cause.removeprefix("factory.py: "), 5)
+        self.board["jobs"] = [idea("001-alpha", "alpha")]
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertEqual(err, cause + "\nfactory.py: Tracer follow pass stopped; followed jobs wait for the next pickup run\n")
+        build.assert_called_once_with(self.home)
+        self.sweep.assert_called_once_with(self.home)
+        self.assertEqual(len(self.launched()), 1)
+
+    def test_a_non_worker_exit_in_a_tracer_pass_stops_pickup(self):
+        follow = patch.object(factory, "tracer_follow_pass").start()
+        build = patch.object(factory, "tracer_build_pass").start()
+        follow.side_effect = lambda home: factory.fail("boom", 2)
+        self.board["jobs"] = [idea("001-alpha", "alpha")]
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+        self.assertEqual(self.pickup()[0], 2)
+        build.assert_not_called()
+        self.sweep.assert_not_called()
+        self.assertEqual(self.launched(), [])
+        self.assertEqual(self.puts(), [])
+
     def test_dry_run_skips_the_backlog_triage_pass(self):
         self.assertEqual(self.pickup("--dry-run")[0], 0)
         self.sweep.assert_not_called()

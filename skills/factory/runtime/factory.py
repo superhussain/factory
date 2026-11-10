@@ -2693,7 +2693,8 @@ def pickup(*args):
     """Claim and launch runnable ideas, and builds that Tracer scope approval released, for the
     projects whose effective pipeline enables pickup on this host. Silent when there is nothing to
     do. Never calls a model itself; backlog triage asks the Worker, which does. No idea text
-    reaches a launcher's arguments, environment or log name."""
+    reaches a launcher's arguments, environment or log name. A Worker error inside a Tracer pass or
+    the triage sweep costs a warning, not the launches."""
     flags = {}
     i = 0
     while i < len(args):
@@ -2715,8 +2716,15 @@ def pickup(*args):
     failing = cached_status(home)[2]
     try:
         if not dry:
-            tracer_follow_pass(home)
-            tracer_build_pass(home)
+            for tracer_pass, stopped in (
+                    (tracer_follow_pass, "Tracer follow pass stopped; followed jobs wait for the next pickup run"),
+                    (tracer_build_pass, "Tracer build pass stopped; Building in Tracer marks wait for the next pickup run")):
+                try:
+                    tracer_pass(home)
+                except SystemExit as e:
+                    if e.code != 5:
+                        raise
+                    print(f"factory.py: {stopped}", file=sys.stderr)
             try:
                 backlog_triage_pass(home)
                 failing = None
