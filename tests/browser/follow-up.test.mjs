@@ -1,6 +1,7 @@
 // The drawer's Add follow-up idea item: which jobs show it, the dialog it opens, the board
 // write with a follow-up-of ref, and Cancel, against one owned local Worker, at mobile and
 // desktop width. Also captures the review images.
+// Also covers the read-only state and an empty menu after the job leaves the board.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -245,6 +246,37 @@ test("follow-up", { timeout: 240000 }, async (t) => {
         await page.waitForSelector("#d-actions-menu", { hidden: true });
         await page.$eval("#new-idea", (el) => (el.hidden = false));
       });
+
+      await t.test(`An empty job actions menu hides its toggle ${width}`, async () => {
+        await openDrawer(page, "042-sample-export");
+        await openJobActions(page);
+        await seedBoard(
+          origin,
+          JOBS.filter((j) => j.id !== "042-sample-export"),
+        );
+        await page.evaluate(() => window.fixtureBoardPoll());
+        await page.waitForFunction(() => document.getElementById("d-actions-wrap").hidden, wait);
+        assert.deepEqual(
+          {
+            ...(await page.evaluate(() => ({
+              wrap: document.getElementById("d-actions-wrap").hidden,
+              menu: document.getElementById("d-actions-menu").hidden,
+              expanded: document.getElementById("d-actions").getAttribute("aria-expanded"),
+              drawer: !document.getElementById("detail").hidden,
+            }))),
+            items: await visibleItems(page),
+          },
+          { wrap: true, menu: true, expanded: "false", items: [], drawer: true },
+        );
+      });
+
+      await t.test(
+        `The emptied menu moves focus to Close ${width}`,
+        { todo: "focus falls to body; 891-move-focus-to fixes syncJobActions" },
+        async () => {
+          assert.equal(await page.evaluate(() => document.activeElement.id), "d-close");
+        },
+      );
       await context.close();
     }
     assert.deepEqual(errors, []);
