@@ -4462,7 +4462,7 @@ let ideaEditorLoad = null;
 
 async function openIdeaEditor(ctx) {
   if (ideaEditor || ideaEditorLoad || !canEditIdea(jobs.find((j) => j.id === ctx.id))) return;
-  const loading = { id: ctx.id, ctx, read: ++boardReadVersion };
+  const loading = { id: ctx.id, read: ++boardReadVersion };
   ideaEditorLoad = loading;
   let message = 'Could not load the idea. Try again.';
   ctx.report('');
