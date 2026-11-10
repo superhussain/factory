@@ -319,13 +319,22 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .tracer-tasks summary { cursor: pointer; }
   .card.needs-you .note { color: var(--alert); }
   .card-wrap { position: relative; }
-  .card-wrap .card .id { padding-right: 64px; }
+  .card-wrap .card .id, .card-wrap .card .proj { padding-right: 28px; }
+  .card-wrap.has-pr .card .id { padding-right: 96px; }
+  .card-actions { position: absolute; top: 7px; right: 8px; width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+  .card-actions:hover, .card-actions:focus-visible { background: var(--line); }
+  .card-actions:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .card-actions svg { width: 16px; height: 16px; }
+  @media (pointer: coarse) { .card-actions::after { content: ""; position: absolute; inset: -8px -8px -8px -4px; } }
+  .card-actions-menu { position: fixed; right: auto; z-index: 30; }
+  .board-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .board-status[hidden] { display: none; }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
   .pr-link:hover { text-decoration: underline; }
   .pr-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   /* The text is ~15px tall; this invisible box makes a ~41px tap target without moving the layout. */
   .pr-link::after { content: ""; position: absolute; inset: -13px -8px; }
-  .card-wrap > .pr-link { position: absolute; top: 13px; right: 16px; }
+  .card-wrap > .pr-link { position: absolute; top: 13px; right: 48px; }
   .detail-head .links { flex: none; display: flex; gap: 16px; align-items: center; height: var(--icon-size); }
   .detail-head .btn { flex: none; }
   .job-actions { position: relative; flex: none; }
@@ -474,6 +483,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="status"><span id="updated">loading</span><span class="dot" id="dot" role="img" aria-label="connection" title="connection"></span></div>
 </header>
 <main class="board" id="board"></main>
+<div class="job-actions-menu card-actions-menu" id="card-actions-menu" role="menu" aria-label="Job actions" hidden></div>
+<p class="board-status" id="board-status" role="status" hidden></p>
 <aside class="detail" id="detail" hidden>
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
@@ -900,6 +911,7 @@ const backlogTriageLoading = new Set();
 const backlogDrafts = new Map(); // item.raw -> { pick, notes, answers }
 let backlogSaving = false;
 let drawerVersion = 0;
+let cardMenu = null; // the open card actions menu: { id, inNeeds }
 let openStamp = null;
 let files = [];
 // True while a newly opened job's files load, so a board re-read cannot mistake them for missing.
@@ -1192,7 +1204,7 @@ function refLine(r) {
   return esc(REF_KINDS[r.kind]) + ' ' + id;
 }
 
-// The link sits beside the button, not inside it, so a click on it never reaches the card handler.
+// The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
 // A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
 function card(j, inNeeds) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
@@ -1215,10 +1227,11 @@ function card(j, inNeeds) {
     (j.tracer?.building === true ? line('meta tracer-building', 'Building in Tracer') : '') +
     (ask && (inNeeds || !hiddenCardFields.has('note')) ? line('note', ask) : '') +
     chips(j.rounds) + '</button>';
-  const pr = prLink(j);
-  if (!pr || hiddenCardFields.has('pr')) return btn;
-  return '<div class="card-wrap">' + btn + '<a class="pr-link" href="' + esc(pr.url) +
-    '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub">PR #' + esc(pr.n) + '</a></div>';
+  const pr = hiddenCardFields.has('pr') ? null : prLink(j);
+  return '<div class="card-wrap' + (pr ? ' has-pr' : '') + '">' + btn +
+    (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub">PR #' + esc(pr.n) + '</a>' : '') +
+    '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
+    ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button></div>';
 }
 
 // Not a .card, so arrow-key card navigation skips it.
@@ -2683,6 +2696,7 @@ function renderBoard() {
       '<p>Jobs show up here as they move through the loop.</p></div>';
     $('board').style.removeProperty('--cols');
     if (!settingsShown) document.title = BASE_TITLE;
+    syncCardActions();
     return;
   }
   const shown = jobs.filter((j) => isShown(j.project));
@@ -2725,6 +2739,7 @@ function renderBoard() {
       $('board').querySelector('.column-toggle[data-stage="' + focusStage + '"]');
     control.focus({ preventScroll: true });
   }
+  syncCardActions();
 }
 
 $('board').addEventListener('click', (e) => {
@@ -2748,6 +2763,12 @@ $('board').addEventListener('click', (e) => {
   }
   const ref = e.target.closest('[data-ref]');
   if (ref) { location.hash = encodeURIComponent(ref.dataset.ref); return; }
+  const trigger = e.target.closest('.card-actions');
+  if (trigger) {
+    if (cardMenu && trigger === cardTrigger(cardMenu.id, cardMenu.inNeeds)) closeCardActions(true);
+    else openCardActions(trigger, 'first');
+    return;
+  }
   const c = e.target.closest('.card');
   if (c) location.hash = encodeURIComponent(c.dataset.id);
 });
@@ -3041,18 +3062,8 @@ async function openJob(id) {
   const pipeline = pipelineLabel(j);
   $('d-pipeline').textContent = pipeline;
   $('d-pipeline').hidden = !pipeline;
-  $('d-discard').hidden = j.stage !== 'idea';
-  $('d-move-host').hidden = !j.project || !MOVE_STAGES.includes(j.stage);
-  $('d-rerun').hidden = !canRerun(j);
-  $('d-prioritize').hidden = !j.project || !PRIORITY_STAGES.includes(j.stage) || !!j.priority;
-  $('d-remove-priority').hidden = !j.priority;
-  $('d-pause').hidden = !j.project || TERMINAL.includes(j.stage) || !!j.paused;
-  $('d-resume').hidden = !j.paused;
-  $('d-follow-up').hidden = j.stage === 'idea' || $('new-idea').hidden;
-  $('d-close-job').hidden = !j.project || j.stage === 'idea' || TERMINAL.includes(j.stage) || !!j.close;
-  const following = j.tracer?.follow === true;
-  $('d-follow-tracer').hidden = !j.project || !(TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) || following || !!tracerLink(j);
-  $('d-copy-link').hidden = false;
+  const shown = jobActionsFor(j);
+  for (const id of JOB_ACTIONS) $(id).hidden = !shown.includes(id);
   if (archived) for (const b of $('d-actions-menu').querySelectorAll('button')) b.hidden = b.id !== 'd-copy-link';
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
   if (first) {
@@ -3091,7 +3102,7 @@ async function openJob(id) {
     runs.forEach((u, i) => add(i ? '' : 'build ' + buildState(j) + ': ', u, 'run ' + u.match(/(\d+)$/)[1]));
   }
   renderDrawerLinks(j);
-  if (!tracerLink(j) && following) head.append((head.childNodes.length ? ' · ' : '') + 'Tracer: waiting for a device with tracer.json');
+  if (!tracerLink(j) && j.tracer?.follow === true) head.append((head.childNodes.length ? ' · ' : '') + 'Tracer: waiting for a device with tracer.json');
   const scope = tracerScopeText(j);
   if (scope) head.append((head.childNodes.length ? ' · ' : '') + scope);
   renderTracerTasks(j);
@@ -4449,19 +4460,18 @@ function boardSaveError(x, hint) {
 let ideaEditor = null;
 let ideaEditorLoad = null;
 
-async function openIdeaEditor() {
-  if (ideaEditor || ideaEditorLoad || !canEditIdea(jobs.find((j) => j.id === openId))) return;
-  const loading = { id: openId, version: drawerVersion, read: ++boardReadVersion, opener: $('d-actions') };
+async function openIdeaEditor(ctx) {
+  if (ideaEditor || ideaEditorLoad || !canEditIdea(jobs.find((j) => j.id === ctx.id))) return;
+  const loading = { id: ctx.id, read: ++boardReadVersion };
   ideaEditorLoad = loading;
-  const err = $('d-edit-idea-err');
   let message = 'Could not load the idea. Try again.';
-  err.hidden = true;
+  ctx.report('');
   syncIdeaEditor();
   try {
     const r = await fetch('./api/board', { cache: 'no-store' });
     if (!r.ok) throw new Error(message);
     const board = await r.json();
-    if (openId !== loading.id || drawerVersion !== loading.version) return;
+    if (!ctx.live()) return;
     if (loading.read !== boardReadVersion) throw new Error(message);
     const j = board.jobs.find((j) => j.id === loading.id);
     if (!j) message = 'This idea is no longer on the board. Your draft is still here.';
@@ -4470,16 +4480,13 @@ async function openIdeaEditor() {
     jobs = board.jobs;
     renderBoard();
     syncDetail();
-    ideaEditor = { id: j.id, originalText: j.idea, version: loading.version, opener: loading.opener, saving: false, error: '' };
+    ideaEditor = { id: j.id, originalText: j.idea, ctx, saving: false, error: '' };
     $('edit-idea-text').value = j.idea;
     syncIdeaEditor();
     $('edit-idea-dlg').showModal();
     $('edit-idea-text').focus();
   } catch (e) {
-    if (openId === loading.id && drawerVersion === loading.version) {
-      err.textContent = message;
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(message);
   } finally {
     ideaEditorLoad = null;
     syncIdeaEditor();
@@ -4487,6 +4494,79 @@ async function openIdeaEditor() {
 }
 
 const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-prioritize', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
+
+// The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
+function jobActionsFor(j) {
+  const shown = {
+    'd-edit-idea': canEditIdea(j),
+    'd-discard': j.stage === 'idea',
+    'd-follow-tracer': !!j.project && (TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) && j.tracer?.follow !== true && !tracerLink(j),
+    'd-move-host': !!j.project && MOVE_STAGES.includes(j.stage),
+    'd-rerun': canRerun(j),
+    'd-prioritize': !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
+    'd-remove-priority': !!j.priority,
+    'd-pause': !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
+    'd-resume': !!j.paused,
+    'd-copy-link': true,
+    'd-follow-up': j.stage !== 'idea' && !$('new-idea').hidden,
+    'd-close-job': !!j.project && j.stage !== 'idea' && !TERMINAL.includes(j.stage) && !j.close,
+  };
+  return JOB_ACTIONS.filter((id) => shown[id]);
+}
+
+// A runner's context. The drawer writes into its own lines and drops results once another job opens.
+function drawerAction(id) {
+  const version = drawerVersion;
+  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
+  return {
+    id: openId,
+    card: false,
+    button: $(id),
+    opener: () => $('d-actions'),
+    live: () => version === drawerVersion,
+    report: (text) => {
+      err.textContent = text;
+      err.hidden = !text;
+    },
+    status: id === 'd-copy-link' ? showCopyStatus : (text) => { $('d-rerun-status').textContent = text; },
+  };
+}
+
+// A card has no drawer, so its results go to the board toast.
+function cardAction(id, inNeeds) {
+  return { id, card: true, button: null, opener: () => cardTrigger(id, inNeeds), live: () => true, report: showBoardStatus, status: showBoardStatus };
+}
+
+// A dialog hands focus back to what opened it, if that is still there to take it.
+function focusOpener(opener) {
+  const el = opener();
+  const target = el?.isConnected && !el.disabled && el.getClientRects().length ? el
+    : !$('detail').hidden ? $('d-close') : $('job-jump');
+  target.focus();
+}
+
+let boardStatusTimer = 0;
+
+// A separate task sets the text after the toast empties, so a repeat is announced again.
+function showBoardStatus(text) {
+  clearTimeout(boardStatusTimer);
+  $('board-status').textContent = '';
+  $('board-status').hidden = !text;
+  if (!text) return;
+  boardStatusTimer = setTimeout(() => {
+    $('board-status').textContent = text;
+    boardStatusTimer = setTimeout(() => showBoardStatus(''), 6000);
+  }, 100);
+}
+
+function showCopyStatus(text) {
+  clearCopyStatus();
+  // A separate task empties the live region first, so a repeat copy is announced again.
+  copyStatusTimer = setTimeout(() => {
+    $('d-copy-status').textContent = text;
+    if (text === 'Copied') copyStatusTimer = setTimeout(clearCopyStatus, 2000);
+  }, 100);
+}
 
 let copyStatusTimer = 0;
 
@@ -4552,15 +4632,13 @@ function syncIdeaEditor() {
 
 function closeIdeaEditor() {
   if (!ideaEditor || ideaEditor.saving) return;
-  const opener = ideaEditor.opener;
+  const { opener } = ideaEditor.ctx;
   ideaEditor = null;
   $('edit-idea-dlg').close();
   $('edit-idea-text').value = '';
   $('edit-idea-err').textContent = '';
   $('edit-idea-err').hidden = true;
-  const target = opener.isConnected && !opener.disabled && opener.getClientRects().length ? opener
-    : !$('detail').hidden ? $('d-close') : $('job-jump');
-  target.focus();
+  focusOpener(opener);
 }
 
 const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
@@ -4683,10 +4761,10 @@ function closeJob(board, id, reason, now) {
 
 let moveHost = null;
 
-async function openMoveHost() {
-  const j = jobs.find((x) => x.id === openId);
+async function openMoveHost(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
   if (moveHost || !j) return;
-  moveHost = { id: j.id, opener: $('d-actions') };
+  moveHost = { id: j.id, opener: ctx.opener };
   const select = $('move-host-select');
   const err = $('move-host-err');
   const empty = $('move-host-empty');
@@ -4735,10 +4813,9 @@ function closeMoveHost() {
   const opener = moveHost.opener;
   moveHost = null;
   $('move-host-dlg').close();
-  opener.focus();
+  focusOpener(opener);
 }
 
-$('d-move-host').addEventListener('click', openMoveHost);
 $('move-host-cancel').addEventListener('click', closeMoveHost);
 $('move-host-dlg').addEventListener('cancel', (e) => { e.preventDefault(); closeMoveHost(); });
 $('move-host-form').addEventListener('submit', async (e) => {
@@ -4765,10 +4842,10 @@ $('move-host-form').addEventListener('submit', async (e) => {
 
 let closeDialog = null;
 
-function openCloseDialog() {
-  const j = jobs.find((x) => x.id === openId);
+function openCloseDialog(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
   if (closeDialog || !j) return;
-  closeDialog = { id: j.id, opener: $('d-actions') };
+  closeDialog = { id: j.id, opener: ctx.opener };
   $('close-job-help').textContent = j.id + ' stops at ' + j.stage + '. The next pickup run writes decision.md with your reason, then moves the job to Closed. If a session is running it, the close waits for that session to stop.';
   $('close-job-reason').value = '';
   $('close-job-err').textContent = '';
@@ -4783,10 +4860,9 @@ function dismissCloseDialog() {
   const opener = closeDialog.opener;
   closeDialog = null;
   $('close-job-dlg').close();
-  opener.focus();
+  focusOpener(opener);
 }
 
-$('d-close-job').addEventListener('click', openCloseDialog);
 $('close-job-cancel').addEventListener('click', dismissCloseDialog);
 $('close-job-dlg').addEventListener('cancel', (e) => { e.preventDefault(); dismissCloseDialog(); });
 $('close-job-form').addEventListener('submit', async (e) => {
@@ -4810,7 +4886,6 @@ $('close-job-form').addEventListener('submit', async (e) => {
   await poll();
 });
 
-$('d-edit-idea').addEventListener('click', openIdeaEditor);
 $('d-actions').addEventListener('click', () => {
   if ($('d-actions-menu').hidden) openJobActions('first'); else closeJobActions(true);
 });
@@ -4863,15 +4938,15 @@ $('edit-idea-form').addEventListener('submit', async (e) => {
   }
   session.saving = false;
   closeIdeaEditor();
-  if (openId !== edit.id || drawerVersion !== session.version) return;
+  if (!session.ctx.live()) return;
   const refreshed = await poll();
-  if (openId !== edit.id || drawerVersion !== session.version) return;
+  if (!session.ctx.live()) return;
   const j = jobs.find((j) => j.id === edit.id);
   if (!refreshed || j?.idea !== edit.text || j?.title !== ideaTitle(edit.text)) {
-    $('d-edit-idea-err').textContent = 'Changes saved. Refresh to see the latest board.';
-    $('d-edit-idea-err').hidden = false;
+    session.ctx.report('Changes saved. Refresh to see the latest board.');
     return;
   }
+  if (session.ctx.card) return;
   activeFile = 'idea.md';
   renderDetail();
   writeHash();
@@ -4892,10 +4967,10 @@ function openIdeaDialog(followUp = null) {
   if (followUp) $('idea-text').focus();
 }
 $('new-idea').addEventListener('click', () => openIdeaDialog());
-$('d-follow-up').addEventListener('click', () => {
-  const j = jobs.find((x) => x.id === openId);
+function followUpAction(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
   if (j) openIdeaDialog(j);
-});
+}
 // Opened from the jumper, Escape should return to where the user was before Cmd+K.
 let ideaFromPicker = false;
 $('idea-dlg').addEventListener('close', () => {
@@ -4933,85 +5008,64 @@ $('d-assign').addEventListener('click', async () => {
     }
   }
 });
-$('d-prioritize').addEventListener('click', async () => {
-  const id = openId;
-  const version = drawerVersion;
-  const err = $('d-prioritize-err');
-  err.hidden = true;
-  $('d-prioritize').disabled = true;
+async function prioritizeAction(ctx) {
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const message = prioritizeJob(board, id, isoNow());
+      const message = prioritizeJob(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
     await poll();
   } catch (x) {
-    if (version === drawerVersion) {
-      err.textContent = String(x.message || x);
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(String(x.message || x));
   } finally {
-    $('d-prioritize').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
-$('d-remove-priority').addEventListener('click', async () => {
-  const id = openId;
-  const version = drawerVersion;
-  const err = $('d-prioritize-err');
-  err.hidden = true;
-  $('d-remove-priority').disabled = true;
+}
+async function removePriorityAction(ctx) {
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const message = removePriority(board, id, isoNow());
+      const message = removePriority(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
     await poll();
   } catch (x) {
-    if (version === drawerVersion) {
-      err.textContent = String(x.message || x);
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(String(x.message || x));
   } finally {
-    $('d-remove-priority').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
-$('d-pause').addEventListener('click', async () => {
-  const id = openId;
-  const version = drawerVersion;
-  const err = $('d-pause-err');
-  err.hidden = true;
-  $('d-pause').disabled = true;
+}
+async function pauseAction(ctx) {
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const message = pauseJob(board, id, isoNow());
+      const message = pauseJob(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
     await poll();
   } catch (x) {
-    if (version === drawerVersion) {
-      err.textContent = String(x.message || x);
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(String(x.message || x));
   } finally {
-    $('d-pause').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
-$('d-rerun').addEventListener('click', async () => {
-  const j = jobs.find((x) => x.id === openId);
+}
+async function rerunAction(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
   if (!j || !canRerun(j)) return;
   const id = j.id;
-  const version = drawerVersion;
   const host = j.claim.device;
-  const err = $('d-rerun-err');
-  const status = $('d-rerun-status');
-  err.hidden = true;
-  $('d-rerun').disabled = true;
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
   try {
     let listed;
-    status.textContent = 'Checking ' + host + '…';
+    ctx.status('Checking ' + host + '…');
     try {
       const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
       if (!h.ok || !p.ok) throw new Error('load');
@@ -5020,7 +5074,7 @@ $('d-rerun').addEventListener('click', async () => {
     } catch {
       throw new Error('Could not check ' + host + '. Try again.');
     } finally {
-      if (version === drawerVersion) status.textContent = '';
+      if (ctx.live()) ctx.status('');
     }
     if (!listed) throw new Error(host + ' does not run pickup for ' + j.project + ', so nothing would restart the job. Use Move to another host instead.');
     if (!confirm('Rerun the ' + j.stage + ' stage of ' + id + ' on ' + host + '? This stops its current session. The next pickup run on ' + host + ' starts the stage again in a fresh session.')) return;
@@ -5030,53 +5084,36 @@ $('d-rerun').addEventListener('click', async () => {
     });
     await poll();
   } catch (x) {
-    if (version === drawerVersion) {
-      err.textContent = String(x.message || x);
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(String(x.message || x));
   } finally {
-    $('d-rerun').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
-$('d-resume').addEventListener('click', async () => {
-  const id = openId;
-  const version = drawerVersion;
-  const err = $('d-pause-err');
-  err.hidden = true;
-  $('d-resume').disabled = true;
+}
+async function resumeAction(ctx) {
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const message = resumeJob(board, id, isoNow());
+      const message = resumeJob(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
     await poll();
   } catch (x) {
-    if (version === drawerVersion) {
-      err.textContent = String(x.message || x);
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(String(x.message || x));
   } finally {
-    $('d-resume').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
-$('d-copy-link').addEventListener('click', async () => {
-  const id = openId;
-  const version = drawerVersion;
+}
+async function copyLinkAction(ctx) {
   let copied = true;
   try {
-    await navigator.clipboard.writeText(jobLink(id));
+    await navigator.clipboard.writeText(jobLink(ctx.id));
   } catch {
     copied = false;
   }
-  if (version !== drawerVersion) return;
-  clearCopyStatus();
-  // A separate task empties the live region first, so a repeat copy is announced again.
-  copyStatusTimer = setTimeout(() => {
-    $('d-copy-status').textContent = copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.';
-    if (copied) copyStatusTimer = setTimeout(clearCopyStatus, 2000);
-  }, 100);
-});
+  if (ctx.live()) ctx.status(copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.');
+}
 $('idea-cancel').addEventListener('click', () => { if (!locked()) $('idea-dlg').close(); });
 // Escape closes the dialog like Cancel, except while a save runs or a submission is
 // unresolved: an uncertain commit keeps its snapshot, and closing would destroy it.
@@ -5334,10 +5371,10 @@ $('idea-form').addEventListener('submit', async (e) => {
   if (!jobs.some((j) => j.id === id)) alert('Idea ' + id + ' was saved, but the board could not be refreshed. Reload the page to see it.');
 });
 
-$('d-discard').addEventListener('click', async () => {
-  const id = openId;
+async function discardAction(ctx) {
+  const { id } = ctx;
   if (!confirm('Discard idea ' + id + '? It moves to closed.')) return;
-  $('d-discard').disabled = true;
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
       const err = discardIdea(board, id, isoNow());
@@ -5347,16 +5384,15 @@ $('d-discard').addEventListener('click', async () => {
   } catch (x) {
     alert(String(x.message || x));
   } finally {
-    $('d-discard').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
+}
 
-$('d-follow-tracer').addEventListener('click', async () => {
-  const id = openId;
-  $('d-follow-tracer').disabled = true;
+async function followTracerAction(ctx) {
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const err = followTracer(board, id, isoNow());
+      const err = followTracer(board, ctx.id, isoNow());
       if (err === 'unchanged') return BOARD_UNCHANGED;
       if (err) throw new Error(err + ', so nothing was changed.');
     });
@@ -5364,9 +5400,119 @@ $('d-follow-tracer').addEventListener('click', async () => {
   } catch (x) {
     alert(String(x.message || x));
   } finally {
-    $('d-follow-tracer').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
+  }
+}
+
+const JOB_ACTION_RUN = {
+  'd-edit-idea': openIdeaEditor,
+  'd-discard': discardAction,
+  'd-follow-tracer': followTracerAction,
+  'd-move-host': openMoveHost,
+  'd-rerun': rerunAction,
+  'd-prioritize': prioritizeAction,
+  'd-remove-priority': removePriorityAction,
+  'd-pause': pauseAction,
+  'd-resume': resumeAction,
+  'd-copy-link': copyLinkAction,
+  'd-follow-up': followUpAction,
+  'd-close-job': openCloseDialog,
+};
+for (const id of JOB_ACTIONS) $(id).addEventListener('click', () => JOB_ACTION_RUN[id](drawerAction(id)));
+
+// One menu for every card. It lives outside #board, so a poll redraw keeps it and syncCardActions re-finds its trigger.
+function buildCardActionsMenu() {
+  $('card-actions-menu').innerHTML = JOB_ACTIONS.map((id) =>
+    '<button class="btn" role="menuitem" tabindex="-1" data-action="' + id + '">' + esc($(id).textContent) + '</button>').join('');
+}
+buildCardActionsMenu();
+
+function cardTrigger(id, inNeeds) {
+  return [...$('board').querySelectorAll('.card-actions')].find((b) => b.dataset.actions === id && b.hasAttribute('data-in-needs') === inNeeds) ?? null;
+}
+
+const cardActionItems = () => [...$('card-actions-menu').children].filter((b) => !b.hidden);
+
+function openCardActions(trigger, focus) {
+  closeCardActions(false);
+  cardMenu = { id: trigger.dataset.actions, inNeeds: trigger.hasAttribute('data-in-needs') };
+  syncCardActions(focus);
+}
+
+function closeCardActions(refocus) {
+  if (!cardMenu) return;
+  const trigger = cardTrigger(cardMenu.id, cardMenu.inNeeds);
+  cardMenu = null;
+  $('card-actions-menu').hidden = true;
+  trigger?.setAttribute('aria-expanded', 'false');
+  if (refocus) trigger?.focus();
+}
+
+// Refreshes the open menu after a redraw: same trigger, current items, or closed when either is gone.
+function syncCardActions(focus) {
+  if (!cardMenu) return;
+  const trigger = cardTrigger(cardMenu.id, cardMenu.inNeeds);
+  const j = jobs.find((x) => x.id === cardMenu.id);
+  if (!trigger || !j) {
+    closeCardActions(false);
+    return;
+  }
+  const shown = jobActionsFor(j);
+  for (const b of $('card-actions-menu').children) b.hidden = !shown.includes(b.dataset.action);
+  trigger.setAttribute('aria-expanded', 'true');
+  $('card-actions-menu').hidden = false;
+  placeCardActions(trigger);
+  const items = cardActionItems();
+  if (focus) (focus === 'last' ? items[items.length - 1] : items[0])?.focus();
+}
+
+// Below the trigger when it fits, else above, right edges aligned, 8px inside the viewport.
+function placeCardActions(trigger) {
+  const menu = $('card-actions-menu');
+  const t = trigger.getBoundingClientRect();
+  const { width, height } = menu.getBoundingClientRect();
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  const top = t.bottom + 4 + height <= vh - 8 ? t.bottom + 4 : t.top - 4 - height;
+  menu.style.top = Math.max(8, Math.min(top, vh - 8 - height)) + 'px';
+  menu.style.left = Math.max(8, Math.min(t.right - width, vw - 8 - width)) + 'px';
+}
+
+$('board').addEventListener('keydown', (e) => {
+  const trigger = e.target.closest('.card-actions');
+  if (!trigger || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+  e.preventDefault();
+  openCardActions(trigger, e.key === 'ArrowDown' ? 'first' : 'last');
+});
+$('card-actions-menu').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-action]');
+  if (!item || !cardMenu) return;
+  const { id, inNeeds } = cardMenu;
+  closeCardActions(true);
+  JOB_ACTION_RUN[item.dataset.action](cardAction(id, inNeeds));
+});
+$('card-actions-menu').addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  const items = cardActionItems();
+  const at = items.indexOf(document.activeElement);
+  const to = { ArrowDown: items[(at + 1) % items.length], ArrowUp: items[(at - 1 + items.length) % items.length], Home: items[0], End: items[items.length - 1] }[e.key];
+  if (to) {
+    e.preventDefault();
+    to.focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeCardActions(true);
+  } else if (e.key === 'Tab') {
+    closeCardActions(true);
   }
 });
+document.addEventListener('pointerdown', (e) => {
+  if (cardMenu && !$('card-actions-menu').contains(e.target) && !e.target.closest('.card-actions')) closeCardActions(false);
+});
+document.addEventListener('scroll', (e) => {
+  if (cardMenu && !$('card-actions-menu').contains(e.target)) closeCardActions(false);
+}, true);
+window.addEventListener('resize', () => closeCardActions(false));
 
 function openBacklogItem(item) {
   drawerVersion++;
