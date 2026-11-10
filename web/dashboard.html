@@ -807,6 +807,21 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
       <div class="reference-scroll"><table class="reference-table" id="reference-links" aria-label="Agent link kinds">
         <thead><tr><th scope="col">Agent link kind</th><th scope="col">Label</th></tr></thead><tbody></tbody>
       </table></div>
+      <h4 id="reference-keys-heading">Keyboard shortcuts</h4>
+      <p class="muted">Single keys work on the board when no dialog is open and no text field has focus.</p>
+      <div class="reference-scroll"><table class="reference-table" id="reference-keys" aria-labelledby="reference-keys-heading">
+        <thead><tr><th scope="col">Key</th><th scope="col">What it does</th></tr></thead><tbody>
+          <tr><td>J or /</td><td>Open the jumper</td></tr>
+          <tr><td>⌘K or Ctrl+K</td><td>Open the jumper</td></tr>
+          <tr><td>N</td><td>New idea</td></tr>
+          <tr><td>P</td><td>Select project</td></tr>
+          <tr><td>S</td><td>Open Settings</td></tr>
+          <tr><td>A</td><td>Open the jumper with actions for the hovered or focused job card</td></tr>
+          <tr><td>B</td><td>Open the first backlog item</td></tr>
+          <tr><td>A or D</td><td>Approve or deny the open backlog item</td></tr>
+          <tr><td>Right or Left arrow</td><td>Move between cards and job pages</td></tr>
+        </tbody>
+      </table></div>
     </section>
   </div>
 </div>
@@ -1210,7 +1225,7 @@ function card(j, inNeeds) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') +
-    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '">' +
+    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '" title="Press A for job actions" aria-keyshortcuts="a">' +
     '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span>' +
       (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
@@ -1255,6 +1270,7 @@ const JOB_PICKER_STAGES = ['idea', 'spec', 'build', 'review', 'approve', 'pr-ope
 let selectedKey = null;
 let pickerFocus = null;
 let pickerMode = 'job';
+let pickerActions = null; // { id, inNeeds } while pickerMode is 'actions'
 let savedJobQuery = '';
 const optionIds = new Map();
 
@@ -1302,11 +1318,13 @@ function jobResultSection(j) {
 
 function renderJobResults() {
   const projectMode = pickerMode === 'project';
-  $('job-picker-heading').textContent = projectMode ? 'Select project' : 'Jump to job';
-  $('job-search-label').textContent = projectMode ? 'Search projects' : 'Search jobs';
-  $('job-results').setAttribute('aria-label', projectMode ? 'Projects' : 'Jobs');
+  const actionsMode = pickerMode === 'actions';
+  $('job-picker-heading').textContent = projectMode ? 'Select project' : actionsMode ? 'Actions for ' + pickerActions.id : 'Jump to job';
+  $('job-search-label').textContent = projectMode ? 'Search projects' : actionsMode ? 'Search actions' : 'Search jobs';
+  $('job-results').setAttribute('aria-label', projectMode ? 'Projects' : actionsMode ? 'Actions' : 'Jobs');
   $('job-picker-back').hidden = !projectMode;
   if (projectMode) return renderProjectResults();
+  if (actionsMode) return renderJobActionResults();
   const query = $('job-search').value.trim().toLowerCase();
   const actions = actionRows(query);
   const matched = jobs.filter((j) => [j.id, j.title, j.project, projectName(j)]
@@ -1416,11 +1434,13 @@ function openJobPicker() {
 }
 
 function closeJobPicker(activate = false) {
+  const card = pickerActions && boardCard(pickerActions.id, pickerActions.inNeeds);
   pickerMode = 'job';
+  pickerActions = null;
   savedJobQuery = '';
   $('job-picker').close();
   $('job-search').setAttribute('aria-expanded', 'false');
-  if (!activate) (pickerFocus?.isConnected ? pickerFocus : $('job-jump')).focus();
+  if (!activate) (card || (pickerFocus?.isConnected ? pickerFocus : $('job-jump'))).focus();
 }
 
 function activateJobResult() {
@@ -1446,6 +1466,14 @@ function activateJobResult() {
     document.body.append(a);
     a.click();
     a.remove();
+    return;
+  }
+  if (row.kind === 'job-action') {
+    const { id, inNeeds } = pickerActions;
+    const j = jobs.find((x) => x.id === id);
+    if (!j || !jobActionsFor(j).includes(row.action)) return renderJobResults();
+    closeJobPicker();
+    JOB_ACTION_RUN[row.action](cardAction(id, inNeeds));
     return;
   }
   if (row.key === 'command:select-project') return openProjectPicker();
@@ -3792,7 +3820,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && openId && !document.querySelector('dialog[open]')) closeDetail();
 });
 
-// Arrow navigation over cards and job pages, plus n, j or /, p and s single-key openers.
+// Arrow navigation over cards and job pages, plus n, j or /, p, s and a single-key openers.
 // A separate listener, so the Esc/Cmd+K handler above stays byte-identical.
 function handleBoardKeys(e) {
   if (settingsRoute() !== null) return;
@@ -3840,6 +3868,12 @@ function handleBoardKeys(e) {
   } else if (e.key === 's') {
     e.preventDefault();
     location.hash = '#/settings/projects';
+  } else if (e.key === 'a') {
+    if (openBacklogRaw !== null) return;
+    const target = cardShortcutTarget(e);
+    if (!target) return;
+    e.preventDefault();
+    openJobActionsPicker(target.id, target.inNeeds);
   }
 }
 document.addEventListener('keydown', handleBoardKeys);
@@ -5431,6 +5465,38 @@ function cardTrigger(id, inNeeds) {
   return [...$('board').querySelectorAll('.card-actions')].find((b) => b.dataset.actions === id && b.hasAttribute('data-in-needs') === inNeeds) ?? null;
 }
 
+function boardCard(id, inNeeds) {
+  return [...$('board').querySelectorAll('.card')].find((c) => c.dataset.id === id && c.classList.contains('needs-you') === inNeeds) ?? null;
+}
+
+// The jumper in actions mode lists what the card menu lists for one job.
+function openJobActionsPicker(id, inNeeds) {
+  if (document.querySelector('dialog[open]')) return;
+  closeCardActions(false);
+  pickerMode = 'actions';
+  pickerActions = { id, inNeeds };
+  savedJobQuery = '';
+  pickerFocus = null;
+  $('job-search').value = '';
+  selectedKey = null;
+  $('job-picker').showModal();
+  $('job-search').setAttribute('aria-expanded', 'true');
+  renderJobResults();
+  $('job-search').focus();
+}
+
+function renderJobActionResults() {
+  const j = jobs.find((x) => x.id === pickerActions.id);
+  const tokens = $('job-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  jobResults = (j ? jobActionsFor(j) : []).map((action) => ({
+    kind: 'job-action', key: 'job-action:' + action, action, title: $(action).textContent, meta: 'Action · ' + j.id,
+  })).filter((r) => tokens.every((t) => r.title.toLowerCase().includes(t)));
+  $('job-count').textContent = jobResults.length + (jobResults.length === 1 ? ' action' : ' actions');
+  $('job-empty').textContent = j ? 'No matching actions' : 'This job is no longer on the board';
+  $('job-empty').hidden = jobResults.length !== 0;
+  renderPickerRows();
+}
+
 const cardActionItems = () => [...$('card-actions-menu').children].filter((b) => !b.hidden);
 
 function openCardActions(trigger, focus) {
@@ -5484,6 +5550,22 @@ $('board').addEventListener('keydown', (e) => {
   e.preventDefault();
   openCardActions(trigger, e.key === 'ArrowDown' ? 'first' : 'last');
 });
+
+// The card under a mouse or pen. Ids survive a poll redraw; nodes do not.
+let hoveredCard = null;
+$('board').addEventListener('pointerover', (e) => {
+  if (e.pointerType === 'touch') return;
+  const c = e.target.closest('.card-wrap')?.querySelector('.card');
+  hoveredCard = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : null;
+});
+$('board').addEventListener('pointerleave', () => { hoveredCard = null; });
+
+// A focused card wins over a hovered one.
+function cardShortcutTarget(e) {
+  const c = e.target.closest?.('#board .card-wrap')?.querySelector('.card');
+  const target = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : hoveredCard;
+  return target && jobs.some((x) => x.id === target.id) ? target : null;
+}
 $('card-actions-menu').addEventListener('click', (e) => {
   const item = e.target.closest('[data-action]');
   if (!item || !cardMenu) return;
