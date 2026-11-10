@@ -91,12 +91,12 @@ const openDrawer = async (page, id) => {
 };
 const boardJob = async (origin, id) =>
   (await (await fetch(origin + "/api/board")).json()).jobs.find((j) => j.id === id);
-// The drawer head plus the open menu, which hangs below it.
-const headAndMenu = (page) =>
-  page.evaluate(() => {
-    const boxes = [".detail-head", "#d-actions-menu:not([hidden])"]
+// The drawer head plus one element below it, such as the open menu.
+const headAnd = (page, extra) =>
+  page.evaluate((extra) => {
+    const boxes = [".detail-head", extra]
       .map((s) => document.querySelector(s)?.getBoundingClientRect())
-      .filter(Boolean);
+      .filter((b) => b && b.height);
     const x = Math.min(...boxes.map((b) => b.left));
     const y = Math.min(...boxes.map((b) => b.top));
     return {
@@ -105,7 +105,7 @@ const headAndMenu = (page) =>
       width: Math.max(...boxes.map((b) => b.right)) - x,
       height: Math.max(...boxes.map((b) => b.bottom)) - y + 4,
     };
-  });
+  }, extra);
 
 test("rerun stage", { timeout: 240000 }, async (t) => {
   await prepareAssets();
@@ -122,6 +122,8 @@ test("rerun stage", { timeout: 240000 }, async (t) => {
       await seedBoard(origin, JOBS);
       let pickupHosts = ["lab-linux", "studio-mac"];
       let effectiveFails = false;
+      let holdEffective = null;
+      let effectiveSeen = null;
       const context = await browser.createBrowserContext();
       const page = await context.newPage();
       await page.setViewport(viewport);
@@ -130,8 +132,12 @@ test("rerun stage", { timeout: 240000 }, async (t) => {
       await freezeClock(page);
       await blockLiveEvents(page);
       await serveHostList(page, HOSTS);
-      page.on("request", (request) => {
+      // Puppeteer already runs each request handler as an intercept action, so awaiting the
+      // hold here keeps the reply pending until the test releases it.
+      page.on("request", async (request) => {
         if (new URL(request.url()).pathname !== "/api/pipeline/effective/sample") return;
+        effectiveSeen?.();
+        if (holdEffective) await holdEffective;
         return effectiveFails
           ? request.respond({ status: 500, body: "fixture failure" }, 1)
           : request.respond(
@@ -181,7 +187,7 @@ test("rerun stage", { timeout: 240000 }, async (t) => {
         if (width === 390)
           await page.screenshot({
             path: `${SHOTS}after-menu-390.png`,
-            clip: await headAndMenu(page),
+            clip: await headAnd(page, "#d-actions-menu:not([hidden])"),
           });
         pickupHosts = ["studio-mac"];
         await rerun();
@@ -192,11 +198,51 @@ test("rerun stage", { timeout: 240000 }, async (t) => {
         effectiveFails = true;
         await rerun();
         assert.equal(await rerunError(), "Could not check lab-linux. Try again.");
+        assert.equal(await page.$eval("#d-rerun-status", (el) => el.textContent), "");
         effectiveFails = false;
         pickupHosts = ["lab-linux", "studio-mac"];
         const job = await boardJob(origin, "042-sample-export");
         assert.deepEqual([job.claim, job.move], [claimed, undefined]);
       });
+
+      await t.test(
+        `the check shows progress, then clears before the confirm ${width}`,
+        async () => {
+          await openDrawer(page, "042-sample-export");
+          let release;
+          holdEffective = new Promise((resolve) => (release = resolve));
+          const seen = new Promise((resolve) => (effectiveSeen = resolve));
+          await page.evaluate(() => {
+            window.realConfirm = window.confirm;
+            window.confirm = () => {
+              window.statusAtConfirm = document.getElementById("d-rerun-status").textContent;
+              return false;
+            };
+          });
+          await openJobActions(page);
+          await activate("#d-rerun");
+          await seen;
+          if (width === 390)
+            await page.screenshot({
+              path: `${SHOTS}after-checking-390.png`,
+              clip: await headAnd(page, "#d-rerun-status"),
+            });
+          assert.equal(
+            await page.$eval("#d-rerun-status", (el) => el.textContent),
+            "Checking lab-linux…",
+          );
+          assert.equal(await page.$eval("#d-rerun", (el) => el.disabled), true);
+          release();
+          holdEffective = null;
+          effectiveSeen = null;
+          await page.waitForFunction(() => !document.getElementById("d-rerun").disabled, wait);
+          assert.equal(await page.evaluate(() => window.statusAtConfirm), "");
+          assert.equal(await page.$eval("#d-rerun-status", (el) => el.textContent), "");
+          const job = await boardJob(origin, "042-sample-export");
+          assert.deepEqual([job.claim, job.move], [claimed, undefined]);
+          await page.evaluate(() => (window.confirm = window.realConfirm));
+        },
+      );
 
       await t.test(`dismissing the confirm writes nothing ${width}`, async () => {
         let message = "";
