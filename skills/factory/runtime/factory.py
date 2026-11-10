@@ -3774,6 +3774,9 @@ def origin_git(repo, *args):
     return r.stdout.strip()
 
 
+FETCH_TIMEOUT_SECONDS = 60
+
+
 def checkout_problem(home, slug, repo, branch=None):
     """Why repo's local base branch, or the given job branch, holds history origin's base does
     not descend from, as an "unsafe checkout:" line, or None. It fetches origin's base first,
@@ -3782,9 +3785,13 @@ def checkout_problem(home, slug, repo, branch=None):
     base = frontmatter(project)[0].get("base", "main") if project.exists() else "main"
     if check_path(base) or base.startswith("-"):
         return f"unsafe checkout: {slug} base {base} is not a safe branch name"
-    # git's stderr can carry origin's URL, credentials included, so the line leaves it out.
-    r = subprocess.run(["git", "-C", str(repo), "fetch", "-q", "origin",
-                        f"+refs/heads/{base}:refs/remotes/origin/{base}"], capture_output=True, text=True)
+    # git's stderr can carry origin's URL, credentials included, so neither fetch line includes it.
+    try:
+        r = subprocess.run(["git", "-C", str(repo), "fetch", "-q", "origin",
+                            f"+refs/heads/{base}:refs/remotes/origin/{base}"], capture_output=True, text=True,
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=FETCH_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return f"unsafe checkout: git fetch origin {base} timed out after {FETCH_TIMEOUT_SECONDS} s in {repo}"
     if r.returncode:
         return f"unsafe checkout: git fetch origin {base} failed in {repo} (exit {r.returncode})"
     roots = set(git(repo, "rev-list", "--max-parents=0", f"refs/remotes/origin/{base}").split())
