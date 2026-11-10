@@ -76,7 +76,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .filter[hidden] { display: none; }
   .btn { font: inherit; font-size: 12px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
   .btn, .close, .card, .tab, .settings-nav a { transition: border-color .15s, background-color .15s, box-shadow .15s, color .15s; }
-  .btn:hover, .btn:focus-visible { border-color: var(--accent); outline: none; }
+  .btn:focus-visible { border-color: var(--accent); outline: none; }
+  /* Touch taps leave :hover set, so hover styles apply only to hover-capable pointers. */
+  @media (hover: hover) { .btn:hover { border-color: var(--accent); outline: none; } }
   .btn:disabled { opacity: .6; cursor: default; }
   /* Touch screens get a 44px tap target. Mouse layouts keep the compact button. */
   @media (pointer: coarse) { .btn:not(.icon) { min-height: 44px; } }
@@ -354,7 +356,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .job-actions-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; min-width: 200px; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .job-actions-menu[hidden] { display: none; }
   .job-actions-menu .btn { border: 0; text-align: left; border-radius: 6px; padding: 8px 12px; }
-  .job-actions-menu .btn:hover, .job-actions-menu .btn:focus-visible { background: var(--line); }
+  .job-actions-menu .btn:focus-visible { background: var(--line); }
+  @media (hover: hover) { .job-actions-menu .btn:hover { background: var(--line); } }
   .detail-head .pr-link { position: relative; font-size: 12px; }
   .detail-head .pr-link[hidden] { display: none; }
   .rounds { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
@@ -384,7 +387,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #idea-ref code { font: 12px var(--font-mono); overflow-wrap: anywhere; }
   .close { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-size); height: var(--icon-size); padding: 0; background: none; border: 1px solid transparent; border-radius: 8px; color: var(--muted); cursor: pointer; }
   .close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-  .close:hover, .close:focus-visible { border-color: var(--accent); color: var(--fg); }
+  .close:focus-visible { border-color: var(--accent); color: var(--fg); }
+  @media (hover: hover) { .close:hover { border-color: var(--accent); color: var(--fg); } }
   .close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .tabs { position: relative; display: flex; gap: 4px; padding: 10px 24px; border-bottom: 1px solid var(--line); overflow-x: auto; flex: none; }
   .tabs[hidden] { display: none; }
