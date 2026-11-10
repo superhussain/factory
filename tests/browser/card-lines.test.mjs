@@ -1,4 +1,4 @@
-// One line per fact on a job card: order, one-row truncation with a title tooltip, colour per
+// One line per fact on a job card: order, one-row truncation (a needs-you ask wraps to two rows) with a title tooltip, colour per
 // kind, host label from the registry and ref links, at desktop light and mobile dark.
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
@@ -160,7 +160,7 @@ test("card lines", { timeout: 240000 }, async (t) => {
         const { x, y, width, height } = document
           .querySelector('.card[data-id="045-sample-needs"]')
           .getBoundingClientRect();
-        return { x, y, width, height };
+        return { x: x + scrollX, y: y + scrollY, width, height };
       });
       await page.screenshot({ path: `${SHOTS}card-needs${suffix}.png`, clip: needsClip });
 
@@ -180,12 +180,23 @@ test("card lines", { timeout: 240000 }, async (t) => {
               whiteSpace: s.whiteSpace,
               textOverflow: s.textOverflow,
               overflow: s.overflowX,
+              needsYou: el.closest(".card").classList.contains("needs-you"),
+              clamp: s.webkitLineClamp,
+              rows: Math.round(el.getBoundingClientRect().height / parseFloat(s.lineHeight)),
             };
           }),
         );
         assert.equal(lines.length, 26);
         for (const l of lines) {
           const where = `${l.id} ${l.cls}`;
+          if (l.needsYou && l.cls === "note line") {
+            assert.equal(l.whiteSpace, "normal", where);
+            assert.equal(l.clamp, "2", where);
+            assert.equal(l.overflow, "hidden", where);
+            assert.equal(l.title, l.text, where);
+            assert.equal(l.rows, 2, where);
+            continue;
+          }
           assert.equal(l.whiteSpace, "nowrap", where);
           assert.equal(l.textOverflow, "ellipsis", where);
           assert.equal(l.overflow, "hidden", where);
