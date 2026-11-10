@@ -1,5 +1,6 @@
 // Job panel header against one owned local Worker: every header control shares one vertical
-// center, and Display settings hide header links per browser in localStorage.
+// center, the close button gives the same hover and focus feedback as the actions button, and
+// Display settings hide header links per browser in localStorage, including on reset.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -127,6 +128,51 @@ test("drawer header links", { timeout: 180000 }, async (t) => {
       assert.equal(await page.$eval("#display-drawer-link-web", (el) => el.checked), true);
       await openJob();
       assert.equal(await visible("#d-paseo-web"), true);
+    });
+
+    await t.test("close matches actions on hover and focus", async () => {
+      await openJob();
+      await page.addStyleTag({ content: "*{transition:none!important}" });
+      const hovered = async (id) => {
+        await page.hover(id);
+        return page.$eval(id, (el) => {
+          const s = getComputedStyle(el);
+          return { borderTopColor: s.borderTopColor, color: s.color };
+        });
+      };
+      assert.deepEqual(await hovered("#d-close"), await hovered("#d-actions"));
+      const focusStyle = (id) =>
+        page.$eval(id, (el) => {
+          const s = getComputedStyle(el);
+          return {
+            outlineStyle: s.outlineStyle,
+            outlineWidth: s.outlineWidth,
+            outlineColor: s.outlineColor,
+            outlineOffset: s.outlineOffset,
+            borderTopColor: s.borderTopColor,
+          };
+        });
+      await page.mouse.move(0, 0);
+      await page.focus("#d-actions");
+      await page.keyboard.press("Tab");
+      assert.equal(await page.evaluate(() => document.activeElement.id), "d-close");
+      assert.equal(await page.$eval("#d-close", (el) => el.matches(":focus-visible")), true);
+      const close = await focusStyle("#d-close");
+      await page.keyboard.down("Shift");
+      await page.keyboard.press("Tab");
+      await page.keyboard.up("Shift");
+      assert.equal(await page.evaluate(() => document.activeElement.id), "d-actions");
+      assert.deepEqual(close, await focusStyle("#d-actions"));
+    });
+
+    await t.test("reset re-renders open links", async () => {
+      await page.evaluate((k) => localStorage.setItem(k, "web"), KEY);
+      await openJob();
+      assert.equal(await visible("#d-paseo-web"), false);
+      await page.evaluate(() => document.getElementById("display-reset").click());
+      assert.equal(await visible("#d-paseo-web"), true);
+      assert.equal(await visible("#detail"), true);
+      assert.equal(await page.evaluate((k) => localStorage.getItem(k), KEY), null);
     });
 
     assert.deepEqual(errors, []);
