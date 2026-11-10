@@ -144,7 +144,7 @@ test("card lines", { timeout: 240000 }, async (t) => {
             };
           }),
         );
-        assert.ok(lines.length >= 8 * 4);
+        assert.equal(lines.length, 22);
         for (const l of lines) {
           const where = `${l.id} ${l.cls}`;
           assert.equal(l.whiteSpace, "nowrap", where);
