@@ -761,6 +761,7 @@ class TakeoverTest(PickupFixture):
         self.hosts = [host(DEVICE, 2)]
         self.set_adapter([self.stall()])
         code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
         self.assertIn("took over 010-run alpha from agent-1 on fallback", out)
 
     def test_takeover_claims_archives_and_recovers(self):
