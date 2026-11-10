@@ -13,6 +13,7 @@ import {
 const SHOTS = new URL("../../.context/shots/", import.meta.url).pathname;
 const AT = "2026-01-02T12:00:00Z";
 const ID = "046-sample-chips";
+const WRAP = `.card-wrap:has(.card[data-id="${ID}"])`;
 const JOB = {
   id: ID,
   project: "sample",
@@ -25,37 +26,6 @@ const JOB = {
   priority: { at: AT },
   pr: "https://github.com/example/sample/pull/46",
 };
-
-const measure = (page, id) =>
-  page.evaluate((i) => {
-    const wrap = document.querySelector(`.card[data-id="${i}"]`).closest(".card-wrap");
-    const row = wrap.querySelector(".card .id");
-    const rect = (el) => {
-      const { left, right, top, bottom } = el.getBoundingClientRect();
-      return { left, right, top, bottom };
-    };
-    const style = getComputedStyle(row);
-    return {
-      chips: [...row.querySelectorAll(".chip")].map((c) => ({
-        text: c.textContent,
-        ...rect(c),
-        clientWidth: c.clientWidth,
-        scrollWidth: c.scrollWidth,
-      })),
-      row: {
-        ...rect(row),
-        paddingLeft: parseFloat(style.paddingLeft),
-        paddingRight: parseFloat(style.paddingRight),
-        title: row.title,
-      },
-      idText: { width: row.querySelector(".id-text").getBoundingClientRect().width },
-      pr: rect(wrap.querySelector(".pr-link")),
-      doc: {
-        scrollWidth: document.documentElement.scrollWidth,
-        clientWidth: document.documentElement.clientWidth,
-      },
-    };
-  }, id);
 
 test("card chips", { timeout: 120000 }, async (t) => {
   await prepareAssets();
@@ -80,7 +50,35 @@ test("card chips", { timeout: 120000 }, async (t) => {
       await document.fonts.ready;
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     });
-    const m = await measure(page, ID);
+    const m = await page.evaluate((sel) => {
+      const wrap = document.querySelector(sel);
+      const row = wrap.querySelector(".card .id");
+      const rect = (el) => {
+        const { left, right, top, bottom } = el.getBoundingClientRect();
+        return { left, right, top, bottom };
+      };
+      const style = getComputedStyle(row);
+      return {
+        chips: [...row.querySelectorAll(".chip")].map((c) => ({
+          text: c.textContent,
+          ...rect(c),
+          clientWidth: c.clientWidth,
+          scrollWidth: c.scrollWidth,
+        })),
+        row: {
+          ...rect(row),
+          paddingLeft: parseFloat(style.paddingLeft),
+          paddingRight: parseFloat(style.paddingRight),
+          title: row.title,
+        },
+        idText: { width: row.querySelector(".id-text").getBoundingClientRect().width },
+        pr: rect(wrap.querySelector(".pr-link")),
+        doc: {
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        },
+      };
+    }, WRAP);
 
     await t.test("chip order", () => {
       assert.deepEqual(
@@ -116,12 +114,10 @@ test("card chips", { timeout: 120000 }, async (t) => {
       assert.ok(m.doc.scrollWidth <= m.doc.clientWidth + 1);
     });
 
-    await (
-      await page
-        .$(`.card[data-id="${ID}"]`)
-        .then((c) => c.evaluateHandle((e) => e.closest(".card-wrap")))
-    ).screenshot({ path: `${SHOTS}chips-card-390.png` });
+    await (await page.$(WRAP)).screenshot({ path: `${SHOTS}chips-card-390.png` });
     await context.close();
-    assert.deepEqual(errors, []);
+    await t.test("no page errors", () => {
+      assert.deepEqual(errors, []);
+    });
   });
 });
