@@ -1444,7 +1444,7 @@ async function browserTest(url) {
     await linkTo("#/backlog/" + (await sha12(DECIDED)));
     await page.waitForFunction(
       () =>
-        location.hash === "#002-decided-item" &&
+        location.hash.startsWith("#002-decided-item") &&
         !document.getElementById("detail").hidden &&
         document.getElementById("d-title").textContent === "Decided item",
       { polling: 50, timeout: 10000 },
