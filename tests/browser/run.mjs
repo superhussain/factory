@@ -631,6 +631,24 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("archive-settings", 1280, 900, "light", openArchiveSettings);
+    const openArchivePrefill = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/pipeline";
+      });
+      await page.waitForSelector("#settings-pipeline:not([hidden])");
+      await page.select("#pipeline-scope", "global");
+      await page.waitForFunction(
+        () =>
+          !document.getElementById("pipeline-archive").hidden &&
+          !document.getElementById("pipeline-archive-mode").disabled,
+      );
+      await page.select("#pipeline-archive-mode", "");
+      await page.select("#pipeline-archive-mode", "count");
+      await page.evaluate(() =>
+        document.getElementById("pipeline-archive").scrollIntoView({ block: "center" }),
+      );
+    };
+    await view("archive-prefill", 1280, 900, "light", openArchivePrefill);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
     await view("archive-list", 1280, 900, "light", openArchiveList);
     await view("archive-list-mobile", 390, 844, "dark", openArchiveList);

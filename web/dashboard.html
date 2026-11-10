@@ -655,7 +655,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
             <option value="age">By age: archive jobs finished more than N days ago</option>
             <option value="count">By count: keep the N most recent finished jobs</option>
           </select></label>
-          <label for="pipeline-archive-n"><span id="pipeline-archive-n-text">Days</span><input type="number" id="pipeline-archive-n" min="1" max="10000" step="1"></label>
+          <label for="pipeline-archive-n"><span id="pipeline-archive-n-text">Days</span><input type="number" id="pipeline-archive-n" aria-describedby="pipeline-archive-help" min="1" max="10000" step="1"></label>
           <p id="pipeline-archive-help" class="muted">The Worker checks once an hour. Only merged and closed jobs move: never one with a claim, a question for you, an escalation, automerge, a queued or running build, unread deny notes or a pending Tracer mirror. Archived jobs keep their files and open read-only from links. This setting applies to all projects.</p>
         </fieldset>
         <div class="settings-tabs" id="pipeline-note-tabs" role="tablist" aria-label="Stage notes">
@@ -2187,6 +2187,7 @@ const triageFromFields = () => $('pipeline-triage-mode').value
   ? {enabled:$('pipeline-triage-mode').value === 'on', threshold:$('pipeline-triage-threshold').value === '' ? 90 : Number($('pipeline-triage-threshold').value), rules:$('pipeline-triage-rules').value} : undefined;
 const archiveFromFields = () => $('pipeline-archive-mode').value
   ? {mode:$('pipeline-archive-mode').value, n:$('pipeline-archive-n').value === '' ? null : Number($('pipeline-archive-n').value)} : undefined;
+const ARCHIVE_DEFAULT_N = {age:30, count:200};
 // Client-side only: the Worker accepts any valid name and its effective filter drops unregistered ones.
 function pickupRegistryError(pickup) {
   if (!hostRegistry?.length || !Array.isArray(pickup?.hosts)) return null;
@@ -2513,6 +2514,11 @@ const PIPELINE_NOTE_TABS = PIPELINE_STAGES.map(stage => 'pipeline-note-tab-' + s
 listenTabs('pipeline-note-tabs', PIPELINE_NOTE_TABS, id => {
   selectRovingTab(PIPELINE_NOTE_TABS, id);
   for (const stage of PIPELINE_STAGES) $('pipeline-note-panel-' + stage).hidden = id !== 'pipeline-note-tab-' + stage;
+});
+// Registered before the generic listeners so the draft reads the filled N.
+$('pipeline-archive-mode').addEventListener('input', () => {
+  const n = ARCHIVE_DEFAULT_N[$('pipeline-archive-mode').value];
+  if ($('pipeline-archive-n').value === '' && n) $('pipeline-archive-n').value = String(n);
 });
 for (const id of ['pipeline-merge', 'pipeline-rounds', ...PIPELINE_GATES.map(gate => 'pipeline-gate-' + gate),
     'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules', 'pipeline-archive-mode', 'pipeline-archive-n',
