@@ -18,7 +18,13 @@ import {
   validateHostPatch,
   validateHostStatus,
 } from "./hosts.js";
-import { TRIAGE_MODEL, TRIAGE_REASON, triageConfidence, triageInput } from "./triage.js";
+import {
+  TRIAGE_MODEL,
+  TRIAGE_REASON,
+  TRIAGE_REASON_NO_RULES,
+  triageConfidence,
+  triageInput,
+} from "./triage.js";
 
 export { BoardEvents } from "./events.js";
 
@@ -659,7 +665,7 @@ async function backlogTriage(request, env) {
     decision: confidence >= threshold ? "queue" : "hold",
     confidence,
     threshold,
-    reason: TRIAGE_REASON,
+    reason: triage.rules ? TRIAGE_REASON : TRIAGE_REASON_NO_RULES,
     model: TRIAGE_MODEL,
   });
 }
