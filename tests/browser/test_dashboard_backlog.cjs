@@ -1145,7 +1145,11 @@ async function browserTest(url) {
       order[5],
       "Questions from the agent. Answer each one before you approve or deny. Your answers are copied to the job this decision creates.",
     );
-    assert.equal(await page.$$eval("input:checked", (e) => e.length), 0, "nothing is preselected");
+    assert.equal(
+      await page.$$eval("#backlog-form input:checked", (e) => e.length),
+      0,
+      "nothing is preselected",
+    );
     await page.click("input[value=denied]");
     assert.equal(
       await page.$$eval(
@@ -1285,7 +1289,7 @@ async function browserTest(url) {
     await open(1);
     assert.equal(await page.$$eval("fieldset.backlog-q", (e) => e.length), 2);
     assert.deepEqual(
-      await page.$$eval("input:checked", (e) => e.map((i) => i.name + ":" + i.value)),
+      await page.$$eval("#backlog-form input:checked", (e) => e.map((i) => i.name + ":" + i.value)),
       ["backlog-pick:denied", "bq0:0", "bq1:0"],
     );
     console.log("PASS backlog browser shortcut failed save");

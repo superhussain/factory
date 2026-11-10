@@ -168,7 +168,9 @@ test("needs you form", { timeout: 180000 }, async (t) => {
       await page.click("fieldset.ask:nth-of-type(2) input[value='1']");
       const check = async () => {
         assert.deepEqual(
-          await page.$$eval("input:checked", (e) => e.map((x) => x.name + ":" + x.value)),
+          await page.$$eval("#needs-form input:checked", (e) =>
+            e.map((x) => x.name + ":" + x.value),
+          ),
           ["q0:0", "q1:1"],
         );
         assert.equal(
