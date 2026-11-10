@@ -185,6 +185,33 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
         self.git("-C", self.cwd, "switch", "-q", "-c", "factory/042-dark-mode")
         self.archived([])
 
+    def commit_inherited(self, *config):
+        default = self.git("-C", self.cwd, "branch", "--show-current").strip()
+        self.git("-C", self.cwd, "commit", "-q", "--allow-empty", "-m", "inherited")
+        self.git("-C", self.cwd, *config, "switch", "-q", "-c", "factory/042-dark-mode")
+        self.git("-C", self.cwd, "commit", "-q", "--allow-empty", "-m", "local")
+        self.git("-C", self.cwd, "branch", "-q", "-D", default)
+        return [f"commit: {line}" for line in self.git("-C", self.cwd, "log", "-2", "--format=%h %s").splitlines()]
+
+    def test_inherited_commits_not_listed(self):
+        self.commit_inherited()
+        self.archived([f"commit: {self.git('-C', self.cwd, 'log', '-1', '--format=%h local').strip()}"])
+
+    def test_inherited_commits_without_creation_entry(self):
+        self.archived(self.commit_inherited("-c", "core.logAllRefUpdates=false"))
+
+    def test_reflog_fails(self):
+        commits = self.commit_inherited()
+        real = subprocess.run
+
+        def fake(argv, *a, **k):
+            if "reflog" in argv:
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            return real(argv, *a, **k)
+
+        patch.object(factory.subprocess, "run", side_effect=fake).start()
+        self.archived(["git reflog failed: exit 1", *commits])
+
     def test_git_fails(self):
         cwd = str(self.root / "factory-042-dark-mode")
         os.mkdir(cwd)
