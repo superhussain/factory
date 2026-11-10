@@ -919,7 +919,7 @@ class TakeoverTest(PickupFixture):
         self.assertEqual(self.launched(), [])
 
 
-class MoveHostTest(PickupFixture):
+class MoveFixture(PickupFixture):
     AT = "2026-11-08T10:00:00Z"
 
     def setUp(self):
@@ -941,6 +941,8 @@ class MoveHostTest(PickupFixture):
         self.board["jobs"] = [job]
         return job
 
+
+class MoveHostTest(MoveFixture):
     def test_old_host_stops_the_worktree_and_records_it(self):
         self.moved()
         code, out, err = self.pickup()
@@ -1076,6 +1078,8 @@ class MoveHostTest(PickupFixture):
                 self.assert_silent(self.pickup())
                 self.assertEqual(self.stopped, [])
 
+
+class MoveEntryShapeTest(MoveFixture):
     def test_null_stopped_still_runs_the_stop(self):
         self.moved(stopped=None)
         code, out, err = self.pickup()
@@ -1094,6 +1098,18 @@ class MoveHostTest(PickupFixture):
         self.assertIsInstance(move["stopped"], str)
         self.assertIsInstance(move["earlier"][0]["stopped"], str)
         self.assertNotIn("archived", move["earlier"][0])
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.stopped, self.puts()), ([self.wt], []))
+
+    def test_list_at_on_the_top_level_entry_stops_once(self):
+        self.moved(at=["T1"], stopped=None)
+        code, out, err = self.pickup()
+        self.assertEqual((code, out, err), (0, "stopped 042-sample-export alpha: moved to studio-mac\n", ""))
+        self.assertEqual(self.stopped, [self.wt])
+        move = self.job("042-sample-export")["move"]
+        self.assertIsInstance(move["stopped"], str)
+        self.assertEqual(move["at"], ["T1"])
         self.calls.clear()
         self.assertEqual(self.pickup(), (0, "", ""))
         self.assertEqual((self.stopped, self.puts()), ([self.wt], []))
