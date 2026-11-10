@@ -904,7 +904,7 @@ const store = {
 // board.json is agent-written and the dashboard is public, so only exact PR URLs for a registered project's repo or archive become links.
 const prUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/pull/(\\d+)$');
 const runUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/actions/runs/(\\d+)$');
-const REF_KINDS = { 'rework-of': 'rework of', 'follow-up-of': 'follow-up of', 'sub-job-of': 'sub-job of' };
+const REF_KINDS = { 'rework-of': 'rework of', 'follow-up-of': 'follow-up of', 'sub-job-of': 'sub-job of', 'batched-into': 'batched into' };
 const BUILD_STATES = ['queued', 'running', 'done', 'failed'];
 // The stages factory.py mirrors into Tracer.
 const TRACER_STAGES = ['spec', 'build', 'review', 'approve', 'needs-human', 'pr-open', 'merged'];
