@@ -68,6 +68,10 @@ const openDrawer = async (page, id) => {
 const boardJob = async (origin, id) =>
   (await (await fetch(origin + "/api/board")).json()).jobs.find((j) => j.id === id);
 const shown = (page, selector) => page.$eval(selector, (el) => !el.hidden);
+const visibleItems = (page) =>
+  page.$$eval("#d-actions-menu [role=menuitem]", (els) =>
+    els.filter((el) => !el.hidden).map((el) => el.id),
+  );
 // The drawer head plus the open menu, which hangs below it.
 const headAndMenu = (page) =>
   page.evaluate(() => {
@@ -228,6 +232,18 @@ test("follow-up", { timeout: 240000 }, async (t) => {
           ).screenshot({
             path: `${SHOTS}after-new-job-1280.png`,
           });
+      });
+
+      await t.test(`Add follow-up idea stays hidden when New idea is hidden ${width}`, async () => {
+        await page.$eval("#new-idea", (el) => (el.hidden = true));
+        await openDrawer(page, "042-sample-export");
+        assert.equal(await shown(page, "#d-follow-up"), false);
+        await openDrawer(page, "044-closed");
+        await openJobActions(page);
+        assert.deepEqual(await visibleItems(page), ["d-copy-link"]);
+        await page.keyboard.press("Escape");
+        await page.waitForSelector("#d-actions-menu", { hidden: true });
+        await page.$eval("#new-idea", (el) => (el.hidden = false));
       });
       await context.close();
     }
