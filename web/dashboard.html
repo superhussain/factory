@@ -985,6 +985,10 @@ window.addEventListener('online', async () => {
 let loaded = false;
 // Archived jobs left the board. A link to one opens it read-only from GET /api/board/archive.
 const archivedJobs = new Map();
+// The board carries archived.max_id once the Worker has archived a job, so only then is there an archive to search.
+let boardArchived = false;
+// The jumper's one archive lookup: { query, status: 'loading' | 'done' | 'error', jobs, total }.
+let archiveSearch = null;
 let boardReadVersion = 0;
 let boardUpdated = '';
 let boardEtag = '';
@@ -1019,6 +1023,7 @@ async function poll({ ifChanged = false } = {}) {
       return true;
     }
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
+    boardArchived = Number.isInteger(data.archived?.max_id);
     boardUpdated = data.updated || '';
     boardEtag = etag;
     loaded = true;
@@ -1322,6 +1327,34 @@ function jobResultSection(j) {
   return waitsOnYou(j) ? 'needs-you' : JOB_PICKER_STAGES.includes(j.stage) ? j.stage : 'other';
 }
 
+function archiveSearchMeta(query) {
+  const status = archiveSearch?.query === query ? archiveSearch.status : null;
+  return status === 'loading' ? 'Searching archived jobs'
+    : status === 'done' ? 'No archived jobs match "' + query + '". Pick to search again.'
+    : status === 'error' ? 'Could not search archived jobs. Pick to try again.'
+    : 'Command · Search the archive for "' + query + '"';
+}
+
+// One GET per pick. A reply that lands after the query changed or the jumper closed is dropped.
+async function searchArchive(query) {
+  const search = { query, status: 'loading', jobs: [], total: 0 };
+  archiveSearch = search;
+  renderJobResults();
+  try {
+    const r = await fetch('./api/board/archive?q=' + encodeURIComponent(query), { cache: 'no-store' });
+    if (!r.ok) throw new Error(String(r.status));
+    const body = await r.json();
+    search.jobs = (Array.isArray(body.jobs) ? body.jobs : [])
+      .filter((j) => typeof j?.id === 'string' && !jobs.some((x) => x.id === j.id));
+    search.total = Number.isInteger(body.total) ? body.total : search.jobs.length;
+    for (const j of search.jobs) archivedJobs.set(j.id, j);
+    search.status = 'done';
+  } catch { search.status = 'error'; }
+  if (archiveSearch !== search || !$('job-picker').open || pickerMode !== 'job') return;
+  if (search.jobs.length) selectedKey = 'archived:' + search.jobs[0].id;
+  renderJobResults();
+}
+
 function renderJobResults() {
   const projectMode = pickerMode === 'project';
   const actionsMode = pickerMode === 'actions';
@@ -1351,6 +1384,14 @@ function renderJobResults() {
     kind: 'job', key: 'job:' + j.id, job: j, title: j.title || j.id,
     meta: j.id + ' · ' + (projectName(j) || 'No project') + ' · ' + j.stage,
   }));
+  const rawQuery = $('job-search').value.trim();
+  const found = archiveSearch?.query === rawQuery && archiveSearch.status === 'done' ? archiveSearch.jobs : [];
+  const archiveRows = !boardArchived || !rawQuery || [...rawQuery].length > 200 ? []
+    : found.length ? found.map((j) => ({
+      kind: 'job', key: 'archived:' + j.id, job: j, title: j.title || j.id,
+      meta: j.id + ' · ' + (projectName(j) || 'No project') + ' · ' + j.stage + ' · archived',
+    }))
+    : [{ kind: 'archive-search', key: 'command:archive-search', query: rawQuery, title: 'Search archived jobs', meta: archiveSearchMeta(rawQuery) }];
   const sections = [
     { id: 'pages', title: 'Pages', rows: actions.filter((r) => r.kind === 'page') },
     { id: 'links', title: 'Links', rows: actions.filter((r) => r.kind === 'link') },
@@ -1358,11 +1399,13 @@ function renderJobResults() {
     { id: 'select-project', title: 'Select project', rows: commands.filter((r) => r.key === 'command:select-project') },
     ...[['needs-you', 'Needs you'], ...JOB_PICKER_STAGES.map((stage) => [stage, stage === 'pr-open' ? 'PR open' : stage[0].toUpperCase() + stage.slice(1)]),
       ['other', 'Other jobs']].map(([id, title]) => ({ id, title, rows: jobRows.filter((r) => jobResultSection(r.job) === id) })),
+    { id: 'archived', title: 'Archived jobs', rows: archiveRows },
   ].filter((section) => section.rows.length);
   jobResults = sections.flatMap((section) => section.rows);
   $('job-count').textContent = matched.length + (matched.length === 1 ? ' job' : ' jobs') +
     (actions.length ? ' · ' + actions.length + ' for ' + openId : '') +
-    (commands.length ? ' · ' + commands.length + (commands.length === 1 ? ' command' : ' commands') : '');
+    (commands.length ? ' · ' + commands.length + (commands.length === 1 ? ' command' : ' commands') : '') +
+    (found.length && archiveRows.length ? ' · ' + found.length + ' archived' + (archiveSearch.total > found.length ? ' of ' + archiveSearch.total : '') : '');
   $('job-empty').textContent = openId ? 'No matching jobs or actions' : 'No jobs found';
   $('job-empty').hidden = jobResults.length !== 0;
   renderPickerRows(sections);
@@ -1429,6 +1472,7 @@ function openJobPicker() {
   if (!$('job-picker').open) {
     pickerMode = 'job';
     savedJobQuery = '';
+    archiveSearch = null;
     pickerFocus = document.activeElement;
     $('job-search').value = '';
     selectedKey = null;
@@ -1444,6 +1488,7 @@ function closeJobPicker(activate = false) {
   pickerMode = 'job';
   pickerActions = null;
   savedJobQuery = '';
+  archiveSearch = null;
   $('job-picker').close();
   $('job-search').setAttribute('aria-expanded', 'false');
   if (!activate) (card || (pickerFocus?.isConnected ? pickerFocus : $('job-jump'))).focus();
@@ -1481,6 +1526,10 @@ function activateJobResult() {
     closeJobPicker();
     JOB_ACTION_RUN[row.action](cardAction(id, inNeeds));
     return;
+  }
+  if (row.kind === 'archive-search') {
+    if (archiveSearch?.query === row.query && archiveSearch.status === 'loading') return;
+    return searchArchive(row.query);
   }
   if (row.key === 'command:select-project') return openProjectPicker();
   if (row.kind === 'command') {
