@@ -140,9 +140,10 @@ Every `git commit` runs the `.husky/pre-commit` hook (installed by the
   files. With no staged JavaScript it exits immediately. If `pnpm` is
   unavailable it fails with a hint to install mise and run `mise exec -- pnpm
   install --frozen-lockfile`.
-- The hook filters exactly `skills/` out of the staged JavaScript list; gitleaks still scans `skills/` — that is the only
-  filtered path. Generated assets are excluded from the `lint`/`format:check`
-  path lists by omission; other directories are not filtered.
+- The hook filters `skills/` out of the staged JavaScript list, and that is the
+  only filtered path. gitleaks still scans `skills/`. Generated assets are
+  excluded from the `lint`/`format:check` path lists by omission. Other
+  directories are not filtered.
 - oxfmt failure fails the commit with `formatting required: run 'mise exec --
   pnpm exec oxfmt <files>' and restage`. Replace `<files>` with the staged
   paths, or run `mise exec -- pnpm run format`.
