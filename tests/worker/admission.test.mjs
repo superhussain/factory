@@ -4,6 +4,7 @@ import {
   FLOORS,
   checkOperatorText,
   effectivePipeline,
+  hasReservedTag,
   validatePipeline,
 } from "../../worker/admission.js";
 
@@ -201,6 +202,19 @@ test("document profile stays linear on adversarial 1 MiB bodies", () => {
     checkOperatorText(`token ${jwt}`, "project document", "document"),
     "project document: looks like a secret",
   );
+});
+
+test("the folded backlog-item check lets i and l match each other", () => {
+  for (const text of [
+    "<backlog-\u04c0tem>",
+    "<backlog-\u04cftem>",
+    "<back\u0406og-item>",
+    "</back\u0406og-\u04c0tem>",
+  ]) {
+    assert.equal(hasReservedTag(text, "backlog-item"), true, text);
+  }
+  assert.equal(hasReservedTag("<backiog-ltem>", "backlog-item"), false);
+  assert.equal(hasReservedTag("Keep \u0406 and \u04c0 apart", "backlog-item"), false);
 });
 
 test("validatePipeline rejects unknown keys at any depth, bad enums and types, and schema other than 1", () => {

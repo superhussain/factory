@@ -104,13 +104,17 @@ const TAG_LOOKALIKES_TO = "<<<<<////--------aeopcsAEOPCSTaopAEOPTBBKKkkllggiIIii
 const TAG_LOOKALIKES = new Map([...TAG_LOOKALIKES_FROM].map((c, i) => [c, TAG_LOOKALIKES_TO[i]]));
 const TAG_LOOKALIKE_CHARS = new RegExp(`[${TAG_LOOKALIKES_FROM}]`, "g");
 
-/** Whether text holds a `name` tag as written or once NFKC and the look-alike fold apply. */
+/**
+ * Whether text holds a `name` tag as written, or once NFKC and the look-alike fold apply. The
+ * folded check lets i and l match each other, since the palochka and Ukrainian I read as either.
+ */
 export function hasReservedTag(text, name) {
   const tag = new RegExp(`<\\/?\\s*${name}`, "i");
   if (tag.test(text)) return true;
   // ASCII text is unchanged by the fold, so skip it.
   if (!/[\u0080-\uffff]/.test(text)) return false;
-  return tag.test(
+  const folded = new RegExp(`<\\/?\\s*${name.replace(/[il]/g, "[il]")}`, "i");
+  return folded.test(
     text.normalize("NFKC").replace(TAG_LOOKALIKE_CHARS, (c) => TAG_LOOKALIKES.get(c)),
   );
 }

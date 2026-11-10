@@ -228,7 +228,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   should be built now without a person reviewing it, and its yes probability times 100, rounded,
   is the confidence. The verdict's `reason` is always the fixed text `Rated by clef-flash against
   the project rules.`, so an item can move the score but write no text. An item or context
-  holding either tag, including fullwidth, Cyrillic, Greek or other lookalike forms, is refused
+  holding either tag, including fullwidth, Cyrillic, Greek or other lookalike forms, or a letter that reads as either l or I, is refused
   with a 400.
 - **Floors.** A queued idea still goes through the spec, four reviews, the approver, merge
   rules and any `spec-approval` gate.
