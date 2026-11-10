@@ -114,11 +114,7 @@ test("card chips", { timeout: 120000 }, async (t) => {
       assert.ok(m.doc.scrollWidth <= m.doc.clientWidth + 1);
     });
 
-    await (
-      await page
-        .$(`.card[data-id="${ID}"]`)
-        .then((c) => c.evaluateHandle((e) => e.closest(".card-wrap")))
-    ).screenshot({ path: `${SHOTS}chips-card-390.png` });
+    await (await page.$(WRAP)).screenshot({ path: `${SHOTS}chips-card-390.png` });
     await context.close();
     assert.deepEqual(errors, []);
   });
