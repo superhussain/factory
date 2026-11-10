@@ -204,6 +204,30 @@ test("project filter", { timeout: 180000 }, async (t) => {
       assert.deepEqual(await display(), (await filterState(page)).rows);
     });
 
+    await t.test("F8 projects load fails", async () => {
+      const failed = await open();
+      await failed.evaluate(() => {
+        localStorage.clear();
+        localStorage.setItem("factory-projects-hidden", "beta");
+      });
+      await failed.setBypassServiceWorker(true);
+      await failed.setRequestInterception(true);
+      failed.on("request", (request) =>
+        new URL(request.url()).pathname.endsWith("/projects.json")
+          ? request.abort()
+          : request.continue(),
+      );
+      await failed.reload({ waitUntil: "domcontentloaded" });
+      await ready(failed);
+      assert.deepEqual(await filterState(failed), {
+        label: "all projects",
+        rows: [row("", "all projects", true), row(":unassigned", "No project yet", true)],
+        stored: "beta",
+      });
+      assert.deepEqual(await cards(failed), ["090-alpha", "091-beta", "092-loose"]);
+      await failed.browserContext().close();
+    });
+
     assert.deepEqual(errors, []);
   });
 });

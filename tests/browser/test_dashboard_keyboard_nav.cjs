@@ -322,8 +322,9 @@ async function browserTest(url) {
     // A card filtered out of the board counts as last for Right (a no-op even
     // while other cards stay visible) and first for Left.
     await page.evaluate(() => {
-      jobs.find((j) => j.id === "903-arrow-third").project = "other";
-      hiddenProjects = new Set(["other"]);
+      // Only a key that is a filter menu row hides jobs, so the card moves to No project yet.
+      delete jobs.find((j) => j.id === "903-arrow-third").project;
+      hiddenProjects = new Set([":unassigned"]);
       renderBoard();
       window.__cardOpens = [];
       const oc = openCard;

@@ -147,9 +147,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .filter-wrap { position: relative; }
   .filter-wrap:has(> #filter[hidden]) { display: none; }
-  .filter-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; min-width: 200px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .filter-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; min-width: 200px; max-width: calc(100vw - 32px); max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .filter-menu[hidden] { display: none; }
-  .filter-menu label { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; font-size: 12px; white-space: nowrap; cursor: pointer; }
+  .filter-menu label { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; font-size: 12px; white-space: nowrap; overflow: hidden; cursor: pointer; }
   .filter-menu label:hover, .filter-menu label:focus-within { background: var(--line); }
   @media (pointer: coarse) { .filter-menu label { min-height: 44px; } }
   .header-actions { display: flex; gap: inherit; }
@@ -1334,7 +1334,7 @@ function renderPickerRows(sections = null) {
 
 function renderProjectResults() {
   const query = $('job-search').value.trim().toLowerCase();
-  const shown = projectFilterKeys().filter((k) => !hiddenProjects.has(k));
+  const shown = shownProjectKeys();
   const current = shown.length === projectFilterKeys().length ? '' : shown.length === 1 ? shown[0] : null;
   jobResults = projectFilterRows().map(({ key, title }) => ({
     kind: 'project', key: 'project:' + key, value: key, title,
@@ -1478,10 +1478,12 @@ function projectFilterRows() {
   return [{ key: '', title: 'all projects' }, ...[...(projects || [])].map(([slug, p]) => ({ key: slug, title: p.title || slug })), { key: UNASSIGNED, title: 'No project yet' }];
 }
 const projectFilterKeys = () => projectFilterRows().slice(1).map((r) => r.key);
-const isShown = (project) => !hiddenProjects.has(project || UNASSIGNED);
+const shownProjectKeys = () => projectFilterKeys().filter((k) => !hiddenProjects.has(k));
+// A saved key hides jobs only while it is a menu row, so a failed projects load hides nothing it cannot show again.
+const isShown = (project) => !hiddenProjects.has(project || UNASSIGNED) || !projectFilterKeys().includes(project || UNASSIGNED);
 // The one shown key when it is a registered project, else ''.
 function soleProject() {
-  const shown = projectFilterKeys().filter((k) => !hiddenProjects.has(k));
+  const shown = shownProjectKeys();
   return shown.length === 1 && projects?.has(shown[0]) ? shown[0] : '';
 }
 function saveHiddenProjects() {
