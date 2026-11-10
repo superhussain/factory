@@ -310,6 +310,32 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
         self.assertEqual((code, out), (1, {"archived": "wks_0a1b", "leftovers": []}))
         self.assertIn(f"paseo archive {AGENT} exit 3", err)
 
+    def detach(self):
+        self.git("-C", self.cwd, "switch", "-q", "--detach")
+
+    def test_detached_head_at_pushed_commit(self):
+        self.detach()
+        self.archived([])
+
+    def test_detached_head_commit_not_on_any_branch(self):
+        self.detach()
+        self.git("-C", self.cwd, "commit", "-q", "--allow-empty", "-m", "detached")
+        self.archived([f"commit: {self.git('-C', self.cwd, 'log', '-1', '--format=%h detached').strip()}"])
+
+    def test_detached_head_commit_kept_by_local_branch(self):
+        self.git("-C", self.cwd, "switch", "-q", "-c", "factory/042-dark-mode")
+        self.git("-C", self.cwd, "commit", "-q", "--allow-empty", "-m", "kept")
+        self.detach()
+        real = subprocess.run
+
+        def fake(argv, *a, **k):
+            if "reflog" in argv:
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            return real(argv, *a, **k)
+
+        patch.object(factory.subprocess, "run", side_effect=fake).start()
+        self.archived([])
+
 
 if __name__ == "__main__":
     unittest.main()
