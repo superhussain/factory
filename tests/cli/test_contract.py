@@ -89,7 +89,8 @@ class LegacyCommandContractTest(IsolatedTestCase):
 
     def test_actual_missing_empty_and_conflicting_commands_keep_exit_codes(self):
         r = self.runtime
-        with patch.object(r, "read_board", return_value={"jobs": []}):
+        with patch.object(r, "read_board", return_value={"jobs": []}), \
+                patch.object(r, "api", return_value=(404, {}, "not found")):
             self.assertEqual(invoke(r, ["job", "001-missing"])[0], 4)
         with patch.object(r, "api", return_value=(200, {}, "[]")), patch.object(r, "read_paths", return_value={}), patch.object(r, "cas", side_effect=lambda home, route, change: change(None)[1]):
             self.assertEqual(invoke(r, ["next"])[0], 3)

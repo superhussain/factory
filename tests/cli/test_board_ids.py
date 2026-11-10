@@ -1,3 +1,4 @@
+import contextlib
 import io
 import json
 import os
@@ -84,3 +85,62 @@ class BoardIdTest(IsolatedTestCase):
                 code, out, _ = self.patch_board(job_id)
                 self.assertEqual((code, json.loads(out)["stage"]), (0, "closed"))
                 self.assertEqual(self.ids(), [job_id])
+
+
+class ArchiveFloorTest(IsolatedTestCase):
+    """Ids up to the board's archived.max_id belong to archived jobs, so none is handed out again."""
+
+    def setUp(self):
+        self.home = Path(os.environ["HOME"], "factory")
+        self.home.mkdir()
+        (self.home / "config.md").write_text("---\ndevice: test\n---\n")
+        self.files = {
+            "/api/board": factory.dump_board({"updated": "", "jobs": [
+                {"id": "414-retry-sync", "project": "sample", "stage": "closed"},
+                {"id": "415-add-export", "project": "sample", "stage": "merged"}],
+                "archived": {"max_id": 416, "fingerprints": {}}}),
+            "/api/backlog": "- [ ] sample: Add thing\n",
+        }
+        api = patch.object(factory, "api", side_effect=self.api)
+        api.start()
+        self.addCleanup(api.stop)
+
+    def api(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if path.startswith("/api/board/archive?"):
+            return (200, {}, json.dumps({"jobs": [{"id": "412-fix-login", "stage": "merged"}]})) \
+                if path == "/api/board/archive?id=412-fix-login" else (404, {}, "not found")
+        if method == "PUT":
+            self.files[path] = body
+        return 200, {"ETag": '"synthetic"'}, self.files[path]
+
+    def ids(self):
+        return [j["id"] for j in json.loads(self.files["/api/board"])["jobs"]]
+
+    def test_archive_floor_reads_only_a_positive_int(self):
+        for archived, floor in (({"max_id": 416}, 416), ({"max_id": True}, 0), ({"max_id": "416"}, 0),
+                                ({"max_id": -1}, 0), ([416], 0), (None, 0)):
+            with self.subTest(archived=archived):
+                self.assertEqual(factory.archive_floor({"jobs": [], "archived": archived}), floor)
+        self.assertEqual(factory.archive_floor({"jobs": []}), 0)
+        self.assertEqual(factory.next_job_id(["415-add-export"], "x", 416), "417-x")
+        self.assertEqual(factory.next_job_id(["420-later"], "x", 416), "421-x")
+
+    def test_claim_starts_above_the_floor(self):
+        with patch.dict(os.environ, {"FACTORY_SESSION": "tag", "PASEO_AGENT_ID": ""}):
+            self.assertEqual(factory.claim_id(self.home, "new-thing", "sample"), "417-new-thing")
+        self.assertEqual(self.ids()[-1], "417-new-thing")
+
+    def test_backlog_triage_queues_above_the_floor(self):
+        verdict = {"model": "m", "confidence": 90, "threshold": 80, "reason": "Small."}
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(factory.queue_backlog_item(self.home, "sample", "Add thing", verdict))
+        self.assertEqual(self.ids()[-1], "417-add-thing")
+        self.assertIn("(417-add-thing)", self.files["/api/backlog"])
+
+    def test_job_falls_back_to_the_archive(self):
+        with patch.object(factory, "factory_home", return_value=self.home):
+            code, out, err = invoke(factory, ["job", "412-fix-login"])
+            self.assertEqual((code, json.loads(out), err), (0, {"id": "412-fix-login", "stage": "merged"}, ""))
+            self.assertEqual(invoke(factory, ["job", "415-add-export"])[0], 0)
+            self.assertEqual(invoke(factory, ["job", "999-missing"]), (
+                4, "", "factory.py: no job 999-missing on the board or in the archive\n"))
