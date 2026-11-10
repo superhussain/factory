@@ -2936,6 +2936,8 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
         if reason:
             if dry:
                 print(f"skip stop {job_id} {project}: {reason}")
+            else:
+                print(f"factory.py: pickup skips the stop of {job_id} {project}: {reason}", file=sys.stderr)
             continue
         archives = {}
         kept = []
