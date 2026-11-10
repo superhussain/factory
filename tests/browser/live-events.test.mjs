@@ -162,12 +162,22 @@ test("live board events", { timeout: 120000 }, async (t) => {
         const { context, page, errors } = await open();
         await page.evaluate(() => {
           window.heldCard = document.querySelector('.card[data-id="001-sample"]');
+          const original = window.poll;
+          window.pollRuns = [];
+          window.poll = function poll(options) {
+            const done = original(options);
+            window.pollRuns.push({ ifChanged: Boolean(options?.ifChanged), done });
+            return done;
+          };
         });
-        const read = page.waitForResponse((r) => new URL(r.url()).pathname === "/board.json");
         await page.evaluate("liveSocket.close(1000)");
         await page.waitForFunction("liveOpen && window.pollTimers.size === 0", wait);
-        await read;
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        // The reopen poll's own promise, so the assert runs after any redraw.
+        await page.waitForFunction("window.pollRuns.some((run) => run.ifChanged)", wait);
+        assert.equal(
+          await page.evaluate(() => window.pollRuns.find((run) => run.ifChanged).done),
+          true,
+        );
         assert.equal(await page.evaluate("heldCard.isConnected"), true);
         assert.deepEqual(errors, []);
         await context.close();
