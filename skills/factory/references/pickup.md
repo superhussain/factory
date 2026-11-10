@@ -208,7 +208,7 @@ changes nothing. Then install one timer per host.
 
 ## Closing a job
 
-- The dashboard's Close job item sets `close = {reason, at}` on a job with a project that is past `idea` and not merged or closed. The reason is one line of 1 to 200 characters.
+- The dashboard's Close job item sets `close = {reason, at}` on a job with a project that is past `idea` and not merged or closed. The reason is one line of 1 to 200 characters, with no control characters and no U+0085, U+2028 or U+2029.
 - `pickup` runs its close pass right after the move stops. It writes `decision.md` with first line `CLOSED: <reason>`, keeping earlier text under `## Earlier decision`, and only then sets the stage to `closed`, the note to the reason and `close.closed`. Its dry run prints `would close <id> <project>`, or `skip close <id> <project>: claimed by <device> session <tag>` for a job with a live claim.
 - A session on a closing job is refused at its next `board` or `hold` call with exit 6. `board` first releases that session's own claim, so the next pickup can close the job.
 - Only the dashboard and `pickup` write `close`. `board` refuses a `close` patch with exit 2.
