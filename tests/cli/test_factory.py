@@ -998,6 +998,30 @@ class FactoryTest(IsolatedTestCase):
             "dropped stub None: no stage, last seen 2020-01-03T00:00:00Z\n"
             "dropped stub '005-bad\\nfake': no stage, last seen 2020-01-04T00:00:00Z\n"))
 
+class PaseoClaimHomeTest(IsolatedTestCase):
+    setUp = FactoryTest.setUp
+    api = FactoryTest.api
+    git = FactoryTest.git
+
+    def test_board_writes_marker_under_resolved_home(self):
+        resolved = self.home / "resolved"
+        with patch.object(factory, "factory_home", return_value=resolved), patch.object(
+                factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}), \
+                patch.object(factory.sys, "stdin", io.StringIO('{"note": "checking"}')):
+            factory.board(self.home, "001-test")
+        self.assertTrue((resolved / "paseo-claims" / "001-test" / "agent_new").is_file())
+        self.assertFalse((self.home / "paseo-claims").exists())
+
+    def test_claim_id_writes_marker_under_resolved_home(self):
+        resolved = self.home / "resolved"
+        with patch.object(factory, "factory_home", return_value=resolved), patch.object(
+                factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}), \
+                patch.object(factory.sys, "stdin", io.StringIO('{"note": "checking"}')):
+            job_id = factory.claim_id(self.home, "sample-export", "sample")
+        self.assertTrue((resolved / "paseo-claims" / job_id / "agent_new").is_file())
+        self.assertFalse((self.home / "paseo-claims").exists())
+
+
 class IdeaTest(IsolatedTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
