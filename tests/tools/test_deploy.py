@@ -112,6 +112,7 @@ class RenderTest(unittest.TestCase):
             "preview_urls": False,
             "r2_buckets": [{"binding": "BUCKET", "bucket_name": "factory-example"}],
             "routes": [{"custom_domain": True, "pattern": "factory.example.test"}],
+            "triggers": {"crons": ["17 * * * *"]},
             "vars": {
                 "ACCESS_AUDIENCE": "example-application-audience",
                 "ACCESS_ISSUER": "https://example-team.cloudflareaccess.com",

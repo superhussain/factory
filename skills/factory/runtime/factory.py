@@ -885,9 +885,16 @@ def drop_stub(factory, job_id):
     cas(factory, "/api/board", change)
 
 
-def next_job_id(names, feature_slug):
+def archive_floor(data):
+    """The highest id the Worker has archived off the board, so no new job reuses it."""
+    archived = data.get("archived")
+    max_id = archived.get("max_id") if isinstance(archived, dict) else None
+    return max_id if isinstance(max_id, int) and not isinstance(max_id, bool) and max_id > 0 else 0
+
+
+def next_job_id(names, feature_slug, floor=0):
     used = [int(m.group(1)) for m in map(re.compile(r"^(\d{3,})-").match, names) if m]
-    return f"{max(used, default=0) + 1:03d}-{feature_slug}"
+    return f"{max(used + [floor], default=0) + 1:03d}-{feature_slug}"
 
 
 def claim_id(factory, feature_slug, project_slug):
@@ -906,7 +913,8 @@ def claim_id(factory, feature_slug, project_slug):
 
     def add(text):
         data = load_board(text)
-        job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug)
+        job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug,
+                             archive_floor(data))
         data["updated"] = now()
         stub = {"id": job_id, "project": project_slug, "updated": data["updated"],
                 "started": data["updated"], "claim": new_claim(device, session)}
@@ -1212,7 +1220,8 @@ def queue_backlog_item(home, slug, feature, verdict):
 
     def add(board):
         data = load_board(board)
-        job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug(text))
+        job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug(text),
+                             archive_floor(data))
         at = data["updated"] = now()
         job = {"id": job_id, "project": slug, "title": text.strip()[:80], "stage": IDEA, "updated": at,
                "idea": f"{text}\n\nQueued by backlog triage: {score}. {verdict['reason']}",
@@ -1819,6 +1828,9 @@ def suggest_admit(path):
             fp = fingerprint(slug, s)
             origins = [(j, j["origin"]) for j in data["jobs"] if isinstance(j.get("origin"), dict)]
             dup = next((j.get("id") for j, o in origins if o.get("fingerprint") == fp), None)
+            archived = data.get("archived")
+            if not dup and isinstance(archived, dict) and isinstance(archived.get("fingerprints"), dict):
+                dup = archived["fingerprints"].get(fp)
             if dup:
                 skipped.append({"title": s["title"], "reason": f"duplicate {dup}"})
                 continue
@@ -1829,7 +1841,8 @@ def suggest_admit(path):
                     >= MAX_OPEN_PER_PROJECT:
                 skipped.append({"title": s["title"], "reason": "open cap"})
                 continue
-            job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug(s["title"]))
+            job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug(s["title"]),
+                                 archive_floor(data))
             eligible, reasons = classify(slug, s, autonomy)
             keys = [o["key"] for o in s["options"]]
             pick = ", ".join(keys[:-1]) + " or " + keys[-1]
@@ -4347,9 +4360,13 @@ def deny_notes_cmd(job_id, sub=None):
 
 
 def job(job_id):
-    found = next((j for j in read_board(factory_home())["jobs"] if j.get("id") == job_id), None)
+    home = factory_home()
+    found = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
     if found is None:
-        fail(f"no job {job_id} on the board", 4)
+        status, _, text = api(home, "GET", f"/api/board/archive?id={urllib.parse.quote(job_id)}", ok=(200, 404))
+        if status == 404:
+            fail(f"no job {job_id} on the board or in the archive", 4)
+        found = json.loads(text)["jobs"][0]
     print(json.dumps(found, indent=2))
 
 

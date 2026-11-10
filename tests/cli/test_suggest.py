@@ -384,6 +384,17 @@ class SuggestTest(IsolatedTestCase):
         self.admit(suggestions(suggestion(title="Later")))
         self.assertEqual(len(json.loads(self.output.getvalue())["admitted"]), 1)
 
+    def test_admit_skips_archived_fingerprints_and_ids(self):
+        fp = factory.fingerprint("sample", suggestion())
+        self.board["archived"] = {"max_id": 416, "fingerprints": {fp: "413-old-suggestion"}}
+        self.admit(suggestions(suggestion()), 3)
+        self.assertEqual(json.loads(self.output.getvalue()),
+                         {"admitted": [], "skipped": [{"title": suggestion()["title"],
+                                                       "reason": "duplicate 413-old-suggestion"}]})
+        self.admit(suggestions(suggestion(title="A new item")))
+        self.assertEqual(json.loads(self.output.getvalue())["admitted"], ["417-a-new-item"])
+        self.assertEqual(self.board["archived"]["max_id"], 416)
+
     def test_admit_request_paths(self):
         self.admit(suggestions())
         self.admit(suggestions(project="other"), 3)

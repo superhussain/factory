@@ -200,6 +200,17 @@ const CAPTURE_BUILD =
   "\n";
 const CAPTURE_ANSWERS =
   "# Answers\n\n## Question 1: Browser evidence\n\nPick: one\n\n- [ ] Ship on unit tests (recommended): open the PR now.\n- [x] Free a slot first: re-run the builder for screenshots.\n\nOther: none\n";
+// The archived running example: answered by interception, never on the board.
+const CAPTURE_ARCHIVED = {
+  id: "412-fix-login",
+  project: "sample",
+  title: "Synthetic login fix",
+  stage: "merged",
+  round: 1,
+  branch: "factory/412-fix-login",
+  updated: "2026-09-01T12:00:00Z",
+  done: "2026-09-01T12:00:00Z",
+};
 const CAPTURE_RECOVERY = {
   version: 1,
   slug: "sample",
@@ -263,6 +274,18 @@ async function capture(outdir, referencePath) {
     await put(origin, "/api/jobs/sample/001-capture/answers.md", CAPTURE_ANSWERS, "text/markdown");
     await put(
       origin,
+      "/api/jobs/sample/412-fix-login/spec.md",
+      "# Synthetic login fix\n\nCapture fixture content, not real job data.\n",
+      "text/markdown",
+    );
+    await put(
+      origin,
+      "/api/pipeline/global",
+      JSON.stringify({ schema: 1, archive: { mode: "age", n: 30 } }),
+      "application/json",
+    );
+    await put(
+      origin,
       "/api/project-documents/sample/notes.md",
       "Original notes\n",
       "text/markdown",
@@ -319,6 +342,14 @@ async function capture(outdir, referencePath) {
               status: held ? 200 : 404,
               contentType: "application/json",
               body: held ? JSON.stringify(CAPTURE_TRIAGE) : "",
+            });
+          }
+          if (target.pathname === "/api/board/archive") {
+            const found = target.searchParams.get("id") === CAPTURE_ARCHIVED.id;
+            return request.respond({
+              status: found ? 200 : 404,
+              contentType: found ? "application/json" : "text/plain",
+              body: found ? JSON.stringify({ jobs: [CAPTURE_ARCHIVED] }) : "not found",
             });
           }
           if (side === "before" && target.pathname === "/dashboard.html") {
@@ -515,6 +546,30 @@ async function capture(outdir, referencePath) {
       await page.click('.backlog-card[data-index="1"]');
       await page.waitForSelector("#backlog-form");
     };
+    // The reference has no archive fieldset or archive lookup, so its side shows triage and the board.
+    const openArchiveSettings = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/pipeline";
+      });
+      await page.waitForSelector("#settings-pipeline:not([hidden])");
+      await page.waitForFunction(() => !document.getElementById("pipeline-triage-mode").disabled);
+      await page.evaluate(
+        (selector) => document.querySelector(selector).scrollIntoView({ block: "center" }),
+        side === "after" ? "#pipeline-archive" : "#pipeline-triage",
+      );
+    };
+    const openArchivedDrawer = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#412-fix-login";
+      });
+      if (side === "after")
+        await page.waitForFunction(
+          () => document.querySelector("#d-doc h1")?.textContent === "Synthetic login fix",
+        );
+      else await new Promise((resolve) => setTimeout(resolve, 1000));
+    };
+    await view("archive-settings", 1280, 900, "light", openArchiveSettings);
+    await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
     await view("backlog-triage-desktop", 1440, 900, "light", openTriage);
     await view("backlog-triage-mobile", 390, 844, "dark", openTriage);
     await view("backlog-triage-open-desktop", 1440, 900, "light", openTriageFirstPaint);
@@ -537,7 +592,7 @@ async function capture(outdir, referencePath) {
           candidate: { path: "web/dashboard.html", sha256: sha(candidate) },
           board: { jobs: CAPTURE_JOBS.length, sha256: sha(JSON.stringify(CAPTURE_JOBS)) },
           origin,
-          viewport: ["1440x900", "390x844", "375x667"],
+          viewport: ["1440x900", "1280x900", "390x844", "375x667"],
           themes: ["light", "dark"],
         },
       }),
