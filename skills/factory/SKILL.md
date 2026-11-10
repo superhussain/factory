@@ -86,8 +86,8 @@ Builder tier follows task complexity and plan clarity under the builder selectio
 rule in Rules. A blocked run skips review. The round cap still applies first.
 
 The factory runs on its own. A human sees a job only when it escalates, hits the
-round cap, or fails twice. Everything else specs, builds, reviews, merges, and
-waits in the build queue without asking.
+round cap, fails twice, or its review findings need a person. Everything else specs,
+builds, reviews, merges, and waits in the build queue without asking.
 
 ## Where things live
 
@@ -778,8 +778,14 @@ feature.
    `factory-review-ui`, and `factory-review-code` with the job folder, round folder,
    worktree, branch, and project file.
 5. Once all four are in, any CHANGES first checks the round cap. At the cap, the job
-   goes to `needs-human`. Otherwise set stage `build` and dispatch the builder per
-   Rules (builder selection; fresh worker on a model change), then repeat step 4 as round
+   goes to `needs-human`. Below the cap, run
+   `python3 "$RUNTIME" escalation "$SLUG/<id>" <N>`. When its decision is `escalate`,
+   run `push "$SLUG/<id>"`, patch
+   `{"stage": "needs-human", "note": "review panel: round <N> findings need a person (clef-flash <confidence>%)", "needs": "decide on the round-<N> findings at $DASHBOARD#<id>/round-<N>/review-<r>, then run /factory rework <id> <note> or /factory approve <id>"}`,
+   with `<r>` the first CHANGES reviewer in the order security, ux, ui, code, and
+   dispatch nothing. Any other decision continues the loop. Otherwise set stage `build`
+   and dispatch the builder per Rules (builder selection; fresh worker on a model
+   change), then repeat step 4 as round
    N+1. If the builder blocks, follow Rules instead of starting a review round.
    If the builder only disputed findings and the branch head didn't move (same
    `git rev-parse factory/<id>` before and after its reply), round N+1
