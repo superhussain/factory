@@ -217,6 +217,25 @@ test("the folded backlog-item check lets i and l match each other", () => {
   assert.equal(hasReservedTag("Keep \u0406 and \u04c0 apart", "backlog-item"), false);
 });
 
+test("hasReservedTag builds its regexes once per tag name", () => {
+  const text = "<back\u0406og-item>";
+  hasReservedTag(text, "backlog-item");
+  const { RegExp: original } = globalThis;
+  let built = 0;
+  globalThis.RegExp = new Proxy(original, {
+    construct(target, args) {
+      built += 1;
+      return Reflect.construct(target, args);
+    },
+  });
+  try {
+    for (let i = 0; i < 3; i += 1) assert.equal(hasReservedTag(text, "backlog-item"), true);
+  } finally {
+    globalThis.RegExp = original;
+  }
+  assert.equal(built, 0);
+});
+
 test("validatePipeline rejects unknown keys at any depth, bad enums and types, and schema other than 1", () => {
   for (const doc of [
     { schema: 1 },
