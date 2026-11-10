@@ -24,6 +24,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     --pass-bg: #dcf2e3; --pass-fg: #17663a;
     --changes-bg: #fde4d6; --changes-fg: #9a3b0c;
     --alert: #d1342f; --alert-bg: #fdecea; --ok: #2e9d5b; --accent: #7c3aed;
+    --info: #1d4ed8;
     --accent-soft: #ede9fe;
     --code-bg: #f3f4f6;
     --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
@@ -37,6 +38,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       --pass-bg: #163824; --pass-fg: #7fd9a1;
       --changes-bg: #45230f; --changes-fg: #f5a372;
       --alert: #ff6b5e; --alert-bg: #3a1714; --ok: #4cc47e; --accent: #a78bfa;
+    --info: #93c5fd;
+      --info: #93c5fd;
       --accent-soft: rgba(167, 139, 250, 0.16);
       --code-bg: #273244;
     }
@@ -277,6 +280,15 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .idea-text { font-size: 12px; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
   .card .note { font-size: 12px; margin-top: 6px; color: var(--fg); }
   .card .refs, .backlog-card .refs { margin-top: 2px; }
+  /* One fact per row: a long value is cut, and the title tooltip keeps it whole. */
+  .card .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .id { display: flex; gap: 6px; align-items: center; }
+  .card .id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .card .title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+  .card .meta.branch { color: var(--info); }
+  .card .meta.refs { color: var(--changes-fg); }
+  .card .meta.host { color: var(--pass-fg); }
+  .card .ref-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   .backlog-card {
     overflow-wrap: anywhere;
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(17,24,39,.05);
@@ -296,7 +308,6 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .tracer-tasks li { padding-left: 10px; text-indent: -10px; }
   .tracer-tasks summary { cursor: pointer; }
   .card.needs-you .note { color: var(--alert); }
-  .card .id .chip { margin-left: 6px; }
   .card-wrap { position: relative; }
   .card-wrap .card .id { padding-right: 64px; }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
