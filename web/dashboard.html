@@ -1031,7 +1031,7 @@ async function poll({ ifChanged = false } = {}) {
   try {
     // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
     const seen = backlog.map((b) => b.raw).join('\n');
-    loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); });
+    loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); });
     const r = await fetch('./board.json', { cache: 'no-store' });
     if (r.status === 401 || r.status === 403) {
       setConnection('signin');
@@ -1057,6 +1057,7 @@ async function poll({ ifChanged = false } = {}) {
     notifyNeeds();
     if (settingsShown === 'projects') renderProjectList();
     syncDetail();
+    syncBacklogRoute();
     syncIdeaEditor();
     if ($('job-picker').open) renderJobResults();
     return true;
@@ -4124,8 +4125,11 @@ function syncDetail() {
 
 window.addEventListener('hashchange', () => {
   archiveFailNoted = '';
+  const key = backlogRoute();
   const { id } = parseHash();
-  if (id) openJob(id); else if (openId) closeDetail();
+  if (key) openBacklogRoute(key);
+  else if (id) openJob(id);
+  else if (openId || openBacklogRaw !== null) closeDetail();
   renderRoute();
 });
 
@@ -4346,6 +4350,7 @@ function addIdea(board, snap, now) {
 const BACKLOG_LINE = /^- \[ \] ([\w-]+): (\S.*)$/;
 const BACKLOG_REF = / \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$/;
 let backlog = [];               // parsed items from the last good read
+let backlogLoaded = false;      // a 200 or 404 has been read at least once
 const backlogBusy = new Set();  // item.raw values with a decision in flight
 const backlogPending = new Map(); // item.raw -> captureId, kept until a decision settles
 
@@ -4401,9 +4406,53 @@ async function loadBacklog() {
     const r = await fetch('./api/backlog', { cache: 'no-store' });
     // Always read the body, so the request finishes even on a 404.
     const text = await r.text();
-    if (r.status === 200) backlog = backlogItems(text);
-    else if (r.status === 404) backlog = [];
+    if (r.status === 200) {
+      const items = backlogItems(text);
+      for (const item of items) item.key = await sha12(item.raw);
+      backlog = items;
+    } else if (r.status === 404) backlog = [];
+    else return;
+    backlogLoaded = true;
   } catch {}
+}
+
+const BACKLOG_GONE = 'That backlog item is no longer in the backlog. It was decided, reworded or removed.';
+let backlogRouteBusy = false;
+
+function backlogRoute() {
+  const m = /^#\/backlog\/([0-9a-f]{12})$/.exec(location.hash);
+  return m ? m[1] : null;
+}
+
+// Open the item, or the job it became, or say it is gone. Waits for both reads.
+async function openBacklogRoute(key) {
+  // A decision in flight reloads the lists before the drawer moves on, so its own key must not redirect yet.
+  if (backlogRouteBusy || backlogSaving || !loaded || !backlogLoaded) return;
+  backlogRouteBusy = true;
+  try {
+    const item = backlog.find((b) => b.key === key);
+    if (item) {
+      if (openBacklogRaw !== item.raw) openBacklogItem(item);
+      return;
+    }
+    let job = null;
+    for (const j of jobs) if (typeof j.backlog?.line === 'string' && await sha12(j.backlog.line) === key) job = j;
+    if (backlogRoute() !== key) return;
+    if (job) {
+      history.replaceState(null, '', location.pathname + location.search + '#' + encodeURIComponent(job.id));
+      openJob(job.id);
+    } else {
+      closeDetail();
+      showBoardStatus(BACKLOG_GONE);
+    }
+  } finally {
+    backlogRouteBusy = false;
+  }
+}
+
+function syncBacklogRoute() {
+  const key = backlogRoute();
+  if (key) openBacklogRoute(key);
 }
 
 // Adds the decided item as a job, or returns the id it already saved under captureId.
@@ -4774,10 +4823,10 @@ function closeJobActions(refocus) {
 
 function syncJobActions() {
   // A job that left the board has nothing to act on, so its stale items go too. An archived
-  // job keeps only Copy link.
+  // job and a backlog item keep only Copy link.
   const wasShown = !$('d-actions-wrap').hidden;
   if (!jobs.some((j) => j.id === openId))
-    for (const id of JOB_ACTIONS) $(id).hidden = id !== 'd-copy-link' || !archivedJobs.has(openId);
+    for (const id of JOB_ACTIONS) $(id).hidden = id !== 'd-copy-link' || !(archivedJobs.has(openId) || openBacklogRaw !== null);
   const any = JOB_ACTIONS.some((id) => !$(id).hidden);
   $('d-actions-wrap').hidden = !any;
   if (any) return;
@@ -5287,7 +5336,7 @@ async function resumeAction(ctx) {
 async function copyLinkAction(ctx) {
   let copied = true;
   try {
-    await navigator.clipboard.writeText(jobLink(ctx.id));
+    await navigator.clipboard.writeText(ctx.id === null ? location.origin + location.pathname + location.search + location.hash : jobLink(ctx.id));
   } catch {
     copied = false;
   }
@@ -5750,7 +5799,7 @@ function openBacklogItem(item) {
   docDir = null;
   docBase = null;
   docRepo = projects?.get(item.project)?.repo || null;
-  if (settingsRoute() === null) history.replaceState(null, '', location.pathname + location.search);
+  if (settingsRoute() === null) history.replaceState(null, '', location.pathname + location.search + '#/backlog/' + item.key);
   $('detail').hidden = false;
   $('d-title').textContent = 'Backlog item';
   $('d-meta').textContent = projectName({ project: item.project }) + ' · backlog';

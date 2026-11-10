@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { createHash } = require("node:crypto");
 const { waitForBoard } = require("../support/board-ready.cjs");
 
 const root = path.resolve(__dirname, "../..");
@@ -34,6 +35,8 @@ const BACKLOG = [
   "",
 ].join("\n");
 
+const sha12 = async (text) => createHash("sha256").update(text).digest("hex").slice(0, 12);
+
 function helpers(fetch, extra = {}) {
   const context = vm.createContext({
     fetch,
@@ -41,6 +44,7 @@ function helpers(fetch, extra = {}) {
     crypto: { randomUUID: () => "uuid-" + ++context.uuids },
     uuids: 0,
     isoNow: () => now,
+    sha12,
     renderBoard: () => context.renders++,
     poll: async () => context.polls++,
     renders: 0,
@@ -132,6 +136,7 @@ async function offline() {
   next = response("- [ ] sample: Loaded\n");
   await loader.loadBacklog();
   assert.equal(loader.backlog.length, 1);
+  assert.equal(loader.backlog[0].key, await sha12("- [ ] sample: Loaded"));
   for (const failure of [response("x", 500), response("x", 401), new TypeError("offline")]) {
     next = failure;
     assert.equal(await loader.loadBacklog(), undefined);
@@ -683,7 +688,7 @@ async function browserTest(url) {
         text,
       );
     const shown = async (title) => {
-      assert.equal(await page.evaluate(() => location.hash), "");
+      assert.match(await page.evaluate(() => location.hash), /^#\/backlog\/[0-9a-f]{12}$/);
       assert.equal(
         await page.$eval(
           "#column-cards-backlog .backlog-card.selected .title",
@@ -1394,6 +1399,72 @@ async function browserTest(url) {
     assert.equal(await keyHint(), "block");
     assert.deepEqual(pageErrors, []);
     console.log("PASS backlog browser tap hint");
+
+    // Deep links: open an item, follow a decided item to its job, report an unknown key.
+    const DECIDED = "- [ ] sample: Decided synthetic item";
+    await support.seedBoard(url, [
+      ...clone(JOBS),
+      {
+        id: "002-decided-item",
+        project: "sample",
+        title: "Decided item",
+        idea: "Decided synthetic item",
+        stage: "closed",
+        updated: now,
+        backlog: { line: DECIDED, decision: "denied", at: now },
+      },
+    ]);
+    await putText(url, "/api/backlog", BACKLOG, "text/markdown; charset=utf-8");
+    const linkTo = async (hash) => {
+      await page.goto(url + "/dashboard.html" + hash, { waitUntil: "domcontentloaded" });
+      await page.reload({ waitUntil: "domcontentloaded" });
+    };
+    const key = await sha12("- [ ] sample: Third synthetic item");
+    await linkTo("#/backlog/" + key);
+    await page.waitForSelector("#backlog-form");
+    assert.equal(await page.evaluate(() => location.hash), "#/backlog/" + key);
+    assert.equal(
+      await page.$eval("#column-cards-backlog .backlog-card.selected .title", (e) => e.textContent),
+      "Third synthetic item",
+    );
+    await page.evaluate(() => {
+      window.copied = [];
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: async (t) => window.copied.push(t) },
+      });
+    });
+    await page.click("#d-actions");
+    assert.deepEqual(
+      await page.$$eval("#d-actions-menu button:not([hidden])", (els) => els.map((e) => e.id)),
+      ["d-copy-link"],
+    );
+    await page.click("#d-copy-link");
+    assert.deepEqual(await page.evaluate(() => window.copied), [url + "/#/backlog/" + key]);
+
+    await linkTo("#/backlog/" + (await sha12(DECIDED)));
+    await page.waitForFunction(
+      () =>
+        location.hash === "#002-decided-item" &&
+        !document.getElementById("detail").hidden &&
+        document.getElementById("d-title").textContent === "Decided item",
+      { polling: 50, timeout: 10000 },
+    );
+
+    await linkTo("#/backlog/000000000000");
+    await page.waitForFunction(
+      () => document.getElementById("board-status").textContent.startsWith("That backlog item"),
+      { polling: 50, timeout: 10000 },
+    );
+    assert.equal(
+      await page.$eval("#board-status", (e) => e.textContent),
+      "That backlog item is no longer in the backlog. It was decided, reworded or removed.",
+    );
+    assert.equal(await page.$eval("#detail", (e) => e.hidden), true);
+    assert.equal(await page.evaluate(() => location.hash), "");
+    assert.deepEqual(pageErrors, []);
+    console.log(
+      "PASS backlog browser deep link: item opens by hash, decided key lands on its job, unknown key toasts, Copy link is the only menu item",
+    );
   } finally {
     await browser.close();
   }
