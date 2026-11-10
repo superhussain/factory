@@ -213,6 +213,14 @@ const CAPTURE_ARCHIVED = {
   updated: "2026-09-01T12:00:00Z",
   done: "2026-09-01T12:00:00Z",
 };
+const CAPTURE_ARCHIVED_CLOSED = {
+  id: "413-old-suggestion",
+  project: "sample",
+  title: "Synthetic old suggestion",
+  stage: "closed",
+  updated: "2026-08-20T12:00:00Z",
+  done: "2026-08-20T12:00:00Z",
+};
 const CAPTURE_RECOVERY = {
   version: 1,
   slug: "sample",
@@ -359,6 +367,17 @@ async function capture(outdir, referencePath) {
             });
           }
           if (target.pathname === "/api/board/archive") {
+            if (target.searchParams.get("page") === "1")
+              return request.respond({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({
+                  jobs: [CAPTURE_ARCHIVED, CAPTURE_ARCHIVED_CLOSED],
+                  page: 1,
+                  pages: 2,
+                  total: 52,
+                }),
+              });
             const q = target.searchParams.get("q");
             if (q !== null) {
               const jobs = [CAPTURE_ARCHIVED].filter((j) =>
@@ -604,7 +623,38 @@ async function capture(outdir, referencePath) {
         );
       else await new Promise((resolve) => setTimeout(resolve, 1000));
     };
+    // The reference has no archive list, so its side shows the closed column.
+    // Terminal columns start collapsed, so both sides expand closed first.
+    const openArchiveList = async (page, side) => {
+      await page.click('.column-toggle[data-stage="closed"]');
+      await page.waitForSelector("#column-cards-closed:not([hidden])");
+      if (side === "after") {
+        await page.click('.archive-more[data-stage="closed"]');
+        await page.waitForSelector('.col.closed .archive-list .card[data-id="413-old-suggestion"]');
+      }
+      await page.evaluate(() =>
+        document.querySelector(".col.closed").scrollIntoView({ block: "start", inline: "start" }),
+      );
+    };
     await view("archive-settings", 1280, 900, "light", openArchiveSettings);
+    const openArchivePrefill = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/pipeline";
+      });
+      await page.waitForSelector("#settings-pipeline:not([hidden])");
+      await page.select("#pipeline-scope", "global");
+      await page.waitForFunction(
+        () =>
+          !document.getElementById("pipeline-archive").hidden &&
+          !document.getElementById("pipeline-archive-mode").disabled,
+      );
+      await page.select("#pipeline-archive-mode", "");
+      await page.select("#pipeline-archive-mode", "count");
+      await page.evaluate(() =>
+        document.getElementById("pipeline-archive").scrollIntoView({ block: "center" }),
+      );
+    };
+    await view("archive-prefill", 1280, 900, "light", openArchivePrefill);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
     const openArchivedLoadFailed = async (page, side) => {
       await page.evaluate(() => {
@@ -619,6 +669,8 @@ async function capture(outdir, referencePath) {
       else await new Promise((resolve) => setTimeout(resolve, 1000));
     };
     await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
+    await view("archive-list", 1280, 900, "light", openArchiveList);
+    await view("archive-list-mobile", 390, 844, "dark", openArchiveList);
     const openArchiveJumper = async (page, side) => {
       archivedBoard = true;
       try {

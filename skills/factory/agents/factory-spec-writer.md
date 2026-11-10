@@ -58,6 +58,12 @@ spec.md sections:
 When the feature text references an earlier job (a rework or follow-up), read that
 job's `spec.md` and PR first and say what this job changes about it.
 
+When the feature text ends with a `Batched ideas (spec each one):` list, each line is
+another board job that ships in this one PR. Spec them all in one spec.md: name each
+id under Scope, give each at least one acceptance criterion that names its id, and
+carry the lead idea as the running example. If one of them turns out unrelated to the
+rest, say so under Risks and still spec it.
+
 ### Job files stay readable
 
 - After any required first line (verdict, decision, routing record), open with a summary of at most 120 words: what changed and why, current status, remaining gates, and the next action.
