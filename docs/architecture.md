@@ -117,6 +117,9 @@ method or path under `/api/hosts` returns 404, and no route deletes a host.
 | `PUT /api/hosts/<id>/status` | the bound service token | write the status record; the Worker sets `seen` |
 | `GET /api/hosts/<id>/history` | person | every saved version of the host, newest first, with `saved_by` and `saved_at` |
 
+The status may carry `triage_failed_since`, an ISO 8601 UTC time, while
+backlog triage fails on that host.
+
 A pairing code is ten characters shown as `XXXXX-XXXXX` and lasts 15 minutes.
 Any pair attempt uses it up, and every failure answers the same 403. One
 service token binds at most one host that is not retired. Retiring clears the

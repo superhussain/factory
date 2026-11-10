@@ -2529,6 +2529,7 @@ function hostCard(h) {
   if (h.status) {
     const st = h.status;
     li.append(make('p', {textContent:st.os + ', ' + st.scheduler + ', last pickup ' + (st.last_pickup ? hostUtc(st.last_pickup) : 'never') + '. Bundle ' + (st.bundle?.commit?.slice(0, 7) ?? 'unknown') + '. Doctor ' + (st.doctor === 'ok' ? 'ok' : 'failed: ' + st.doctor.join(', ')) + '.'}));
+    if (st.triage_failed_since) li.append(make('p', {className:'host-triage', textContent:'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'}));
     const cells = (tag, values) => make('tr', {}, ...values.map(value => make(tag, {textContent:value})));
     li.append(make('table', {className:'host-routes'}, make('caption', {textContent:'Routes (set on the device)'}),
       make('thead', {}, cells('th', ['Route', 'Provider', 'Model', 'Effort', 'Limited until'])),
