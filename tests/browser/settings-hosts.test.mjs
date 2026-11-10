@@ -382,7 +382,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
             {
               status: 200,
               contentType: "application/json",
-              body: JSON.stringify({ ...paused[1], state: "active" }),
+              body: JSON.stringify({ ...paused.find((h) => h.id === "new-box"), state: "active" }),
             },
             1,
           );
