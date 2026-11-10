@@ -927,6 +927,7 @@ const CONNECTION = {
   offline: ["You're offline. Showing the board saved on this device. Edits won't save until you reconnect.", 'dot err', 'offline'],
   signin: ['Your sign-in has expired.', 'dot err', 'sign-in expired'],
 };
+function drawDot(className, label) { const dot = $('dot'); dot.className = className; dot.title = label; dot.setAttribute('aria-label', label); }
 function setConnection(state) {
   const [text, dot, title] = CONNECTION[state];
   $('conn-banner').hidden = state === 'online';
@@ -934,9 +935,7 @@ function setConnection(state) {
   $('conn-signin').hidden = state !== 'signin';
   const polling = state === 'online' && !liveOpen;
   const label = polling ? 'Polling every ' + pollSeconds + ' seconds until live updates reconnect' : title;
-  $('dot').className = polling ? dot + ' polling' : dot;
-  $('dot').title = label;
-  $('dot').setAttribute('aria-label', label);
+  drawDot(polling ? dot + ' polling' : dot, label);
 }
 function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
 $('conn-signin').addEventListener('click', () => location.reload());
@@ -978,13 +977,12 @@ async function poll({ ifChanged = false } = {}) {
     const data = r.ok ? await r.json() : { jobs: [] };
     if (version !== boardReadVersion) return false;
     const etag = r.ok ? r.headers.get('ETag') || '' : '';
+    setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
     // A socket open only catches writes made while it was down, so an unchanged board is not redrawn.
     if (ifChanged && loaded && etag && etag === boardEtag) {
-      setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
       return true;
     }
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
-    setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
     boardUpdated = data.updated || '';
     boardEtag = etag;
     loaded = true;
@@ -998,9 +996,7 @@ async function poll({ ifChanged = false } = {}) {
     return true;
   } catch (e) {
     if (version !== boardReadVersion) return false;
-    $('dot').className = 'dot err';
-    $('dot').title = 'board.json unreachable';
-    $('dot').setAttribute('aria-label', 'board.json unreachable');
+    drawDot('dot err', 'board.json unreachable');
     if (!loaded) $('updated').textContent = "can't reach the factory";
     if (e instanceof TypeError) setConnection('offline');
     return false;
