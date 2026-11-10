@@ -137,8 +137,8 @@ test("close job", { timeout: 240000 }, async (t) => {
         if (request.method() !== "PUT" || new URL(request.url()).pathname !== "/api/board")
           return request.continue();
         const mode = putMode;
+        putMode = null;
         if (mode === "land") {
-          putMode = null;
           const headers = request.headers();
           await fetch(request.url(), {
             method: "PUT",
