@@ -370,3 +370,38 @@ test("triage blocks validate field by field and a project block replaces the glo
   view = await (await s.send("/api/pipeline/effective/sample")).json();
   assert.deepEqual(view.triage, project);
 });
+
+test("the archive key validates field by field and saves only in the all-projects scope", async () => {
+  const s = setup();
+  const archive = (value) => doc({ archive: value });
+  for (const [body, text] of [
+    [archive([]), "archive: must be an object"],
+    [archive("age"), "archive: must be an object"],
+    [archive({ mode: "age", n: 30, days: 1 }), "archive.days: unknown field"],
+    [archive({ n: 30 }), 'archive.mode: must be "age" or "count"'],
+    [archive({ mode: "weeks", n: 30 }), 'archive.mode: must be "age" or "count"'],
+    [archive({ mode: "age" }), "archive.n: must be a whole number from 1 to 10000"],
+    [archive({ mode: "age", n: 0 }), "archive.n: must be a whole number from 1 to 10000"],
+    [archive({ mode: "count", n: 10001 }), "archive.n: must be a whole number from 1 to 10000"],
+    [archive({ mode: "count", n: 2.5 }), "archive.n: must be a whole number from 1 to 10000"],
+    [archive({ mode: "count", n: "30" }), "archive.n: must be a whole number from 1 to 10000"],
+  ]) {
+    const response = await s.put("/api/pipeline/global", body);
+    assert.equal(response.status, 400, body);
+    assert.equal(await response.text(), text);
+  }
+  const scoped = await s.put("/api/pipeline/projects/sample", archive({ mode: "age", n: 30 }));
+  assert.equal(scoped.status, 400);
+  assert.equal(await scoped.text(), "archive: set only in the all-projects scope");
+  assert.equal(s.puts().length, 0);
+  for (const value of [
+    { mode: "age", n: 1 },
+    { mode: "count", n: 10000 },
+  ]) {
+    const current = s.bucket.objects.get("pipeline/global.json");
+    const headers = current ? { "If-Match": current.httpEtag } : { "If-None-Match": "*" };
+    assert.equal((await s.put("/api/pipeline/global", archive(value), headers)).status, 200);
+  }
+  const view = await (await s.send("/api/pipeline/effective/sample")).json();
+  assert.equal("archive" in view, false);
+});

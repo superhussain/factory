@@ -8,6 +8,7 @@ import {
   HOST_NAME,
   validatePipeline,
 } from "./admission.js";
+import { archiveGet, runArchive } from "./archive.js";
 import { escapeHtml, readServerConfig, renderDashboard, serveAsset } from "./assets.js";
 import { announce, connectEvents, EVENTS_PATH } from "./events.js";
 import {
@@ -293,7 +294,9 @@ async function casPut(request, env, key, type) {
     const stored = data.jobs.length ? await storedBoard(env) : { etag: null, jobs: [] };
     const bad =
       (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
-      (stored.etag === cond.get("If-Match") ? checkRowIds(stored.jobs, data.jobs) : null);
+      (stored.etag === cond.get("If-Match")
+        ? (checkRowIds(stored.jobs, data.jobs) ?? checkArchived(stored, data))
+        : null);
     if (bad) return reply(bad, 400);
   }
   const obj = await env.BUCKET.put(key, body, {
@@ -439,6 +442,8 @@ async function pipelinePut(request, env, principal, scope) {
   }
   const error = validatePipeline(doc);
   if (error) return reply(error, 400);
+  if (scope !== "global" && "archive" in doc)
+    return reply("archive: set only in the all-projects scope", 400);
   const key = pipelineKey(scope);
   const current = await env.BUCKET.head(key);
   if (cond.has("If-Match") ? current?.httpEtag !== cond.get("If-Match") : current)
@@ -951,13 +956,13 @@ async function jobPut(request, env, key) {
     : reply("precondition failed", 412);
 }
 
-// The stored board's version and rows. An unreadable board has no rows.
+// The stored board's version, rows and archived field. An unreadable board has no rows.
 async function storedBoard(env) {
   const object = await env.BUCKET.get("board.json");
   if (!object) return { etag: null, jobs: [] };
   try {
-    const { jobs } = JSON.parse(await object.text());
-    return { etag: object.httpEtag, jobs: Array.isArray(jobs) ? jobs : [] };
+    const { jobs, archived } = JSON.parse(await object.text());
+    return { etag: object.httpEtag, jobs: Array.isArray(jobs) ? jobs : [], archived };
   } catch {
     return { etag: object.httpEtag, jobs: [] };
   }
@@ -985,6 +990,22 @@ function checkRowIds(storedJobs, jobs) {
   for (const [id, count] of left)
     if (count && typeof id === "string")
       return `a board write cannot change a row's id: ${quoteId(id)} is gone and a new row appeared. Nothing was written. Upgrade the factory skill, or drop and re-add the row in two writes.`;
+  return null;
+}
+
+// An error message, or null. Only the archive pass writes `archived`, and a client that
+// ignores its id floor must not hand out an archived job's id again.
+function checkArchived(stored, data) {
+  if (JSON.stringify(data.archived ?? null) !== JSON.stringify(stored.archived ?? null))
+    return "a board write cannot change the archived field. Nothing was written. Upgrade the factory skill.";
+  const max = stored.archived?.max_id;
+  if (!Number.isInteger(max)) return null;
+  const ids = new Set(stored.jobs.map((j) => j?.id));
+  for (const j of data.jobs) {
+    const m = typeof j?.id === "string" && !ids.has(j.id) && /^(\d{3,})-/.exec(j.id);
+    if (m && Number(m[1]) <= max)
+      return `a board write cannot add ${quoteId(j.id)}: ids up to ${max} belong to archived jobs. Nothing was written. Upgrade the factory skill.`;
+  }
   return null;
 }
 
@@ -1100,6 +1121,8 @@ async function api(request, env, path, principal) {
   }
   if (path === "/api/backlog/triage" && method === "POST") return backlogTriage(request, env);
   if (path === "/api/backlog/triage" && method === "GET") return backlogTriageGet(request, env);
+  if (path === "/api/board/archive")
+    return method === "GET" ? archiveGet(request, env) : notFound();
   if (path === "/api/board" || path === "/api/backlog") {
     const [key, type] =
       path === "/api/board" ? ["board.json", "application/json"] : ["backlog.md", "text/markdown"];
@@ -1164,6 +1187,9 @@ export default {
       return reply("forbidden", 403);
     }
     return serveFactory(request, { ...env, config }, principal);
+  },
+  scheduled(controller, env, ctx) {
+    ctx.waitUntil(runArchive(env, new Date(controller.scheduledTime)));
   },
 };
 

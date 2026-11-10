@@ -44,7 +44,16 @@ export const FLOORS = Object.freeze(
 
 const REVIEWERS = ["security", "ux", "ui", "code"];
 const STAGES = ["spec", "build", "review", "approve"];
-const KEYS = ["schema", "merge", "review_rounds", "gates", "pickup", "triage", "stage_notes"];
+const KEYS = [
+  "schema",
+  "merge",
+  "review_rounds",
+  "gates",
+  "pickup",
+  "triage",
+  "stage_notes",
+  "archive",
+];
 export const HOST_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 // Optional gate stages. Config can switch a catalog gate on; it can never add one or
@@ -177,15 +186,28 @@ export function validatePipeline(doc) {
       if (error) return error;
     }
   }
-  if (!("stage_notes" in doc)) return null;
-  if (!isObject(doc.stage_notes)) return "stage_notes: must be an object";
-  for (const key of Object.keys(doc.stage_notes))
-    if (!STAGES.includes(key)) return `stage_notes.${key}: unknown field`;
-  for (const stage of STAGES) {
-    if (!(stage in doc.stage_notes)) continue;
-    const error = checkOperatorText(doc.stage_notes[stage], `stage_notes.${stage}`);
-    if (error) return error;
+  if ("stage_notes" in doc) {
+    if (!isObject(doc.stage_notes)) return "stage_notes: must be an object";
+    for (const key of Object.keys(doc.stage_notes))
+      if (!STAGES.includes(key)) return `stage_notes.${key}: unknown field`;
+    for (const stage of STAGES) {
+      if (!(stage in doc.stage_notes)) continue;
+      const error = checkOperatorText(doc.stage_notes[stage], `stage_notes.${stage}`);
+      if (error) return error;
+    }
   }
+  return "archive" in doc ? archiveError(doc.archive) : null;
+}
+
+/** The first error in a pipeline `archive` value, or null. The dashboard holds the same copy. */
+function archiveError(archive) {
+  if (!isObject(archive)) return "archive: must be an object";
+  for (const key of Object.keys(archive))
+    if (key !== "mode" && key !== "n") return `archive.${key}: unknown field`;
+  if (archive.mode !== "age" && archive.mode !== "count")
+    return 'archive.mode: must be "age" or "count"';
+  if (!(Number.isInteger(archive.n) && archive.n >= 1 && archive.n <= 10000))
+    return "archive.n: must be a whole number from 1 to 10000";
   return null;
 }
 
