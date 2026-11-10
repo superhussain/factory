@@ -644,11 +644,13 @@ migration; their command and JSON output contract are unchanged.
   servers.
 - On cleanup, run `python3 "$RUNTIME" cleanup "$SLUG/<id>"` and clear `port`. It
   stops processes running out of `$WT`, runs `git worktree remove` without `--force`,
-  then `git branch -d factory/<id>` once it is merged into the checkout's HEAD, and prints `{"removed": [...], "left": [...]}`.
+  then `git branch -d factory/<id>` once it is merged into the checkout's HEAD, and
+  prints `{"removed": [...], "left": [...]}`.
   Exit 1 means something was left: a dirty worktree, a process it could not stop,
-  an unmerged branch, or a git call that failed or ran past 20 s. That is not a stop. Put `cleanup left: <first left item>` in
-  the job's `note` and continue. Never run `git branch -D`, `git worktree remove --force`
-  or `rm -rf` on a job's worktree, branch or folder, and never retry cleanup with force.
+  an unmerged branch, or a git call that failed or ran past 20 s. That is not a stop.
+  Put `cleanup left: <first left item>` in the job's `note` and continue. Never run
+  `git branch -D`, `git worktree remove --force` or `rm -rf` on a job's worktree,
+  branch or folder, and never retry cleanup with force.
 - Never put real secrets, tokens, or user data in screenshots, logs, or job files,
   since the Worker serves job markdown and images to anyone past the Access policy.
 - If an agent fails or writes a malformed file, re-run it once, then move the job
