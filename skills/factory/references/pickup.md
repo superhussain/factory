@@ -212,6 +212,7 @@ changes nothing. Then install one timer per host.
 - `pickup` runs its close pass right after the move stops. It writes `decision.md` with first line `CLOSED: <reason>`, keeping earlier text under `## Earlier decision`, and only then sets the stage to `closed`, the note to the reason and `close.closed`. Its dry run prints `would close <id> <project>`, or `skip close <id> <project>: claimed by <device> session <tag>` for a job with a live claim.
 - A session on a closing job is refused at its next `board` or `hold` call with exit 6. `board` first releases that session's own claim, so the next pickup can close the job.
 - Only the dashboard and `pickup` write `close`. `board` refuses a `close` patch with exit 2.
+- The next pickup run on a host that still holds a closed job's worktree or `factory/<id>` branch runs `cleanup` on it, once per host, and records `close.cleanup.<host> = {at, left}`. It keeps a dirty worktree and an unmerged branch. Its dry run prints `would clean up <id> <project>`.
 
 ## Logs and limits
 
