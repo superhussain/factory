@@ -1214,6 +1214,9 @@ function waitsOnYou(j) {
     (j.stage === 'pr-open' && (j.escalated === true || /^escalated:/i.test(String(j.note ?? ''))));
 }
 
+// Prioritized jobs first, as factory.py pickup takes them. The sort is stable, so ties keep board order.
+function prioritizedFirst(list) { return list.sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at)); }
+
 // One fact on one row, with the full text in its tooltip.
 function line(cls, text) {
   return '<div class="' + cls + ' line" title="' + esc(text) + '">' + esc(text) + '</div>';
@@ -2742,6 +2745,7 @@ function renderBoard() {
   const waiting = lists[COLUMNS.indexOf('needs-you')];
   // Oldest first, so the longest wait sits on top.
   waiting.sort((a, b) => (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
+  for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   if (!settingsShown) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   $('board').style.setProperty('--cols', collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']).join(' '));
