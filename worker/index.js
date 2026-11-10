@@ -10,6 +10,15 @@ import {
 } from "./admission.js";
 import { archiveGet, runArchive } from "./archive.js";
 import { escapeHtml, readServerConfig, renderDashboard, serveAsset } from "./assets.js";
+import {
+  ESCALATION_MODEL,
+  ESCALATION_REASON_BUILDER,
+  ESCALATION_REASON_PERSON,
+  ESCALATION_THRESHOLD,
+  escalationConfidence,
+  escalationInput,
+  REVIEWERS,
+} from "./escalation.js";
 import { announce, connectEvents, EVENTS_PATH } from "./events.js";
 import {
   newPairingCode,
@@ -47,6 +56,8 @@ const PIPELINE_EFFECTIVE = /^\/api\/pipeline\/effective\/([\w-]+)$/;
 const MAX_PIPELINE = 16 << 10;
 // 2000 + 6000 characters at up to 4 UTF-8 bytes each, plus JSON keys and escapes.
 const MAX_TRIAGE = 64 << 10;
+// Four reviews of 8000 characters at up to 4 UTF-8 bytes each, plus JSON keys and escapes.
+const MAX_ESCALATION = 160 << 10;
 // /api/hosts, /api/hosts/<id> and /api/hosts/<id>/<action>.
 const HOSTS = /^\/api\/hosts(?:\/([^/]+)(?:\/(code|pair|status|history))?)?$/;
 const MAX_BODY = 1 << 20;
@@ -670,6 +681,53 @@ async function backlogTriage(request, env) {
   });
 }
 
+// Rates one review round's CHANGES findings. The Worker compares the score with the fixed
+// threshold and writes the reason, so review text can move the score but write no words.
+async function reviewEscalation(request, env) {
+  const body = await readJson(request, MAX_ESCALATION);
+  if (body instanceof Response) return body;
+  if (typeof body !== "object" || body === null || Array.isArray(body))
+    return reply("body: must be a JSON object", 400);
+  for (const key of Object.keys(body))
+    if (key !== "reviews") return reply(`${key}: unknown field`, 400);
+  const { reviews } = body;
+  if (typeof reviews !== "object" || reviews === null || Array.isArray(reviews))
+    return reply("reviews: must be an object", 400);
+  if (!Object.keys(reviews).length) return reply("reviews: must name at least one reviewer", 400);
+  for (const [name, text] of Object.entries(reviews)) {
+    const field = `reviews.${name}`;
+    if (!REVIEWERS.includes(name)) return reply(`${field}: unknown reviewer`, 400);
+    if (typeof text !== "string") return reply(`${field}: must be text`, 400);
+    if ([...text].length > 8000) return reply(`${field}: over 8000 characters`, 400);
+    const error = checkOperatorText(text, field, "document");
+    if (error) return reply(error, 400);
+    if (hasReservedTag(text, "review-findings"))
+      return reply(`${field}: contains the reserved review-findings tag`, 400);
+  }
+  if (!env.AI)
+    return reply("review escalation needs the Workers AI binding; deploy the current Worker", 503);
+  let result;
+  try {
+    result = await env.AI.run(ESCALATION_MODEL, escalationInput(reviews));
+  } catch {
+    return reply("the escalation model failed", 502);
+  }
+  const confidence = escalationConfidence(result);
+  if (confidence === null) return reply("the escalation model gave an unusable reply", 502);
+  const escalate = confidence >= ESCALATION_THRESHOLD;
+  return reply(
+    JSON.stringify({
+      decision: escalate ? "escalate" : "continue",
+      confidence,
+      threshold: ESCALATION_THRESHOLD,
+      reason: escalate ? ESCALATION_REASON_PERSON : ESCALATION_REASON_BUILDER,
+      model: ESCALATION_MODEL,
+    }),
+    200,
+    "application/json",
+  );
+}
+
 const hostKey = (id) => `hosts/${id}.json`;
 const hostStatusKey = (id) => `host-status/${id}.json`;
 const hostPairingKey = (id) => `host-pairing/${id}.json`;
@@ -1127,6 +1185,7 @@ async function api(request, env, path, principal) {
   }
   if (path === "/api/backlog/triage" && method === "POST") return backlogTriage(request, env);
   if (path === "/api/backlog/triage" && method === "GET") return backlogTriageGet(request, env);
+  if (path === "/api/review/escalation" && method === "POST") return reviewEscalation(request, env);
   if (path === "/api/board/archive")
     return method === "GET" ? archiveGet(request, env) : notFound();
   if (path === "/api/board" || path === "/api/backlog") {
