@@ -245,6 +245,56 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 To stop triage, set it to Off in Settings, Pipeline. Ideas it already queued stay
 ordinary ideas, and a person can discard them.
 
+## Review escalation
+
+After a review round with CHANGES below the round cap, one clef-flash call over the
+findings decides whether the job needs a person now. There is no setting: the
+threshold is a code constant of 80, a guess that has not been measured.
+
+```mermaid
+sequenceDiagram
+  participant O as orchestrator
+  participant F as factory.py escalation
+  participant W as Worker
+  participant M as clef-flash
+  O->>F: sample/042-csv-export 1
+  F->>W: POST /api/review/escalation
+  W->>M: env.AI.run
+  M-->>W: noul 0.91
+  W-->>F: escalate, 91
+  F-->>O: one JSON line
+```
+
+- `factory.py escalation <slug>/<job-id> <round>` reads `round-<N>/review-*.md` and sends
+  only the reviews whose first line is `VERDICT: CHANGES`, each cut to 8000 characters.
+- The Worker wraps each review in a `<review-findings reviewer="..." trust="data">`
+  envelope and asks one `escalate` question of type `noul`. Confidence 80 or more is
+  `escalate`, below is `continue`. The reason is fixed text, so review text can move the
+  score but write no words.
+- On `escalate`, loop step 5 in SKILL.md pushes the job, patches it to `needs-human` with
+  a `needs` link to the first CHANGES review, and dispatches nothing.
+- The check runs only below the cap. It never runs after approver CHANGES, at the round
+  cap, or on an all-PASS round, and it sees only the current round.
+
+Request: `{"reviews": {"security"?: text, "ux"?: text, "ui"?: text, "code"?: text}}`, at
+least one key, body cap `160 << 10` bytes. A review over 8000 characters, an unknown
+reviewer or key, or text holding the `review-findings` or `operator-preferences` tag gets
+a 400.
+
+Reply 200: `{"decision": "escalate"|"continue", "confidence": int, "threshold": 80,
+"reason": text, "model": "@cf/cloudflare/clef-flash"}`. The reason is
+`clef-flash rated the findings as needing a person.` or
+`clef-flash rated the findings as fixable by the builder.`
+
+| Case | Output | Loop |
+| --- | --- | --- |
+| no CHANGES review | `continue`, no call | unchanged |
+| 400, 404, 502, 503, network, bad reply | warning, `continue` | unchanged |
+
+A failed check never blocks a job. It only skips the extra stop. The round cap, the
+approver and the merge rules still apply. The Worker must deploy before hosts upgrade, or
+`factory.py` sees 404 and continues.
+
 ## Rollback
 
 | Scope | Rollback |

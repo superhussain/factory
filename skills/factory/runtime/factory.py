@@ -32,6 +32,9 @@
   factory.py documents <project-slug>       write the project's notes, decisions and runbook, wrapped as
                                             operator-preferences data, to projects/<slug>.documents.md
                                             and print its path
+  factory.py escalation <project-slug>/<job-id> <round>
+                                            ask whether a review round's CHANGES findings need a person,
+                                            print one JSON verdict
   factory.py stop <worktree>                stop processes running out of a worktree
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
@@ -1211,6 +1214,57 @@ def backlog_triage(home, item, context):
               file=sys.stderr)
         return None, status == 400
     return (None, False) if verdict["decision"] == "off" else (verdict, True)
+
+
+ESCALATION_TEXT_LIMIT = 8000
+
+
+def escalation_verdict(text):
+    """The Worker's review escalation reply, or None when it is not one."""
+    try:
+        reply = json.loads(text)
+    except ValueError:
+        return None
+    ok = (isinstance(reply, dict) and reply.get("decision") in ("escalate", "continue")
+          and type(reply.get("confidence")) is int and type(reply.get("threshold")) is int
+          and isinstance(reply.get("reason"), str) and isinstance(reply.get("model"), str))
+    return reply if ok else None
+
+
+def escalation_cmd(target, round_text):
+    """Print one JSON verdict on whether round <round>'s CHANGES findings need a person.
+    A Worker or network failure only warns and prints continue, so the review loop goes on."""
+    home, slug, job_id = r2_target(target, True)
+    if not re.fullmatch(r"[1-9][0-9]*", round_text):
+        fail("round must be a positive integer", 2)
+    folder = safe_job_folder(home, slug, job_id) / f"round-{round_text}"
+    reviews = {}
+    for name in TRACER_REVIEWERS:
+        path = folder / f"review-{name}.md"
+        if not path.is_file():
+            fail(f"{path} is missing: the round is not complete", 4)
+        text = path.read_text(encoding="utf-8")
+        if text.splitlines()[:1] == ["VERDICT: CHANGES"]:
+            reviews[name] = text[:ESCALATION_TEXT_LIMIT]
+    unchanged = {"decision": "continue", "confidence": None, "threshold": None,
+                 "reason": "no reviewer asked for changes", "model": None}
+    if not reviews:
+        print(json.dumps(unchanged))
+        return
+    body = json.dumps({"reviews": reviews}, ensure_ascii=False)
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(captured):
+            status, _, text = api(home, "POST", "/api/review/escalation", body, ok=(200, 400, 404, 502, 503),
+                                  headers={"Content-Type": "application/json"})
+    except SystemExit:
+        status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
+    verdict = escalation_verdict(text) if status == 200 else None
+    if verdict is None:
+        why = "malformed reply" if status == 200 else status
+        print(f"factory.py: review escalation check failed ({why}); the review loop continues", file=sys.stderr)
+        verdict = {**unchanged, "reason": "the escalation check failed"}
+    print(json.dumps(verdict))
 
 
 def queue_backlog_item(home, slug, feature, verdict):
@@ -5536,6 +5590,7 @@ COMMANDS["cleanup"] = (cleanup, 1, 1)
 COMMANDS["deny-notes"] = (deny_notes_cmd, 1, 2)
 COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
+COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 
 def main(argv=None):
     global _HOME_OVERRIDE
