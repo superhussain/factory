@@ -495,6 +495,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <p class="copy-status" id="d-copy-status" role="status"></p>
   <p class="err" id="d-pause-err" role="alert" hidden></p>
   <p class="err" id="d-rerun-err" role="alert" hidden></p>
+  <p class="copy-status" id="d-rerun-status" role="status"></p>
   <div class="assignment" id="d-assignment" hidden>
     <p class="muted" id="d-assign-help"></p>
     <label>Project <select class="filter" id="d-project" aria-describedby="d-assign-help"></select></label>
@@ -2958,6 +2959,7 @@ async function openJob(id) {
     $('d-prioritize-err').hidden = true;
     $('d-pause-err').hidden = true;
     $('d-rerun-err').hidden = true;
+    $('d-rerun-status').textContent = '';
     $('d-project').value = '';
     $('d-project').disabled = !projects?.size;
     $('d-assign').disabled = true;
@@ -4885,10 +4887,12 @@ $('d-rerun').addEventListener('click', async () => {
   const version = drawerVersion;
   const host = j.claim.device;
   const err = $('d-rerun-err');
+  const status = $('d-rerun-status');
   err.hidden = true;
   $('d-rerun').disabled = true;
   try {
     let listed;
+    status.textContent = 'Checking ' + host + '…';
     try {
       const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
       if (!h.ok || !p.ok) throw new Error('load');
@@ -4896,6 +4900,8 @@ $('d-rerun').addEventListener('click', async () => {
       listed = list.some((x) => x.id === host && x.state === 'active') && (view.pickup?.enabled ? view.pickup.hosts : []).includes(host);
     } catch {
       throw new Error('Could not check ' + host + '. Try again.');
+    } finally {
+      if (version === drawerVersion) status.textContent = '';
     }
     if (!listed) throw new Error(host + ' does not run pickup for ' + j.project + ', so nothing would restart the job. Use Move to another host instead.');
     if (!confirm('Rerun the ' + j.stage + ' stage of ' + id + ' on ' + host + '? This stops its current session. The next pickup run on ' + host + ' starts the stage again in a fresh session.')) return;
@@ -5267,6 +5273,7 @@ function openBacklogItem(item) {
     head.append(a);
   }
   for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;
