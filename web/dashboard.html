@@ -4439,19 +4439,18 @@ function boardSaveError(x, hint) {
 let ideaEditor = null;
 let ideaEditorLoad = null;
 
-async function openIdeaEditor() {
-  if (ideaEditor || ideaEditorLoad || !canEditIdea(jobs.find((j) => j.id === openId))) return;
-  const loading = { id: openId, version: drawerVersion, read: ++boardReadVersion, opener: $('d-actions') };
+async function openIdeaEditor(ctx) {
+  if (ideaEditor || ideaEditorLoad || !canEditIdea(jobs.find((j) => j.id === ctx.id))) return;
+  const loading = { id: ctx.id, ctx, read: ++boardReadVersion };
   ideaEditorLoad = loading;
-  const err = $('d-edit-idea-err');
   let message = 'Could not load the idea. Try again.';
-  err.hidden = true;
+  ctx.report('');
   syncIdeaEditor();
   try {
     const r = await fetch('./api/board', { cache: 'no-store' });
     if (!r.ok) throw new Error(message);
     const board = await r.json();
-    if (openId !== loading.id || drawerVersion !== loading.version) return;
+    if (!ctx.live()) return;
     if (loading.read !== boardReadVersion) throw new Error(message);
     const j = board.jobs.find((j) => j.id === loading.id);
     if (!j) message = 'This idea is no longer on the board. Your draft is still here.';
@@ -4460,16 +4459,13 @@ async function openIdeaEditor() {
     jobs = board.jobs;
     renderBoard();
     syncDetail();
-    ideaEditor = { id: j.id, originalText: j.idea, version: loading.version, opener: loading.opener, saving: false, error: '' };
+    ideaEditor = { id: j.id, originalText: j.idea, ctx, saving: false, error: '' };
     $('edit-idea-text').value = j.idea;
     syncIdeaEditor();
     $('edit-idea-dlg').showModal();
     $('edit-idea-text').focus();
   } catch (e) {
-    if (openId === loading.id && drawerVersion === loading.version) {
-      err.textContent = message;
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(message);
   } finally {
     ideaEditorLoad = null;
     syncIdeaEditor();
@@ -4495,6 +4491,60 @@ function jobActionsFor(j) {
     'd-close-job': !!j.project && j.stage !== 'idea' && !TERMINAL.includes(j.stage) && !j.close,
   };
   return JOB_ACTIONS.filter((id) => shown[id]);
+}
+
+// A runner's context. The drawer writes into its own lines and drops results once another job opens.
+function drawerAction(id) {
+  const version = drawerVersion;
+  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
+  return {
+    id: openId,
+    card: false,
+    button: $(id),
+    opener: () => $('d-actions'),
+    live: () => version === drawerVersion,
+    report: (text) => {
+      err.textContent = text;
+      err.hidden = !text;
+    },
+    status: id === 'd-copy-link' ? showCopyStatus : (text) => { $('d-rerun-status').textContent = text; },
+  };
+}
+
+// A card has no drawer, so its results go to the board toast.
+function cardAction(id, inNeeds) {
+  return { id, card: true, button: null, opener: () => cardTrigger(id, inNeeds), live: () => true, report: showBoardStatus, status: showBoardStatus };
+}
+
+// A dialog hands focus back to what opened it, if that is still there to take it.
+function focusOpener(opener) {
+  const el = opener();
+  const target = el?.isConnected && !el.disabled && el.getClientRects().length ? el
+    : !$('detail').hidden ? $('d-close') : $('job-jump');
+  target.focus();
+}
+
+let boardStatusTimer = 0;
+
+// A separate task sets the text after the toast empties, so a repeat is announced again.
+function showBoardStatus(text) {
+  clearTimeout(boardStatusTimer);
+  $('board-status').textContent = '';
+  $('board-status').hidden = !text;
+  if (!text) return;
+  boardStatusTimer = setTimeout(() => {
+    $('board-status').textContent = text;
+    boardStatusTimer = setTimeout(() => showBoardStatus(''), 6000);
+  }, 100);
+}
+
+function showCopyStatus(text) {
+  clearCopyStatus();
+  // A separate task empties the live region first, so a repeat copy is announced again.
+  copyStatusTimer = setTimeout(() => {
+    $('d-copy-status').textContent = text;
+    if (text === 'Copied') copyStatusTimer = setTimeout(clearCopyStatus, 2000);
+  }, 100);
 }
 
 let copyStatusTimer = 0;
@@ -4561,15 +4611,13 @@ function syncIdeaEditor() {
 
 function closeIdeaEditor() {
   if (!ideaEditor || ideaEditor.saving) return;
-  const opener = ideaEditor.opener;
+  const { opener } = ideaEditor.ctx;
   ideaEditor = null;
   $('edit-idea-dlg').close();
   $('edit-idea-text').value = '';
   $('edit-idea-err').textContent = '';
   $('edit-idea-err').hidden = true;
-  const target = opener.isConnected && !opener.disabled && opener.getClientRects().length ? opener
-    : !$('detail').hidden ? $('d-close') : $('job-jump');
-  target.focus();
+  focusOpener(opener);
 }
 
 const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
@@ -4692,10 +4740,10 @@ function closeJob(board, id, reason, now) {
 
 let moveHost = null;
 
-async function openMoveHost() {
-  const j = jobs.find((x) => x.id === openId);
+async function openMoveHost(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
   if (moveHost || !j) return;
-  moveHost = { id: j.id, opener: $('d-actions') };
+  moveHost = { id: j.id, opener: ctx.opener };
   const select = $('move-host-select');
   const err = $('move-host-err');
   const empty = $('move-host-empty');
@@ -4744,10 +4792,9 @@ function closeMoveHost() {
   const opener = moveHost.opener;
   moveHost = null;
   $('move-host-dlg').close();
-  opener.focus();
+  focusOpener(opener);
 }
 
-$('d-move-host').addEventListener('click', openMoveHost);
 $('move-host-cancel').addEventListener('click', closeMoveHost);
 $('move-host-dlg').addEventListener('cancel', (e) => { e.preventDefault(); closeMoveHost(); });
 $('move-host-form').addEventListener('submit', async (e) => {
@@ -4774,10 +4821,10 @@ $('move-host-form').addEventListener('submit', async (e) => {
 
 let closeDialog = null;
 
-function openCloseDialog() {
-  const j = jobs.find((x) => x.id === openId);
+function openCloseDialog(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
   if (closeDialog || !j) return;
-  closeDialog = { id: j.id, opener: $('d-actions') };
+  closeDialog = { id: j.id, opener: ctx.opener };
   $('close-job-help').textContent = j.id + ' stops at ' + j.stage + '. The next pickup run writes decision.md with your reason, then moves the job to Closed. If a session is running it, the close waits for that session to stop.';
   $('close-job-reason').value = '';
   $('close-job-err').textContent = '';
@@ -4792,10 +4839,9 @@ function dismissCloseDialog() {
   const opener = closeDialog.opener;
   closeDialog = null;
   $('close-job-dlg').close();
-  opener.focus();
+  focusOpener(opener);
 }
 
-$('d-close-job').addEventListener('click', openCloseDialog);
 $('close-job-cancel').addEventListener('click', dismissCloseDialog);
 $('close-job-dlg').addEventListener('cancel', (e) => { e.preventDefault(); dismissCloseDialog(); });
 $('close-job-form').addEventListener('submit', async (e) => {
@@ -4819,7 +4865,6 @@ $('close-job-form').addEventListener('submit', async (e) => {
   await poll();
 });
 
-$('d-edit-idea').addEventListener('click', openIdeaEditor);
 $('d-actions').addEventListener('click', () => {
   if ($('d-actions-menu').hidden) openJobActions('first'); else closeJobActions(true);
 });
@@ -4872,15 +4917,15 @@ $('edit-idea-form').addEventListener('submit', async (e) => {
   }
   session.saving = false;
   closeIdeaEditor();
-  if (openId !== edit.id || drawerVersion !== session.version) return;
+  if (!session.ctx.live()) return;
   const refreshed = await poll();
-  if (openId !== edit.id || drawerVersion !== session.version) return;
+  if (!session.ctx.live()) return;
   const j = jobs.find((j) => j.id === edit.id);
   if (!refreshed || j?.idea !== edit.text || j?.title !== ideaTitle(edit.text)) {
-    $('d-edit-idea-err').textContent = 'Changes saved. Refresh to see the latest board.';
-    $('d-edit-idea-err').hidden = false;
+    session.ctx.report('Changes saved. Refresh to see the latest board.');
     return;
   }
+  if (session.ctx.card) return;
   activeFile = 'idea.md';
   renderDetail();
   writeHash();
@@ -4901,10 +4946,10 @@ function openIdeaDialog(followUp = null) {
   if (followUp) $('idea-text').focus();
 }
 $('new-idea').addEventListener('click', () => openIdeaDialog());
-$('d-follow-up').addEventListener('click', () => {
-  const j = jobs.find((x) => x.id === openId);
+function followUpAction(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
   if (j) openIdeaDialog(j);
-});
+}
 // Opened from the jumper, Escape should return to where the user was before Cmd+K.
 let ideaFromPicker = false;
 $('idea-dlg').addEventListener('close', () => {
@@ -4942,85 +4987,64 @@ $('d-assign').addEventListener('click', async () => {
     }
   }
 });
-$('d-prioritize').addEventListener('click', async () => {
-  const id = openId;
-  const version = drawerVersion;
-  const err = $('d-prioritize-err');
-  err.hidden = true;
-  $('d-prioritize').disabled = true;
+async function prioritizeAction(ctx) {
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const message = prioritizeJob(board, id, isoNow());
+      const message = prioritizeJob(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
     await poll();
   } catch (x) {
-    if (version === drawerVersion) {
-      err.textContent = String(x.message || x);
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(String(x.message || x));
   } finally {
-    $('d-prioritize').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
-$('d-remove-priority').addEventListener('click', async () => {
-  const id = openId;
-  const version = drawerVersion;
-  const err = $('d-prioritize-err');
-  err.hidden = true;
-  $('d-remove-priority').disabled = true;
+}
+async function removePriorityAction(ctx) {
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const message = removePriority(board, id, isoNow());
+      const message = removePriority(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
     await poll();
   } catch (x) {
-    if (version === drawerVersion) {
-      err.textContent = String(x.message || x);
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(String(x.message || x));
   } finally {
-    $('d-remove-priority').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
-$('d-pause').addEventListener('click', async () => {
-  const id = openId;
-  const version = drawerVersion;
-  const err = $('d-pause-err');
-  err.hidden = true;
-  $('d-pause').disabled = true;
+}
+async function pauseAction(ctx) {
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const message = pauseJob(board, id, isoNow());
+      const message = pauseJob(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
     await poll();
   } catch (x) {
-    if (version === drawerVersion) {
-      err.textContent = String(x.message || x);
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(String(x.message || x));
   } finally {
-    $('d-pause').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
-$('d-rerun').addEventListener('click', async () => {
-  const j = jobs.find((x) => x.id === openId);
+}
+async function rerunAction(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
   if (!j || !canRerun(j)) return;
   const id = j.id;
-  const version = drawerVersion;
   const host = j.claim.device;
-  const err = $('d-rerun-err');
-  const status = $('d-rerun-status');
-  err.hidden = true;
-  $('d-rerun').disabled = true;
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
   try {
     let listed;
-    status.textContent = 'Checking ' + host + '…';
+    ctx.status('Checking ' + host + '…');
     try {
       const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
       if (!h.ok || !p.ok) throw new Error('load');
@@ -5029,7 +5053,7 @@ $('d-rerun').addEventListener('click', async () => {
     } catch {
       throw new Error('Could not check ' + host + '. Try again.');
     } finally {
-      if (version === drawerVersion) status.textContent = '';
+      if (ctx.live()) ctx.status('');
     }
     if (!listed) throw new Error(host + ' does not run pickup for ' + j.project + ', so nothing would restart the job. Use Move to another host instead.');
     if (!confirm('Rerun the ' + j.stage + ' stage of ' + id + ' on ' + host + '? This stops its current session. The next pickup run on ' + host + ' starts the stage again in a fresh session.')) return;
@@ -5039,53 +5063,36 @@ $('d-rerun').addEventListener('click', async () => {
     });
     await poll();
   } catch (x) {
-    if (version === drawerVersion) {
-      err.textContent = String(x.message || x);
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(String(x.message || x));
   } finally {
-    $('d-rerun').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
-$('d-resume').addEventListener('click', async () => {
-  const id = openId;
-  const version = drawerVersion;
-  const err = $('d-pause-err');
-  err.hidden = true;
-  $('d-resume').disabled = true;
+}
+async function resumeAction(ctx) {
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const message = resumeJob(board, id, isoNow());
+      const message = resumeJob(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
     await poll();
   } catch (x) {
-    if (version === drawerVersion) {
-      err.textContent = String(x.message || x);
-      err.hidden = false;
-    }
+    if (ctx.live()) ctx.report(String(x.message || x));
   } finally {
-    $('d-resume').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
-$('d-copy-link').addEventListener('click', async () => {
-  const id = openId;
-  const version = drawerVersion;
+}
+async function copyLinkAction(ctx) {
   let copied = true;
   try {
-    await navigator.clipboard.writeText(jobLink(id));
+    await navigator.clipboard.writeText(jobLink(ctx.id));
   } catch {
     copied = false;
   }
-  if (version !== drawerVersion) return;
-  clearCopyStatus();
-  // A separate task empties the live region first, so a repeat copy is announced again.
-  copyStatusTimer = setTimeout(() => {
-    $('d-copy-status').textContent = copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.';
-    if (copied) copyStatusTimer = setTimeout(clearCopyStatus, 2000);
-  }, 100);
-});
+  if (ctx.live()) ctx.status(copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.');
+}
 $('idea-cancel').addEventListener('click', () => { if (!locked()) $('idea-dlg').close(); });
 // Escape closes the dialog like Cancel, except while a save runs or a submission is
 // unresolved: an uncertain commit keeps its snapshot, and closing would destroy it.
@@ -5343,10 +5350,10 @@ $('idea-form').addEventListener('submit', async (e) => {
   if (!jobs.some((j) => j.id === id)) alert('Idea ' + id + ' was saved, but the board could not be refreshed. Reload the page to see it.');
 });
 
-$('d-discard').addEventListener('click', async () => {
-  const id = openId;
+async function discardAction(ctx) {
+  const { id } = ctx;
   if (!confirm('Discard idea ' + id + '? It moves to closed.')) return;
-  $('d-discard').disabled = true;
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
       const err = discardIdea(board, id, isoNow());
@@ -5356,16 +5363,15 @@ $('d-discard').addEventListener('click', async () => {
   } catch (x) {
     alert(String(x.message || x));
   } finally {
-    $('d-discard').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
+}
 
-$('d-follow-tracer').addEventListener('click', async () => {
-  const id = openId;
-  $('d-follow-tracer').disabled = true;
+async function followTracerAction(ctx) {
+  if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const err = followTracer(board, id, isoNow());
+      const err = followTracer(board, ctx.id, isoNow());
       if (err === 'unchanged') return BOARD_UNCHANGED;
       if (err) throw new Error(err + ', so nothing was changed.');
     });
@@ -5373,9 +5379,25 @@ $('d-follow-tracer').addEventListener('click', async () => {
   } catch (x) {
     alert(String(x.message || x));
   } finally {
-    $('d-follow-tracer').disabled = false;
+    if (ctx.button) ctx.button.disabled = false;
   }
-});
+}
+
+const JOB_ACTION_RUN = {
+  'd-edit-idea': openIdeaEditor,
+  'd-discard': discardAction,
+  'd-follow-tracer': followTracerAction,
+  'd-move-host': openMoveHost,
+  'd-rerun': rerunAction,
+  'd-prioritize': prioritizeAction,
+  'd-remove-priority': removePriorityAction,
+  'd-pause': pauseAction,
+  'd-resume': resumeAction,
+  'd-copy-link': copyLinkAction,
+  'd-follow-up': followUpAction,
+  'd-close-job': openCloseDialog,
+};
+for (const id of JOB_ACTIONS) $(id).addEventListener('click', () => JOB_ACTION_RUN[id](drawerAction(id)));
 
 function openBacklogItem(item) {
   drawerVersion++;
