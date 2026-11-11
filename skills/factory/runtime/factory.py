@@ -3391,6 +3391,7 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
 
 def close_pass(home, data, device, minutes, dry):
     """Close each job the dashboard queued a close for: decision.md first, then the stage."""
+    configs = {}
     for j in data["jobs"]:
         job_id, project = j.get("id"), j.get("project")
         if not (closing(j) and j.get("stage") not in TERMINAL
@@ -3416,7 +3417,9 @@ def close_pass(home, data, device, minutes, dry):
             print(f"closed pull request {pr} for {job_id}")
         elif outcome and outcome[0] == "open":
             print(f"factory.py: pickup leaves pull request {pr} open: {outcome[1]}", file=sys.stderr)
-        config = pickup_config(home, project)
+        if project not in configs:
+            configs[project] = pickup_config(home, project)
+        config = configs[project]
 
         def write(text, j=j, reason=reason, outcome=outcome, config=config):
             if text is not None and text.startswith("CLOSED:"):
