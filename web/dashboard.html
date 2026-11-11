@@ -490,6 +490,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head .close { flex: none; }
     .detail-head .links { order: 3; flex-basis: 100%; height: auto; }
     .detail-head .pr-link { margin-top: 8px; }
+    .detail-head { position: relative; }
+    .detail-head .job-actions { position: static; }
+    .detail-head .job-actions-menu { top: calc(100% + 4px); right: 16px; }
     .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
     .doc { padding: 16px 16px 40px; }
     .pager > .doc, .pager > .gallery { touch-action: pan-y pinch-zoom; }
@@ -4911,6 +4914,10 @@ function jobLink(id) {
   return location.origin + location.pathname + location.search + '#' + encodeURIComponent(id);
 }
 
+function backlogLink(key) {
+  return location.origin + location.pathname + location.search + '#/backlog/' + key;
+}
+
 function enabledJobActions() {
   return JOB_ACTIONS.map($).filter((el) => !el.hidden && !el.disabled);
 }
@@ -5449,7 +5456,8 @@ async function resumeAction(ctx) {
 async function copyLinkAction(ctx) {
   let copied = true;
   try {
-    await navigator.clipboard.writeText(ctx.id === null ? location.origin + location.pathname + location.search + location.hash : jobLink(ctx.id));
+    const link = ctx.id !== null ? jobLink(ctx.id) : backlogLink(backlog.find((b) => b.raw === openBacklogRaw).key);
+    await navigator.clipboard.writeText(link);
   } catch {
     copied = false;
   }

@@ -113,6 +113,15 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
 
         await activate("#d-actions");
         assert.deepEqual(await state(page), openAt("d-edit-idea"), `${label} open by pointer`);
+        const rect = (sel) => page.$eval(sel, (el) => el.getBoundingClientRect().toJSON());
+        const [menu, head, button] = [
+          await rect("#d-actions-menu"),
+          await rect(".detail-head"),
+          await rect("#d-actions"),
+        ];
+        if (viewport.width <= 760) assert.ok(menu.top >= head.bottom, `${label} menu below header`);
+        else
+          assert.equal(Math.round(menu.top - button.bottom), 4, `${label} menu under its button`);
         await activate("#d-actions");
         assert.deepEqual(await state(page), closedAt("d-actions"), `${label} close by pointer`);
 
