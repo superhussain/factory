@@ -1054,7 +1054,7 @@ let loaded = false;
 const archivedJobs = new Map();
 // Ids the archive answered 404 for, so a link to one is fetched once per page session.
 const archiveMisses = new Set();
-// The id whose failed archive load was already reported, so retries on each poll stay quiet.
+// The id whose failed archive load was already reported. It resets when the hash names another id, so retries and tab changes stay quiet.
 let archiveFailNoted = '';
 // The board carries archived.max_id once the Worker has archived a job, so only then is there an archive to search.
 let boardArchived = false;
@@ -4228,9 +4228,9 @@ function syncDetail() {
 }
 
 window.addEventListener('hashchange', () => {
-  archiveFailNoted = '';
-  const key = backlogRoute();
   const { id } = parseHash();
+  if (id !== archiveFailNoted) archiveFailNoted = '';
+  const key = backlogRoute();
   if (key) openBacklogRoute(key);
   else if (id) openJob(id);
   else if (openId || openBacklogRaw !== null) closeDetail();
