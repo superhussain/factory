@@ -27,12 +27,17 @@ class TriageFixture(IsolatedTestCase):
         self.cas_down = set()
         self.views = {"sample": (200, {"triage": {"enabled": True, "threshold": 80}})}
         self.gets = []
+        self.reads = []
+        self.backlog_gets = 0
+        self.stored = {}
+        self.read_status = 200
 
         def api(home, method, path, body=None, ok=(200,), headers=None, raw=False):
             if (method, path) == ("GET", "/projects.json"):
                 return 200, {}, json.dumps([{"slug": "sample"}, {"slug": "beta"}])
             if (method, path) == ("GET", "/api/backlog"):
                 self.assertEqual(ok, (200, 404))
+                self.backlog_gets += 1
                 text = self.files.get(path)
                 return (404, {}, "") if text is None else (200, {}, text)
             if method == "GET" and path.startswith("/api/pipeline/effective/"):
@@ -42,6 +47,13 @@ class TriageFixture(IsolatedTestCase):
                 if status not in ok:
                     self.module.fail(f"GET {path} returned {status}", 5)
                 return status, {}, view if isinstance(view, str) else json.dumps(view)
+            if (method, path) == ("POST", "/api/backlog/triage/verdicts"):
+                self.assertEqual(ok, (200, 404))
+                items = json.loads(body)["items"]
+                self.reads.append(items)
+                if self.read_status == 404:
+                    return 404, {}, ""
+                return 200, {}, json.dumps({"verdicts": [self.stored.get(item) for item in items]})
             self.assertEqual((method, path), ("POST", "/api/backlog/triage"))
             self.assertEqual(headers, {"Content-Type": "application/json"})
             self.posts.append(json.loads(body))
@@ -278,6 +290,30 @@ class BacklogTriagePassTests(TriageFixture):
         self.assertEqual(self.cached(), [RENAME])
         self.assertEqual(self.gets, ["/api/pipeline/effective/sample"])
 
+    def test_one_verdict_read_per_sweep(self):
+        self.sweep()
+        self.assertEqual(self.backlog_gets, 1)
+        self.assertEqual(self.reads, [["sample: Add PDF export to reports",
+                                       "sample: Rename report filters (rework-of 006-filter-names)"]])
+        self.assertEqual(len(self.posts), 2)
+        self.reads.clear()
+        self.sweep()
+        self.assertEqual(self.reads, [])
+
+    def test_a_hold_another_host_stored_is_cached_without_a_post(self):
+        self.stored["sample: Rename report filters (rework-of 006-filter-names)"] = HOLD
+        out, err = self.sweep()
+        self.assertEqual(err, "")
+        self.assertNotIn("held", out)
+        self.assertEqual([p["item"] for p in self.posts], ["sample: Add PDF export to reports"])
+        self.assertEqual(self.cached(), [RENAME])
+
+    def test_an_older_worker_404_on_the_verdict_read_rates_every_line(self):
+        self.read_status = 404
+        self.stored["sample: Rename report filters (rework-of 006-filter-names)"] = HOLD
+        self.sweep()
+        self.assertEqual(len(self.posts), 2)
+
     def test_a_line_with_trailing_spaces_posts_the_stripped_item(self):
         self.files["/api/backlog"] = f"# Backlog\n{PDF}   \n"
         self.triage = (200, json.dumps(HOLD))
@@ -285,14 +321,13 @@ class BacklogTriagePassTests(TriageFixture):
         self.assertEqual(self.posts, [{"item": "sample: Add PDF export to reports"}])
         self.assertEqual(self.cached(), [PDF + "   "])
 
-    def test_a_worker_error_mid_sweep_keeps_the_holds_so_far(self):
+    def test_a_worker_error_while_picking_lines_sends_nothing(self):
         self.files["/api/backlog"] = EXAMPLE + "- [ ] beta: Add dark mode\n"
         self.views["beta"] = (500, "boom")
         with self.assertRaises(SystemExit) as raised:
             self.sweep()
         self.assertEqual(raised.exception.code, 5)
-        self.assertEqual(self.cached(), [RENAME])
-        self.assertEqual(self.board()[-1]["id"], "009-add-pdf-export")
+        self.assertEqual((self.reads, self.posts, self.cached()), ([], [], None))
 
     def test_a_row_left_on_the_board_is_not_queued_twice(self):
         self.after_board = lambda: self.cas_down.update({"/api/backlog", "/api/board"})
@@ -321,8 +356,8 @@ class BacklogTriagePassTests(TriageFixture):
                 self.assertEqual(self.cached(), [])
                 self.assertEqual(self.posts, [])
 
-    def test_skipped_lines_are_never_sent_and_a_run_sends_at_most_five(self):
-        extra = "".join(f"- [ ] sample: Idea number {n}\n" for n in range(7))
+    def test_skipped_lines_are_never_sent_and_a_run_sends_at_most_twenty(self):
+        extra = "".join(f"- [ ] sample: Idea number {n}\n" for n in range(22))
         self.triage = (200, json.dumps(HOLD))
         for view in ((200, {"triage": {"enabled": False, "threshold": 80}}), (200, {}), (200, {"triage": True}),
                      (200, "not json"), (404, ""), (409, "")):
@@ -335,9 +370,9 @@ class BacklogTriagePassTests(TriageFixture):
                 self.gets.clear()
                 out, err = self.sweep()
                 self.assertEqual(err, "")
-                self.assertEqual([p["item"] for p in self.posts], [f"sample: Idea number {n}" for n in range(5)])
+                self.assertEqual([p["item"] for p in self.posts], [f"sample: Idea number {n}" for n in range(20)])
                 self.assertEqual(self.gets, ["/api/pipeline/effective/beta", "/api/pipeline/effective/sample"])
-                self.assertEqual(self.cached(), [f"- [ ] sample: Idea number {n}" for n in range(5)])
+                self.assertEqual(self.cached(), [f"- [ ] sample: Idea number {n}" for n in range(20)])
 
     def test_server_and_network_failures_retry_and_a_400_is_cached(self):
         for triage, reason, cached in (
@@ -354,7 +389,7 @@ class BacklogTriagePassTests(TriageFixture):
                     self.posts.clear()
                     out, err = self.sweep()
                     self.assertEqual(out, "")
-                    self.assertEqual(len(self.posts), 2 if run == 0 or not cached else 0)
+                    self.assertEqual(len(self.posts), (2 if run == 0 else 0) if cached else 1)
                     self.assertEqual(err, WARN.format(reason) * len(self.posts))
                     self.assertEqual(self.cached() or [], cached)
                 self.assertEqual(self.files["/api/backlog"], EXAMPLE)

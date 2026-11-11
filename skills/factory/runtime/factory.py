@@ -23,10 +23,11 @@
                                             experiment as JSON (read-only)
   factory.py unclaim <job-id>               release this session's claim on an idea, so it waits again
   factory.py deny-notes <job-id> [done]   print a denied job's unread notes wrapped as data, or mark them read
-  factory.py pickup [--dry-run] [--limit N] [--max-inflight N]
+  factory.py pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]
                                             claim and launch runnable ideas for the projects whose
                                             pipeline lists this host, through launchers.json; silent
-                                            when there is nothing to do
+                                            when there is nothing to do. The backlog triage sweep
+                                            runs at most every 30 minutes; --triage-now runs it now
   factory.py host pair <id> <code>          pair this device with a host added in Settings and set
                                             device: <id> in config.md
   factory.py pipeline <project-slug>        print the project's effective pipeline configuration as JSON,
@@ -1238,7 +1239,42 @@ def report_verdict(home, slug, feature, item, verdict):
     return False
 
 
-TRIAGE_SWEEP_LIMIT = 5
+TRIAGE_SWEEP_LIMIT = 20
+TRIAGE_SWEEP_MINUTES = 30
+
+
+def triage_sweep_due(home, stamp):
+    """True unless this host's last sweep started less than TRIAGE_SWEEP_MINUTES before stamp.
+    A missing, malformed or future record is due, so a bad clock cannot stall triage."""
+    try:
+        data = json.loads(Path(home, "backlog-triage-sweep.json").read_text(encoding="utf-8"))
+        if data.get("version") != 1:
+            return True
+        last = datetime.strptime(data["at"], "%Y-%m-%dT%H:%M:%SZ")
+    except (OSError, ValueError, UnicodeError, KeyError, TypeError, AttributeError):
+        return True
+    gap = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ") - last
+    return not timedelta(0) <= gap < timedelta(minutes=TRIAGE_SWEEP_MINUTES)
+
+
+def save_triage_sweep(home, stamp):
+    write_atomic(str(Path(home, "backlog-triage-sweep.json")),
+                 json.dumps({"version": 1, "at": stamp}, indent=2) + "\n")
+
+
+def stored_verdicts(home, items):
+    """The Worker's stored triage record, or None, for each item in order. An older Worker's 404
+    gives None for every item."""
+    if not items:
+        return []
+    status, _, text = api(home, "POST", "/api/backlog/triage/verdicts",
+                          json.dumps({"items": items}, ensure_ascii=False), ok=(200, 404),
+                          headers={"Content-Type": "application/json"})
+    try:
+        verdicts = json.loads(text).get("verdicts") if status == 200 else None
+    except (ValueError, AttributeError):
+        verdicts = None
+    return verdicts if isinstance(verdicts, list) and len(verdicts) == len(items) else [None] * len(items)
 
 
 def read_triaged(home):
@@ -1306,9 +1342,10 @@ def triage_enabled(home, slug):
 
 
 def backlog_triage_pass(home):
-    """Ask the Worker for a verdict on up to TRIAGE_SWEEP_LIMIT unchecked backlog lines this host
-    has no final verdict for, in projects with triage on. Queued lines become ideas.
-    A Worker error still saves the verdicts recorded so far."""
+    """Rate up to TRIAGE_SWEEP_LIMIT unchecked backlog lines this host has no final verdict for, in
+    projects with triage on. One verdicts read first records the lines another host already held.
+    Queued lines become ideas. The first retryable failure ends the sweep. A Worker error still
+    saves the verdicts recorded so far."""
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
     lines = unchecked_lines(text if status == 200 else "")
     cached = read_triaged(home)
@@ -1317,22 +1354,28 @@ def backlog_triage_pass(home):
     todo = [line for line in lines if line[0] not in triaged]
     try:
         projects = registered(home) if todo else set()
-        enabled, sent = {}, 0
-        for raw, slug, feature, context in todo:
-            if sent == TRIAGE_SWEEP_LIMIT:
+        enabled, picked = {}, []
+        for line in todo:
+            raw, slug = line[0], line[1]
+            if len(picked) == TRIAGE_SWEEP_LIMIT:
                 break
-            if raw in triaged or slug not in projects:
+            if raw in triaged or slug not in projects or any(raw == p[0] for p in picked):
                 continue
             if slug not in enabled:
                 enabled[slug] = triage_enabled(home, slug)
-            if not enabled[slug]:
+            if enabled[slug]:
+                picked.append(line)
+        items = [f"{slug}: {feature.rstrip()}" for _, slug, feature, _ in picked]
+        for (raw, slug, feature, context), item, stored in zip(picked, items, stored_verdicts(home, items)):
+            if isinstance(stored, dict) and stored.get("decision") == "hold":
+                triaged.append(raw)
                 continue
-            sent += 1
-            item = f"{slug}: {feature.rstrip()}"
             verdict, final = backlog_triage(home, item, context or None)
             left = verdict is not None and report_verdict(home, slug, feature, item, verdict)
             if final and (verdict is None or verdict["decision"] != "queue" or left):
                 triaged.append(raw)
+            if verdict is None and not final:
+                break
     finally:
         if triaged != cached:
             save_triaged(home, triaged)
@@ -3259,6 +3302,9 @@ def host_cmd(sub, host_id, code):
     print(f"paired {host_id}. config.md now sets device: {host_id}. Confirm the host in Settings, Hosts.")
 
 
+USAGE_PICKUP = "usage: pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]"
+
+
 def pickup(*args):
     """Claim and launch runnable ideas, and builds that Tracer scope approval released, for the
     projects whose effective pipeline enables pickup on this host. Silent when there is nothing to
@@ -3269,16 +3315,18 @@ def pickup(*args):
     i = 0
     while i < len(args):
         flag = args[i]
-        if flag == "--dry-run" and flag not in flags:
+        if flag in ("--dry-run", "--triage-now") and flag not in flags:
             flags[flag] = True
             i += 1
             continue
         value = args[i + 1] if i + 1 < len(args) else None
         if flag not in ("--limit", "--max-inflight") or flag in flags or value is None \
                 or not re.fullmatch(r"[1-9][0-9]*", value) or flag == "--limit" and int(value) > 5:
-            fail("usage: pickup [--dry-run] [--limit N] [--max-inflight N]", 2)
+            fail(USAGE_PICKUP, 2)
         flags[flag] = int(value)
         i += 2
+    if "--dry-run" in flags and "--triage-now" in flags:
+        fail(USAGE_PICKUP, 2)
     dry, limit, cap = "--dry-run" in flags, flags.get("--limit", 1), flags.get("--max-inflight")
     home = factory_home()
     device, _, minutes = holder(home)
@@ -3295,14 +3343,16 @@ def pickup(*args):
                     if e.code != 5:
                         raise
                     print(f"factory.py: {stopped}", file=sys.stderr)
-            try:
-                backlog_triage_pass(home)
-                failing = None
-            except SystemExit as e:
-                if e.code != 5:
-                    raise
-                failing = failing or started
-                print("factory.py: backlog triage stopped; unsent lines wait for the next pickup run", file=sys.stderr)
+            if "--triage-now" in flags or triage_sweep_due(home, started):
+                save_triage_sweep(home, started)
+                try:
+                    backlog_triage_pass(home)
+                    failing = None
+                except SystemExit as e:
+                    if e.code != 5:
+                        raise
+                    failing = failing or started
+                    print("factory.py: backlog triage stopped; unsent lines wait for the next pickup run", file=sys.stderr)
         pickup_pass(home, device, minutes, dry, limit, cap)
     finally:
         if not dry:
