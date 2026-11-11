@@ -318,6 +318,7 @@ async function capture(outdir, referencePath) {
 
     let archivedBoard = false;
     let archivePageFails = false;
+    let archiveSearchFails = false;
     let longProject = false;
     async function view(name, width, height, theme, prepare, touch = false) {
       for (const side of ["before", "after"]) {
@@ -404,6 +405,12 @@ async function capture(outdir, referencePath) {
                       pages: 2,
                       total: 52,
                     }),
+                  });
+                if (archiveSearchFails && target.searchParams.has("q"))
+                  return request.respond({
+                    status: 500,
+                    contentType: "text/plain",
+                    body: "unavailable",
                   });
                 const q = target.searchParams.get("q");
                 if (q !== null) {
@@ -675,14 +682,21 @@ async function capture(outdir, referencePath) {
       );
     };
     const openArchivedDrawer = async (page, side) => {
+      // Both sides wait for the archive answer, so the before shot is not a timed guess.
+      const answered = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/api/board/archive" && url.searchParams.get("id") === "412-fix-login"
+        );
+      });
       await page.evaluate(() => {
         location.hash = "#412-fix-login";
       });
+      await answered;
       if (side === "after")
         await page.waitForFunction(
           () => document.querySelector("#d-doc h1")?.textContent === "Synthetic login fix",
         );
-      else await new Promise((resolve) => setTimeout(resolve, 1000));
     };
     // The reference has no archive list, so its side shows the closed column.
     // Terminal columns start collapsed, so both sides expand closed first.
@@ -708,6 +722,32 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
+    const settleArchiveSettings = async (page, name) => {
+      try {
+        await page.waitForFunction(() => {
+          const t = document.getElementById("pipeline-status").textContent;
+          return t.startsWith("Fix before saving") || t === "Unsaved changes";
+        });
+      } catch (error) {
+        const seen = await page.$eval("#pipeline-status", (el) => el.textContent);
+        throw new Error(
+          name + ' capture status wait timed out; #pipeline-status read "' + seen + '"',
+          {
+            cause: error,
+          },
+        );
+      }
+      await page.evaluate(() =>
+        document.getElementById("pipeline-archive").scrollIntoView({ block: "start" }),
+      );
+      const cropped = await page.evaluate(() =>
+        ["pipeline-archive", "pipeline-status"].filter((id) => {
+          const r = document.getElementById(id).getBoundingClientRect();
+          return r.top < 0 || r.bottom > window.innerHeight;
+        }),
+      );
+      if (cropped.length) throw new Error(name + " capture crops " + cropped.join(", "));
+    };
     const openArchivePrefill = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/pipeline";
@@ -721,20 +761,7 @@ async function capture(outdir, referencePath) {
       );
       await page.select("#pipeline-archive-mode", "");
       await page.select("#pipeline-archive-mode", "count");
-      await page.waitForFunction(() => {
-        const t = document.getElementById("pipeline-status").textContent;
-        return t.startsWith("Fix before saving") || t === "Unsaved changes";
-      });
-      await page.evaluate(() =>
-        document.getElementById("pipeline-archive").scrollIntoView({ block: "start" }),
-      );
-      const cropped = await page.evaluate(() =>
-        ["pipeline-archive", "pipeline-status"].filter((id) => {
-          const r = document.getElementById(id).getBoundingClientRect();
-          return r.top < 0 || r.bottom > window.innerHeight;
-        }),
-      );
-      if (cropped.length) throw new Error("archive-prefill capture crops " + cropped.join(", "));
+      await settleArchiveSettings(page, "archive-prefill");
     };
     await view("archive-prefill", 1280, 900, "light", openArchivePrefill);
     const openArchiveSwap = async (page) => {
@@ -751,9 +778,7 @@ async function capture(outdir, referencePath) {
       await page.select("#pipeline-archive-mode", "");
       await page.select("#pipeline-archive-mode", "age");
       await page.select("#pipeline-archive-mode", "count");
-      await page.evaluate(() =>
-        document.getElementById("pipeline-archive").scrollIntoView({ block: "center" }),
-      );
+      await settleArchiveSettings(page, "archive-swap");
     };
     await view("archive-swap", 1280, 900, "light", openArchiveSwap);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
@@ -869,6 +894,25 @@ async function capture(outdir, referencePath) {
       }
     };
     await view("jumper-archive-empty", 1280, 900, "light", openArchiveEmpty);
+    const openArchiveFailed = async (page) => {
+      archivedBoard = true;
+      archiveSearchFails = true;
+      try {
+        await page.evaluate(() => poll());
+        await openJumper(page);
+        await page.type("#job-search", "zzz");
+        await clickArchiveSearch(page);
+        await page.waitForFunction(() =>
+          [...document.querySelectorAll("#job-results .meta")].some(
+            (el) => el.textContent === "Could not search archived jobs. Pick to try again.",
+          ),
+        );
+      } finally {
+        archivedBoard = false;
+        archiveSearchFails = false;
+      }
+    };
+    await view("jumper-archive-failed", 1280, 900, "light", openArchiveFailed);
     await view("backlog-triage-desktop", 1440, 900, "light", openTriage);
     await view("backlog-triage-mobile", 390, 844, "dark", openTriage);
     await view("backlog-triage-open-desktop", 1440, 900, "light", openTriagePrefetched);
