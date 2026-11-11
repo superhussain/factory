@@ -175,3 +175,14 @@ class PromptTest(IsolatedTestCase):
         self.assertEqual((code, out), (6, ""))
         self.assertIn("symlink or junction", err)
         self.assertEqual(list(real.iterdir()), [])
+
+    def test_skill_uses_prompt(self):
+        skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertNotIn("end that stage's", skill)
+        self.assertNotIn("Prompts carry only", skill)
+        self.assertIn('`python3 "$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] '
+                      '--out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`', skill)
+        self.assertIn("`Your full prompt is in <printed path>. Read it first and follow it exactly.`", skill)
+        self.assertIn("`prompt` ends each prompt with `$PIPELINE.prompts.<stage>` verbatim.", skill)
+        self.assertIn("the absolute path in `$DOCUMENTS`", skill)
+        self.assertIn("`project`, and `idea` (the feature text)", skill)
