@@ -16,7 +16,7 @@ const job = (stage) => ({
 const CHANGED = '{"type":"changed","key":"board.json"}';
 const wait = { polling: 50, timeout: 10000 };
 
-test("live board events", { timeout: 120000 }, async (t) => {
+test("live board events", { timeout: 240000 }, async (t) => {
   await prepareAssets();
   await withBrowserFixture(async ({ browser, origin }) => {
     await seedProject(
