@@ -60,14 +60,7 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
       JSON.stringify({ item: TRAILING_ITEM, context: "Recommend: deny\nSynthetic reason." }),
     );
     assert.equal(trailing.status, 200);
-    const lines = [
-      MODEL_ITEM,
-      FIXED_ITEM,
-      TRAILING_ITEM + "   ",
-      MISSING_ITEM,
-      MALFORMED_ITEM,
-      LATE_ITEM,
-    ];
+    const lines = [MODEL_ITEM, FIXED_ITEM, TRAILING_ITEM + "   ", MISSING_ITEM, MALFORMED_ITEM];
     assert.equal(
       (
         await send(
@@ -91,29 +84,33 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
     const late = new Promise((resolve) => {
       releaseLate = resolve;
     });
+    const verdictReads = [];
+    let itemReads = 0;
     await page.setRequestInterception(true);
-    page.on("request", (request) => {
+    page.on("request", async (request) => {
       const url = new URL(request.url());
-      if (url.pathname !== "/api/backlog/triage") return request.continue();
-      const item = url.searchParams.get("item");
-      if (item === MODEL_ITEM)
-        return request.respond({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(MODEL_VERDICT),
-        });
-      if (item === MISSING_ITEM) return request.respond({ status: 404, body: "" });
-      if (item === MALFORMED_ITEM)
-        return request.respond({ status: 200, contentType: "application/json", body: '{"bad":1}' });
-      if (item === LATE_ITEM)
-        return late.then(() =>
-          request.respond({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify(LATE_VERDICT),
-          }),
-        );
-      return request.continue();
+      if (url.pathname === "/api/backlog/triage") itemReads++;
+      if (url.pathname !== "/api/backlog/triage/verdicts") return request.continue();
+      const body = request.postData();
+      const { items } = JSON.parse(body);
+      verdictReads.push(items);
+      const real = await fetch(origin + url.pathname, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      const { verdicts } = await real.json();
+      items.forEach((item, i) => {
+        if (item === MODEL_ITEM) verdicts[i] = MODEL_VERDICT;
+        if (item === MALFORMED_ITEM) verdicts[i] = { bad: 1 };
+        if (item === LATE_ITEM) verdicts[i] = LATE_VERDICT;
+      });
+      if (items.includes(LATE_ITEM)) await late;
+      return request.respond({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ verdicts }),
+      });
     });
     await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".backlog-card", wait);
@@ -138,6 +135,11 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
 
     await t.test("the form does not move when the verdict is cached", async () => {
       await page.waitForFunction(() => backlogTriageSeen.size === 5, wait);
+      assert.deepEqual(verdictReads, [
+        [MODEL_ITEM, FIXED_ITEM, TRAILING_ITEM, MISSING_ITEM, MALFORMED_ITEM],
+      ]);
+      await page.evaluate(() => renderBoard());
+      assert.equal(verdictReads.length, 1);
       const opened = await page.evaluate((text) => {
         [...document.querySelectorAll(".backlog-card")]
           .find((card) => card.textContent.includes(text))
@@ -191,7 +193,8 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
       },
     );
 
-    await t.test("a 404 or a malformed body leaves the section hidden", async () => {
+    await t.test("a missing verdict or a malformed record leaves the section hidden", async () => {
+      assert.equal(verdictReads.length, 1);
       for (const line of [MISSING_ITEM, MALFORMED_ITEM]) {
         await open(line);
         await new Promise((resolve) => setTimeout(resolve, 300));
@@ -203,9 +206,32 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
           before: true,
         });
       }
+      assert.equal(verdictReads.length, 2);
+      assert.deepEqual(verdictReads[1], [MISSING_ITEM]);
     });
 
     await t.test("a reply that lands after the open fills the section", async () => {
+      const etag = (await send("GET", "/api/backlog")).headers.get("etag");
+      const text = "# Backlog\n\n" + [...lines, LATE_ITEM].map((l) => `- [ ] ${l}\n`).join("");
+      assert.equal(
+        (
+          await send("PUT", "/api/backlog", text, {
+            "If-Match": etag,
+            "Content-Type": "text/markdown",
+          })
+        ).status,
+        200,
+      );
+      await page.evaluate(async () => {
+        await loadBacklog();
+        renderBoard();
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll(".backlog-card").length === 6,
+        wait,
+      );
+      assert.equal(verdictReads.length, 3);
+      assert.deepEqual(verdictReads[2], [MISSING_ITEM, LATE_ITEM]);
       await open(LATE_ITEM);
       assert.equal((await section()).hidden, true);
       releaseLate();
@@ -214,8 +240,10 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
         (await section()).paragraphs[0],
         "Confidence 40% is below the 80% threshold. Rated by clef-flash against the project rules.",
       );
+      assert.equal(verdictReads.length, 3);
     });
 
+    assert.equal(itemReads, 0);
     assert.deepEqual(errors, []);
   });
 });
