@@ -185,37 +185,6 @@ test("live board events", { timeout: 120000 }, async (t) => {
       },
     );
 
-    await t.test(
-      "live L9 a timer tick with an unchanged board keeps the focused card",
-      async () => {
-        const { context, page, errors } = await open();
-        await page.focus('.card[data-id="001-sample"]');
-        await page.evaluate(() => {
-          window.heldCard = document.activeElement;
-        });
-        assert.equal(await page.evaluate(() => pollTick()), true);
-        assert.equal(
-          await page.evaluate(() => heldCard.isConnected && document.activeElement === heldCard),
-          true,
-        );
-        // A changed ETag still redraws, and focus moves to the new card for the same job.
-        assert.equal(
-          await page.evaluate(() => {
-            boardEtag = '"stale"';
-            return pollTick();
-          }),
-          true,
-        );
-        assert.equal(await page.evaluate("heldCard.isConnected"), false);
-        assert.equal(
-          await page.evaluate(() => document.activeElement.matches('.card[data-id="001-sample"]')),
-          true,
-        );
-        assert.deepEqual(errors, []);
-        await context.close();
-      },
-    );
-
     await t.test("live L3 hidden tabs keep the socket only with notifications on", async () => {
       const quiet = await open();
       await setHidden(quiet.page, true);
@@ -300,6 +269,37 @@ test("live board events", { timeout: 120000 }, async (t) => {
       assert.deepEqual(errors, []);
       await context.close();
     });
+
+    await t.test(
+      "live L9 a timer tick with an unchanged board keeps the focused card",
+      async () => {
+        const { context, page, errors } = await open();
+        await page.focus('.card[data-id="001-sample"]');
+        await page.evaluate(() => {
+          window.heldCard = document.activeElement;
+        });
+        assert.equal(await page.evaluate(() => pollTick()), true);
+        assert.equal(
+          await page.evaluate(() => heldCard.isConnected && document.activeElement === heldCard),
+          true,
+        );
+        // A changed ETag still redraws, and focus moves to the new card for the same job.
+        assert.equal(
+          await page.evaluate(() => {
+            boardEtag = '"stale"';
+            return pollTick();
+          }),
+          true,
+        );
+        assert.equal(await page.evaluate("heldCard.isConnected"), false);
+        assert.equal(
+          await page.evaluate(() => document.activeElement.matches('.card[data-id="001-sample"]')),
+          true,
+        );
+        assert.deepEqual(errors, []);
+        await context.close();
+      },
+    );
 
     await t.test(
       "live L4 an event during a drawer load does not load the drawer again",

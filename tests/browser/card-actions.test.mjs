@@ -128,7 +128,7 @@ async function menuClip(page) {
     const b = document.querySelector("#card-actions-menu").getBoundingClientRect();
     const x = Math.min(a.left, b.left) - 8;
     const y = Math.min(a.top, b.top) - 8;
-    // getBoundingClientRect is viewport-relative; a screenshot clip is page-relative.
+    // getBoundingClientRect is viewport-relative; Puppeteer's screenshot clip is document-relative.
     return {
       x: x + window.scrollX,
       y: y + window.scrollY,

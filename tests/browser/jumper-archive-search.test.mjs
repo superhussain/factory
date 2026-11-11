@@ -210,10 +210,13 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       const base = done.slice(0, -suffix.length);
       let release;
       held = new Promise((resolve) => (release = resolve));
-      await page.keyboard.press("Enter");
-      await waitMeta("Searching archived jobs");
-      assert.equal(await count(), base);
-      release();
+      try {
+        await page.keyboard.press("Enter");
+        await waitMeta("Searching archived jobs");
+        assert.equal(await count(), base);
+      } finally {
+        release();
+      }
       await waitMeta('No archived jobs match "zzz". Pick to search again.');
       assert.equal(await count(), done);
       assert.deepEqual(asked.slice(-2), ["zzz", "zzz"]);

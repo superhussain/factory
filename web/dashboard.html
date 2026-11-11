@@ -5717,7 +5717,7 @@ async function reconcile(cause) {
     if (hit) return hit.id;
     showErr(boardSaveError(cause, 'The board has no record of it yet, but the save could still land late. Retry re-checks with the same content and will not add a duplicate.'));
   } catch {
-    showErr('Could not confirm whether the idea was saved: ' + cause.message + '. Retry checks again and will not add a duplicate.');
+    showErr('Could not confirm whether the idea was saved: ' + String(cause.message || cause).replace(/[\s.]+$/, '') + '. Retry checks again and will not add a duplicate.');
   }
   return null;
 }
@@ -6312,7 +6312,6 @@ function applyDisplay() {
 // The board timer runs only while the live socket is closed. Hidden or unfocused windows
 // never poll unless notifications are on. Returning to the window refreshes at once.
 // A tick reads the backlog only when the last read is 2 minutes old.
-// A tick redraws only a changed board, so a focused card keeps its node.
 function pollTick() { return poll({ ifChanged: true, withBacklog: Date.now() - backlogReadAt >= BACKLOG_POLL_MS }); }
 function schedulePoll() {
   clearInterval(pollTimer);
