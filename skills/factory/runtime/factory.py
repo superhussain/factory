@@ -130,6 +130,7 @@ SLUG = re.compile(r"[\w-]+")
 BACKLOG_LINE = re.compile(r"^- \[ \] ([\w-]+): (\S.*)$")
 # Starts with a word character, so "." and ".." are never ids.
 JOB_ID = re.compile(r"\w[\w.-]*", re.ASCII)
+BACKLOG_PICK = re.compile(r"backlog:[0-9a-f]{12}")
 # What a new board row's id must look like. Older rows keep the ids they have.
 NEW_JOB_ID = re.compile(r"[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*")
 JOB_REL = re.compile(r"(?:(round-\d+/)?[\w.-]+\.(md|png|jpe?g|gif|webp)|(round-\d+/)?[\w-]+\.walkthrough\.html|walkthrough\.html)", re.ASCII)
@@ -497,9 +498,13 @@ def mirror_batch(data, lead):
                     change["note"] += f"; stacked PR {rider['pr']} is still open"
             patch_job(data, rider["id"], change)
         elif not stacked:
-            patch_job(data, rider["id"], {"stage": lead.get("stage"), "pr": lead.get("pr"), "needs": ask})
+            change = {"stage": lead.get("stage"), "pr": lead.get("pr"), "needs": ask}
+            if not unchanged(rider, change):
+                patch_job(data, rider["id"], change)
         elif lead.get("stage") != "merged":
-            patch_job(data, rider["id"], {"stage": lead.get("stage"), "needs": ask})
+            change = {"stage": lead.get("stage"), "needs": ask}
+            if not unchanged(rider, change):
+                patch_job(data, rider["id"], change)
         elif rider.get("pr"):
             refs = [{"id": lead["id"], "kind": "follow-up-of"} if r.get("kind") == BATCH_REF else r
                     for r in rider["refs"] if isinstance(r, dict)]
@@ -511,6 +516,11 @@ def mirror_batch(data, lead):
             patch_job(data, rider["id"], {"stage": IDEA, "refs": refs or None, "stacked": None,
                                           "note": f"unbatched: {lead['id']} merged before its stacked PR opened",
                                           "needs": None})
+
+
+def unchanged(rider, change):
+    """True when patching rider with change would set nothing new."""
+    return all(rider.get(k) == v for k, v in change.items())
 
 
 def merge_patch(target, patch):
@@ -1239,6 +1249,22 @@ def unchecked_lines(text):
     return found
 
 
+def backlog_candidates(text, slug):
+    """{"backlog:<key>": (raw, feature, ref, entry)} for the project's unchecked backlog lines, in
+    file order. entry is the batch candidate {"id", "title", "idea"}; ref is the suffix match or None."""
+    found = {}
+    for raw, line_slug, feature, context in unchecked_lines(text):
+        key = f"backlog:{backlog_key(raw)}"
+        if line_slug != slug or key in found:
+            continue
+        feature = feature.rstrip()
+        ref = BACKLOG_SUFFIX.search(feature)
+        body = (feature[:ref.start()] if ref else feature).strip()
+        found[key] = (raw, feature, ref, {"id": key, "title": body[:80],
+                                          "idea": f"{body}\n\n{context}" if context else body})
+    return found
+
+
 def triage_enabled(home, slug):
     """True when the project's effective pipeline turns backlog triage on."""
     status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
@@ -1643,14 +1669,24 @@ def batch_problem(data, j, slug, device, session, minutes):
 
 
 def batch_cmd(target, *idea_ids):
-    """List the project's ideas that can ride in a job at spec, or attach up to MAX_RIDERS of them
-    as riders in one board write. Prints {"lead", "riders", "candidates"} as JSON."""
+    """List the project's ideas and unchecked backlog lines that can ride in a job at spec, or attach
+    up to MAX_RIDERS of them as riders. A backlog line becomes a new rider job and is checked off with
+    its id. Prints {"lead", "riders", "candidates"} as JSON."""
     home, slug, lead_id = r2_target(target, True)
     device, session, minutes = holder(home)
     idea_ids = list(dict.fromkeys(idea_ids))
     for idea_id in idea_ids:
-        if not JOB_ID.fullmatch(idea_id) or ".." in idea_id:
+        if not BACKLOG_PICK.fullmatch(idea_id) and (not JOB_ID.fullmatch(idea_id) or ".." in idea_id):
             fail(f"bad job id {idea_id!r}. Nothing was written.", 2)
+    status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
+    lines = backlog_candidates(text if status == 200 else "", slug)
+    line_picks = [i for i in idea_ids if BACKLOG_PICK.fullmatch(i)]
+    job_picks = [i for i in idea_ids if not BACKLOG_PICK.fullmatch(i)]
+    for pick in line_picks:
+        if pick not in lines:
+            fail(f"no unchecked {slug} backlog line {pick}. Nothing was written.", 4)
+    jobs = Path(home, "jobs")
+    local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
 
     def entry(j):
         return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title")}
@@ -1670,7 +1706,7 @@ def batch_cmd(target, *idea_ids):
             if len(riders_of(data, lead_id)) + len(idea_ids) > MAX_RIDERS:
                 fail(f"a batch holds at most {MAX_RIDERS} ideas", 2)
             picked = []
-            for idea_id in idea_ids:
+            for idea_id in job_picks:
                 j = next((x for x in data["jobs"] if x.get("id") == idea_id), None)
                 if j is None:
                     fail(f"no job {idea_id} on the board", 4)
@@ -1682,13 +1718,61 @@ def batch_cmd(target, *idea_ids):
                 j.pop("claim", None)
                 patch_job(data, j["id"], {"stage": "spec", "note": f"batched into {lead_id}",
                                           "refs": [*(j.get("refs") or []), {"id": lead_id, "kind": BATCH_REF}]})
+        made = {}
+        for pick in line_picks:
+            _, _, ref, candidate = lines[pick]
+            job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]],
+                                 feature_slug(candidate["title"]), archive_floor(data))
+            refs = ([{"id": ref.group(2), "kind": ref.group(1)}] if ref else []) + [{"id": lead_id, "kind": BATCH_REF}]
+            patch_job(data, job_id, {"project": slug, "title": candidate["title"], "idea": candidate["idea"],
+                                     "stage": "spec", "note": f"batched into {lead_id}", "refs": refs})
+            made[pick] = job_id
         candidates = [entry(j) for j in data["jobs"]
                       if j.get("id") != lead_id and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
                       and batch_problem(data, j, slug, device, session, minutes) is None]
+        candidates += [v[3] for k, v in lines.items() if k not in line_picks]
         result = {"lead": lead_id, "riders": [entry(j) for j in riders_of(data, lead_id)],
                   "candidates": candidates[:MAX_CANDIDATES]}
-        return (dump_board(data) if idea_ids else None), result
-    print(json.dumps(cas(home, "/api/board", change), indent=2))
+        return (dump_board(data) if idea_ids else None), (result, made)
+    result, made = cas(home, "/api/board", change)
+
+    def mark(text):
+        rows, marked = (text or "").split("\n"), set()
+        for n, row in enumerate(rows):
+            pick = next((p for p in made if p not in marked and lines[p][0] == row.rstrip("\r")), None)
+            if pick:
+                rows[n] = f"- [x] {slug}: {lines[pick][1]} ({made[pick]})"
+                marked.add(pick)
+        return ("\n".join(rows) if marked else None), {p: r for p, r in made.items() if p not in marked}
+
+    def drop(ids):
+        def remove(text):
+            data = load_board(text)
+            keep = [j for j in data["jobs"]
+                    if not (j.get("id") in ids and lead_of(j) == lead_id and j.get("stage") == "spec")]
+            if len(keep) == len(data["jobs"]):
+                return None, None
+            data["jobs"], data["updated"] = keep, now()
+            return dump_board(data), None
+        cas(home, "/api/board", remove)
+
+    if made:
+        try:
+            missing = cas(home, "/api/backlog", mark)
+        except SystemExit:
+            try:
+                drop(set(made.values()))
+            except SystemExit:
+                pass
+            print(f"factory.py: batch removed {', '.join(made.values())}; their backlog lines stay unchecked",
+                  file=sys.stderr)
+            raise
+        for pick, rider_id in missing.items():
+            drop({rider_id})
+            print(f"factory.py: {pick} changed before batch could check it off; removed {rider_id}",
+                  file=sys.stderr)
+            result["riders"] = [r for r in result["riders"] if r["id"] != rider_id]
+    print(json.dumps(result, indent=2))
 
 
 def stack_cmd(target, rider_id):
