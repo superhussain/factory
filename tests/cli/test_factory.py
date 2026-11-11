@@ -1059,6 +1059,90 @@ class PaseoClaimHomeTest(IsolatedTestCase):
         self.assertEqual(self.saved()["note"], "checking")
 
 
+class HoldWriteSkipTest(IsolatedTestCase):
+    setUp = FactoryTest.setUp
+    api = FactoryTest.api
+    git = FactoryTest.git
+    saved = FactoryTest.saved
+    save = FactoryTest.save
+
+    def ago(self, minutes):
+        stamp = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        return stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def seed(self, minutes, **extra):
+        job = self.saved()
+        job["started"] = "2026-11-11T00:00:00Z"
+        job["claim"]["seen"] = self.ago(minutes)
+        job.update(extra)
+        self.save(job)
+
+    def board_puts(self, take=None):
+        calls = []
+
+        def record(home, method, path, *args, **kwargs):
+            calls.append((method, path))
+            return self.api(home, method, path, *args, **kwargs)
+        with patch.object(factory, "api", side_effect=record):
+            factory.hold(self.target, take)
+        return calls.count(("PUT", "/api/board"))
+
+    def test_fresh_own_claim_skips_the_board_write(self):
+        self.seed(3)
+        before = self.store["/api/board"]
+        self.assertEqual(self.board_puts(), 0)
+        self.assertEqual(self.store["/api/board"], before)
+        self.assertIn("held sample/001-test as test session sender", self.output.getvalue())
+        self.assertIn("elapsed ", self.output.getvalue())
+
+    def test_claim_seen_over_ten_minutes_ago_writes(self):
+        self.seed(11)
+        old = self.saved()["claim"]["seen"]
+        self.assertEqual(self.board_puts(), 1)
+        self.assertGreater(self.saved()["claim"]["seen"], old)
+
+    def test_other_session_claim_writes(self):
+        self.seed(200)
+        job = self.saved()
+        job["claim"] = factory.new_claim("other", "someone")
+        job["claim"]["seen"] = self.ago(200)
+        self.save(job)
+        self.assertEqual(self.board_puts(), 1)
+        self.assertEqual(self.saved()["claim"]["session"], "sender")
+
+    def test_take_writes(self):
+        self.seed(3)
+        self.assertEqual(self.board_puts("take"), 1)
+
+    def test_released_writes(self):
+        self.seed(3)
+        factory.handoff(self.target)
+        with patch.dict(os.environ, {"FACTORY_SESSION": "receiver"}):
+            factory.hold(self.target, "released")
+            self.assertEqual(self.board_puts("released"), 1)
+
+    def test_handoff_acceptance_writes(self):
+        self.seed(3)
+        factory.handoff(self.target)
+        with patch.dict(os.environ, {"FACTORY_SESSION": "receiver"}):
+            job = self.saved()
+            job["claim"] = factory.new_claim("test", "receiver")
+            self.save(job)
+            self.assertEqual(self.board_puts(), 1)
+        self.assertEqual(self.saved()["handoff"]["state"], "accepted")
+
+    def test_paseo_link_change_writes(self):
+        self.seed(3, paseo={"server": "srv_old", "agent": "agent_old"})
+        new = {"server": "srv_new", "agent": "agent_new"}
+        with patch.object(factory, "paseo_session", return_value=new):
+            self.assertEqual(self.board_puts(), 1)
+        self.assertEqual(self.saved()["paseo"], new)
+        self.seed(3, paseo={"server": "srv_old", "agent": "agent_old"})
+        with patch.object(factory, "paseo_session", return_value=None):
+            self.assertEqual(self.board_puts(), 1)
+        self.assertNotIn("paseo", self.saved())
+
+
 class IdeaTest(IsolatedTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
