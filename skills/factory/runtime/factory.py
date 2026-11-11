@@ -3235,8 +3235,8 @@ def close_decision(j, reason, device, earlier, outcome):
             f"{open_pr}"
             "- The next pickup run on each host that holds the worktree or branch runs "
             f"`factory.py cleanup {j['project']}/{j['id']}` there when the project's pickup is on "
-            "and lists that host. It keeps a dirty worktree and a branch that is not merged. "
-            "On any other host, run that command there by hand.\n")
+            "and lists that host. It keeps a dirty worktree, and a branch that is not merged unless "
+            "origin holds the same commit. On any other host, run that command there by hand.\n")
     return text + "\n## Earlier decision\n\n" + earlier if earlier else text
 
 
@@ -3316,7 +3316,7 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
         if dry:
             print(f"would clean up {job_id} {project}")
             continue
-        _, left = cleanup_job(repo, wt, branch)
+        _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
 
         def change(text, job_id=job_id, closed=c["closed"], left=left):
             board = load_board(text)
@@ -5066,12 +5066,13 @@ def cleanup(target):
     sys.exit(1 if left else 0)
 
 
-def cleanup_job(repo, wt, branch):
-    """Stop and remove a job's worktree, then delete its branch when merged. (removed, left)."""
+def cleanup_job(repo, wt, branch, drop_pushed=False):
+    """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. (removed, left)."""
     def run_git(*args):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
-            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=20)
+            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=20,
+                               env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
         except subprocess.TimeoutExpired:
             return None, "", f"git {args[0]} timed out after 20 s"
         except OSError:
@@ -5086,6 +5087,20 @@ def cleanup_job(repo, wt, branch):
             return None
         lines = re.sub(r", use --\w+ to .*", "", err).strip().splitlines()
         return (lines or [f"git exited {code}"])[0]
+
+    def pushed_tip_error():
+        """None after deleting a branch whose tip origin holds, else the reason it stays."""
+        tip = run_git("rev-parse", f"refs/heads/{branch}")[1]
+        code, out, _ = run_git("ls-remote", "origin", f"refs/heads/{branch}")
+        if not tip or code != 0 or out.split() != [tip, f"refs/heads/{branch}"]:
+            return f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}"
+        path = None
+        for line in run_git("worktree", "list", "--porcelain")[1].splitlines():
+            if line.startswith("worktree "):
+                path = line[len("worktree "):]
+            elif line == f"branch refs/heads/{branch}":
+                return f"checked out in {path}"
+        return first_error("update-ref", "-d", f"refs/heads/{branch}", tip)
 
     removed, left = [], []
     if wt.exists():
@@ -5106,7 +5121,8 @@ def cleanup_job(repo, wt, branch):
             if code is None:
                 error = err
             elif code:
-                error = f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}"
+                error = (pushed_tip_error() if drop_pushed else
+                         f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}")
             elif run_git("config", "--get", f"branch.{branch}.merge")[1]:
                 error = first_error("branch", "--unset-upstream", branch) or first_error("branch", "-d", branch)
             else:
