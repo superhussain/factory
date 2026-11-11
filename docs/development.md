@@ -48,7 +48,7 @@ The pnpm scripts are the source of truth (`package.json`):
 | `format` | `oxfmt` over `worker tools tests`, rewriting in place |
 | `test:assets` | Asset build, deployment dry-run, bundle verification |
 | `test:auth` | Production auth unit suites |
-| `test:protocol` | v1 protocol, settings, lockfile suites |
+| `test:protocol` | Asset preparation, then v1 protocol, settings, lockfile suites |
 | `test:local` | Local integration check on owned loopback ports |
 | `test:browser` | Full browser suite |
 | `test:deploy` | Deployment tooling tests and projections |
