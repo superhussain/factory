@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -108,6 +109,19 @@ class RetroRedactTest(RetroCase):
                 self.assertEqual(factory.retro_redact(text), text)
                 self.assertLess(time.monotonic() - start, 1)
         self.assertEqual(factory.retro_redact("x" * 63 + "_token=xyz"), "x" * 63 + "_token=[redacted]")
+
+    def test_every_retro_pattern_runs_in_linear_time(self):
+        patterns = {name: value for name, value in vars(factory).items()
+                    if name.startswith("RETRO_") and isinstance(value, re.Pattern)}
+        self.assertIn("RETRO_URL_CREDS", patterns)
+        units = [*"aZ09-.+_:/", " ", "\t", "a.", "a-", "a+", "a1", "--a", "token", "password", "bearer ", "-u ", "://"]
+        for unit in units:
+            text = (unit * 30000)[:30000]
+            for name, pattern in [*patterns.items(), ("retro_redact", None)]:
+                with self.subTest(unit=unit, pattern=name):
+                    start = time.monotonic()
+                    factory.retro_redact(text) if pattern is None else pattern.sub("", text)
+                    self.assertLess(time.monotonic() - start, 1)
 
     def test_project_folds_home(self):
         self.assertEqual(self.digest()[0]["project"], "~--paseo-worktrees-ab12-factory-1017-add-x")
