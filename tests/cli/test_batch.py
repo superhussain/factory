@@ -187,6 +187,14 @@ class BatchTest(IsolatedTestCase):
         self.assertEqual(self.ids(out, "riders"), ["094-name-the-weekly"])
         self.assertNotIn(key, self.ids(out, "candidates"))
 
+    def test_dotted_suffix_id_adds_no_ref(self):
+        line = "- [ ] sample: Rename the export button (follow-up-of a..b)"
+        self.backlog = f"# Backlog\n{line}\n"
+        code, out, _ = self.batch(TARGET, f"backlog:{factory.backlog_key(line)}")
+        self.assertEqual(code, 0)
+        j = self.job(self.ids(out, "riders")[0])
+        self.assertEqual((j["title"], j["refs"]), ("Rename the export button", [REF]))
+
     def test_unknown_backlog_key_writes_nothing(self):
         self.set_backlog()
         self.refuse(4, "no unchecked sample backlog line backlog:000000000000. Nothing was written.",

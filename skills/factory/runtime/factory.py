@@ -1440,8 +1440,9 @@ def queue_backlog_item(home, slug, feature, verdict):
                "idea": f"{text}\n\nQueued by backlog triage: {score}. {verdict['reason']}",
                "backlog": {"line": raw, "decision": "approved", "at": at, "by": "triage",
                            "triage": {k: verdict[k] for k in ("model", "confidence", "threshold", "reason")}}}
-        if ref:
-            job["refs"] = [{"id": ref.group(2), "kind": ref.group(1)}]
+        refs = suffix_refs(ref)
+        if refs:
+            job["refs"] = refs
         data["jobs"].append(job)
         return dump_board(data), job_id
     try:
@@ -1497,6 +1498,11 @@ def queue_backlog_item(home, slug, feature, verdict):
 
 
 BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$", re.ASCII)
+
+
+def suffix_refs(ref):
+    """The refs a BACKLOG_SUFFIX match carries: none when there is no match or its id contains ".."."""
+    return [{"id": ref.group(2), "kind": ref.group(1)}] if ref and ".." not in ref.group(2) else []
 
 
 def backlog_held(text, done):
@@ -1742,7 +1748,7 @@ def batch_cmd(target, *idea_ids):
             _, _, ref, candidate = lines[pick]
             job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]],
                                  feature_slug(candidate["title"]), archive_floor(data))
-            refs = ([{"id": ref.group(2), "kind": ref.group(1)}] if ref else []) + [{"id": lead_id, "kind": BATCH_REF}]
+            refs = suffix_refs(ref) + [{"id": lead_id, "kind": BATCH_REF}]
             patch_job(data, job_id, {"project": slug, "title": candidate["title"], "idea": candidate["idea"],
                                      "stage": "spec", "note": f"batched into {lead_id}", "refs": refs})
             made[pick] = job_id
