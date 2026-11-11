@@ -95,6 +95,15 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
         wait,
         meta,
       );
+    const setQuery = (value) =>
+      page.$eval(
+        "#job-search",
+        (el, v) => {
+          el.value = v;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        },
+        value,
+      );
 
     await t.test("a board without an archive shows no row", async () => {
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
@@ -192,6 +201,22 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       await page.keyboard.press("Enter");
       await waitMeta("Could not search archived jobs. Pick to try again.");
       assert.equal(asked.at(-1), "boom");
+    });
+
+    await t.test("a query over 200 characters hides the row", async () => {
+      const before = asked.length;
+      await setQuery("a".repeat(200));
+      assert.deepEqual(await archiveOption(), {
+        title: "Search archived jobs",
+        meta: 'Command · Search the archive for "' + "a".repeat(200) + '"',
+        selected: "true",
+      });
+      await setQuery("a".repeat(201));
+      assert.equal(await archiveOption(), undefined);
+      assert.deepEqual(await options(), []);
+      await page.keyboard.press("Enter");
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(asked.length, before);
     });
 
     assert.deepEqual(errors, []);
