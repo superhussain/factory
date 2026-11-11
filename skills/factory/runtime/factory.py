@@ -5145,11 +5145,11 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
 
     def pushed_tip_error():
         """None after deleting a branch whose tip origin holds, else the reason it stays."""
-        tip = run_git("rev-parse", f"refs/heads/{branch}")[1]
         ref = f"refs/heads/{branch}"
-        code, out, _ = run_git("ls-remote", "origin", ref)
+        tip = run_git("rev-parse", ref)[1]
         if not tip:
             return not_merged()
+        code, out, _ = run_git("ls-remote", "origin", ref)
         if code != 0:
             return not_merged("origin could not be reached")
         if not out:
