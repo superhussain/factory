@@ -1497,7 +1497,12 @@ function renderJobResults() {
     }))
     : [{ kind: 'archive-search', key: 'command:archive-search', query: rawQuery, title: 'Search archived jobs', meta: archiveSearchMeta(rawQuery) }];
   // #job-count is the live region, so every archive outcome changes its text.
-  const archiveCount = !archiveRows.length || archiveSearch?.query !== rawQuery ? '' : found.length ? ' · ' + found.length + ' archived' + (archiveSearch.total > found.length ? ' of ' + archiveSearch.total : '') : archiveSearch.status === 'done' ? ' · no archived matches' : archiveSearch.status === 'error' ? ' · archive search failed' : '';
+  let archiveCount = '';
+  if (archiveRows.length && archiveSearch?.query === rawQuery) {
+    if (found.length) archiveCount = ' · ' + found.length + ' archived' + (archiveSearch.total > found.length ? ' of ' + archiveSearch.total : '');
+    else if (archiveSearch.status === 'done') archiveCount = ' · no archived matches';
+    else if (archiveSearch.status === 'error') archiveCount = ' · archive search failed';
+  }
   const sections = [
     { id: 'pages', title: 'Pages', rows: actions.filter((r) => r.kind === 'page') },
     { id: 'links', title: 'Links', rows: actions.filter((r) => r.kind === 'link') },
