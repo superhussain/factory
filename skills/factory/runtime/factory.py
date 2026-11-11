@@ -45,6 +45,8 @@
   factory.py escalation <project-slug>/<job-id> <round>
                                             ask whether a review round's CHANGES findings need a person,
                                             print one JSON verdict
+  factory.py review-plan <project-slug>/<job-id> <round>
+                                            skip the ux and ui reviews of a round that changes nothing a person sees, print one JSON plan
   factory.py stop <worktree>                stop processes running out of a worktree
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
@@ -3999,6 +4001,105 @@ def prompt_cmd(target, role, *flags):
     print(out)
 
 
+# Repo-relative fnmatch patterns; "*" also crosses "/". A match means a person can see the change.
+VISIBLE_GLOBS = ("*.html", "*.htm", "*.css", "*.scss", "*.sass", "*.less", "*.svg", "*.png", "*.jpg",
+                 "*.jpeg", "*.gif", "*.webp", "*.ico", "*.vue", "*.svelte", "*.jsx", "*.tsx", "*.astro",
+                 "*.hbs", "*.njk", "*.ejs", "*.erb", "*.j2", "*.jinja", "*templates/*", "*components/*",
+                 "web/*", "public/*", "static/*", "assets/*")
+VISUAL_CRITERION = re.compile(r"screenshot|captur|before and after|before/after|visual evidence", re.I)
+SKIPPABLE_REVIEWERS = ("ux", "ui")
+REVIEW_PLAN_USAGE = "usage: review-plan <project-slug>/<job-id> <round>"
+
+
+def markdown_section(text, name):
+    """The lines under the first ## heading named name, up to the next ## heading, or None."""
+    lines = text.splitlines()
+    heading = re.compile(r"^##\s+(?:\d+\.\s*)?" + re.escape(name) + r"\b", re.I)
+    start = next((i for i, line in enumerate(lines) if heading.match(line)), None)
+    if start is None:
+        return None
+    end = next((i for i in range(start + 1, len(lines)) if re.match(r"^##\s", lines[i])), len(lines))
+    return "\n".join(lines[start + 1:end])
+
+
+def visible_globs(project_file):
+    """VISIBLE_GLOBS plus every backtick span in the project file's ## UI section."""
+    section = markdown_section(project_file.read_text(encoding="utf-8"), "UI") or ""
+    return VISIBLE_GLOBS + tuple(re.findall(r"`([^`\n]+)`", section))
+
+
+def plan_reason(spec_text, decision_text, changed, globs):
+    """(visible, reason): whether a round changes something a person sees, and the first rule that decided it."""
+    criteria = markdown_section(spec_text, "Acceptance criteria")
+    if criteria is None:
+        return True, "spec.md has no Acceptance criteria section"
+    if VISUAL_CRITERION.search(criteria):
+        return True, "spec.md has a visual-evidence acceptance criterion"
+    if re.search(r"^## Visible change[ \t]*$", decision_text, re.M):
+        return True, "decision.md names a visible change"
+    for path in changed:
+        glob = next((g for g in globs if fnmatch.fnmatchcase(path, g)), None)
+        if glob:
+            return True, f"{path} matches {glob}"
+    return False, (f"spec.md has no visual-evidence criterion and none of the {len(changed)} changed files "
+                   "matches a visible-file glob")
+
+
+def changed_files(wt, base):
+    """The paths the worktree's branch changes since it left origin/<base>, or None on any git failure."""
+    mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
+                        capture_output=True, text=True)
+    if mb.returncode:
+        return None
+    diff = subprocess.run(["git", "-C", str(wt), "diff", "--name-only", "--no-renames", "-z", mb.stdout.strip(),
+                           "HEAD"], capture_output=True, text=True)
+    if diff.returncode:
+        return None
+    return [p for p in diff.stdout.split("\0") if p]
+
+
+def review_plan_cmd(target, round_text):
+    """Write SKIPPED ux and ui reviews for a round that changes nothing a person sees, and print one JSON plan.
+    Any doubt (no worktree, a git failure, no Acceptance criteria section) runs all four reviewers."""
+    home, slug, job_id = r2_target(target, True)
+    if not re.fullmatch(r"[1-9][0-9]*", round_text):
+        fail("round must be a positive integer. " + REVIEW_PLAN_USAGE, 2)
+    data = read_board(home)
+    if not any(j.get("id") == job_id for j in data["jobs"]):
+        fail(f"no job {job_id} on the board", 4)
+    project_file = project_files(home, slug)[0]
+    base = frontmatter(project_file)[0].get("base") or "main"
+    stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
+    wt = home / "worktrees" / slug / (stacked or job_id)
+    folder = home / "jobs" / slug / job_id
+    round_folder = folder / f"round-{round_text}"
+    targets = [round_folder / f"review-{name}.md" for name in SKIPPABLE_REVIEWERS]
+    for node in (folder, round_folder, *targets):
+        if is_link(node):
+            fail(f"{node} is a symlink or junction; nothing was written", 6)
+    if not (folder / "spec.md").is_file():
+        fail(f"{folder / 'spec.md'} is missing", 4)
+    decision = folder / "decision.md"
+    changed = changed_files(wt, base) if wt.is_dir() else None
+    if changed is None:
+        visible, reason = True, f"the diff against origin/{base} could not be read"
+    else:
+        visible, reason = plan_reason((folder / "spec.md").read_text(encoding="utf-8"),
+                                      decision.read_text(encoding="utf-8") if decision.is_file() else "",
+                                      changed, visible_globs(project_file))
+    if visible:
+        print(json.dumps({"round": int(round_text), "run": list(TRACER_REVIEWERS), "skipped": [], "reason": reason}))
+        return
+    for path in targets:
+        if path.exists():
+            fail(f"{path} already exists; nothing was written", 6)
+    round_folder.mkdir(exist_ok=True)
+    for path in targets:
+        write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
+    print(json.dumps({"round": int(round_text), "run": ["security", "code"], "skipped": list(SKIPPABLE_REVIEWERS),
+                      "reason": reason}))
+
+
 WAIT_ARTIFACT = re.compile(r"spec\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
 WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S]"
 
@@ -6397,6 +6498,7 @@ COMMANDS["deny-notes"] = (deny_notes_cmd, 1, 2)
 COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
+COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
