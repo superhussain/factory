@@ -1,6 +1,7 @@
 // The a and . keys on a hovered or focused board card, or with a job drawer open: the jumper
 // opens in actions mode with the card menu's items, filters and runs one, and Settings >
 // Reference lists the keys. Also captures the Reference section and the actions jumper for review.
+// Also covers the stale-action guard and the job-gone empty state.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -271,6 +272,71 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
         await page.$eval("#reference-keys", (el) => el.getAttribute("aria-labelledby")),
         "reference-keys-heading",
       );
+    });
+
+    await context.close();
+    assert.deepEqual(errors, []);
+  });
+});
+
+const empty = (page) => page.$eval("#job-empty", (el) => [el.hidden, el.textContent]);
+
+test("stale actions", { timeout: 180000 }, async (t) => {
+  await prepareAssets();
+  await mkdir(SHOTS, { recursive: true });
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seed(origin);
+    const { context, page, errors } = await openPage(browser, origin, "");
+    await page.waitForSelector(CARD(ID));
+
+    await t.test("stale action", async () => {
+      await openActions(page, ID);
+      await page.keyboard.type("pau");
+      assert.deepEqual((await picker(page)).options, ["Pause pickup"]);
+      await page.evaluate((id) => {
+        jobs = jobs.map((j) =>
+          j.id === id ? { ...j, paused: { at: "2026-01-02T12:00:00Z" } } : j,
+        );
+      }, ID);
+      await page.keyboard.press("Enter");
+      const state = await picker(page);
+      assert.equal(state.open, true);
+      assert.deepEqual(state.options, []);
+      assert.equal(state.count, "0 actions");
+      assert.deepEqual(await empty(page), [false, "No matching actions"]);
+      assert.equal((await boardJob(origin, ID)).paused, undefined);
+      await page.evaluate(() => window.fixtureBoardPoll());
+      assert.deepEqual((await picker(page)).options, ["Pause pickup"]);
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => !document.getElementById("job-picker").open);
+    });
+
+    await t.test("job gone", async () => {
+      await openActions(page, ID);
+      await seedBoard(
+        origin,
+        JOBS.filter((j) => j.id !== ID),
+      );
+      await page.evaluate(() => window.fixtureBoardPoll());
+      const state = await picker(page);
+      assert.equal(state.heading, `Actions for ${ID}`);
+      assert.deepEqual(state.options, []);
+      assert.equal(state.count, "0 actions");
+      assert.deepEqual(await empty(page), [false, "This job is no longer on the board"]);
+      assert.equal(await page.$(CARD(ID)), null);
+      const shot = await page.$("#job-picker");
+      await shot.screenshot({ path: `${SHOTS}jumper-actions-gone-1440.png` });
+      await page.keyboard.press("Enter");
+      assert.equal((await picker(page)).open, true);
+      assert.equal(
+        await page.evaluate(() => document.querySelector("dialog[open]:not(#job-picker)")),
+        null,
+      );
+      await page.keyboard.type("pause");
+      assert.deepEqual(await empty(page), [false, "This job is no longer on the board"]);
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => !document.getElementById("job-picker").open);
+      assert.equal(await page.evaluate(() => document.activeElement.id), "job-jump");
     });
 
     await context.close();
