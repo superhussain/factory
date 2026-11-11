@@ -24,7 +24,8 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory.py` onc
 
 - Check: `git rev-parse --show-toplevel`, `test -f deploy/profile.json`, `test -f deploy/bootstrap.json`, `python3 skills/factory/runtime/factory.py doctor`.
 - Ask, Goal: "What should we set up?" Options: New instance (Recommended when no profile), Add this computer to my instance, Register a project, Configure next steps.
-- Then jump to phase 2, 4, 6 or 8.
+- A failing `doctor` here is expected on a new instance or a new computer. It only shows what is missing; do not treat it as an error.
+- Then jump: New instance and Add this computer to phase 2, Register a project to phase 6, Configure next steps to phase 8.
 
 ## 2. Tools
 
@@ -37,6 +38,7 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory.py` onc
 - Check: none.
 - Ask, Zone: "Is your domain's zone active in this Cloudflare account?" Options: Yes, No.
 - Ask as plain messages, one value each: account ID, zone.
+- When adding a computer, use the same account ID, zone, hostname and emails as the first one. `up` then creates this host's service token and policy and adds the policy to the application.
 - Ask, Hostname: "Use factory.<zone>?" Options: factory.<zone> (Recommended), Other.
 - Ask as a plain message: allowed emails.
 - Ask, Plan: "Create these resources?" Options: Yes (Recommended), Change an answer, Stop.
@@ -89,7 +91,7 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory.py` onc
 
 - Only when pickup is yes. Check: `python3 "$FACTORY" pickup --dry-run` after the files exist.
 - Ask, Scheduler: "Which timer does this host use?" Options: cron (Recommended on Linux), launchd (macOS), Task Scheduler (Windows).
-- Then, after a yes, write `<home>/routes.md` and `<home>/launchers.json` from [pickup.md](../../../skills/factory/references/pickup.md) and hand over the timer block.
+- Then write `<home>/routes.md` and `<home>/launchers.json` from [pickup.md](../../../skills/factory/references/pickup.md) and hand over the timer block.
 
 ## 10. Extras
 
