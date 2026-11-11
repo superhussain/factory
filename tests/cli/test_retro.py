@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 from support import ROOT, IsolatedTestCase, invoke, load_runtime
 
@@ -29,7 +30,7 @@ def bash(cmd):
     return ("Bash", {"command": cmd})
 
 
-class RetroDigestTest(IsolatedTestCase):
+class RetroCase(IsolatedTestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -56,6 +57,67 @@ class RetroDigestTest(IsolatedTestCase):
 
     def scan(self, entries):
         return factory.retro_scan(self.session(entries), True)
+
+
+def strings(value):
+    if isinstance(value, dict):
+        for k, v in value.items():
+            yield k
+            yield from strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from strings(v)
+    elif isinstance(value, str):
+        yield value
+
+
+class RetroRedactTest(RetroCase):
+    def test_running_example_and_header_shapes(self):
+        text = "CF_API_TOKEN=xyz curl -H 'Authorization: Bearer abc' https://ci:hunter2@git.example.test/r"
+        self.assertEqual(factory.retro_pattern(text),
+                         "CF_API_TOKEN=[redacted] curl -H 'Authorization: [redacted]' https:<path>")
+        for text, secret in (("Cookie: session=c00kie-value", "c00kie"), ("set-cookie: sid=abc; Path=/", "sid=abc"),
+                             ("proxy-authorization: Basic dXNlcjpw", "dXNlcjpw"), ("X-Api-Key: k3y-value", "k3y"),
+                             ("cf-access-client-secret: s3cr3t-value", "s3cr3t"),
+                             ("retry with bearer eyJabc.def-ghi", "eyJabc"), ("ssh://git:pw0rd@host.example.test/r", "pw0rd"),
+                             ('db_password = "two words"', "two words"), ("GH_TOKEN=gh-value", "gh-value"),
+                             ("client_credential: cred-value", "cred-value"), ("passwd=pw-value", "pw-value")):
+            with self.subTest(text=text):
+                out = factory.retro_redact(text)
+                self.assertNotIn(secret, out)
+                self.assertIn("[redacted]", out)
+
+    def test_project_folds_home(self):
+        self.assertEqual(self.digest()[0]["project"], "~--paseo-worktrees-ab12-factory-1017-add-x")
+        self.assertEqual(factory.retro_project("-Users-x-dev"), "~-dev")
+        self.assertEqual(factory.retro_project("C--Users-x-dev"), "~-dev")
+        self.assertEqual(factory.retro_project("-srv-home-x"), "-srv-home-x")
+
+    def test_every_string_and_key_clipped(self):
+        tool = "T" * 300
+        self.session([assistant("a1", (tool, {})), result("a1", "x " * 300)], slug="-home-u-" + "p" * 200)
+        rows = self.digest()
+        self.assertEqual(next(r for r in rows if r["session"] == "s2")["tools"], {"T" * 160: 1})
+        self.assertTrue(all(len(s) <= 160 for s in strings(rows)))
+        self.assertEqual(factory.retro_clip({"k" * 200: ["v" * 200, {"n": 1}]}), {"k" * 160: ["v" * 160, {"n": 1}]})
+
+
+class RetroDigestTest(RetroCase):
+    def test_vanished_files_skipped(self):
+        later = self.session([{"type": "user", "message": {"content": "hi"}}], slug=SLUG, name="s2")
+        gone = self.session([{"type": "user", "message": {"content": "hi"}}], slug=SLUG, name="s3")
+        scan = factory.retro_scan
+
+        def vanishing(path, main):
+            if not main or path == later:
+                path.unlink()
+                later.with_name("s3.jsonl").unlink(missing_ok=True)
+            return scan(path, main)
+        with patch.object(factory, "retro_scan", vanishing):
+            rows = self.digest()
+        self.assertFalse(gone.exists())
+        self.assertEqual([r["session"] for r in rows], ["s1"])
+        self.assertEqual(rows[0]["subagents"], {"count": 0, "by_type": {}})
 
     def test_usage_dedupes_by_message_id(self):
         row = self.digest()[0]
@@ -165,17 +227,6 @@ class RetroDigestTest(IsolatedTestCase):
         for secret in (github, key, "hunter"):
             self.assertNotIn(secret, out)
         self.assertIn("[redacted]", out)
-
-        def strings(value):
-            if isinstance(value, dict):
-                for k, v in value.items():
-                    yield k
-                    yield from strings(v)
-            elif isinstance(value, list):
-                for v in value:
-                    yield from strings(v)
-            elif isinstance(value, str):
-                yield value
         self.assertTrue(all(len(s) <= 160 for s in strings(self.digest())))
         self.assertEqual(len(factory.retro_pattern("z" * 400)), 160)
 

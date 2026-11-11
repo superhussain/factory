@@ -6187,15 +6187,39 @@ RETRO_POLLS = {"until_file": re.compile(r"\buntil \[ -[fs] "),
 RETRO_JOB = re.compile(r"factory-(\d{2,5})-")
 RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
 RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+")
-RETRO_KEYVALUE = re.compile(r"(?i)\b(token|secret|password|api[_-]?key)(\s*[=:]\s*)\S+")
+RETRO_HEADERS = re.compile(
+    r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))(\s*:\s*)[^\r\n'\"]+")
+RETRO_URL_CREDS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+@")
+RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
+RETRO_KEYVALUE = re.compile(
+    r"(?i)([A-Za-z0-9_-]*(?:token|secret|password|passwd|api[_-]?key|credential)[A-Za-z0-9_-]*)(\s*[=:]\s*)"
+    r"(?:\"[^\"]*\"|'[^']*'|\S+)")
+RETRO_HOME = re.compile(r"^(?:[A-Za-z]-)?-(?:home|Users)-[A-Za-z0-9_]+")
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
 
 def retro_redact(text):
+    text = RETRO_HEADERS.sub(r"\1\2[redacted]", text)
+    text = RETRO_URL_CREDS.sub(r"\1[redacted]@", text)
+    text = RETRO_BEARER.sub(r"\1[redacted]", text)
+    text = RETRO_KEYVALUE.sub(r"\1\2[redacted]", text)
     for pattern in NOTE_SECRETS:
         text = pattern.sub("[redacted]", text)
-    return RETRO_KEYVALUE.sub(r"\1\2[redacted]", text)
+    return text
+
+
+def retro_project(name):
+    return RETRO_HOME.sub("~", name)
+
+
+def retro_clip(obj):
+    """obj with every string, and every dict key, cut to 160 characters."""
+    if isinstance(obj, dict):
+        return {k[:160]: retro_clip(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [retro_clip(v) for v in obj]
+    return obj[:160] if isinstance(obj, str) else obj
 
 
 def retro_pattern(text):
@@ -6325,29 +6349,37 @@ def retro_host():
     return (frontmatter(config)[0] if config.is_file() else {}).get("device") or socket.gethostname()
 
 
-def retro_digest(days):
+def retro_rows(days):
+    """This host's clipped digest rows from the last days, oldest session first."""
     root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
     if not root.is_dir():
         fail(f"no Claude Code transcripts at {root}", 4)
     host, cutoff, rows = retro_host(), time.time() - days * 86400, []
     for project in sorted(p for p in root.iterdir() if p.is_dir()):
         for path in sorted(project.glob("*.jsonl")):
-            if path.stat().st_mtime < cutoff:
+            try:
+                if path.stat().st_mtime < cutoff:
+                    continue
+                scan = retro_scan(path, True)
+            except OSError:
                 continue
-            scan = retro_scan(path, True)
             if scan["start"] is None:
                 continue
             job = RETRO_JOB.search(project.name)
-            row = {"host": host, "project": project.name, "session": path.stem,
+            row = {"host": host, "project": retro_project(project.name), "session": path.stem,
                    "job": job.group(1) if job else "ad-hoc", **scan}
-            by_type, subs = {}, sorted((project / path.stem / "subagents").glob("*.jsonl"))
-            for sub in subs:
+            by_type, scanned = {}, 0
+            for sub in sorted((project / path.stem / "subagents").glob("*.jsonl")):
                 meta = sub.with_suffix(".meta.json")
                 try:
                     kind = str(json.loads(meta.read_text(encoding="utf-8")).get("agentType") or "unknown")
                 except (OSError, ValueError, AttributeError):
                     kind = "unknown"
-                d = retro_scan(sub, False)
+                try:
+                    d = retro_scan(sub, False)
+                except OSError:
+                    continue
+                scanned += 1
                 t = by_type.setdefault(kind, {"count": 0, "turns": 0, "tokens": dict.fromkeys(RETRO_TOKENS, 0),
                                               "errors": 0, "denials": 0, "models": []})
                 t["count"] += 1
@@ -6359,9 +6391,13 @@ def retro_digest(days):
                     t["tokens"][key] += d["tokens"][key]
                 for key in RETRO_ENV_NOISE:
                     row["env_noise"][key] += d["env_noise"][key]
-            row["subagents"] = {"count": len(subs), "by_type": by_type}
-            rows.append(row)
-    for row in sorted(rows, key=lambda r: (r["start"], r["session"])):
+            row["subagents"] = {"count": scanned, "by_type": by_type}
+            rows.append(retro_clip(row))
+    return sorted(rows, key=lambda r: (r["start"], r["session"]))
+
+
+def retro_digest(days):
+    for row in retro_rows(days):
         print(json.dumps(row))
 
 
