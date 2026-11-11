@@ -682,14 +682,21 @@ async function capture(outdir, referencePath) {
       );
     };
     const openArchivedDrawer = async (page, side) => {
+      // Both sides wait for the archive answer, so the before shot is not a timed guess.
+      const answered = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/api/board/archive" && url.searchParams.get("id") === "412-fix-login"
+        );
+      });
       await page.evaluate(() => {
         location.hash = "#412-fix-login";
       });
+      await answered;
       if (side === "after")
         await page.waitForFunction(
           () => document.querySelector("#d-doc h1")?.textContent === "Synthetic login fix",
         );
-      else await new Promise((resolve) => setTimeout(resolve, 1000));
     };
     // The reference has no archive list, so its side shows the closed column.
     // Terminal columns start collapsed, so both sides expand closed first.
