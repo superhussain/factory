@@ -4110,6 +4110,8 @@ def wait_valid(artifact, line):
         return bool(line.strip())
     if artifact == "decision.md":
         return line in ("APPROVE", "ESCALATE", "CHANGES") or line.startswith("CLOSED: ")
+    if line == "VERDICT: SKIPPED":
+        return bool(re.fullmatch(r"round-[1-9][0-9]*/review-(ux|ui)\.md", artifact))
     return line in ("VERDICT: PASS", "VERDICT: CHANGES")
 
 
@@ -5817,7 +5819,7 @@ def spec_tasks(text):
 
 
 def review_rounds(folder):
-    """[(n, {reviewer: PASS or CHANGES})] for each round whose four reviews all carry a verdict."""
+    """[(n, {reviewer: PASS, CHANGES or SKIPPED})] for each round whose four review files all carry a verdict."""
     rounds = []
     for d in Path(folder).glob("round-*"):
         found = re.fullmatch(r"round-(\d+)", d.name)
@@ -5827,7 +5829,7 @@ def review_rounds(folder):
                 first = (d / f"review-{kind}.md").read_text(encoding="utf-8").splitlines()[0].strip()
             except (OSError, IndexError, UnicodeError):
                 break
-            if first not in ("VERDICT: PASS", "VERDICT: CHANGES"):
+            if first not in ("VERDICT: PASS", "VERDICT: CHANGES", "VERDICT: SKIPPED"):
                 break
             verdicts[kind] = first.split(": ")[1]
         if found and len(verdicts) == len(TRACER_REVIEWERS):

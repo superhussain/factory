@@ -731,7 +731,7 @@ class MirrorTest(TracerCase):
     def test_review_rounds_post_once(self):
         self.job["stage"] = "review"
         self.review(1, {"security": "PASS", "ux": "CHANGES", "ui": "PASS", "code": "PASS"})
-        self.review(2, self.ALL_PASS)
+        self.review(2, dict(self.ALL_PASS, ux="SKIPPED", ui="SKIPPED"))
         (self.folder / "round-3").mkdir()
         (self.folder / "round-3" / "review-security.md").write_text("VERDICT: PASS\n")
         self.review(4, dict(self.ALL_PASS, code="MAYBE"))
@@ -748,6 +748,7 @@ class MirrorTest(TracerCase):
                           f"{API_URL}/#001-sample/round-1/review-ux", "id": "r1"})
             self.assertEqual((runs[1]["status"], runs[1]["passed"], runs[1]["failed"], runs[1]["failures"]),
                              ("passed", 4, 0, []))
+            self.assertIn("security PASS · ux SKIPPED · ui SKIPPED · code PASS", runs[1]["output"])
             self.assertEqual(len(runs), 2)
             self.review(3, self.ALL_PASS)
             before = len(fake.requests)
