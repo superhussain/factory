@@ -10,6 +10,7 @@
 <meta name="theme-color" id="theme-color-light" media="(prefers-color-scheme: light)" content="#f9fafb">
 <meta name="theme-color" id="theme-color-dark" media="(prefers-color-scheme: dark)" content="#111827">
 <meta http-equiv="Content-Security-Policy" content="__FACTORY_CSP__">
+<meta name="factory-version" content="__FACTORY_VERSION__">
 <script type="application/json" id="factory-config">__FACTORY_CONFIG__</script>
 <script type="application/json" id="factory-reference">__FACTORY_REFERENCE__</script>
 <title>__FACTORY_TITLE__</title>
@@ -1125,6 +1126,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     if (version !== boardReadVersion) return false;
     const etag = r.ok ? r.headers.get('ETag') || '' : '';
     setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
+    noteDeployedVersion(r);
     // A socket open or a timer tick redraws only a changed board, so a focused card is not read again.
     // syncDetail() still reopens a deep-linked tab or archived job that has not loaded.
     if (ifChanged && loaded && etag && etag === boardEtag) {
@@ -2209,13 +2211,48 @@ $('settings-projects').addEventListener('keydown', e => {
     if (!e.repeat && !e.isComposing) e.target.closest('#project-pickup') ? savePipelineScope(projectPickupScope()) : saveProjectDocument();
   }
 });
+function settingsUnsaved() {
+  return [...projectDocuments.values()].some(s => settingsDirty(s) || s.blocked || ['conflict','uncertain','saving'].includes(s.phase))
+    || [...pipelineScopes.values()].some(s => pipelineDirty(s) || ['saving','conflict'].includes(s.phase));
+}
 window.addEventListener('beforeunload', e => {
-  if ([...projectDocuments.values()].some(s => settingsDirty(s) || s.blocked || ['conflict','uncertain','saving'].includes(s.phase))
-    || [...pipelineScopes.values()].some(s => pipelineDirty(s) || ['saving','conflict'].includes(s.phase))) {
+  if (settingsUnsaved()) {
     e.preventDefault();
     e.returnValue = '';
   }
 });
+
+// Deployed version: a tab on an older page reloads once nothing is unsaved.
+const PAGE_VERSION = document.querySelector('meta[name="factory-version"]')?.content;
+const RELOADED_KEY = 'factory-reloaded-for';
+let deployedVersion = null, reloadTimer = 0;
+function noteDeployedVersion(r) {
+  const v = r.headers.get('X-Factory-Version');
+  if (!v || r.headers.get('X-Factory-Offline') || v === PAGE_VERSION || deployedVersion === v) return;
+  try { if (sessionStorage.getItem(RELOADED_KEY) === v) return; } catch {}
+  deployedVersion = v;
+  reloadTimer = reloadTimer || setInterval(reloadWhenIdle, 5000);
+  reloadWhenIdle();
+}
+function unsavedWork() {
+  const typing = '#needs-form textarea, #backlog-form textarea';
+  const blank = el => !el.value.trim();
+  return !!document.querySelector('dialog[open]')
+    || settingsUnsaved()
+    || [...document.querySelectorAll(typing)].some(el => !blank(el))
+    || [...document.querySelectorAll('#host-add input[type=text], #host-add input:not([type])')].some(el => !blank(el))
+    || hostDrafts.size > 0
+    || !!document.activeElement?.matches('textarea, input[type=text], input[type=search], input:not([type]), [contenteditable]');
+}
+async function reloadWhenIdle() {
+  if (!deployedVersion || unsavedWork()) return;
+  try {
+    sessionStorage.setItem(RELOADED_KEY, deployedVersion);
+    for (const name of await caches.keys()) await (await caches.open(name)).delete('/');
+  } catch {}
+  location.reload();
+}
+document.addEventListener('visibilitychange', reloadWhenIdle);
 
 // Settings page: a full-screen view on the '#/settings/<section>' hash route.
 const SETTINGS_SECTIONS = ['projects', 'pipeline', 'hosts', 'display', 'notifications', 'scheduler', 'reference'];

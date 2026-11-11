@@ -42,7 +42,7 @@ function setup(fetch, records = [], sessionRecords = []) {
     calls = [],
     elements = new Map(),
     windowEvents = new Map();
-  const document = { activeElement: null };
+  const document = { activeElement: null, querySelector: () => null, addEventListener() {} };
   const $ = (id) => {
     if (!elements.has(id))
       elements.set(id, {
