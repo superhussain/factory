@@ -400,6 +400,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .chip.PASS { background: var(--pass-bg); color: var(--pass-fg); }
   .chip.CHANGES { background: var(--changes-bg); color: var(--changes-fg); font-weight: 600; }
+  .chip.SKIPPED { background: transparent; color: var(--pending-fg); outline: 1px dashed var(--pending-fg); outline-offset: -1px; }
 
   .detail {
     position: fixed; top: 0; right: 0; bottom: 0; width: min(var(--drawer-w, 760px), 100%);
@@ -1159,7 +1160,7 @@ function chips(rounds) {
     '<div class="round"><span class="rn">R' + (i + 1) + '</span>' +
     REVIEWERS.map((k) => {
       const v = (r && r[k]) || 'pending';
-      const cls = v === 'PASS' || v === 'CHANGES' ? v : 'pending';
+      const cls = v === 'PASS' || v === 'CHANGES' || v === 'SKIPPED' ? v : 'pending';
       return '<span class="chip ' + cls + '" title="' + esc(k + ': ' + v) + '">' + esc(k) + '</span>';
     }).join('') + '</div>'
   ).join('') + '</div>';
