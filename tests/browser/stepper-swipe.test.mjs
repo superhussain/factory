@@ -223,7 +223,7 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       assert.match(await frame.$eval("#kicker", (e) => e.textContent), /Step 1 of 2/);
     });
 
-    await t.test("T7 touchcancel drops the frame swipe", async () => {
+    await t.test("T7 touchcancel drops the frame swipe, so a lone touchend stays put", async () => {
       await open();
       const { frame, y } = await openFrame();
       const kicker = () => frame.$eval("#kicker", (e) => e.textContent);
@@ -233,6 +233,12 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
         await sleep(16);
       }
       await touches("touchCancel", []);
+      await settled();
+      await frame.evaluate(() =>
+        document
+          .getElementById("steps")
+          .dispatchEvent(new TouchEvent("touchend", { bubbles: true })),
+      );
       await settled();
       assert.match(await kicker(), /Step 1 of 2/);
       await drag(line(300, 150, y), 16);
@@ -244,8 +250,14 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       await open();
       const { frame } = await openFrame();
       assert.deepEqual(
-        await frame.evaluate(() => [typeof x0, typeof y0, typeof swiping, typeof sideways]),
-        ["undefined", "undefined", "undefined", "undefined"],
+        await frame.evaluate(() => [
+          typeof x0,
+          typeof y0,
+          typeof x,
+          typeof swiping,
+          typeof sideways,
+        ]),
+        ["undefined", "undefined", "undefined", "undefined", "undefined"],
       );
     });
 
