@@ -77,6 +77,7 @@ const edges = (page, selector) =>
     const r = row.getBoundingClientRect();
     return {
       spanLeft: a.left,
+      spanRight: a.right,
       rowLeft: r.left,
       rowRight: r.right,
       scrollLeft: row.scrollLeft,
@@ -151,6 +152,10 @@ test("card ref truncated", { timeout: 240000 }, async (t) => {
         assert.equal(e.overflow, "clip");
         assert.ok(e.spanLeft >= e.rowLeft, `span left ${e.spanLeft} row left ${e.rowLeft}`);
         assert.ok(e.spanLeft < e.rowRight, `span left ${e.spanLeft} row right ${e.rowRight}`);
+        assert.ok(
+          e.spanRight + 2 <= e.rowRight + 0.5,
+          `span right ${e.spanRight} row right ${e.rowRight}`,
+        );
         await tab(page, 2, true);
         assert.equal(await activeIs(page, ACTIONS), true);
         assert.equal(await page.$(".ref-link.ref-focused"), null);

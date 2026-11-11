@@ -333,7 +333,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .meta.host { color: var(--host-fg); }
   .card .ref-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   @media (hover: hover) { .card .ref-link:hover { color: var(--accent); text-decoration-thickness: 2px; } }
-  .card .ref-link.ref-focused { background: var(--accent); color: var(--panel); border-radius: 3px; box-shadow: -2px 0 0 var(--accent), 2px 0 0 var(--accent); text-decoration-thickness: 2px; }
+  /* The end margin gives the right shadow 2px of the row's scroll range, so a ref at the row's end keeps it. */
+  .card .ref-link.ref-focused { background: var(--accent); color: var(--panel); border-radius: 3px; box-shadow: -2px 0 0 var(--accent), 2px 0 0 var(--accent); text-decoration-thickness: 2px; margin-inline-end: 2px; }
   /* .sr-only hides the stand-in; this pins it inside .card-wrap. */
   .ref-focus { top: 0; left: 0; }
   .backlog-card {
@@ -5960,7 +5961,7 @@ function markRefFocus(e, on) {
   const row = span.closest('.line');
   if (!on) { row.scrollLeft = 0; return; }
   const s = span.getBoundingClientRect(), r = row.getBoundingClientRect();
-  if (s.right > r.right) row.scrollLeft += s.left - r.left - 4;
+  if (s.right + 2 > r.right) row.scrollLeft += s.left - r.left - 4;
 }
 $('board').addEventListener('focusin', (e) => markRefFocus(e, true));
 $('board').addEventListener('focusout', (e) => markRefFocus(e, false));
