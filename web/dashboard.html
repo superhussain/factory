@@ -87,7 +87,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .ask { border: 1px solid var(--line); border-radius: 12px; margin: 16px 0; padding: 12px 16px; }
   .ask legend { font-weight: 600; padding: 0 6px; }
   .ask-option { display: flex; gap: 10px; align-items: flex-start; width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
-  .ask-option:hover { background: var(--accent-soft); }
+  @media (hover: hover) { .ask-option:hover { background: var(--accent-soft); } }
   .ask-option:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
   .backlog-context, .backlog-triage { margin: 12px 0; }
   .doc .backlog-context > h3, .doc .backlog-triage > h3 { font-size: 13px; margin: 0 0 4px; }
@@ -157,7 +157,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .filter-menu label { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; font-size: 12px; white-space: nowrap; overflow: hidden; cursor: pointer; }
   .filter-menu input { flex: none; accent-color: var(--accent); }
   .filter-menu .filter-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .filter-menu label:hover, .filter-menu label:focus-within { background: var(--line); }
+  .filter-menu label:focus-within { background: var(--line); }
+  @media (hover: hover) { .filter-menu label:hover { background: var(--line); } }
   @media (pointer: coarse) { .filter-menu label { min-height: 44px; } }
   .header-actions { display: flex; gap: inherit; }
   body[data-view="settings"] #board, body[data-view="settings"] #detail { display: none; }
@@ -272,7 +273,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .col.needs-you h2 { color: var(--alert); }
   .more { font: inherit; font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); background: none; border: 0; padding: 0 0 0 6px; cursor: pointer; }
-  .more:hover, .more:focus-visible { color: var(--accent); text-decoration: underline; outline: none; }
+  .more:focus-visible { color: var(--accent); text-decoration: underline; outline: none; }
+  @media (hover: hover) { .more:hover { color: var(--accent); text-decoration: underline; outline: none; } }
   .column-toggle {
     font: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit;
     background: transparent; border: 0; cursor: pointer; min-height: 44px; min-width: 36px;
@@ -303,7 +305,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(17,24,39,.05);
     padding: 14px 16px; cursor: pointer;
   }
-  .card:hover, .card:focus-visible { border-color: var(--accent); outline: none; }
+  .card:focus-visible { border-color: var(--accent); outline: none; }
+  @media (hover: hover) { .card:hover { border-color: var(--accent); outline: none; } }
   .card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .card.needs-you { border: 1px solid var(--alert); border-left-width: 4px; background: var(--alert-bg); }
   .card .id { font: 11px/1.3 var(--font-mono); color: var(--muted); }
@@ -324,7 +327,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .meta.refs { color: var(--ref-fg); }
   .card .meta.host { color: var(--host-fg); }
   .card .ref-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-  .card .ref-link:hover { color: var(--accent); text-decoration-thickness: 2px; }
+  @media (hover: hover) { .card .ref-link:hover { color: var(--accent); text-decoration-thickness: 2px; } }
   .card .ref-link.ref-focused { background: var(--accent); color: var(--panel); border-radius: 3px; box-shadow: -2px 0 0 var(--accent), 2px 0 0 var(--accent); text-decoration-thickness: 2px; }
   .ref-focus { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .backlog-card {
@@ -332,7 +335,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(17,24,39,.05);
     padding: 14px 16px; display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
   }
-  .backlog-card:hover, .backlog-card:focus-visible { border-color: var(--accent); outline: none; }
+  .backlog-card:focus-visible { border-color: var(--accent); outline: none; }
+  @media (hover: hover) { .backlog-card:hover { border-color: var(--accent); outline: none; } }
   .backlog-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .backlog-card:disabled { cursor: progress; opacity: .6; }
   .backlog-card .title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
@@ -352,15 +356,15 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card-wrap .card .id, .card-wrap .card .proj { padding-right: 28px; }
   .card-wrap.has-pr .card .id { padding-right: 96px; }
   .card-actions { position: absolute; top: 7px; right: 8px; width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
-  .card-actions:hover, .card-actions:focus-visible { background: var(--line); }
-  .card-actions:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .card-actions:focus-visible { background: var(--line); outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (hover: hover) { .card-actions:hover { background: var(--line); } }
   .card-actions svg { width: 16px; height: 16px; }
   @media (pointer: coarse) { .card-actions::after { content: ""; position: absolute; inset: -8px -8px -8px -4px; } }
   .card-actions-menu { position: fixed; right: auto; z-index: 30; }
   .board-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .board-status[hidden] { display: none; }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
-  .pr-link:hover { text-decoration: underline; }
+  @media (hover: hover) { .pr-link:hover { text-decoration: underline; } }
   .pr-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   /* The text is ~15px tall; this invisible box makes a ~41px tap target without moving the layout. */
   .pr-link::after { content: ""; position: absolute; inset: -13px -8px; }
@@ -393,7 +397,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .detail[hidden] { display: none; }
   /* Drag handle on the drawer's left edge. The width lives in --drawer-w and localStorage. */
   .detail-resize { position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; touch-action: none; z-index: 1; }
-  .detail-resize:hover, .detail-resize:focus-visible, .detail.resizing .detail-resize { outline: none; background: linear-gradient(90deg, transparent 3px, var(--accent) 3px 5px, transparent 5px); }
+  .detail-resize:focus-visible, .detail.resizing .detail-resize { outline: none; background: linear-gradient(90deg, transparent 3px, var(--accent) 3px 5px, transparent 5px); }
+  @media (hover: hover) { .detail-resize:hover { outline: none; background: linear-gradient(90deg, transparent 3px, var(--accent) 3px 5px, transparent 5px); } }
   body.resizing-drawer { user-select: none; cursor: col-resize; }
   .detail-head { padding: 18px 24px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: flex-start; }
   .detail-head .titles { flex: 1; min-width: 0; }
@@ -402,9 +407,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #idea-ref code { font: 12px var(--font-mono); overflow-wrap: anywhere; }
   .close { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-size); height: var(--icon-size); padding: 0; background: none; border: 1px solid transparent; border-radius: 8px; color: var(--muted); cursor: pointer; }
   .close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-  .close:focus-visible { border-color: var(--accent); color: var(--fg); }
+  .close:focus-visible { border-color: var(--accent); color: var(--fg); outline: 2px solid var(--accent); outline-offset: 2px; }
   @media (hover: hover) { .close:hover { border-color: var(--accent); color: var(--fg); } }
-  .close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .tabs { position: relative; display: flex; gap: 4px; padding: 10px 24px; border-bottom: 1px solid var(--line); overflow-x: auto; flex: none; }
   .tabs[hidden] { display: none; }
   .tab {
@@ -1056,14 +1060,14 @@ let loaded = false;
 const archivedJobs = new Map();
 // Ids the archive answered 404 for, so a link to one is fetched once per page session.
 const archiveMisses = new Set();
-// The id whose failed archive load was already reported, so retries on each poll stay quiet.
+// The id whose failed archive load was already reported. It resets when the hash names another id, so retries and tab changes stay quiet.
 let archiveFailNoted = '';
 // The board carries archived.max_id once the Worker has archived a job, so only then is there an archive to search.
 let boardArchived = false;
 // The jumper's one archive lookup: { query, status: 'loading' | 'done' | 'error', jobs, total }.
 let archiveSearch = null;
 // Pages of GET /api/board/archive?page=N, shown under the merged and closed columns.
-const archiveList = { open: false, rows: [], page: 0, pages: 0, total: 0, busy: false, error: '' };
+const archiveList = { open: false, rows: [], page: 0, pages: 0, total: 0, busy: false, error: '', errorStage: '' };
 let boardReadVersion = 0;
 const BACKLOG_POLL_MS = 120000;
 let backlogReadAt = 0;
@@ -2903,7 +2907,7 @@ function archiveSection(s) {
   const a = archiveList;
   const button = (text) => '<button type="button" class="btn archive-more" data-archive data-stage="' + s + '"' +
     (a.busy ? ' aria-disabled="true"' : '') + '>' + (a.busy ? 'Loading archived jobs' : text) + '</button>';
-  const error = a.error ? '<p class="archive-error" role="alert">' + esc(a.error) + '</p>' : '';
+  const error = a.error && a.errorStage === s ? '<p class="archive-error">' + esc(a.error) + '</p>' : '';
   if (!a.open) return '<div class="archive-list">' + error + button('Show archived jobs') + '</div>';
   const rows = a.rows.filter((j) => j.stage === s && isShown(j.project) && !jobs.some((x) => x.id === j.id));
   return '<div class="archive-list"><h3 class="archive-head">Archived</h3>' +
@@ -2999,7 +3003,7 @@ $('board').addEventListener('click', (e) => {
     renderBoard();
     return;
   }
-  if (e.target.closest('[data-archive]')) { loadArchivePage(); return; }
+  const more = e.target.closest('[data-archive]'); if (more) { loadArchivePage(more.dataset.stage); return; }
   const b = e.target.closest('[data-backlog-open]');
   if (b) {
     openBacklogItem(renderedBacklog[Number(b.dataset.index)]);
@@ -3293,10 +3297,11 @@ async function loadArchivedJob(id) {
   } catch { return { job: null, failed: true }; }
 }
 
-async function loadArchivePage() {
+async function loadArchivePage(stage) {
   if (archiveList.busy) return;
   archiveList.busy = true;
   archiveList.error = '';
+  archiveList.errorStage = '';
   renderBoard();
   try {
     const r = await fetch('./api/board/archive?page=' + (archiveList.page + 1), { cache: 'no-store' });
@@ -3312,6 +3317,8 @@ async function loadArchivePage() {
     Object.assign(archiveList, { open: true, page: body.page, pages: body.pages, total: body.total });
   } catch {
     archiveList.error = 'Could not load archived jobs. Try again.';
+    archiveList.errorStage = stage;
+    showBoardStatus(archiveList.error);
   }
   archiveList.busy = false;
   renderBoard();
@@ -4234,9 +4241,9 @@ function syncDetail() {
 }
 
 window.addEventListener('hashchange', () => {
-  archiveFailNoted = '';
-  const key = backlogRoute();
   const { id } = parseHash();
+  if (id !== archiveFailNoted) archiveFailNoted = '';
+  const key = backlogRoute();
   if (key) openBacklogRoute(key);
   else if (id) openJob(id);
   else if (openId || openBacklogRaw !== null) closeDetail();
