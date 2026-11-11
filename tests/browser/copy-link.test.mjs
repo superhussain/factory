@@ -34,7 +34,7 @@ const VIEWPORTS = [
   { width: 1280, height: 900 },
 ];
 const LINK = (origin) => origin + "/#100-sample-idea";
-const FALLBACK = "Copy is unavailable. Copy the link from the address bar.";
+const FALLBACK = (origin) => "Copy is unavailable. The link is " + LINK(origin);
 
 async function openDrawer(browser, origin, viewport, id, reject) {
   const context = await browser.createBrowserContext();
@@ -167,7 +167,7 @@ test("Copy link copies the job's dashboard link", { timeout: 120000 }, async () 
         await denied.page.waitForFunction(
           (text) => document.getElementById("d-copy-status").textContent === text,
           {},
-          FALLBACK,
+          FALLBACK(origin),
         );
         await denied.page.evaluate(() => {
           location.hash = "#101-sample-closed";

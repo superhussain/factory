@@ -1400,6 +1400,16 @@ class MoveFenceTest(IsolatedTestCase):
         self.assertIn("only the dashboard sets paused", err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
+    def test_board_refuses_a_stacked_patch(self):
+        before = self.store["/api/board"]
+        err = io.StringIO()
+        with patch.object(factory.sys, "stdin", io.StringIO('{"stacked": true}')), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            factory.board(self.home, "001-test")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("only factory.py stack sets stacked", err.getvalue())
+        self.assertEqual(self.store["/api/board"], before)
+
     def test_board_refuses_a_close_patch(self):
         before = self.store["/api/board"]
         err = io.StringIO()
