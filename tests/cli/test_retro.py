@@ -6,7 +6,9 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-from support import ROOT, IsolatedTestCase, invoke, load_runtime
+from datetime import datetime
+
+from support import ROOT, IsolatedTestCase, http_fixture, invoke, load_runtime
 
 factory = load_runtime()
 FIXTURE = ROOT / "tests/fixtures/retro"
@@ -244,13 +246,83 @@ class RetroDigestTest(RetroCase):
         self.assertEqual(self.digest()[0]["host"], factory.socket.gethostname())
 
     def test_usage_errors(self):
-        for args in (["retro"], ["retro", "push"], ["retro", "digest", "--days"], ["retro", "digest", "--days", "0"],
+        for args in (["retro"], ["retro", "push", "now"], ["retro", "pull"], ["retro", "digest", "--days"], ["retro", "digest", "--days", "0"],
                      ["retro", "digest", "--days", "91"], ["retro", "digest", "--days", "x"], ["retro", "digest", "--days", "²"],
                      ["retro", "digest", "--weeks", "2"]):
             code, out, _ = invoke(factory, args)
             self.assertEqual((code, out), (2, ""), args)
-        self.assertIn("usage: factory.py retro digest [--days N], N from 1 to 90", invoke(factory, ["retro", "push"])[2])
+        self.assertIn("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD, N from 1 to 90",
+                      invoke(factory, ["retro", "push", "now"])[2])
         os.environ["CLAUDE_CONFIG_DIR"] = str(self.root / "missing")
         code, out, err = invoke(factory, ["retro", "digest"])
         self.assertEqual((code, out), (4, ""))
         self.assertIn("no Claude Code transcripts at", err)
+
+
+PAIR_HINT = "pair this host with factory.py host pair <id> <code>"
+
+
+class RetroWorkerCase(RetroCase):
+    def config(self, origin, device="device: mac\n"):
+        (self.home / "config.md").write_text(f"---\napi_url: {origin}\n{device}---\n", encoding="utf-8")
+
+
+class RetroPushTest(RetroWorkerCase):
+    def test_push_puts_the_digest_once(self):
+        date = datetime.now().date().isoformat()
+        route = f"PUT /api/retro/mac/{date}.jsonl"
+        with http_fixture({route: (200, b"ok")}) as server:
+            self.config(server.origin)
+            code, out, err = invoke(factory, ["retro", "push"])
+            digest = invoke(factory, ["retro", "digest"])[1]
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"pushed 1 sessions to retro/mac/{date}.jsonl\n")
+        self.assertEqual([f"{m} {p}" for m, p, _, _ in server.requests], [route])
+        _, _, headers, body = server.requests[0]
+        self.assertEqual(headers["Content-Type"], "application/x-ndjson")
+        self.assertEqual(body.decode("utf-8"), digest)
+        self.assertEqual(json.loads(digest)["host"], "mac")
+
+    def test_push_needs_a_paired_device(self):
+        with http_fixture({}) as server:
+            for device in ("", "device:\n", "device: -bad\n"):
+                with self.subTest(device=device):
+                    self.config(server.origin, device)
+                    code, out, err = invoke(factory, ["retro", "push"])
+                    self.assertEqual((code, out), (2, ""))
+                    self.assertIn(f"set device: in {self.home / 'config.md'}; {PAIR_HINT}", err)
+            self.assertEqual(server.requests, [])
+        date = datetime.now().date().isoformat()
+        for body, exit_code, message in ((factory.RETRO_WRITE_ONLY.encode(), 2, PAIR_HINT),
+                                         (b"Forbidden", 5, "Access rejected the service token")):
+            with self.subTest(body=body), http_fixture({f"PUT /api/retro/mac/{date}.jsonl": (403, body)}) as server:
+                self.config(server.origin)
+                code, out, err = invoke(factory, ["retro", "push"])
+                self.assertEqual((code, out), (exit_code, ""))
+                self.assertIn(message, err)
+
+
+class RetroPullTest(RetroWorkerCase):
+    def test_pull_prints_each_listed_host_in_order(self):
+        routes = {"GET /api/retro/2026-11-11": (200, ["pc", "../x", 5, "mac"]),
+                  "GET /api/retro/pc/2026-11-11.jsonl": (200, b'{"host": "pc"}\n'),
+                  "GET /api/retro/mac/2026-11-11.jsonl": (200, b'{"host": "mac"}\n{"host": "mac"}\n')}
+        with http_fixture(routes) as server:
+            self.config(server.origin)
+            code, out, err = invoke(factory, ["retro", "pull", "2026-11-11"])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, '{"host": "pc"}\n{"host": "mac"}\n{"host": "mac"}\n')
+        self.assertEqual([p for _, p, _, _ in server.requests],
+                         ["/api/retro/2026-11-11", "/api/retro/pc/2026-11-11.jsonl", "/api/retro/mac/2026-11-11.jsonl"])
+
+    def test_empty_day_and_bad_dates(self):
+        with http_fixture({"GET /api/retro/2026-11-11": (200, [])}) as server:
+            self.config(server.origin)
+            self.assertEqual(invoke(factory, ["retro", "pull", "2026-11-11"]),
+                             (0, "", "no host pushed a retro digest for 2026-11-11\n"))
+            for date in ("2026-02-30", "2026-11-1", "11/11/2026", "x"):
+                with self.subTest(date=date):
+                    code, out, err = invoke(factory, ["retro", "pull", date])
+                    self.assertEqual((code, out), (2, ""))
+                    self.assertIn("usage: factory.py retro digest", err)
+            self.assertEqual(len(server.requests), 1)

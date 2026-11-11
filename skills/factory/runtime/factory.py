@@ -86,6 +86,8 @@
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
+  factory.py retro push                     upload that digest (last day) to retro/<device>/<local date>.jsonl
+  factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
 
 claim, next, hold, handoff, board, ideas, and stuck take --session <tag> (or
 FACTORY_SESSION). A session without one gets a new tag from claim, next, or hold,
@@ -6195,6 +6197,7 @@ RETRO_KEYVALUE = re.compile(
     r"(?i)([A-Za-z0-9_-]*(?:token|secret|password|passwd|api[_-]?key|credential)[A-Za-z0-9_-]*)(\s*[=:]\s*)"
     r"(?:\"[^\"]*\"|'[^']*'|\S+)")
 RETRO_HOME = re.compile(r"^(?:[A-Za-z]-)?-(?:home|Users)-[A-Za-z0-9_]+")
+RETRO_WRITE_ONLY = "retro digests are written only by the host's bound service token"
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
@@ -6401,10 +6404,51 @@ def retro_digest(days):
         print(json.dumps(row))
 
 
+def retro_push():
+    """PUT this host's digest to the Worker under its device name and today's local date."""
+    home = factory_home()
+    config = home / "config.md"
+    device = (frontmatter(config)[0] if config.is_file() else {}).get("device") or ""
+    hint = f"set device: in {config}; pair this host with factory.py host pair <id> <code>"
+    if not HOST_NAME.fullmatch(device):
+        fail(hint, 2)
+    rows = retro_rows(1)
+    key = f"retro/{device}/{datetime.now().date().isoformat()}.jsonl"
+    status, _, text = api(home, "PUT", f"/api/{key}", "".join(json.dumps(row) + "\n" for row in rows),
+                          ok=(200, 403), headers={"Content-Type": "application/x-ndjson"})
+    if status == 403 and text.strip() == RETRO_WRITE_ONLY:
+        fail(f"{RETRO_WRITE_ONLY}. {hint}", 2)
+    if status == 403:
+        fail(access_message(os.path.abspath(os.path.join(home, ".env"))), 5)
+    print(f"pushed {len(rows)} sessions to {key}")
+
+
+def retro_pull(date):
+    """Print every host's pushed digest for date, in the order the Worker lists the hosts."""
+    home = factory_home()
+    hosts = [h for h in json.loads(api(home, "GET", f"/api/retro/{date}")[2])
+             if isinstance(h, str) and HOST_NAME.fullmatch(h)]
+    if not hosts:
+        print(f"no host pushed a retro digest for {date}", file=sys.stderr)
+    for host in hosts:
+        sys.stdout.write(api(home, "GET", f"/api/retro/{host}/{date}.jsonl")[2])
+
+
+def retro_date(d):
+    try:
+        return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) and datetime.strptime(d, "%Y-%m-%d"))
+    except ValueError:
+        return False
+
+
 def retro_cmd(action, *args):
+    if action == "push" and not args:
+        return retro_push()
+    if action == "pull" and len(args) == 1 and retro_date(args[0]):
+        return retro_pull(args[0])
     days = args[1] if len(args) == 2 and args[0] == "--days" else "1" if not args else ""
     if action != "digest" or not (days.isascii() and days.isdigit()) or not 1 <= int(days) <= 90:
-        fail("usage: factory.py retro digest [--days N], N from 1 to 90", 2)
+        fail("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD, N from 1 to 90", 2)
     retro_digest(int(days))
 
 
