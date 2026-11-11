@@ -1312,7 +1312,11 @@ def escalation_cmd(target, round_text):
         status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
     verdict = escalation_verdict(text) if status == 200 else None
     if verdict is None:
-        why = "malformed reply" if status == 200 else status
+        if status == 200:
+            why = "malformed reply"
+        else:
+            detail = " ".join(text.split())[:200]
+            why = f"{status}: {detail}" if detail else status
         print(f"factory.py: review escalation check failed ({why}); the review loop continues", file=sys.stderr)
         verdict = {**unchanged, "reason": "the escalation check failed"}
     print(json.dumps(verdict))
