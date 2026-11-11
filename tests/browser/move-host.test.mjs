@@ -209,7 +209,7 @@ test("move host", { timeout: 240000 }, async (t) => {
         ).screenshot({ path: `${SHOTS}after-move-dialog${suffix}.png` });
         assert.equal(
           await page.$eval("#move-host-help", (el) => el.textContent),
-          "042-sample-export runs on lab-linux. Moving it stops that session and starts the job on the host you pick. If lab-linux is offline, the stop waits until it comes back.",
+          "042-sample-export runs on Lab Linux. Moving it stops that session and starts the job on the host you pick. If Lab Linux is offline, the stop waits until it comes back.",
         );
         assert.equal(
           await page.$eval("#move-host-select", (el) => el.getAttribute("aria-describedby")),
@@ -297,7 +297,7 @@ test("move host", { timeout: 240000 }, async (t) => {
           ).screenshot({ path: `${SHOTS}after-move-dialog-moving${suffix}.png` });
           assert.equal(
             await page.$eval("#move-host-help", (el) => el.textContent),
-            "042-sample-export is moving to studio-mac. The host you pick starts it instead.",
+            "042-sample-export is moving to Studio Mac. The host you pick starts it instead.",
           );
           assert.deepEqual(await options(page), []);
           await page.click("#move-host-cancel");

@@ -5068,10 +5068,11 @@ async function openMoveHost(ctx) {
   select.replaceChildren();
   const pending = !j.claim && j.move && !moveStopped(j.move) ? j.move : null;
   const current = j.claim?.device ?? pending?.from;
-  $('move-host-help').textContent = j.claim?.device
-    ? j.id + ' runs on ' + j.claim.device + '. Moving it stops that session and starts the job on the host you pick. If ' + j.claim.device + ' is offline, the stop waits until it comes back.'
-    : pending?.to ? j.id + ' is moving to ' + pending.to + '. The host you pick starts it instead.'
+  const help = (name) => j.claim?.device
+    ? j.id + ' runs on ' + name(j.claim.device) + '. Moving it stops that session and starts the job on the host you pick. If ' + name(j.claim.device) + ' is offline, the stop waits until it comes back.'
+    : pending?.to ? j.id + ' is moving to ' + name(pending.to) + '. The host you pick starts it instead.'
     : j.id + ' has no host right now. The host you pick starts it.';
+  $('move-host-help').textContent = help(hostName);
   let hosts = [];
   let blocked = [];
   let blockedOffline = [];
@@ -5079,6 +5080,7 @@ async function openMoveHost(ctx) {
     const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
     if (!h.ok || !p.ok) throw new Error('load');
     const [list, view] = [await h.json(), await p.json()];
+    $('move-host-help').textContent = help((id) => list.find((x) => x.id === id)?.label || hostName(id));
     const listed = view.pickup?.enabled ? view.pickup.hosts : [];
     const others = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to);
     const queued = new Set(queuedStops(j.move).map((q) => q.from));
@@ -5368,6 +5370,7 @@ async function rerunAction(ctx) {
       const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
       if (!h.ok || !p.ok) throw new Error('load');
       const [list, view] = [await h.json(), await p.json()];
+    $('move-host-help').textContent = help((id) => list.find((x) => x.id === id)?.label || hostName(id));
       name = list.find((x) => x.id === host)?.label || name;
       listed = list.some((x) => x.id === host && x.state === 'active') && (view.pickup?.enabled ? view.pickup.hosts : []).includes(host);
     } catch {
