@@ -80,6 +80,7 @@ const edges = (page, selector) =>
       rowLeft: r.left,
       rowRight: r.right,
       scrollLeft: row.scrollLeft,
+      overflow: getComputedStyle(row).textOverflow,
       focused: span.classList.contains("ref-focused"),
     };
   }, selector);
@@ -120,6 +121,7 @@ test("card ref truncated", { timeout: 240000 }, async (t) => {
         const e = await edges(page, SPAN);
         assert.ok(e.spanLeft >= e.rowRight, `span left ${e.spanLeft} row right ${e.rowRight}`);
         assert.equal(e.scrollLeft, 0);
+        assert.equal(e.overflow, "ellipsis");
         assert.equal(e.focused, false);
       });
 
@@ -146,12 +148,15 @@ test("card ref truncated", { timeout: 240000 }, async (t) => {
         const e = await edges(page, SPAN);
         assert.equal(e.focused, true);
         assert.ok(e.scrollLeft > 0, `scrollLeft ${e.scrollLeft}`);
+        assert.equal(e.overflow, "clip");
         assert.ok(e.spanLeft >= e.rowLeft, `span left ${e.spanLeft} row left ${e.rowLeft}`);
         assert.ok(e.spanLeft < e.rowRight, `span left ${e.spanLeft} row right ${e.rowRight}`);
         await tab(page, 2, true);
         assert.equal(await activeIs(page, ACTIONS), true);
         assert.equal(await page.$(".ref-link.ref-focused"), null);
-        assert.equal((await edges(page, SPAN)).scrollLeft, 0);
+        const rest = await edges(page, SPAN);
+        assert.equal(rest.scrollLeft, 0);
+        assert.equal(rest.overflow, "ellipsis");
       });
 
       await t.test(`labels ${scheme}`, async () => {
