@@ -1054,14 +1054,14 @@ let loaded = false;
 const archivedJobs = new Map();
 // Ids the archive answered 404 for, so a link to one is fetched once per page session.
 const archiveMisses = new Set();
-// The id whose failed archive load was already reported, so retries on each poll stay quiet.
+// The id whose failed archive load was already reported. It resets when the hash names another id, so retries and tab changes stay quiet.
 let archiveFailNoted = '';
 // The board carries archived.max_id once the Worker has archived a job, so only then is there an archive to search.
 let boardArchived = false;
 // The jumper's one archive lookup: { query, status: 'loading' | 'done' | 'error', jobs, total }.
 let archiveSearch = null;
 // Pages of GET /api/board/archive?page=N, shown under the merged and closed columns.
-const archiveList = { open: false, rows: [], page: 0, pages: 0, total: 0, busy: false, error: '' };
+const archiveList = { open: false, rows: [], page: 0, pages: 0, total: 0, busy: false, error: '', errorStage: '' };
 let boardReadVersion = 0;
 const BACKLOG_POLL_MS = 120000;
 let backlogReadAt = 0;
@@ -2897,7 +2897,7 @@ function archiveSection(s) {
   const a = archiveList;
   const button = (text) => '<button type="button" class="btn archive-more" data-archive data-stage="' + s + '"' +
     (a.busy ? ' aria-disabled="true"' : '') + '>' + (a.busy ? 'Loading archived jobs' : text) + '</button>';
-  const error = a.error ? '<p class="archive-error" role="alert">' + esc(a.error) + '</p>' : '';
+  const error = a.error && a.errorStage === s ? '<p class="archive-error">' + esc(a.error) + '</p>' : '';
   if (!a.open) return '<div class="archive-list">' + error + button('Show archived jobs') + '</div>';
   const rows = a.rows.filter((j) => j.stage === s && isShown(j.project) && !jobs.some((x) => x.id === j.id));
   return '<div class="archive-list"><h3 class="archive-head">Archived</h3>' +
@@ -2993,7 +2993,7 @@ $('board').addEventListener('click', (e) => {
     renderBoard();
     return;
   }
-  if (e.target.closest('[data-archive]')) { loadArchivePage(); return; }
+  const more = e.target.closest('[data-archive]'); if (more) { loadArchivePage(more.dataset.stage); return; }
   const b = e.target.closest('[data-backlog-open]');
   if (b) {
     openBacklogItem(renderedBacklog[Number(b.dataset.index)]);
@@ -3289,10 +3289,11 @@ async function loadArchivedJob(id) {
   } catch { return { job: null, failed: true }; }
 }
 
-async function loadArchivePage() {
+async function loadArchivePage(stage) {
   if (archiveList.busy) return;
   archiveList.busy = true;
   archiveList.error = '';
+  archiveList.errorStage = '';
   renderBoard();
   try {
     const r = await fetch('./api/board/archive?page=' + (archiveList.page + 1), { cache: 'no-store' });
@@ -3308,6 +3309,8 @@ async function loadArchivePage() {
     Object.assign(archiveList, { open: true, page: body.page, pages: body.pages, total: body.total });
   } catch {
     archiveList.error = 'Could not load archived jobs. Try again.';
+    archiveList.errorStage = stage;
+    showBoardStatus(archiveList.error);
   }
   archiveList.busy = false;
   renderBoard();
@@ -4230,9 +4233,9 @@ function syncDetail() {
 }
 
 window.addEventListener('hashchange', () => {
-  archiveFailNoted = '';
-  const key = backlogRoute();
   const { id } = parseHash();
+  if (id !== archiveFailNoted) archiveFailNoted = '';
+  const key = backlogRoute();
   if (key) openBacklogRoute(key);
   else if (id) openJob(id);
   else if (openId || openBacklogRaw !== null) closeDetail();

@@ -317,6 +317,7 @@ async function capture(outdir, referencePath) {
     const servedMetaCsp = inner(/http-equiv="Content-Security-Policy" content="([^"]*)"/);
 
     let archivedBoard = false;
+    let archivePageFails = false;
     let longProject = false;
     async function view(name, width, height, theme, prepare, touch = false) {
       for (const side of ["before", "after"]) {
@@ -387,6 +388,12 @@ async function capture(outdir, referencePath) {
                 });
               }
               if (target.pathname === "/api/board/archive") {
+                if (archivePageFails && target.searchParams.has("page"))
+                  return request.respond({
+                    status: 503,
+                    contentType: "text/plain",
+                    body: "unavailable",
+                  });
                 if (target.searchParams.get("page") === "1")
                   return request.respond({
                     status: 200,
@@ -743,17 +750,23 @@ async function capture(outdir, referencePath) {
     };
     await view("archive-swap", 1280, 900, "light", openArchiveSwap);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
-    const openArchivedLoadFailed = async (page, side) => {
+    const openArchivedLoadFailed = async (page) => {
+      // Both sides wait for the archive answer and then the toast text, so neither shot is taken mid-request.
+      const answered = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/api/board/archive" && url.searchParams.get("id") === "411-sync-retry"
+        );
+      });
       await page.evaluate(() => {
         location.hash = "#411-sync-retry";
       });
-      if (side === "after")
-        await page.waitForFunction(() =>
-          document
-            .getElementById("board-status")
-            .textContent.startsWith("Could not load archived job"),
-        );
-      else await new Promise((resolve) => setTimeout(resolve, 1000));
+      await answered;
+      await page.waitForFunction(() =>
+        document
+          .getElementById("board-status")
+          .textContent.startsWith("Could not load archived job"),
+      );
     };
     await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
     const openArchivedLoadSignin = async (page, side) => {
@@ -772,6 +785,27 @@ async function capture(outdir, referencePath) {
     await view("archived-load-signin", 1280, 900, "light", openArchivedLoadSignin);
     await view("archive-list", 1280, 900, "light", openArchiveList);
     await view("archive-list-mobile", 390, 844, "dark", openArchiveList);
+    const openArchiveListError = async (page, side) => {
+      archivePageFails = true;
+      try {
+        for (const stage of ["merged", "closed"]) {
+          const toggle = `.column-toggle[data-stage="${stage}"]`;
+          if ((await page.$eval(toggle, (el) => el.getAttribute("aria-expanded"))) === "false")
+            await page.click(toggle);
+        }
+        await page.click('.archive-more[data-stage="closed"]');
+        await page.waitForSelector(".archive-error");
+        if (side === "after")
+          await page.waitForFunction(
+            () =>
+              document.getElementById("board-status").textContent ===
+              "Could not load archived jobs. Try again.",
+          );
+      } finally {
+        archivePageFails = false;
+      }
+    };
+    await view("archive-list-error", 1280, 900, "light", openArchiveListError);
     // The reference has no archive button, so its side shows the plain blank board.
     const openEmptyArchive = async (page) => {
       await page.evaluate(() => {

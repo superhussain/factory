@@ -127,6 +127,13 @@ test("archived jobs from the blank board", { timeout: 180000 }, async (t) => {
         await page.$eval(".archive-error", (el) => el.textContent),
         "Could not load archived jobs. Try again.",
       );
+      await page.waitForFunction(
+        () =>
+          document.getElementById("board-status").textContent ===
+          "Could not load archived jobs. Try again.",
+        wait,
+      );
+      assert.equal(await page.$(".blank [role=alert]"), null);
       assert.equal(
         await page.$eval(".blank .archive-more", (el) => el.textContent),
         "Show archived jobs",

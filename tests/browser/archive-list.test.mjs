@@ -206,11 +206,39 @@ test("archived jobs page under the terminal columns", { timeout: 180000 }, async
         await fresh.$eval('.archive-more[data-stage="closed"]', (el) => el.textContent),
         "Show archived jobs",
       );
+      assert.equal(await cards(fresh, ".archive-error"), 1);
+      assert.equal(await cards(fresh, ".col.closed .archive-error"), 1);
+      assert.equal(
+        await cards(
+          fresh,
+          ".archive-list [role=alert], .archive-list [role=status], .archive-list [aria-live]",
+        ),
+        0,
+      );
+      await fresh.waitForFunction(
+        () =>
+          document.getElementById("board-status").textContent ===
+          "Could not load archived jobs. Try again.",
+        wait,
+      );
+      await fresh.evaluate(() => {
+        window.statusWrites = 0;
+        new MutationObserver(() => window.statusWrites++).observe(
+          document.getElementById("board-status"),
+          { childList: true, characterData: true, subtree: true },
+        );
+        renderBoard();
+        renderBoard();
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(await fresh.evaluate(() => window.statusWrites), 0);
+      assert.equal(await cards(fresh, ".archive-error"), 1);
       await fresh.click('.archive-more[data-stage="closed"]');
       await fresh.waitForFunction(
         () => document.querySelectorAll(".archive-list .card").length === 50,
         wait,
       );
+      assert.equal(await cards(fresh, ".archive-error"), 0);
     });
 
     assert.deepEqual(errors, []);
