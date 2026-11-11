@@ -5712,7 +5712,7 @@ async function reconcile(cause) {
     if (!r.ok) throw new Error(r.status);
     const hit = (await r.json()).jobs.find((j) => j.capture_id === snap.capture_id);
     if (hit) return hit.id;
-    showErr('Not confirmed: ' + cause.message + '. The board has no record of it yet, but the save could still land late. Retry re-checks with the same content and will not add a duplicate.');
+    showErr(boardSaveError(cause, 'The board has no record of it yet, but the save could still land late. Retry re-checks with the same content and will not add a duplicate.'));
   } catch {
     showErr('Could not confirm whether the idea was saved: ' + cause.message + '. Retry checks again and will not add a duplicate.');
   }
