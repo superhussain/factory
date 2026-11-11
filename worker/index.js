@@ -58,6 +58,8 @@ const PIPELINE_EFFECTIVE = /^\/api\/pipeline\/effective\/([\w-]+)$/;
 const MAX_PIPELINE = 16 << 10;
 // 2000 + 6000 characters at up to 4 UTF-8 bytes each, plus JSON keys and escapes.
 const MAX_TRIAGE = 64 << 10;
+// 50 items of 2000 characters at up to 4 UTF-8 bytes each, plus JSON quotes and escapes.
+const MAX_TRIAGE_READ = 512 << 10;
 // Four reviews of 8000 characters at up to 4 UTF-8 bytes each, plus JSON keys and escapes.
 const MAX_ESCALATION = 160 << 10;
 // /api/hosts, /api/hosts/<id> and /api/hosts/<id>/<action>.
@@ -609,6 +611,35 @@ async function backlogTriageGet(request, env) {
   const item = new URL(request.url).searchParams.get("item");
   if (!backlogItemMatch(item)) return reply(BAD_BACKLOG_ITEM, 400);
   return getFile(env, await triageKey(item), "application/json");
+}
+
+// The stored hold record, or null, for each of up to 50 items, in input order. Read only.
+async function backlogTriageVerdicts(request, env) {
+  const body = await readJson(request, MAX_TRIAGE_READ);
+  if (body instanceof Response) return body;
+  if (typeof body !== "object" || body === null || Array.isArray(body))
+    return reply("body: must be a JSON object", 400);
+  for (const key of Object.keys(body))
+    if (key !== "items") return reply(`${key}: unknown field`, 400);
+  const { items } = body;
+  if (!Array.isArray(items) || items.length < 1 || items.length > 50)
+    return reply("items: must be a list of 1 to 50 backlog items", 400);
+  for (const [i, item] of items.entries())
+    if (!backlogItemMatch(item))
+      return reply(`items[${i}]: ${BAD_BACKLOG_ITEM.slice("item: ".length)}`, 400);
+  const verdicts = await Promise.all(
+    items.map(async (item) => {
+      const obj = await env.BUCKET.get(await triageKey(item));
+      if (!obj) return null;
+      try {
+        const v = JSON.parse(await obj.text());
+        return v && typeof v === "object" && !Array.isArray(v) ? v : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return reply(JSON.stringify({ verdicts }), 200, "application/json");
 }
 
 // Rates one new backlog line against its project's triage rules. The Worker compares the
@@ -1279,6 +1310,8 @@ async function api(request, env, path, principal) {
     if (method === "PUT") return ideaImagePut(request, env, m[1]);
     return notFound();
   }
+  if (path === "/api/backlog/triage/verdicts" && method === "POST")
+    return backlogTriageVerdicts(request, env);
   if (path === "/api/backlog/triage" && method === "POST") return backlogTriage(request, env);
   if (path === "/api/backlog/triage" && method === "GET") return backlogTriageGet(request, env);
   if (path === "/api/review/escalation" && method === "POST") return reviewEscalation(request, env);

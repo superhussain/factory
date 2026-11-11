@@ -376,3 +376,57 @@ test("the longest allowed item and context in 4-byte characters fit under the bo
   assert.equal(over.status, 400);
   assert.equal(over.text, "context: over 6000 characters");
 });
+
+test("POST verdicts reads stored holds in input order in one request", async () => {
+  const s = setup({ reply: clef(0.62) });
+  await s.save("projects/sample", on());
+  await s.triage({ item: ITEM });
+  const get = await s.send("GET", "/api/backlog/triage?item=" + encodeURIComponent(ITEM));
+  const recordA = JSON.parse(get.text);
+  const read = (body, principal, headers) =>
+    s.send("POST", "/api/backlog/triage/verdicts", body, principal, headers);
+  const other = "sample: Another line";
+
+  const gets = [];
+  const bucketGet = s.bucket.get;
+  s.bucket.get = async (key) => (gets.push(key), bucketGet(key));
+  let r = await read({ items: [ITEM, other, ITEM] });
+  assert.equal(r.status, 200);
+  assert.deepEqual(JSON.parse(r.text), { verdicts: [recordA, null, recordA] });
+  assert.equal(gets.length, 3);
+  s.bucket.get = bucketGet;
+
+  r = await read({ items: Array.from({ length: 50 }, (_, i) => `sample: line ${i}`) });
+  assert.equal(r.status, 200);
+  assert.equal(JSON.parse(r.text).verdicts.length, 50);
+
+  const key = [...s.bucket.objects.keys()].find((k) => k.startsWith("backlog-triage/"));
+  s.bucket.objects.get(key).bytes = Buffer.from("not json");
+  r = await read({ items: [ITEM] });
+  assert.deepEqual(JSON.parse(r.text), { verdicts: [null] });
+
+  const cases = [
+    [{ items: [] }, "items: must be a list of 1 to 50 backlog items"],
+    [
+      { items: Array.from({ length: 51 }, () => ITEM) },
+      "items: must be a list of 1 to 50 backlog items",
+    ],
+    [{ items: "x" }, "items: must be a list of 1 to 50 backlog items"],
+    [
+      { items: ["no slug"] },
+      'items[0]: must be one "<slug>: <feature>" line of at most 2000 characters',
+    ],
+    [{ items: [ITEM], extra: 1 }, "extra: unknown field"],
+    [[], "body: must be a JSON object"],
+  ];
+  for (const [body, text] of cases) {
+    r = await read(body);
+    assert.equal(r.status, 400);
+    assert.equal(r.text, text);
+  }
+  r = await read({ items: [ITEM] }, device, { "Content-Type": "text/plain" });
+  assert.equal(r.status, 415);
+  assert.equal(r.text, "body needs application/json");
+  r = await s.send("GET", "/api/backlog/triage/verdicts");
+  assert.equal(r.status, 404);
+});
