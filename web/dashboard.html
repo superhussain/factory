@@ -1203,6 +1203,12 @@ function refs(j) {
   return Array.isArray(j.refs) ? j.refs.filter((r) => r && typeof r.id === 'string' && REF_KINDS[r.kind]) : [];
 }
 
+// The lead a rider is batched into, as in factory.py lead_of.
+const leadOf = (j) => refs(j).find((r) => r.kind === 'batched-into')?.id ?? null;
+
+// The riders batched into a lead, in board order.
+const ridersOf = (id) => jobs.filter((x) => leadOf(x) === id).map((x) => x.id);
+
 function buildState(j) {
   const s = j.build && j.build.state;
   return BUILD_STATES.includes(s) ? s : null;
@@ -1216,7 +1222,7 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused)].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
 }
 
 // A holder's stop is recorded only when stopped is a string, as in factory.py.
@@ -1282,6 +1288,7 @@ function refLine(r) {
 // A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
 function card(j, inNeeds, archived = false) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
+  const riders = archived ? [] : ridersOf(j.id);
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
@@ -1297,6 +1304,8 @@ function card(j, inNeeds, archived = false) {
       (j.branch ? line('meta branch', j.branch) : '') +
       line('meta round', 'round ' + (j.round ?? 0) + (buildState(j) ? ' · build ' + buildState(j) : ''))) +
     (refText ? '<div class="meta refs line" title="' + esc(refText) + '">' + refs(j).map(refLine).join(' &middot; ') + '</div>' : '') +
+    (riders.length ? '<div class="meta refs riders line" title="' + esc('batches ' + riders.join(' · ')) + '">batches ' +
+      riders.map((id) => '<span class="ref-link" data-ref="' + esc(id) + '">' + esc(id) + '</span>').join(' &middot; ') + '</div>' : '') +
     (hostLine(j) ? line('meta host', hostLine(j)) : '') +
     (j.tracer?.building === true ? line('meta tracer-building', 'Building in Tracer') : '') +
     (ask && (inNeeds || !hiddenCardFields.has('note')) ? line('note', ask) : '') +
@@ -3308,6 +3317,7 @@ async function openJob(id) {
     head.append(a);
   };
   for (const r of refs(j)) add(REF_KINDS[r.kind] + ' ', '#' + encodeURIComponent(r.id), r.id);
+  ridersOf(j.id).forEach((id, i) => add(i ? '' : 'batches ', '#' + encodeURIComponent(id), id));
   if (buildState(j)) {
     const runs = buildRuns(j);
     if (!runs.length) head.append((head.childNodes.length ? ' · ' : '') + 'build ' + buildState(j));
@@ -4764,19 +4774,20 @@ const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host
 
 // The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
 function jobActionsFor(j) {
+  const rider = !!leadOf(j);
   const shown = {
     'd-edit-idea': canEditIdea(j),
     'd-discard': j.stage === 'idea',
     'd-follow-tracer': !!j.project && (TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) && j.tracer?.follow !== true && !tracerLink(j),
-    'd-move-host': !!j.project && MOVE_STAGES.includes(j.stage),
+    'd-move-host': !rider && !!j.project && MOVE_STAGES.includes(j.stage),
     'd-rerun': canRerun(j),
-    'd-prioritize': !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
+    'd-prioritize': !rider && !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
     'd-remove-priority': !!j.priority,
-    'd-pause': !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
+    'd-pause': !rider && !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
     'd-resume': !!j.paused,
     'd-copy-link': true,
     'd-follow-up': j.stage !== 'idea' && !$('new-idea').hidden,
-    'd-close-job': !!j.project && j.stage !== 'idea' && !TERMINAL.includes(j.stage) && !j.close,
+    'd-close-job': !rider && !!j.project && j.stage !== 'idea' && !TERMINAL.includes(j.stage) && !j.close,
   };
   return JOB_ACTIONS.filter((id) => shown[id]);
 }
@@ -4919,7 +4930,7 @@ const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
 function moveJob(board, id, to, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || !MOVE_STAGES.includes(j.stage)) return 'This job can no longer be moved.';
+  if (!j.project || !MOVE_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be moved.';
   if (!j.claim && j.move?.to === to) return 'unchanged';
   const from = j.claim?.device ?? (!j.claim && j.move && !moveStopped(j.move) ? j.move.from : undefined);
   if (to === from) return 'This job already runs on ' + to + '.';
@@ -4955,7 +4966,7 @@ function writeMove(board, j, to, now) {
 
 // A rerun is a move back to the job's own host: that host stops the session, then its pickup
 // claims the job and runs factory recover in a fresh session.
-const canRerun = (j) => !!j.project && MOVE_STAGES.includes(j.stage) && !!j.claim?.device && !j.paused && !asks(j.needs);
+const canRerun = (j) => !!j.project && MOVE_STAGES.includes(j.stage) && !!j.claim?.device && !j.paused && !asks(j.needs) && !leadOf(j);
 
 function rerunJob(board, id, host, now) {
   const j = board.jobs.find((x) => x.id === id);
@@ -4972,7 +4983,7 @@ const PRIORITY_STAGES = ['idea', ...MOVE_STAGES];
 function prioritizeJob(board, id, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || !PRIORITY_STAGES.includes(j.stage)) return 'This job can no longer be prioritized.';
+  if (!j.project || !PRIORITY_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be prioritized.';
   if (j.priority) return 'unchanged';
   j.priority = { at: now };
   j.updated = now;
@@ -4995,7 +5006,7 @@ function removePriority(board, id, now) {
 function pauseJob(board, id, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || TERMINAL.includes(j.stage)) return 'This job can no longer be paused.';
+  if (!j.project || TERMINAL.includes(j.stage) || leadOf(j)) return 'This job can no longer be paused.';
   if (j.paused) return 'unchanged';
   j.paused = { at: now };
   j.updated = now;
@@ -5019,7 +5030,7 @@ function resumeJob(board, id, now) {
 function closeJob(board, id, reason, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || j.stage === 'idea' || TERMINAL.includes(j.stage)) return 'This job can no longer be closed.';
+  if (!j.project || j.stage === 'idea' || TERMINAL.includes(j.stage) || leadOf(j)) return 'This job can no longer be closed.';
   if (j.close) return j.close.reason === reason.trim() ? 'unchanged' : 'A close is already queued for this job.';
   const text = reason.trim();
   if (!/^[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}$/.test(text)) return 'Enter a reason of 1 to 200 characters. Line breaks and control characters are not allowed.';
