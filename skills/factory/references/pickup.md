@@ -215,7 +215,7 @@ changes nothing. Then install one timer per host.
 - When the job has a `pr` in the project's `repo`, the close pass runs `gh pr view`, and for an open PR `gh pr close --comment`, before it writes `decision.md`. The comment opens with the agent disclosure marker and links `<api_url>/#<id>/decision`. When gh is missing or fails, the job still closes and `decision.md` says why the PR stayed open.
 - A session on a closing job is refused at its next `board` or `hold` call with exit 6. `board` first releases that session's own claim, so the next pickup can close the job.
 - Only the dashboard and `pickup` write `close`. `board` refuses a `close` patch with exit 2.
-- The next pickup run on a host that still holds a closed job's worktree or `factory/<id>` branch runs `cleanup` on it, once per host, and records `close.cleanup.<host> = {at, left}`. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit and no worktree has it checked out. It deletes that branch with git update-ref -d and the commit, never git branch -D. Its dry run prints `would clean up <id> <project>`.
+- The next pickup run on a host that still holds a closed job's worktree or `factory/<id>` branch runs `cleanup` on it, once per host, and records `close.cleanup.<host> = {at, left}`. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit and no worktree has it checked out. It deletes that branch with `git update-ref -d` guarded by the branch's current commit, never `git branch -D`. Its dry run prints `would clean up <id> <project>`.
 
 ## Logs and limits
 

@@ -3315,7 +3315,7 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
         if dry:
             print(f"would clean up {job_id} {project}")
             continue
-        removed, left = cleanup_job(repo, wt, branch, drop_pushed=True)
+        _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
 
         def change(text, job_id=job_id, closed=c["closed"], left=left):
             board = load_board(text)
@@ -5070,7 +5070,8 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
     def run_git(*args):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
-            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=20)
+            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=20,
+                               env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
         except subprocess.TimeoutExpired:
             return None, "", f"git {args[0]} timed out after 20 s"
         except OSError:
@@ -5090,7 +5091,7 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
         """None after deleting a branch whose tip origin holds, else the reason it stays."""
         tip = run_git("rev-parse", f"refs/heads/{branch}")[1]
         code, out, _ = run_git("ls-remote", "origin", f"refs/heads/{branch}")
-        if not tip or code != 0 or out.split()[:1] != [tip]:
+        if not tip or code != 0 or out.split() != [tip, f"refs/heads/{branch}"]:
             return f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}"
         path = None
         for line in run_git("worktree", "list", "--porcelain")[1].splitlines():
