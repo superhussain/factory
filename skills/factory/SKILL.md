@@ -202,7 +202,7 @@ does the same. Pass `--session <tag>` to every later `claim`, `next`, `hold`, an
 
 - Run `hold` again before spawning each agent and when each one finishes, so a long
   build keeps the claim fresh. A claim goes stale after `claim_stale_minutes` in
-  `config.md` (default 120).
+  `config.md` (default 120). When this session's own claim was refreshed in the last 10 minutes and nothing else would change, `hold` skips the board write and prints the same lines.
 - `hold` prints `elapsed <N>s`, the seconds since the job's first claim. Time matters here: do not spend time that can be avoided, and the earlier a correct result is obtained, the better. Use the line to pace the job and to run independent agents in parallel. It never cuts a review round, skips a reviewer, shortens WAIT FOR ALL, or relaxes a security floor.
 - Moving a job to `needs-human`, `pr-open`, `merged`, or `closed` releases the claim.
 - Claims prevent accidents between sessions, not abuse. Anyone with the Access
