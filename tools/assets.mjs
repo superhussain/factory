@@ -279,7 +279,9 @@ export async function verifyAssets() {
 const isMain = process.argv[1] && new URL(import.meta.url).pathname === process.argv[1];
 if (isMain) {
   const args = process.argv.slice(2);
-  if (args.length === 1 && args[0] === "--offline") {
+  if (args.length === 1 && args[0] === "--prepare") {
+    await prepareAssets();
+  } else if (args.length === 1 && args[0] === "--offline") {
     // prepareAssets, then the owned offline fixture (real browser, same-origin bytes).
     await prepareAssets();
     const { spawn } = await import("node:child_process");
@@ -290,7 +292,7 @@ if (isMain) {
   } else if (args.length === 1 && args[0] === "--verify") {
     await verifyAssets();
   } else {
-    console.error("usage: node tools/assets.mjs --offline | --verify");
+    console.error("usage: node tools/assets.mjs --prepare | --offline | --verify");
     process.exit(2);
   }
 }
