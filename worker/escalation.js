@@ -1,5 +1,11 @@
 // Review escalation: one Workers AI call that rates a review round's CHANGES findings.
-import { foldedTagSource, foldLookalikes, hasReservedTag, redactSecrets } from "./admission.js";
+import {
+  foldedTagSource,
+  foldLookalikes,
+  hasReservedTag,
+  hasSecret,
+  redactSecrets,
+} from "./admission.js";
 
 export const ESCALATION_MODEL = "@cf/cloudflare/clef-flash";
 export const ESCALATION_THRESHOLD = 80;
@@ -52,16 +58,21 @@ export const ESCALATION_TAGS = ["review-findings", "operator-preferences"];
 
 export const ESCALATION_TEXT_LIMIT = 8000;
 const VARIATION_SELECTORS = /[\uFE00-\uFE0F\u{e0100}-\u{e01ef}]/gu;
+const EMOJI_JOINERS =
+  /(?<=\p{Extended_Pictographic}[\u{1F3FB}-\u{1F3FF}]?)\u200D(?=\p{Extended_Pictographic})/gu;
 const TAG_REMOVALS = ESCALATION_TAGS.map((name) => [
   new RegExp(foldedTagSource(name) + "[^<>\\n]*>?", "gi"),
   `[${name} tag removed]`,
 ]);
 
-// Replaces what the admission rules refuse, so a review that quotes a secret or a tag, or writes an emoji, is still rated.
+// Replaces what the admission rules refuse, so a review that quotes a secret or a tag, or
+// writes an emoji, is still rated. Look-alike letters fold to ASCII only when the folded
+// text holds a reserved tag or a secret shape, so other prose reaches the model as written.
 export function cleanReview(text) {
-  text = text.replace(VARIATION_SELECTORS, "");
-  if (ESCALATION_TAGS.some((n) => hasReservedTag(text, n))) {
-    text = foldLookalikes(text);
+  text = text.replace(VARIATION_SELECTORS, "").replace(EMOJI_JOINERS, "");
+  const folded = foldLookalikes(text);
+  if (hasSecret(folded) || ESCALATION_TAGS.some((n) => hasReservedTag(text, n))) {
+    text = folded;
     for (const [pattern, mark] of TAG_REMOVALS) text = text.replace(pattern, mark);
   }
   return [...redactSecrets(text, SECRET_MARK)].slice(0, ESCALATION_TEXT_LIMIT).join("");
