@@ -15,6 +15,7 @@ import {
   ESCALATION_MODEL,
   ESCALATION_REASON_BUILDER,
   ESCALATION_REASON_PERSON,
+  ESCALATION_TEXT_LIMIT,
   ESCALATION_THRESHOLD,
   escalationConfidence,
   escalationInput,
@@ -700,7 +701,8 @@ async function reviewEscalation(request, env) {
     const field = `reviews.${name}`;
     if (!REVIEWERS.includes(name)) return reply(`${field}: unknown reviewer`, 400);
     if (typeof text !== "string") return reply(`${field}: must be text`, 400);
-    if ([...text].length > 8000) return reply(`${field}: over 8000 characters`, 400);
+    if ([...text].length > ESCALATION_TEXT_LIMIT)
+      return reply(`${field}: over ${ESCALATION_TEXT_LIMIT} characters`, 400);
     const clean = cleanReview(text);
     const error = checkOperatorText(clean, field, "document");
     if (error) return reply(error, 400);

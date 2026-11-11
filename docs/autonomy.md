@@ -278,10 +278,12 @@ sequenceDiagram
 
 Request: `{"reviews": {"security"?: text, "ux"?: text, "ui"?: text, "code"?: text}}`, at
 least one key, body cap `160 << 10` bytes. A review over 8000 characters, an unknown
-reviewer or key, or control or invisible characters get a 400. Before the call, the Worker
-replaces secret-shaped text with `[secret-shaped text removed]` and each `review-findings` or
-`operator-preferences` tag with `[review-findings tag removed]` or
-`[operator-preferences tag removed]`, so a review that quotes one is still rated.
+reviewer or key, or other control or invisible characters get a 400. Before the call, the
+Worker removes variation selectors, replaces secret-shaped text with
+`[secret-shaped text removed]`, replaces a `review-findings` tag with
+`[review-findings tag removed]` and an `operator-preferences` tag with
+`[operator-preferences tag removed]`, and cuts the result to 8000 characters. A review that
+quotes a secret or a tag, or writes an emoji such as ⚠️, is still rated.
 
 Reply 200: `{"decision": "escalate"|"continue", "confidence": int, "threshold": 80,
 "reason": text, "model": "@cf/cloudflare/clef-flash"}`. The reason is
