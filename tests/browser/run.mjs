@@ -715,6 +715,32 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
+    const settleArchiveSettings = async (page, name) => {
+      try {
+        await page.waitForFunction(() => {
+          const t = document.getElementById("pipeline-status").textContent;
+          return t.startsWith("Fix before saving") || t === "Unsaved changes";
+        });
+      } catch (error) {
+        const seen = await page.$eval("#pipeline-status", (el) => el.textContent);
+        throw new Error(
+          name + ' capture status wait timed out; #pipeline-status read "' + seen + '"',
+          {
+            cause: error,
+          },
+        );
+      }
+      await page.evaluate(() =>
+        document.getElementById("pipeline-archive").scrollIntoView({ block: "start" }),
+      );
+      const cropped = await page.evaluate(() =>
+        ["pipeline-archive", "pipeline-status"].filter((id) => {
+          const r = document.getElementById(id).getBoundingClientRect();
+          return r.top < 0 || r.bottom > window.innerHeight;
+        }),
+      );
+      if (cropped.length) throw new Error(name + " capture crops " + cropped.join(", "));
+    };
     const openArchivePrefill = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/pipeline";
@@ -728,20 +754,7 @@ async function capture(outdir, referencePath) {
       );
       await page.select("#pipeline-archive-mode", "");
       await page.select("#pipeline-archive-mode", "count");
-      await page.waitForFunction(() => {
-        const t = document.getElementById("pipeline-status").textContent;
-        return t.startsWith("Fix before saving") || t === "Unsaved changes";
-      });
-      await page.evaluate(() =>
-        document.getElementById("pipeline-archive").scrollIntoView({ block: "start" }),
-      );
-      const cropped = await page.evaluate(() =>
-        ["pipeline-archive", "pipeline-status"].filter((id) => {
-          const r = document.getElementById(id).getBoundingClientRect();
-          return r.top < 0 || r.bottom > window.innerHeight;
-        }),
-      );
-      if (cropped.length) throw new Error("archive-prefill capture crops " + cropped.join(", "));
+      await settleArchiveSettings(page, "archive-prefill");
     };
     await view("archive-prefill", 1280, 900, "light", openArchivePrefill);
     const openArchiveSwap = async (page) => {
@@ -758,9 +771,7 @@ async function capture(outdir, referencePath) {
       await page.select("#pipeline-archive-mode", "");
       await page.select("#pipeline-archive-mode", "age");
       await page.select("#pipeline-archive-mode", "count");
-      await page.evaluate(() =>
-        document.getElementById("pipeline-archive").scrollIntoView({ block: "center" }),
-      );
+      await settleArchiveSettings(page, "archive-swap");
     };
     await view("archive-swap", 1280, 900, "light", openArchiveSwap);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
