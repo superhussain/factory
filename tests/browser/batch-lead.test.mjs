@@ -79,6 +79,9 @@ const cardMenu = (page) =>
 const drawerMenu = (page) =>
   page.$$eval("#d-actions-menu button", (b) => b.filter((x) => !x.hidden).map((x) => x.id));
 
+const drawerOpen = (page, title) =>
+  page.waitForFunction((t) => document.querySelector("#d-title").textContent === t, {}, title);
+
 async function openCardMenu(page, id) {
   await page.click(`.card-actions[data-actions="${id}"]`);
   await page.waitForSelector("#card-actions-menu:not([hidden])");
@@ -113,11 +116,7 @@ test("batch lead riders and rider actions", { timeout: 120000 }, async () => {
     // 1. The lead card names its riders and each id opens its job.
     assert.equal(await page.$eval(`${card(LEAD)} .riders`, (el) => el.textContent), RIDERS_LINE);
     await page.click(`${card(LEAD)} .riders .ref-link[data-ref="${TYPO}"]`);
-    await page.waitForFunction(
-      (id) => document.querySelector("#d-title") && location.hash.includes(id),
-      {},
-      TYPO,
-    );
+    await drawerOpen(page, JOBS[1].title);
 
     // 3. The rider's card and drawer menus omit the five actions and keep Copy link.
     assert.deepEqual(
@@ -133,8 +132,8 @@ test("batch lead riders and rider actions", { timeout: 120000 }, async () => {
     assert.ok(riderDrawer.includes("d-copy-link"));
 
     // 2. The lead drawer carries the same line with a link per rider; its menu keeps all five.
-    await page.click(card(LEAD));
-    await page.waitForFunction((id) => location.hash.includes(id), {}, LEAD);
+    await page.evaluate((id) => (location.hash = id), LEAD);
+    await drawerOpen(page, JOBS[0].title);
     assert.ok((await page.$eval("#d-refs", (el) => el.textContent)).includes(RIDERS_LINE));
     assert.deepEqual(await page.$$eval("#d-refs a", (a) => a.map((x) => x.getAttribute("href"))), [
       `#${TYPO}`,
