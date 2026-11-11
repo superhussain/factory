@@ -4913,6 +4913,7 @@ function focusOpener(opener) {
   target.focus();
 }
 
+const BOARD_STATUS_MS = 12000, COPIED_STATUS_MS = 2000;
 let boardStatusTimer = 0;
 
 // A separate task sets the text after the toast empties, so a repeat is announced again.
@@ -4923,7 +4924,7 @@ function showBoardStatus(text) {
   if (!text) return;
   boardStatusTimer = setTimeout(() => {
     $('board-status').textContent = text;
-    boardStatusTimer = setTimeout(() => showBoardStatus(''), 6000);
+    boardStatusTimer = setTimeout(() => showBoardStatus(''), text === 'Copied' ? COPIED_STATUS_MS : BOARD_STATUS_MS);
   }, 100);
 }
 
@@ -4932,7 +4933,7 @@ function showCopyStatus(text) {
   // A separate task empties the live region first, so a repeat copy is announced again.
   copyStatusTimer = setTimeout(() => {
     $('d-copy-status').textContent = text;
-    if (text === 'Copied') copyStatusTimer = setTimeout(clearCopyStatus, 2000);
+    if (text === 'Copied') copyStatusTimer = setTimeout(clearCopyStatus, COPIED_STATUS_MS);
   }, 100);
 }
 

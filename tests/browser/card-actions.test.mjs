@@ -282,10 +282,22 @@ test("card actions", { timeout: 180000 }, async (t) => {
         );
       await clickItem(page, "d-copy-link");
       await shows("Copied");
+      await page.waitForFunction(() => document.getElementById("board-status").hidden, {
+        timeout: 5000,
+      });
       assert.deepEqual(await page.evaluate(() => window.__copied), [`${origin}/#${ID}`]);
       await page.evaluate(() => (window.__denyCopy = true));
       await clickItem(page, "d-copy-link");
       await shows(FALLBACK);
+      await new Promise((resolve) => setTimeout(resolve, 7000));
+      assert.deepEqual(await page.$eval("#board-status", (el) => [el.textContent, el.hidden]), [
+        FALLBACK,
+        false,
+      ]);
+      assert.deepEqual(
+        await page.evaluate(() => [BOARD_STATUS_MS, COPIED_STATUS_MS]),
+        [12000, 2000],
+      );
       assert.equal(await page.$eval("#board-status", (el) => el.getAttribute("role")), "status");
     });
 
