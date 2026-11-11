@@ -2876,6 +2876,9 @@ function renderBoard() {
   const focusRaw = focused?.dataset.raw;
   const focusStage = focused?.dataset.stage;
   const focusClass = focused && (focused.classList.contains('more') ? 'more' : focused.classList.contains('archive-more') ? 'archive-more' : 'column-toggle');
+  // A redraw replaces every card node, so focus goes back to the same job's card or menu trigger.
+  const focusedCard = $('board').contains(document.activeElement) ? document.activeElement.closest('.card, .card-actions') : null;
+  const focusCard = focusedCard && { trigger: focusedCard.classList.contains('card-actions'), id: focusedCard.dataset.id ?? focusedCard.dataset.actions };
   if (!jobs.length && !backlog.length) {
     $('board').innerHTML = '<div class="blank"><h2>No jobs yet</h2>' +
       '<p>Start one with <code>/factory &lt;feature&gt;</code> or <code>/factory next</code>.</p>' +
@@ -2927,6 +2930,11 @@ function renderBoard() {
     const control = $('board').querySelector('.' + focusClass + '[data-stage="' + focusStage + '"]') ||
       $('board').querySelector('.column-toggle[data-stage="' + focusStage + '"]');
     control.focus({ preventScroll: true });
+  }
+  if (focusCard) {
+    [...$('board').querySelectorAll(focusCard.trigger ? '.card-actions' : '.card')]
+      .find((el) => (focusCard.trigger ? el.dataset.actions : el.dataset.id) === focusCard.id)
+      ?.focus({ preventScroll: true });
   }
   syncCardActions();
 }
