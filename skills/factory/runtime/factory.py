@@ -184,8 +184,8 @@ TAG_LOOKALIKES_FROM = ("‹⟨〈❮˂" "⁄∕⧸╱"
                        "‐‑‒–—―−⁃"
                        "аеорсѕАЕОРСЅТ"
                        "αορΑΕΟΡΤ"
-                       "\u0412\u0392\u041a\u039a\u043a\u03ba\u04c0\u04cf\u0261\u050d\u0456\u0406\u0399\u03b9\u0131\u041c\u039c\u043c")
-TAG_LOOKALIKES_TO = "<<<<<////--------aeopcsAEOPCSTaopAEOPTBBKKkkllggiIIiiMMm"
+                       "\u0412\u0392\u041a\u039a\u043a\u03ba\u04c0\u04cf\u0261\u050d\u0456\u0406\u0399\u03b9\u0131\u041c\u039c\u043c\u0443\u0445\u04bb\u0458\u0501\u051b\u051d\u04af\u041d\u0425\u0408\u051a\u051c\u04ae")
+TAG_LOOKALIKES_TO = "<<<<<////--------aeopcsAEOPCSTaopAEOPTBBKKkkllggiIIiiMMmyxhjdqwyHXJQWY"
 TAG_LOOKALIKES = str.maketrans(TAG_LOOKALIKES_FROM, TAG_LOOKALIKES_TO)
 NOTE_LINK = re.compile(r"://|\bwww\.|\b[a-z0-9-]+\.[a-z]{2,}/|\b\d{1,3}(?:\.\d{1,3}){3}[:/]", re.I | re.ASCII)
 # Rules 6 and 7, copied from SECRETS and PHRASES in worker/admission.js.
