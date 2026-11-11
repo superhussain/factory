@@ -521,31 +521,35 @@ test("move host", { timeout: 240000 }, async (t) => {
           },
         ]);
         pickupHosts = [...PICKUP_HOSTS, "cloud-box"];
-        const emptyText = async () => {
-          await page.evaluate(() => (location.hash = "#042-sample-export"));
-          await page.reload({ waitUntil: "domcontentloaded" });
-          await page.waitForSelector("#d-move-host:not([hidden])", wait);
-          await openJobActions(page);
-          await page.click("#d-move-host");
-          await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
-          const text = await page.$eval("#move-host-empty", (el) => el.textContent);
-          await page.click("#move-host-cancel");
-          return text;
-        };
-        studio.offline = true;
-        assert.ok(
-          (await emptyText()).endsWith(
-            " lab-linux, studio-mac are offline and stop the job only when they come back online.",
-          ),
-        );
-        lab.offline = false;
-        studio.offline = false;
-        assert.equal(
-          await emptyText(),
-          "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. Try again after one of them stops the job.",
-        );
-        lab.offline = true;
-        pickupHosts = PICKUP_HOSTS;
+        try {
+          const emptyText = async () => {
+            await page.evaluate(() => (location.hash = "#042-sample-export"));
+            await page.reload({ waitUntil: "domcontentloaded" });
+            await page.waitForSelector("#d-move-host:not([hidden])", wait);
+            await openJobActions(page);
+            await page.click("#d-move-host");
+            await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+            const text = await page.$eval("#move-host-empty", (el) => el.textContent);
+            await page.click("#move-host-cancel");
+            return text;
+          };
+          studio.offline = true;
+          assert.ok(
+            (await emptyText()).endsWith(
+              " lab-linux, studio-mac are offline and stop the job only when they come back online.",
+            ),
+          );
+          lab.offline = false;
+          studio.offline = false;
+          assert.equal(
+            await emptyText(),
+            "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. Try again after one of them stops the job.",
+          );
+        } finally {
+          lab.offline = true;
+          studio.offline = false;
+          pickupHosts = PICKUP_HOSTS;
+        }
       });
       await page.close();
     }
