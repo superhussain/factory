@@ -34,19 +34,9 @@ const JOBS = [
     branch: "factory/042-sample-export",
     round: 1,
     updated: "2026-01-01T00:00:00Z",
-    claim: {
-      device: "host-a",
-      session: "a1b2c3",
-      since: "2026-01-01T10:00:00Z",
-    },
+    claim: { device: "host-a", session: "a1b2c3", since: "2026-01-01T10:00:00Z" },
   },
-  {
-    id: "044-closed",
-    project: "sample",
-    title: "Closed job",
-    stage: "closed",
-    updated: NOW,
-  },
+  { id: "044-closed", project: "sample", title: "Closed job", stage: "closed", updated: NOW },
   { id: "045-no-project", title: "No project", stage: "build", updated: NOW },
   {
     id: "046-sample-pr",
