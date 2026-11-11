@@ -310,6 +310,7 @@ async function capture(outdir, referencePath) {
     const servedMetaCsp = inner(/http-equiv="Content-Security-Policy" content="([^"]*)"/);
 
     let archivedBoard = false;
+    let archivePageFails = false;
     let longProject = false;
     async function view(name, width, height, theme, prepare, touch = false) {
       for (const side of ["before", "after"]) {
@@ -375,6 +376,12 @@ async function capture(outdir, referencePath) {
             });
           }
           if (target.pathname === "/api/board/archive") {
+            if (archivePageFails && target.searchParams.has("page"))
+              return request.respond({
+                status: 503,
+                contentType: "text/plain",
+                body: "unavailable",
+              });
             if (target.searchParams.get("page") === "1")
               return request.respond({
                 status: 200,
@@ -693,6 +700,30 @@ async function capture(outdir, referencePath) {
     await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
     await view("archive-list", 1280, 900, "light", openArchiveList);
     await view("archive-list-mobile", 390, 844, "dark", openArchiveList);
+    const openArchiveListError = async (page, side) => {
+      archivePageFails = true;
+      try {
+        for (const stage of ["merged", "closed"]) {
+          const toggle = `.column-toggle[data-stage="${stage}"]`;
+          if ((await page.$eval(toggle, (el) => el.getAttribute("aria-expanded"))) === "false")
+            await page.click(toggle);
+        }
+        await page.click('.archive-more[data-stage="closed"]');
+        await page.waitForSelector(".archive-error");
+        if (side === "after")
+          await page.waitForFunction(
+            () =>
+              document.getElementById("board-status").textContent ===
+              "Could not load archived jobs. Try again.",
+          );
+      } finally {
+        archivePageFails = false;
+      }
+      await page.evaluate(() =>
+        document.querySelector(".col.merged").scrollIntoView({ block: "start", inline: "start" }),
+      );
+    };
+    await view("archive-list-error", 1280, 900, "light", openArchiveListError);
     const openArchiveJumper = async (page, side) => {
       archivedBoard = true;
       try {
