@@ -49,10 +49,11 @@ test("live board events", { timeout: 120000 }, async (t) => {
         window.labelTicks = [];
         window.setInterval = (fn, ms, ...args) => {
           const id = interval(fn, ms, ...args);
-          if (fn.name === "poll") window.pollTimers.set(id, ms);
+          if (fn.name === "pollTick") window.pollTimers.set(id, ms);
           else if (ms === 30000) window.labelTicks.push(fn);
           return id;
         };
+        document.hasFocus = () => window.fixtureFocus !== false;
         // The test moves this page's clock forward without waiting.
         const now = Date.now;
         window.clockOffset = 0;
@@ -142,10 +143,10 @@ test("live board events", { timeout: 120000 }, async (t) => {
         const { context, page, errors } = await open();
         await page.evaluate("liveSocket.close(1000)");
         await page.waitForFunction("!liveOpen && window.pollTimers.size === 1", wait);
-        assert.deepEqual(await timers(page), [3000]);
+        assert.deepEqual(await timers(page), [30000]);
         const dot = () =>
           page.$eval("#dot", (el) => [el.className, el.title, el.getAttribute("aria-label")]);
-        const polling = "Polling every 3 seconds until live updates reconnect";
+        const polling = "Polling every 30 seconds until live updates reconnect";
         assert.deepEqual(await dot(), ["dot ok polling", polling, polling]);
         await page.waitForFunction("liveOpen && window.pollTimers.size === 0", wait);
         assert.deepEqual(await timers(page), []);
@@ -201,6 +202,72 @@ test("live board events", { timeout: 120000 }, async (t) => {
       assert.deepEqual(await timers(notified.page), []);
       assert.deepEqual(notified.errors, []);
       await notified.context.close();
+    });
+
+    await t.test("live L6 a changed frame reads only its key", async () => {
+      const { context, page, errors } = await open();
+      const paths = [];
+      page.on("request", (request) => paths.push(new URL(request.url()).pathname));
+      const send = async (data) => {
+        paths.length = 0;
+        await page.evaluate(
+          (d) => liveSocket.dispatchEvent(new MessageEvent("message", { data: d })),
+          data,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        return paths.filter((p) => p === "/board.json" || p === "/api/backlog").sort();
+      };
+      assert.deepEqual(await send(JSON.stringify({ type: "changed", key: "board.json" })), [
+        "/board.json",
+      ]);
+      assert.deepEqual(await send(JSON.stringify({ type: "changed", key: "backlog.md" })), [
+        "/api/backlog",
+      ]);
+      assert.deepEqual(await send("not json"), ["/api/backlog", "/board.json"]);
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+    await t.test("live L7 a fallback tick reads the backlog every 2 minutes", async () => {
+      const { context, page, errors } = await open();
+      const paths = [];
+      page.on("request", (request) => paths.push(new URL(request.url()).pathname));
+      const tick = async () => {
+        paths.length = 0;
+        await page.evaluate(() => pollTick());
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return paths.filter((p) => p === "/board.json" || p === "/api/backlog").sort();
+      };
+      // The socket open already read both, so the backlog is fresh.
+      assert.deepEqual(await tick(), ["/board.json"]);
+      await page.evaluate(() => {
+        window.clockOffset += 120000;
+      });
+      assert.deepEqual(await tick(), ["/api/backlog", "/board.json"]);
+      assert.deepEqual(await tick(), ["/board.json"]);
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+    await t.test("live L8 the socket keeps retrying at the cap", async () => {
+      const { context, page, errors } = await open();
+      await page.evaluate(() => {
+        window.retryDelays = [];
+        const timeout = window.setTimeout;
+        window.setTimeout = (fn, ms, ...args) => {
+          if (fn.name === "openLive") {
+            window.retryDelays.push(ms);
+            return 0;
+          }
+          return timeout(fn, ms, ...args);
+        };
+        liveRetries = 20;
+        liveSocket.close(1000);
+      });
+      await page.waitForFunction("window.retryDelays.length === 1", wait);
+      assert.deepEqual(await page.evaluate("window.retryDelays"), [30000]);
+      assert.deepEqual(errors, []);
+      await context.close();
     });
 
     await t.test(

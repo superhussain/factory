@@ -56,7 +56,7 @@ test("display settings", { timeout: 180000 }, async (t) => {
       window.pollTimers = new Map();
       window.setInterval = (fn, ms, ...args) => {
         const id = interval(fn, ms, ...args);
-        if (fn.name === "poll") window.pollTimers.set(id, ms);
+        if (fn.name === "pollTick") window.pollTimers.set(id, ms);
         return id;
       };
       window.clearInterval = (id) => {
@@ -220,10 +220,14 @@ test("display settings", { timeout: 180000 }, async (t) => {
       );
     });
 
-    await t.test("display V5 poll cadence and hidden tab", async () => {
-      assert.deepEqual(await liveTimers(), [3000]);
-      await page.select("#display-poll", "10");
-      assert.deepEqual(await liveTimers(), [10000]);
+    await t.test("display V5 poll cadence, hidden tab and unfocused window", async () => {
+      assert.deepEqual(await liveTimers(), [30000]);
+      await page.select("#display-poll", "15");
+      assert.deepEqual(await liveTimers(), [15000]);
+      assert.deepEqual(
+        await page.$$eval("#display-poll option", (els) => els.map((el) => el.value)),
+        ["15", "30", "60"],
+      );
       const setHidden = (hidden) =>
         page.evaluate((value) => {
           Object.defineProperty(document, "hidden", { configurable: true, get: () => value });
@@ -231,16 +235,47 @@ test("display settings", { timeout: 180000 }, async (t) => {
         }, hidden);
       await setHidden(true);
       assert.deepEqual(await liveTimers(), []);
-      const before = boardRequests;
+      let before = boardRequests;
       await setHidden(false);
       await page.waitForFunction(() => window.pollTimers.size === 1, wait);
       await new Promise((resolve) => setTimeout(resolve, 500));
       assert.equal(boardRequests - before, 1);
-      assert.deepEqual(await liveTimers(), [10000]);
-      await setStorage({ "factory-poll": "5" });
+      assert.deepEqual(await liveTimers(), [15000]);
+
+      // An unfocused window has no timer. Focus reads the board once.
+      const setFocus = (focused) =>
+        page.evaluate((value) => {
+          window.fixtureFocus = value;
+          window.dispatchEvent(new Event(value ? "focus" : "blur"));
+        }, focused);
+      await setFocus(false);
+      await page.waitForFunction(() => window.pollTimers.size === 0, wait);
+      before = boardRequests;
+      await setFocus(true);
+      await page.waitForFunction(() => window.pollTimers.size === 1, wait);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.equal(boardRequests - before, 1);
+      assert.deepEqual(await liveTimers(), [15000]);
+
+      // With notifications on, an unfocused window polls every 30 seconds.
+      await page.evaluate(() => {
+        window.Notification = class {
+          static permission = "granted";
+        };
+        notifyOn = true;
+      });
+      await setFocus(false);
+      await page.waitForFunction(() => window.pollTimers.size === 1, wait);
+      assert.deepEqual(await liveTimers(), [30000]);
+      await page.evaluate(() => {
+        notifyOn = false;
+      });
+      await setFocus(true);
+
+      await setStorage({ "factory-poll": "3" });
       await reload();
-      assert.deepEqual(await liveTimers(), [3000]);
-      assert.equal(await page.$eval("#display-poll", (el) => el.value), "3");
+      assert.deepEqual(await liveTimers(), [30000]);
+      assert.equal(await page.$eval("#display-poll", (el) => el.value), "30");
     });
 
     await t.test("display V6 project filter mirrors the header", async () => {
@@ -270,9 +305,9 @@ test("display settings", { timeout: 180000 }, async (t) => {
 
     await t.test("display V8 reset restores every default", async () => {
       await page.select("#display-theme", "dark");
-      await page.select("#display-poll", "30");
+      await page.select("#display-poll", "60");
       await page.select("#display-density", "compact");
-      assert.equal(await page.evaluate(() => localStorage.getItem("factory-poll")), "30");
+      assert.equal(await page.evaluate(() => localStorage.getItem("factory-poll")), "60");
       await page.click("#display-reset");
       assert.deepEqual(
         await page.evaluate((keys) => keys.map((key) => localStorage.getItem(key)), KEYS),
@@ -281,7 +316,7 @@ test("display settings", { timeout: 180000 }, async (t) => {
       assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), undefined);
       assert.deepEqual(await themeColors(), SYSTEM_BARS);
       assert.equal(await page.evaluate(() => document.body.classList.contains("compact")), false);
-      assert.deepEqual(await liveTimers(), [3000]);
+      assert.deepEqual(await liveTimers(), [30000]);
       assert.equal((await filterState(page)).label, "all projects");
       assert.deepEqual(
         await page.$$eval("#display-columns input, #display-filter input", (els) =>
@@ -293,7 +328,7 @@ test("display settings", { timeout: 180000 }, async (t) => {
         await page.$$eval("#display-theme, #display-density, #display-poll", (els) =>
           els.map((el) => el.value),
         ),
-        ["system", "comfortable", "3"],
+        ["system", "comfortable", "30"],
       );
       assert.equal(
         await page.$eval("#detail", (el) => el.style.getPropertyValue("--drawer-w")),
