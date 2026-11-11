@@ -414,6 +414,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           : h,
       );
       const page = await open("#/settings/hosts", failing);
+      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
       await page.click("#hosts-load");
       await page.waitForFunction(() => document.querySelectorAll(".host-card").length === 5, wait);
       const card = '.host-card[data-id="studio-mac"]';
@@ -434,7 +435,9 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           "See the host's pickup log for the error.",
       );
       assert.equal(await page.$('.host-card[data-id="lab-linux"] .host-triage'), null);
-      const color = (sel) => page.$eval(sel, (el) => getComputedStyle(el).color);
+      // A late renderHosts() can detach a node between $eval's find and read, so read in one call.
+      const color = (sel) =>
+        page.evaluate((s) => getComputedStyle(document.querySelector(s)).color, sel);
       const alert = "rgb(209, 52, 47)";
       assert.equal(await color(`${card} .host-triage`), alert);
       const doctor = '.host-card[data-id="lab-linux"] .host-doctor';
@@ -445,10 +448,11 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       assert.equal(await color(doctor), alert);
       assert.equal(await page.$(`${card} .host-doctor`), null);
       assert.equal(
-        await page.$$eval(`${card} p`, (ps) => {
+        await page.evaluate((c) => {
+          const ps = [...document.querySelectorAll(`${c} p`)];
           const el = ps.find((p) => p.textContent.startsWith("macOS, launchd"));
           return getComputedStyle(el).color;
-        }),
+        }, card),
         "rgb(107, 114, 128)",
       );
       await page.close();
