@@ -50,7 +50,7 @@
   factory.py idea-images <project-slug>/<job-id>
                                             materialize a job's pasted images and their
                                             Markdown into the job folder, then push them
-  factory.py sync [<project-slug>]          pull every staged job of a project, or of all projects
+  factory.py sync [<project-slug>]          pull every active job of a project, or of all projects; skips merged and closed
   factory.py tracer sync [<project-slug>[/<job-id>]]
                                             mirror jobs into Tracer for projects listed in tracer.json
   factory.py hold <project-slug>/<job-id> [take|released]
@@ -4669,16 +4669,13 @@ def idea_images(target):
 
 
 def sync(slug=None):
-    """Pull every staged job of one project, or of every project."""
+    """Pull every active job of one project, or of every project. It skips merged and closed jobs, whose files no longer change; pull <project>/<id> fetches one."""
     if slug:
         r2_target(slug, False)
     home, conflicted = factory_home(), []
     for j in read_board(home)["jobs"]:
-        # Stubs and ideas have no job files to pull.
-        if j.get("stage") in (None, IDEA) or slug and j.get("project") != slug:
-            continue
-        if not j.get("project") and j.get("stage") == "closed" \
-                and isinstance(j.get("idea"), str) and not j.get("branch"):
+        # Stubs and ideas have no job files, and merged or closed jobs no longer change.
+        if j.get("stage") in (None, IDEA, *TERMINAL) or slug and j.get("project") != slug:
             continue
         _, project, job_id = r2_target(f"{j.get('project')}/{j.get('id')}", True)
         line, conflicts = pull_job(home, project, job_id)
@@ -5105,7 +5102,7 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
         except subprocess.TimeoutExpired:
             return None, "", f"git {args[0]} timed out after 20 s"
         except OSError:
-            return None, "", "could not run git"
+            return None, "", f"could not run git {args[0]}"
         return r.returncode, r.stdout.strip(), r.stderr
 
     def first_error(*args):
