@@ -49,3 +49,19 @@ test("logs nothing when the first attempt succeeds", async () => {
   );
   assert.equal(lines.length, 0);
 });
+
+test("logs a non-Error throw as its string", async () => {
+  const lines = [];
+  const result = await retryCapture(
+    label,
+    async (attempt) => {
+      if (attempt === 1) throw "plain failure";
+      return "ok";
+    },
+    (line) => lines.push(line),
+  );
+  assert.equal(result, "ok");
+  assert.deepEqual(lines, [
+    "capture retry before-idea-desktop: attempt 1 of 3 failed: plain failure",
+  ]);
+});

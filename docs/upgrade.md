@@ -40,6 +40,15 @@ The `hosted` group exercises assets, auth, protocol, local integration, browser
 and deployment tooling against the merged source (browser provisioning first if
 needed; see [development.md](development.md)).
 
+Then replace the installed skill bundle on each host from this checkout:
+
+```sh
+python3 tools/install.py --destination <absolute-directory> --replace
+```
+
+The old bundle stays beside it as `factory.backup-<uuid>`. See
+[device.md](device.md) for the lock and backup rules.
+
 Install hooks are approved only for esbuild `0.28.2` and workerd `1.20261023.1`;
 fsevents `2.3.3` is denied. Do not broaden approval to repair an installation.
 To roll back dependencies, return to the previous reviewed checkout, remove

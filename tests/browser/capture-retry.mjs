@@ -8,7 +8,7 @@ export async function retryCapture(label, run, log = console.error) {
     } catch (error) {
       if (attempt === CAPTURE_ATTEMPTS) throw error;
       log(
-        `capture retry ${label}: attempt ${attempt} of ${CAPTURE_ATTEMPTS} failed: ${error.message}`,
+        `capture retry ${label}: attempt ${attempt} of ${CAPTURE_ATTEMPTS} failed: ${String(error?.message ?? error)}`,
       );
     }
   }

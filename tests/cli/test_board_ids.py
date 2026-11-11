@@ -146,6 +146,11 @@ class ArchiveFloorTest(IsolatedTestCase):
     def ids(self):
         return [j["id"] for j in json.loads(self.files["/api/board"])["jobs"]]
 
+    def board(self, job_id, body):
+        with patch.object(factory.sys, "stdin", io.StringIO(body)), \
+                patch.dict(os.environ, {"FACTORY_SESSION": "tag", "PASEO_AGENT_ID": ""}):
+            return invoke(factory, ["board", str(self.home), job_id])
+
     def test_archive_floor_reads_only_a_positive_int(self):
         for archived, floor in (({"max_id": 416}, 416), ({"max_id": True}, 0), ({"max_id": "416"}, 0),
                                 ({"max_id": -1}, 0), ([416], 0), (None, 0)):
@@ -191,11 +196,6 @@ class ArchiveFloorTest(IsolatedTestCase):
             floor.assert_not_called()
             self.assertEqual(self.board("417-new-thing", '{"stage": "closed", "project": "sample"}')[0], 0)
             floor.assert_called_once()
-
-    def board(self, job_id, body):
-        with patch.object(factory.sys, "stdin", io.StringIO(body)), \
-                patch.dict(os.environ, {"FACTORY_SESSION": "tag", "PASEO_AGENT_ID": ""}):
-            return invoke(factory, ["board", str(self.home), job_id])
 
     def test_job_falls_back_to_the_archive(self):
         with patch.object(factory, "factory_home", return_value=self.home):

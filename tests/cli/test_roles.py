@@ -281,3 +281,27 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("Interactive `/factory` use never adds it", skill)
         self.assertIn("then the standing instruction that ends this prompt, byte for byte",
                       " ".join(text["schedules/resume.md"].split()))
+
+    def test_open_items_are_absorbed_before_queued(self):
+        def flat(name):
+            return " ".join((SKILL / name).read_text(encoding="utf-8").split())
+        risk = "auth, secret, data, protocol, storage, dependency, workflow or permission risk"
+        skill = flat("SKILL.md")
+        for phrase in ("Fix open items in the job that found them", "Rounds left: <n>",
+                       "Items under `### Absorbed` are done", risk,
+                       "or raises the round cap (F3)",
+                       "or 0 when the approver already returned CHANGES this cycle"):
+            self.assertIn(phrase, skill)
+        builder = flat("agents/factory-builder.md")
+        for phrase in ("Absorb small open items", "### Absorbed", "### Left open", risk):
+            self.assertIn(phrase, builder)
+        for name in ("code", "security", "ui", "ux"):
+            review = flat(f"agents/factory-review-{name}.md")
+            for phrase in ("### Fix now", "### Follow-up", "Nits never change the verdict", risk):
+                self.assertIn(phrase, review, name)
+            self.assertNotIn("a separate heading", review, name)
+        approver = flat("agents/factory-approver.md")
+        self.assertIn("Rounds left", approver)
+        self.assertIn("the `### Fix now` nits are worth one more review round", approver)
+        self.assertNotIn("absorb bar", approver)
+        self.assertIn("rather than Sub-jobs", flat("agents/factory-spec-writer.md"))

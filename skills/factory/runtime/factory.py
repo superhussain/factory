@@ -793,12 +793,12 @@ def board(factory, job_id):
                 fail(f"ids up to {floor} belong to archived jobs, so {job_id} cannot go back on the board. "
                      f"Read it with factory.py job {job_id}. Claim new ids with claim. "
                      "Nothing was written.", 2)
-        if found is None and not NEW_JOB_ID.fullmatch(job_id):
-            fail(f"bad job id {job_id!r}: a new job id is digits, a dash and a lowercase slug, "
-                 "like 003-rate-limiting. Nothing was written.", 2)
-        if found is None and not patch.get("stage"):
-            fail(f"{job_id} is not on the board, and a new row must set stage. "
-                 "Claim new ids with claim. Nothing was written.", 2)
+            if not NEW_JOB_ID.fullmatch(job_id):
+                fail(f"bad job id {job_id!r}: a new job id is digits, a dash and a lowercase slug, "
+                     "like 003-rate-limiting. Nothing was written.", 2)
+            if not patch.get("stage"):
+                fail(f"{job_id} is not on the board, and a new row must set stage. "
+                     "Claim new ids with claim. Nothing was written.", 2)
         held = blocking(found, device, session, minutes)
         if held:
             return None, (None, held)
@@ -1677,7 +1677,8 @@ def batch_cmd(target, *idea_ids):
     idea_ids = list(dict.fromkeys(idea_ids))
     for idea_id in idea_ids:
         if not BACKLOG_PICK.fullmatch(idea_id) and (not JOB_ID.fullmatch(idea_id) or ".." in idea_id):
-            fail(f"bad job id {idea_id!r}. Nothing was written.", 2)
+            fail(f"bad job id {idea_id!r}: a job id is letters, digits, dots, dashes and underscores, "
+                 "like 003-rate-limiting. Nothing was written.", 2)
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
     lines = backlog_candidates(text if status == 200 else "", slug)
     line_picks = [i for i in idea_ids if BACKLOG_PICK.fullmatch(i)]
@@ -1704,7 +1705,7 @@ def batch_cmd(target, *idea_ids):
             if "tracer" in lead:
                 fail(f"cannot batch into {lead_id}: follows Tracer", 2)
             if len(riders_of(data, lead_id)) + len(idea_ids) > MAX_RIDERS:
-                fail(f"a batch holds at most {MAX_RIDERS} ideas", 2)
+                fail(f"a batch holds at most {MAX_RIDERS} riders", 2)
             picked = []
             for idea_id in job_picks:
                 j = next((x for x in data["jobs"] if x.get("id") == idea_id), None)
@@ -3485,7 +3486,8 @@ def close_pass(home, data, device, minutes, dry):
         reason = close_reason(j)
         if reason is None:
             print(f"factory.py: pickup skips the close of {job_id}: "
-                  "its reason must be 1 to 200 characters, with no line breaks or control characters", file=sys.stderr)
+                  "its reason must be 1 to 200 characters, "
+                  "with no line breaks or control characters", file=sys.stderr)
             continue
         c = blocking(j, device, "", minutes)
         if c:

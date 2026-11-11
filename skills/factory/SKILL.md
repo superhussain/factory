@@ -632,6 +632,16 @@ migration; their command and JSON output contract are unchanged.
   Then give the final summary and finish with **Closing without shipping** step 2.
   A non-zero push moves the job to `needs-human` with the push error as the note.
   Approver verdicts never start with `CLOSED:`, and no reader treats it as one.
+- Fix open items in the job that found them. The agent that spots one already holds
+  the context a new job would spend a spec and a build to rebuild. Absorb an item in
+  this job when it is small, sits in a file the spec's Tasks name, carries no auth,
+  secret, data, protocol, storage, dependency, workflow or permission risk, and needs
+  no design choice. Queue it as a follow-up only when it is outside the spec, large,
+  risky, needs its own design, or needs a person. Absorbing never widens the spec
+  (F10) or raises the round cap (F3). The builder lists absorbed items under
+  `### Absorbed` and the rest under `### Left open` in its build.md run section.
+  Reviewers split nits into `### Fix now` and `### Follow-up`. The approver weighs
+  what is still open before APPROVE.
 - A merged or closed job stays that way. New work on it is a new job with `refs`
   pointing back, so the board shows what is actually open. Use `rework-of` to fix
   or redo it, `follow-up-of` for work it surfaced, and `sub-job-of` for a slice
@@ -826,7 +836,9 @@ feature.
    re-runs only the reviewers that asked for changes. Copy the others' review files
    into the new round folder and set them to `PASS` in the new board entry; only the
    re-run reviewers start `pending`.
-6. All PASS: set stage `approve` and spawn `factory-approver`. It writes `decision.md`.
+6. All PASS: set stage `approve` and spawn `factory-approver` with `Rounds left: <n>`,
+   the review rounds this build cycle still allows, or 0 when the approver already
+   returned CHANGES this cycle. It writes `decision.md`.
    APPROVE ships the PR and merges it as Rules describes. ESCALATE ships a held PR
    at `pr-open` with `escalated` true and the board note "escalated:" plus the
    decision's reason. The PR URL goes in `pr`, not the note. CHANGES is a normal fix
@@ -845,10 +857,13 @@ feature.
    should settle before the item is built. The `next` that runs one sets its `refs`.
 9. After a merge, queue the job's open items. If `decision.md` already has a
    `## Follow-ups` heading, this step is done, so skip it. Open items are what
-   `build.md`'s last run lists as unresolved or left out, and final-round review nits
-   the merged diff did not apply. Leave out spec sub-jobs (step 8 queues them),
-   `## Device check` items, and anything already on `$BASE`. Queue each agent-doable
-   item with `factory.py backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
+   `build.md`'s last run lists under `### Left open` (or, in an older build.md, as
+   unresolved or left out), and final-round review nits under `### Fix now`,
+   `### Follow-up` or an older nits heading that the merged diff did not apply. Items
+   under `### Absorbed` are done, not open. Leave out spec sub-jobs (step 8 queues
+   them), `## Device check` items, and anything already on `$BASE`. Queue each
+   agent-doable item with
+   `factory.py backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
    writing the file first as in step 8: first line `Recommend: approve`, then
    `Left open by <id> (PR #<n>): <source file>`. List person-only items but never
    queue them and never set `needs` for them. Then append `## Follow-ups` to
@@ -886,8 +901,8 @@ first line `CLOSED: <reason>`, pushed before the stage moves to `closed`.
 
 1. If `decision.md` already has a `## Follow-ups` heading, skip this step. Open items
    are each `## Left out` bullet and, when `build.md` exists, what its last run lists
-   as unresolved or left out. Leave out anything already on `$BASE` and any item whose
-   bullet names an existing job. Queue each agent-doable item with
+   under `### Left open` or as unresolved. Leave out anything already on `$BASE` and
+   any item whose bullet names an existing job. Queue each agent-doable item with
    `factory.py backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
    writing the file first as in step 8: first line `Recommend: approve`, then
    `Left out by <id> (closed at <stage>): <source file>`. An `already in backlog:` line

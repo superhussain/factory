@@ -464,6 +464,7 @@ test("move host", { timeout: 240000 }, async (t) => {
       });
 
       await t.test(`chained move keeps the earlier stop ${width}`, async () => {
+        const CHAINED_HOST = "moving to Cloud box · stop queued on Lab Linux, Studio Mac";
         const T1 = "2026-01-01T10:00:00Z";
         await seedBoard(origin, [
           {
@@ -497,10 +498,11 @@ test("move host", { timeout: 240000 }, async (t) => {
           await page.click("#move-host-save");
           await page.waitForFunction(() => !document.getElementById("move-host-dlg").open, wait);
           await page.waitForFunction(
-            () =>
+            (text) =>
               document.querySelector('.card[data-id="042-sample-export"] .host')?.textContent ===
-              "moving to Cloud box · stop queued on Lab Linux, Studio Mac",
+              text,
             wait,
+            CHAINED_HOST,
           );
           await page.click("#d-close");
           await page.waitForFunction(() => document.getElementById("detail").hidden, wait);
@@ -524,10 +526,7 @@ test("move host", { timeout: 240000 }, async (t) => {
               },
             ],
           });
-          assert.equal(
-            await hostLine(page, "042-sample-export"),
-            "moving to Cloud box · stop queued on Lab Linux, Studio Mac",
-          );
+          assert.equal(await hostLine(page, "042-sample-export"), CHAINED_HOST);
         } finally {
           pickupHosts = PICKUP_HOSTS;
         }

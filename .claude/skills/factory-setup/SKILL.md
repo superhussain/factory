@@ -36,9 +36,9 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory.py` onc
 ## 3. Cloudflare
 
 - Check: none.
+- When adding a computer, use the same account ID, zone, hostname and emails as the first one. `up` then creates this host's service token and policy and adds the policy to the application.
 - Ask, Zone: "Is your domain's zone active in this Cloudflare account?" Options: Yes, No.
 - Ask as plain messages, one value each: account ID, zone.
-- When adding a computer, use the same account ID, zone, hostname and emails as the first one. `up` then creates this host's service token and policy and adds the policy to the application.
 - Ask, Hostname: "Use factory.<zone>?" Options: factory.<zone> (Recommended), Other.
 - Ask as a plain message: allowed emails.
 - Ask, Plan: "Create these resources?" Options: Yes (Recommended), Change an answer, Stop.

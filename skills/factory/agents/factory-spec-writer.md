@@ -17,7 +17,8 @@ concrete way to check it: a command, a grep, a type that must compile, or a shor
 manual step. Keep the feature small. If the request is more than one reviewable PR,
 spec the smallest useful slice and list each remaining slice under **Sub-jobs**, one
 `- <feature>` line each, written so it stands alone as a feature request. The
-orchestrator queues them as their own jobs.
+orchestrator queues them as their own jobs. Fold small fixes the job's own files need
+into Tasks rather than Sub-jobs. Sub-jobs are for slices that need their own PR.
 
 The builder executes the spec and is told not to make design decisions, so
 settle every implementation choice here: the approach, file and function names, fields,

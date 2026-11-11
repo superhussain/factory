@@ -92,7 +92,7 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | Deploy every merge to main | `deploy-main` workflow | [cloudflare.md](cloudflare.md#8-continuous-deployment-from-main) |
 | PR screenshots, Paseo, Tracer | device config | [integrations.md](integrations.md) |
 | Browser notifications and display | Settings, Notifications and Display | none |
-| Upgrade later | This checkout, then each host | [upgrade.md](upgrade.md) |
+| Upgrade later | `git pull` here, then `install.py --replace` on each host | [upgrade.md](upgrade.md) |
 
 ## Set up with an agent
 

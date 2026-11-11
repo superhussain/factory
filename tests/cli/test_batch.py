@@ -1,3 +1,4 @@
+import io
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ REF = {"id": LEAD, "kind": "batched-into"}
 NOW = "2026-01-01T12:00:00Z"
 LINE = "- [ ] sample: Name the weekly CSV weekly-<date>.csv (follow-up-of 080-sample-report)"
 CLAIM = {"device": "test", "session": "tag", "since": NOW, "seen": NOW}
+BAD_ID = "a job id is letters, digits, dots, dashes and underscores, like 003-rate-limiting. Nothing was written."
 
 
 def idea(job_id, **extra):
@@ -215,8 +217,8 @@ class BatchTest(IsolatedTestCase):
 
     def test_attach_refuses_bad_picked_ids(self):
         self.set_jobs(jobs() + [idea("bad id")])
-        self.refuse(2, "bad job id 'bad id'. Nothing was written.", TARGET, "bad id")
-        self.refuse(2, "bad job id '../x'. Nothing was written.", TARGET, "../x")
+        self.refuse(2, f"bad job id 'bad id': {BAD_ID}", TARGET, "bad id")
+        self.refuse(2, f"bad job id '../x': {BAD_ID}", TARGET, "../x")
 
     def test_attaches_twenty_riders(self):
         more = [f"{n}-sample-more" for n in range(100, 120)]
@@ -228,9 +230,10 @@ class BatchTest(IsolatedTestCase):
         more = [f"{n}-sample-more" for n in range(100, 118)]
         self.set_jobs(jobs() + [idea(i) for i in more])
         with patch.dict(os.environ, {"FACTORY_SESSION": "tag"}):
-            with self.assertRaises(SystemExit) as raised:
+            with patch("sys.stderr", new_callable=io.StringIO) as err, self.assertRaises(SystemExit) as raised:
                 factory.batch_cmd(TARGET, "091-sample-typo", "092-sample-csv-name", "093-sample-login", *more)
         self.assertEqual((raised.exception.code, self.puts), (2, 0))
+        self.assertEqual(err.getvalue(), "factory.py: a batch holds at most 20 riders\n")
 
     def test_cli_accepts_twenty_idea_ids(self):
         self.assertEqual(factory.COMMANDS["batch"][1:], (1, 21))
