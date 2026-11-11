@@ -5102,7 +5102,7 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
         except subprocess.TimeoutExpired:
             return None, "", f"git {args[0]} timed out after 20 s"
         except OSError:
-            return None, "", "could not run git"
+            return None, "", f"could not run git {args[0]}"
         return r.returncode, r.stdout.strip(), r.stderr
 
     def first_error(*args):
