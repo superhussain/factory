@@ -162,7 +162,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .filter-menu .filter-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .filter-menu label:focus-within { background: var(--line); }
   @media (hover: hover) { .filter-menu label:hover { background: var(--line); } }
-  @media (pointer: coarse) { .filter-menu label { min-height: 44px; } }
+  @media (pointer: coarse) { .filter-menu label { min-height: 44px; white-space: normal; } .filter-menu .filter-title { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; } }
   .header-actions { display: flex; gap: inherit; }
   body[data-view="settings"] #board, body[data-view="settings"] #detail { display: none; }
   .settings-page { max-width: 1440px; margin: 0 auto; padding: 28px; }
