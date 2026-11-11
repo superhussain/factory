@@ -260,12 +260,21 @@ test("move host", { timeout: 240000 }, async (t) => {
             wait,
           );
           await openJobActions(page);
+          await page.evaluate(() => {
+            window.emptyAtOpen = null;
+            const d = document.getElementById("move-host-dlg");
+            d.showModal = function () {
+              window.emptyAtOpen = document.getElementById("move-host-empty").textContent;
+              return HTMLDialogElement.prototype.showModal.call(this);
+            };
+          });
           await page.click("#d-move-host");
           await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
           await page.waitForFunction(
             () => document.getElementById("move-host-empty").textContent !== "",
             wait,
           );
+          assert.equal(await page.evaluate(() => window.emptyAtOpen), "");
           assert.equal(
             await page.$eval("#move-host-empty", (el) => el.textContent),
             "No other active host runs pickup for sample. Add one in Settings, Hosts.",
@@ -590,7 +599,7 @@ test("move host", { timeout: 240000 }, async (t) => {
           ).screenshot({ path: `${SHOTS}after-move-dialog-stops-queued${suffix}.png` });
           assert.equal(
             await page.$eval("#move-host-empty", (el) => el.textContent),
-            "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. lab-linux is offline and stops the job only when it comes back online. Try again after one of them stops the job.",
+            "Every other host that runs pickup for sample still has a stop queued: Lab Linux, Studio Mac. Lab Linux is offline and stops the job only when it comes back online. Try again after one of them stops the job.",
           );
           assert.equal(
             await page.$eval(
@@ -652,19 +661,51 @@ test("move host", { timeout: 240000 }, async (t) => {
           studio.offline = true;
           assert.equal(
             await emptyText(),
-            "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. lab-linux, studio-mac are offline and stop the job only when they come back online. Try again after one of them stops the job.",
+            "Every other host that runs pickup for sample still has a stop queued: Lab Linux, Studio Mac. Lab Linux, Studio Mac are offline and stop the job only when they come back online. Try again after one of them stops the job.",
           );
           lab.offline = false;
           studio.offline = false;
           assert.equal(
             await emptyText(),
-            "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. Try again after one of them stops the job.",
+            "Every other host that runs pickup for sample still has a stop queued: Lab Linux, Studio Mac. Try again after one of them stops the job.",
           );
         } finally {
           lab.offline = true;
           studio.offline = false;
           pickupHosts = PICKUP_HOSTS;
         }
+      });
+
+      await t.test(`move errors name the host ${width}`, async () => {
+        await page.waitForFunction(() => hostName("studio-mac") === "Studio Mac", wait);
+        const messages = await page.evaluate((now) => {
+          const job = (claim, move) => ({
+            id: "042-sample-export",
+            project: "sample",
+            stage: "build",
+            claim: { device: claim, session: "d4e5f6", since: now },
+            move,
+          });
+          return [
+            moveJob({ jobs: [job("studio-mac")] }, "042-sample-export", "studio-mac", now),
+            moveJob(
+              {
+                jobs: [
+                  job("studio-mac", { from: "lab-linux", to: "studio-mac", at: now, claimed: now }),
+                ],
+              },
+              "042-sample-export",
+              "lab-linux",
+              now,
+            ),
+            moveJob({ jobs: [job("ghost-box")] }, "042-sample-export", "ghost-box", now),
+          ];
+        }, NOW);
+        assert.deepEqual(messages, [
+          "This job already runs on Studio Mac.",
+          "A stop is still queued on Lab Linux. Pick another host.",
+          "This job already runs on ghost-box.",
+        ]);
       });
       await page.close();
     }
