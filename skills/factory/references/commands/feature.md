@@ -54,6 +54,7 @@ feature.
    re-runs only the reviewers that asked for changes. Copy the others' review files
    into the new round folder and keep their verdict in the new board entry (PASS stays
    `PASS` and SKIPPED stays `SKIPPED`); only the re-run reviewers start `pending`.
+   A disputed-only round skips `review-plan`; the copied files carry their verdicts.
 6. Every verdict PASS or SKIPPED: set stage `approve` and spawn `factory-approver`
    with `Rounds left: <n>`, the review rounds this build cycle still allows, or 0 when the approver already
    returned CHANGES this cycle. It writes `decision.md`.
