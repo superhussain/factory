@@ -1756,50 +1756,59 @@ class CloseTest(PickupFixture):
         self.assertEqual(self.job("042-sample-export")["stage"], "closed")
 
     def test_close_skips_a_finished_pull_request(self):
+        rows = (("same repo", {}, "false factory/042-sample-export"),
+                ("no branch key", {"branch": None}, "false factory/042-sample-export"),
+                ("no branch", {"branch": ""}, "false factory/042-sample-export"),
+                ("fork head", {}, "true factory/042-sample-export"),
+                ("head mismatch", {}, "false factory/050-other"))
         for state, line in (("MERGED", "already merged"), ("CLOSED", "already closed")):
-            with self.subTest(state=state):
-                self.calls.clear()
-                self.files.clear()
-                self.gh_answers["view"] = (0, state + " false factory/042-sample-export\n")
-                self.board["jobs"] = [self.closing(pr=self.PR)]
-                self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
-                self.assertEqual([call for call in self.calls if call[0] == "gh"],
-                                 [("gh",) + self.BRANCH_VIEW])
-                self.assertIn(f"- Pull request: {self.PR}, {line}.\n", self.files[self.DECISION])
-                self.assertNotIn("stays open", self.files[self.DECISION])
+            for name, extra, view in rows:
+                with self.subTest(state=state, case=name):
+                    self.calls.clear()
+                    self.files.clear()
+                    self.gh_answers["view"] = (0, f"{state} {view}\n")
+                    # None in extra drops the key.
+                    self.board["jobs"] = [{k: v for k, v in self.closing(pr=self.PR, **extra).items()
+                                           if v is not None}]
+                    self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
+                    self.assertEqual([call for call in self.calls if call[0] == "gh"],
+                                     [("gh",) + self.BRANCH_VIEW])
+                    self.assertIn(f"- Pull request: {self.PR}, {line}.\n", self.files[self.DECISION])
+                    self.assertNotIn("stays open", self.files[self.DECISION])
 
     def test_close_leaves_the_pull_request_open(self):
         other = "https://github.com/other/repo/pull/7"
         full, hint = "---\nrepo: sample/alpha\n---\n", " (check gh auth status on host-a)"
         ok = (0, "OPEN false factory/042-sample-export\n")
-        cases = (("gh None", None, self.PR, full, "gh is not installed on host-a"),
-                 ("view exit 1", {"view": (1, "")}, self.PR, full, "gh pr view exited 1" + hint),
+        cases = (("gh None", None, self.PR, full, "gh is not installed on host-a", {}),
+                 ("view exit 1", {"view": (1, "")}, self.PR, full, "gh pr view exited 1" + hint, {}),
                  ("state DRAFT", {"view": (0, "DRAFT false factory/042-sample-export\n")}, self.PR,
-                  full, "gh pr view reported state DRAFT"),
+                  full, "gh pr view reported state DRAFT", {}),
                  ("close exit 1", {"view": ok, "close": (1, "")}, self.PR,
-                  full, "gh pr close exited 1" + hint),
+                  full, "gh pr close exited 1" + hint, {}),
                  ("head mismatch", {"view": (0, "OPEN false factory/050-other\n")}, self.PR, full,
                   "its head branch factory/050-other is not the job's branch "
-                  "factory/042-sample-export"),
+                  "factory/042-sample-export", {}),
                  ("no head", {"view": (0, "OPEN false\n")}, self.PR, full,
-                  "gh pr view reported no head branch"),
+                  "gh pr view reported no head branch", {}),
                  ("fork head", {"view": (0, "OPEN true factory/042-sample-export\n")}, self.PR,
                   full,
                   "its head branch factory/042-sample-export comes from another repository, "
-                  "not sample/alpha"),
+                  "not sample/alpha", {}),
                  ("gh vanishes", {"view": ok, "close": None}, self.PR, full,
-                  "gh is not installed on host-a"),
+                  "gh is not installed on host-a", {}),
                  ("view timeout", {"view": ("timeout", "")}, self.PR, full,
-                  "gh pr view timed out after 60 seconds on host-a"),
+                  "gh pr view timed out after 60 seconds on host-a", {}),
                  ("close timeout", {"view": ok, "close": ("timeout", "")}, self.PR, full,
-                  "gh pr close timed out after 60 seconds on host-a"),
-                 ("other repo", {}, other, full, "its URL is not a pull request in sample/alpha"),
+                  "gh pr close timed out after 60 seconds on host-a", {}),
+                 ("other repo", {}, other, full, "its URL is not a pull request in sample/alpha", {}),
                  ("no repo", {}, self.PR, "---\nname: alpha\n---\n",
-                  "the project file names no repo"),
+                  "the project file names no repo", {}),
                  ("no project file", {}, self.PR, None,
-                  "there is no project file for alpha on host-a"),
-                 ("no branch", {}, self.PR, full, "the job has no branch"))
-        for name, answers, pr, project_text, why in cases:
+                  "there is no project file for alpha on host-a", {}),
+                 ("no branch", {"view": ok}, self.PR, full, "the job has no branch", {"branch": ""}),
+                 ("no branch key", {"view": ok}, self.PR, full, "the job has no branch", {"branch": None}))
+        for name, answers, pr, project_text, why, extra in cases:
             with self.subTest(name):
                 self.calls.clear()
                 self.files.clear()
@@ -1808,8 +1817,8 @@ class CloseTest(PickupFixture):
                     (self.home / "projects" / "alpha.md").unlink()
                 else:
                     (self.home / "projects" / "alpha.md").write_text(project_text, encoding="utf-8")
-                extra = {"branch": ""} if name == "no branch" else {}
-                self.board["jobs"] = [self.closing(pr=pr, **extra)]
+                # None in extra drops the key.
+                self.board["jobs"] = [{k: v for k, v in self.closing(pr=pr, **extra).items() if v is not None}]
                 self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n",
                                                  f"factory.py: pickup leaves pull request {pr} "
                                                  f"open: {why}\n"))
@@ -1821,8 +1830,8 @@ class CloseTest(PickupFixture):
                 gh = [call for call in self.calls if call[0] == "gh"]
                 if name in ("head mismatch", "no head", "fork head"):
                     self.assertNotIn("close", [call[1] for call in gh])
-                if name == "no branch":
-                    self.assertEqual(gh, [])
+                if name in ("no branch", "no branch key"):
+                    self.assertEqual(gh, [("gh",) + self.BRANCH_VIEW])
 
     def test_close_dry_run_names_the_pull_request(self):
         self.board["jobs"] = [self.closing(pr=self.PR)]
