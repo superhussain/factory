@@ -198,16 +198,22 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       const { frame, y } = await openFrame();
       // The second finger lands on #example, outside #steps, so its touchstart never
       // reaches the swipe. Only the touchmove second-finger guard can drop the swipe.
-      const left = await page.$eval(".html-stepper-frame", (el) => el.getBoundingClientRect().left);
-      const { dy, outside } = await frame.evaluate((fx) => {
-        const mid = (id) => {
-          const r = document.getElementById(id).getBoundingClientRect();
-          return r.top + r.height / 2;
-        };
-        const dy = Math.round(mid("example") - mid("title"));
-        const hit = document.elementFromPoint(fx, Math.round(mid("title")) + dy);
-        return { dy, outside: Boolean(hit) && !hit.closest("#steps") };
-      }, 200 - left);
+      const { left, top } = await page.$eval(".html-stepper-frame", (el) => {
+        const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top };
+      });
+      const { dy, outside } = await frame.evaluate(
+        ([fx, fy]) => {
+          const mid = (id) => {
+            const r = document.getElementById(id).getBoundingClientRect();
+            return r.top + r.height / 2;
+          };
+          const dy = Math.round(mid("example") - mid("title"));
+          const hit = document.elementFromPoint(fx, fy + dy);
+          return { dy, outside: Boolean(hit) && !hit.closest("#steps") };
+        },
+        [200 - left, y - top],
+      );
       assert.ok(outside, "the second finger must land outside #steps");
       const second = [200, y + dy];
       for (const [type, points] of [
