@@ -4598,7 +4598,7 @@ async function decideBacklog(item, decision, notes, answers) {
     return id;
   } catch (x) {
     if (!x.uncertain) backlogPending.delete(item.raw);
-    else x.message = 'Not confirmed: ' + x.message + '. Try again. It will not add a duplicate.';
+    else x.message = boardSaveError(x, 'Try again. It will not add a duplicate.');
     throw x;
   } finally {
     await loadBacklog();
@@ -4703,7 +4703,7 @@ async function casBoard(change) {
 // An uncertain save may have landed, so the dialog says so and the same retry confirms it.
 function boardSaveError(x, hint) {
   const text = String(x.message || x);
-  return x.uncertain ? 'Not confirmed: ' + text + '. ' + hint : text;
+  return x.uncertain ? 'Not confirmed: ' + text.replace(/[\s.]+$/, '') + '. ' + hint : text;
 }
 
 let ideaEditor = null;
