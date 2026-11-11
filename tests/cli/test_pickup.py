@@ -1028,6 +1028,9 @@ class MoveHostTest(MoveFixture):
         self.assertEqual(self.pickup(), (0, "", f"factory.py: pickup skips alpha: {line}\n"
                                                 f"factory.py: pickup skips the stop of 042-sample-export alpha: {line}\n"))
         self.assertEqual((self.stopped, self.puts()), ([], []))
+        self.assertNotIn("stopped", self.job("042-sample-export")["move"])
+        self.assertEqual(self.pickup("--dry-run"),
+                         (0, f"skip stop 042-sample-export alpha: {line}\nhost {DEVICE}: would launch 0\n", ""))
 
     def test_earlier_host_stops_after_a_second_move(self):
         self.moved(**{"from": "studio-mac", "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
