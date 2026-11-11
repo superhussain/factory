@@ -1361,8 +1361,18 @@ class MoveArchiveTest(MoveHostTest):
         home = self.root / "paseo home"
         with patch.dict(os.environ, {"PASEO_HOME": str(home)}):
             code, out, err = self.pickup()
+        self.assertEqual((code, out), (0, "stopped 042-sample-export alpha: moved to studio-mac\n"))
         self.assertEqual(err, self.hint("9f1c2d3e-0000-4000-8000-000000000001").replace(
             "paseo archive", f"paseo --home '{home}' archive"))
+
+    def test_hint_leaves_out_unprintable_paseo_home(self):
+        factory.forget_paseo_claim(self.home, "042-sample-export", self.AGENT)
+        self.set_stalls()
+        self.moved(agent="9f1c2d3e-0000-4000-8000-000000000001", server="srv-lab")
+        home = self.root / "paseo\x1bhome"
+        with patch.dict(os.environ, {"PASEO_HOME": str(home)}):
+            self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
+                                             self.hint("9f1c2d3e-0000-4000-8000-000000000001")))
 
     def test_non_hex_agent_stops_once(self):
         self.set_stalls()
