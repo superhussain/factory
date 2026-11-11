@@ -3,7 +3,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import {
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+  controlBoardPolling,
+} from "../support/browser-server.mjs";
 
 const IDEA = {
   id: "100-sample-idea",
@@ -33,6 +38,8 @@ async function openDrawer(browser, origin, viewport, id) {
   await page.setViewport(viewport);
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
+  // A board read during the Edit idea load cancels it, so no socket or timer reads run.
+  await controlBoardPolling(page);
   await page.goto(origin + "/#" + id, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(
     (id) => document.getElementById("d-meta").textContent.includes(id),
@@ -150,7 +157,16 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
 
         await activate("#d-actions");
         await activate("#d-edit-idea");
-        await page.waitForFunction(() => document.getElementById("edit-idea-dlg").open);
+        await page.waitForFunction(
+          () =>
+            document.getElementById("edit-idea-dlg").open ||
+            !document.getElementById("d-edit-idea-err").hidden,
+        );
+        assert.equal(
+          await page.$eval("#d-edit-idea-err", (el) => (el.hidden ? "" : el.textContent)),
+          "",
+          `${label} Edit idea loads`,
+        );
         assert.equal((await state(page)).menu, false, `${label} item closes the menu`);
         await page.keyboard.press("Escape");
         await page.waitForFunction(() => !document.getElementById("edit-idea-dlg").open);
