@@ -165,6 +165,8 @@ an automatic takeover or reset of review/approval counters.
 python3 <installed-skill>/runtime/factory.py retro digest [--days N]
 python3 <installed-skill>/runtime/factory.py retro push
 python3 <installed-skill>/runtime/factory.py retro pull YYYY-MM-DD
+python3 <installed-skill>/runtime/factory.py retro aggregate [--days N]
+python3 <installed-skill>/runtime/factory.py retro admit <run>
 ```
 
 `retro digest` prints one JSON line per Claude Code main session whose
@@ -189,6 +191,24 @@ hint. A re-push the same day replaces that file. `retro pull YYYY-MM-DD` reads
 `GET /api/retro/<date>` and prints each listed host's lines in list order. A day
 no host pushed prints a note on stderr and exits 0. Raw transcripts never leave
 the host.
+
+`retro aggregate` pulls every host's digest for the last N days (default 7, at
+most 30), oldest date first, into a new run folder `<home>/retro/<run>/`. The run
+tag is the UTC time plus 6 random hex digits. It writes `digest.jsonl`, the rows,
+and `aggregate.json`: token sums, context medians, error, denial and command
+patterns with counts and up to 5 `host/session` refs, and the registered
+projects. Every ad-hoc row's `project` becomes `ad-hoc` in both files, so neither
+names that work. Lines that are not digest rows count as `skipped`. It prints the
+run, the file paths, this host's transcripts root, and the `out` and `findings`
+paths for `/factory retro`. A window no host pushed exits 3 and writes nothing. A
+linked `retro` or run folder exits 2.
+
+`retro admit <run>` checks the retro agent's `reply.json` in that folder against
+`factory.retro/1`. A bad reply exits 2 with nothing written, and `{"none": true}`
+exits 3. It writes `findings.md`, ranked by count times cost per occurrence, then
+writes the reply's cards to `suggestions.json` and runs `suggest admit` on it (see
+[Retro cards](autonomy.md#retro-cards)). A missing run or reply exits 4. The run
+folder stays on this host; nothing in it reaches R2.
 
 ## Exit recovery
 
