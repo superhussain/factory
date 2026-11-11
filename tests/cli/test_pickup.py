@@ -1868,6 +1868,7 @@ class CloseCleanupTest(PickupFixture):
     def setUp(self):
         super().setUp()
         self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.files = {}
         patch.object(factory, "worktree_pids", return_value=[]).start()
         self.git(self.repo_a, "init", "-q")
         self.git(self.repo_a, "symbolic-ref", "HEAD", "refs/heads/main")
@@ -1877,6 +1878,15 @@ class CloseCleanupTest(PickupFixture):
         (self.wt / "work.txt").write_text("work\n")
         self.git(self.wt, "add", "work.txt")
         self.git(self.wt, "commit", "-q", "-m", "work")
+
+    def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if not path.endswith("/decision.md"):
+            return super().request(home, method, path, body, ok, headers, raw)
+        self.calls.append((method, path))
+        if method == "GET":
+            return 404, {}, ""
+        self.files[path] = body
+        return 200, {}, ""
 
     def git(self, cwd, *args):
         return subprocess.run(["git", "-C", str(cwd), *args], check=True,
@@ -1901,6 +1911,29 @@ class CloseCleanupTest(PickupFixture):
         self.assertEqual(set(record), {"at", "left"})
         self.assertEqual(record["left"], [self.UNREACHABLE])
         self.assertNotIn("port", job)
+        self.calls.clear()
+        self.assert_silent(self.pickup())
+
+    def test_cleanup_runs_beside_a_pull_request_close(self):
+        pr = "https://github.com/sample/alpha/pull/8"
+        decision = "/api/jobs/alpha/043-sample-import/decision.md"
+        (self.home / "projects").mkdir()
+        (self.home / "projects" / "alpha.md").write_text("---\nrepo: sample/alpha\n---\n", encoding="utf-8")
+        patch.object(factory, "api_url", return_value="https://factory.example.test").start()
+        answers = {"view": (0, "OPEN false factory/043-sample-import\n"), "close": (0, "")}
+        patch.object(factory, "gh_pr", side_effect=lambda *args: answers[args[0]]).start()
+        closing = CloseTest.closing(CloseTest, id="043-sample-import", branch="factory/043-sample-import", pr=pr)
+        self.board["jobs"] = [self.closed(), closing]
+        self.assertEqual(self.pickup(), (0, f"closed pull request {pr} for 043-sample-import\n"
+                                            "closed 043-sample-import alpha\n"
+                                            f"cleaned up 042-sample-export alpha, left: {self.UNREACHABLE}\n", ""))
+        self.assertEqual(self.puts(), [("PUT", decision), ("PUT", "/api/board"), ("PUT", "/api/board")])
+        self.assertIn(f"- Pull request: {pr}, closed by pickup", self.files[decision])
+        close = self.job("043-sample-import")["close"]
+        self.assertIn("closed", close)
+        self.assertNotIn("cleanup", close)
+        self.assertEqual(self.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"], [self.UNREACHABLE])
+        self.assertFalse(self.wt.exists())
         self.calls.clear()
         self.assert_silent(self.pickup())
 
