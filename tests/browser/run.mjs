@@ -704,6 +704,27 @@ async function capture(outdir, referencePath) {
     await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
     await view("archive-list", 1280, 900, "light", openArchiveList);
     await view("archive-list-mobile", 390, 844, "dark", openArchiveList);
+    // The reference has no archive button, so its side shows the plain blank board.
+    const openEmptyArchive = async (page) => {
+      await page.evaluate(() => {
+        jobs = [];
+        backlog = [];
+        boardArchived = true;
+        renderBoard();
+      });
+    };
+    const openEmptyArchiveLoaded = async (page, side) => {
+      await openEmptyArchive(page);
+      if (side === "after") {
+        await page.click(".blank .archive-more");
+        await page.waitForSelector('.col.closed .archive-list .card[data-id="413-old-suggestion"]');
+        await page.evaluate(() =>
+          document.querySelector(".col.closed").scrollIntoView({ block: "start", inline: "start" }),
+        );
+      }
+    };
+    await view("empty-archive", 1280, 900, "light", openEmptyArchive);
+    await view("empty-archive-loaded-mobile", 390, 844, "dark", openEmptyArchiveLoaded);
     const openArchiveJumper = async (page, side) => {
       archivedBoard = true;
       try {
