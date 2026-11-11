@@ -16,11 +16,13 @@ Each run, in order:
 - Skips ideas that are gated, held by a live claim, or waiting on a human, and
   projects whose effective pipeline has pickup off, does not list this host, or
   cannot be read. Each skip reason is printed once and the run goes on.
-- Skips a project whose checkout fails the `unsafe checkout` check, when pickup is
-  on and lists this host. It fetches `origin/<base>` (with `GIT_TERMINAL_PROMPT=0` and a 60 s limit, so a remote that asks for credentials or stops answering is a skip, not a stall) and refuses a local `<base>`
-  with a root commit that `origin/<base>` lacks, so a host still on archive history
-  claims and launches nothing for that project. `worktree` runs the same check on
-  the job branch and exits 6.
+- Skips a project whose checkout fails the `unsafe checkout` check, when pickup
+  is on and lists this host. It fetches `origin/<base>` (with
+  `GIT_TERMINAL_PROMPT=0` and a 60 s limit, so a remote that asks for
+  credentials or stops answering is a skip, not a stall) and refuses a local
+  `<base>` with a root commit that `origin/<base>` lacks, so a host still on
+  archive history claims and launches nothing for that project. `worktree` runs
+  the same check on the job branch and exits 6.
 - Deny notes: before ideas, launches at most one `/factory deny-notes <id>` session
   for a `closed` job denied from the backlog whose `backlog.notes` are unread (no
   `backlog.notes_read`). The session gets the notes from `factory.py deny-notes <id>`
