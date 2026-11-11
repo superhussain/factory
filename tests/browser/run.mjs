@@ -389,7 +389,7 @@ async function capture(outdir, referencePath) {
             const q = target.searchParams.get("q");
             if (q !== null) {
               const jobs = [CAPTURE_ARCHIVED].filter((j) =>
-                [j.id, j.title].some((f) => f.toLowerCase().includes(q.toLowerCase())),
+                [j.id, j.title, j.project].some((f) => f.toLowerCase().includes(q.toLowerCase())),
               );
               return request.respond({
                 status: 200,
