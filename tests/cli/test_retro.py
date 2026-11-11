@@ -83,7 +83,12 @@ class RetroRedactTest(RetroCase):
                              ("cf-access-client-secret: s3cr3t-value", "s3cr3t"),
                              ("retry with bearer eyJabc.def-ghi", "eyJabc"), ("ssh://git:pw0rd@host.example.test/r", "pw0rd"),
                              ('db_password = "two words"', "two words"), ("GH_TOKEN=gh-value", "gh-value"),
-                             ("client_credential: cred-value", "cred-value"), ("passwd=pw-value", "pw-value")):
+                             ("client_credential: cred-value", "cred-value"), ("passwd=pw-value", "pw-value"),
+                             ('{"token":"abcdefsecret"}', "abcdef"), ('{"api_key": "zzsecretvalue123"}', "zzsecret"),
+                             ("mysql --password hunter2 db", "hunter"), ("gh auth login --with-token abc-tok", "abc-tok"),
+                             ("curl -u ci:hunter2 https://example.test", "hunter"),  # gitleaks:allow synthetic curl credentials
+                             ("curl --user=ci:hunter2 https://example.test", "hunter"),  # gitleaks:allow synthetic curl credentials
+                             ("Authorization=Basic dXNlcjpw", "dXNlcjpw")):
             with self.subTest(text=text):
                 out = factory.retro_redact(text)
                 self.assertNotIn(secret, out)
@@ -94,6 +99,16 @@ class RetroRedactTest(RetroCase):
         self.assertEqual(factory.retro_project("-Users-x-dev"), "~-dev")
         self.assertEqual(factory.retro_project("C--Users-x-dev"), "~-dev")
         self.assertEqual(factory.retro_project("-srv-home-x"), "-srv-home-x")
+        self.assertEqual(factory.retro_redact("git push -u origin main"), "git push -u origin main")
+
+    def test_project_folds_a_hyphenated_home(self):
+        for home, slug, folded in (("/Users/john.doe", "-Users-john-doe-dev", "~-dev"),
+                                   ("/home/john-doe", "-home-john-doe", "~"),
+                                   ("C:\\Users\\john.doe", "C--Users-john-doe-dev", "~-dev")):
+            with self.subTest(home=home), patch.object(factory.Path, "home", return_value=home):
+                self.assertEqual(factory.retro_project(slug), folded)
+        with patch.object(factory.Path, "home", return_value="/Users/john.doe"):
+            self.assertEqual(factory.retro_project("-Users-john-doer-dev"), "~-doer-dev")
 
     def test_every_string_and_key_clipped(self):
         tool = "T" * 300
