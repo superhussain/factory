@@ -155,7 +155,9 @@ reads and writes them, and job folders go up by hand:
   `If-Match` from `<slug>.sync.json`, never a save-time GET or retry. A missing baseline
   or existing `.remote` refuses the push. A new remote change still fails with 412.
 - `pull "$SLUG/<id>"` downloads what changed in R2 and keeps local edits, and
-  `sync "$SLUG"` does that for every job of the project that is not `merged` or `closed`. A finished job's files don't change, so `pull "$SLUG/<id>"` fetches one when needed.
+  `sync "$SLUG"` does that for every job of the project that is not `merged` or
+  `closed`. A finished job's files don't change, so `pull "$SLUG/<id>"` fetches
+  one when needed.
 - When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
   the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
   each file. `push` never uploads a `.remote`, and refuses the file until a human

@@ -50,7 +50,8 @@
   factory.py idea-images <project-slug>/<job-id>
                                             materialize a job's pasted images and their
                                             Markdown into the job folder, then push them
-  factory.py sync [<project-slug>]          pull every active job of a project, or of all projects; skips merged and closed
+  factory.py sync [<project-slug>]          pull every active job of a project, or of all projects;
+                                            skips merged and closed
   factory.py tracer sync [<project-slug>[/<job-id>]]
                                             mirror jobs into Tracer for projects listed in tracer.json
   factory.py hold <project-slug>/<job-id> [take|released]
@@ -4703,7 +4704,8 @@ def idea_images(target):
 
 
 def sync(slug=None):
-    """Pull every active job of one project, or of every project. It skips merged and closed jobs, whose files no longer change; pull <project>/<id> fetches one."""
+    """Pull every active job of one project, or of every project. Skips merged and closed
+    jobs, whose files no longer change; pull <project>/<id> fetches one."""
     if slug:
         r2_target(slug, False)
     home, conflicted = factory_home(), []
