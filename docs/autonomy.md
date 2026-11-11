@@ -284,8 +284,9 @@ removes those, replaces secret-shaped text with `[secret-shaped text removed]`, 
 `review-findings` tag with `[review-findings tag removed]` and an `operator-preferences`
 tag with `[operator-preferences tag removed]`, and cuts the result to 8000 characters.
 When the text holds a tag or a secret shape in fullwidth or look-alike letters, the Worker
-folds those letters to ASCII first, so a token such as `ｇｈｐ＿…` is removed too. A
-review that quotes a secret or a tag, or writes an emoji such as ⚠️ or 👩‍💻, is still rated.
+folds those letters to ASCII first, and the rest of that review is folded with it, so a
+token such as `ｇｈｐ＿…` or `gһp_…` is removed too. A review that quotes a secret or a
+tag, or writes an emoji such as ⚠️ or 👩‍💻, is still rated.
 
 Reply 200: `{"decision": "escalate"|"continue", "confidence": int, "threshold": 80,
 "reason": text, "model": "@cf/cloudflare/clef-flash"}`. The reason is
