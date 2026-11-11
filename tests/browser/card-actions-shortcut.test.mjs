@@ -385,6 +385,8 @@ test("stale actions", { timeout: 180000 }, async (t) => {
         jobs = jobs.map((j) =>
           j.id === id ? { ...j, paused: { at: "2026-01-02T12:00:00Z" } } : j,
         );
+        // Local jobs no longer match the served board, so the next tick must see a changed ETag.
+        boardEtag = '"stale"';
       }, ID);
       await page.keyboard.press("Enter");
       const state = await picker(page);
