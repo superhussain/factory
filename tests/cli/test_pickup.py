@@ -2242,10 +2242,6 @@ class DenyNotesTest(PickupFixture):
         self.assertEqual(self.calls, [])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 FOLLOW = [{"id": "090-alpha-old", "kind": "follow-up-of"}]
 HELD = ["101-wrap-doc-line", "102-move-comment", "103-drop-double-period", "104-fix-typo", "105-rename-flag"]
 
@@ -2318,3 +2314,7 @@ class BatchHoldTest(PickupFixture):
         self.assertEqual((code, err), (0, ""))
         self.assertRegex(out, r"^launched 101-wrap-doc-line alpha on primary session [0-9a-f]{6}\n$")
         self.assertEqual([j["id"] for j in self.board["jobs"] if "claim" in j], ["101-wrap-doc-line"])
+
+
+if __name__ == "__main__":
+    unittest.main()

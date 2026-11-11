@@ -2572,7 +2572,7 @@ def batch_holds(home, jobs, runnable):
             for j in held[1:]:
                 lines[j["id"]] = f"skip {j['id']} {slug}: batches behind {held[0]['id']}"
             continue
-        waited = int(oldest.total_seconds() // 3600)
+        waited = max(0, int(oldest.total_seconds() // 3600))
         for j in held:
             lines[j["id"]] = (f"skip {j['id']} {slug}: waits for a batch "
                               f"({len(held)} of {least} held, oldest {waited}h of {hours}h)")
