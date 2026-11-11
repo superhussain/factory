@@ -89,6 +89,46 @@ test("live board events", { timeout: 120000 }, async (t) => {
       }, hidden);
     const stageOf = (page) =>
       page.$eval('.card[data-id="001-sample"]', (el) => el.closest("section.col").classList[1]);
+    // Queued live reads wait for the test to fire them. Fetches are counted, and held while holdReads is set.
+    const catchLiveReads = (page) =>
+      page.evaluate(() => {
+        const timeout = window.setTimeout;
+        window.liveTimers = [];
+        window.setTimeout = (fn, ms, ...args) => {
+          if (fn.name === "runLiveRead") {
+            window.liveTimers.push({ ms, key: args[0] });
+            return 1;
+          }
+          return timeout(fn, ms, ...args);
+        };
+        const real = window.fetch;
+        window.liveFetches = { board: 0, backlog: 0 };
+        window.heldReads = [];
+        window.holdReads = false;
+        window.fetch = (input, init) => {
+          const path = new URL(String(input), location.href).pathname;
+          if (path === "/board.json") window.liveFetches.board++;
+          if (path === "/api/backlog") window.liveFetches.backlog++;
+          if (!window.holdReads || (path !== "/board.json" && path !== "/api/backlog"))
+            return real(input, init);
+          return new Promise((resolve) => window.heldReads.push(() => resolve(real(input, init))));
+        };
+      });
+    const frame = (page, key, count = 1) =>
+      page.evaluate(
+        (k, n) => {
+          for (let i = 0; i < n; i++)
+            liveSocket.dispatchEvent(
+              new MessageEvent("message", { data: JSON.stringify({ type: "changed", key: k }) }),
+            );
+        },
+        key,
+        count,
+      );
+    const fireTimers = (page) =>
+      page.evaluate(() =>
+        Promise.all(window.liveTimers.splice(0).map(({ key }) => runLiveRead(key))),
+      );
 
     await t.test("live L1 a board write reaches the open dashboard", async () => {
       const { context, page, frames, errors, boardReads } = await open();
@@ -206,6 +246,7 @@ test("live board events", { timeout: 120000 }, async (t) => {
 
     await t.test("live L6 a changed frame reads only its key", async () => {
       const { context, page, errors } = await open();
+      await catchLiveReads(page);
       const paths = [];
       page.on("request", (request) => paths.push(new URL(request.url()).pathname));
       const send = async (data) => {
@@ -214,6 +255,7 @@ test("live board events", { timeout: 120000 }, async (t) => {
           (d) => liveSocket.dispatchEvent(new MessageEvent("message", { data: d })),
           data,
         );
+        await fireTimers(page);
         await new Promise((resolve) => setTimeout(resolve, 500));
         return paths.filter((p) => p === "/board.json" || p === "/api/backlog").sort();
       };
@@ -402,5 +444,57 @@ test("live board events", { timeout: 120000 }, async (t) => {
         await context.close();
       },
     );
+
+    await t.test("live L12 a burst of board frames reads the board once", async () => {
+      const { context, page, errors } = await open();
+      await catchLiveReads(page);
+      await frame(page, "board.json", 5);
+      assert.deepEqual(await page.evaluate("window.liveTimers"), [{ ms: 2000, key: "board.json" }]);
+      await fireTimers(page);
+      assert.deepEqual(await page.evaluate("window.liveFetches"), { board: 1, backlog: 0 });
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+    await t.test("live L13 frames for both keys read each key once", async () => {
+      const { context, page, errors } = await open();
+      await catchLiveReads(page);
+      for (let i = 0; i < 3; i++) {
+        await frame(page, "board.json");
+        await frame(page, "backlog.md");
+      }
+      assert.deepEqual(await page.evaluate("window.liveTimers.map((x) => x.key).sort()"), [
+        "backlog.md",
+        "board.json",
+      ]);
+      await fireTimers(page);
+      assert.deepEqual(await page.evaluate("window.liveFetches"), { board: 1, backlog: 1 });
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+    await t.test("live L14 a frame during a read adds one follow-up read", async () => {
+      const { context, page, errors } = await open();
+      await catchLiveReads(page);
+      await frame(page, "board.json");
+      await page.evaluate(() => {
+        window.holdReads = true;
+        window.firstRead = runLiveRead(window.liveTimers.splice(0)[0].key);
+      });
+      await page.waitForFunction(() => window.heldReads.length === 1, wait);
+      await frame(page, "board.json", 3);
+      assert.deepEqual(await page.evaluate("window.liveTimers"), []);
+      await page.evaluate(() => {
+        window.holdReads = false;
+        for (const go of window.heldReads.splice(0)) go();
+        return window.firstRead;
+      });
+      await page.waitForFunction(() => window.liveTimers.length === 1, wait);
+      await fireTimers(page);
+      assert.deepEqual(await page.evaluate("window.liveFetches"), { board: 2, backlog: 0 });
+      assert.deepEqual(await page.evaluate("window.liveTimers"), []);
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
   });
 });
