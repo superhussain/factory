@@ -88,6 +88,8 @@ class ReviewEscalationTests(IsolatedTestCase):
              "400: reviews.code: contains the reserved review-findings tag"),
             ((404, "not found"), "404: not found"),
             ((502, "the escalation model failed"), "502: the escalation model failed"),
+            ((502, "the escalation model failed\x1b[2J"), "502: the escalation model failed [2J"),
+            ((502, "a\u202eb c\x07"), "502: a b c"),
             ((503, "review escalation needs the Workers AI binding; deploy the current Worker"),
              "503: review escalation needs the Workers AI binding; deploy the current Worker"),
             ((502, "  \n"), "502"),
