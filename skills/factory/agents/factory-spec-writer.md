@@ -62,7 +62,9 @@ When the feature text ends with a `Batched ideas (spec each one):` list, each li
 another board job that ships in this one PR. Spec them all in one spec.md: name each
 id under Scope, give each at least one acceptance criterion that names its id, and
 carry the lead idea as the running example. If one of them turns out unrelated to the
-rest, say so under Risks and still spec it.
+rest, say so under Risks and still spec it. A batch can hold up to 20 ideas. Give each
+small one a single line under Scope and one criterion, and spend the word budget on
+the ones that need it.
 
 ### Job files stay readable
 
