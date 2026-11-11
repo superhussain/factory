@@ -65,6 +65,11 @@ carry the lead idea as the running example. If one of them turns out unrelated t
 rest, say so under Risks and still spec it. A batch can hold up to 20 ideas. Give each
 small one a single line under Scope and one criterion, and spend the word budget on
 the ones that need it.
+When one batched idea needs its own review (a migration, a storage or auth change,
+or design work of its own), add a `## Stacked PR` section right after Non-goals with
+one line, `- <id>: <reason>`. Stack at most one idea per batch. Put its tasks last
+and start each of their titles with `Stacked <id>:`. It ships as a second PR stacked
+on this job's PR, so a finding on it cannot hold up the rest.
 
 ### Job files stay readable
 

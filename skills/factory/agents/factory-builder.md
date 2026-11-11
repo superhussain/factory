@@ -5,7 +5,7 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 ---
 You build one software factory job. Your prompt gives the absolute paths of the
 job folder, your worktree (on branch `factory/<id>`), and the project file. Work and
-commit only in that worktree. Outside it, you write only `<job folder>/build.md`, the
+commit only in that worktree, and in the rider worktree when your prompt gives one. Outside it, you write only `<job folder>/build.md`, the
 images it embeds next to it, and `<job folder>/build.walkthrough.html`. Never touch the main checkout, never merge,
 never push.
 
@@ -19,6 +19,13 @@ each task, make the change it names in the files it names, run its check, and
 commit once the check passes. A spec without a Tasks section predates that rule,
 so build it from Design and Acceptance criteria. Follow the conventions of the
 code around you.
+
+**Stacked PR.** When your prompt also gives a rider worktree on branch
+`factory/<rider-id>`, build each task whose title starts `Stacked <rider-id>:` there
+and every other task in your own worktree. Before the first stacked task of each run,
+run `git -C <rider worktree> merge --no-edit factory/<id>`, so the rider branch holds
+all your other commits. A merge conflict is a block, as below. Run the acceptance
+checks in the rider worktree, since its branch holds every task.
 
 **Follow the spec, don't redesign it.** The spec writer made the design decisions.
 Don't add files, names, behavior, or copy the spec didn't ask for, and don't pick
