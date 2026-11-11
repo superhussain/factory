@@ -1,8 +1,8 @@
 // The a and . keys on a hovered or focused board card, or with a job drawer open: the jumper
 // opens in actions mode with the card menu's items, filters and runs one, and Settings >
-// Reference lists the keys. Also captures the Reference section and the actions jumper for review.
-// Cmd+K or Ctrl+K in actions mode switches to the normal jumper.
-// Also covers the stale-action guard, the job-gone empty state and the card-gone focus fallback.
+// Reference lists the keys. Cmd+K or Ctrl+K in actions mode switches to the normal jumper.
+// Also covers the stale-action guard, the job-gone empty state and the card-gone focus fallback,
+// and captures the Reference section and the actions jumper for review.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -150,6 +150,21 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
       await page.keyboard.press("Escape");
       await page.waitForFunction(() => !document.getElementById("job-picker").open);
       assert.equal(await focused(page, IDEA), true);
+    });
+
+    await t.test("menu open", async () => {
+      for (const blur of [false, true]) {
+        await page.click(`.card-actions[data-actions="${ID}"]`);
+        await page.waitForSelector(`${MENU}:not([hidden])`);
+        await page.hover(CARD(IDEA));
+        if (blur) await page.evaluate(() => document.activeElement.blur());
+        await page.keyboard.press("a");
+        await page.waitForFunction(() => document.getElementById("job-picker").open);
+        assert.equal((await picker(page)).heading, `Actions for ${ID}`);
+        assert.equal(await page.$eval(MENU, (el) => el.hidden), true);
+        await page.keyboard.press("Escape");
+        await page.waitForFunction(() => !document.getElementById("job-picker").open);
+      }
     });
 
     await t.test("switch to jumper", async () => {

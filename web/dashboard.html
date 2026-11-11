@@ -1662,7 +1662,7 @@ function activateJobResult() {
     const j = jobs.find((x) => x.id === id);
     if (!j || !jobActionsFor(j).includes(row.action)) return renderJobResults();
     closeJobPicker();
-    JOB_ACTION_RUN[row.action](drawer && openId === id ? drawerAction(row.action) : cardAction(id, inNeeds));
+    drawer && openId === id ? JOB_ACTION_RUN[row.action](drawerAction(row.action)) : runCardAction(row.action, id, inNeeds);
     return;
   }
   if (row.kind === 'archive-search') {
@@ -5811,6 +5811,19 @@ const JOB_ACTION_RUN = {
 };
 for (const id of JOB_ACTIONS) $(id).addEventListener('click', () => JOB_ACTION_RUN[id](drawerAction(id)));
 
+// One run per job and action at a time; a second click while the first is in flight does nothing.
+const cardRuns = new Set();
+async function runCardAction(action, id, inNeeds) {
+  const key = id + ':' + action;
+  if (cardRuns.has(key)) return;
+  cardRuns.add(key);
+  try {
+    await JOB_ACTION_RUN[action](cardAction(id, inNeeds));
+  } finally {
+    cardRuns.delete(key);
+  }
+}
+
 // One menu for every card. It lives outside #board, so a poll redraw keeps it and syncCardActions re-finds its trigger.
 function buildCardActionsMenu() {
   $('card-actions-menu').innerHTML = JOB_ACTIONS.map((id) =>
@@ -5882,12 +5895,14 @@ function syncCardActions(focus) {
     return;
   }
   const shown = jobActionsFor(j);
+  const active = $('card-actions-menu').contains(document.activeElement) ? document.activeElement : null;
   for (const b of $('card-actions-menu').children) b.hidden = !shown.includes(b.dataset.action);
   trigger.setAttribute('aria-expanded', 'true');
   $('card-actions-menu').hidden = false;
   placeCardActions(trigger);
   const items = cardActionItems();
   if (focus) (focus === 'last' ? items[items.length - 1] : items[0])?.focus();
+  else if (active?.hidden) items[0]?.focus();
 }
 
 // Below the trigger when it fits, else above, right edges aligned, 8px inside the viewport.
@@ -5932,8 +5947,9 @@ function markRefFocus(e, on) {
 $('board').addEventListener('focusin', (e) => markRefFocus(e, true));
 $('board').addEventListener('focusout', (e) => markRefFocus(e, false));
 
-// A focused card wins over a hovered one, and either wins over the open drawer's job.
+// An open card menu wins, then a focused card, then a hovered one, then the open drawer's job.
 function cardShortcutTarget(e) {
+  if (cardMenu && jobs.some((x) => x.id === cardMenu.id)) return { id: cardMenu.id, inNeeds: cardMenu.inNeeds };
   const c = e.target.closest?.('#board .card-wrap')?.querySelector('.card');
   const target = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : hoveredCard;
   if (target && jobs.some((x) => x.id === target.id)) return target;
@@ -5941,12 +5957,13 @@ function cardShortcutTarget(e) {
 }
 $('card-actions-menu').addEventListener('click', (e) => {
   const item = e.target.closest('[data-action]');
-  if (!item || !cardMenu) return;
+  if (!item || item.hidden || !cardMenu) return;
   const { id, inNeeds } = cardMenu;
   closeCardActions(true);
-  JOB_ACTION_RUN[item.dataset.action](cardAction(id, inNeeds));
+  runCardAction(item.dataset.action, id, inNeeds);
 });
 $('card-actions-menu').addEventListener('keydown', (e) => {
+  if (e.key === 'a' || e.key === '.') return;
   e.stopPropagation();
   const items = cardActionItems();
   const at = items.indexOf(document.activeElement);
