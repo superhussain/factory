@@ -243,3 +243,115 @@ class BatchTest(IsolatedTestCase):
             code, out, _ = invoke(factory, ["stuck", "--limit", "5"])
         self.assertEqual(code, 0)
         self.assertEqual([j["id"] for j in json.loads(out)], [LEAD])
+
+    def stack(self, *args):
+        with patch.dict(os.environ, {"PASEO_AGENT_ID": ""}):
+            return invoke(factory, ["stack", *args, "--session", "tag"])
+
+    def refuse_stack(self, code, message, *args):
+        self.assertEqual(self.stack(*args), (code, "", f"factory.py: {message}\n"))
+        self.assertEqual(self.puts, 0)
+
+    def test_stack_marks_one_rider(self):
+        self.batch(TARGET, "091-sample-typo", "092-sample-csv-name")
+        self.puts = 0
+        code, out, _ = self.stack(TARGET, "092-sample-csv-name")
+        self.assertEqual((code, self.puts), (0, 1))
+        self.assertEqual(json.loads(out), {"lead": LEAD, "stacked": "092-sample-csv-name"})
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stacked"], j["note"], j["stage"]), (True, f"stacked PR on {LEAD}", "spec"))
+        self.assertNotIn("stacked", self.job("091-sample-typo"))
+        code, out, _ = self.stack(TARGET, "092-sample-csv-name")
+        self.assertEqual((code, self.puts), (0, 1))
+        self.assertEqual(json.loads(out), {"lead": LEAD, "stacked": "092-sample-csv-name"})
+
+    def test_stack_refusals_write_nothing(self):
+        self.batch(TARGET, "091-sample-typo", "092-sample-csv-name")
+        batched = json.loads(self.text)["jobs"]
+        self.puts = 0
+        self.refuse_stack(2, "bad job id '../x'. Nothing was written.", TARGET, "../x")
+        self.refuse_stack(2, "bad job id 'bad id'. Nothing was written.", TARGET, "bad id")
+        self.refuse_stack(4, "no job 999-sample-none on the board", "sample/999-sample-none", "092-sample-csv-name")
+        self.refuse_stack(4, "no job 999-sample-none on the board", TARGET, "999-sample-none")
+        rows = json.loads(json.dumps(batched))
+        rows[0]["claim"]["session"] = "other"
+        self.set_jobs(rows)
+        self.refuse_stack(6, f"{LEAD} is not held by this session. Nothing was written.", TARGET,
+                          "092-sample-csv-name")
+        rows[0].update(claim=dict(CLAIM), stage="build")
+        self.set_jobs(rows)
+        self.refuse_stack(2, f"stack runs while {LEAD} is at spec, not build", TARGET, "092-sample-csv-name")
+        rows[0]["stage"] = "spec"
+        self.set_jobs(rows)
+        self.refuse_stack(2, f"cannot stack 093-sample-login: not batched into {LEAD}. Nothing was written.",
+                          TARGET, "093-sample-login")
+        rows[1]["stacked"] = True
+        self.set_jobs(rows)
+        self.refuse_stack(2, f"cannot stack 092-sample-csv-name: 091-sample-typo is already stacked on {LEAD}. "
+                          "Nothing was written.", TARGET, "092-sample-csv-name")
+
+    def test_cli_registers_stack(self):
+        self.assertEqual(factory.COMMANDS["stack"], (factory.stack_cmd, 2, 2))
+
+    def stacked_batch(self):
+        self.batch(TARGET, "091-sample-typo", "092-sample-csv-name")
+        self.stack(TARGET, "092-sample-csv-name")
+
+    def test_stacked_rider_keeps_its_own_pr(self):
+        self.stacked_batch()
+        self.patch_lead({"stage": "build"})
+        self.assertEqual(self.job("092-sample-csv-name")["stage"], "build")
+        self.patch_lead({"stage": "pr-open", "pr": "https://example.test/pr/41"})
+        self.assertEqual(self.job("091-sample-typo")["pr"], "https://example.test/pr/41")
+        j = self.job("092-sample-csv-name")
+        self.assertEqual(j["stage"], "pr-open")
+        self.assertNotIn("pr", j)
+        rows = json.loads(self.text)["jobs"]
+        rows[2]["pr"] = "https://example.test/pr/42"
+        self.set_jobs(rows)
+        self.patch_lead({"stage": "needs-human"})
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stage"], j["pr"]), ("needs-human", "https://example.test/pr/42"))
+
+    def test_merged_lead_releases_stacked_rider(self):
+        rows = jobs()
+        rows[2]["refs"] = ["junk", {"id": "001-sample-old", "kind": "follow-up-of"}]
+        self.set_jobs(rows)
+        self.stacked_batch()
+        self.patch_lead({"stage": "pr-open", "pr": "https://example.test/pr/41", "automerge": True})
+        rows = json.loads(self.text)["jobs"]
+        rows[2]["pr"] = "https://example.test/pr/42"
+        self.set_jobs(rows)
+        self.patch_lead({"stage": "merged"})
+        self.assertEqual(self.job("091-sample-typo")["stage"], "merged")
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stage"], j["pr"], j["automerge"], j["note"]),
+                         ("pr-open", "https://example.test/pr/42", True, f"stacked on {LEAD}, which merged"))
+        self.assertEqual(j["refs"], [{"id": "001-sample-old", "kind": "follow-up-of"},
+                                     {"id": LEAD, "kind": "follow-up-of"}])
+        self.assertNotIn("stacked", j)
+        self.assertNotIn("escalated", j)
+        self.assertIsNone(factory.lead_of(j))
+
+    def test_merged_lead_unbatches_stacked_rider_without_pr(self):
+        self.stacked_batch()
+        self.patch_lead({"stage": "pr-open", "pr": "https://example.test/pr/41", "escalated": True})
+        self.patch_lead({"stage": "merged"})
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stage"], j["note"]), ("idea", f"unbatched: {LEAD} merged before its stacked PR opened"))
+        for key in ("refs", "stacked", "pr", "escalated"):
+            self.assertNotIn(key, j)
+
+    def test_closed_lead_unbatches_stacked_rider(self):
+        self.stacked_batch()
+        self.patch_lead({"stage": "pr-open", "pr": "https://example.test/pr/41"})
+        rows = json.loads(self.text)["jobs"]
+        rows[2]["pr"] = "https://example.test/pr/42"
+        self.set_jobs(rows)
+        self.patch_lead({"stage": "closed"})
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stage"], j["note"]),
+                         ("idea", f"unbatched: {LEAD} closed; stacked PR https://example.test/pr/42 is still open"))
+        for key in ("refs", "stacked", "pr"):
+            self.assertNotIn(key, j)
+        self.assertEqual(self.job("091-sample-typo")["note"], f"unbatched: {LEAD} closed")

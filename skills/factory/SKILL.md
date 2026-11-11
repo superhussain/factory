@@ -363,6 +363,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "needs": "optional one line on what only the human can do, e.g. approve spec.md, or review and merge PR #123 held by merge: human",
   "port": "optional dev-server port or block the builder holds, e.g. 8130-8139",
   "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | batched-into (set only by factory.py batch; board refuses it)" }],
+  "stacked": "true on the one rider that ships as a PR stacked on its lead's PR; set only by factory.py stack",
   "build": { "state": "queued | running | done | failed", "runs": ["https://github.com/<repo>/actions/runs/1"] },
   "pipeline": { "global": 3, "project": 2 },
   "backlog": { "line": "- [ ] <slug>: <feature>", "decision": "approved | denied | rework", "at": "...", "notes": "optional", "answers": "optional", "notes_read": "..." },
@@ -511,6 +512,7 @@ migration; their command and JSON output contract are unchanged.
   branch with `git -C "$WT" push -u origin factory/<id>`, so another device can pick
   the job up. A rejected push means another device moved the branch, so move the job
   to `needs-human` with that reason.
+  With a stacked rider, also run `git -C "$WORKTREES/<rider-id>" push -u origin factory/<rider-id>`.
 - Shipping opens a PR, and an APPROVE PR merges without waiting for a human. Push
   once more with `git -C "$REPO_PATH" push -u origin factory/<id>`, then open a PR
   against the job's base (`$BASE` unless the job was stacked) with
@@ -526,6 +528,13 @@ migration; their command and JSON output contract are unchanged.
   when you see it merged. Then run `cleanup` as Rules describes.
   When `batch <project>/<id>` prints any `riders`, the description also has a
   `Batched ideas` list with one `- <id>: <title>` line per rider.
+  With a stacked rider, open the job's PR first, then push `factory/<rider-id>` and run
+  `gh pr create -R "$REPO" --head factory/<rider-id> --base factory/<id>`. Its
+  description opens with `Stacked on #<n>.` and covers only the rider's tasks. Patch
+  the rider `{"pr": "<its PR URL>"}`. Write `$JOBS/<rider-id>/decision.md` with the
+  job's `decision.md` first line, then `Approved with <id>: $DASHBOARD#<id>/decision`,
+  and run `push "$SLUG/<rider-id>"`. The job's `Batched ideas` list leaves the rider
+  out and ends with `Stacked: #<rider PR number>`.
 - Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
   at `pr-open` until its parent merges and the child is retargeted to `$BASE`, then
   merges the same way. Checks can take a minute to register, so poll
@@ -541,6 +550,9 @@ migration; their command and JSON output contract are unchanged.
   `gh pr merge <n> -R "$REPO" --merge --delete-branch` as its own command. Move the
   job to `merged`, then run `cleanup`. A failing check or a merge conflict goes back to the builder as a
   rework with the log. A second failure moves the job to `needs-human`.
+  When the job had a stacked rider, `board` moves that rider out of the batch at
+  `pr-open` with the job's `automerge` and `escalated`. Merge the rider's PR the same
+  way, move it to `merged`, and run `cleanup "$SLUG/<rider-id>"`.
 - Jobs at `pr-open` from before auto-merge stay as they are. They never auto-merge.
   A human merges or closes them, and the orchestrator moves the job when it sees that.
 - An ESCALATE PR is held. Put a `> [!WARNING]` callout at the top of the description
@@ -776,7 +788,14 @@ feature.
 2. Spawn `factory-spec-writer` with the feature text, job folder, worktree, and
    project file, so the spec describes the same `$BASE` the builder starts from. It
    writes `spec.md`.
-3. Apply the spec-approval gate as Gate stages describes. Set stage `build`, then
+3. Apply the spec-approval gate as Gate stages describes.
+   When `spec.md` has a `## Stacked PR` section, run
+   `python3 "$RUNTIME" stack "$SLUG/<id>" <rider-id> --session <tag>` with the id on its
+   line, then `git -C "$REPO_PATH" worktree add "$WORKTREES/<rider-id>" -b factory/<rider-id> factory/<id>`.
+   Every builder dispatch for this job, fix rounds and recovery included, also gets that
+   rider worktree. Exit 2, 4 or 6 writes nothing: report the line, create no rider
+   worktree, and tell the builder to build every task on `factory/<id>`.
+   Set stage `build`, then
    spawn `factory-builder` as `builder-<id>` at the
    tier Rules selects from the spec, with its assigned dev-server port if the job
    needs one. It commits on
@@ -785,6 +804,9 @@ feature.
    all-`pending` entry to `rounds`. Spawn `factory-review-security`, `factory-review-ux`,
    `factory-review-ui`, and `factory-review-code` with the job folder, round folder,
    worktree, branch, and project file.
+   With a stacked rider, every reviewer and the approver get `$WORKTREES/<rider-id>`
+   and `factory/<rider-id>` in place of the job's worktree and branch, since that
+   branch holds the whole stack.
 5. Once all four are in, any CHANGES first checks the round cap. At the cap, the job
    goes to `needs-human`. Below the cap, run
    `python3 "$RUNTIME" escalation "$SLUG/<id>" <N>`. When its decision is `escalate`,
@@ -842,8 +864,9 @@ feature.
     It archives this session's Paseo workspace when it is the job's own worktree workspace,
     whatever its git state, and can end the session. When the workspace archive leaves
     this session's agent running, it archives the agent too. On exit 1, a stderr line holding
-    `agent archive failed` is patched as `{"note": "<stderr line without factory.py: >"}`.
-    Any other stderr line is patched as `{"note": "workspace archive failed: <stderr line>"}`.
+    `agent archive failed` is patched as `{"note": "<stderr line minus its factory.py: prefix>"}`.
+    Any other stderr line is patched as
+    `{"note": "workspace archive failed: <stderr line minus its factory.py: prefix>"}`.
 
 **Reworking an existing PR.** When the feature is "rework PR #N", the spec writer
 reads that PR's description and diff (`gh pr view N`, `gh pr diff N`) as the statement
@@ -958,8 +981,8 @@ works from any directory.
    names before you pick it. Pick none when unsure. Run
    `batch <project>/<id> <idea-id> ... --session <tag>` with the picks. It moves them to
    `spec` behind this job with a `batched-into` ref, and from then on every stage and
-   `pr` this job gets is mirrored onto them. Exit 2, 4 or 6 writes nothing: report the
-   line and go on unbatched. `board` refuses a patch that adds or removes a `batched-into` ref.
+   `pr` this job gets is mirrored onto them, except that a stacked rider never gets `pr`.
+   Exit 2, 4 or 6 writes nothing: report the line and go on unbatched. `board` refuses a patch that adds or removes a `batched-into` ref.
 6. Continue the loop from step 2 of `/factory <feature>`, with the `idea` field
    as the feature text. When the job has pasted images, also give the spec writer
    `$JOBS/<id>/idea-images.md` and its images, so the spec starts from the idea's
