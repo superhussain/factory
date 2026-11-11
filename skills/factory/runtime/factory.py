@@ -3234,8 +3234,9 @@ def close_decision(j, reason, device, earlier, outcome):
             "- No agent reviewed this close. The reason is the owner's own words.\n"
             f"{open_pr}"
             "- The next pickup run on each host that holds the worktree or branch runs "
-            f"`factory.py cleanup {j['project']}/{j['id']}` there. It keeps a dirty worktree and a branch "
-            "that is not merged.\n")
+            f"`factory.py cleanup {j['project']}/{j['id']}` there when the project's pickup is on "
+            "and lists that host. It keeps a dirty worktree and a branch that is not merged. "
+            "On any other host, run that command there by hand.\n")
     return text + "\n## Earlier decision\n\n" + earlier if earlier else text
 
 
