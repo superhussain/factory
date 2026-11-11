@@ -288,7 +288,9 @@ class RolesTest(IsolatedTestCase):
         risk = "auth, secret, data, protocol, storage, dependency, workflow or permission risk"
         skill = flat("SKILL.md")
         for phrase in ("Fix open items in the job that found them", "Rounds left: <n>",
-                       "Items under `### Absorbed` are done", risk):
+                       "Items under `### Absorbed` are done", risk,
+                       "or raises the round cap (F3)",
+                       "or 0 when the approver already returned CHANGES this cycle"):
             self.assertIn(phrase, skill)
         builder = flat("agents/factory-builder.md")
         for phrase in ("Absorb small open items", "### Absorbed", "### Left open", risk):
@@ -298,5 +300,8 @@ class RolesTest(IsolatedTestCase):
             for phrase in ("### Fix now", "### Follow-up", "Nits never change the verdict", risk):
                 self.assertIn(phrase, review, name)
             self.assertNotIn("a separate heading", review, name)
-        self.assertIn("Rounds left", flat("agents/factory-approver.md"))
+        approver = flat("agents/factory-approver.md")
+        self.assertIn("Rounds left", approver)
+        self.assertIn("the `### Fix now` nits are worth one more review round", approver)
+        self.assertNotIn("absorb bar", approver)
         self.assertIn("rather than Sub-jobs", flat("agents/factory-spec-writer.md"))

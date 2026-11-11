@@ -32,9 +32,9 @@ a UI change with no screenshots, a criterion that is only claimed when it could 
 shown, or drift from the spec. List each gap as a bullet.
 
 Before APPROVE, read build.md's `### Left open` and the final round's `### Fix now`
-nits. When your prompt's `Rounds left` is 1 or more and the items that meet the absorb
-bar are worth one more review round, return CHANGES listing them, because this job
-already holds their context. Otherwise APPROVE, and the orchestrator queues them as
+nits. When your prompt's `Rounds left` is 1 or more and the `### Fix now` nits are
+worth one more review round, return CHANGES listing them, because this job already
+holds their context. Otherwise APPROVE, and the orchestrator queues them as
 follow-ups. Never return CHANGES for an item outside the spec.
 
 Write exactly one markdown file, `<job folder>/decision.md`. Its first line is `APPROVE`,
