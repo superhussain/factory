@@ -750,7 +750,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="display-theme">Theme<select id="display-theme"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <label for="display-density">Density<select id="display-density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
       <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="15">Every 15 seconds</option><option value="30">Every 30 seconds</option><option value="60">Every 60 seconds</option></select></label>
-      <p class="muted" id="display-poll-help">The board updates live while this tab is visible. If the live connection drops, the board refreshes on this schedule and the backlog every 2 minutes until it reconnects. Refreshing pauses while this window is hidden or unfocused and catches up when you come back. With notifications on, it refreshes every 30 seconds instead. A hidden tab stays live only while notifications are on.</p>
+      <p class="muted" id="display-poll-help">If live updates drop, the board refreshes on this schedule and the backlog every 2 minutes. A hidden or unfocused window pauses until you return. With notifications on, it refreshes every 30 seconds instead.</p>
       <fieldset id="display-filter"><legend>Show jobs from</legend></fieldset>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
@@ -1023,14 +1023,19 @@ const CONNECTION = {
   signin: ['Your sign-in has expired.', 'dot err', 'sign-in expired'],
 };
 function drawDot(className, label) { const dot = $('dot'); dot.className = className; dot.title = label; dot.setAttribute('aria-label', label); }
+let connState = '';
 function setConnection(state) {
+  const was = connState; connState = state;
   const [text, dot, title] = CONNECTION[state];
   $('conn-banner').hidden = state === 'online';
   $('conn-text').textContent = text;
   $('conn-signin').hidden = state !== 'signin';
   const polling = state === 'online' && !liveOpen;
-  const label = polling ? 'Polling every ' + pollSeconds + ' seconds until live updates reconnect' + (liveNote && '. ' + liveNote) : title;
+  const every = pollEvery();
+  const cadence = every ? 'Polling every ' + every + ' seconds until live updates reconnect' : 'Polling paused while this window is hidden or unfocused';
+  const label = polling ? cadence + (liveNote && '. ' + liveNote) : title;
   drawDot(polling ? dot + ' polling' : dot, label);
+  if (was === 'signin' && state !== 'signin') syncLive();
 }
 function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
 // Keepalive: an open socket sends "ping" every 25 s and the room's auto-response answers "pong", so proxies that drop quiet connections keep it. No pong for 60 s closes it. liveNote names how the last socket closed, for the polling dot.
@@ -1121,7 +1126,9 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     const etag = r.ok ? r.headers.get('ETag') || '' : '';
     setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
     // A socket open or a timer tick redraws only a changed board, so a focused card is not read again.
+    // syncDetail() still reopens a deep-linked tab or archived job that has not loaded.
     if (ifChanged && loaded && etag && etag === boardEtag) {
+      syncDetail();
       return true;
     }
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
@@ -4262,7 +4269,7 @@ function parseHash() {
   return i < 0 ? { id: h, tab: '' } : { id: h.slice(0, i), tab: h.slice(i + 1) };
 }
 
-// Reload the open job's files only when its board entry changed, so new reviews appear without refetching every 3s,
+// Reload the open job's files only when its board entry changed, so new reviews appear without refetching every tick,
 // or while the hash names a file that could still land (decision.md before the approver runs).
 function syncDetail() {
   const { id } = parseHash();
@@ -6318,21 +6325,22 @@ function applyDisplay() {
 // A tick reads the backlog only when the last read is 2 minutes old.
 // A tick redraws only a changed board, so a focused card keeps its node.
 function pollTick() { return poll({ ifChanged: true, withBacklog: Date.now() - backlogReadAt >= BACKLOG_POLL_MS }); }
+// Seconds between fallback ticks now, or 0 while a hidden or unfocused window waits.
+function pollEvery() { const away = document.hidden || !document.hasFocus(); return !away ? pollSeconds : notifyActive() ? 30 : 0; }
 function schedulePoll() {
   clearInterval(pollTimer);
-  const away = document.hidden || !document.hasFocus();
-  const ms = !pollStarted || liveOpen ? 0 : !away ? pollSeconds * 1000 : notifyActive() ? 30000 : 0;
+  const ms = !pollStarted || liveOpen ? 0 : pollEvery() * 1000;
   pollTimer = ms ? setInterval(pollTick, ms) : 0;
   drawLiveDot();
 }
 document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); syncLive(); schedulePoll(); });
 // Live board events: the Worker sends {"type":"changed","key":...} after each board or
 // backlog write, and the matching key re-reads at once. A dropped socket retries with backoff
-// (1, 2, 4 ... 30 s), then every 30 s while a socket is wanted.
+// (1, 2, 4 ... 30 s), then every 30 s while a socket is wanted. An expired sign-in stops retries until a board read succeeds.
 const LIVE_PATH = '/events/board';
 const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000;
 let liveSocket = null, liveOpen = false, liveRetries = 0, liveRetryTimer = 0;
-function liveWanted() { return pollStarted && navigator.onLine && (!document.hidden || notifyActive()); }
+function liveWanted() { return pollStarted && navigator.onLine && connState !== 'signin' && (!document.hidden || notifyActive()); }
 function openLive() {
   clearTimeout(liveRetryTimer);
   liveRetryTimer = 0;

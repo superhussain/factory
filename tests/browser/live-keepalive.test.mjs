@@ -35,6 +35,7 @@ test("live keepalive", { timeout: 120000 }, async (t) => {
         if (new URL(request.url()).pathname === "/board.json") boardReads.count++;
       });
       await page.evaluateOnNewDocument(() => {
+        document.hasFocus = () => true;
         const interval = window.setInterval;
         window.pingTicks = [];
         window.setInterval = (fn, ms, ...args) => {
