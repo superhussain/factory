@@ -5030,7 +5030,7 @@ const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
 
 // Writes the move and drops the claim, so factory.py fences the old session and the target host
 // picks the job up. Returns an error message, '' once the board is changed, or 'unchanged' when
-// the board already holds this move.
+// the board already holds this move and no pickup has claimed it.
 function moveJob(board, id, to, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
@@ -5236,7 +5236,7 @@ $('move-host-form').addEventListener('submit', async (e) => {
   } catch (x) {
     if (!refused && dlg.uncertain) x.uncertain = true;
     dlg.uncertain = !!x.uncertain;
-    $('move-host-err').textContent = boardSaveError(x, 'The move may have saved. Press Move job again with the same host to check. It will not queue a second move.');
+    $('move-host-err').textContent = boardSaveError(x, 'The move may have saved. Press Move job again with the same host to check. It will not queue a duplicate move.');
     $('move-host-err').hidden = false;
     $('move-host-save').disabled = false;
     return;
@@ -5289,7 +5289,7 @@ $('close-job-form').addEventListener('submit', async (e) => {
   } catch (x) {
     if (!refused && dlg.uncertain) x.uncertain = true;
     dlg.uncertain = !!x.uncertain;
-    $('close-job-err').textContent = boardSaveError(x, 'The close may have saved. Press Close job again with the same reason to check. It will not queue a second close.');
+    $('close-job-err').textContent = boardSaveError(x, 'The close may have saved. Press Close job again to check. It will not queue a second close or change a saved reason.');
     $('close-job-err').hidden = false;
     $('close-job-save').disabled = false;
     return;
@@ -5715,7 +5715,7 @@ async function reconcile(cause) {
     if (!r.ok) throw new Error(r.status);
     const hit = (await r.json()).jobs.find((j) => j.capture_id === snap.capture_id);
     if (hit) return hit.id;
-    showErr('Not confirmed: ' + cause.message + '. The board has no record of it yet, but the save could still land late. Retry re-checks with the same content and will not add a duplicate.');
+    showErr(boardSaveError(cause, 'The board has no record of it yet, but the save could still land late. Retry re-checks with the same content and will not add a duplicate.'));
   } catch {
     showErr('Could not confirm whether the idea was saved: ' + cause.message + '. Retry checks again and will not add a duplicate.');
   }

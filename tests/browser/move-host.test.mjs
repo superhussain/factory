@@ -71,7 +71,7 @@ const JOBS = [
   },
 ];
 const MOVE_HINT =
-  " The move may have saved. Press Move job again with the same host to check. It will not queue a second move.";
+  " The move may have saved. Press Move job again with the same host to check. It will not queue a duplicate move.";
 const PICKUP_HOSTS = ["lab-linux", "studio-mac", "new-box", "spare-pc", "old-laptop"];
 
 const freezeClock = (page) =>
@@ -358,12 +358,14 @@ test("move host", { timeout: 240000 }, async (t) => {
         await page.waitForFunction(() => !document.getElementById("move-host-err").hidden, wait);
         const first = await page.$eval("#move-host-err", (el) => el.textContent);
         const after = await (await fetch(origin + "/api/board")).text();
-        try {
-          readFails = true;
-          await page.$eval("#move-host-err", (el) => {
+        const clearErr = () =>
+          page.$eval("#move-host-err", (el) => {
             el.hidden = true;
             el.textContent = "";
           });
+        try {
+          readFails = true;
+          await clearErr();
           await page.click("#move-host-save");
           await page.waitForFunction(() => !document.getElementById("move-host-err").hidden, wait);
           if (width === 1440)
