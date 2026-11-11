@@ -268,10 +268,14 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
         assert.equal((await meta()).includes(id), false);
         await reset();
       }
+      const refetched = page.waitForResponse(
+        (response) => new URL(response.url()).searchParams.get("id") === "413-expired-link",
+      );
       await page.evaluate(() => {
         location.hash = "#413-expired-link";
       });
-      await until(() => asked.filter((id) => id === "413-expired-link").length === 2);
+      await refetched;
+      assert.equal(asked.filter((id) => id === "413-expired-link").length, 2);
       await reset();
     });
 
