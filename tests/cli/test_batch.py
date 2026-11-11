@@ -80,11 +80,20 @@ class BatchTest(IsolatedTestCase):
         self.assertEqual(json.loads(out)["lead"], LEAD)
         self.assertEqual(json.loads(out)["riders"], [])
         self.assertEqual(json.loads(out)["candidates"][:2], [
-            {"id": "091-sample-typo", "title": "Title 091-sample-typo", "idea": "Fix the header typo"},
+            {"id": "091-sample-typo", "title": "Title 091-sample-typo", "idea": "Fix the header typo", "hold": False},
             {"id": "092-sample-csv-name", "title": "Title 092-sample-csv-name",
-             "idea": "Title 092-sample-csv-name"}])
+             "idea": "Title 092-sample-csv-name", "hold": False}])
         self.assertEqual(self.ids(out, "candidates"), ["091-sample-typo", "092-sample-csv-name", "093-sample-login"])
         self.assertEqual(self.puts, 0)
+
+    def test_candidates_mark_hold(self):
+        rows = jobs()
+        rows[2]["refs"] = [{"id": "080-sample-report", "kind": "follow-up-of"}]
+        self.set_jobs(rows)
+        code, out, _ = self.batch(TARGET)
+        self.assertEqual(code, 0)
+        hold = {c["id"]: c["hold"] for c in json.loads(out)["candidates"]}
+        self.assertEqual((hold["092-sample-csv-name"], hold["093-sample-login"]), (True, False))
 
     def test_excludes_each_ineligible_idea(self):
         others = [

@@ -1707,7 +1707,8 @@ def batch_cmd(target, *idea_ids):
     local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
 
     def entry(j):
-        return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title")}
+        return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title"),
+                "hold": batch_hold(j)}
 
     def change(text):
         data = load_board(text)
