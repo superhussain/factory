@@ -137,12 +137,12 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await live.type("#host-add-label", "Test host");
       await live.click("#host-add-save");
       await live.waitForSelector("#host-code:not([hidden])", wait);
-      const command = await live.$eval("#host-code-command", (el) => el.textContent);
+      const command = await read(live, "#host-code-command", "textContent");
       const code = command.split(" ").at(-1);
       assert.match(code, CODE);
       assert.equal(command, "factory.py host pair test-host " + code);
       assert.ok(
-        (await live.$eval("#host-code-text", (el) => el.textContent)).startsWith(
+        (await read(live, "#host-code-text", "textContent")).startsWith(
           "Pairing code for test-host: " + code + ". It works once and expires at ",
         ),
       );
@@ -160,8 +160,8 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       assert.deepEqual(leaks, []);
       await live.click("#host-code-done");
       await assert.rejects(read(live, "#host-code", "hiddn"), /has no property hiddn/);
-      assert.equal(await live.$eval("#host-code", (el) => el.hidden), true);
-      assert.equal(await live.$eval("#host-code-command", (el) => el.textContent), "");
+      assert.equal(await read(live, "#host-code", "hidden"), true);
+      assert.equal(await read(live, "#host-code-command", "textContent"), "");
     });
 
     await t.test("hosts H2 save and conflict keep typed values", async () => {
@@ -230,7 +230,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await clickNow(live, '[aria-label="New code Elsewhere"]');
       await live.waitForSelector("#host-code:not([hidden])", wait);
       assert.match(
-        (await live.$eval("#host-code-command", (el) => el.textContent)).split(" ").at(-1),
+        (await read(live, "#host-code-command", "textContent")).split(" ").at(-1),
         CODE,
       );
       await live.waitForFunction(
@@ -241,7 +241,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       );
       await live.click("#settings-nav-pipeline");
       await live.waitForSelector("#settings-pipeline:not([hidden])", wait);
-      assert.equal(await live.$eval("#host-code", (el) => el.hidden), true);
+      assert.equal(await read(live, "#host-code", "hidden"), true);
       await live.close();
     });
 
