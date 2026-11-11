@@ -192,10 +192,11 @@ test("document profile stays linear on adversarial 1 MiB bodies", () => {
   const size = 1 << 20;
   for (const unit of ["eyJ-", "eyJ_", ".eyJ", "-----BEGIN eyJ-", "eyJ" + x(10) + ".", ".eyJ—"]) {
     const body = unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
-    const start = performance.now();
+    const before = process.cpuUsage();
     checkOperatorText(body, "project document", "document");
-    const ms = performance.now() - start;
-    assert.ok(ms < 500, `${JSON.stringify(unit)} took ${ms.toFixed(0)} ms`);
+    const { user, system } = process.cpuUsage(before);
+    const ms = (user + system) / 1000;
+    assert.ok(ms < 500, `${JSON.stringify(unit)} used ${ms.toFixed(0)} ms of CPU`);
   }
   const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig";
   assert.equal(

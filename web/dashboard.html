@@ -1276,12 +1276,13 @@ function refLine(r) {
 }
 
 // The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
+// The wrapper holds the key hint, so the button's only shortcut cue is aria-keyshortcuts.
 // A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
 function card(j, inNeeds, archived = false) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
-    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' title="Press A or . for job actions" aria-keyshortcuts="a ."') + '>' +
+    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
     '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span>' +
       (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
@@ -1299,8 +1300,8 @@ function card(j, inNeeds, archived = false) {
     (ask && (inNeeds || !hiddenCardFields.has('note')) ? line('note', ask) : '') +
     chips(j.rounds) + '</button>';
   const pr = hiddenCardFields.has('pr') ? null : prLink(j);
-  return '<div class="card-wrap' + (pr ? ' has-pr' : '') + '">' + btn +
-    (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub">PR #' + esc(pr.n) + '</a>' : '') +
+  return '<div class="card-wrap' + (pr ? ' has-pr' : '') + '"' + (archived ? '' : ' title="Job actions (A or .)"') + '>' + btn +
+    (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub" title="">PR #' + esc(pr.n) + '</a>' : '') +
     (archived ? '' : '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
     ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') + '</div>';
 }
@@ -1512,9 +1513,23 @@ function cancelJobPicker() {
   else closeJobPicker();
 }
 
+// Where focus returns when the actions jumper closes: the drawer's actions button, else the board card.
+function actionsOpener() {
+  return pickerActions.drawer && !$('detail').hidden ? $('d-actions') : boardCard(pickerActions.id, pickerActions.inNeeds);
+}
+
 function openJobPicker() {
   if (document.querySelector('dialog[open]:not(#job-picker)')) return;
-  if (!$('job-picker').open) {
+  if ($('job-picker').open && pickerMode === 'actions') {
+    // Cmd+K in actions mode swaps to the normal jumper; Escape still returns to the card.
+    pickerFocus = actionsOpener();
+    pickerMode = 'job';
+    pickerActions = null;
+    archiveSearch = null;
+    $('job-search').value = '';
+    selectedKey = null;
+    renderJobResults();
+  } else if (!$('job-picker').open) {
     pickerMode = 'job';
     savedJobQuery = '';
     archiveSearch = null;
@@ -1529,7 +1544,7 @@ function openJobPicker() {
 }
 
 function closeJobPicker(activate = false) {
-  const card = pickerActions && (pickerActions.drawer && !$('detail').hidden ? $('d-actions') : boardCard(pickerActions.id, pickerActions.inNeeds));
+  const card = pickerActions && actionsOpener();
   pickerMode = 'job';
   pickerActions = null;
   savedJobQuery = '';
