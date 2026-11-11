@@ -109,9 +109,10 @@ async function menuClip(page) {
     const b = document.querySelector("#card-actions-menu").getBoundingClientRect();
     const x = Math.min(a.left, b.left) - 8;
     const y = Math.min(a.top, b.top) - 8;
+    // getBoundingClientRect is viewport-relative; a screenshot clip is page-relative.
     return {
-      x,
-      y,
+      x: x + window.scrollX,
+      y: y + window.scrollY,
       width: Math.max(a.right, b.right) + 8 - x,
       height: Math.max(a.bottom, b.bottom) + 8 - y,
     };
@@ -180,11 +181,27 @@ test("card actions", { timeout: 180000 }, async (t) => {
         await p.$eval(TRIGGER, (el) => el.scrollIntoView({ block: "center", inline: "center" }));
         await p.click(TRIGGER);
         await p.waitForSelector(`${MENU}:not([hidden])`);
-        const rect = await p.$eval(MENU, (el) => {
-          const r = el.getBoundingClientRect();
-          return { left: r.left, right: r.right };
-        });
+        const rect = await p.evaluate((sel) => {
+          const m = document.querySelector("#card-actions-menu").getBoundingClientRect();
+          const t = document.querySelector(sel).getBoundingClientRect();
+          return {
+            left: m.left,
+            right: m.right,
+            top: m.top,
+            bottom: m.bottom,
+            tTop: t.top,
+            tBottom: t.bottom,
+            scrollY,
+          };
+        }, TRIGGER);
+        assert.ok(rect.scrollY > 0, JSON.stringify(rect));
         assert.ok(rect.left >= 8 && rect.right <= 382, JSON.stringify(rect));
+        // The menu opens 4px below or above its trigger on a scrolled board.
+        assert.ok(
+          Math.abs(rect.top - (rect.tBottom + 4)) <= 1 ||
+            Math.abs(rect.bottom - (rect.tTop - 4)) <= 1,
+          JSON.stringify(rect),
+        );
         await p.screenshot({
           path: `${SHOTS}card-actions-menu-390.png`,
           clip: await menuClip(p),
