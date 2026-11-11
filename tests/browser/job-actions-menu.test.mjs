@@ -150,7 +150,16 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
 
         await activate("#d-actions");
         await activate("#d-edit-idea");
-        await page.waitForFunction(() => document.getElementById("edit-idea-dlg").open);
+        await page.waitForFunction(
+          () =>
+            document.getElementById("edit-idea-dlg").open ||
+            !document.getElementById("d-edit-idea-err").hidden,
+        );
+        assert.equal(
+          await page.$eval("#d-edit-idea-err", (el) => (el.hidden ? "" : el.textContent)),
+          "",
+          `${label} Edit idea loads`,
+        );
         assert.equal((await state(page)).menu, false, `${label} item closes the menu`);
         await page.keyboard.press("Escape");
         await page.waitForFunction(() => !document.getElementById("edit-idea-dlg").open);
