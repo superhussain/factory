@@ -607,6 +607,7 @@ async function capture(outdir, referencePath) {
     try {
       await view("filter-long-desktop", 1440, 900, "light", openFilter);
       await view("filter-long-mobile", 390, 844, "dark", openFilter);
+      await view("filter-long-touch", 390, 844, "dark", (page) => page.tap("#filter"), true);
     } finally {
       longProject = false;
     }
