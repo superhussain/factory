@@ -5980,8 +5980,9 @@ $('board').addEventListener('pointerover', (e) => {
   hoveredCard = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : null;
 });
 $('board').addEventListener('pointerleave', () => { hoveredCard = null; });
-// The stand-in link holds keyboard focus; the visible span shows it. A span that runs past the
-// row's ellipsis scrolls into the row while focused, and the row scrolls back on blur.
+// The stand-in link holds keyboard focus; the visible span shows it. A focused span cut by the
+// row's edge scrolls the least that shows it whole, or to the row's start when it is wider than
+// the row. The row scrolls back on blur.
 function markRefFocus(e, on) {
   const a = e.target.closest?.('a.ref-focus');
   const span = a?.closest('.card-wrap').querySelector('.ref-link[data-ref="' + CSS.escape(a.dataset.ref) + '"]');
@@ -5990,7 +5991,7 @@ function markRefFocus(e, on) {
   const row = span.closest('.line');
   if (!on) { row.scrollLeft = 0; return; }
   const s = span.getBoundingClientRect(), r = row.getBoundingClientRect();
-  if (s.right + 2 > r.right) row.scrollLeft += s.left - r.left - 4;
+  if (s.right + 2 > r.right) row.scrollLeft += Math.min(s.left - r.left - 4, s.right - r.right + 4);
 }
 $('board').addEventListener('focusin', (e) => markRefFocus(e, true));
 $('board').addEventListener('focusout', (e) => markRefFocus(e, false));
