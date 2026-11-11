@@ -1,5 +1,5 @@
 // A batched rider's card names the lead it ships inside once, at desktop light and mobile dark,
-// and a batched rider waiting on you shows the lead's needs ask.
+// and a batched rider waiting on you shows the lead's needs ask and one whose lead set no ask names the lead.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -115,6 +115,52 @@ test("batched rider needs ask", { timeout: 120000 }, async () => {
     }, NEEDS_CARD);
     await page.screenshot({ path: `${SHOTS}batch-ref-needs-desktop.png`, clip });
     assert.equal(await page.$eval(`${NEEDS_CARD} .note`, (el) => el.textContent), ASK);
+    await page.close();
+  });
+});
+
+const WAIT_CARD = '.card.needs-you[data-id="093-sample-csv-header"]';
+
+test("batched rider waits on lead", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await mkdir(SHOTS, { recursive: true });
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    await seedBoard(origin, [
+      { ...JOBS[0], stage: "needs-human" },
+      {
+        id: "093-sample-csv-header",
+        project: "sample",
+        title: "Add a header row to the weekly CSV",
+        stage: "needs-human",
+        round: 0,
+        refs: [{ id: "090-sample-export-csv", kind: "batched-into" }],
+        note: "batched into 090-sample-export-csv",
+        updated: NOW,
+      },
+    ]);
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1440, height: 900 });
+    await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
+    await blockLiveEvents(page);
+    await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(WAIT_CARD);
+    await page.evaluate(
+      () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+    );
+    const clip = await page.evaluate((s) => {
+      const { x, y, width, height } = document.querySelector(s).getBoundingClientRect();
+      return { x: x + scrollX, y: y + scrollY, width, height };
+    }, WAIT_CARD);
+    await page.screenshot({ path: `${SHOTS}batch-ref-waits-on-lead-desktop.png`, clip });
+    assert.equal(
+      await page.$eval(`${WAIT_CARD} .note`, (el) => el.textContent),
+      "Waiting on lead 090-sample-export-csv",
+    );
     await page.close();
   });
 });
