@@ -1,4 +1,5 @@
 import concurrent.futures
+import contextlib
 import errno
 import io
 import json
@@ -55,7 +56,7 @@ class LocationTest(IsolatedTestCase):
                  ({"FACTORY_HOME": str(self.root / "loop")}, RuntimeError, "cannot resolve factory home")]
         for env, error, message in cases:
             with self.subTest(message=message), patch.dict(os.environ, env), \
-                    patch.object(self.runtime.Path, "resolve", side_effect=error), \
+                    (patch.object(self.runtime.Path, "resolve", side_effect=error) if error else contextlib.nullcontext()), \
                     patch("sys.stderr", new_callable=io.StringIO) as err:
                 self.rejected(self.runtime.factory_home)
                 self.assertEqual(err.getvalue(), f"factory.py: {message}. Nothing was written.\n")

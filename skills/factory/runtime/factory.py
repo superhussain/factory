@@ -3799,6 +3799,7 @@ def read_location(pointer):
         fail(f"Invalid location pointer: {pointer}.", 2)
 
 
+# Every command calls factory_home before its first write, which keeps "Nothing was written." true.
 def factory_home():
     selected = _HOME_OVERRIDE or os.environ.get("FACTORY_HOME")
     if selected:
