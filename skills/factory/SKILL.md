@@ -273,6 +273,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "pipeline": { "global": 3, "project": 2 },
   "backlog": { "line": "- [ ] <slug>: <feature>", "decision": "approved | denied | rework", "at": "...", "notes": "optional", "answers": "optional", "notes_read": "..." },
   "experiment": { "name": "pilot", "arm": "a | b", "provider": "provider-b", "model": "model-b", "effort": "high" },
+  "agents": [{ "at": "...", "stage": "spec", "role": "spec", "harness": "claude", "via": "native", "model": "...", "effort": "medium", "session": "a1b2c3" }],
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
   "started": "2026-10-15T11:40:00Z",
   "updated": "2026-10-15T12:00:00Z",
@@ -305,15 +306,17 @@ Approve also appends the notes to `idea`.
 
 How the dashboard's idea column, Assign project and backlog decision page behave is in [dashboard](references/dashboard.md).
 
-`experiment` is set only by pickup, at first claim, when `routes.md` sets an owner-model
-experiment: the arm the job launched on and the provider, model and effort it launched
-with. Pickup never rewrites it, and a relaunch of an arm `b` job launches on the recorded
-triple. `factory.py experiment report <name>` attributes outcomes by it.
+`experiment` is set only by pickup, at first claim, for an owner-model experiment; see
+[pickup](references/pickup.md#owner-model-experiment).
+Only pickup and `agent record` append `agents` rows, newest 32 kept;
+`agent report` counts them.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
 
 ## Rules
 
+- Before each role dispatch, run `python3 "$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`.
+  After hold, record the orchestrator once when no orchestrator row carries this session.
 - Agents get context from files, not the conversation. Build every agent prompt with
   `python3 "$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] --out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`
   (`<role>-round-<N>.txt` when you pass `--round`), after `pipeline` and `documents`,

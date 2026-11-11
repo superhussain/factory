@@ -92,6 +92,11 @@
                                             from the last N days (default 1)
   factory.py retro push                     upload that digest (last day) to retro/<device>/<local date>.jsonl
   factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
+  factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>]
+                                            append one row to the job's agents, after checking this
+                                            session holds the claim, and print it as JSON
+  factory.py agent report [<project-slug>]  count every job's agents rows by stage, role, harness, via,
+                                            model and effort, as a plain-text table
 
 claim, next, hold, handoff, board, ideas, and stuck take --session <tag> (or
 FACTORY_SESSION). A session without one gets a new tag from claim, next, or hold,
@@ -779,6 +784,8 @@ def board(factory, job_id):
         fail("only factory.py suggest sets origin", 2)
     if "started" in patch:
         fail("only factory.py sets started", 2)
+    if "agents" in patch:
+        fail("only factory.py agent and pickup set agents", 2)
     if "move" in patch:
         fail("only the dashboard and factory.py pickup set move", 2)
     if "priority" in patch:
@@ -3096,9 +3103,11 @@ def takeover(home, data, device, minutes, paths, settings, dry):
                    FACTORY_REPO_PATH=given["repo_path"], FACTORY_SESSION=tag,
                    FACTORY_PROVIDER=given["provider"], FACTORY_MODEL=given["model"],
                    FACTORY_EFFORT=given["effort"], FACTORY_PROMPT=given["prompt"])
-        ok, why, log_path = launch_idea(home, entry, live[0], launcher_argv(template, given), env)
+        argv = launcher_argv(template, given)
+        ok, why, log_path = launch_idea(home, entry, live[0], argv, env)
         if ok:
             print(f"took over {job_id} {slug} from {session} on {live[0]} session {tag}")
+            record_agent(home, job_id, launch_row(given, argv, tag))
             return 1
         with open(log_path, "rb") as log:
             log.seek(max(0, os.path.getsize(log_path) - 4096))
@@ -4051,10 +4060,12 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
         entry = picked[0]
         j = next((x for x in data["jobs"] if x.get("id") == entry["id"]), None)
         arm, given = job_given(j, entry)
-        ok, detail, log_path = launch_idea(home, entry, name, launcher_argv(template, given),
+        argv = launcher_argv(template, given)
+        ok, detail, log_path = launch_idea(home, entry, name, argv,
                                            launch_env(given, given["provider"], given["model"]))
         if ok:
             print(f"launched {entry['id']} {entry['project']} on {name} session {entry['session']}")
+            record_agent(home, entry["id"], launch_row(given, argv, entry["session"]))
             launches += 1
             continue
         limit_name = experiment["name"] if arm == "b" and experiment else name
@@ -6840,6 +6851,92 @@ def retro_cmd(action, *args):
     retro_digest(int(days))
 
 
+AGENT_ROLES = ("orchestrator",) + PROMPT_ROLES
+AGENT_VIAS = ("native", "paseo", "launcher", "general", "direct")
+AGENT_ROWS_MAX = 32
+
+
+def launch_row(given, argv, tag):
+    """The orchestrator row for one pickup launch, on the values it actually used."""
+    return {"role": "orchestrator", "harness": given["provider"],
+            "via": "paseo" if Path(argv[0]).stem.lower() == "paseo" else "launcher", "model": given["model"],
+            **({"effort": given["effort"]} if given["effort"] else {}), "session": tag}
+
+
+def record_agent(home, job_id, row, claimant=None, project=None):
+    """One CAS: append row, stamped with the board's stage, round and time, to job_id's
+    agents, keeping the newest AGENT_ROWS_MAX. The saved row, or None for a missing job.
+    A claimant (device, session) pair must hold the job's claim, and a project must be
+    the job's own."""
+
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None:
+            return None, None
+        if project and job.get("project") != project:
+            fail(f"{job_id} belongs to {job.get('project')}, not {project}", 2)
+        if claimant:
+            c = job.get("claim")
+            if not c:
+                fail(f"{job_id} has no claim from this session; run hold first", 6)
+            if not mine(c, *claimant):
+                fail(f"{held_by(job_id, c)}. Nothing was written. Pass --session <tag> if this session "
+                     "holds it, or take it over with hold <project>/<id> take", 6)
+        full = {"at": now(), "stage": job.get("stage")}
+        if job.get("stage") == "review" and job.get("round") is not None:
+            full["round"] = job["round"]
+        full.update(row)
+        rows = job.get("agents") if isinstance(job.get("agents"), list) else []
+        patch_job(data, job_id, {"agents": (rows + [full])[-AGENT_ROWS_MAX:]})
+        return dump_board(data), full
+    return cas(home, "/api/board", change)
+
+
+AGENT_STAGES = ("idea",) + IN_FLIGHT + ("needs-human", "pr-open") + TERMINAL
+AGENT_RECORD_USAGE = "usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>]"
+AGENT_COLUMNS = ("stage", "role", "harness", "via", "model", "effort")
+
+
+def agent_cmd(sub, *args):
+    if sub == "record" and len(args) in (5, 6):
+        target, role, harness, via, model, *effort = args
+        if (role not in AGENT_ROLES or not SLUG.fullmatch(harness) or len(harness) > 64 or via not in AGENT_VIAS
+                or not ROUTE_MODEL.fullmatch(model) or effort and effort[0] not in ROUTE_EFFORTS):
+            fail(AGENT_RECORD_USAGE, 2)
+        home, slug, job_id = r2_target(target, True)
+        device, session, _ = holder(home)
+        row = {"role": role, "harness": harness, "via": via, "model": model}
+        if effort:
+            row["effort"] = effort[0]
+        row["session"] = session
+        saved = record_agent(home, job_id, row, (device, session), slug)
+        if saved is None:
+            fail(f"no job {job_id} on the board", 4)
+        print(json.dumps(saved))
+        return
+    if sub != "report" or len(args) > 1 or args and not SLUG.fullmatch(args[0]):
+        fail(AGENT_RECORD_USAGE + " | agent report [<project>]", 2)
+    counts = {}
+    for j in read_board(factory_home())["jobs"]:
+        if args and j.get("project") != args[0]:
+            continue
+        for row in j.get("agents") or []:
+            if not isinstance(row, dict):
+                continue
+            key = tuple(str(row.get(c) or "-") for c in AGENT_COLUMNS)
+            counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        print("no agent records")
+        return
+    order = {stage: i for i, stage in enumerate(AGENT_STAGES)}
+    lines = [AGENT_COLUMNS + ("count",)] + [
+        key + (str(counts[key]),) for key in sorted(counts, key=lambda k: (order.get(k[0], len(order)),) + k)]
+    widths = [max(len(line[i]) for line in lines) for i in range(len(lines[0]))]
+    for line in lines:
+        print("  ".join(cell.ljust(w) for cell, w in zip(line, widths)).rstrip())
+
+
 COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3),
             "board": (board, 2, 2), "next": (next_item, 0, 0), "backlog": (backlog_cmd, 2, 4),
             "stop": (stop, 1, 1), "push": (push, 1, 1), "pull": (pull, 1, 1), "sync": (sync, 0, 1),
@@ -6870,6 +6967,7 @@ COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
+COMMANDS["agent"] = (agent_cmd, 1, 7)
 
 def main(argv=None):
     global _HOME_OVERRIDE, _LOCATED
