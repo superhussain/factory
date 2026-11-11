@@ -53,6 +53,7 @@ const JOBS = [
 ];
 const FALLBACK = "Copy is unavailable. Copy the link from the address bar.";
 const TRIGGER = `.card-actions[data-actions="${ID}"]`;
+const PR_LINK = `.card[data-id="${ID}"] ~ .pr-link`;
 const MENU = "#card-actions-menu";
 
 async function openBoard(browser, origin, viewport) {
@@ -261,6 +262,44 @@ test("card actions", { timeout: 180000 }, async (t) => {
       await press("Escape", { menu: false, expanded: "false", focus: "card-actions" });
       await press("ArrowUp", open("d-close-job"));
       await press("Escape", { menu: false, expanded: "false", focus: "card-actions" });
+    });
+
+    await t.test("PR link keeps focus across a redraw", async () => {
+      await page.focus(TRIGGER);
+      await page.keyboard.down("Shift");
+      await page.keyboard.press("Tab");
+      await page.keyboard.up("Shift");
+      await page.mouse.move(5, 5);
+      await page.evaluate(() => {
+        window.__oldPr = document.activeElement;
+        renderBoard();
+      });
+      await (await page.$(".col.pr-open")).screenshot({ path: `${SHOTS}pr-link-focus-1440.png` });
+      assert.deepEqual(
+        await page.evaluate(
+          (sel) => [
+            document.activeElement === document.querySelector(sel),
+            document.activeElement !== window.__oldPr,
+          ],
+          PR_LINK,
+        ),
+        [true, true],
+      );
+      await page.evaluate(() => {
+        hiddenCardFields.add("pr");
+        renderBoard();
+      });
+      assert.equal(
+        await page.evaluate(
+          (id) => document.activeElement === document.querySelector(`.card[data-id="${id}"]`),
+          ID,
+        ),
+        true,
+      );
+      await page.evaluate(() => {
+        hiddenCardFields.delete("pr");
+        renderBoard();
+      });
     });
 
     await t.test("no overlap", async () => {
