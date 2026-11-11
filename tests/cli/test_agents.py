@@ -102,6 +102,7 @@ class AgentRecordTest(BoardFixture):
     def test_refuses(self):
         for args in (("reviewer", "opencode", "native", "gpt-6.1-sol"),
                      ("build", "open code", "native", "gpt-6.1-sol"),
+                     ("build", "h" * 65, "native", "gpt-6.1-sol"),
                      ("build", "opencode", "subagent", "gpt-6.1-sol"),
                      ("build", "opencode", "native", "gpt 6.1"),
                      ("build", "opencode", "native", "gpt-6.1-sol", "huge")):
@@ -109,9 +110,17 @@ class AgentRecordTest(BoardFixture):
         code, out, err = self.record("build", "opencode", "native", "gpt-6.1-sol", session="other1")
         self.assertEqual((code, out), (6, ""))
         self.assertTrue(err.startswith(f"factory.py: {JOB} is held by {DEVICE} session d4e5f6 since "), err)
+        self.assertTrue(err.endswith(". Nothing was written. Pass --session <tag> if this session holds it, "
+                                     "or take it over with hold <project>/<id> take\n"), err)
         self.job().pop("claim")
         self.assertEqual(self.record("build", "opencode", "native", "gpt-6.1-sol"),
                          (6, "", f"factory.py: {JOB} has no claim from this session; run hold first\n"))
+        self.assertEqual((self.puts, "agents" in self.job()), (0, False))
+
+    def test_refuses_another_projects_job(self):
+        result = invoke(factory, ["agent", "record", f"beta/{JOB}", "build", "opencode", "native", "gpt-6.1-sol",
+                                  "--session", "d4e5f6"])
+        self.assertEqual(result, (2, "", f"factory.py: {JOB} belongs to alpha, not beta\n"))
         self.assertEqual((self.puts, "agents" in self.job()), (0, False))
 
     def test_board_refuses_agents(self):
@@ -134,7 +143,7 @@ class AgentRecordTest(BoardFixture):
 
 class AgentReportTest(BoardFixture):
     def test_table(self):
-        self.job()["agents"] = ROWS
+        self.job()["agents"] = ROWS + ["a hand-edited row", None]
         self.board["jobs"].append({"id": "502-other", "stage": "build", "project": "beta", "agents": ROWS[3:4]})
         self.assertEqual(invoke(factory, ["agent", "report", "alpha"]), (0, TABLE, ""))
         code, out, err = invoke(factory, ["agent", "report"])

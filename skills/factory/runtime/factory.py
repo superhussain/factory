@@ -3037,11 +3037,8 @@ def takeover(home, data, device, minutes, paths, settings, dry):
         argv = launcher_argv(template, given)
         ok, why, log_path = launch_idea(home, entry, live[0], argv, env)
         if ok:
-            record_agent(home, job_id, {
-                "role": "orchestrator", "harness": given["provider"],
-                "via": "paseo" if Path(argv[0]).stem.lower() == "paseo" else "launcher", "model": given["model"],
-                **({"effort": given["effort"]} if given["effort"] else {}), "session": tag})
             print(f"took over {job_id} {slug} from {session} on {live[0]} session {tag}")
+            record_agent(home, job_id, launch_row(given, argv, tag))
             return 1
         with open(log_path, "rb") as log:
             log.seek(max(0, os.path.getsize(log_path) - 4096))
@@ -3989,11 +3986,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
         ok, detail, log_path = launch_idea(home, entry, name, argv,
                                            launch_env(given, given["provider"], given["model"]))
         if ok:
-            record_agent(home, entry["id"], {
-                "role": "orchestrator", "harness": given["provider"],
-                "via": "paseo" if Path(argv[0]).stem.lower() == "paseo" else "launcher", "model": given["model"],
-                **({"effort": given["effort"]} if given["effort"] else {}), "session": entry["session"]})
             print(f"launched {entry['id']} {entry['project']} on {name} session {entry['session']}")
+            record_agent(home, entry["id"], launch_row(given, argv, entry["session"]))
             launches += 1
             continue
         limit_name = experiment["name"] if arm == "b" and experiment else name
@@ -6693,22 +6687,33 @@ AGENT_VIAS = ("native", "paseo", "launcher", "general", "direct")
 AGENT_ROWS_MAX = 32
 
 
-def record_agent(home, job_id, row, claimant=None):
+def launch_row(given, argv, tag):
+    """The orchestrator row for one pickup launch, on the values it actually used."""
+    return {"role": "orchestrator", "harness": given["provider"],
+            "via": "paseo" if Path(argv[0]).stem.lower() == "paseo" else "launcher", "model": given["model"],
+            **({"effort": given["effort"]} if given["effort"] else {}), "session": tag}
+
+
+def record_agent(home, job_id, row, claimant=None, project=None):
     """One CAS: append row, stamped with the board's stage, round and time, to job_id's
     agents, keeping the newest AGENT_ROWS_MAX. The saved row, or None for a missing job.
-    A claimant (device, session) pair must hold the job's claim."""
+    A claimant (device, session) pair must hold the job's claim, and a project must be
+    the job's own."""
 
     def change(text):
         data = load_board(text)
         job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
         if job is None:
             return None, None
+        if project and job.get("project") != project:
+            fail(f"{job_id} belongs to {job.get('project')}, not {project}", 2)
         if claimant:
             c = job.get("claim")
             if not c:
                 fail(f"{job_id} has no claim from this session; run hold first", 6)
             if not mine(c, *claimant):
-                fail(f"{held_by(job_id, c)}. Nothing was written.", 6)
+                fail(f"{held_by(job_id, c)}. Nothing was written. Pass --session <tag> if this session "
+                     "holds it, or take it over with hold <project>/<id> take", 6)
         full = {"at": now(), "stage": job.get("stage")}
         if job.get("stage") == "review" and job.get("round") is not None:
             full["round"] = job["round"]
@@ -6727,16 +6732,16 @@ AGENT_COLUMNS = ("stage", "role", "harness", "via", "model", "effort")
 def agent_cmd(sub, *args):
     if sub == "record" and len(args) in (5, 6):
         target, role, harness, via, model, *effort = args
-        if (role not in AGENT_ROLES or not SLUG.fullmatch(harness) or via not in AGENT_VIAS
+        if (role not in AGENT_ROLES or not SLUG.fullmatch(harness) or len(harness) > 64 or via not in AGENT_VIAS
                 or not ROUTE_MODEL.fullmatch(model) or effort and effort[0] not in ROUTE_EFFORTS):
             fail(AGENT_RECORD_USAGE, 2)
-        home, _, job_id = r2_target(target, True)
+        home, slug, job_id = r2_target(target, True)
         device, session, _ = holder(home)
         row = {"role": role, "harness": harness, "via": via, "model": model}
         if effort:
             row["effort"] = effort[0]
         row["session"] = session
-        saved = record_agent(home, job_id, row, (device, session))
+        saved = record_agent(home, job_id, row, (device, session), slug)
         if saved is None:
             fail(f"no job {job_id} on the board", 4)
         print(json.dumps(saved))
@@ -6748,6 +6753,8 @@ def agent_cmd(sub, *args):
         if args and j.get("project") != args[0]:
             continue
         for row in j.get("agents") or []:
+            if not isinstance(row, dict):
+                continue
             key = tuple(str(row.get(c) or "-") for c in AGENT_COLUMNS)
             counts[key] = counts.get(key, 0) + 1
     if not counts:
