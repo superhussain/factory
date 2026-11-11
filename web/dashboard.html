@@ -324,6 +324,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .meta.host { color: var(--host-fg); }
   .card .ref-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   .card .ref-link:hover { color: var(--accent); text-decoration-thickness: 2px; }
+  .card .ref-link.ref-focused { background: var(--accent); color: var(--panel); border-radius: 3px; box-shadow: -2px 0 0 var(--accent), 2px 0 0 var(--accent); text-decoration-thickness: 2px; }
+  .ref-focus { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .backlog-card {
     overflow-wrap: anywhere;
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(17,24,39,.05);
@@ -1269,7 +1271,7 @@ function line(cls, text) {
   return '<div class="' + cls + ' line" title="' + esc(text) + '">' + esc(text) + '</div>';
 }
 
-// A ref to a job on the board is a mouse target that opens it; others stay text.
+// A ref to a job on the board is a mouse target that opens it; card() adds its keyboard stand-in. Others stay text.
 function refLine(r) {
   const id = jobs.some((x) => x.id === r.id) ? '<span class="ref-link" data-ref="' + esc(r.id) + '">' + esc(r.id) + '</span>' : esc(r.id);
   return esc(REF_KINDS[r.kind]) + ' ' + id;
@@ -1303,7 +1305,8 @@ function card(j, inNeeds, archived = false) {
   return '<div class="card-wrap' + (pr ? ' has-pr' : '') + '"' + (archived ? '' : ' title="Job actions (A or .)"') + '>' + btn +
     (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub" title="">PR #' + esc(pr.n) + '</a>' : '') +
     (archived ? '' : '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
-    ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') + '</div>';
+    ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') +
+    refs(j).filter((r) => jobs.some((x) => x.id === r.id)).map((r) => '<a class="ref-focus" href="#' + esc(r.id) + '" data-ref="' + esc(r.id) + '">' + esc(REF_KINDS[r.kind]) + ' ' + esc(r.id) + '</a>').join('') + '</div>';
 }
 
 // Not a .card, so arrow-key card navigation skips it.
@@ -5797,6 +5800,13 @@ $('board').addEventListener('pointerover', (e) => {
   hoveredCard = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : null;
 });
 $('board').addEventListener('pointerleave', () => { hoveredCard = null; });
+// The stand-in link holds keyboard focus; the visible span shows it.
+function markRefFocus(e, on) {
+  const a = e.target.closest?.('a.ref-focus');
+  a?.closest('.card-wrap').querySelector('.ref-link[data-ref="' + CSS.escape(a.dataset.ref) + '"]')?.classList.toggle('ref-focused', on);
+}
+$('board').addEventListener('focusin', (e) => markRefFocus(e, true));
+$('board').addEventListener('focusout', (e) => markRefFocus(e, false));
 
 // A focused card wins over a hovered one, and either wins over the open drawer's job.
 function cardShortcutTarget(e) {

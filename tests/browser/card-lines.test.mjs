@@ -1,5 +1,5 @@
 // One line per fact on a job card: order, one-row truncation (a needs-you ask wraps to two rows)
-// with a title tooltip, colour per kind, host label from the registry, ref links and their hover,
+// with a title tooltip, colour per kind, host label from the registry, ref links, their hover and keyboard focus,
 // at desktop light and mobile dark.
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
@@ -261,6 +261,42 @@ test("card lines", { timeout: 240000 }, async (t) => {
         await page.mouse.move(0, 0);
         await settle(page);
         assert.equal(await color(page, link), await tokenColor(page, "--ref-fg"));
+      });
+
+      await t.test(`ref focus ${scheme}`, async () => {
+        await page.focus('.card-actions[data-actions="042-sample-export"]');
+        const stand = '.card-wrap a.ref-focus[data-ref="041-sample-report"]';
+        const span = `${CARD} .ref-link[data-ref="041-sample-report"]`;
+        assert.deepEqual(
+          await page.$eval(`.card-wrap:has(${CARD}) a.ref-focus`, (el) => [
+            el.getAttribute("href"),
+            el.textContent,
+          ]),
+          ["#041-sample-report", "follow-up of 041-sample-report"],
+        );
+        assert.equal(await page.$('.card-wrap:has(.card[data-id="043-orphan"]) a.ref-focus'), null);
+        await page.keyboard.press("Tab");
+        await settle(page);
+        await page.screenshot({ path: `${SHOTS}card-lines-ref-focus${suffix}.png`, clip });
+        assert.equal(await page.evaluate((s) => document.activeElement.matches(s), stand), true);
+        assert.equal(await color(page, span), await tokenColor(page, "--panel"));
+        assert.equal(
+          await page.$eval(span, (el) => getComputedStyle(el).backgroundColor),
+          await tokenColor(page, "--accent"),
+        );
+        await page.keyboard.down("Shift");
+        await page.keyboard.press("Tab");
+        await page.keyboard.up("Shift");
+        assert.equal(await page.$(".ref-link.ref-focused"), null);
+        await page.focus(stand);
+        await page.keyboard.press("Enter");
+        await page.waitForFunction(
+          () => document.getElementById("d-title")?.textContent === "Sample report",
+          wait,
+        );
+        assert.equal(await page.evaluate(() => location.hash), "#041-sample-report");
+        await page.click("#d-close");
+        await page.waitForFunction(() => document.getElementById("detail").hidden, wait);
       });
 
       await t.test(`ref link ${scheme}`, async () => {
