@@ -76,6 +76,8 @@
   factory.py suggest approve <job-id> <A|B|C>
                                             a human at a terminal approves one option of such a card
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
+  factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
+                                            from the last N days (default 1)
 
 claim, next, hold, handoff, board, ideas, and stuck take --session <tag> (or
 FACTORY_SESSION). A session without one gets a new tag from claim, next, or hold,
@@ -92,6 +94,7 @@ The board, backlog, and project files live in R2 behind the factory Worker at
 `api_url` in config.md. Job folders and worktrees stay on this device.
 """
 
+import collections
 import contextlib
 import fnmatch
 import http.client
@@ -6006,6 +6009,192 @@ def tracer_cmd(sub, target=None):
               else f"nothing to mirror: no project is listed in {home / 'tracer.json'}")
 
 
+RETRO_DENIALS = ("denied by the Claude Code auto mode classifier", "Permission to use",
+                 "doesn't want to proceed", "Blocked:")
+RETRO_ENV_NOISE = {"winsize_crash": "undefined method `winsize'", "command_not_found": "command not found: ",
+                   "zsh_no_matches": "no matches found: ", "node_crash": "Node.js v"}
+RETRO_POLLS = {"until_file": re.compile(r"\buntil \[ -[fs] "),
+               "task_output": re.compile(r"/tasks/[\w-]+\.output\b"),
+               "quiet_window": re.compile(r"stat -c %Y|stat -f %m")}
+RETRO_JOB = re.compile(r"factory-(\d{2,5})-")
+RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
+RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+")
+RETRO_KEYVALUE = re.compile(r"(?i)\b(token|secret|password|api[_-]?key)(\s*[=:]\s*)\S+")
+RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
+                "uncached_input": "input_tokens", "output": "output_tokens"}
+
+
+def retro_redact(text):
+    for pattern in NOTE_SECRETS:
+        text = pattern.sub("[redacted]", text)
+    return RETRO_KEYVALUE.sub(r"\1\2[redacted]", text)
+
+
+def retro_pattern(text):
+    text = " ".join(retro_redact(text).split())
+    return re.sub(r"\d+", "N", RETRO_PATH.sub("<path>", text))[:160]
+
+
+def retro_command_key(cmd):
+    return retro_pattern(RETRO_ASSIGN.sub("", cmd))
+
+
+def retro_text(content):
+    """A message or tool_result content as text: a string, or its joined text blocks."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str))
+    return ""
+
+
+def retro_scan(path, main):
+    """One transcript reduced to digest fields. main=False also counts isSidechain lines."""
+    usage, tools, cmds, models = {}, collections.Counter(), collections.Counter(), set()
+    attachments, calls, results = collections.Counter(), {}, []
+    stamps, human, interrupts, rounds, seen_assistant = [], 0, 0, [], False
+    prompts = {"count": 0, "chars": 0}
+    polls = dict.fromkeys(RETRO_POLLS, 0)
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict) or (main and e.get("isSidechain")):
+                continue
+            if isinstance(e.get("timestamp"), str):
+                stamps.append(e["timestamp"])
+            msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+            content = msg.get("content")
+            blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+            if e.get("type") == "attachment" and not seen_assistant and isinstance(e.get("attachment"), dict):
+                attachments[str(e["attachment"].get("type"))] += len(json.dumps(e["attachment"]).encode())
+            elif e.get("type") == "assistant":
+                seen_assistant = True
+                if isinstance(msg.get("model"), str):
+                    models.add(msg["model"])
+                if isinstance(msg.get("id"), str) and isinstance(msg.get("usage"), dict):
+                    best = usage.setdefault(msg["id"], dict.fromkeys(RETRO_TOKENS, 0))
+                    for key, field in RETRO_TOKENS.items():
+                        value = msg["usage"].get(field)
+                        if isinstance(value, int):
+                            best[key] = max(best[key], value)
+                for b in blocks:
+                    if b.get("type") != "tool_use":
+                        continue
+                    name = str(b.get("name"))
+                    inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                    tools[name] += 1
+                    calls[b.get("id")] = (name, inp)
+                    rounds += [int(n) for n in re.findall(r"\bround-(\d+)/", json.dumps(inp))]
+                    if name in ("Agent", "Task") and isinstance(inp.get("prompt"), str):
+                        prompts["count"] += 1
+                        prompts["chars"] += len(inp["prompt"])
+                    target = inp.get("command") if name == "Bash" else inp.get("file_path") if name == "Read" else None
+                    if isinstance(target, str):
+                        for key, pattern in RETRO_POLLS.items():
+                            polls[key] += bool(pattern.search(target))
+                        if name == "Bash":
+                            cmds[retro_command_key(target)] += 1
+            elif e.get("type") == "user":
+                text = retro_text(content)
+                interrupts += "[Request interrupted" in text
+                if any(b.get("type") == "tool_result" for b in blocks):
+                    for b in blocks:
+                        if b.get("type") == "tool_result":
+                            name, inp = calls.get(b.get("tool_use_id"), ("?", {}))
+                            results.append((name, inp, retro_text(b.get("content")), b.get("is_error") is True))
+                elif not e.get("isMeta") and not e.get("isSidechain") and text and not text.startswith("<"):
+                    human += 1
+    errors = {"count": 0, "benign": 0, "patterns": collections.Counter()}
+    denials = {"count": 0, "blocked_sleep": 0, "patterns": collections.Counter()}
+    noise = dict.fromkeys(RETRO_ENV_NOISE, 0)
+    for i, (name, inp, text, is_error) in enumerate(results):
+        for key, needle in RETRO_ENV_NOISE.items():
+            noise[key] += needle in text
+        if not is_error:
+            continue
+        command = inp.get("command") if isinstance(inp.get("command"), str) else ""
+        if "Blocked: sleep" in text:
+            denials["blocked_sleep"] += 1
+        elif any(phrase in text for phrase in RETRO_DENIALS):
+            denials["count"] += 1
+            denials["patterns"][retro_pattern(text)] += 1
+        elif i == len(results) - 1 and (
+                (name == "Bash" and "archive-workspace" in command and "137" in text)
+                or ("archive_workspace" in name and "connection closed" in text.lower())):
+            errors["benign"] += 1
+        else:
+            errors["count"] += 1
+            errors["patterns"][retro_pattern(text)] += 1
+    for bucket in (errors, denials):
+        bucket["patterns"] = dict(bucket["patterns"].most_common())
+    contexts = [u["uncached_input"] + u["cache_read"] + u["cache_write"] for u in usage.values()]
+    return {"start": stamps[0] if stamps else None, "end": stamps[-1] if stamps else None,
+            "turns": len(usage), "human_msgs": human, "interrupts": interrupts, "models": sorted(models),
+            "tools": dict(tools.most_common()),
+            "tokens": {key: sum(u[key] for u in usage.values()) for key in RETRO_TOKENS},
+            "context": {"first_turn": contexts[0] if contexts else 0,
+                        "mean_per_turn": round(sum(contexts) / len(contexts)) if contexts else 0},
+            "first_turn_attachments": dict(attachments), "agent_prompts": prompts,
+            "review_round_max": max(rounds) if rounds else None, "polls": polls, "env_noise": noise,
+            "errors": errors, "denials": denials,
+            "repeated_cmds": {cmd: n for cmd, n in cmds.most_common(5) if n >= 3}}
+
+
+def retro_host():
+    config = factory_home() / "config.md"
+    return (frontmatter(config)[0] if config.is_file() else {}).get("device") or socket.gethostname()
+
+
+def retro_digest(days):
+    root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+    if not root.is_dir():
+        fail(f"no Claude Code transcripts at {root}", 4)
+    host, cutoff, rows = retro_host(), time.time() - days * 86400, []
+    for project in sorted(p for p in root.iterdir() if p.is_dir()):
+        for path in sorted(project.glob("*.jsonl")):
+            if path.stat().st_mtime < cutoff:
+                continue
+            scan = retro_scan(path, True)
+            if scan["start"] is None:
+                continue
+            job = RETRO_JOB.search(project.name)
+            row = {"host": host, "project": project.name, "session": path.stem,
+                   "job": job.group(1) if job else "ad-hoc", **scan}
+            by_type, subs = {}, sorted((project / path.stem / "subagents").glob("*.jsonl"))
+            for sub in subs:
+                meta = sub.with_suffix(".meta.json")
+                try:
+                    kind = str(json.loads(meta.read_text(encoding="utf-8")).get("agentType") or "unknown")
+                except (OSError, ValueError, AttributeError):
+                    kind = "unknown"
+                d = retro_scan(sub, False)
+                t = by_type.setdefault(kind, {"count": 0, "turns": 0, "tokens": dict.fromkeys(RETRO_TOKENS, 0),
+                                              "errors": 0, "denials": 0, "models": []})
+                t["count"] += 1
+                t["turns"] += d["turns"]
+                t["errors"] += d["errors"]["count"]
+                t["denials"] += d["denials"]["count"]
+                t["models"] = sorted(set(t["models"]) | set(d["models"]))
+                for key in RETRO_TOKENS:
+                    t["tokens"][key] += d["tokens"][key]
+                for key in RETRO_ENV_NOISE:
+                    row["env_noise"][key] += d["env_noise"][key]
+            row["subagents"] = {"count": len(subs), "by_type": by_type}
+            rows.append(row)
+    for row in sorted(rows, key=lambda r: (r["start"], r["session"])):
+        print(json.dumps(row))
+
+
+def retro_cmd(action, *args):
+    days = args[1] if len(args) == 2 and args[0] == "--days" else "1" if not args else ""
+    if action != "digest" or not days.isdigit() or not 1 <= int(days) <= 90:
+        fail("usage: factory.py retro digest [--days N]", 2)
+    retro_digest(int(days))
+
+
 COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3),
             "board": (board, 2, 2), "next": (next_item, 0, 0), "backlog": (backlog_cmd, 2, 4),
             "stop": (stop, 1, 1), "push": (push, 1, 1), "pull": (pull, 1, 1), "sync": (sync, 0, 1),
@@ -6031,6 +6220,7 @@ COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
+COMMANDS["retro"] = (retro_cmd, 1, 3)
 
 def main(argv=None):
     global _HOME_OVERRIDE, _LOCATED
