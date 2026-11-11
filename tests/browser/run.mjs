@@ -672,9 +672,20 @@ async function capture(outdir, referencePath) {
       );
       await page.select("#pipeline-archive-mode", "");
       await page.select("#pipeline-archive-mode", "count");
+      await page.waitForFunction(() => {
+        const t = document.getElementById("pipeline-status").textContent;
+        return t.startsWith("Fix before saving") || t === "Unsaved changes";
+      });
       await page.evaluate(() =>
-        document.getElementById("pipeline-archive").scrollIntoView({ block: "center" }),
+        document.getElementById("pipeline-archive").scrollIntoView({ block: "start" }),
       );
+      const cropped = await page.evaluate(() =>
+        ["pipeline-archive", "pipeline-status"].filter((id) => {
+          const r = document.getElementById(id).getBoundingClientRect();
+          return r.top < 0 || r.bottom > window.innerHeight;
+        }),
+      );
+      if (cropped.length) throw new Error("archive-prefill capture crops " + cropped.join(", "));
     };
     await view("archive-prefill", 1280, 900, "light", openArchivePrefill);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
