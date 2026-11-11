@@ -3185,7 +3185,7 @@ def gh_pr(*args):
     if gh is None:
         return None
     try:
-        r = subprocess.run([gh, "pr", *args], capture_output=True, text=True, timeout=60,
+        r = subprocess.run([gh, "pr", *args], capture_output=True, encoding="utf-8", errors="replace", timeout=60,
                            stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return 1, ""
@@ -3199,19 +3199,26 @@ def close_pull_request(home, j, device):
     m = GH_PR.fullmatch(pr) if isinstance(pr, str) else None
     if not (m and m[1].lower() == repo.lower()):
         return "open", f"its URL is not a pull request in {repo or 'the project repository'}"
-    view = gh_pr("view", pr, "--json", "state", "--jq", ".state")
+    view = gh_pr("view", pr, "--json", "state,headRefName",
+                  "--jq", '.state + " " + .headRefName')
     if view is None:
         return "open", f"gh is not installed on {device}"
     if view[0]:
         return "open", f"gh pr view exited {view[0]}"
-    state = view[1].strip()
+    state, _, head = view[1].strip().partition(" ")
+    if not head:
+        return "open", "gh pr view reported no head branch"
+    if head != j.get("branch"):
+        return "open", f"its head branch {head} is not the job's branch {j.get('branch') or 'none'}"
     if state in ("MERGED", "CLOSED"):
         return ("merged" if state == "MERGED" else "already closed"), ""
     if state != "OPEN":
         return "open", f"gh pr view reported state {state}"
     comment = PR_CLOSE_COMMENT.format(id=j["id"], link=f"{api_url(home)}/#{j['id']}/decision")
-    code = gh_pr("close", pr, "--comment", comment)[0]
-    return ("open", f"gh pr close exited {code}") if code else ("closed", "")
+    close = gh_pr("close", pr, "--comment", comment)
+    if close is None:
+        return "open", f"gh is not installed on {device}"
+    return ("open", f"gh pr close exited {close[0]}") if close[0] else ("closed", "")
 
 
 def close_decision(j, reason, device, earlier, outcome):
