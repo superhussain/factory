@@ -161,6 +161,36 @@ test("project filter", { timeout: 180000 }, async (t) => {
       assert.equal((await menu(page)).open, true);
     });
 
+    await t.test("F14 few columns", async () => {
+      const few = await open();
+      await few.evaluate(() =>
+        localStorage.setItem(
+          "factory-hidden-columns",
+          "backlog,idea,spec,build,review,approve,pr-open,closed",
+        ),
+      );
+      await few.reload({ waitUntil: "domcontentloaded" });
+      await ready(few);
+      const measure = () =>
+        few.evaluate(() => ({
+          cols: document.getElementById("board").style.getPropertyValue("--cols"),
+          width: document.getElementById("filter-empty")?.getBoundingClientRect().width ?? 0,
+        }));
+      await few.click("#filter");
+      await few.click(box(""));
+      assert.equal(
+        await emptyLine(few),
+        "No projects selected. Pick projects in the project filter to show their jobs.",
+      );
+      const none = await measure();
+      assert.equal(none.cols, "36px 36px auto");
+      assert.ok(none.width >= 600, `line width ${none.width}`);
+      await few.click(box(""));
+      assert.equal(await emptyLine(few), null);
+      assert.equal((await measure()).cols, "36px 36px");
+      await few.browserContext().close();
+    });
+
     await t.test("F5 close", async () => {
       await page.keyboard.press("Escape");
       assert.deepEqual(await menu(page), { open: false, expanded: "false", focus: "filter" });
