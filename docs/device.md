@@ -174,8 +174,10 @@ takes the host name from `device:` in `config.md`, else the hostname. Each row
 counts turns, tokens once per message, tools, errors and denials, and folds
 subagents in by type. It writes nothing and makes no network call. Error and
 denial excerpts are redacted, have paths and digits normalized, and are clipped
-to 160 characters. Header values, URL passwords, bearer tokens and secret-named
-values become `[redacted]`. The home prefix of `project` becomes `~`, and every
+to 160 characters. Header values, URL passwords, bearer tokens, `curl -u` user:pass,
+secret-named values and the value after a secret-named `--` flag become
+`[redacted]`. The home prefix of `project`, through this host's user name,
+becomes `~`, and every
 string and key is cut to 160 characters. A transcript deleted mid-run is
 skipped. A window with no sessions prints nothing and exits 0. A missing
 projects directory exits 4.
