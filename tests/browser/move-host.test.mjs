@@ -117,6 +117,7 @@ test("move host", { timeout: 240000 }, async (t) => {
       await page.setBypassServiceWorker(true);
       // Sends the page's board write from Node, then drops the page's copy of it.
       let landPut = false;
+      let readFails = false;
       page.on("request", async (request) => {
         if (
           !landPut ||
@@ -133,6 +134,15 @@ test("move host", { timeout: 240000 }, async (t) => {
           ),
           body: request.postData(),
         });
+        return request.abort("failed", 1);
+      });
+      page.on("request", (request) => {
+        if (
+          !readFails ||
+          request.method() !== "GET" ||
+          new URL(request.url()).pathname !== "/api/board"
+        )
+          return;
         return request.abort("failed", 1);
       });
       page.on("request", (request) => {
@@ -334,6 +344,71 @@ test("move host", { timeout: 240000 }, async (t) => {
         await page.click("#move-host-save");
         await page.waitForFunction(() => !document.getElementById("move-host-dlg").open, wait);
         assert.equal(await (await fetch(origin + "/api/board")).text(), after);
+        await seedBoard(origin, JOBS);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForSelector("#d-move-host:not([hidden])", wait);
+      });
+
+      await t.test(`an offline retry keeps the move hint ${width}`, async () => {
+        landPut = true;
+        await openJobActions(page);
+        await page.click("#d-move-host");
+        await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        await page.click("#move-host-save");
+        await page.waitForFunction(() => !document.getElementById("move-host-err").hidden, wait);
+        const first = await page.$eval("#move-host-err", (el) => el.textContent);
+        const after = await (await fetch(origin + "/api/board")).text();
+        try {
+          readFails = true;
+          await page.$eval("#move-host-err", (el) => {
+            el.hidden = true;
+            el.textContent = "";
+          });
+          await page.click("#move-host-save");
+          await page.waitForFunction(() => !document.getElementById("move-host-err").hidden, wait);
+          if (width === 1440)
+            await (
+              await page.$("#move-host-dlg")
+            ).screenshot({ path: `${SHOTS}move-offline-retry-1440.png` });
+          const text = await page.$eval("#move-host-err", (el) => el.textContent);
+          assert.equal(text, first);
+          assert.ok(text.startsWith("Not confirmed: "), text);
+          assert.ok(text.endsWith(MOVE_HINT), text);
+        } finally {
+          readFails = false;
+        }
+        await page.click("#move-host-save");
+        await page.waitForFunction(() => !document.getElementById("move-host-dlg").open, wait);
+        assert.equal(await (await fetch(origin + "/api/board")).text(), after);
+        await seedBoard(origin, JOBS);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForSelector("#d-move-host:not([hidden])", wait);
+      });
+
+      await t.test(`a claimed and released move requeues on retry ${width}`, async () => {
+        landPut = true;
+        await openJobActions(page);
+        await page.click("#d-move-host");
+        await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        await page.click("#move-host-save");
+        await page.waitForFunction(() => !document.getElementById("move-host-err").hidden, wait);
+        const board = await (await fetch(origin + "/api/board")).json();
+        board.jobs.find((j) => j.id === "042-sample-export").move.claimed = "2026-01-01T12:05:00Z";
+        await seedBoard(origin, board.jobs);
+        await page.click("#move-host-save");
+        await page.waitForFunction(() => !document.getElementById("move-host-dlg").open, wait);
+        const job = (await (await fetch(origin + "/api/board")).json()).jobs.find(
+          (j) => j.id === "042-sample-export",
+        );
+        assert.deepEqual(job.move, {
+          from: "lab-linux",
+          session: "a1b2c3",
+          agent: "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+          server: "srv-lab",
+          to: "studio-mac",
+          at: NOW,
+        });
+        assert.equal("claim" in job, false);
         await seedBoard(origin, JOBS);
         await page.reload({ waitUntil: "domcontentloaded" });
         await page.waitForSelector("#d-move-host:not([hidden])", wait);

@@ -58,6 +58,7 @@ const CLOSE_HINT =
 // null sends board writes through, 'drop' aborts them unsent, 'land' sends then aborts the page's copy,
 // '5xx' answers 503 with a body ending in a period.
 let putMode = null;
+let readFails = false;
 
 const freezeClock = (page) =>
   page.evaluateOnNewDocument(() => {
@@ -125,6 +126,12 @@ test("close job", { timeout: 240000 }, async (t) => {
       await page.setBypassServiceWorker(true);
       await page.setRequestInterception(true);
       page.on("request", async (request) => {
+        if (
+          readFails &&
+          request.method() === "GET" &&
+          new URL(request.url()).pathname === "/api/board"
+        )
+          return request.abort("failed");
         if (request.method() !== "PUT" || new URL(request.url()).pathname !== "/api/board")
           return request.continue();
         const mode = putMode;
@@ -318,6 +325,37 @@ test("close job", { timeout: 240000 }, async (t) => {
         await activate("#close-job-save");
         await page.waitForSelector("#close-job-dlg:not([open])");
         assert.equal(await boardText(origin), after);
+      });
+
+      await t.test(`an offline retry keeps the close hint ${width}`, async () => {
+        await reseed();
+        await openDialog("042-sample-export");
+        putMode = "land";
+        await page.type("#close-job-reason", REASON);
+        const first = await failedSave();
+        assert.match(first, /^Not confirmed: /);
+        const clearErr = () =>
+          page.$eval("#close-job-err", (el) => {
+            el.hidden = true;
+            el.textContent = "";
+          });
+        try {
+          readFails = true;
+          await clearErr();
+          const text = await failedSave();
+          if (width === 390)
+            await (
+              await page.$("#close-job-dlg")
+            ).screenshot({ path: `${SHOTS}close-offline-retry-390.png` });
+          assert.equal(text, first);
+        } finally {
+          readFails = false;
+        }
+        await page.type("#close-job-reason", " again");
+        await clearErr();
+        assert.equal(await failedSave(), "A close is already queued for this job.");
+        await activate("#close-job-cancel");
+        await page.waitForSelector("#close-job-dlg:not([open])");
       });
 
       await t.test(`a 5xx body ending in a period gets one period ${width}`, async () => {
