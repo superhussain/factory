@@ -149,6 +149,12 @@ class ArchiveFloorTest(IsolatedTestCase):
         self.assertEqual(self.board("417-new-thing", '{"stage": "closed", "project": "sample"}')[0], 0)
         self.assertEqual(self.board("414-retry-sync", '{"note": "x"}')[0], 0)
 
+    def test_board_patches_without_an_archived_field(self):
+        self.files["/api/board"] = factory.dump_board(
+            {"updated": "", "jobs": [{"id": "414-retry-sync", "project": "sample", "stage": "closed"}]})
+        self.assertEqual(self.board("413-add-export", '{"stage": "closed", "project": "sample"}')[0], 0)
+        self.assertIn("413-add-export", self.ids())
+
     def board(self, job_id, body):
         with patch.object(factory.sys, "stdin", io.StringIO(body)), \
                 patch.dict(os.environ, {"FACTORY_SESSION": "tag", "PASEO_AGENT_ID": ""}):

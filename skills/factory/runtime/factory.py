@@ -736,12 +736,13 @@ def board(factory, job_id):
     def change(text):
         data = load_board(text)
         found = next((j for j in data["jobs"] if j.get("id") == job_id), None)
-        m = re.match(r"(\d{3,})-", job_id)
-        floor = archive_floor(data)
-        if found is None and m and int(m.group(1)) <= floor:
-            fail(f"ids up to {floor} belong to archived jobs, so {job_id} cannot go back on the board. "
-                 f"Read it with factory.py job {job_id}. Claim new ids with claim. "
-                 "Nothing was written.", 2)
+        if found is None:
+            m = re.match(r"(\d{3,})-", job_id)
+            floor = archive_floor(data)
+            if m and int(m.group(1)) <= floor:
+                fail(f"ids up to {floor} belong to archived jobs, so {job_id} cannot go back on the board. "
+                     f"Read it with factory.py job {job_id}. Claim new ids with claim. "
+                     "Nothing was written.", 2)
         if found is None and not NEW_JOB_ID.fullmatch(job_id):
             fail(f"bad job id {job_id!r}: a new job id is digits, a dash and a lowercase slug, "
                  "like 003-rate-limiting. Nothing was written.", 2)
