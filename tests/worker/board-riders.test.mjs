@@ -83,3 +83,19 @@ test("rider status comes from either side", async () => {
   const fresh = setup([LEAD]);
   await refused(fresh, [LEAD, { ...RIDER, paused: CONTROLS.paused }], "paused");
 });
+
+test("rows without a string id are skipped", async () => {
+  const NO_ID = { project: "sample", stage: "build", refs: RIDER.refs };
+  const NUM_ID = { id: 1205, project: "sample", stage: "build", refs: RIDER.refs };
+  const s = setup([LEAD, RIDER, NO_ID, NUM_ID]);
+  const before = s.etag();
+  const response = await s.write([
+    LEAD,
+    RIDER,
+    { ...NO_ID, priority: CONTROLS.priority },
+    { ...NUM_ID, paused: CONTROLS.paused },
+    null,
+  ]);
+  assert.equal(response.status, 200);
+  assert.notEqual(s.etag(), before);
+});
