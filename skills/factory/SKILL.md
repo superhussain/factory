@@ -869,8 +869,8 @@ first line `CLOSED: <reason>`, pushed before the stage moves to `closed`.
 
 1. If `decision.md` already has a `## Follow-ups` heading, skip this step. Open items
    are each `## Left out` bullet and, when `build.md` exists, what its last run lists
-   under `### Left open` or as unresolved. Leave out anything already on `$BASE` and any item whose
-   bullet names an existing job. Queue each agent-doable item with
+   under `### Left open` or as unresolved. Leave out anything already on `$BASE` and
+   any item whose bullet names an existing job. Queue each agent-doable item with
    `factory.py backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
    writing the file first as in step 8: first line `Recommend: approve`, then
    `Left out by <id> (closed at <stage>): <source file>`. An `already in backlog:` line

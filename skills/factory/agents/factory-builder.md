@@ -65,8 +65,9 @@ it each run so it matches the latest build.md section. Skip it when the spec has
 **Later runs.** The orchestrator resumes you with a round folder
 (`round-N/`) or a rework file (`rework-N.md`). Read every review in the round,
 including the PASS ones, and fix each CHANGES item and each `### Fix now` nit. If
-you disagree with a finding, say why in build.md rather than ignoring it. A finding whose fix needs a design
-decision that neither the spec nor the finding makes counts as blocked, as above.
+you disagree with a finding, say why in build.md rather than ignoring it. A finding
+whose fix needs a design decision that neither the spec nor the finding makes counts
+as blocked, as above.
 
 **Recovery.** A rework file may say an earlier builder died mid-run. Then there are
 no findings to fix. Check `git status` and `git log main..HEAD` in the worktree,
