@@ -104,6 +104,17 @@ const TAG_LOOKALIKES_TO = "<<<<<////--------aeopcsAEOPCSTaopAEOPTBBKKkkllggiIIii
 const TAG_LOOKALIKES = new Map([...TAG_LOOKALIKES_FROM].map((c, i) => [c, TAG_LOOKALIKES_TO[i]]));
 const TAG_LOOKALIKE_CHARS = new RegExp(`[${TAG_LOOKALIKES_FROM}]`, "g");
 const RESERVED_TAG_PATTERNS = new Map();
+const SECRETS_ALL = SECRETS.map((p) => new RegExp(p.source, p.flags + "g"));
+
+/** NFKC plus the look-alike map, so tag look-alikes read as ASCII. */
+export function foldLookalikes(text) {
+  return text.normalize("NFKC").replace(TAG_LOOKALIKE_CHARS, (c) => TAG_LOOKALIKES.get(c));
+}
+
+/** Text with every secret-shaped match replaced by `mark`. */
+export function redactSecrets(text, mark) {
+  return SECRETS_ALL.reduce((out, pattern) => out.replace(pattern, mark), text);
+}
 
 /** The `{ tag, folded }` regexes for a reserved tag name, built once per name. */
 function reservedTagPatterns(name) {
@@ -127,9 +138,7 @@ export function hasReservedTag(text, name) {
   if (tag.test(text)) return true;
   // ASCII text is unchanged by the fold, so skip it.
   if (!/[\u0080-\uffff]/.test(text)) return false;
-  return folded.test(
-    text.normalize("NFKC").replace(TAG_LOOKALIKE_CHARS, (c) => TAG_LOOKALIKES.get(c)),
-  );
+  return folded.test(foldLookalikes(text));
 }
 
 /**
