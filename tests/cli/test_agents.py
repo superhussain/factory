@@ -6,11 +6,28 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from support import IsolatedTestCase, invoke
-from test_experiment import EXPERIMENT, PickupFixture, factory, idea, stamp
-from test_pickup import FAKE_ADAPTER
+from datetime import datetime, timedelta, timezone
 
+from support import IsolatedTestCase, invoke, load_runtime
+
+factory = load_runtime()
 DEVICE = "host-a"
+ROUTES = "---\nprimary: provider-a model-a high\nfallback: provider-b model-b\n---\n"
+EXPERIMENT = "experiment: pilot provider-b model-b high 50\n"
+# The PickupFixture fakes from test_experiment and test_pickup: a launcher that records its
+# environment, and a stall adapter that lists the stalls in adapter.json.
+FAKE = """import json, os, sys
+path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "records.json")
+records = json.load(open(path, encoding="utf-8")) if os.path.exists(path) else []
+records.append({k: v for k, v in os.environ.items() if k.startswith("FACTORY_")})
+json.dump(records, open(path, "w", encoding="utf-8"))
+"""
+FAKE_ADAPTER = """import json, os, sys
+root = os.path.dirname(os.path.abspath(__file__))
+conf = json.load(open(os.path.join(root, "adapter.json"), encoding="utf-8"))
+if sys.argv[1] == "list":
+    print(json.dumps({"version": 1, "stalls": conf["stalls"]}), flush=True)
+"""
 JOB = "501-retry-uploads"
 USAGE = "factory.py: usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>]\n"
 # The made-up step 3 rows: one job that started on Claude and moved to opencode during build.
@@ -33,6 +50,15 @@ build   build         opencode  native  glm-5.3-flash    high    1
 build   orchestrator  opencode  paseo   glm-5.3-flash    high    1
 review  review-code   opencode  native  gpt-6.1-sol      high    1
 """
+
+
+def stamp(**delta):
+    return (datetime.now(timezone.utc) + timedelta(**delta)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def idea(job_id):
+    return {"id": job_id, "stage": "idea", "project": "alpha", "title": "Feature", "idea": "Feature",
+            "updated": "2026-01-01T00:00:00Z"}
 
 
 class BoardFixture(IsolatedTestCase):
@@ -117,6 +143,54 @@ class AgentReportTest(BoardFixture):
         self.assertEqual(invoke(factory, ["agent", "report", "gamma"]), (0, "no agent records\n", ""))
 
 
+class PickupFixture(BoardFixture):
+    def setUp(self):
+        super().setUp()
+        self.root = self.home
+        self.repo = self.root / "repo-a"
+        self.repo.mkdir()
+        (self.home / "paths.md").write_text(f"---\nalpha: {self.repo}\n---\n", encoding="utf-8")
+        self.routes = self.home / "routes.md"
+        self.routes.write_text(ROUTES, encoding="utf-8")
+        self.fake = self.root / "fake_launcher.py"
+        self.fake.write_text(FAKE, encoding="utf-8")
+        self.write_launchers({"primary": [sys.executable, str(self.fake), "{effort}"],
+                              "fallback": [sys.executable, str(self.fake)]})
+        self.board["jobs"] = []
+        patch.object(factory, "LAUNCH_WAIT_SECONDS", 2).start()
+        patch.object(factory, "report_status").start()
+        patch.object(factory, "backlog_triage_pass").start()
+        patch.object(factory, "checkout_problem", return_value=None).start()
+
+    def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if path == "/api/hosts":
+            return 404, {}, ""
+        if path == "/api/pipeline/effective/alpha":
+            return 200, {}, json.dumps({
+                "project": "alpha", "merge": "auto", "review_rounds": 2,
+                "reviewers": ["security", "ux", "ui", "code"], "gates": [],
+                "pickup": {"enabled": True, "hosts": [DEVICE]}, "stage_notes": {},
+                "versions": {"global": 1, "project": 1}, "floors": []})
+        return super().request(home, method, path, body, ok, headers, raw)
+
+    def configure(self, line):
+        self.routes.write_text(ROUTES[:4] + line + ROUTES[4:], encoding="utf-8")
+
+    def write_launchers(self, launchers):
+        (self.home / "launchers.json").write_text(json.dumps({"version": 1, "launchers": launchers}),
+                                                  encoding="utf-8")
+
+    def pickup(self):
+        return invoke(factory, ["pickup"])
+
+    def launched(self):
+        path = self.root / "records.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+
+    def job(self, job_id=JOB):
+        return next(j for j in self.board["jobs"] if j["id"] == job_id)
+
+
 class AgentPickupTest(PickupFixture):
     def rows(self, job_id):
         rows = self.job(job_id)["agents"]
@@ -130,7 +204,7 @@ class AgentPickupTest(PickupFixture):
         [record] = self.launched()
         self.assertEqual(self.rows("016-doc-lint"), [
             {"stage": "idea", "role": "orchestrator", "harness": "provider-a", "via": "launcher",
-             "model": "model-a", "effort": "high", "session": record["env"]["FACTORY_SESSION"]}])
+             "model": "model-a", "effort": "high", "session": record["FACTORY_SESSION"]}])
 
     def test_launch_records_the_arm_b_triple(self):
         self.configure(EXPERIMENT)
@@ -143,8 +217,7 @@ class AgentPickupTest(PickupFixture):
         if os.name == "nt":
             self.skipTest("the fake paseo program is a shebang script")
         paseo = self.root / "paseo"
-        paseo.write_text(f"#!{sys.executable}\n" + (self.root / "fake_launcher.py").read_text(encoding="utf-8"),
-                         encoding="utf-8")
+        paseo.write_text(f"#!{sys.executable}\n" + FAKE, encoding="utf-8")
         paseo.chmod(0o755)
         self.write_launchers({"primary": [str(paseo), "{id}"], "fallback": [str(paseo), "{id}"]})
         self.board["jobs"] = [idea("016-doc-lint")]
@@ -160,8 +233,6 @@ class AgentPickupTest(PickupFixture):
             encoding="utf-8")
         (self.home / "stalls.json").write_text(json.dumps({"version": 1, "adapter": [sys.executable, str(adapter)]}),
                                                encoding="utf-8")
-        self.write_launchers({"primary": [sys.executable, str(self.fake), "{id}"],
-                              "fallback": [sys.executable, str(self.fake), "{id}"]})
         self.board["jobs"] = [{"id": JOB, "stage": "build", "project": "alpha", "updated": stamp(hours=-25),
                                "claim": {"device": DEVICE, "session": "a1b2c3", "since": stamp(minutes=-40),
                                          "seen": stamp(minutes=-40)},
@@ -171,4 +242,4 @@ class AgentPickupTest(PickupFixture):
         [record] = self.launched()
         self.assertEqual(self.rows(JOB), [
             {"stage": "build", "role": "orchestrator", "harness": "provider-b", "via": "launcher",
-             "model": "model-b", "session": record["env"]["FACTORY_SESSION"]}])
+             "model": "model-b", "session": record["FACTORY_SESSION"]}])

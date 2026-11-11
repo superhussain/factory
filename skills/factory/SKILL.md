@@ -273,7 +273,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "pipeline": { "global": 3, "project": 2 },
   "backlog": { "line": "- [ ] <slug>: <feature>", "decision": "approved | denied | rework", "at": "...", "notes": "optional", "answers": "optional", "notes_read": "..." },
   "experiment": { "name": "pilot", "arm": "a | b", "provider": "provider-b", "model": "model-b", "effort": "high" },
-  "agents": [{ "at": "...", "stage": "review", "round": 1, "role": "review-code", "harness": "opencode", "via": "native | paseo | launcher | general | direct", "model": "gpt-6.1-sol", "effort": "high", "session": "d4e5f6" }],
+  "agents": [{ "at": "...", "stage": "spec", "role": "spec", "harness": "claude", "via": "native", "model": "...", "effort": "medium", "session": "a1b2c3" }],
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
   "started": "2026-10-15T11:40:00Z",
   "updated": "2026-10-15T12:00:00Z",
@@ -306,16 +306,10 @@ Approve also appends the notes to `idea`.
 
 How the dashboard's idea column, Assign project and backlog decision page behave is in [dashboard](references/dashboard.md).
 
-`experiment` is set only by pickup, at first claim, when `routes.md` sets an owner-model
-experiment: the arm the job launched on and the provider, model and effort it launched
-with. Pickup never rewrites it, and a relaunch of an arm `b` job launches on the recorded
-triple. `factory.py experiment report <name>` attributes outcomes by it.
-`agents` lists who ran each stage, one row per launch or role dispatch, newest 32
-kept. Pickup appends the orchestrator row after each launch and takeover. The
-orchestrator appends one row per role dispatch with `factory.py agent record`, which
-stamps the board's stage, round and time. `board` refuses an `agents` patch.
-`factory.py agent report [<project>]` counts the rows by stage, role, harness, via,
-model and effort.
+`experiment` is set only by pickup, at first claim, for an owner-model experiment; see
+[pickup](references/pickup.md#owner-model-experiment).
+`agents` keeps the newest 32 rows of who ran each stage. Only pickup launches and
+`agent record` append them; `agent report` counts them.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
 
