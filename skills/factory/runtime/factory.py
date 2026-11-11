@@ -590,11 +590,15 @@ def paseo_session():
 
 
 def paseo_archive_command(agent):
-    """The paseo command that archives agent by hand on this host, or None when agent is unsafe to print as an argument."""
+    """The paseo command that archives agent by hand on this host, or None when agent is unsafe to print as an argument.
+
+    When PASEO_HOME is unprintable it is left out and a clause says so."""
     if not PASEO_ID.fullmatch(agent) or agent.startswith("-"):
         return None
     home = os.environ.get("PASEO_HOME")
-    return "paseo " + (f"--home {shlex.quote(home)} " if home and home.isprintable() else "") + f"archive --force {agent}"
+    if home and not home.isprintable():
+        return f"paseo archive --force {agent} (left out --home because PASEO_HOME has unprintable characters)"
+    return "paseo " + (f"--home {shlex.quote(home)} " if home else "") + f"archive --force {agent}"
 
 
 def paseo_claim_path(home, job_id, agent):
