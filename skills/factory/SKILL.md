@@ -283,7 +283,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
 dashboard links only exact `https://github.com/<repo>/pull/<n>` URLs for the
 job's own `$REPO`.
 `round` is 0 before the first review. `rounds[i]` is round i+1. Verdicts are
-`pending`, `PASS`, or `CHANGES`. Reviewer keys are fixed: security, ux, ui, code.
+`pending`, `PASS`, `CHANGES`, or `SKIPPED` (ux and ui only, written by `review-plan`). Reviewer keys are fixed: security, ux, ui, code.
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
 which ports live jobs hold. Only `factory.py` writes `claim`.
 `done` is when the job entered `merged` or `closed`, and only `factory.py` writes it.
@@ -352,7 +352,7 @@ only `factory.py deny-notes` writes it.
   `python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...` once. Never poll for job files
   with `until` or `while` loops, `sleep`, file mtimes, quiet windows, Monitor or a
   task's output file.
-  Spawn all four reviewers in one message. A turn that ends on text alone is a
+  Spawn every reviewer `review-plan` lists in one message. A turn that ends on text alone is a
   report, not the end of the run. While any agent or background command is still
   running, wait for it instead of ending the run. The run ends only at a real
   stop: the job is at `needs-human`, `merged` or `closed`, its PR waits at
@@ -360,7 +360,8 @@ only `factory.py deny-notes` writes it.
 - WAIT FOR ALL: a round is done only when all four `review-*.md` files exist in
   the round folder. Record each verdict on the board as it lands, but never resume
   the builder mid-round. Read verdicts from each file's first line: reviewers write
-  `VERDICT: PASS` or `VERDICT: CHANGES`, and the approver writes `APPROVE`,
+  `VERDICT: PASS` or `VERDICT: CHANGES`, `review-plan` writes `VERDICT: SKIPPED`
+  for ux and ui, and the approver writes `APPROVE`,
   `ESCALATE`, or `CHANGES`. `wait` prints those first lines.
 - Max `$PIPELINE.review_rounds` review rounds per build cycle (2 unless pipeline settings say otherwise, at most 5). If
   the last allowed round of a cycle still has a CHANGES verdict, the job goes to
