@@ -730,8 +730,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <p class="muted">These settings apply only to this browser. They are saved here and never sent to the server.</p>
       <label for="display-theme">Theme<select id="display-theme"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <label for="display-density">Density<select id="display-density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
-      <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="3">Every 3 seconds</option><option value="10">Every 10 seconds</option><option value="30">Every 30 seconds</option></select></label>
-      <p class="muted" id="display-poll-help">The board updates live while this tab is visible. If the live connection drops, it refreshes on this schedule until it reconnects. A hidden tab stays live only while notifications are on.</p>
+      <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="15">Every 15 seconds</option><option value="30">Every 30 seconds</option><option value="60">Every 60 seconds</option></select></label>
+      <p class="muted" id="display-poll-help">The board updates live while this tab is visible. If the live connection drops, the board refreshes on this schedule and the backlog every 2 minutes until it reconnects. Refreshing pauses while this window is hidden or unfocused and catches up when you come back. With notifications on, it refreshes every 30 seconds instead. A hidden tab stays live only while notifications are on.</p>
       <fieldset id="display-filter"><legend>Show jobs from</legend></fieldset>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
@@ -1065,6 +1065,8 @@ let archiveSearch = null;
 // Pages of GET /api/board/archive?page=N, shown under the merged and closed columns.
 const archiveList = { open: false, rows: [], page: 0, pages: 0, total: 0, busy: false, error: '' };
 let boardReadVersion = 0;
+const BACKLOG_POLL_MS = 120000;
+let backlogReadAt = 0;
 let boardUpdated = '';
 let boardEtag = '';
 
@@ -1076,12 +1078,18 @@ function drawUpdated() {
   $('updated').title = boardUpdated;
 }
 
-async function poll({ ifChanged = false } = {}) {
+function refreshBacklog() {
+  backlogReadAt = Date.now();
+  const version = boardReadVersion;
+  // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
+  const seen = backlog.map((b) => b.raw).join('\n');
+  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); });
+}
+
+async function poll({ ifChanged = false, withBacklog = true } = {}) {
   const version = ++boardReadVersion;
   try {
-    // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
-    const seen = backlog.map((b) => b.raw).join('\n');
-    loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); });
+    if (withBacklog) refreshBacklog();
     const r = await fetch('./board.json', { cache: 'no-store' });
     if (r.status === 401 || r.status === 403) {
       setConnection('signin');
@@ -6179,13 +6187,13 @@ loadProjects().then(() => {
 // Display settings live only in this browser. Each value is read against a fixed list,
 // so a bad stored value falls back to the default.
 const DISPLAY_KEYS = { theme:'factory-theme', density:'factory-density', columns:'factory-hidden-columns', poll:'factory-poll', cardFields:'factory-hidden-card-fields', ideaProject:'factory-idea-project', drawerLinks:'factory-hidden-drawer-links' };
-const THEMES = ['system', 'light', 'dark'], DENSITIES = ['comfortable', 'compact'], POLL_SECONDS = [3, 10, 30];
+const THEMES = ['system', 'light', 'dark'], DENSITIES = ['comfortable', 'compact'], POLL_SECONDS = [15, 30, 60], POLL_DEFAULT = 30;
 const THEME_COLORS = { light: '#f9fafb', dark: '#111827' };
-const pickDisplay = (value, list) => list.includes(value) ? value : list[0];
+const pickDisplay = (value, list, fallback = list[0]) => list.includes(value) ? value : fallback;
 let theme = pickDisplay(store.get(DISPLAY_KEYS.theme), THEMES);
 let frameTheme = theme;
 let density = pickDisplay(store.get(DISPLAY_KEYS.density), DENSITIES);
-let pollSeconds = pickDisplay(Number(store.get(DISPLAY_KEYS.poll)), POLL_SECONDS);
+let pollSeconds = pickDisplay(Number(store.get(DISPLAY_KEYS.poll)), POLL_SECONDS, POLL_DEFAULT);
 const hiddenColumns = new Set((store.get(DISPLAY_KEYS.columns) || '').split(',').filter(s => COLUMNS.includes(s) && s !== 'needs-you'));
 const CARD_FIELDS = [['note', 'Note'], ['meta', 'Branch, round and build line'], ['pr', 'PR link']];
 const hiddenCardFields = new Set((store.get(DISPLAY_KEYS.cardFields) || '').split(',').filter(f => CARD_FIELDS.some(([k]) => k === f)));
@@ -6202,20 +6210,23 @@ function applyDisplay() {
   // replace() swaps the fragment without a history entry, so Back cannot undo the theme.
   for (const f of document.querySelectorAll('.html-stepper-frame')) f.contentWindow.location.replace(f.src.replace(/#.*$/, '') + walkthroughHash());
 }
-// The board timer runs only while the live socket is closed. Hidden tabs never poll
-// unless notifications are on. Returning to the tab refreshes at once.
+// The board timer runs only while the live socket is closed. Hidden or unfocused windows
+// never poll unless notifications are on. Returning to the window refreshes at once.
+// A tick reads the backlog only when the last read is 2 minutes old.
+function pollTick() { return poll({ withBacklog: Date.now() - backlogReadAt >= BACKLOG_POLL_MS }); }
 function schedulePoll() {
   clearInterval(pollTimer);
-  const ms = !pollStarted || liveOpen ? 0 : !document.hidden ? pollSeconds * 1000 : notifyActive() ? 30000 : 0;
-  pollTimer = ms ? setInterval(poll, ms) : 0;
+  const away = document.hidden || !document.hasFocus();
+  const ms = !pollStarted || liveOpen ? 0 : !away ? pollSeconds * 1000 : notifyActive() ? 30000 : 0;
+  pollTimer = ms ? setInterval(pollTick, ms) : 0;
   drawLiveDot();
 }
 document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); syncLive(); schedulePoll(); });
 // Live board events: the Worker sends {"type":"changed","key":...} after each board or
-// backlog write, and the board re-reads at once. A dropped socket retries with backoff
-// (1, 2, 4 ... 30 s, 8 tries); focus, online or showing the tab start over after that.
+// backlog write, and the matching key re-reads at once. A dropped socket retries with backoff
+// (1, 2, 4 ... 30 s), then every 30 s while a socket is wanted.
 const LIVE_PATH = '/events/board';
-const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000, LIVE_MAX_RETRIES = 8;
+const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000;
 let liveSocket = null, liveOpen = false, liveRetries = 0, liveRetryTimer = 0;
 function liveWanted() { return pollStarted && navigator.onLine && (!document.hidden || notifyActive()); }
 function openLive() {
@@ -6231,13 +6242,20 @@ function openLive() {
     schedulePoll();
     poll({ ifChanged: true });
   });
-  ws.addEventListener('message', () => { if (ws === liveSocket) poll(); });
+  ws.addEventListener('message', (e) => {
+    if (ws !== liveSocket) return;
+    let key;
+    try { key = JSON.parse(e.data).key; } catch {}
+    if (key === 'board.json') poll({ withBacklog: false });
+    else if (key === 'backlog.md') refreshBacklog();
+    else poll();
+  });
   ws.addEventListener('close', () => {
     if (ws !== liveSocket) return;
     liveSocket = null;
     liveOpen = false;
     schedulePoll();
-    if (liveRetries < LIVE_MAX_RETRIES && liveWanted())
+    if (liveWanted())
       liveRetryTimer = setTimeout(openLive, Math.min(LIVE_FIRST_RETRY_MS * 2 ** liveRetries++, LIVE_MAX_RETRY_MS));
   });
 }
@@ -6255,7 +6273,8 @@ function syncLive() {
   if (!liveWanted()) closeLive();
   else if (!liveSocket && !liveRetryTimer) { liveRetries = 0; openLive(); }
 }
-window.addEventListener('focus', syncLive);
+window.addEventListener('blur', () => setTimeout(schedulePoll, 0));
+window.addEventListener('focus', () => { if (pollStarted && !liveOpen && !document.hidden) pollTick(); syncLive(); schedulePoll(); });
 setInterval(() => { if (!document.hidden) drawUpdated(); }, 30000);
 $('display-columns').append(...COLUMNS.map(s => {
   const box = Object.assign(document.createElement('input'), {type:'checkbox', id:'display-column-' + s, disabled:s === 'needs-you'});
@@ -6298,7 +6317,7 @@ function renderDisplaySettings() {
 const displaySaved = () => { $('display-status').textContent = 'Saved in this browser.'; };
 $('display-theme').addEventListener('change', () => { theme = pickDisplay($('display-theme').value, THEMES); store.set(DISPLAY_KEYS.theme, theme); applyDisplay(); displaySaved(); });
 $('display-density').addEventListener('change', () => { density = pickDisplay($('display-density').value, DENSITIES); store.set(DISPLAY_KEYS.density, density); applyDisplay(); displaySaved(); });
-$('display-poll').addEventListener('change', () => { pollSeconds = pickDisplay(Number($('display-poll').value), POLL_SECONDS); store.set(DISPLAY_KEYS.poll, pollSeconds); schedulePoll(); displaySaved(); });
+$('display-poll').addEventListener('change', () => { pollSeconds = pickDisplay(Number($('display-poll').value), POLL_SECONDS, POLL_DEFAULT); store.set(DISPLAY_KEYS.poll, pollSeconds); schedulePoll(); displaySaved(); });
 $('display-columns').addEventListener('change', e => {
   const s = e.target.dataset.stage;
   if (!s || s === 'needs-you') return;
@@ -6329,7 +6348,7 @@ $('display-idea-project').addEventListener('change', () => {
 $('display-reset').addEventListener('click', () => {
   for (const key of [...Object.values(DISPLAY_KEYS), PROJECTS_HIDDEN_KEY, 'factory-project']) store.remove(key);
   resetDrawerWidth();
-  theme = 'system'; density = 'comfortable'; pollSeconds = 3;
+  theme = 'system'; density = 'comfortable'; pollSeconds = POLL_DEFAULT;
   hiddenProjects.clear();
   hiddenColumns.clear();
   hiddenCardFields.clear();

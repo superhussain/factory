@@ -113,9 +113,9 @@ class BatchTest(IsolatedTestCase):
         self.assertEqual(factory.batch_problem(data, cases[-1][0], "sample", "test", "tag", 120), "leads a batch")
         self.assertIsNone(factory.batch_problem({"jobs": []}, idea("3-c"), "sample", "test", "tag", 120))
 
-    def test_candidates_stop_at_twenty(self):
-        self.set_jobs(jobs()[:1] + [idea(f"{n}-sample-many") for n in range(100, 125)])
-        self.assertEqual(len(json.loads(self.batch(TARGET)[1])["candidates"]), 20)
+    def test_candidates_stop_at_forty(self):
+        self.set_jobs(jobs()[:1] + [idea(f"{n}-sample-many") for n in range(100, 145)])
+        self.assertEqual(len(json.loads(self.batch(TARGET)[1])["candidates"]), 40)
 
     def test_attach_moves_riders_in_one_write(self):
         code, out, _ = self.batch(TARGET, "091-sample-typo", "092-sample-csv-name")
@@ -153,14 +153,22 @@ class BatchTest(IsolatedTestCase):
         self.refuse(2, "bad job id 'bad id'. Nothing was written.", TARGET, "bad id")
         self.refuse(2, "bad job id '../x'. Nothing was written.", TARGET, "../x")
 
-    def test_refuses_more_than_four_riders(self):
-        rows = jobs() + [idea(f"{n}-sample-more") for n in range(100, 104)]
-        self.set_jobs(rows)
+    def test_attaches_twenty_riders(self):
+        more = [f"{n}-sample-more" for n in range(100, 120)]
+        self.set_jobs(jobs() + [idea(i) for i in more])
+        code, out, _ = self.batch(TARGET, *more)
+        self.assertEqual((code, self.ids(out, "riders")), (0, more))
+
+    def test_refuses_more_than_twenty_riders(self):
+        more = [f"{n}-sample-more" for n in range(100, 118)]
+        self.set_jobs(jobs() + [idea(i) for i in more])
         with patch.dict(os.environ, {"FACTORY_SESSION": "tag"}):
             with self.assertRaises(SystemExit) as raised:
-                factory.batch_cmd(TARGET, "091-sample-typo", "092-sample-csv-name", "093-sample-login",
-                                  "100-sample-more", "101-sample-more")
+                factory.batch_cmd(TARGET, "091-sample-typo", "092-sample-csv-name", "093-sample-login", *more)
         self.assertEqual((raised.exception.code, self.puts), (2, 0))
+
+    def test_cli_accepts_twenty_idea_ids(self):
+        self.assertEqual(factory.COMMANDS["batch"][1:], (1, 21))
 
     def patch_lead(self, patch_body):
         factory.cas(self.home, "/api/board", lambda text: self.apply(text, patch_body))
