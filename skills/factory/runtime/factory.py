@@ -468,7 +468,7 @@ def mirror_batch(data, lead):
         if rider.get("stage") in TERMINAL:
             continue
         if lead.get("stage") == "closed":
-            refs = [r for r in rider["refs"] if r.get("kind") != BATCH_REF]
+            refs = [r for r in rider["refs"] if isinstance(r, dict) and r.get("kind") != BATCH_REF]
             patch_job(data, rider["id"], {"stage": IDEA, "refs": refs or None,
                                           "note": f"unbatched: {lead['id']} closed"})
         else:
@@ -1603,6 +1603,9 @@ def batch_cmd(target, *idea_ids):
     home, slug, lead_id = r2_target(target, True)
     device, session, minutes = holder(home)
     idea_ids = list(dict.fromkeys(idea_ids))
+    for idea_id in idea_ids:
+        if not JOB_ID.fullmatch(idea_id) or ".." in idea_id:
+            fail(f"bad job id {idea_id!r}. Nothing was written.", 2)
 
     def entry(j):
         return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title")}

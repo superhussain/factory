@@ -148,6 +148,11 @@ class BatchTest(IsolatedTestCase):
         self.set_jobs(rows)
         self.refuse(2, f"cannot batch into {LEAD}: follows Tracer", TARGET, "091-sample-typo")
 
+    def test_attach_refuses_bad_picked_ids(self):
+        self.set_jobs(jobs() + [idea("bad id")])
+        self.refuse(2, "bad job id 'bad id'. Nothing was written.", TARGET, "bad id")
+        self.refuse(2, "bad job id '../x'. Nothing was written.", TARGET, "../x")
+
     def test_refuses_more_than_four_riders(self):
         rows = jobs() + [idea(f"{n}-sample-more") for n in range(100, 104)]
         self.set_jobs(rows)
@@ -194,6 +199,17 @@ class BatchTest(IsolatedTestCase):
         self.batch(TARGET, "091-sample-typo")
         self.patch_lead({"stage": "closed"})
         self.assertEqual(self.job("091-sample-typo")["refs"], [{"id": "001-sample-old", "kind": "follow-up-of"}])
+
+    def test_closed_lead_drops_non_dict_refs(self):
+        rows = jobs()
+        rows[1]["refs"] = ["junk"]
+        self.set_jobs(rows)
+        self.batch(TARGET, "091-sample-typo")
+        self.patch_lead({"stage": "closed"})
+        j = self.job("091-sample-typo")
+        self.assertEqual(j["stage"], "idea")
+        self.assertNotIn("refs", j)
+        self.assertEqual(self.job(LEAD)["stage"], "closed")
 
     def test_finished_riders_are_left_alone(self):
         self.batch(TARGET, "091-sample-typo", "092-sample-csv-name")
