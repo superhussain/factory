@@ -2244,3 +2244,77 @@ class DenyNotesTest(PickupFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FOLLOW = [{"id": "090-alpha-old", "kind": "follow-up-of"}]
+HELD = ["101-wrap-doc-line", "102-move-comment", "103-drop-double-period", "104-fix-typo", "105-rename-flag"]
+
+
+class BatchHoldTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+
+    def held_ideas(self, count, **extra):
+        return [idea(job_id, "alpha", **dict({"refs": FOLLOW, "updated": stamp(minutes=-10)}, **extra))
+                for job_id in HELD[:count]]
+
+    def dry(self):
+        code, out, err = self.pickup("--dry-run", "--max-inflight", "5")
+        self.assertEqual((code, err), (0, ""))
+        # A launch line's argv carries the multi-line prompt; keep only the line starts.
+        return [line for line in out.splitlines() if line.startswith(("skip ", "would launch ", "host "))]
+
+    def waits(self, ids, line):
+        return [f"skip {job_id} alpha: waits for a batch ({line})" for job_id in ids]
+
+    def test_three_fresh_wait(self):
+        self.board["jobs"] = self.held_ideas(3)
+        self.assertEqual(self.dry(), self.waits(HELD[:3], "3 of 5 held, oldest 0h of 12h")
+                         + [f"host {DEVICE}: would launch 0"])
+
+    def test_five_release_one(self):
+        self.board["jobs"] = self.held_ideas(5)
+        lines = self.dry()
+        self.assertTrue(lines[0].startswith("would launch 101-wrap-doc-line alpha on primary: "))
+        self.assertEqual(lines[1:], [f"skip {job_id} alpha: batches behind 101-wrap-doc-line" for job_id in HELD[1:]]
+                         + [f"host {DEVICE}: would launch 1"])
+
+    def test_old_one_releases(self):
+        self.board["jobs"] = self.held_ideas(1, updated=stamp(hours=-13))
+        lines = self.dry()
+        self.assertTrue(lines[0].startswith("would launch 101-wrap-doc-line alpha on primary: "))
+        self.assertEqual(lines[1:], [f"host {DEVICE}: would launch 1"])
+
+    def test_triage_idea_waits(self):
+        self.board["jobs"] = [idea(HELD[0], "alpha", updated=stamp(minutes=-10),
+                                   backlog={"by": "triage", "decision": "approved"})]
+        self.assertEqual(self.dry(), self.waits(HELD[:1], "1 of 5 held, oldest 0h of 12h")
+                         + [f"host {DEVICE}: would launch 0"])
+
+    def test_person_idea_launches(self):
+        self.board["jobs"] = self.held_ideas(3) + [
+            idea("110-add-csv-export", "alpha", refs=FOLLOW, updated=stamp(minutes=-10), capture_id="c1")]
+        lines = self.dry()
+        self.assertEqual(lines[:3], self.waits(HELD[:3], "3 of 5 held, oldest 0h of 12h"))
+        self.assertTrue(lines[3].startswith("would launch 110-add-csv-export alpha on primary: "))
+        self.assertEqual(lines[4:], [f"host {DEVICE}: would launch 1"])
+
+    def test_view_hold_settings(self):
+        self.board["jobs"] = self.held_ideas(3)
+        view = effective("alpha", None, {"pickup": ON})
+        self.views["alpha"] = (200, dict(view, hold={"min_ideas": 3, "max_wait_hours": 1}))
+        lines = self.dry()
+        self.assertTrue(lines[0].startswith("would launch 101-wrap-doc-line alpha on primary: "))
+        self.assertEqual(lines[1:], [f"skip {job_id} alpha: batches behind 101-wrap-doc-line" for job_id in HELD[1:3]]
+                         + [f"host {DEVICE}: would launch 1"])
+        self.views["alpha"] = (200, dict(view, hold={"min_ideas": 0, "max_wait_hours": 1}))
+        self.assertEqual(self.dry(), self.waits(HELD[:3], "3 of 5 held, oldest 0h of 12h")
+                         + [f"host {DEVICE}: would launch 0"])
+
+    def test_real_run_claims_lead_only(self):
+        self.board["jobs"] = self.held_ideas(5)
+        code, out, err = self.pickup("--limit", "5", "--max-inflight", "5")
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, r"^launched 101-wrap-doc-line alpha on primary session [0-9a-f]{6}\n$")
+        self.assertEqual([j["id"] for j in self.board["jobs"] if "claim" in j], ["101-wrap-doc-line"])
