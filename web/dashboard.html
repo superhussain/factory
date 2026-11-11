@@ -1120,7 +1120,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     if (version !== boardReadVersion) return false;
     const etag = r.ok ? r.headers.get('ETag') || '' : '';
     setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
-    // A socket open only catches writes made while it was down, so an unchanged board is not redrawn.
+    // A socket open or a timer tick redraws only a changed board, so a focused card is not read again.
     if (ifChanged && loaded && etag && etag === boardEtag) {
       return true;
     }
@@ -6312,7 +6312,8 @@ function applyDisplay() {
 // The board timer runs only while the live socket is closed. Hidden or unfocused windows
 // never poll unless notifications are on. Returning to the window refreshes at once.
 // A tick reads the backlog only when the last read is 2 minutes old.
-function pollTick() { return poll({ withBacklog: Date.now() - backlogReadAt >= BACKLOG_POLL_MS }); }
+// A tick redraws only a changed board, so a focused card keeps its node.
+function pollTick() { return poll({ ifChanged: true, withBacklog: Date.now() - backlogReadAt >= BACKLOG_POLL_MS }); }
 function schedulePoll() {
   clearInterval(pollTimer);
   const away = document.hidden || !document.hasFocus();

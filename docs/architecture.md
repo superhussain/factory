@@ -207,7 +207,7 @@ sequenceDiagram
   socket retries with backoff (1, 2, 4 ... 30 s), then every 30 s until it opens.
   A hidden tab keeps its socket only while notifications are on. A `changed` event
   re-reads only its key.
-- A socket open re-reads `board.json` but redraws only when its `ETag` changed.
+- A socket open or a poll timer tick re-reads `board.json` but redraws only when its `ETag` changed, so a focused card is not read again.
   The header dot is solid while live and a ring while polling.
 
 | Request to `/events/board` | Result |
