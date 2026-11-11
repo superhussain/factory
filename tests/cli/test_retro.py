@@ -397,7 +397,7 @@ S1, S2, S3 = ("3ae1fc86-0000-4000-8000-00000000000%d" % n for n in (1, 2, 3))
 class RetroAggregateTest(RetroWorkerCase):
     def window(self, days, pushed):
         """Routes for every date in the window; pushed maps a date offset to {host: rows or text}."""
-        today, routes = datetime.now().date(), {"GET /projects.json": (200, [{"slug": "factory"}, {"slug": "huss-skills"}])}
+        today, routes = datetime.now().date(), {"GET /projects.json": (200, [{"slug": "factory"}, {"slug": "sample-tools"}])}
         for back in range(days):
             date = (today - timedelta(days=back)).isoformat()
             hosts = pushed.get(back, {})
@@ -438,7 +438,7 @@ class RetroAggregateTest(RetroWorkerCase):
         sub = {"cache_read": 120, "cache_write": 0, "uncached_input": 6, "output": 9}
         self.assertEqual(agg, {
             "schema": "factory.retro-aggregate/1", "run": run, "from": printed["from"], "to": printed["to"],
-            "host": "host-a", "transcripts": str(self.projects), "projects": ["factory", "huss-skills"],
+            "host": "host-a", "transcripts": str(self.projects), "projects": ["factory", "sample-tools"],
             "hosts": {"host-a": {"sessions": 2, "jobs": 1, "ad_hoc": 1}, "host-b": {"sessions": 1, "jobs": 1, "ad_hoc": 0}},
             "tokens": {"main": tokens, "subagents": sub},
             "context": {"first_turn_median": 1000, "mean_per_turn_median": 2000},
@@ -509,7 +509,7 @@ REF = "host-a/3ae1fc86-0000-4000-8000-000000000001"
 def finding(**over):
     f = {"title": "ls alias crashes in non-interactive shells", "category": "tool-economy", "count": 253,
          "cost": 250, "sessions": [REF], "root_cause": "The colorls alias needs a terminal size.",
-         "fix": "Alias ls only in interactive shells.", "project": "huss-skills"}
+         "fix": "Alias ls only in interactive shells.", "project": "sample-tools"}
     f.update(over)
     return f
 
@@ -521,7 +521,7 @@ def retro_suggestion(**over):
          "options": [{"key": "A", "label": "Interactive only", "detail": "Wrap the alias in an interactive check",
                       "pros": ["One line"], "cons": []},
                      {"key": "B", "label": "Drop the alias", "detail": "Use plain ls", "pros": [], "cons": ["No colors"]}],
-         "recommend": "A", "reason": "It keeps colors for people.", "project": "huss-skills"}
+         "recommend": "A", "reason": "It keeps colors for people.", "project": "sample-tools"}
     s.update(over)
     return s
 
@@ -538,7 +538,7 @@ class RetroAdmitTest(RetroCase):
         self.folder = self.home / "retro" / RUN
         self.folder.mkdir(parents=True)
         agg = {"schema": "factory.retro-aggregate/1", "run": RUN, "from": "2026-11-05", "to": "2026-11-11",
-               "host": "host-a", "projects": ["factory", "huss-skills"],
+               "host": "host-a", "projects": ["factory", "sample-tools"],
                "hosts": {"host-a": {"sessions": 40, "jobs": 12, "ad_hoc": 3}}}
         (self.folder / "aggregate.json").write_text(json.dumps(agg), encoding="utf-8")
 
@@ -564,8 +564,8 @@ class RetroAdmitTest(RetroCase):
             "Window 2026-11-05 to 2026-11-11 · hosts host-a · 40 sessions · ranked by count x cost", "",
             "| Rank | Finding | Category | Count | Cost each | Score | Target |",
             "| --- | --- | --- | --- | --- | --- | --- |",
-            "| 1 | ls alias crashes in non-interactive shells | tool-economy | 253 | 250 | 63,250 | huss-skills |",
-            "| 2 | A \\| pipe in the title | tool-economy | 4 | 10,000 | 40,000 | huss-skills |",
+            "| 1 | ls alias crashes in non-interactive shells | tool-economy | 253 | 250 | 63,250 | sample-tools |",
+            "| 2 | A \\| pipe in the title | tool-economy | 4 | 10,000 | 40,000 | sample-tools |",
             "| 3 | Reviewers re-read files | navigation | 40 | 1,000 | 40,000 | factory |", ""]))
         self.assertIn("\n".join([
             "## 1. ls alias crashes in non-interactive shells", "", "Root cause:", "",
