@@ -1322,7 +1322,6 @@ function refLine(r) {
 }
 
 // The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
-// The wrapper holds the key hint, so the button's only shortcut cue is aria-keyshortcuts.
 // A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
 function card(j, inNeeds, archived = false) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;

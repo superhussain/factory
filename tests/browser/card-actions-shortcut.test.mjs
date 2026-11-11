@@ -282,6 +282,16 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
       await page.waitForFunction(() => document.getElementById("job-picker").open);
       await page.keyboard.type("resume");
       assert.deepEqual((await picker(page)).options, ["Resume pickup"]);
+      // Only the drawer runner passes #d-resume as ctx.button, so only it toggles disabled.
+      await page.evaluate(() => {
+        window.resumeDisabled = false;
+        new MutationObserver(() => {
+          window.resumeDisabled = true;
+        }).observe(document.getElementById("d-resume"), {
+          attributes: true,
+          attributeFilter: ["disabled"],
+        });
+      });
       await page.keyboard.press("Enter");
       await page.waitForFunction(
         (sel) =>
@@ -291,6 +301,7 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
       );
       assert.equal((await boardJob(origin, ID)).paused, undefined);
       assert.equal(await page.$eval("#detail", (el) => el.hidden), false);
+      assert.equal(await page.evaluate(() => window.resumeDisabled), true);
     });
 
     await t.test("title", async () => {
