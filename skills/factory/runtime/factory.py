@@ -221,6 +221,8 @@ UNATTENDED = (
     "does not override the security floors, the confirmation a risky or destructive action "
     "needs, or any rule that holds work for a human.")
 _HOME_OVERRIDE = None
+# Inside one main() call, the pointer-selected home already validated, keyed by pointer path.
+_LOCATED = None
 BACKLOG_TEMPLATE = (
     "# factory backlog\n\n"
     "One feature per line, as `- [ ] <slug>: <feature>`. `factory.py backlog add` appends one,\n"
@@ -3754,7 +3756,14 @@ def factory_home():
             fail("cannot resolve factory home", 2)
     root = config_root()
     pointer = root / "factory-location.json"
-    return read_location(pointer) if os.path.lexists(pointer) else root / "factory"
+    if not os.path.lexists(pointer):
+        return root / "factory"
+    if _LOCATED is not None and pointer in _LOCATED:
+        return _LOCATED[pointer]
+    home = read_location(pointer)
+    if _LOCATED is not None:
+        _LOCATED[pointer] = home
+    return home
 
 
 def regular_metadata(path):
@@ -5832,7 +5841,7 @@ COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 
 def main(argv=None):
-    global _HOME_OVERRIDE
+    global _HOME_OVERRIDE, _LOCATED
     args = list(sys.argv[1:] if argv is None else argv)
     options, positional = {}, []
     i = 0
@@ -5883,7 +5892,9 @@ def main(argv=None):
     if session and not SLUG.fullmatch(session):
         fail("bad session tag: use letters, digits, - and _", 2)
     old_home, old_session = _HOME_OVERRIDE, os.environ.get("FACTORY_SESSION")
+    old_located = _LOCATED
     try:
+        _LOCATED = {}
         if home is not None:
             try:
                 _HOME_OVERRIDE = Path(home).resolve()
@@ -5899,6 +5910,7 @@ def main(argv=None):
             cmd(*positional[1:])
     finally:
         _HOME_OVERRIDE = old_home
+        _LOCATED = old_located
         if old_session is None:
             os.environ.pop("FACTORY_SESSION", None)
         else:
