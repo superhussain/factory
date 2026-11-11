@@ -172,7 +172,8 @@ takes the host name from `device:` in `config.md`, else the hostname. Each row
 counts turns, tokens once per message, tools, errors and denials, and folds
 subagents in by type. It writes nothing and makes no network call. Error and
 denial excerpts are redacted, have paths and digits normalized, and are clipped
-to 160 characters. A missing projects directory exits 4.
+to 160 characters. A window with no sessions prints nothing and exits 0. A
+missing projects directory exits 4.
 
 ## Exit recovery
 

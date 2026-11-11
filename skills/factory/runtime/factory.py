@@ -6198,8 +6198,8 @@ def retro_digest(days):
 
 def retro_cmd(action, *args):
     days = args[1] if len(args) == 2 and args[0] == "--days" else "1" if not args else ""
-    if action != "digest" or not days.isdigit() or not 1 <= int(days) <= 90:
-        fail("usage: factory.py retro digest [--days N]", 2)
+    if action != "digest" or not (days.isascii() and days.isdigit()) or not 1 <= int(days) <= 90:
+        fail("usage: factory.py retro digest [--days N], N from 1 to 90", 2)
     retro_digest(int(days))
 
 

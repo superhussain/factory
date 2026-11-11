@@ -194,11 +194,11 @@ class RetroDigestTest(IsolatedTestCase):
 
     def test_usage_errors(self):
         for args in (["retro"], ["retro", "push"], ["retro", "digest", "--days"], ["retro", "digest", "--days", "0"],
-                     ["retro", "digest", "--days", "91"], ["retro", "digest", "--days", "x"],
+                     ["retro", "digest", "--days", "91"], ["retro", "digest", "--days", "x"], ["retro", "digest", "--days", "²"],
                      ["retro", "digest", "--weeks", "2"]):
             code, out, _ = invoke(factory, args)
             self.assertEqual((code, out), (2, ""), args)
-        self.assertIn("usage: factory.py retro digest [--days N]", invoke(factory, ["retro", "push"])[2])
+        self.assertIn("usage: factory.py retro digest [--days N], N from 1 to 90", invoke(factory, ["retro", "push"])[2])
         os.environ["CLAUDE_CONFIG_DIR"] = str(self.root / "missing")
         code, out, err = invoke(factory, ["retro", "digest"])
         self.assertEqual((code, out), (4, ""))
