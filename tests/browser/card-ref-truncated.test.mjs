@@ -54,16 +54,38 @@ const JOBS = [
     refs: [{ kind: "batched-into", id: "062-sample-dashboard" }],
     updated: NOW,
   },
+  {
+    id: "064-sample-legend-colour-contrast-in-charts",
+    project: "sample",
+    title: "Legend colour contrast in charts",
+    stage: "spec",
+    round: 0,
+    refs: [{ kind: "batched-into", id: "062-sample-dashboard" }],
+    updated: NOW,
+  },
+  {
+    id: "065-sample-axis-labels",
+    project: "sample",
+    title: "Axis labels",
+    stage: "spec",
+    round: 0,
+    refs: [{ kind: "batched-into", id: "062-sample-dashboard" }],
+    updated: NOW,
+  },
 ];
 const CARD = '.card[data-id="062-sample-dashboard"]';
 const WRAP = `.card-wrap:has(${CARD})`;
 const ACTIONS = '.card-actions[data-actions="062-sample-dashboard"]';
 const SPAN = `${CARD} .refs:not(.riders) .ref-link[data-ref="061-sample-chart"]`;
 const RIDER_SPAN = `${CARD} .riders .ref-link[data-ref="063-sample-typo"]`;
+const LONG_RIDER = "064-sample-legend-colour-contrast-in-charts";
+const LONG_RIDER_SPAN = `${CARD} .riders .ref-link[data-ref="${LONG_RIDER}"]`;
 const LABELS = [
   `062-sample-dashboard: follow-up of ${LONG}`,
   "062-sample-dashboard: follow-up of 061-sample-chart",
   "062-sample-dashboard: batches 063-sample-typo",
+  `062-sample-dashboard: batches ${LONG_RIDER}`,
+  "062-sample-dashboard: batches 065-sample-axis-labels",
 ];
 
 const settle = (page) =>
@@ -124,6 +146,19 @@ test("card ref truncated", { timeout: 240000 }, async (t) => {
         assert.equal(e.scrollLeft, 0);
         assert.equal(e.overflow, "ellipsis");
         assert.equal(e.focused, false);
+        const l = await edges(page, LONG_RIDER_SPAN);
+        assert.ok(
+          l.spanLeft < l.rowRight - 8,
+          `long rider left ${l.spanLeft} row right ${l.rowRight}`,
+        );
+        assert.ok(
+          l.spanRight > l.rowRight,
+          `long rider right ${l.spanRight} row right ${l.rowRight}`,
+        );
+        assert.ok(
+          l.spanRight - l.spanLeft + 8 < l.rowRight - l.rowLeft,
+          `long rider width ${l.spanRight - l.spanLeft} row width ${l.rowRight - l.rowLeft}`,
+        );
       });
 
       await t.test(`capture ${scheme}`, async () => {
@@ -135,8 +170,18 @@ test("card ref truncated", { timeout: 240000 }, async (t) => {
           const { x, y, width, height } = el.getBoundingClientRect();
           return { x: x + scrollX, y: y + scrollY, width, height };
         }, CARD);
-        await page.screenshot({ path: `${SHOTS}card-ref-truncated${suffix}.png`, clip });
+        await page.screenshot({
+          path: `${SHOTS}card-ref-truncated${suffix}.png`,
+          clip,
+        });
         await tab(page, 2, true);
+        await page.focus(ACTIONS);
+        await tab(page, 4);
+        await page.screenshot({
+          path: `${SHOTS}card-ref-long-rider${suffix}.png`,
+          clip,
+        });
+        await tab(page, 4, true);
       });
 
       await t.test(`focus ${scheme}`, async () => {
@@ -160,6 +205,26 @@ test("card ref truncated", { timeout: 240000 }, async (t) => {
         assert.equal(await activeIs(page, ACTIONS), true);
         assert.equal(await page.$(".ref-link.ref-focused"), null);
         const rest = await edges(page, SPAN);
+        assert.equal(rest.scrollLeft, 0);
+        assert.equal(rest.overflow, "ellipsis");
+      });
+
+      await t.test(`long rider ${scheme}`, async () => {
+        await page.focus(ACTIONS);
+        await tab(page, 4);
+        assert.equal(await activeIs(page, `${WRAP} a.ref-focus[data-ref="${LONG_RIDER}"]`), true);
+        const e = await edges(page, LONG_RIDER_SPAN);
+        assert.equal(e.focused, true);
+        assert.ok(e.scrollLeft > 0, `scrollLeft ${e.scrollLeft}`);
+        assert.equal(e.overflow, "clip");
+        assert.ok(
+          Math.abs(e.spanRight - (e.rowRight - 4)) <= 1,
+          `span right ${e.spanRight} row right ${e.rowRight}`,
+        );
+        assert.ok(e.spanLeft > e.rowLeft + 4.5, `span left ${e.spanLeft} row left ${e.rowLeft}`);
+        await tab(page, 4, true);
+        assert.equal(await activeIs(page, ACTIONS), true);
+        const rest = await edges(page, LONG_RIDER_SPAN);
         assert.equal(rest.scrollLeft, 0);
         assert.equal(rest.overflow, "ellipsis");
       });
