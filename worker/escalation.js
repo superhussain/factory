@@ -1,5 +1,5 @@
 // Review escalation: one Workers AI call that rates a review round's CHANGES findings.
-import { foldLookalikes, hasReservedTag, redactSecrets } from "./admission.js";
+import { foldedTagSource, foldLookalikes, hasReservedTag, redactSecrets } from "./admission.js";
 
 export const ESCALATION_MODEL = "@cf/cloudflare/clef-flash";
 export const ESCALATION_THRESHOLD = 80;
@@ -50,15 +50,19 @@ export function escalationConfidence(result) {
 export const SECRET_MARK = "[secret-shaped text removed]";
 export const ESCALATION_TAGS = ["review-findings", "operator-preferences"];
 
-// Replaces what the admission rules refuse, so a review that quotes a secret or a tag is still rated.
+export const ESCALATION_TEXT_LIMIT = 8000;
+const VARIATION_SELECTORS = /[\uFE00-\uFE0F\u{e0100}-\u{e01ef}]/gu;
+const TAG_REMOVALS = ESCALATION_TAGS.map((name) => [
+  new RegExp(foldedTagSource(name) + "[^<>\\n]*>?", "gi"),
+  `[${name} tag removed]`,
+]);
+
+// Replaces what the admission rules refuse, so a review that quotes a secret or a tag, or writes an emoji, is still rated.
 export function cleanReview(text) {
+  text = text.replace(VARIATION_SELECTORS, "");
   if (ESCALATION_TAGS.some((n) => hasReservedTag(text, n))) {
     text = foldLookalikes(text);
-    for (const name of ESCALATION_TAGS)
-      text = text.replace(
-        new RegExp("<\\/?\\s*" + name.replace(/[il]/g, "[il]") + "[^<>\\n]*>?", "gi"),
-        `[${name} tag removed]`,
-      );
+    for (const [pattern, mark] of TAG_REMOVALS) text = text.replace(pattern, mark);
   }
-  return redactSecrets(text, SECRET_MARK);
+  return [...redactSecrets(text, SECRET_MARK)].slice(0, ESCALATION_TEXT_LIMIT).join("");
 }
