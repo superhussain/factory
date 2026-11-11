@@ -55,7 +55,8 @@ const VIEWPORTS = [
 const CARD = '.card[data-id="042-sample-export"]';
 const CLOSE_HINT =
   " The close may have saved. Press Close job again with the same reason to check. It will not queue a second close.";
-// null sends board writes through, 'drop' aborts them unsent, 'land' sends then aborts the page's copy.
+// null sends board writes through, 'drop' aborts them unsent, 'land' sends then aborts the page's copy,
+// '5xx' answers 503 with a body ending in a period.
 let putMode = null;
 
 const freezeClock = (page) =>
@@ -128,6 +129,12 @@ test("close job", { timeout: 240000 }, async (t) => {
           return request.continue();
         const mode = putMode;
         putMode = null;
+        if (mode === "5xx")
+          return request.respond({
+            status: 503,
+            contentType: "text/plain",
+            body: "Storage is busy.",
+          });
         if (mode === "land") {
           const headers = request.headers();
           await fetch(request.url(), {
@@ -311,6 +318,28 @@ test("close job", { timeout: 240000 }, async (t) => {
         await activate("#close-job-save");
         await page.waitForSelector("#close-job-dlg:not([open])");
         assert.equal(await boardText(origin), after);
+      });
+
+      await t.test(`a 5xx body ending in a period gets one period ${width}`, async () => {
+        await reseed();
+        await openDialog("042-sample-export");
+        const before = await boardText(origin);
+        putMode = "5xx";
+        await page.type("#close-job-reason", REASON);
+        const text = await failedSave();
+        if (width === 390)
+          await (await page.$("#close-job-dlg")).screenshot({ path: `${SHOTS}close-5xx-390.png` });
+        assert.equal(
+          text,
+          "Not confirmed: saving the board failed: 503 Storage is busy." + CLOSE_HINT,
+        );
+        assert.equal(await boardText(origin), before);
+        await activate("#close-job-save");
+        await page.waitForSelector("#close-job-dlg:not([open])");
+        assert.deepEqual((await boardJob(origin, "042-sample-export")).close, {
+          reason: REASON,
+          at: NOW,
+        });
       });
 
       await reseed();

@@ -541,6 +541,14 @@ def paseo_session():
     return None
 
 
+def paseo_archive_command(agent):
+    """The paseo command that archives agent by hand on this host, or None when agent is unsafe to print as an argument."""
+    if not PASEO_ID.fullmatch(agent) or agent.startswith("-"):
+        return None
+    home = os.environ.get("PASEO_HOME")
+    return "paseo " + (f"--home {shlex.quote(home)} " if home else "") + f"archive --force {agent}"
+
+
 def paseo_claim_path(home, job_id, agent):
     """<home>/paseo-claims/<job-id>/<agent>, the marker that this host's Paseo session claimed the job."""
     if (isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
@@ -723,6 +731,7 @@ def board(factory, job_id):
     check_pipeline(patch.get("pipeline"))
     device, session, minutes = holder(factory)
     paseo = paseo_session()
+    home = factory_home() if paseo else None
 
     def change(text):
         data = load_board(text)
@@ -775,7 +784,7 @@ def board(factory, job_id):
         fail(f"{held_by(job_id, held)}. Nothing was written. Pass --session <tag> if this session "
              "holds it, or take it over with hold <project>/<id> take", 6)
     if paseo and job and job.get("paseo") == paseo:
-        record_paseo_claim(factory_home(), job_id, paseo)
+        record_paseo_claim(home, job_id, paseo)
     print(json.dumps(job, indent=2))
     if "stage" in patch or "rounds" in patch or (patch.get("tracer") or {}).get("follow") is True:
         tracer_after_board(Path(factory), job, patch)
@@ -951,6 +960,7 @@ def claim_id(factory, feature_slug, project_slug):
     new_session()
     device, session, _ = holder(factory)
     paseo = paseo_session()
+    home = factory_home() if paseo else None
 
     def add(text):
         data = load_board(text)
@@ -965,7 +975,7 @@ def claim_id(factory, feature_slug, project_slug):
         return dump_board(data), job_id
     job_id = cas(factory, "/api/board", add)
     if paseo:
-        record_paseo_claim(factory_home(), job_id, paseo)
+        record_paseo_claim(home, job_id, paseo)
     jobs.joinpath(project_slug, job_id).mkdir(parents=True, exist_ok=True)
     return job_id
 
@@ -3133,12 +3143,14 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
                 x["stopped"] = now()
             print(f"archived {noun} {names} and stopped {line}" if archives else f"stopped {line}")
             for a in kept:
+                cmd = paseo_archive_command(a)
                 print(f"factory.py: pickup kept session {a} of {job_id}: no claim recorded on this host, "
-                      "archive it by hand if it still runs", file=sys.stderr)
+                      "archive it by hand if it still runs" + (f": {cmd}" if cmd else ""), file=sys.stderr)
             for a in refused:
                 shown = a if PASEO_ID.fullmatch(a) else ascii(a[:64])
+                cmd = paseo_archive_command(a)
                 print(f"factory.py: pickup skipped archive of session {shown} of {job_id}: not an id the stall adapter "
-                      "accepts, archive it by hand if it still runs", file=sys.stderr)
+                      "accepts, archive it by hand if it still runs" + (f": {cmd}" if cmd else ""), file=sys.stderr)
 
 
 def prioritized(j):

@@ -885,7 +885,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <h2 id="move-host-h">Move to another host</h2>
     <p class="muted" id="move-host-help"></p>
     <label id="move-host-label">Host<select id="move-host-select" aria-describedby="move-host-help"></select></label>
-    <p class="muted" id="move-host-empty" hidden></p>
+    <p class="muted" id="move-host-empty" role="status" aria-live="polite" hidden></p>
     <p class="err" id="move-host-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="move-host-cancel">Cancel</button><button class="btn primary" type="submit" id="move-host-save">Move job</button></div>
   </form>
@@ -4598,7 +4598,7 @@ async function decideBacklog(item, decision, notes, answers) {
     return id;
   } catch (x) {
     if (!x.uncertain) backlogPending.delete(item.raw);
-    else x.message = 'Not confirmed: ' + x.message + '. Try again. It will not add a duplicate.';
+    else x.message = boardSaveError(x, 'Try again. It will not add a duplicate.');
     throw x;
   } finally {
     await loadBacklog();
@@ -4703,7 +4703,7 @@ async function casBoard(change) {
 // An uncertain save may have landed, so the dialog says so and the same retry confirms it.
 function boardSaveError(x, hint) {
   const text = String(x.message || x);
-  return x.uncertain ? 'Not confirmed: ' + text + '. ' + hint : text;
+  return x.uncertain ? 'Not confirmed: ' + text.replace(/[\s.]+$/, '') + '. ' + hint : text;
 }
 
 let ideaEditor = null;
@@ -5049,9 +5049,11 @@ async function openMoveHost(ctx) {
   select.hidden = !hosts.length;
   $('move-host-label').hidden = !hosts.length;
   if (!hosts.length && err.hidden) {
-    const late = blockedOffline.length === 1 ? blockedOffline[0] + ' is offline and stops the job only when it comes back online.' : blockedOffline.length ? blockedOffline.join(', ') + ' are offline and stop the job only when they come back online.' : '';
+    let late = '';
+    if (blockedOffline.length === 1) late = blockedOffline[0] + ' is offline and stops the job only when it comes back online. ';
+    else if (blockedOffline.length) late = blockedOffline.join(', ') + ' are offline and stop the job only when they come back online. ';
     empty.textContent = blocked.length
-      ? 'Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '. Try again after one of them stops the job.' + (late ? ' ' + late : '')
+      ? 'Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '. ' + late + 'Try again after one of them stops the job.'
       : 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
     empty.hidden = false;
   }
