@@ -6355,11 +6355,13 @@ function schedulePoll() {
 }
 document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); syncLive(); schedulePoll(); });
 // Live board events: the Worker sends {"type":"changed","key":...} after each board or
-// backlog write, and the matching key re-reads at once. A dropped socket retries with backoff
+// backlog write, and the matching key re-reads once, 2 s after the first frame; frames during a read add one more read. A dropped socket retries with backoff
 // (1, 2, 4 ... 30 s), then every 30 s while a socket is wanted. An expired sign-in stops retries until a board read succeeds.
 const LIVE_PATH = '/events/board';
 const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000;
 let liveSocket = null, liveOpen = false, liveRetries = 0, liveRetryTimer = 0;
+const LIVE_READ_MS = 2000;
+const liveReads = { 'board.json': { timer: 0, busy: false, again: false }, 'backlog.md': { timer: 0, busy: false, again: false } };
 function liveWanted() { return pollStarted && navigator.onLine && connState !== 'signin' && (!document.hidden || notifyActive()); }
 function openLive() {
   clearTimeout(liveRetryTimer);
@@ -6378,9 +6380,8 @@ function openLive() {
     if (ws !== liveSocket) return;
     let key;
     try { key = JSON.parse(e.data).key; } catch {}
-    if (key === 'board.json') poll({ withBacklog: false });
-    else if (key === 'backlog.md') refreshBacklog();
-    else poll();
+    if (Object.hasOwn(liveReads, key)) queueLiveRead(key);
+    else { queueLiveRead('board.json'); queueLiveRead('backlog.md'); }
   });
   ws.addEventListener('close', () => {
     if (ws !== liveSocket) return;
@@ -6404,6 +6405,20 @@ function closeLive() {
 function syncLive() {
   if (!liveWanted()) closeLive();
   else if (!liveSocket && !liveRetryTimer) { liveRetries = 0; openLive(); }
+}
+function queueLiveRead(key) {
+  const r = liveReads[key];
+  if (r.busy) { r.again = true; return; }
+  if (!r.timer) r.timer = setTimeout(runLiveRead, LIVE_READ_MS, key);
+}
+function runLiveRead(key) {
+  const r = liveReads[key];
+  r.timer = 0;
+  r.busy = true;
+  return (key === 'board.json' ? poll({ withBacklog: false }) : refreshBacklog()).finally(() => {
+    r.busy = false;
+    if (r.again) { r.again = false; queueLiveRead(key); }
+  });
 }
 window.addEventListener('blur', () => setTimeout(schedulePoll, 0));
 window.addEventListener('focus', () => { if (pollStarted && !liveOpen && !document.hidden) pollTick(); syncLive(); schedulePoll(); });
