@@ -1238,11 +1238,13 @@ class MoveArchiveTest(MoveHostTest):
 
     def hint(self, agent):
         return (f"factory.py: pickup kept session {agent} of 042-sample-export: "
-                "no claim recorded on this host, archive it by hand if it still runs\n")
+                "no claim recorded on this host, archive it by hand if it still runs"
+                f": paseo archive --force {agent}\n")
 
-    def skipped(self, shown):
+    def skipped(self, shown, agent=None):
         return (f"factory.py: pickup skipped archive of session {shown} of 042-sample-export: "
-                "not an id the stall adapter accepts, archive it by hand if it still runs\n")
+                "not an id the stall adapter accepts, archive it by hand if it still runs"
+                + (f": paseo archive --force {agent}" if agent else "") + "\n")
 
     def recorded(self):
         if not self.adapter_calls.exists():
@@ -1313,8 +1315,8 @@ class MoveArchiveTest(MoveHostTest):
                 hint = {"not claimed here": self.hint(self.AGENT),
                         "other session": self.hint("9f1c2d3e-0000-4000-8000-000000000001"),
                         "bad agent": self.skipped("-bad"),
-                        "non-hex agent": self.skipped("ab_cd"),
-                        "short agent": self.skipped("abc"),
+                        "non-hex agent": self.skipped("ab_cd", "ab_cd"),
+                        "short agent": self.skipped("abc", "abc"),
                         "unsafe agent": self.skipped("'ab\\x1b[2Jcd'")}.get(name, "")
                 self.assertEqual((code, err), (0, hint))
                 self.assertEqual(out, "stopped 042-sample-export alpha: moved to studio-mac\n")
@@ -1349,11 +1351,21 @@ class MoveArchiveTest(MoveHostTest):
         spec.loader.exec_module(module)
         self.assertEqual(factory.ADAPTER_ID.pattern, module.ID_RE.pattern)
 
+    def test_hint_names_paseo_home(self):
+        factory.forget_paseo_claim(self.home, "042-sample-export", self.AGENT)
+        self.set_stalls()
+        self.moved(agent="9f1c2d3e-0000-4000-8000-000000000001", server="srv-lab")
+        home = self.root / "paseo home"
+        with patch.dict(os.environ, {"PASEO_HOME": str(home)}):
+            code, out, err = self.pickup()
+        self.assertEqual(err, self.hint("9f1c2d3e-0000-4000-8000-000000000001").replace(
+            "paseo archive", f"paseo --home '{home}' archive"))
+
     def test_non_hex_agent_stops_once(self):
         self.set_stalls()
         self.moved(agent="ab_cd", server="srv-lab")
         self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
-                                         self.skipped("ab_cd")))
+                                         self.skipped("ab_cd", "ab_cd")))
         self.assertEqual(self.recorded(), [])
         move = self.job("042-sample-export")["move"]
         self.assertIn("stopped", move)

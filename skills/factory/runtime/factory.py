@@ -541,6 +541,14 @@ def paseo_session():
     return None
 
 
+def paseo_archive_command(agent):
+    """The paseo command that archives agent by hand on this host, or None when agent is unsafe to print as an argument."""
+    if not PASEO_ID.fullmatch(agent) or agent.startswith("-"):
+        return None
+    home = os.environ.get("PASEO_HOME")
+    return "paseo " + (f"--home {shlex.quote(home)} " if home else "") + f"archive --force {agent}"
+
+
 def paseo_claim_path(home, job_id, agent):
     """<home>/paseo-claims/<job-id>/<agent>, the marker that this host's Paseo session claimed the job."""
     if (isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
@@ -3133,12 +3141,14 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
                 x["stopped"] = now()
             print(f"archived {noun} {names} and stopped {line}" if archives else f"stopped {line}")
             for a in kept:
+                cmd = paseo_archive_command(a)
                 print(f"factory.py: pickup kept session {a} of {job_id}: no claim recorded on this host, "
-                      "archive it by hand if it still runs", file=sys.stderr)
+                      "archive it by hand if it still runs" + (f": {cmd}" if cmd else ""), file=sys.stderr)
             for a in refused:
                 shown = a if PASEO_ID.fullmatch(a) else ascii(a[:64])
+                cmd = paseo_archive_command(a)
                 print(f"factory.py: pickup skipped archive of session {shown} of {job_id}: not an id the stall adapter "
-                      "accepts, archive it by hand if it still runs", file=sys.stderr)
+                      "accepts, archive it by hand if it still runs" + (f": {cmd}" if cmd else ""), file=sys.stderr)
 
 
 def prioritized(j):
