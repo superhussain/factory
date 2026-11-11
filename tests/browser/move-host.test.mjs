@@ -487,7 +487,14 @@ test("move host", { timeout: 240000 }, async (t) => {
         ).screenshot({ path: `${SHOTS}after-move-dialog-stops-queued${suffix}.png` });
         assert.equal(
           await page.$eval("#move-host-empty", (el) => el.textContent),
-          "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. Try again after one of them stops the job. lab-linux is offline and stops the job only when it comes back online.",
+          "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. lab-linux is offline and stops the job only when it comes back online. Try again after one of them stops the job.",
+        );
+        assert.equal(
+          await page.$eval(
+            "#move-host-empty",
+            (el) => el.getAttribute("role") + " " + el.getAttribute("aria-live"),
+          ),
+          "status polite",
         );
         for (const id of ["#move-host-label", "#move-host-select"]) {
           assert.equal(await page.$eval(id, (el) => getComputedStyle(el).display), "none");
@@ -533,10 +540,9 @@ test("move host", { timeout: 240000 }, async (t) => {
           return text;
         };
         studio.offline = true;
-        assert.ok(
-          (await emptyText()).endsWith(
-            " lab-linux, studio-mac are offline and stop the job only when they come back online.",
-          ),
+        assert.equal(
+          await emptyText(),
+          "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. lab-linux, studio-mac are offline and stop the job only when they come back online. Try again after one of them stops the job.",
         );
         lab.offline = false;
         studio.offline = false;
