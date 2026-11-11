@@ -155,6 +155,13 @@ class ArchiveFloorTest(IsolatedTestCase):
         self.assertEqual(self.board("413-add-export", '{"stage": "closed", "project": "sample"}')[0], 0)
         self.assertIn("413-add-export", self.ids())
 
+    def test_board_skips_the_floor_for_an_existing_row(self):
+        with patch.object(factory, "archive_floor", wraps=factory.archive_floor) as floor:
+            self.assertEqual(self.board("414-retry-sync", '{"note": "x"}')[0], 0)
+            floor.assert_not_called()
+            self.assertEqual(self.board("417-new-thing", '{"stage": "closed", "project": "sample"}')[0], 0)
+            floor.assert_called_once()
+
     def board(self, job_id, body):
         with patch.object(factory.sys, "stdin", io.StringIO(body)), \
                 patch.dict(os.environ, {"FACTORY_SESSION": "tag", "PASEO_AGENT_ID": ""}):
