@@ -204,6 +204,9 @@ test("move host", { timeout: 240000 }, async (t) => {
         await openJobActions(page);
         await page.click("#d-move-host");
         await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        await (
+          await page.$("#move-host-dlg")
+        ).screenshot({ path: `${SHOTS}after-move-dialog${suffix}.png` });
         assert.equal(
           await page.$eval("#move-host-help", (el) => el.textContent),
           "042-sample-export runs on lab-linux. Moving it stops that session and starts the job on the host you pick. If lab-linux is offline, the stop waits until it comes back.",
@@ -213,9 +216,6 @@ test("move host", { timeout: 240000 }, async (t) => {
           "move-host-help",
         );
         assert.deepEqual(await options(page), ["Studio Mac (studio-mac)"]);
-        await (
-          await page.$("#move-host-dlg")
-        ).screenshot({ path: `${SHOTS}after-move-dialog${suffix}.png` });
         await page.click("#move-host-cancel");
         assert.equal(
           await page.evaluate(() => document.getElementById("move-host-dlg").open),
@@ -292,6 +292,9 @@ test("move host", { timeout: 240000 }, async (t) => {
           await openJobActions(page);
           await page.click("#d-move-host");
           await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+          await (
+            await page.$("#move-host-dlg")
+          ).screenshot({ path: `${SHOTS}after-move-dialog-moving${suffix}.png` });
           assert.equal(
             await page.$eval("#move-host-help", (el) => el.textContent),
             "042-sample-export is moving to studio-mac. The host you pick starts it instead.",
