@@ -1372,7 +1372,8 @@ class MoveArchiveTest(MoveHostTest):
         home = self.root / "paseo\x1bhome"
         with patch.dict(os.environ, {"PASEO_HOME": str(home)}):
             self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
-                                             self.hint("9f1c2d3e-0000-4000-8000-000000000001")))
+                                             self.hint("9f1c2d3e-0000-4000-8000-000000000001").replace(
+                                                 "\n", " (left out --home because PASEO_HOME has unprintable characters)\n")))
 
     def test_non_hex_agent_stops_once(self):
         self.set_stalls()
