@@ -17,13 +17,17 @@ Read surrounding code in the worktree. Don't modify code.
 Check that each acceptance criterion is actually met by the diff, not just
 claimed in build.md. Look for correctness bugs, unhandled edge cases, type
 holes (`any`, unchecked casts), scope creep beyond the spec, needless complexity,
-and anything the project file's Code section calls out. You may re-run the project
-file's Verify commands in the worktree to confirm build.md's claims.
+and anything the project file's Code section calls out. Items build.md lists under
+`### Absorbed` are allowed when they meet the absorb bar below; flag any other as
+scope creep. You may re-run the project file's Verify commands in the worktree to
+confirm build.md's claims.
 
 Write exactly one markdown file, `<round folder>/review-code.md`. Its first line is
 `VERDICT: PASS` or `VERDICT: CHANGES`. Then list findings, each with file:line and
-the fix. CHANGES is only for issues that must be fixed before merge. Put nits under
-a separate heading.
+the fix. CHANGES is only for issues that must be fixed before merge. Put a nit under
+`### Fix now` when the builder can absorb it (a few lines, in a file the spec's Tasks
+name, no auth, secret, data, protocol or storage risk, no design choice) and under
+`### Follow-up` otherwise, with the reason. Nits never change the verdict.
 
 You may also write `<round folder>/review-code.walkthrough.html`, as the
 interactive walkthrough rules below say, when a CHANGES fix is easier shown than
