@@ -39,9 +39,9 @@ builder and still cannot proceed, write your own block and stop.
 **Absorb small open items.** A small issue you find while building costs less to
 fix now than as a new job that must rebuild your context. Fix it in this run, in its
 own commit, when it sits in a file the spec's Tasks name, takes a few lines, carries
-no auth, secret, data, protocol or storage risk, and needs no design choice. This is
-the one exception to adding what the spec didn't ask for. Leave anything else as it
-is and list it.
+no auth, secret, data, protocol, storage, dependency, workflow or permission risk,
+and needs no design choice. This is the one exception to adding what the spec didn't
+ask for. Leave anything else as it is and list it.
 
 **Screenshots.** If the spec touches UI (the project file's UI section lists which
 paths count), follow its capture instructions. Save shots in `<job folder>/` as

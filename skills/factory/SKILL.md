@@ -621,12 +621,13 @@ migration; their command and JSON output contract are unchanged.
 - Fix open items in the job that found them. The agent that spots one already holds
   the context a new job would spend a spec and a build to rebuild. Absorb an item in
   this job when it is small, sits in a file the spec's Tasks name, carries no auth,
-  secret, data, protocol or storage risk, and needs no design choice. Queue it as a
-  follow-up only when it is outside the spec, large, risky, needs its own design, or
-  needs a person. Absorbing never widens the spec (F10) or adds a review round (F3).
-  The builder lists absorbed items under `### Absorbed` and the rest under
-  `### Left open` in its build.md run section. Reviewers split nits into `### Fix now`
-  and `### Follow-up`. The approver weighs what is still open before APPROVE.
+  secret, data, protocol, storage, dependency, workflow or permission risk, and needs
+  no design choice. Queue it as a follow-up only when it is outside the spec, large,
+  risky, needs its own design, or needs a person. Absorbing never widens the spec
+  (F10) or adds a review round (F3). The builder lists absorbed items under
+  `### Absorbed` and the rest under `### Left open` in its build.md run section.
+  Reviewers split nits into `### Fix now` and `### Follow-up`. The approver weighs
+  what is still open before APPROVE.
 - A merged or closed job stays that way. New work on it is a new job with `refs`
   pointing back, so the board shows what is actually open. Use `rework-of` to fix
   or redo it, `follow-up-of` for work it surfaced, and `sub-job-of` for a slice

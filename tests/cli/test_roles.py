@@ -285,16 +285,17 @@ class RolesTest(IsolatedTestCase):
     def test_open_items_are_absorbed_before_queued(self):
         def flat(name):
             return " ".join((SKILL / name).read_text(encoding="utf-8").split())
+        risk = "auth, secret, data, protocol, storage, dependency, workflow or permission risk"
         skill = flat("SKILL.md")
         for phrase in ("Fix open items in the job that found them", "Rounds left: <n>",
-                       "Items under `### Absorbed` are done"):
+                       "Items under `### Absorbed` are done", risk):
             self.assertIn(phrase, skill)
         builder = flat("agents/factory-builder.md")
-        for phrase in ("Absorb small open items", "### Absorbed", "### Left open"):
+        for phrase in ("Absorb small open items", "### Absorbed", "### Left open", risk):
             self.assertIn(phrase, builder)
         for name in ("code", "security", "ui", "ux"):
             review = flat(f"agents/factory-review-{name}.md")
-            for phrase in ("### Fix now", "### Follow-up", "Nits never change the verdict"):
+            for phrase in ("### Fix now", "### Follow-up", "Nits never change the verdict", risk):
                 self.assertIn(phrase, review, name)
             self.assertNotIn("a separate heading", review, name)
         self.assertIn("Rounds left", flat("agents/factory-approver.md"))
