@@ -27,7 +27,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     --info: #1d4ed8;
     --host-fg: #0f766e; --ref-fg: #be185d;
     --accent-soft: #ede9fe;
-    --archived-line: #6b7280;
+    --archived-line: var(--muted);
     --code-bg: #f3f4f6;
     --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -43,7 +43,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       --info: #93c5fd;
       --host-fg: #5eead4; --ref-fg: #f9a8d4;
       --accent-soft: rgba(167, 139, 250, 0.16);
-      --archived-line: #374151;
+      --archived-line: var(--line);
       --code-bg: #273244;
     }
   }
@@ -58,7 +58,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     --info: #93c5fd;
     --host-fg: #5eead4; --ref-fg: #f9a8d4;
     --accent-soft: rgba(167, 139, 250, 0.16);
-    --archived-line: #374151;
+    --archived-line: var(--line);
     --code-bg: #273244;
   }
   * { box-sizing: border-box; }
@@ -162,7 +162,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .filter-menu .filter-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .filter-menu label:focus-within { background: var(--line); }
   @media (hover: hover) { .filter-menu label:hover { background: var(--line); } }
-  @media (pointer: coarse) { .filter-menu label { min-height: 44px; white-space: normal; } .filter-menu .filter-title { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; } }
+  @media (pointer: coarse) { .filter-menu label { min-height: 44px; } .filter-menu .filter-title { white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; } }
   .header-actions { display: flex; gap: inherit; }
   body[data-view="settings"] #board, body[data-view="settings"] #detail { display: none; }
   .settings-page { max-width: 1440px; margin: 0 auto; padding: 28px; }
@@ -750,7 +750,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="display-theme">Theme<select id="display-theme"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <label for="display-density">Density<select id="display-density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
       <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="15">Every 15 seconds</option><option value="30">Every 30 seconds</option><option value="60">Every 60 seconds</option></select></label>
-      <p class="muted" id="display-poll-help">If live updates drop, the board refreshes on this schedule and the backlog every 2 minutes. A hidden or unfocused window pauses until you return. With notifications on, it refreshes every 30 seconds instead.</p>
+      <p class="muted" id="display-poll-help">If live updates drop, the board refreshes on this schedule and the backlog every 2 minutes. Refreshing pauses while the window is hidden or unfocused. With notifications on, it refreshes every 30 seconds instead.</p>
       <fieldset id="display-filter"><legend>Show jobs from</legend></fieldset>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
@@ -2971,10 +2971,10 @@ function renderBoard() {
   const focusStage = focused?.dataset.stage;
   const focusClass = focused && (focused.classList.contains('more') ? 'more' : focused.classList.contains('archive-more') ? 'archive-more' : 'column-toggle');
   // A redraw replaces every card node, so focus goes back to the same job's card, PR link or menu trigger.
-  const focusedCard = $('board').contains(document.activeElement) ? document.activeElement.closest('.card, .card-actions, .card-wrap > .pr-link') : null;
-  const focusCard = focusedCard && (focusedCard.classList.contains('pr-link')
-    ? { kind: 'pr', id: focusedCard.parentElement.querySelector('.card').dataset.id }
-    : { kind: focusedCard.classList.contains('card-actions') ? 'trigger' : 'card', id: focusedCard.dataset.id ?? focusedCard.dataset.actions });
+  const focusedControl = $('board').contains(document.activeElement) ? document.activeElement.closest('.card, .card-actions, .card-wrap > .pr-link') : null;
+  const focusCard = focusedControl && (focusedControl.classList.contains('pr-link')
+    ? { kind: 'pr', id: focusedControl.parentElement.querySelector('.card').dataset.id }
+    : { kind: focusedControl.classList.contains('card-actions') ? 'trigger' : 'card', id: focusedControl.dataset.id ?? focusedControl.dataset.actions });
   if (!jobs.length && !backlog.length && !archiveList.open) {
     $('board').innerHTML = '<div class="blank"><h2>No jobs yet</h2>' +
       '<p>Start one with <code>/factory &lt;feature&gt;</code> or <code>/factory next</code>.</p>' +
@@ -3000,7 +3000,7 @@ function renderBoard() {
   if (!settingsShown) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
-  // An empty auto track takes the free space, so the filter-empty line spans the board and not only a few narrow columns.
+  // The extra auto track lets the filter-empty line span the whole board.
   $('board').style.setProperty('--cols', tracks.concat(noneShown ? ['auto'] : []).join(' '));
   $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : '') + COLUMNS.map((s, i) => {
     if (hiddenColumns.has(s)) return '';
@@ -3036,7 +3036,8 @@ function renderBoard() {
     const el = [...$('board').querySelectorAll(trigger ? '.card-actions' : '.card')]
       .find((x) => (trigger ? x.dataset.actions : x.dataset.id) === focusCard.id);
     // A PR link the redraw dropped (field hidden, PR cleared) hands focus to its card.
-    (focusCard.kind === 'pr' ? el?.parentElement.querySelector(':scope > .pr-link') ?? el : el)?.focus({ preventScroll: true });
+    const target = focusCard.kind === 'pr' ? el?.parentElement.querySelector(':scope > .pr-link') ?? el : el;
+    target?.focus({ preventScroll: true });
   }
   syncCardActions();
 }
@@ -4972,12 +4973,16 @@ function clearCopyStatus() {
   $('d-copy-status').textContent = '';
 }
 
+function pageUrl() {
+  return location.origin + location.pathname + location.search;
+}
+
 function jobLink(id) {
-  return location.origin + location.pathname + location.search + '#' + encodeURIComponent(id);
+  return pageUrl() + '#' + encodeURIComponent(id);
 }
 
 function backlogLink(key) {
-  return location.origin + location.pathname + location.search + '#/backlog/' + key;
+  return pageUrl() + '#/backlog/' + encodeURIComponent(key);
 }
 
 function enabledJobActions() {
