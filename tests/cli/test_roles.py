@@ -120,10 +120,13 @@ class RolesTest(IsolatedTestCase):
     def test_prompt_contracts_and_both_fresh_approval_rows(self):
         skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
         execution = (SKILL / "references/execution.md").read_text(encoding="utf-8")
+        commands = SKILL / "references/commands"
+        feature = (commands / "feature.md").read_text(encoding="utf-8")
+        recover = (commands / "recover.md").read_text(encoding="utf-8")
         self.assertIn("WAIT FOR ALL", skill)
         self.assertIn("Max `$PIPELINE.review_rounds` review rounds", skill)
-        self.assertIn("One approver CHANGES", skill)
-        for text in (skill, execution):
+        self.assertIn("One approver CHANGES", feature)
+        for text in (recover, execution):
             row = next(line for line in text.splitlines() if line.startswith("| approve |"))
             self.assertIn("fresh approver", row)
             self.assertIn("current HEAD and round", row)
@@ -137,7 +140,8 @@ class RolesTest(IsolatedTestCase):
                 self.assertIn(name.replace("factory-", "").replace(".md", ".md"), text)
         self.assertIn("two failed candidate verifications total", (SKILL / "agents/factory-builder.md").read_text(encoding="utf-8"))
         self.assertIn("Private build-tab evidence", skill)
-        self.assertEqual(skill.count("decisions-via-askuserquestion"), 2)
+        self.assertEqual(skill.count("decisions-via-askuserquestion"), 1)
+        self.assertEqual((commands / "next.md").read_text(encoding="utf-8").count("decisions-via-askuserquestion"), 1)
         self.assertIn("is the question tool it names", " ".join(skill.split()))
         blocks = []
         for name in self.runtime.ROLE_NAMES:
@@ -286,7 +290,7 @@ class RolesTest(IsolatedTestCase):
         def flat(name):
             return " ".join((SKILL / name).read_text(encoding="utf-8").split())
         risk = "auth, secret, data, protocol, storage, dependency, workflow or permission risk"
-        skill = flat("SKILL.md")
+        skill = flat("SKILL.md") + " " + flat("references/commands/feature.md")
         for phrase in ("Fix open items in the job that found them", "Rounds left: <n>",
                        "Items under `### Absorbed` are done", risk,
                        "or raises the round cap (F3)",

@@ -159,6 +159,22 @@ owning session. It uploads artifacts before releasing the claim. Resume follows
 the installed [execution guide](../skills/factory/references/execution.md), never
 an automatic takeover or reset of review/approval counters.
 
+## Session retro digest
+
+```text
+python3 <installed-skill>/runtime/factory.py retro digest [--days N]
+```
+
+`retro digest` prints one JSON line per Claude Code main session whose
+transcript changed in the last N days (default 1, at most 90). It reads
+`~/.claude/projects`, or `$CLAUDE_CONFIG_DIR/projects` when that is set, and
+takes the host name from `device:` in `config.md`, else the hostname. Each row
+counts turns, tokens once per message, tools, errors and denials, and folds
+subagents in by type. It writes nothing and makes no network call. Error and
+denial excerpts are redacted, have paths and digits normalized, and are clipped
+to 160 characters. A window with no sessions prints nothing and exits 0. A
+missing projects directory exits 4.
+
 ## Exit recovery
 
 | Exit | Action |

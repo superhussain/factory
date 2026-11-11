@@ -186,6 +186,8 @@ test("The drawer lists Tracer task statuses", { timeout: 120000 }, async () => {
             role: box.querySelector("ol").getAttribute("role"),
             indent: getComputedStyle(box.querySelector("li")).textIndent,
             pad: getComputedStyle(box.querySelector("li")).paddingLeft,
+            summaryIndent: getComputedStyle(box.querySelector("summary")).textIndent,
+            summaryPad: getComputedStyle(box.querySelector("summary")).paddingLeft,
           };
         });
       assert.deepEqual(await list(), {
@@ -201,6 +203,8 @@ test("The drawer lists Tracer task statuses", { timeout: 120000 }, async () => {
         role: "list",
         indent: "-10px",
         pad: "10px",
+        summaryIndent: "-14px",
+        summaryPad: "14px",
       });
       await page.click("#d-tracer-tasks summary");
       await seedBoard(origin, [

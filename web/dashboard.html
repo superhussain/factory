@@ -356,7 +356,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .detail-head .refs a { color: var(--accent); }
   .tracer-tasks ol { margin: 2px 0 0; padding-left: 14px; list-style: none; }
   .tracer-tasks li { padding-left: 10px; text-indent: -10px; }
-  .tracer-tasks summary { cursor: pointer; }
+  .tracer-tasks summary { cursor: pointer; padding-left: 14px; text-indent: -14px; }
   .card.needs-you .note { color: var(--alert); }
   /* A needs-you ask wraps to two rows, so a touch user can read it without the tooltip. */
   .card.needs-you .note.line { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
@@ -749,7 +749,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="display-theme">Theme<select id="display-theme"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <label for="display-density">Density<select id="display-density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
       <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="15">Every 15 seconds</option><option value="30">Every 30 seconds</option><option value="60">Every 60 seconds</option></select></label>
-      <p class="muted" id="display-poll-help">The board updates live while this tab is visible. If the live connection drops, the board refreshes on this schedule and the backlog every 2 minutes until it reconnects. Refreshing pauses while this window is hidden or unfocused and catches up when you come back. With notifications on, it refreshes every 30 seconds instead. A hidden tab stays live only while notifications are on.</p>
+      <p class="muted" id="display-poll-help">If live updates drop, the board refreshes on this schedule and the backlog every 2 minutes. A hidden or unfocused window pauses until you return. With notifications on, it refreshes every 30 seconds instead.</p>
       <fieldset id="display-filter"><legend>Show jobs from</legend></fieldset>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
@@ -1022,14 +1022,19 @@ const CONNECTION = {
   signin: ['Your sign-in has expired.', 'dot err', 'sign-in expired'],
 };
 function drawDot(className, label) { const dot = $('dot'); dot.className = className; dot.title = label; dot.setAttribute('aria-label', label); }
+let connState = '';
 function setConnection(state) {
+  const was = connState; connState = state;
   const [text, dot, title] = CONNECTION[state];
   $('conn-banner').hidden = state === 'online';
   $('conn-text').textContent = text;
   $('conn-signin').hidden = state !== 'signin';
   const polling = state === 'online' && !liveOpen;
-  const label = polling ? 'Polling every ' + pollSeconds + ' seconds until live updates reconnect' + (liveNote && '. ' + liveNote) : title;
+  const every = pollEvery();
+  const cadence = every ? 'Polling every ' + every + ' seconds until live updates reconnect' : 'Polling paused while this window is hidden or unfocused';
+  const label = polling ? cadence + (liveNote && '. ' + liveNote) : title;
   drawDot(polling ? dot + ' polling' : dot, label);
+  if (was === 'signin' && state !== 'signin') syncLive();
 }
 function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
 // Keepalive: an open socket sends "ping" every 25 s and the room's auto-response answers "pong", so proxies that drop quiet connections keep it. No pong for 60 s closes it. liveNote names how the last socket closed, for the polling dot.
@@ -1120,7 +1125,11 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     const etag = r.ok ? r.headers.get('ETag') || '' : '';
     setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
     // A socket open or a timer tick redraws only a changed board, so a focused card is not read again.
-    if (ifChanged && loaded && etag && etag === boardEtag) return true;
+    // syncDetail() still reopens a deep-linked tab or archived job that has not loaded.
+    if (ifChanged && loaded && etag && etag === boardEtag) {
+      syncDetail();
+      return true;
+    }
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
     boardArchived = Number.isInteger(data.archived?.max_id);
     boardUpdated = data.updated || '';
@@ -2779,16 +2788,23 @@ function hostCard(h) {
     if (st.doctor !== 'ok') li.append(alertLine('host-doctor', 'Doctor failed: ' + st.doctor.join(', ') + '.'));
     if (st.triage_failed_since) li.append(alertLine('host-triage', 'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'));
     const heads = ['Route', 'Provider', 'Model', 'Effort', 'Limited until'];
-    const roled = (node, role) => (node.setAttribute('role', role), node);
-    const cells = (tag, values) => roled(make('tr', {}, ...values.map((value, i) => {
-      const cell = roled(make(tag, {textContent:value}), tag === 'th' ? 'columnheader' : 'cell');
-      cell.dataset.label = heads[i];
-      return cell;
-    })), 'row');
+    const cells = (tag, values) => {
+      const row = make('tr', {}, ...values.map((value, i) => {
+        const cell = make(tag, {textContent:value});
+        cell.setAttribute('role', tag === 'th' ? 'columnheader' : 'cell');
+        cell.dataset.label = heads[i];
+        return cell;
+      }));
+      row.setAttribute('role', 'row');
+      return row;
+    };
     const caption = make('caption', {id:'host-' + h.id + '-routes-caption', textContent:'Routes (set on the device)'});
-    const table = roled(make('table', {className:'host-routes'}, caption,
-      roled(make('thead', {}, cells('th', heads)), 'rowgroup'),
-      roled(make('tbody', {}, ...st.routes.map(r => cells('td', [r.name, r.provider, r.model, r.effort ?? 'none', r.limited_until ? hostUtc(r.limited_until) : 'none']))), 'rowgroup')), 'table');
+    const thead = make('thead', {}, cells('th', heads));
+    const tbody = make('tbody', {}, ...st.routes.map(r => cells('td', [r.name, r.provider, r.model, r.effort ?? 'none', r.limited_until ? hostUtc(r.limited_until) : 'none'])));
+    thead.setAttribute('role', 'rowgroup');
+    tbody.setAttribute('role', 'rowgroup');
+    const table = make('table', {className:'host-routes'}, caption, thead, tbody);
+    table.setAttribute('role', 'table');
     table.setAttribute('aria-labelledby', caption.id);
     li.append(table);
   }
@@ -4263,7 +4279,7 @@ function parseHash() {
   return i < 0 ? { id: h, tab: '' } : { id: h.slice(0, i), tab: h.slice(i + 1) };
 }
 
-// Reload the open job's files only when its board entry changed, so new reviews appear without refetching every 3s,
+// Reload the open job's files only when its board entry changed, so new reviews appear without refetching every tick,
 // or while the hash names a file that could still land (decision.md before the approver runs).
 function syncDetail() {
   const { id } = parseHash();
@@ -5177,8 +5193,8 @@ async function openMoveHost(ctx) {
     const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
     if (!h.ok || !p.ok) throw new Error('load');
     const [list, view] = [await h.json(), await p.json()];
-    $('move-host-help').textContent = help((id) => list.find((x) => x.id === id)?.label || hostName(id));
     const hostLabel = (x) => x.label || hostName(x.id);
+    $('move-host-help').textContent = help((id) => hostLabel(list.find((x) => x.id === id) ?? { id }));
     const listed = view.pickup?.enabled ? view.pickup.hosts : [];
     const others = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to);
     const queued = new Set(queuedStops(j.move).map((q) => q.from));
@@ -6321,21 +6337,22 @@ function applyDisplay() {
 // never poll unless notifications are on. Returning to the window refreshes at once.
 // A tick reads the backlog only when the last read is 2 minutes old.
 function pollTick() { return poll({ ifChanged: true, withBacklog: Date.now() - backlogReadAt >= BACKLOG_POLL_MS }); }
+// Seconds between fallback ticks now, or 0 while a hidden or unfocused window waits.
+function pollEvery() { const away = document.hidden || !document.hasFocus(); return !away ? pollSeconds : notifyActive() ? 30 : 0; }
 function schedulePoll() {
   clearInterval(pollTimer);
-  const away = document.hidden || !document.hasFocus();
-  const ms = !pollStarted || liveOpen ? 0 : !away ? pollSeconds * 1000 : notifyActive() ? 30000 : 0;
+  const ms = !pollStarted || liveOpen ? 0 : pollEvery() * 1000;
   pollTimer = ms ? setInterval(pollTick, ms) : 0;
   drawLiveDot();
 }
 document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); syncLive(); schedulePoll(); });
 // Live board events: the Worker sends {"type":"changed","key":...} after each board or
 // backlog write, and the matching key re-reads at once. A dropped socket retries with backoff
-// (1, 2, 4 ... 30 s), then every 30 s while a socket is wanted.
+// (1, 2, 4 ... 30 s), then every 30 s while a socket is wanted. An expired sign-in stops retries until a board read succeeds.
 const LIVE_PATH = '/events/board';
 const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000;
 let liveSocket = null, liveOpen = false, liveRetries = 0, liveRetryTimer = 0;
-function liveWanted() { return pollStarted && navigator.onLine && (!document.hidden || notifyActive()); }
+function liveWanted() { return pollStarted && navigator.onLine && connState !== 'signin' && (!document.hidden || notifyActive()); }
 function openLive() {
   clearTimeout(liveRetryTimer);
   liveRetryTimer = 0;

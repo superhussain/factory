@@ -250,12 +250,15 @@ test("display settings", { timeout: 180000 }, async (t) => {
         }, focused);
       await setFocus(false);
       await page.waitForFunction(() => window.pollTimers.size === 0, wait);
+      const dotTitle = () => page.$eval("#dot", (el) => el.title);
+      assert.match(await dotTitle(), /^Polling paused while this window is hidden or unfocused/);
       before = boardRequests;
       await setFocus(true);
       await page.waitForFunction(() => window.pollTimers.size === 1, wait);
       await new Promise((resolve) => setTimeout(resolve, 500));
       assert.equal(boardRequests - before, 1);
       assert.deepEqual(await liveTimers(), [15000]);
+      assert.match(await dotTitle(), /^Polling every 15 seconds until live updates reconnect/);
 
       // With notifications on, an unfocused window polls every 30 seconds.
       await page.evaluate(() => {
@@ -267,6 +270,7 @@ test("display settings", { timeout: 180000 }, async (t) => {
       await setFocus(false);
       await page.waitForFunction(() => window.pollTimers.size === 1, wait);
       assert.deepEqual(await liveTimers(), [30000]);
+      assert.match(await dotTitle(), /^Polling every 30 seconds until live updates reconnect/);
       await page.evaluate(() => {
         notifyOn = false;
       });

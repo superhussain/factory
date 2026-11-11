@@ -34,6 +34,14 @@
   factory.py documents <project-slug>       write the project's notes, decisions and runbook, wrapped as
                                             operator-preferences data, to projects/<slug>.documents.md
                                             and print its path
+  factory.py prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]
+                                            print a role's full agent prompt (spec, build, review-security,
+                                            review-ux, review-ui, review-code, approve), or write it to
+                                            <path> with mode 600 and print the path
+  factory.py wait <project-slug>/<job-id> <artifact>... [--timeout S]
+                                            print each finished job file's first line, checking once a
+                                            second for up to S seconds (default 60); exit 3 while one is
+                                            missing, 5 while one has no valid first line
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
@@ -78,6 +86,8 @@
   factory.py suggest approve <job-id> <A|B|C>
                                             a human at a terminal approves one option of such a card
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
+  factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
+                                            from the last N days (default 1)
 
 claim, next, hold, handoff, board, ideas, and stuck take --session <tag> (or
 FACTORY_SESSION). A session without one gets a new tag from claim, next, or hold,
@@ -4036,11 +4046,9 @@ def pipeline_view(slug, data):
             "versions": versions, "prompts": prompts}
 
 
-def pipeline_cmd(slug):
-    """Print the project's effective pipeline configuration. Nothing falls back to defaults."""
-    if not SLUG.fullmatch(slug):
-        fail("usage: pipeline <project-slug>", 2)
-    status, _, text = api(factory_home(), "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+def fetch_pipeline(home, slug):
+    """The project's effective pipeline configuration, as pipeline_view returns it. Nothing falls back to defaults."""
+    status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
     if status == 404:
         fail(f"no pipeline view for {slug}: register the project, or deploy the current Worker", 4)
     if status == 409:
@@ -4049,7 +4057,14 @@ def pipeline_cmd(slug):
         data = json.loads(text)
     except ValueError:
         fail(f"malformed pipeline view for {slug}: body", 5)
-    print(json.dumps(pipeline_view(slug, data), indent=2))
+    return pipeline_view(slug, data)
+
+
+def pipeline_cmd(slug):
+    """Print the project's effective pipeline configuration."""
+    if not SLUG.fullmatch(slug):
+        fail("usage: pipeline <project-slug>", 2)
+    print(json.dumps(fetch_pipeline(factory_home(), slug), indent=2))
 
 
 def documents_cmd(slug):
@@ -4078,6 +4093,162 @@ def documents_cmd(slug):
     write_atomic(path, PREFERENCES_SENTENCE + "\n\n" + "\n\n".join(envelopes) + "\n" if envelopes
                  else "This project has no notes.md, decisions.md or runbook.md.\n")
     print(path)
+
+
+PROMPT_ROLES = ("spec", "build", "review-security", "review-ux", "review-ui", "review-code", "approve")
+PROMPT_USAGE = "usage: prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]"
+
+
+def prompt_cmd(target, role, *flags):
+    """Print one role's full agent prompt, or with --out write it to a private file and print its path."""
+    home, slug, job_id = r2_target(target, True)
+    if role not in PROMPT_ROLES:
+        fail(f"bad role {role!r}: use one of {', '.join(PROMPT_ROLES)}", 2)
+    if len(flags) % 2:
+        fail(PROMPT_USAGE, 2)
+    options = {}
+    for flag, value in zip(flags[::2], flags[1::2]):
+        if flag not in ("--round", "--port", "--out") or flag in options:
+            fail(PROMPT_USAGE, 2)
+        options[flag] = value
+    review = role.startswith("review-")
+    if "--round" in options and not (role == "build" or review):
+        fail(f"{role} takes no --round", 2)
+    if "--port" in options and role != "build":
+        fail(f"{role} takes no --port", 2)
+    if review and "--round" not in options:
+        fail(f"{role} needs --round N", 2)
+    if "--round" in options and not re.fullmatch(r"[1-9][0-9]*", options["--round"]):
+        fail("--round must be a positive integer", 2)
+    if "--port" in options and not (re.fullmatch(r"[1-9][0-9]*", options["--port"])
+                                    and int(options["--port"]) <= 65535):
+        fail("--port must be 1 to 65535", 2)
+    out = options.get("--out")
+    if out is not None:
+        out = Path(os.path.normpath(out))
+        jobs = home / "jobs"
+        if not out.is_absolute() or out == jobs or jobs in out.parents:
+            fail(f"--out must be an absolute path outside {jobs}", 2)
+
+    data = read_board(home)
+    job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+    if job is None:
+        fail(f"no job {job_id} on the board", 4)
+    project_file = project_files(home, slug)[0]
+    documents = project_file.parent / f"{slug}.documents.md"
+    if not documents.is_file():
+        fail(f"no {documents}: run factory.py documents {slug} first", 4)
+    stage = "review" if review else role
+    pipeline = fetch_pipeline(home, slug)
+    base = frontmatter(project_file)[0].get("base") or "main"
+    folder = home / "jobs" / slug / job_id
+    worktrees = home / "worktrees" / slug
+    riders = riders_of(data, job_id)
+    stacked = next((r["id"] for r in riders if r.get("stacked") is True), None)
+    tree_id = stacked if stacked and (review or role == "approve") else job_id
+    skill = Path(HERE).parent
+    lines = [f"Job id: {job_id}",
+             f"Job folder: {folder}",
+             f"Worktree: {worktrees / tree_id} (branch factory/{tree_id}, base branch {base})",
+             f"Project file: {project_file}",
+             f"Project documents: {documents}",
+             f"Visuals reference: {skill / 'references' / 'visuals.md'}",
+             f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}"]
+    round_folder = folder / f"round-{options['--round']}" if "--round" in options else None
+    if role == "spec":
+        feature = job.get("idea") or job.get("title")
+        if not feature:
+            fail(f"{job_id} has no idea or title to spec", 4)
+        if (folder / "idea-images.md").is_file():
+            lines.append(f"Idea images: {folder / 'idea-images.md'}")
+        lines += ["", "Feature text:", feature]
+        if riders:
+            lines += ["", "Batched ideas (spec each one):"]
+            lines += [f"- {r['id']}: {r.get('idea') or r.get('title')}" for r in riders]
+    elif role == "build":
+        lines.append(f"Builder name: builder-{job_id}")
+        if "--port" in options:
+            lines.append(f"Dev-server port: {options['--port']}")
+        if round_folder:
+            lines.append(f"Round folder: {round_folder}")
+        if stacked:
+            lines.append(f"Rider worktree: {worktrees / stacked} (branch factory/{stacked})")
+    elif review:
+        lines += [f"Round folder: {round_folder}", f"Your file: {round_folder / (role + '.md')}"]
+    else:
+        lines.append(f"Your file: {folder / 'decision.md'}")
+    if stage in pipeline["prompts"]:
+        lines += ["", pipeline["prompts"][stage]]
+    text = "\n".join(lines) + "\n"
+    if out is None:
+        sys.stdout.write(text)
+        return
+    for node in [out, *out.parents]:
+        if node == home:
+            break
+        if is_link(node):
+            fail(f"{node} is a symlink or junction; nothing was written", 6)
+    for parent in reversed([p for p in out.parents if not p.exists()]):
+        parent.mkdir(mode=0o700)
+    write_atomic(str(out), text)
+    os.chmod(out, 0o600)
+    print(out)
+
+
+WAIT_ARTIFACT = re.compile(r"spec\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
+WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S]"
+
+
+def wait_valid(artifact, line):
+    """True when line is a finished first line for artifact."""
+    if artifact in ("spec.md", "build.md"):
+        return bool(line.strip())
+    if artifact == "decision.md":
+        return line in ("APPROVE", "ESCALATE", "CHANGES") or line.startswith("CLOSED: ")
+    return line in ("VERDICT: PASS", "VERDICT: CHANGES")
+
+
+def wait_cmd(target, *args):
+    """Print each artifact's first line once all are valid, checking once a second until --timeout."""
+    home, slug, job_id = r2_target(target, True)
+    artifacts, timeout = [], None
+    i = 0
+    while i < len(args):
+        if args[i] == "--timeout":
+            if timeout is not None or i + 1 == len(args) or not re.fullmatch(r"[0-9]+", args[i + 1]) \
+                    or int(args[i + 1]) > 600:
+                fail("--timeout takes one value from 0 to 600 seconds", 2)
+            timeout = int(args[i + 1])
+            i += 2
+        elif WAIT_ARTIFACT.fullmatch(args[i]):
+            artifacts.append(args[i])
+            i += 1
+        else:
+            fail(f"bad artifact {args[i]!r}. " + WAIT_USAGE, 2)
+    if not artifacts:
+        fail(WAIT_USAGE, 2)
+    folder = home / "jobs" / slug / job_id
+    deadline = time.monotonic() + (60 if timeout is None else timeout)
+    while True:
+        lines = {}
+        for artifact in artifacts:
+            path = folder / artifact
+            for node in (path, path.parent, folder):
+                if is_link(node):
+                    fail(f"{node} is a symlink or junction; nothing was read through it", 6)
+            if path.is_file():
+                lines[artifact] = (path.read_text(encoding="utf-8", errors="replace").splitlines() or [""])[0]
+        missing = [a for a in artifacts if a not in lines]
+        malformed = [a for a in artifacts if a in lines and not wait_valid(a, lines[a])]
+        if not missing and not malformed:
+            for artifact in artifacts:
+                print(f"{artifact}: {lines[artifact]}")
+            return
+        if time.monotonic() >= deadline:
+            if missing:
+                fail("still missing: " + ", ".join(missing), 3)
+            fail("no valid first line: " + ", ".join(malformed), 5)
+        time.sleep(1)
 
 
 def tracer_start(j):
@@ -6202,6 +6373,201 @@ def tracer_cmd(sub, target=None):
               else f"nothing to mirror: no project is listed in {home / 'tracer.json'}")
 
 
+RETRO_DENIALS = ("denied by the Claude Code auto mode classifier", "Permission to use",
+                 "doesn't want to proceed", "Blocked:")
+RETRO_ENV_NOISE = {"winsize_crash": "undefined method `winsize'", "command_not_found": "command not found: ",
+                   "zsh_no_matches": "no matches found: ", "node_crash": "Node.js v"}
+RETRO_POLLS = {"until_file": re.compile(r"\buntil \[ -[fs] "),
+               "task_output": re.compile(r"/tasks/[\w-]+\.output\b"),
+               "quiet_window": re.compile(r"stat -c %Y|stat -f %m")}
+RETRO_JOB = re.compile(r"factory-(\d{2,5})-")
+RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
+RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+")
+RETRO_KEYVALUE = re.compile(r"(?i)\b(token|secret|password|api[_-]?key)(\s*[=:]\s*)\S+")
+RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
+                "uncached_input": "input_tokens", "output": "output_tokens"}
+
+
+def retro_redact(text):
+    for pattern in NOTE_SECRETS:
+        text = pattern.sub("[redacted]", text)
+    return RETRO_KEYVALUE.sub(r"\1\2[redacted]", text)
+
+
+def retro_pattern(text):
+    text = " ".join(retro_redact(text).split())
+    return re.sub(r"\d+", "N", RETRO_PATH.sub("<path>", text))[:160]
+
+
+def retro_command_key(cmd):
+    return retro_pattern(RETRO_ASSIGN.sub("", cmd))
+
+
+def retro_text(content):
+    """A message or tool_result content as text: a string, or its joined text blocks."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str))
+    return ""
+
+
+def retro_count(counts, key):
+    counts[key] = counts.get(key, 0) + 1
+
+
+def retro_ranked(counts):
+    return dict(sorted(counts.items(), key=lambda item: -item[1]))
+
+
+def retro_scan(path, main):
+    """One transcript reduced to digest fields. main=False also counts isSidechain lines."""
+    usage, tools, cmds, models = {}, {}, {}, set()
+    attachments, calls, results = {}, {}, []
+    stamps, human, interrupts, rounds, seen_assistant = [], 0, 0, [], False
+    prompts = {"count": 0, "chars": 0}
+    polls = dict.fromkeys(RETRO_POLLS, 0)
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict) or (main and e.get("isSidechain")):
+                continue
+            if isinstance(e.get("timestamp"), str):
+                stamps.append(e["timestamp"])
+            msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+            content = msg.get("content")
+            blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+            if e.get("type") == "attachment" and not seen_assistant and isinstance(e.get("attachment"), dict):
+                kind = str(e["attachment"].get("type"))
+                attachments[kind] = attachments.get(kind, 0) + len(json.dumps(e["attachment"]).encode())
+            elif e.get("type") == "assistant":
+                seen_assistant = True
+                if isinstance(msg.get("model"), str):
+                    models.add(msg["model"])
+                if isinstance(msg.get("id"), str) and isinstance(msg.get("usage"), dict):
+                    best = usage.setdefault(msg["id"], dict.fromkeys(RETRO_TOKENS, 0))
+                    for key, field in RETRO_TOKENS.items():
+                        value = msg["usage"].get(field)
+                        if isinstance(value, int):
+                            best[key] = max(best[key], value)
+                for b in blocks:
+                    if b.get("type") != "tool_use":
+                        continue
+                    name = str(b.get("name"))
+                    inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                    retro_count(tools, name)
+                    calls[b.get("id")] = (name, inp)
+                    rounds += [int(n) for n in re.findall(r"\bround-(\d+)/", json.dumps(inp))]
+                    if name in ("Agent", "Task") and isinstance(inp.get("prompt"), str):
+                        prompts["count"] += 1
+                        prompts["chars"] += len(inp["prompt"])
+                    target = inp.get("command") if name == "Bash" else inp.get("file_path") if name == "Read" else None
+                    if isinstance(target, str):
+                        for key, pattern in RETRO_POLLS.items():
+                            polls[key] += bool(pattern.search(target))
+                        if name == "Bash":
+                            retro_count(cmds, retro_command_key(target))
+            elif e.get("type") == "user":
+                text = retro_text(content)
+                interrupts += "[Request interrupted" in text
+                if any(b.get("type") == "tool_result" for b in blocks):
+                    for b in blocks:
+                        if b.get("type") == "tool_result":
+                            name, inp = calls.get(b.get("tool_use_id"), ("?", {}))
+                            results.append((name, inp, retro_text(b.get("content")), b.get("is_error") is True))
+                elif not e.get("isMeta") and not e.get("isSidechain") and text and not text.startswith("<"):
+                    human += 1
+    errors = {"count": 0, "benign": 0, "patterns": {}}
+    denials = {"count": 0, "blocked_sleep": 0, "patterns": {}}
+    noise = dict.fromkeys(RETRO_ENV_NOISE, 0)
+    for i, (name, inp, text, is_error) in enumerate(results):
+        for key, needle in RETRO_ENV_NOISE.items():
+            noise[key] += needle in text
+        if not is_error:
+            continue
+        command = inp.get("command") if isinstance(inp.get("command"), str) else ""
+        if "Blocked: sleep" in text:
+            denials["blocked_sleep"] += 1
+        elif any(phrase in text for phrase in RETRO_DENIALS):
+            denials["count"] += 1
+            retro_count(denials["patterns"], retro_pattern(text))
+        elif i == len(results) - 1 and (
+                (name == "Bash" and "archive-workspace" in command and "137" in text)
+                or ("archive_workspace" in name and "connection closed" in text.lower())):
+            errors["benign"] += 1
+        else:
+            errors["count"] += 1
+            retro_count(errors["patterns"], retro_pattern(text))
+    for bucket in (errors, denials):
+        bucket["patterns"] = retro_ranked(bucket["patterns"])
+    contexts = [u["uncached_input"] + u["cache_read"] + u["cache_write"] for u in usage.values()]
+    return {"start": stamps[0] if stamps else None, "end": stamps[-1] if stamps else None,
+            "turns": len(usage), "human_msgs": human, "interrupts": interrupts, "models": sorted(models),
+            "tools": retro_ranked(tools),
+            "tokens": {key: sum(u[key] for u in usage.values()) for key in RETRO_TOKENS},
+            "context": {"first_turn": contexts[0] if contexts else 0,
+                        "mean_per_turn": round(sum(contexts) / len(contexts)) if contexts else 0},
+            "first_turn_attachments": attachments, "agent_prompts": prompts,
+            "review_round_max": max(rounds) if rounds else None, "polls": polls, "env_noise": noise,
+            "errors": errors, "denials": denials,
+            "repeated_cmds": {cmd: n for cmd, n in list(retro_ranked(cmds).items())[:5] if n >= 3}}
+
+
+def retro_host():
+    config = factory_home() / "config.md"
+    return (frontmatter(config)[0] if config.is_file() else {}).get("device") or socket.gethostname()
+
+
+def retro_digest(days):
+    root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+    if not root.is_dir():
+        fail(f"no Claude Code transcripts at {root}", 4)
+    host, cutoff, rows = retro_host(), time.time() - days * 86400, []
+    for project in sorted(p for p in root.iterdir() if p.is_dir()):
+        for path in sorted(project.glob("*.jsonl")):
+            if path.stat().st_mtime < cutoff:
+                continue
+            scan = retro_scan(path, True)
+            if scan["start"] is None:
+                continue
+            job = RETRO_JOB.search(project.name)
+            row = {"host": host, "project": project.name, "session": path.stem,
+                   "job": job.group(1) if job else "ad-hoc", **scan}
+            by_type, subs = {}, sorted((project / path.stem / "subagents").glob("*.jsonl"))
+            for sub in subs:
+                meta = sub.with_suffix(".meta.json")
+                try:
+                    kind = str(json.loads(meta.read_text(encoding="utf-8")).get("agentType") or "unknown")
+                except (OSError, ValueError, AttributeError):
+                    kind = "unknown"
+                d = retro_scan(sub, False)
+                t = by_type.setdefault(kind, {"count": 0, "turns": 0, "tokens": dict.fromkeys(RETRO_TOKENS, 0),
+                                              "errors": 0, "denials": 0, "models": []})
+                t["count"] += 1
+                t["turns"] += d["turns"]
+                t["errors"] += d["errors"]["count"]
+                t["denials"] += d["denials"]["count"]
+                t["models"] = sorted(set(t["models"]) | set(d["models"]))
+                for key in RETRO_TOKENS:
+                    t["tokens"][key] += d["tokens"][key]
+                for key in RETRO_ENV_NOISE:
+                    row["env_noise"][key] += d["env_noise"][key]
+            row["subagents"] = {"count": len(subs), "by_type": by_type}
+            rows.append(row)
+    for row in sorted(rows, key=lambda r: (r["start"], r["session"])):
+        print(json.dumps(row))
+
+
+def retro_cmd(action, *args):
+    days = args[1] if len(args) == 2 and args[0] == "--days" else "1" if not args else ""
+    if action != "digest" or not (days.isascii() and days.isdigit()) or not 1 <= int(days) <= 90:
+        fail("usage: factory.py retro digest [--days N], N from 1 to 90", 2)
+    retro_digest(int(days))
+
+
 COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3),
             "board": (board, 2, 2), "next": (next_item, 0, 0), "backlog": (backlog_cmd, 2, 4),
             "stop": (stop, 1, 1), "push": (push, 1, 1), "pull": (pull, 1, 1), "sync": (sync, 0, 1),
@@ -6218,6 +6584,8 @@ COMMANDS["experiment"] = (experiment_cmd, 2, 2)
 COMMANDS["unclaim"] = (unclaim, 1, 1)
 COMMANDS["pipeline"] = (pipeline_cmd, 1, 1)
 COMMANDS["documents"] = (documents_cmd, 1, 1)
+COMMANDS["prompt"] = (prompt_cmd, 2, 8)
+COMMANDS["wait"] = (wait_cmd, 2, 22)
 COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
 COMMANDS["host"] = (host_cmd, 3, 3)
@@ -6228,6 +6596,7 @@ COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
+COMMANDS["retro"] = (retro_cmd, 1, 3)
 
 def main(argv=None):
     global _HOME_OVERRIDE, _LOCATED

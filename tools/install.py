@@ -17,8 +17,12 @@ from pathlib import Path
 REQUIRED = (
     "SKILL.md", "runtime/factory.py", "runtime/paseo_stalls.py", "runtime/pr_screenshots.py",
     "templates/config.md", "templates/project.md", "references/execution.md", "references/integrations.md",
-    "references/pickup.md", "references/visuals.md", "references/walkthrough.html", "schedules/explore.md", "schedules/resume.md",
-) + tuple("agents/factory-" + name + ".md" for name in (
+    "references/pickup.md", "references/visuals.md",
+    "references/project-settings.md", "references/dashboard.md", "references/needs.md", "references/schedules.md",
+    "references/walkthrough.html", "schedules/explore.md", "schedules/resume.md",
+) + tuple("references/commands/" + name + ".md" for name in (
+    "feature", "next", "idea", "deny-notes", "approve", "approve-spec", "rework", "recover", "build", "init", "handoff",
+    "resume")) + tuple("agents/factory-" + name + ".md" for name in (
     "approver", "builder", "explorer", "review-code", "review-security", "review-ui", "review-ux", "spec-writer"))
 
 
