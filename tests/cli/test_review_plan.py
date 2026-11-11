@@ -119,3 +119,32 @@ class ReviewPlanTest(IsolatedTestCase):
         self.assertEqual((code, out), (6, ""))
         self.assertIn("already exists; nothing was written", err)
         self.assertFalse((self.folder / "round-1" / "review-ux.md").exists())
+
+    def assertNothingWritten(self, round_text, code, out, expected):
+        self.assertEqual((code, out), (expected, ""))
+        for name in ("ux", "ui"):
+            self.assertFalse((self.folder / f"round-{round_text}" / f"review-{name}.md").exists())
+
+    def test_bad_round_exits_2(self):
+        self.worktree("docs/trust.md")
+        for round_text in ("0", "x", "-1"):
+            with self.subTest(round_text):
+                code, out, _ = self.plan(round_text)
+                self.assertNothingWritten(round_text, code, out, 2)
+
+    def test_linked_round_folder_exits_6(self):
+        self.worktree("docs/trust.md")
+        real = self.home / "elsewhere"
+        real.mkdir()
+        (self.folder / "round-1").symlink_to(real, target_is_directory=True)
+        code, out, err = self.plan()
+        self.assertIn("symlink or junction", err)
+        self.assertNothingWritten("1", code, out, 6)
+        self.assertEqual(list(real.iterdir()), [])
+
+    def test_missing_spec_exits_4(self):
+        self.worktree("docs/trust.md")
+        (self.folder / "spec.md").unlink()
+        code, out, err = self.plan()
+        self.assertIn("spec.md is missing", err)
+        self.assertNothingWritten("1", code, out, 4)
