@@ -107,7 +107,7 @@ def repoint(args, path):
     act([*git, "fetch", "origin", "--prune"])
     act([*git, "switch", "--detach", "origin/main"])
     # A private branch left under its own name would be reused and pushed to the public origin.
-    listing = act([*git, "for-each-ref", "--format=%(refname:short)%09%(upstream)", "refs/heads"])
+    listing = act([*git, "for-each-ref", "--format=%(refname:lstrip=2)%09%(upstream)", "refs/heads"])
     refs = [line.partition("\t")[::2] for line in listing.splitlines()]
     private = [name for name, _ in refs if not name.startswith("archive/")
                and run([*git, "merge-base", "--is-ancestor", name, "origin/main"]).returncode != 0]
