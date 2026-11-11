@@ -32,7 +32,7 @@
   factory.py documents <project-slug>       write the project's notes, decisions and runbook, wrapped as
                                             operator-preferences data, to projects/<slug>.documents.md
                                             and print its path
-  factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 4 of them
+  factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py escalation <project-slug>/<job-id> <round>
                                             ask whether a review round's CHANGES findings need a person,
                                             print one JSON verdict
@@ -147,8 +147,8 @@ TERMINAL = ("merged", "closed")
 REF_KINDS = ("rework-of", "follow-up-of", "sub-job-of", "batched-into")
 # A rider is an idea that ships inside another job. It follows that lead's stage and PR.
 BATCH_REF = "batched-into"
-MAX_RIDERS = 4
-MAX_CANDIDATES = 20
+MAX_RIDERS = 20
+MAX_CANDIDATES = 40
 BUILD_STATES = ("queued", "running", "done", "failed")
 # Ideas wait on the board with no claim, branch, or files until a pickup moves them to spec.
 IDEA = "idea"
@@ -1599,8 +1599,8 @@ def batch_problem(data, j, slug, device, session, minutes):
 
 
 def batch_cmd(target, *idea_ids):
-    """List the project's ideas that can ride in a job at spec, or attach up to 4 of them as
-    riders in one board write. Prints {"lead", "riders", "candidates"} as JSON."""
+    """List the project's ideas that can ride in a job at spec, or attach up to MAX_RIDERS of them
+    as riders in one board write. Prints {"lead", "riders", "candidates"} as JSON."""
     home, slug, lead_id = r2_target(target, True)
     device, session, minutes = holder(home)
     idea_ids = list(dict.fromkeys(idea_ids))
@@ -5794,7 +5794,7 @@ COMMANDS["deny-notes"] = (deny_notes_cmd, 1, 2)
 COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
-COMMANDS["batch"] = (batch_cmd, 1, 5)
+COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 
 def main(argv=None):
     global _HOME_OVERRIDE
