@@ -607,16 +607,17 @@ def paseo_session():
     return None
 
 
-def paseo_archive_command(agent):
-    """The paseo command that archives agent by hand on this host, or None when agent is unsafe to print as an argument.
+def paseo_archive_tail(agent):
+    """The end of an archive-by-hand hint for agent: "" when agent is unsafe to print as an argument, else the
+    command after a colon.
 
-    When PASEO_HOME is unprintable it is left out and a clause says so."""
+    When PASEO_HOME is unprintable it is left out and a clause before the colon says so."""
     if not PASEO_ID.fullmatch(agent) or agent.startswith("-"):
-        return None
+        return ""
     home = os.environ.get("PASEO_HOME")
     if home and not home.isprintable():
-        return f"paseo archive --force {agent} (left out --home because PASEO_HOME has unprintable characters)"
-    return "paseo " + (f"--home {shlex.quote(home)} " if home else "") + f"archive --force {agent}"
+        return f" (left out --home because PASEO_HOME has unprintable characters): paseo archive --force {agent}"
+    return ": paseo " + (f"--home {shlex.quote(home)} " if home else "") + f"archive --force {agent}"
 
 
 def paseo_claim_path(home, job_id, agent):
@@ -3562,14 +3563,12 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
                 x["stopped"] = now()
             print(f"archived {noun} {names} and stopped {line}" if archives else f"stopped {line}")
             for a in kept:
-                cmd = paseo_archive_command(a)
                 print(f"factory.py: pickup kept session {a} of {job_id}: no claim recorded on this host, "
-                      "archive it by hand if it still runs" + (f": {cmd}" if cmd else ""), file=sys.stderr)
+                      "archive it by hand if it still runs" + paseo_archive_tail(a), file=sys.stderr)
             for a in refused:
                 shown = a if PASEO_ID.fullmatch(a) else ascii(a[:64])
-                cmd = paseo_archive_command(a)
                 print(f"factory.py: pickup skipped archive of session {shown} of {job_id}: not an id the stall adapter "
-                      "accepts, archive it by hand if it still runs" + (f": {cmd}" if cmd else ""), file=sys.stderr)
+                      "accepts, archive it by hand if it still runs" + paseo_archive_tail(a), file=sys.stderr)
 
 
 def prioritized(j):
@@ -3694,12 +3693,17 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
     enabled, hosts, unread = pickup
     holders = recorded_holders(j)
     uncovered = [h for h in holders if not (enabled and h in hosts)]
-    manual = (f"- No host is named for a manual cleanup, because {device} could not read "
-              f"the project's pickup hosts: {unread}.\n" if holders and unread else
-              f"- Hosts that need `factory.py cleanup {j['project']}/{j['id']}` run by hand: "
-              + ", ".join(f"`{h}`" for h in uncovered)
-              + ". The board records them as holding this job, and the project's pickup is off "
-              "or does not list them.\n" if uncovered else "")
+    task = f"`factory.py cleanup {j['project']}/{j['id']}`"
+    if holders and unread:
+        manual = (f"- The board records {', '.join(f'`{h}`' for h in holders)} as holding this job, but {device} "
+                  f"could not read the project's pickup hosts: {unread}. Run {task} by hand on each of those "
+                  "hosts that pickup does not cover.\n")
+    elif uncovered:
+        manual = (f"- Hosts that need {task} run by hand: " + ", ".join(f"`{h}`" for h in uncovered)
+                  + ". The board records them as holding this job, and the project's pickup "
+                  + ("is off" if enabled is False else "does not list them") + ".\n")
+    else:
+        manual = ""
     text = (f"CLOSED: {reason}\n\n"
             f"**Summary.** Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: "
             f"{reason}. Nothing else is owed unless Left out says so.\n\n"
