@@ -2383,9 +2383,8 @@ ADAPTER_TIMEOUT_SECONDS = 120
 TAKEOVER_MINUTES = 30
 
 
-def pickup_settings(home, slug, repo, device):
-    """(enabled, hosts, None) from the project's effective pipeline, or (None, None, reason).
-    When pickup is on and lists device, an unsafe checkout at repo is the reason."""
+def pickup_config(home, slug):
+    """(enabled, hosts, None) from the project's effective pipeline, or (None, None, reason)."""
     status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
     if status == 404:
         return None, None, "no pipeline view; register the project or deploy the current Worker"
@@ -2400,12 +2399,19 @@ def pickup_settings(home, slug, repo, device):
     p = view.get("pickup") if isinstance(view, dict) else None
     if isinstance(p, dict) and isinstance(p.get("enabled"), bool) and isinstance(p.get("hosts"), list) \
             and all(isinstance(h, str) and HOST_NAME.fullmatch(h) for h in p["hosts"]):
-        if p["enabled"] and device in p["hosts"]:
-            problem = checkout_problem(home, slug, repo)
-            if problem:
-                return None, None, problem
         return p["enabled"], p["hosts"], None
     return None, None, "malformed pickup in the pipeline view"
+
+
+def pickup_settings(home, slug, repo, device):
+    """(enabled, hosts, None) from the project's effective pipeline, or (None, None, reason).
+    When pickup is on and lists device, an unsafe checkout at repo is the reason."""
+    enabled, hosts, why = pickup_config(home, slug)
+    if enabled and device in hosts:
+        problem = checkout_problem(home, slug, repo)
+        if problem:
+            return None, None, problem
+    return enabled, hosts, why
 
 
 def host_max_inflight(home, device):
@@ -3262,6 +3268,15 @@ def close_reason(j):
     return r if CLOSE_REASON.fullmatch(r) else None
 
 
+def recorded_holders(j):
+    """Hosts the board records as holding the job: its claim and each move's from, sorted."""
+    c, m = j.get("claim"), j.get("move")
+    found = [c.get("device")] if isinstance(c, dict) else []
+    if isinstance(m, dict):
+        found += [x.get("from") for x in [*earlier_moves(m), m]]
+    return sorted({h for h in found if isinstance(h, str) and HOST_NAME.fullmatch(h)})
+
+
 def closing_message(job_id):
     return f"{job_id} has a close queued from the dashboard. Nothing else was written. Stop this session."
 
@@ -3337,13 +3352,22 @@ def close_pull_request(home, j, device):
     return "closed", ""
 
 
-def close_decision(j, reason, device, earlier, outcome):
+def close_decision(j, reason, device, earlier, outcome, pickup):
     """decision.md for a job closed from the dashboard. earlier is the decision.md it replaces, or None.
     outcome is close_pull_request's (state, why), or None without a pr."""
     at, stage, pr = j["close"]["at"], j.get("stage"), j.get("pr")
     state, why = outcome or (None, "")
     open_pr = (f"- Pull request {pr} stays open because {why}. Close it on GitHub if it should not merge.\n"
                if state == "open" else "")
+    enabled, hosts, unread = pickup
+    holders = recorded_holders(j)
+    uncovered = [h for h in holders if not (enabled and h in hosts)]
+    manual = (f"- No host is named for a manual cleanup, because {device} could not read "
+              f"the project's pickup hosts: {unread}.\n" if holders and unread else
+              f"- Hosts that need `factory.py cleanup {j['project']}/{j['id']}` run by hand: "
+              + ", ".join(f"`{h}`" for h in uncovered)
+              + ". The board records them as holding this job, and the project's pickup is off "
+              "or does not list them.\n" if uncovered else "")
     text = (f"CLOSED: {reason}\n\n"
             f"**Summary.** Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: "
             f"{reason}. Nothing else is owed unless Left out says so.\n\n"
@@ -3360,7 +3384,8 @@ def close_decision(j, reason, device, earlier, outcome):
             f"`factory.py cleanup {j['project']}/{j['id']}` there when the project's pickup is on "
             f"and lists that host. On any other host, run `factory.py cleanup {j['project']}/{j['id']}` "
             "by hand. It keeps a dirty worktree, and a branch that is not merged unless "
-            "origin holds the same commit.\n")
+            "origin holds the same commit.\n"
+            f"{manual}")
     return text + "\n## Earlier decision\n\n" + earlier if earlier else text
 
 
@@ -3391,11 +3416,12 @@ def close_pass(home, data, device, minutes, dry):
             print(f"closed pull request {pr} for {job_id}")
         elif outcome and outcome[0] == "open":
             print(f"factory.py: pickup leaves pull request {pr} open: {outcome[1]}", file=sys.stderr)
+        config = pickup_config(home, project)
 
-        def write(text, j=j, reason=reason, outcome=outcome):
+        def write(text, j=j, reason=reason, outcome=outcome, config=config):
             if text is not None and text.startswith("CLOSED:"):
                 return None, None
-            return close_decision(j, reason, device, text, outcome), None
+            return close_decision(j, reason, device, text, outcome, config), None
         cas(home, f"/api/jobs/{project}/{job_id}/decision.md", write)
 
         def change(text, job_id=job_id, at=j["close"]["at"], reason=reason):

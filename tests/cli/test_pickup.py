@@ -1732,15 +1732,40 @@ class CloseTest(PickupFixture):
 
     def test_close_decision_names_an_open_pull_request(self):
         job = self.closing(pr="https://github.example.test/sample/pull/7")
-        text = factory.close_decision(job, self.REASON, DEVICE, None, ("open", "gh is not installed on host-a"))
+        text = factory.close_decision(job, self.REASON, DEVICE, None, ("open", "gh is not installed on host-a"),
+                                      (True, ["other-host", DEVICE], None))
         self.assertIn("- Pull request: https://github.example.test/sample/pull/7, still open.\n", text)
         self.assertIn("- No agent reviewed this close. The reason is the owner's own words.\n"
                       "- Pull request https://github.example.test/sample/pull/7 stays open because "
                       "gh is not installed on host-a. Close it on GitHub if it should not merge.\n"
                       "- The next pickup run on each host", text)
         bare = factory.close_decision({"id": "042-sample-export", "project": "alpha", "stage": "spec",
-                                       "close": {"at": "2026-01-02T12:00:00Z"}}, self.REASON, DEVICE, None, None)
+                                       "close": {"at": "2026-01-02T12:00:00Z"}}, self.REASON, DEVICE, None, None,
+                                      (True, ["other-host", DEVICE], None))
         self.assertIn("- Stage when closed: `spec`, round 0.\n- Branch: `none`.\n- Pull request: none.\n", bare)
+
+    def test_close_decision_names_hosts_pickup_skips(self):
+        self.board["jobs"] = [self.closing(move={"from": "host-b", "session": "s9", "to": "other-host",
+                                                 "at": "2026-01-02T11:00:00Z",
+                                                 "earlier": [{"from": "host-c"}, {"from": "bad host"}]})]
+        self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
+        self.assertIn("Hosts that need `factory.py cleanup alpha/042-sample-export` run by hand: `host-b`, `host-c`. "
+                      "The board records them as holding this job, and the project's pickup is off "
+                      "or does not list them.\n", self.files[self.DECISION])
+
+    def test_close_decision_names_hosts_when_pickup_is_off(self):
+        self.views["alpha"] = (200, effective("alpha", {"pickup": {"enabled": False, "hosts": ["other-host", DEVICE]}}))
+        self.board["jobs"] = [self.closing()]
+        self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
+        self.assertIn("run by hand: `other-host`.", self.files[self.DECISION])
+
+    def test_close_decision_says_why_no_host_is_named(self):
+        self.views["alpha"] = (404, "")
+        self.board["jobs"] = [self.closing()]
+        self.pickup()
+        self.assertIn("- No host is named for a manual cleanup, because host-a could not read the project's "
+                      "pickup hosts: no pipeline view; register the project or deploy the current Worker.\n",
+                      self.files[self.DECISION])
 
     def test_close_closes_an_open_pull_request(self):
         self.board["jobs"] = [self.closing(pr=self.PR)]
