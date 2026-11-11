@@ -328,7 +328,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .ref-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   @media (hover: hover) { .card .ref-link:hover { color: var(--accent); text-decoration-thickness: 2px; } }
   .card .ref-link.ref-focused { background: var(--accent); color: var(--panel); border-radius: 3px; box-shadow: -2px 0 0 var(--accent), 2px 0 0 var(--accent); text-decoration-thickness: 2px; }
-  .ref-focus { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  /* .sr-only hides the stand-in; this pins it inside .card-wrap. */
+  .ref-focus { top: 0; left: 0; }
   .backlog-card {
     overflow-wrap: anywhere;
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(17,24,39,.05);
@@ -431,7 +432,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .doc pre code { padding: 0; background: none; }
   .doc a { color: var(--accent); }
   .doc .new-tab { display: inline-block; margin-left: 1px; font-size: .85em; }
-  .doc .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   /* GitHub-style sizing: a screenshot stays narrower than the drawer and shorter than the screen.
      The click opens it full size. */
   .doc .img-link { display: inline-block; vertical-align: top; max-width: min(100%, 480px); margin: 4px 0; border-radius: 6px; }
@@ -1333,11 +1334,13 @@ function refLine(r) {
 }
 
 // The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
+// Each on-board ref and rider also gets a visually hidden stand-in link after the actions trigger, named for this card, so Tab reaches it.
 // A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
 function card(j, inNeeds, archived = false) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
   const riders = archived ? [] : ridersOf(j.id);
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
+  const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
     '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span>' +
@@ -1363,7 +1366,8 @@ function card(j, inNeeds, archived = false) {
     (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub" title="">PR #' + esc(pr.n) + '</a>' : '') +
     (archived ? '' : '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
     ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') +
-    refs(j).filter((r) => jobs.some((x) => x.id === r.id)).map((r) => '<a class="ref-focus" href="#' + esc(r.id) + '" data-ref="' + esc(r.id) + '">' + esc(REF_KINDS[r.kind]) + ' ' + esc(r.id) + '</a>').join('') + '</div>';
+    refs(j).filter((r) => jobs.some((x) => x.id === r.id)).map((r) => standIn(r.id, REF_KINDS[r.kind] + ' ' + r.id)).join('') +
+    riders.map((id) => standIn(id, 'batches ' + id)).join('') + '</div>';
 }
 
 // Not a .card, so arrow-key card navigation skips it.
