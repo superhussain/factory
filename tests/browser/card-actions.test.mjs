@@ -51,7 +51,6 @@ const JOBS = [
     updated: AT,
   },
 ];
-const FALLBACK = "Copy is unavailable. Copy the link from the address bar.";
 const TRIGGER = `.card-actions[data-actions="${ID}"]`;
 const PR_LINK = `.card[data-id="${ID}"] ~ .pr-link`;
 const MENU = "#card-actions-menu";
@@ -271,6 +270,7 @@ test("card actions", { timeout: 180000 }, async (t) => {
     });
 
     await t.test("copy", async () => {
+      const FALLBACK = `Copy is unavailable. The link is ${origin}/#${ID}`;
       const shows = (text) =>
         page.waitForFunction(
           (text) => {

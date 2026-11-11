@@ -115,7 +115,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog textarea { resize: vertical; min-height: 140px; }
   dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
   .detail > .err, .detail > .copy-status { margin: 12px 20px; flex: none; }
-  .detail > .copy-status { font-size: 12px; color: var(--muted); }
+  .detail > .copy-status { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .detail > .copy-status:empty { display: none; }
   #idea-image-list, .gallery { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
   #idea-image-list li { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
@@ -367,7 +367,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card-actions svg { width: 16px; height: 16px; }
   @media (pointer: coarse) { .card-actions::after { content: ""; position: absolute; inset: -8px -8px -8px -4px; } }
   .card-actions-menu { position: fixed; right: auto; z-index: 30; }
-  .board-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .board-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); overflow-wrap: anywhere; }
   .board-status[hidden] { display: none; }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
   @media (hover: hover) { .pr-link:hover { text-decoration: underline; } }
@@ -5511,14 +5511,14 @@ async function resumeAction(ctx) {
   }
 }
 async function copyLinkAction(ctx) {
-  let copied = true;
+  let link = '', copied = true;
   try {
-    const link = ctx.id !== null ? jobLink(ctx.id) : backlogLink(backlog.find((b) => b.raw === openBacklogRaw).key);
+    link = ctx.id !== null ? jobLink(ctx.id) : backlogLink(backlog.find((b) => b.raw === openBacklogRaw).key);
     await navigator.clipboard.writeText(link);
   } catch {
     copied = false;
   }
-  if (ctx.live()) ctx.status(copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.');
+  if (ctx.live()) ctx.status(copied ? 'Copied' : link ? `Copy is unavailable. The link is ${link}` : 'Copy is unavailable. Open the item again and copy its link.');
 }
 $('idea-cancel').addEventListener('click', () => { if (!locked()) $('idea-dlg').close(); });
 // Escape closes the dialog like Cancel, except while a save runs or a submission is

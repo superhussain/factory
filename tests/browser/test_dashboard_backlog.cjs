@@ -1452,7 +1452,12 @@ async function browserTest(url) {
     await page.evaluate(() => {
       window.copied = [];
       Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: async (t) => window.copied.push(t) },
+        value: {
+          writeText: async (t) => {
+            if (window.denyCopy) throw new Error("synthetic denial");
+            window.copied.push(t);
+          },
+        },
       });
     });
     await page.click("#d-actions");
@@ -1468,6 +1473,14 @@ async function browserTest(url) {
     await page.click("#d-actions");
     await page.click("#d-copy-link");
     assert.equal(await page.evaluate(() => window.copied[1]), url + "/#/backlog/" + key);
+    await page.evaluate(() => (window.denyCopy = true));
+    await page.click("#d-actions");
+    await page.click("#d-copy-link");
+    await page.waitForFunction(
+      (text) => document.getElementById("d-copy-status").textContent === text,
+      { polling: 50, timeout: 10000 },
+      `Copy is unavailable. The link is ${url}/#/backlog/${key}`,
+    );
 
     await linkTo("#/backlog/" + (await sha12(DECIDED)));
     await page.waitForFunction(
