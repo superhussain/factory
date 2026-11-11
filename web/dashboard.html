@@ -5908,6 +5908,10 @@ function syncCardActions(focus) {
 function placeCardActions(trigger) {
   const menu = $('card-actions-menu');
   const t = trigger.getBoundingClientRect();
+  // The shared .job-actions-menu right: 0 would stretch the fixed menu to the viewport edge,
+  // and a menu left near that edge shrinks, so measure it unstretched at the left edge.
+  menu.style.right = 'auto';
+  menu.style.left = '0px';
   const { width, height } = menu.getBoundingClientRect();
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;

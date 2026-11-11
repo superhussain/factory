@@ -104,6 +104,21 @@ async function clickItem(page, action) {
   await page.click(`${MENU} [data-action="${action}"]`);
 }
 
+async function menuClip(page) {
+  return page.evaluate((sel) => {
+    const a = document.querySelector(sel).closest(".card-wrap").getBoundingClientRect();
+    const b = document.querySelector("#card-actions-menu").getBoundingClientRect();
+    const x = Math.min(a.left, b.left) - 8;
+    const y = Math.min(a.top, b.top) - 8;
+    return {
+      x,
+      y,
+      width: Math.max(a.right, b.right) + 8 - x,
+      height: Math.max(a.bottom, b.bottom) + 8 - y,
+    };
+  }, TRIGGER);
+}
+
 test("card actions", { timeout: 180000 }, async (t) => {
   await prepareAssets();
   await mkdir(SHOTS, { recursive: true });
@@ -144,26 +159,53 @@ test("card actions", { timeout: 180000 }, async (t) => {
     await t.test("capture", async () => {
       await page.click(TRIGGER);
       await page.waitForSelector(`${MENU}:not([hidden])`);
-      const clip = await page.evaluate((sel) => {
-        const a = document.querySelector(sel).closest(".card-wrap").getBoundingClientRect();
-        const b = document.querySelector("#card-actions-menu").getBoundingClientRect();
-        const x = Math.min(a.left, b.left) - 8;
-        const y = Math.min(a.top, b.top) - 8;
-        return {
-          x,
-          y,
-          width: Math.max(a.right, b.right) + 8 - x,
-          height: Math.max(a.bottom, b.bottom) + 8 - y,
-        };
-      }, TRIGGER);
       // A full-page capture resizes the viewport, which closes the menu.
       await page.screenshot({
         path: `${SHOTS}card-actions-menu-1440.png`,
-        clip,
+        clip: await menuClip(page),
         captureBeyondViewport: false,
       });
       assert.equal(await page.$eval(MENU, (el) => el.hidden), false);
       await page.keyboard.press("Escape");
+    });
+
+    await t.test("capture 390", async () => {
+      const other = await openBoard(browser, origin, {
+        width: 390,
+        height: 844,
+        isMobile: true,
+        hasTouch: true,
+      });
+      try {
+        const p = other.page;
+        await p.$eval(TRIGGER, (el) => el.scrollIntoView({ block: "center", inline: "center" }));
+        await p.click(TRIGGER);
+        await p.waitForSelector(`${MENU}:not([hidden])`);
+        const rect = await p.$eval(MENU, (el) => {
+          const r = el.getBoundingClientRect();
+          return { left: r.left, right: r.right };
+        });
+        assert.ok(rect.left >= 8 && rect.right <= 382, JSON.stringify(rect));
+        await p.screenshot({
+          path: `${SHOTS}card-actions-menu-390.png`,
+          clip: await menuClip(p),
+          captureBeyondViewport: false,
+        });
+        await p.keyboard.press("Escape");
+        await p.evaluate(() => (window.__denyCopy = true));
+        await clickItem(p, "d-copy-link");
+        await p.waitForFunction(() =>
+          document.getElementById("board-status").textContent.startsWith("Copy is unavailable."),
+        );
+        await (
+          await p.$("#board-status")
+        ).screenshot({
+          path: `${SHOTS}board-status-copy-fail-390.png`,
+        });
+        assert.deepEqual(other.errors, []);
+      } finally {
+        await other.context.close();
+      }
     });
 
     await t.test("parity", async () => {
