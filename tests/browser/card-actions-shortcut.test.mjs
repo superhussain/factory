@@ -2,7 +2,7 @@
 // opens in actions mode with the card menu's items, filters and runs one, and Settings >
 // Reference lists the keys. Also captures the Reference section and the actions jumper for review.
 // Cmd+K or Ctrl+K in actions mode switches to the normal jumper.
-// Also covers the stale-action guard and the job-gone empty state.
+// Also covers the stale-action guard, the job-gone empty state and the card-gone focus fallback.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -379,6 +379,26 @@ test("stale actions", { timeout: 180000 }, async (t) => {
       assert.deepEqual((await picker(page)).options, ["Pause pickup"]);
       await page.keyboard.press("Escape");
       await page.waitForFunction(() => !document.getElementById("job-picker").open);
+    });
+
+    await t.test("card gone switch to jumper", async () => {
+      await openActions(page, ID);
+      await seedBoard(
+        origin,
+        JOBS.filter((j) => j.id !== ID),
+      );
+      await page.evaluate(() => window.fixtureBoardPoll());
+      assert.equal(await page.$(CARD(ID)), null);
+      await page.keyboard.down("Control");
+      await page.keyboard.press("k");
+      await page.keyboard.up("Control");
+      assert.equal((await picker(page)).heading, "Jump to job");
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => !document.getElementById("job-picker").open);
+      assert.equal(await page.evaluate(() => document.activeElement.id), "job-jump");
+      await seedBoard(origin, JOBS);
+      await page.evaluate(() => window.fixtureBoardPoll());
+      await page.waitForSelector(CARD(ID));
     });
 
     await t.test("job gone", async () => {
