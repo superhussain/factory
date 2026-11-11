@@ -5037,8 +5037,8 @@ function moveJob(board, id, to, now) {
   if (!j.project || !MOVE_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be moved.';
   if (!j.claim && j.move?.to === to && !('claimed' in j.move)) return 'unchanged';
   const from = j.claim?.device ?? (!j.claim && j.move && !moveStopped(j.move) ? j.move.from : undefined);
-  if (to === from) return 'This job already runs on ' + to + '.';
-  if (queuedStops(j.move).some((x) => x.from === to)) return 'A stop is still queued on ' + to + '. Pick another host.';
+  if (to === from) return 'This job already runs on ' + hostName(to) + '.';
+  if (queuedStops(j.move).some((x) => x.from === to)) return 'A stop is still queued on ' + hostName(to) + '. Pick another host.';
   writeMove(board, j, to, now);
   return '';
 }
@@ -5158,10 +5158,13 @@ async function openMoveHost(ctx) {
   select.replaceChildren();
   const pending = !j.claim && j.move && !moveStopped(j.move) ? j.move : null;
   const current = j.claim?.device ?? pending?.from;
-  const help = (name) => j.claim?.device
-    ? j.id + ' runs on ' + name(j.claim.device) + '. Moving it stops that session and starts the job on the host you pick. If ' + name(j.claim.device) + ' is offline, the stop waits until it comes back.'
-    : pending?.to ? j.id + ' is moving to ' + name(pending.to) + '. The host you pick starts it instead.'
-    : j.id + ' has no host right now. The host you pick starts it.';
+  const help = (name) => {
+    const on = j.claim?.device && name(j.claim.device);
+    return on
+      ? j.id + ' runs on ' + on + '. Moving it stops that session and starts the job on the host you pick. If ' + on + ' is offline, the stop waits until it comes back.'
+      : pending?.to ? j.id + ' is moving to ' + name(pending.to) + '. The host you pick starts it instead.'
+      : j.id + ' has no host right now. The host you pick starts it.';
+  };
   $('move-host-help').textContent = help(hostName);
   let hosts = [];
   let blocked = [];
@@ -5171,12 +5174,13 @@ async function openMoveHost(ctx) {
     if (!h.ok || !p.ok) throw new Error('load');
     const [list, view] = [await h.json(), await p.json()];
     $('move-host-help').textContent = help((id) => list.find((x) => x.id === id)?.label || hostName(id));
+    const hostLabel = (x) => x.label || hostName(x.id);
     const listed = view.pickup?.enabled ? view.pickup.hosts : [];
     const others = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to);
     const queued = new Set(queuedStops(j.move).map((q) => q.from));
     hosts = others.filter((x) => !queued.has(x.id));
-    blocked = others.filter((x) => queued.has(x.id)).map((x) => x.id);
-    blockedOffline = others.filter((x) => queued.has(x.id) && x.offline).map((x) => x.id);
+    blocked = others.filter((x) => queued.has(x.id)).map(hostLabel);
+    blockedOffline = others.filter((x) => queued.has(x.id) && x.offline).map(hostLabel);
   } catch {
     err.textContent = 'Could not load hosts. Try again.';
     err.hidden = false;
