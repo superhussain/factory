@@ -1353,9 +1353,10 @@ function refLine(r) {
 
 // The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
 // Each on-board ref and rider also gets a visually hidden stand-in link after the actions trigger, named for this card, so Tab reaches it.
-// A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise. A rider's batch note is left out.
+// A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise. A rider's batch note is left out, and a rider with no ask names its lead.
 function card(j, inNeeds, archived = false) {
-  const ask = inNeeds && asks(j.needs) ? j.needs : batchNote(j) ? '' : j.note;
+  const own = inNeeds && asks(j.needs) ? j.needs : batchNote(j) ? '' : j.note;
+  const ask = own || (inNeeds && leadOf(j) ? 'Waiting on lead ' + leadOf(j) : '');
   const riders = archived ? [] : ridersOf(j.id);
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
