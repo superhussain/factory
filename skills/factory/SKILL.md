@@ -502,17 +502,8 @@ only `factory.py deny-notes` writes it.
 - At each stage change, send one line with the event and a deep link to the file
   that explains it, as in
   `merged: <PR URL> · $DASHBOARD#<id>/decision`.
-
-  | Event | Link to |
-  | --- | --- |
-  | Spec written | `#<id>/spec` |
-  | Build done (first build, fix round, rework) | `#<id>/build` |
-  | Waiting on his answers (`needs.md` written) | `#<id>/needs` |
-  | Review round N done | the first `round-N/review-<r>` with CHANGES, else `round-N/review-security` |
-  | PR open, merged, or escalated | `#<id>/decision`, plus the PR URL |
-  | Closed without shipping | `#<id>/decision` |
-  | Batched build triggered or landed | the run URLs and the jobs that rode it |
-  | needs-human | the file that explains the hold: the latest CHANGES review at the round cap, or the failed agent's file. Use `#<id>` plus the note when only the note says why (a git conflict, say). |
+  Pick the link from the event table in
+  [dashboard](references/dashboard.md#stage-change-deep-links).
 - Follow the project file's Orchestrator section for load: how many builders may run
   dev servers at once, which ports to hand out and which to avoid. Wrap long
   commands in `timeout`.
@@ -626,3 +617,4 @@ Read a command's file before you run it.
 | `/factory init` | [init](references/commands/init.md) | You set up a device or register a project. |
 | `/factory handoff <id>` | [handoff](references/commands/handoff.md) | You hand a job to another runtime. |
 | `/factory resume <id>` | [resume](references/commands/resume.md) | You continue a handed-off job. |
+| `/factory retro [--days N]` | [retro](references/commands/retro.md) | A person asks for a cross-host session retro. |

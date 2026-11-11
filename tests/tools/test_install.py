@@ -191,7 +191,7 @@ class InstallTest(IsolatedTestCase):
         home = self.root / "retained-state"
         result = command("--home", str(home), "init", "--agents", "both")
         self.assertIn("Set api_url", result.stdout)
-        self.assertEqual(len(list((self.root / ".claude/agents").glob("*.md"))), 8)
+        self.assertEqual(len(list((self.root / ".claude/agents").glob("*.md"))), 9)
         command("adopt-home", str(home))
         command("doctor", expected=2)
         store = {"/projects.json": b'[{"slug":"sample","repo":"example/sample"}]',

@@ -9,13 +9,13 @@ handoff; no repository guide is needed.
 
 `<python-launcher> <installed-skill>/runtime/factory.py init --agents none` is the
 default. Explicitly select `claude`, `opencode` or `both` instead of `none` to
-refresh eight native roles. Init never invokes a runtime binary.
+refresh nine native roles. Init never invokes a runtime binary.
 
 Claude defaults to `Path.home()/.claude/agents`; OpenCode defaults to
 `<config_root>/opencode/agents`. Optional absolute `claude_agents_dir` and
 `opencode_agents_dir` in device config select custom directories. Links,
 junctions, overlapping directories and malformed role delimiters are refused
-before any selected role write. All eight sources and all selected destinations
+before any selected role write. All nine sources and all selected destinations
 are preflighted together. A later disk failure may leave some bodies refreshed;
 resolve the reported destination error and explicitly rerun.
 
@@ -26,10 +26,10 @@ The native loader owns YAML diagnostics. Fresh Claude headers use source name,
 description and tools without a model pin. Fresh OpenCode headers contain only
 description and `mode: all`, never copied Claude tools or model fields.
 
-For OpenCode run `opencode api get /api/agent` and manually confirm all eight IDs:
+For OpenCode run `opencode api get /api/agent` and manually confirm all nine IDs:
 `factory-spec-writer`, `factory-builder`, `factory-explorer`, `factory-review-code`,
 `factory-review-security`, `factory-review-ui`, `factory-review-ux`,
-`factory-approver`. For Claude confirm these roles through its native agent
+`factory-approver`, `factory-retro`. For Claude confirm these roles through its native agent
 interface. Missing or invalid roles stop native dispatch; fix metadata manually
 with native diagnostics. Never bypass a permission, model pin or invalid role
 using a general worker or auto-approval flags. Existing installer/security
