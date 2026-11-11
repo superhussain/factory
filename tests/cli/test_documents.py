@@ -119,7 +119,8 @@ class DocumentsTest(IsolatedTestCase):
         self.assertIn('runtime/factory.py documents "$SLUG"', skill)
         self.assertNotIn("automatic agent consumption", skill)
         self.assertIn("document:<slug>/<name>", (ROOT / "docs/trust.md").read_text(encoding="utf-8"))
-        flat = " ".join(skill.split())
+        settings = (SKILL / "references/project-settings.md").read_text(encoding="utf-8")
+        flat = " ".join((skill + " " + settings).split())
         self.assertNotIn("cache/sync", flat)
         self.assertIn("`factory.py documents <slug>` writes the non-empty documents to "
                       "`projects/<slug>.documents.md`", flat)

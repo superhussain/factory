@@ -271,7 +271,7 @@ sequenceDiagram
   envelope and asks one `escalate` question of type `noul`. Confidence 80 or more is
   `escalate`, below is `continue`. The reason is fixed text, so review text can move the
   score but write no words.
-- On `escalate`, loop step 5 in SKILL.md pushes the job, patches it to `needs-human` with
+- On `escalate`, loop step 5 in references/commands/feature.md pushes the job, patches it to `needs-human` with
   a `needs` link to the first CHANGES review, and dispatches nothing.
 - The check runs only below the cap. It never runs after approver CHANGES, at the round
   cap, or on an all-PASS round, and it sees only the current round.
