@@ -1,6 +1,7 @@
 // Job panel header against one owned local Worker: every header control shares one vertical
-// center, the close button gives the same hover and focus feedback as the actions button, a tap on touch leaves no hover style, and
-// Display settings hide header links per browser in localStorage, including on reset.
+// center, the close button gives the same hover and focus feedback as the actions button,
+// a tap on touch leaves no hover style, and Display settings hide header links per browser
+// in localStorage, including on reset.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";

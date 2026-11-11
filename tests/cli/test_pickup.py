@@ -1780,7 +1780,7 @@ class CloseTest(PickupFixture):
                 if project_text is None:
                     (self.home / "projects" / "alpha.md").unlink()
                 else:
-                    (self.home / "projects" / "alpha.md").write_text(project_text)
+                    (self.home / "projects" / "alpha.md").write_text(project_text, encoding="utf-8")
                 self.board["jobs"] = [self.closing(pr=pr)]
                 self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n",
                                                  f"factory.py: pickup leaves pull request {pr} open: {why}\n"))

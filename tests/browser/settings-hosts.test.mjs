@@ -424,40 +424,58 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await page.click("#hosts-load");
       await page.waitForFunction(() => document.querySelectorAll(".host-card").length === 5, wait);
       const card = '.host-card[data-id="studio-mac"]';
+      const lab = '.host-card[data-id="lab-linux"]';
       if (captureDir) {
         await mkdir(captureDir, { recursive: true });
         await (await page.$(card)).screenshot({ path: join(captureDir, "host-card-1280.png") });
         await (
-          await page.$('.host-card[data-id="lab-linux"]')
-        ).screenshot({
-          path: join(captureDir, "host-card-doctor-1280.png"),
-        });
+          await page.$(lab)
+        ).screenshot({ path: join(captureDir, "host-card-doctor-1280.png") });
         await page.setViewport({ width: 390, height: 844 });
         await (await page.$(card)).screenshot({ path: join(captureDir, "host-card-390.png") });
       }
-      assert.equal(
-        await read(page, `${card} .host-triage`, "textContent"),
-        "Backlog triage failing since 2026-01-01 09:00 UTC. Pickup still launches ideas. " +
+      // One in-page read, so a renderHosts() rebuild cannot split the values.
+      const alerts = () =>
+        page.evaluate(
+          (studio, linux) => {
+            const q = (s) => document.querySelector(s);
+            const meta = [...document.querySelectorAll(`${studio} p`)].find((p) =>
+              p.textContent.startsWith("macOS, launchd"),
+            );
+            return {
+              triage: q(`${studio} .host-triage`).textContent,
+              triageColor: getComputedStyle(q(`${studio} .host-triage`)).color,
+              labTriage: q(`${linux} .host-triage`) !== null,
+              doctor: q(`${linux} .host-doctor`).textContent,
+              doctorColor: getComputedStyle(q(`${linux} .host-doctor`)).color,
+              studioDoctor: q(`${studio} .host-doctor`) !== null,
+              metaColor: getComputedStyle(meta).color,
+            };
+          },
+          card,
+          lab,
+        );
+      const text = {
+        triage:
+          "Backlog triage failing since 2026-01-01 09:00 UTC. Pickup still launches ideas. " +
           "See the host's pickup log for the error.",
-      );
-      assert.equal(await page.$('.host-card[data-id="lab-linux"] .host-triage'), null);
-      const color = (sel) =>
-        page.evaluate((s) => getComputedStyle(document.querySelector(s)).color, sel);
-      const alert = "rgb(209, 52, 47)";
-      assert.equal(await color(`${card} .host-triage`), alert);
-      const doctor = '.host-card[data-id="lab-linux"] .host-doctor';
-      assert.equal(await read(page, doctor, "textContent"), "Doctor failed: schedule-entry.");
-      assert.equal(await color(doctor), alert);
-      assert.equal(await page.$(`${card} .host-doctor`), null);
-      assert.equal(
-        await page.evaluate((s) => {
-          const el = [...document.querySelectorAll(s)].find((p) =>
-            p.textContent.startsWith("macOS, launchd"),
-          );
-          return getComputedStyle(el).color;
-        }, `${card} p`),
-        "rgb(107, 114, 128)",
-      );
+        labTriage: false,
+        doctor: "Doctor failed: schedule-entry.",
+        studioDoctor: false,
+      };
+      assert.deepEqual(await alerts(), {
+        ...text,
+        triageColor: "rgb(209, 52, 47)",
+        doctorColor: "rgb(209, 52, 47)",
+        metaColor: "rgb(107, 114, 128)",
+      });
+      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
+      assert.deepEqual(await alerts(), {
+        ...text,
+        triageColor: "rgb(255, 107, 94)",
+        doctorColor: "rgb(255, 107, 94)",
+        metaColor: "rgb(156, 163, 175)",
+      });
       await page.close();
     });
 

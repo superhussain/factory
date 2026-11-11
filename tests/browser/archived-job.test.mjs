@@ -196,7 +196,11 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
       await page.evaluate(() => {
         location.hash = "#411-sync-retry/spec.md";
       });
-      await until(() => asked.filter((id) => id === "411-sync-retry").length > tries);
+      const deadline = Date.now() + 10000;
+      while (asked.filter((id) => id === "411-sync-retry").length <= tries) {
+        if (Date.now() > deadline) throw new Error("no second archive fetch");
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
       await new Promise((resolve) => setTimeout(resolve, 300));
       assert.equal(await statusHidden(), true);
       await page.evaluate(() => {
