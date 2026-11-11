@@ -41,6 +41,7 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
     const asked = [];
     let archivedField = false;
     let held = null;
+    let archiveTotal = null;
     await page.setRequestInterception(true);
     page.on("request", (request) => {
       const url = new URL(request.url());
@@ -65,7 +66,7 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
         return request.respond({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ jobs, total: jobs.length }),
+          body: JSON.stringify({ jobs, total: archiveTotal ?? jobs.length }),
         });
       };
       const gate = held;
@@ -249,6 +250,20 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       await page.keyboard.press("Enter");
       await new Promise((resolve) => setTimeout(resolve, 300));
       assert.equal(asked.length, before);
+    });
+
+    await t.test("a capped reply shows the total", async () => {
+      archiveTotal = 3;
+      try {
+        await setQuery("login");
+        assert.equal((await archiveOption())?.selected, "true");
+        await page.keyboard.press("Enter");
+        await waitMeta("412-fix-login · Synthetic sample · merged · archived");
+        assert.equal(await count(), "0 jobs · 1 archived of 3");
+        assert.equal(asked.at(-1), "login");
+      } finally {
+        archiveTotal = null;
+      }
     });
 
     assert.deepEqual(errors, []);
