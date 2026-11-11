@@ -54,7 +54,7 @@ test("every pinned uses line names its release", () => {
 });
 
 test("every actions folder has action.yml or action.yaml", () => {
-  assert.ok(actionDirs.length > 0);
+  assert.ok(actionDirs.length > 0, ".github/actions has no action folders");
   for (const dir of actionDirs) {
     assert.ok(
       actionFiles(dir).length > 0,
