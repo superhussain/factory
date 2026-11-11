@@ -9,7 +9,11 @@ export const FLOORS = Object.freeze(
       "Never push to the base or force-push. Every change lands as a PR from factory/<id>.",
       "none",
     ],
-    ["F2", "Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL.", "none"],
+    [
+      "F2",
+      "Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. Security and code always run. ux and ui are SKIPPED only by factory.py review-plan when a round changes nothing a person sees, and the approver checks each skip.",
+      "none",
+    ],
     [
       "F3",
       "At most 2 review rounds per build cycle by default, then needs-human.",

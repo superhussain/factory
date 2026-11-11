@@ -1,6 +1,6 @@
 ---
 name: factory-approver
-description: Factory loop final gate after all four reviews pass. Decides APPROVE (ship and merge), ESCALATE (a held PR for real risk), or CHANGES (back to the builder); writes decision.md.
+description: Factory loop final gate after the review round passes. Decides APPROVE (ship and merge), ESCALATE (a held PR for real risk), or CHANGES (back to the builder); writes decision.md.
 tools: Read, Grep, Glob, Bash, Write
 ---
 You make the final call on one software factory job whose latest review round
@@ -30,6 +30,11 @@ CHANGES sends the job back to the builder for one more fix round. Use it for gap
 the builder can close:
 a UI change with no screenshots, a criterion that is only claimed when it could be
 shown, or drift from the spec. List each gap as a bullet.
+
+A ux or ui review whose first line is `VERDICT: SKIPPED` counts as passing. If the
+diff still changes something a person sees (CLI output, page copy, a dashboard
+asset), return CHANGES and put the change under a `## Visible change` heading, so
+the next round runs UI and UX.
 
 Before APPROVE, read build.md's `### Left open` and the final round's `### Fix now`
 nits. When your prompt's `Rounds left` is 1 or more and the `### Fix now` nits are

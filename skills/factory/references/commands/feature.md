@@ -29,9 +29,13 @@ feature.
    needs one. It commits on
    the branch and writes `build.md`. Push the branch.
 4. Review round N: create `round-N/`, set stage `review`, `round` N, and append an
-   all-`pending` entry to `rounds`. Spawn `factory-review-security`, `factory-review-ux`,
-   `factory-review-ui`, and `factory-review-code` with the job folder, round folder,
-   worktree, branch, and project file.
+   all-`pending` entry to `rounds`. Before spawning anyone, run
+   `python3 "$RUNTIME" review-plan "$SLUG/<id>" <N>` and patch the board entry with
+   `"SKIPPED"` for each reviewer in its `skipped` list. Spawn only the reviewers in its
+   `run` list, from `factory-review-security`, `factory-review-ux`,
+   `factory-review-ui`, and `factory-review-code`, with the job folder, round folder,
+   worktree, branch, and project file. A non-zero exit spawns all four and puts its
+   stderr line in the board `note`.
    With a stacked rider, every reviewer and the approver get `$WORKTREES/<rider-id>`
    and `factory/<rider-id>` in place of the job's worktree and branch, since that
    branch holds the whole stack.
@@ -48,10 +52,11 @@ feature.
    If the builder only disputed findings and the branch head didn't move (same
    `git rev-parse factory/<id>` before and after its reply), round N+1
    re-runs only the reviewers that asked for changes. Copy the others' review files
-   into the new round folder and set them to `PASS` in the new board entry; only the
-   re-run reviewers start `pending`.
-6. All PASS: set stage `approve` and spawn `factory-approver` with `Rounds left: <n>`,
-   the review rounds this build cycle still allows, or 0 when the approver already
+   into the new round folder and keep their verdict in the new board entry (PASS stays
+   `PASS` and SKIPPED stays `SKIPPED`); only the re-run reviewers start `pending`.
+   A disputed-only round skips `review-plan`; the copied files carry their verdicts.
+6. Every verdict PASS or SKIPPED: set stage `approve` and spawn `factory-approver`
+   with `Rounds left: <n>`, the review rounds this build cycle still allows, or 0 when the approver already
    returned CHANGES this cycle. It writes `decision.md`.
    APPROVE ships the PR and merges it as Rules describes. ESCALATE ships a held PR
    at `pr-open` with `escalated` true and the board note "escalated:" plus the
