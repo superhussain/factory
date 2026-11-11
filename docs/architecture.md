@@ -79,6 +79,8 @@ conditions** for legacy-client compatibility (a blind write), while malformed
 present conditions return 428. Project files, board and backlog keep strict
 conditional semantics. A board write that names the stored version also
 cannot change a row's id: one write may not drop a stored id and add a row.
+It also cannot add `move`, `priority`, `paused` or `close` to a row with a
+`batched-into` ref, since a rider follows its lead.
 New device clients always send conditions; the blind
 write remains an honest compatibility surface, unsafe under concurrent writers.
 
