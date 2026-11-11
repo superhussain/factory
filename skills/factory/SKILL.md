@@ -623,3 +623,4 @@ Read a command's file before you run it.
 | `/factory init` | [init](references/commands/init.md) | You set up a device or register a project. |
 | `/factory handoff <id>` | [handoff](references/commands/handoff.md) | You hand a job to another runtime. |
 | `/factory resume <id>` | [resume](references/commands/resume.md) | You continue a handed-off job. |
+| `/factory retro [--days N]` | [retro](references/commands/retro.md) | A person asks for a cross-host session retro. |

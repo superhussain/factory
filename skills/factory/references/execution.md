@@ -2,14 +2,14 @@
 
 ## Dispatch roles
 
-Use the same eight role contracts in `agents/factory-*.md` on every runtime.
+Use the same nine role contracts in `agents/factory-*.md` on every runtime.
 Claude's source `tools` apply only to Claude Code. Source roles have no model pin. The Markdown
 body defines the work and output file for other agents.
 
 | Runtime | Dispatch |
 | --- | --- |
-| Claude Code | Explicitly install with `init --agents claude`, confirm all eight roles through the native agent interface, then use native agent/message tools. No activation CLI is assumed. |
-| OpenCode V2 | Explicitly install with `init --agents opencode`. Use the native subagent tool with the role name, background execution, and configured model. A rerun keeps each existing role's frontmatter verbatim and refreshes only its prompt body. Init validates only the `---` header delimiters, never the frontmatter content. Before using these native roles, run `opencode api get /api/agent` and manually confirm all eight `factory-*` role IDs are registered; a missing or invalid installed role stops native-role dispatch until its frontmatter is fixed manually with the native diagnostics. |
+| Claude Code | Explicitly install with `init --agents claude`, confirm all nine roles through the native agent interface, then use native agent/message tools. No activation CLI is assumed. |
+| OpenCode V2 | Explicitly install with `init --agents opencode`. Use the native subagent tool with the role name, background execution, and configured model. A rerun keeps each existing role's frontmatter verbatim and refreshes only its prompt body. Init validates only the `---` header delimiters, never the frontmatter content. Before using these native roles, run `opencode api get /api/agent` and manually confirm all nine `factory-*` role IDs are registered; a missing or invalid installed role stops native-role dispatch until its frontmatter is fixed manually with the native diagnostics. |
 | Other agents | Launch a general worker and have it read the canonical role file's body, the project file, and job files. Pass absolute paths and the base branch. |
 | Paseo (optional) | Discover configured profiles/providers with native tools and create a worker in the existing job worktree, not a second branch. Resolve that host's checkout and paths first. See integrations.md. |
 

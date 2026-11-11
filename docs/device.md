@@ -22,7 +22,7 @@ On Windows use `py -3` instead of `python3`, quoting paths containing spaces.
 Use this installer on every host.
 
 The copied bundle works when the source checkout is unavailable. It includes all
-templates, eight canonical role bodies, execution references and optional prompts.
+templates, nine canonical role bodies, execution references and optional prompts.
 There are no repository-relative runtime reads or runtime dependency downloads.
 
 An identical install is a no-content-change success. A differing existing install

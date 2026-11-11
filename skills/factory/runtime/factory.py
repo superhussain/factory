@@ -4802,7 +4802,8 @@ def native_header(path):
 
 
 ROLE_NAMES = tuple("factory-" + name + ".md" for name in (
-    "approver", "builder", "explorer", "review-code", "review-security", "review-ui", "review-ux", "spec-writer"))
+    "approver", "builder", "explorer", "review-code", "review-security", "review-ui", "review-ux", "spec-writer",
+    "retro"))
 
 
 def install_agents(skill, runtimes):
