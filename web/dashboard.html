@@ -324,6 +324,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .meta.host { color: var(--host-fg); }
   .card .ref-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   .card .ref-link:hover { color: var(--accent); text-decoration-thickness: 2px; }
+  .card .ref-link.ref-focused { background: var(--accent); color: var(--panel); border-radius: 3px; box-shadow: -2px 0 0 var(--accent), 2px 0 0 var(--accent); text-decoration-thickness: 2px; }
+  .ref-focus { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .backlog-card {
     overflow-wrap: anywhere;
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(17,24,39,.05);
@@ -1201,6 +1203,12 @@ function refs(j) {
   return Array.isArray(j.refs) ? j.refs.filter((r) => r && typeof r.id === 'string' && REF_KINDS[r.kind]) : [];
 }
 
+// The lead a rider is batched into, as in factory.py lead_of.
+const leadOf = (j) => refs(j).find((r) => r.kind === 'batched-into')?.id ?? null;
+
+// The riders batched into a lead, in board order.
+const ridersOf = (id) => jobs.filter((x) => leadOf(x) === id).map((x) => x.id);
+
 function buildState(j) {
   const s = j.build && j.build.state;
   return BUILD_STATES.includes(s) ? s : null;
@@ -1214,7 +1222,7 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused)].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
 }
 
 // A holder's stop is recorded only when stopped is a string, as in factory.py.
@@ -1269,19 +1277,21 @@ function line(cls, text) {
   return '<div class="' + cls + ' line" title="' + esc(text) + '">' + esc(text) + '</div>';
 }
 
-// A ref to a job on the board is a mouse target that opens it; others stay text.
+// A ref to a job on the board is a mouse target that opens it; card() adds its keyboard stand-in. Others stay text.
 function refLine(r) {
   const id = jobs.some((x) => x.id === r.id) ? '<span class="ref-link" data-ref="' + esc(r.id) + '">' + esc(r.id) + '</span>' : esc(r.id);
   return esc(REF_KINDS[r.kind]) + ' ' + id;
 }
 
 // The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
+// The wrapper holds the key hint, so the button's only shortcut cue is aria-keyshortcuts.
 // A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
 function card(j, inNeeds, archived = false) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
+  const riders = archived ? [] : ridersOf(j.id);
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
-    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' title="Press A or . for job actions" aria-keyshortcuts="a ."') + '>' +
+    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
     '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span>' +
       (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
@@ -1294,15 +1304,18 @@ function card(j, inNeeds, archived = false) {
       (j.branch ? line('meta branch', j.branch) : '') +
       line('meta round', 'round ' + (j.round ?? 0) + (buildState(j) ? ' · build ' + buildState(j) : ''))) +
     (refText ? '<div class="meta refs line" title="' + esc(refText) + '">' + refs(j).map(refLine).join(' &middot; ') + '</div>' : '') +
+    (riders.length ? '<div class="meta refs riders line" title="' + esc('batches ' + riders.join(' · ')) + '">batches ' +
+      riders.map((id) => '<span class="ref-link" data-ref="' + esc(id) + '">' + esc(id) + '</span>').join(' &middot; ') + '</div>' : '') +
     (hostLine(j) ? line('meta host', hostLine(j)) : '') +
     (j.tracer?.building === true ? line('meta tracer-building', 'Building in Tracer') : '') +
     (ask && (inNeeds || !hiddenCardFields.has('note')) ? line('note', ask) : '') +
     chips(j.rounds) + '</button>';
   const pr = hiddenCardFields.has('pr') ? null : prLink(j);
-  return '<div class="card-wrap' + (pr ? ' has-pr' : '') + '">' + btn +
-    (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub">PR #' + esc(pr.n) + '</a>' : '') +
+  return '<div class="card-wrap' + (pr ? ' has-pr' : '') + '"' + (archived ? '' : ' title="Job actions (A or .)"') + '>' + btn +
+    (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub" title="">PR #' + esc(pr.n) + '</a>' : '') +
     (archived ? '' : '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
-    ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') + '</div>';
+    ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') +
+    refs(j).filter((r) => jobs.some((x) => x.id === r.id)).map((r) => '<a class="ref-focus" href="#' + esc(r.id) + '" data-ref="' + esc(r.id) + '">' + esc(REF_KINDS[r.kind]) + ' ' + esc(r.id) + '</a>').join('') + '</div>';
 }
 
 // Not a .card, so arrow-key card navigation skips it.
@@ -1437,6 +1450,8 @@ function renderJobResults() {
       meta: j.id + ' · ' + (projectName(j) || 'No project') + ' · ' + j.stage + ' · archived',
     }))
     : [{ kind: 'archive-search', key: 'command:archive-search', query: rawQuery, title: 'Search archived jobs', meta: archiveSearchMeta(rawQuery) }];
+  // #job-count is the live region, so every archive outcome changes its text.
+  const archiveCount = !archiveRows.length || archiveSearch?.query !== rawQuery ? '' : found.length ? ' · ' + found.length + ' archived' + (archiveSearch.total > found.length ? ' of ' + archiveSearch.total : '') : archiveSearch.status === 'done' ? ' · no archived matches' : archiveSearch.status === 'error' ? ' · archive search failed' : '';
   const sections = [
     { id: 'pages', title: 'Pages', rows: actions.filter((r) => r.kind === 'page') },
     { id: 'links', title: 'Links', rows: actions.filter((r) => r.kind === 'link') },
@@ -1450,7 +1465,7 @@ function renderJobResults() {
   $('job-count').textContent = matched.length + (matched.length === 1 ? ' job' : ' jobs') +
     (actions.length ? ' · ' + actions.length + ' for ' + openId : '') +
     (commands.length ? ' · ' + commands.length + (commands.length === 1 ? ' command' : ' commands') : '') +
-    (found.length && archiveRows.length ? ' · ' + found.length + ' archived' + (archiveSearch.total > found.length ? ' of ' + archiveSearch.total : '') : '');
+    archiveCount;
   $('job-empty').textContent = openId ? 'No matching jobs or actions' : 'No jobs found';
   $('job-empty').hidden = jobResults.length !== 0;
   renderPickerRows(sections);
@@ -1512,9 +1527,23 @@ function cancelJobPicker() {
   else closeJobPicker();
 }
 
+// Where focus returns when the actions jumper closes: the drawer's actions button, else the board card.
+function actionsOpener() {
+  return pickerActions.drawer && !$('detail').hidden ? $('d-actions') : boardCard(pickerActions.id, pickerActions.inNeeds);
+}
+
 function openJobPicker() {
   if (document.querySelector('dialog[open]:not(#job-picker)')) return;
-  if (!$('job-picker').open) {
+  if ($('job-picker').open && pickerMode === 'actions') {
+    // Cmd+K in actions mode swaps to the normal jumper; Escape still returns to the card.
+    pickerFocus = actionsOpener();
+    pickerMode = 'job';
+    pickerActions = null;
+    archiveSearch = null;
+    $('job-search').value = '';
+    selectedKey = null;
+    renderJobResults();
+  } else if (!$('job-picker').open) {
     pickerMode = 'job';
     savedJobQuery = '';
     archiveSearch = null;
@@ -1529,7 +1558,7 @@ function openJobPicker() {
 }
 
 function closeJobPicker(activate = false) {
-  const card = pickerActions && (pickerActions.drawer && !$('detail').hidden ? $('d-actions') : boardCard(pickerActions.id, pickerActions.inNeeds));
+  const card = pickerActions && actionsOpener();
   pickerMode = 'job';
   pickerActions = null;
   savedJobQuery = '';
@@ -2847,6 +2876,9 @@ function renderBoard() {
   const focusRaw = focused?.dataset.raw;
   const focusStage = focused?.dataset.stage;
   const focusClass = focused && (focused.classList.contains('more') ? 'more' : focused.classList.contains('archive-more') ? 'archive-more' : 'column-toggle');
+  // A redraw replaces every card node, so focus goes back to the same job's card or menu trigger.
+  const focusedCard = $('board').contains(document.activeElement) ? document.activeElement.closest('.card, .card-actions') : null;
+  const focusCard = focusedCard && { trigger: focusedCard.classList.contains('card-actions'), id: focusedCard.dataset.id ?? focusedCard.dataset.actions };
   if (!jobs.length && !backlog.length) {
     $('board').innerHTML = '<div class="blank"><h2>No jobs yet</h2>' +
       '<p>Start one with <code>/factory &lt;feature&gt;</code> or <code>/factory next</code>.</p>' +
@@ -2898,6 +2930,11 @@ function renderBoard() {
     const control = $('board').querySelector('.' + focusClass + '[data-stage="' + focusStage + '"]') ||
       $('board').querySelector('.column-toggle[data-stage="' + focusStage + '"]');
     control.focus({ preventScroll: true });
+  }
+  if (focusCard) {
+    [...$('board').querySelectorAll(focusCard.trigger ? '.card-actions' : '.card')]
+      .find((el) => (focusCard.trigger ? el.dataset.actions : el.dataset.id) === focusCard.id)
+      ?.focus({ preventScroll: true });
   }
   syncCardActions();
 }
@@ -3290,6 +3327,7 @@ async function openJob(id) {
     head.append(a);
   };
   for (const r of refs(j)) add(REF_KINDS[r.kind] + ' ', '#' + encodeURIComponent(r.id), r.id);
+  ridersOf(j.id).forEach((id, i) => add(i ? '' : 'batches ', '#' + encodeURIComponent(id), id));
   if (buildState(j)) {
     const runs = buildRuns(j);
     if (!runs.length) head.append((head.childNodes.length ? ' · ' : '') + 'build ' + buildState(j));
@@ -4746,19 +4784,20 @@ const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host
 
 // The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
 function jobActionsFor(j) {
+  const rider = !!leadOf(j);
   const shown = {
     'd-edit-idea': canEditIdea(j),
     'd-discard': j.stage === 'idea',
     'd-follow-tracer': !!j.project && (TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) && j.tracer?.follow !== true && !tracerLink(j),
-    'd-move-host': !!j.project && MOVE_STAGES.includes(j.stage),
+    'd-move-host': !rider && !!j.project && MOVE_STAGES.includes(j.stage),
     'd-rerun': canRerun(j),
-    'd-prioritize': !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
+    'd-prioritize': !rider && !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
     'd-remove-priority': !!j.priority,
-    'd-pause': !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
+    'd-pause': !rider && !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
     'd-resume': !!j.paused,
     'd-copy-link': true,
     'd-follow-up': j.stage !== 'idea' && !$('new-idea').hidden,
-    'd-close-job': !!j.project && j.stage !== 'idea' && !TERMINAL.includes(j.stage) && !j.close,
+    'd-close-job': !rider && !!j.project && j.stage !== 'idea' && !TERMINAL.includes(j.stage) && !j.close,
   };
   return JOB_ACTIONS.filter((id) => shown[id]);
 }
@@ -4858,7 +4897,8 @@ function syncJobActions() {
   const focused = document.activeElement;
   closeJobActions(false);
   // Chrome may already have blurred the hidden item, so focus on body counts as focus lost from the menu.
-  if (wasShown && !$('detail').hidden && ($('d-actions-wrap').contains(focused) || focused === document.body)) $('d-close').focus();
+  if (wasShown && !$('detail').hidden &&
+      ($('d-actions-wrap').contains(focused) || focused === document.body)) $('d-close').focus();
 }
 
 function syncIdeaEditor() {
@@ -4900,7 +4940,7 @@ const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
 function moveJob(board, id, to, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || !MOVE_STAGES.includes(j.stage)) return 'This job can no longer be moved.';
+  if (!j.project || !MOVE_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be moved.';
   if (!j.claim && j.move?.to === to) return 'unchanged';
   const from = j.claim?.device ?? (!j.claim && j.move && !moveStopped(j.move) ? j.move.from : undefined);
   if (to === from) return 'This job already runs on ' + to + '.';
@@ -4936,7 +4976,7 @@ function writeMove(board, j, to, now) {
 
 // A rerun is a move back to the job's own host: that host stops the session, then its pickup
 // claims the job and runs factory recover in a fresh session.
-const canRerun = (j) => !!j.project && MOVE_STAGES.includes(j.stage) && !!j.claim?.device && !j.paused && !asks(j.needs);
+const canRerun = (j) => !!j.project && MOVE_STAGES.includes(j.stage) && !!j.claim?.device && !j.paused && !asks(j.needs) && !leadOf(j);
 
 function rerunJob(board, id, host, now) {
   const j = board.jobs.find((x) => x.id === id);
@@ -4953,7 +4993,7 @@ const PRIORITY_STAGES = ['idea', ...MOVE_STAGES];
 function prioritizeJob(board, id, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || !PRIORITY_STAGES.includes(j.stage)) return 'This job can no longer be prioritized.';
+  if (!j.project || !PRIORITY_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be prioritized.';
   if (j.priority) return 'unchanged';
   j.priority = { at: now };
   j.updated = now;
@@ -4976,7 +5016,7 @@ function removePriority(board, id, now) {
 function pauseJob(board, id, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || TERMINAL.includes(j.stage)) return 'This job can no longer be paused.';
+  if (!j.project || TERMINAL.includes(j.stage) || leadOf(j)) return 'This job can no longer be paused.';
   if (j.paused) return 'unchanged';
   j.paused = { at: now };
   j.updated = now;
@@ -5000,7 +5040,7 @@ function resumeJob(board, id, now) {
 function closeJob(board, id, reason, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || j.stage === 'idea' || TERMINAL.includes(j.stage)) return 'This job can no longer be closed.';
+  if (!j.project || j.stage === 'idea' || TERMINAL.includes(j.stage) || leadOf(j)) return 'This job can no longer be closed.';
   if (j.close) return j.close.reason === reason.trim() ? 'unchanged' : 'A close is already queued for this job.';
   const text = reason.trim();
   if (!/^[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}$/.test(text)) return 'Enter a reason of 1 to 200 characters. Line breaks and control characters are not allowed.';
@@ -5781,6 +5821,13 @@ $('board').addEventListener('pointerover', (e) => {
   hoveredCard = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : null;
 });
 $('board').addEventListener('pointerleave', () => { hoveredCard = null; });
+// The stand-in link holds keyboard focus; the visible span shows it.
+function markRefFocus(e, on) {
+  const a = e.target.closest?.('a.ref-focus');
+  a?.closest('.card-wrap').querySelector('.ref-link[data-ref="' + CSS.escape(a.dataset.ref) + '"]')?.classList.toggle('ref-focused', on);
+}
+$('board').addEventListener('focusin', (e) => markRefFocus(e, true));
+$('board').addEventListener('focusout', (e) => markRefFocus(e, false));
 
 // A focused card wins over a hovered one, and either wins over the open drawer's job.
 function cardShortcutTarget(e) {

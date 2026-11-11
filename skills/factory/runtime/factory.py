@@ -468,7 +468,7 @@ def mirror_batch(data, lead):
         if rider.get("stage") in TERMINAL:
             continue
         if lead.get("stage") == "closed":
-            refs = [r for r in rider["refs"] if r.get("kind") != BATCH_REF]
+            refs = [r for r in rider["refs"] if isinstance(r, dict) and r.get("kind") != BATCH_REF]
             patch_job(data, rider["id"], {"stage": IDEA, "refs": refs or None,
                                           "note": f"unbatched: {lead['id']} closed"})
         else:
@@ -736,12 +736,13 @@ def board(factory, job_id):
     def change(text):
         data = load_board(text)
         found = next((j for j in data["jobs"] if j.get("id") == job_id), None)
-        m = re.match(r"(\d{3,})-", job_id)
-        floor = archive_floor(data)
-        if found is None and m and int(m.group(1)) <= floor:
-            fail(f"ids up to {floor} belong to archived jobs, so {job_id} cannot go back on the board. "
-                 f"Read it with factory.py job {job_id}. Claim new ids with claim. "
-                 "Nothing was written.", 2)
+        if found is None:
+            m = re.match(r"(\d{3,})-", job_id)
+            floor = archive_floor(data)
+            if m and int(m.group(1)) <= floor:
+                fail(f"ids up to {floor} belong to archived jobs, so {job_id} cannot go back on the board. "
+                     f"Read it with factory.py job {job_id}. Claim new ids with claim. "
+                     "Nothing was written.", 2)
         if found is None and not NEW_JOB_ID.fullmatch(job_id):
             fail(f"bad job id {job_id!r}: a new job id is digits, a dash and a lowercase slug, "
                  "like 003-rate-limiting. Nothing was written.", 2)
@@ -1603,6 +1604,9 @@ def batch_cmd(target, *idea_ids):
     home, slug, lead_id = r2_target(target, True)
     device, session, minutes = holder(home)
     idea_ids = list(dict.fromkeys(idea_ids))
+    for idea_id in idea_ids:
+        if not JOB_ID.fullmatch(idea_id) or ".." in idea_id:
+            fail(f"bad job id {idea_id!r}. Nothing was written.", 2)
 
     def entry(j):
         return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title")}

@@ -44,7 +44,7 @@ const setValue = (page, selector, value) =>
     value,
   );
 // Host-card buttons are rebuilt by every renderHosts(), and one load renders twice.
-// Click in-page so the node cannot detach between find and click.
+// Click and read styles in-page so the node cannot detach between find and use.
 const clickNow = (page, selector) =>
   page.evaluate((s) => document.querySelector(s).click(), selector);
 const cardMessage = (page, id) =>
@@ -436,7 +436,6 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           "See the host's pickup log for the error.",
       );
       assert.equal(await page.$('.host-card[data-id="lab-linux"] .host-triage'), null);
-      // A late renderHosts() can detach a node between $eval's find and read, so read in one call.
       const color = (sel) =>
         page.evaluate((s) => getComputedStyle(document.querySelector(s)).color, sel);
       const alert = "rgb(209, 52, 47)";
@@ -449,11 +448,12 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       assert.equal(await color(doctor), alert);
       assert.equal(await page.$(`${card} .host-doctor`), null);
       assert.equal(
-        await page.evaluate((c) => {
-          const ps = [...document.querySelectorAll(`${c} p`)];
-          const el = ps.find((p) => p.textContent.startsWith("macOS, launchd"));
+        await page.evaluate((s) => {
+          const el = [...document.querySelectorAll(s)].find((p) =>
+            p.textContent.startsWith("macOS, launchd"),
+          );
           return getComputedStyle(el).color;
-        }, card),
+        }, `${card} p`),
         "rgb(107, 114, 128)",
       );
       await page.close();
@@ -471,7 +471,13 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           `${fallback} td:last-child`,
         );
       await page.setViewport({ width: 390, height: 844 });
-      assert.equal(await page.$eval(table, (el) => el.scrollWidth <= el.clientWidth), true);
+      assert.equal(
+        await page.evaluate((s) => {
+          const el = document.querySelector(s);
+          return el.scrollWidth <= el.clientWidth;
+        }, table),
+        true,
+      );
       assert.equal(await page.$eval(`${fallback} td`, (el) => el.textContent), "fallback");
       assert.deepEqual(
         await page.$$eval(`${fallback} td`, (cells) => cells.map((el) => el.dataset.label)),

@@ -193,9 +193,6 @@ const CAPTURE_TRIAGE = {
   model: "@cf/cloudflare/clef-flash",
   at: "2026-10-27T10:00:00Z",
 };
-// Capture holds each triage reply this long, only in the backlog-triage-open views,
-// the one place a capture opens a card without waiting for the verdict.
-const CAPTURE_TRIAGE_DELAY_MS = 1000;
 const CAPTURE_SPEC =
   "# Synthetic spec\n\nCapture fixture content, not real job data.\n\n## Tasks\n\n1. **Parse the fixture**\n   - Files: `sample.md`\n   - Check: synthetic\n2. **Render the list**\n   - Files: `sample.html`\n3. **Ship it**\n   - Check: synthetic\n\n```mermaid\ngraph LR; Alpha-->Beta\n```\n";
 const CAPTURE_BUILD =
@@ -315,7 +312,6 @@ async function capture(outdir, referencePath) {
     let archivedBoard = false;
     let longProject = false;
     async function view(name, width, height, theme, prepare, touch = false) {
-      const delayTriage = name.startsWith("backlog-triage-open-");
       for (const side of ["before", "after"]) {
         const context = await browser.createBrowserContext();
         const page = await context.newPage();
@@ -352,8 +348,6 @@ async function capture(outdir, referencePath) {
           }
           if (target.pathname === "/api/backlog/triage") {
             const held = target.searchParams.get("item") === CAPTURE_TRIAGE_ITEM;
-            if (delayTriage)
-              await new Promise((resolve) => setTimeout(resolve, CAPTURE_TRIAGE_DELAY_MS));
             return request.respond({
               status: held ? 200 : 404,
               contentType: "application/json",
@@ -395,7 +389,7 @@ async function capture(outdir, referencePath) {
             const q = target.searchParams.get("q");
             if (q !== null) {
               const jobs = [CAPTURE_ARCHIVED].filter((j) =>
-                [j.id, j.title].some((f) => f.toLowerCase().includes(q.toLowerCase())),
+                [j.id, j.title, j.project].some((f) => f.toLowerCase().includes(q.toLowerCase())),
               );
               return request.respond({
                 status: 200,
@@ -721,6 +715,27 @@ async function capture(outdir, referencePath) {
       }
     };
     await view("jumper-archive-search", 1280, 900, "light", openArchiveJumper);
+    const openArchiveEmpty = async (page) => {
+      archivedBoard = true;
+      try {
+        await page.evaluate(() => poll());
+        await openJumper(page);
+        await page.type("#job-search", "zzz");
+        await page.evaluate(() =>
+          [...document.querySelectorAll('#job-results [role="option"]')]
+            .find((o) => o.querySelector(".title").textContent === "Search archived jobs")
+            .click(),
+        );
+        await page.waitForFunction(() =>
+          [...document.querySelectorAll("#job-results .meta")].some(
+            (el) => el.textContent === 'No archived jobs match "zzz". Pick to search again.',
+          ),
+        );
+      } finally {
+        archivedBoard = false;
+      }
+    };
+    await view("jumper-archive-empty", 1280, 900, "light", openArchiveEmpty);
     await view("backlog-triage-desktop", 1440, 900, "light", openTriage);
     await view("backlog-triage-mobile", 390, 844, "dark", openTriage);
     await view("backlog-triage-open-desktop", 1440, 900, "light", openTriageFirstPaint);
