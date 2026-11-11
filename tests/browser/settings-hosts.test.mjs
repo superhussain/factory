@@ -45,7 +45,8 @@ const setValue = (page, selector, value) =>
   );
 // Host-card buttons are rebuilt by every renderHosts(), and one load renders twice.
 // Click in-page so the node cannot detach between find and click.
-const clickNow = (page, selector) => page.$eval(selector, (el) => el.click());
+const clickNow = (page, selector) =>
+  page.evaluate((s) => document.querySelector(s).click(), selector);
 const cardMessage = (page, id) =>
   page.$eval(`.host-card[data-id="${id}"] .host-msg`, (el) => el.textContent);
 const waitCardMessage = (page, id, text) =>
@@ -343,7 +344,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           "Doctor failed: schedule-entry.",
         ),
       );
-      await page.click('[aria-label="Confirm New box"]');
+      await clickNow(page, '[aria-label="Confirm New box"]');
       await waitCardMessage(page, "new-box", "Confirmed. It picks up work now.");
       assert.deepEqual(confirmed, { body: '{"state":"active"}', ifMatch: '"etag-new-box"' });
       assert.equal(await cardMessage(page, "new-box"), "Confirmed. It picks up work now.");
@@ -398,7 +399,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       assert.deepEqual(await pills("new-box"), ["Paired, not confirmed", "Paused"]);
       assert.deepEqual(await pills("old-laptop"), ["Retired"]);
       assert.deepEqual(await pills("studio-mac"), ["Active"]);
-      await page.click('[aria-label="Confirm New box"]');
+      await clickNow(page, '[aria-label="Confirm New box"]');
       await waitCardMessage(
         page,
         "new-box",
@@ -465,7 +466,10 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       const table = '.host-card[data-id="studio-mac"] .host-routes';
       const fallback = `${table} tbody tr:last-child`;
       const display = () =>
-        page.$eval(`${fallback} td:last-child`, (el) => getComputedStyle(el).display);
+        page.evaluate(
+          (s) => getComputedStyle(document.querySelector(s)).display,
+          `${fallback} td:last-child`,
+        );
       await page.setViewport({ width: 390, height: 844 });
       assert.equal(await page.$eval(table, (el) => el.scrollWidth <= el.clientWidth), true);
       assert.equal(await page.$eval(`${fallback} td`, (el) => el.textContent), "fallback");
