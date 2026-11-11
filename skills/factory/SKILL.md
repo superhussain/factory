@@ -273,6 +273,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "pipeline": { "global": 3, "project": 2 },
   "backlog": { "line": "- [ ] <slug>: <feature>", "decision": "approved | denied | rework", "at": "...", "notes": "optional", "answers": "optional", "notes_read": "..." },
   "experiment": { "name": "pilot", "arm": "a | b", "provider": "provider-b", "model": "model-b", "effort": "high" },
+  "agents": [{ "at": "...", "stage": "review", "round": 1, "role": "review-code", "harness": "opencode", "via": "native | paseo | launcher | general | direct", "model": "gpt-6.1-sol", "effort": "high", "session": "d4e5f6" }],
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
   "started": "2026-10-15T11:40:00Z",
   "updated": "2026-10-15T12:00:00Z",
@@ -309,11 +310,19 @@ How the dashboard's idea column, Assign project and backlog decision page behave
 experiment: the arm the job launched on and the provider, model and effort it launched
 with. Pickup never rewrites it, and a relaunch of an arm `b` job launches on the recorded
 triple. `factory.py experiment report <name>` attributes outcomes by it.
+`agents` lists who ran each stage, one row per launch or role dispatch, newest 32
+kept. Pickup appends the orchestrator row after each launch and takeover. The
+orchestrator appends one row per role dispatch with `factory.py agent record`, which
+stamps the board's stage, round and time. `board` refuses an `agents` patch.
+`factory.py agent report [<project>]` counts the rows by stage, role, harness, via,
+model and effort.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
 
 ## Rules
 
+- Before each role dispatch, run `python3 "$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`.
+  After hold, record the orchestrator once when no orchestrator row carries this session.
 - Agents get context from files, not the conversation. Build every agent prompt with
   `python3 "$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] --out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`
   (`<role>-round-<N>.txt` when you pass `--round`), after `pipeline` and `documents`,

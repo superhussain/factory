@@ -34,6 +34,10 @@ Each run, in order:
 - Claims one idea at a time — the board compare-and-swap stops two hosts taking
   one idea — launches it detached with its output in a private log, and waits up
   to 30 seconds. Still running or exit 0 counts as launched.
+- After each launch succeeds, appends an orchestrator row to the job's `agents`:
+  the provider, model and effort it launched with, its session tag, and `via`
+  `paseo` when the launcher program is `paseo`, else `launcher`. An arm `b` row
+  carries the experiment's triple.
 - Stops after `--limit` launches (default 1) or when a full pass claims nothing.
   It is silent when there is nothing to do, and it never calls a model.
 - Caps in-flight work. On a host with a registry record, the cap is the host's
@@ -189,6 +193,7 @@ changes nothing. Then install one timer per host.
   its route marked limited, its board claim replaced with a fresh tag and its session
   archived, then `pickup` relaunches `/factory recover` (or `/factory idea` for an idea
   job) on the next route; at most one takeover per run, counted against `--limit`.
+  A launched takeover appends an orchestrator row on the fallback route to `agents`.
 - The two time windows never overlap: pickup acts only while the reset is more than
   `takeover_minutes` away, the limit-resume sweep only after the reset, and the archive is
   the marker that stops the sweep reviving a taken session.

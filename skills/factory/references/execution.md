@@ -13,6 +13,19 @@ body defines the work and output file for other agents.
 | Other agents | Launch a general worker and have it read the canonical role file's body, the project file, and job files. Pass absolute paths and the base branch. |
 | Paseo (optional) | Discover configured profiles/providers with native tools and create a worker in the existing job worktree, not a second branch. Resolve that host's checkout and paths first. See integrations.md. |
 
+Before each role dispatch, run `python3 "$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`.
+After hold, record the orchestrator once when no orchestrator row carries this session.
+`<harness>` is the route provider or the runtime name. Leave out `<effort>` when the
+dispatch set none. `<via>` names the launch path:
+
+| via | Launch path |
+| --- | --- |
+| `native` | the harness's own subagent tool |
+| `paseo` | a Paseo agent |
+| `launcher` | a pickup launcher other than Paseo |
+| `general` | the general-worker fallback |
+| `direct` | a session a person started |
+
 The orchestrator alone holds the factory claim and writes the board. Role workers
 write only their assigned files and the builder's branch. Never give them the
 orchestrator's factory session tag. Choose each builder per SKILL.md's builder
