@@ -396,6 +396,12 @@ class BatchTest(IsolatedTestCase):
         self.set_jobs(rows)
         self.refuse_stack(2, f"cannot stack 093-sample-login: not batched into {LEAD}. Nothing was written.",
                           TARGET, "093-sample-login")
+        rows[2]["stage"] = "closed"
+        self.set_jobs(rows)
+        self.refuse_stack(2, "cannot stack 092-sample-csv-name: it is closed. Nothing was written.",
+                          TARGET, "092-sample-csv-name")
+        rows[2]["stage"] = "spec"
+        self.set_jobs(rows)
         rows[1]["stacked"] = True
         self.set_jobs(rows)
         self.refuse_stack(2, f"cannot stack 092-sample-csv-name: 091-sample-typo is already stacked on {LEAD}. "

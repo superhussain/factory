@@ -1821,6 +1821,8 @@ def stack_cmd(target, rider_id):
             fail(f"stack runs while {lead_id} is at spec, not {lead.get('stage')}", 2)
         if lead_of(rider) != lead_id:
             fail(f"cannot stack {rider_id}: not batched into {lead_id}. Nothing was written.", 2)
+        if rider.get("stage") in TERMINAL:
+            fail(f"cannot stack {rider_id}: it is {rider['stage']}. Nothing was written.", 2)
         other = next((j["id"] for j in riders_of(data, lead_id)
                       if j["id"] != rider_id and j.get("stacked") is True), None)
         if other:

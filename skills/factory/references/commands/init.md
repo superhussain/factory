@@ -26,8 +26,9 @@ Existing registrations reconcile through project pull: dirty/conflicted caches
 stop instead of being overwritten, without disturbing their checkout-path entry.
 New candidates have no `path` frontmatter. The runtime strips that legacy field
 from older device caches before uploads; the Worker rejects raw path-bearing
-documents. After the Worker-first rollout above, use `pull <slug>` to adopt an
-observed baseline before editing an existing project on an upgraded device.
+documents. After the Worker-first rollout in [project settings](../project-settings.md),
+use `pull <slug>` to adopt an observed baseline before editing an existing
+project on an upgraded device.
 
 Before using the generated native OpenCode roles, verify role activation:
 run `opencode api get /api/agent` and confirm all eight `factory-*` role IDs are
@@ -62,5 +63,5 @@ identity, JWT cryptography or write permission. Malformed pointers fail closed.
 
 Setup and diagnostics are exceptions: `init`, `adopt-home` and `doctor` resolve
 locations directly and never require `where` first. Offline setup must not try to
-read a remote project before endpoint/token configuration. The steps below apply
-to job/work commands.
+read a remote project before endpoint/token configuration. Step zero in SKILL.md
+applies to job/work commands.
