@@ -118,11 +118,6 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
       );
     });
     const statusHidden = () => page.$eval("#board-status", (el) => el.hidden);
-    const until = async (done) => {
-      for (let i = 0; i < 200 && !done(); i++)
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      assert.ok(done());
-    };
     const meta = () => page.$eval("#d-meta", (el) => el.textContent);
     const shownActions = () =>
       page.$$eval("#d-actions-menu button", (buttons) =>
@@ -172,10 +167,11 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
       await page.evaluate(() => {
         location.hash = "#999-missing";
       });
-      await until(() => asked.includes("999-missing"));
+      await page.waitForFunction(() => archiveMisses.has("999-missing"), wait);
       await page.evaluate(() => poll());
       await page.evaluate(() => poll());
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Awaiting the open attempt a poll makes counts any archive fetch it starts.
+      await page.evaluate(() => syncDetail());
       assert.equal(asked.filter((id) => id === "999-missing").length, 1);
       assert.equal((await meta()).includes("999-missing"), false);
       assert.equal(await statusHidden(), true);
@@ -216,9 +212,8 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
 
       await page.evaluate(() => showBoardStatus(""));
       const tries = asked.filter((id) => id === "411-sync-retry").length;
-      await page.evaluate(() => poll());
-      await until(() => asked.filter((id) => id === "411-sync-retry").length > tries);
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await page.evaluate(() => syncDetail());
+      assert.ok(asked.filter((id) => id === "411-sync-retry").length > tries);
       assert.equal(await statusHidden(), true);
 
       await page.evaluate(() => {
