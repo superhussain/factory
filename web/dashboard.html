@@ -5193,8 +5193,8 @@ async function openMoveHost(ctx) {
     const [h, p] = await Promise.all([fetch('./api/hosts', { cache: 'no-store' }), fetch('./api/pipeline/effective/' + encodeURIComponent(j.project), { cache: 'no-store' })]);
     if (!h.ok || !p.ok) throw new Error('load');
     const [list, view] = [await h.json(), await p.json()];
-    $('move-host-help').textContent = help((id) => list.find((x) => x.id === id)?.label || hostName(id));
     const hostLabel = (x) => x.label || hostName(x.id);
+    $('move-host-help').textContent = help((id) => hostLabel(list.find((x) => x.id === id) ?? { id }));
     const listed = view.pickup?.enabled ? view.pickup.hosts : [];
     const others = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to);
     const queued = new Set(queuedStops(j.move).map((q) => q.from));
