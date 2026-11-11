@@ -2,6 +2,7 @@
 // running an action with the drawer closed, dialogs, copy, keyboard and the PR link beside it.
 // Hover styles apply only to hover-capable pointers, so a touch tap leaves none behind.
 // Also captures the open card menu for review.
+// Also covers the double-run and hidden-item guards and menu focus after a poll.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -94,6 +95,24 @@ const menuState = (page) =>
     }),
     TRIGGER,
   );
+
+async function setPaused(page, origin, paused) {
+  await seedBoard(
+    origin,
+    JOBS.map((j) => (j.id === ID && paused ? { ...j, paused: { at: AT } } : j)),
+    new Date().toISOString(),
+  );
+  await page.evaluate(() => window.fixtureBoardPoll());
+  await page.waitForFunction(
+    (id, paused) =>
+      [...document.querySelectorAll(`.card[data-id="${id}"] .chip`)].some(
+        (c) => c.textContent === "Paused",
+      ) === paused,
+    {},
+    ID,
+    paused,
+  );
+}
 
 const boardJob = async (origin, id) =>
   (await (await fetch(origin + "/api/board")).json()).jobs.find((j) => j.id === id);
@@ -248,6 +267,7 @@ test("card actions", { timeout: 180000 }, async (t) => {
     });
 
     await t.test("keyboard", async () => {
+      await setPaused(page, origin, true);
       await page.focus(TRIGGER);
       const press = async (key, expected) => {
         await page.keyboard.press(key);
@@ -262,6 +282,83 @@ test("card actions", { timeout: 180000 }, async (t) => {
       await press("Escape", { menu: false, expanded: "false", focus: "card-actions" });
       await press("ArrowUp", open("d-close-job"));
       await press("Escape", { menu: false, expanded: "false", focus: "card-actions" });
+    });
+
+    await t.test("hidden item", async () => {
+      await setPaused(page, origin, true);
+      await page.click(TRIGGER);
+      await page.waitForSelector(`${MENU}:not([hidden])`);
+      await page.evaluate(() => {
+        window.__runs = 0;
+        window.__real = JOB_ACTION_RUN["d-pause"];
+        JOB_ACTION_RUN["d-pause"] = () => window.__runs++;
+      });
+      try {
+        await page.$eval(`${MENU} [data-action="d-pause"]`, (el) => el.click());
+        assert.equal(await page.evaluate(() => window.__runs), 0);
+        assert.equal((await menuState(page)).menu, true);
+        assert.equal((await menuState(page)).expanded, "true");
+      } finally {
+        await page.evaluate(() => (JOB_ACTION_RUN["d-pause"] = window.__real));
+        await page.keyboard.press("Escape");
+      }
+    });
+
+    await t.test("double run", async () => {
+      await setPaused(page, origin, true);
+      await page.evaluate(() => {
+        window.__runs = 0;
+        window.__gate = new Promise((r) => (window.__release = r));
+        window.__real = JOB_ACTION_RUN["d-resume"];
+        JOB_ACTION_RUN["d-resume"] = (ctx) => {
+          window.__runs++;
+          return window.__gate.then(() => window.__real(ctx));
+        };
+      });
+      try {
+        await clickItem(page, "d-resume");
+        await clickItem(page, "d-resume");
+        assert.equal(await page.evaluate(() => window.__runs), 1);
+      } finally {
+        await page.evaluate(() => {
+          window.__release();
+          JOB_ACTION_RUN["d-resume"] = window.__real;
+        });
+      }
+      await setPaused(page, origin, false);
+      await page.waitForFunction(() => cardRuns.size === 0);
+    });
+
+    await t.test("poll keeps menu focus", async () => {
+      await setPaused(page, origin, false);
+      await page.focus(TRIGGER);
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowDown");
+      assert.equal((await menuState(page)).focus, "d-pause");
+      await setPaused(page, origin, true);
+      const clip = await page.evaluate((sel) => {
+        const a = document.querySelector(sel).closest(".card-wrap").getBoundingClientRect();
+        const b = document.querySelector("#card-actions-menu").getBoundingClientRect();
+        const x = Math.min(a.left, b.left) - 8;
+        const y = Math.min(a.top, b.top) - 8;
+        return {
+          x,
+          y,
+          width: Math.max(a.right, b.right) + 8 - x,
+          height: Math.max(a.bottom, b.bottom) + 8 - y,
+        };
+      }, TRIGGER);
+      await page.screenshot({
+        path: `${SHOTS}card-menu-poll-focus-1440.png`,
+        clip,
+        captureBeyondViewport: false,
+      });
+      assert.deepEqual(await menuState(page), {
+        menu: true,
+        expanded: "true",
+        focus: "d-follow-tracer",
+      });
+      await page.keyboard.press("Escape");
     });
 
     await t.test("PR link keeps focus across a redraw", async () => {
