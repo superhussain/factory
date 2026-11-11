@@ -996,6 +996,8 @@ def claim_id(factory, feature_slug, project_slug):
     for slug in (feature_slug, project_slug):
         if not SLUG.fullmatch(slug):
             fail(f"bad slug {slug!r}: use letters, digits, - and _", 2)
+    paseo = paseo_session()
+    home = factory_home() if paseo else None
     jobs = Path(factory, "jobs")
     jobs.mkdir(parents=True, exist_ok=True)
 
@@ -1003,8 +1005,6 @@ def claim_id(factory, feature_slug, project_slug):
     local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
     new_session()
     device, session, _ = holder(factory)
-    paseo = paseo_session()
-    home = factory_home() if paseo else None
 
     def add(text):
         data = load_board(text)
