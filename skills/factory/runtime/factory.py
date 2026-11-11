@@ -3185,7 +3185,7 @@ def gh_pr(*args):
     if gh is None:
         return None
     try:
-        r = subprocess.run([gh, "pr", *args], capture_output=True, text=True, timeout=60,
+        r = subprocess.run([gh, "pr", *args], capture_output=True, encoding="utf-8", errors="replace", timeout=60,
                            stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return 1, ""
@@ -3201,19 +3201,26 @@ def close_pull_request(home, j, device):
         return "open", "the project file names no repo"
     if not (m and m[1].lower() == repo.lower()):
         return "open", f"its URL is not a pull request in {repo}"
-    view = gh_pr("view", pr, "--json", "state", "--jq", ".state")
+    view = gh_pr("view", pr, "--json", "state,headRefName",
+                  "--jq", '.state + " " + .headRefName')
     if view is None:
         return "open", f"gh is not installed on {device}"
     if view[0]:
         return "open", f"gh pr view exited {view[0]} (check gh auth status on {device})"
-    state = view[1].strip()
+    state, _, head = view[1].strip().partition(" ")
+    if not head:
+        return "open", "gh pr view reported no head branch"
+    if head != j.get("branch"):
+        return "open", f"its head branch {head} is not the job's branch {j.get('branch') or 'none'}"
     if state in ("MERGED", "CLOSED"):
         return ("merged" if state == "MERGED" else "already closed"), ""
     if state != "OPEN":
         return "open", f"gh pr view reported state {state}"
     comment = PR_CLOSE_COMMENT.format(id=j["id"], link=f"{api_url(home)}/#{j['id']}/decision")
-    code = gh_pr("close", pr, "--comment", comment)[0]
-    return ("open", f"gh pr close exited {code} (check gh auth status on {device})") if code else ("closed", "")
+    close = gh_pr("close", pr, "--comment", comment)
+    if close is None:
+        return "open", f"gh is not installed on {device}"
+    return ("open", f"gh pr close exited {close[0]} (check gh auth status on {device})") if close[0] else ("closed", "")
 
 
 def close_decision(j, reason, device, earlier, outcome):
@@ -3252,7 +3259,7 @@ def close_pass(home, data, device, minutes, dry):
         reason = close_reason(j)
         if reason is None:
             print(f"factory.py: pickup skips the close of {job_id}: "
-                  "its reason is not one line of 1 to 200 characters", file=sys.stderr)
+                  "its reason must be 1 to 200 characters, with no line breaks or control characters", file=sys.stderr)
             continue
         c = blocking(j, device, "", minutes)
         if c:
