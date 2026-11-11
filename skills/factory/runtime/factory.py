@@ -3236,9 +3236,6 @@ def close_pull_request(home, j, device):
         return "open", "the project file names no repo"
     if not (m and m[1].lower() == repo.lower()):
         return "open", f"its URL is not a pull request in {repo}"
-    branch = j.get("branch")
-    if not branch:
-        return "open", "the job has no branch"
     view = gh_pr("view", pr, "--json", "state,isCrossRepository,headRefName", "--jq",
                  '.state + " " + (.isCrossRepository | tostring) + " " + .headRefName')
     if view is None:
@@ -3249,14 +3246,17 @@ def close_pull_request(home, j, device):
         return "open", f"gh pr view exited {view[0]} (check gh auth status on {device})"
     state, _, rest = view[1].strip().partition(" ")
     cross, _, head = rest.partition(" ")
+    if state in ("MERGED", "CLOSED"):
+        return ("merged" if state == "MERGED" else "already closed"), ""
     if not head:
         return "open", "gh pr view reported no head branch"
     if cross != "false":
         return "open", f"its head branch {head} comes from another repository, not {repo}"
+    branch = j.get("branch")
+    if not branch:
+        return "open", "the job has no branch"
     if head != branch:
         return "open", f"its head branch {head} is not the job's branch {branch}"
-    if state in ("MERGED", "CLOSED"):
-        return ("merged" if state == "MERGED" else "already closed"), ""
     if state != "OPEN":
         return "open", f"gh pr view reported state {state}"
     comment = PR_CLOSE_COMMENT.format(id=j["id"], link=f"{api_url(home)}/#{j['id']}/decision")
