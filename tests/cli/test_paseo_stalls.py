@@ -110,8 +110,14 @@ class PaseoStallsTest(unittest.TestCase):
                  "provider": "claude/model-a"},
                 {"id": "eeee4444-5555-8666-9777-888899990000", "status": "idle",
                  "provider": "claude/model-a"},
-                {"id": "bad id", "status": "idle", "provider": "claude/model-a"}],
+                {"id": "bad id", "status": "idle", "provider": "claude/model-a"},
+                {"id": "ffff5555-6666-8777-8888-999900001111", "status": "idle",
+                 "provider": "claude-alt/model-a"},
+                {"id": "abcd6666-7777-8888-9999-000011112222", "status": "idle",
+                 "provider": "claudex/model-a"}],
             logs={ID: LIMIT, SECOND: WEEKLY,
+                  "ffff5555-6666-8777-8888-999900001111": LIMIT,
+                  "abcd6666-7777-8888-9999-000011112222": LIMIT,
                   "cccc2222-3333-8444-9555-666677778888": LIMIT,
                   "dddd3333-4444-8555-8666-777788889999": "Summary of the run.",
                   "eeee4444-5555-8666-9777-888899990000": LIMIT,
@@ -119,7 +125,8 @@ class PaseoStallsTest(unittest.TestCase):
             inspect={ID: INFO, SECOND: dict(INFO, UpdatedAt="2026-10-28T20:30:00.000Z"),
                      "cccc2222-3333-8444-9555-666677778888": INFO,
                      "eeee4444-5555-8666-9777-888899990000": dict(INFO, Archived=True),
-                     "bad id": INFO})
+                     "bad id": INFO,
+                     "ffff5555-6666-8777-8888-999900001111": INFO})
         result = self.run_script("list")
         self.assertEqual(result.returncode, 0, result.stderr)
         doc = json.loads(result.stdout)
@@ -127,7 +134,9 @@ class PaseoStallsTest(unittest.TestCase):
             {"session": ID, "reset": "2026-10-29T19:00:00Z", "provider": "claude/model-a",
              "model": "model-a"},
             {"session": SECOND, "reset": "2026-10-28T21:00:00Z", "provider": "claude/model-a",
-             "model": "model-a"}]})
+             "model": "model-a"},
+            {"session": "ffff5555-6666-8777-8888-999900001111", "reset": "2026-10-29T19:00:00Z",
+             "provider": "claude/model-a", "model": "model-a"}]})
         self.assertEqual(self.recorded()[0], ["--home", str(self.paseo_home), "ls", "-g", "--json"])
 
     @unittest.skipUnless(ZONES, NO_ZONES)

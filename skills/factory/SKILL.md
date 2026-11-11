@@ -272,6 +272,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "build": { "state": "queued | running | done | failed", "runs": ["https://github.com/<repo>/actions/runs/1"] },
   "pipeline": { "global": 3, "project": 2 },
   "backlog": { "line": "- [ ] <slug>: <feature>", "decision": "approved | denied | rework", "at": "...", "notes": "optional", "answers": "optional", "notes_read": "..." },
+  "experiment": { "name": "pilot", "arm": "a | b", "provider": "provider-b", "model": "model-b", "effort": "high" },
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
   "started": "2026-10-15T11:40:00Z",
   "updated": "2026-10-15T12:00:00Z",
@@ -283,7 +284,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
 dashboard links only exact `https://github.com/<repo>/pull/<n>` URLs for the
 job's own `$REPO`.
 `round` is 0 before the first review. `rounds[i]` is round i+1. Verdicts are
-`pending`, `PASS`, or `CHANGES`. Reviewer keys are fixed: security, ux, ui, code.
+`pending`, `PASS`, `CHANGES`, or `SKIPPED` (ux and ui only, written by `review-plan`). Reviewer keys are fixed: security, ux, ui, code.
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
 which ports live jobs hold. Only `factory.py` writes `claim`.
 `done` is when the job entered `merged` or `closed`, and only `factory.py` writes it.
@@ -304,6 +305,10 @@ Approve also appends the notes to `idea`.
 
 How the dashboard's idea column, Assign project and backlog decision page behave is in [dashboard](references/dashboard.md).
 
+`experiment` is set only by pickup, at first claim, when `routes.md` sets an owner-model
+experiment: the arm the job launched on and the provider, model and effort it launched
+with. Pickup never rewrites it, and a relaunch of an arm `b` job launches on the recorded
+triple. `factory.py experiment report <name>` attributes outcomes by it.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
 
@@ -352,7 +357,7 @@ only `factory.py deny-notes` writes it.
   `python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...` once. Never poll for job files
   with `until` or `while` loops, `sleep`, file mtimes, quiet windows, Monitor or a
   task's output file.
-  Spawn all four reviewers in one message. A turn that ends on text alone is a
+  Spawn every reviewer `review-plan` lists in one message. A turn that ends on text alone is a
   report, not the end of the run. While any agent or background command is still
   running, wait for it instead of ending the run. The run ends only at a real
   stop: the job is at `needs-human`, `merged` or `closed`, its PR waits at
@@ -360,7 +365,8 @@ only `factory.py deny-notes` writes it.
 - WAIT FOR ALL: a round is done only when all four `review-*.md` files exist in
   the round folder. Record each verdict on the board as it lands, but never resume
   the builder mid-round. Read verdicts from each file's first line: reviewers write
-  `VERDICT: PASS` or `VERDICT: CHANGES`, and the approver writes `APPROVE`,
+  `VERDICT: PASS` or `VERDICT: CHANGES`, `review-plan` writes `VERDICT: SKIPPED`
+  for ux and ui, and the approver writes `APPROVE`,
   `ESCALATE`, or `CHANGES`. `wait` prints those first lines.
 - Max `$PIPELINE.review_rounds` review rounds per build cycle (2 unless pipeline settings say otherwise, at most 5). If
   the last allowed round of a cycle still has a CHANGES verdict, the job goes to
@@ -545,7 +551,7 @@ Code enforces these, and stored pipeline configuration can only tighten them, ex
 | Id | Floor | Config can |
 | --- | --- | --- |
 | F1 | Never push to the base or force-push. Every change lands as a PR from factory/<id>. | none |
-| F2 | Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. | none |
+| F2 | Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. Security and code always run. ux and ui are SKIPPED only by factory.py review-plan when a round changes nothing a person sees, and the approver checks each skip. | none |
 | F3 | At most 2 review rounds per build cycle by default, then needs-human. | 1 to 5; only the all-projects scope can raise it above 2 |
 | F4 | Approver runs on every job. Only APPROVE merges. ESCALATE holds the PR. | none |
 | F5 | APPROVE PRs merge after green checks. | tighten to human: every PR held for a person |
@@ -565,7 +571,7 @@ The gate catalog is code: `GATES` in `worker/admission.js` and `PIPELINE_GATES` 
 `factory.py`. Pipeline configuration can switch a catalog gate on for every project
 or for one project, and a gate switched on globally applies to every project. Config
 cannot add a gate outside the catalog or remove a loop stage: the spec, the build,
-the four reviews, the approver and the PR always run.
+the reviews F2 requires, the approver and the PR always run.
 
 | Id | Gate | Holds |
 | --- | --- | --- |

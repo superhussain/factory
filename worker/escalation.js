@@ -67,7 +67,8 @@ const TAG_REMOVALS = ESCALATION_TAGS.map((name) => [
 
 // Replaces what the admission rules refuse, so a review that quotes a secret or a tag, or
 // writes an emoji, is still rated. Look-alike letters fold to ASCII only when the folded
-// text holds a reserved tag or a secret shape, so other prose reaches the model as written.
+// text holds a reserved tag or a secret shape. The rest of that review folds with them.
+// Other reviews reach the model as written.
 export function cleanReview(text) {
   text = text.replace(VARIATION_SELECTORS, "").replace(EMOJI_JOINERS, "");
   const folded = foldLookalikes(text);

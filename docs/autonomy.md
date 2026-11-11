@@ -220,8 +220,8 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   prints the error and "backlog triage stopped; unsent lines wait for the next pickup run". The sweep
   keeps the holds it recorded, and pickup still claims and launches ideas. While the sweep keeps
   failing, pickup's host status carries `triage_failed_since`, the start of the first failing run.
-  Settings, Hosts shows "Backlog triage failing since <time>" in red with a warning sign on the host's card until a sweep
-  succeeds.
+  Settings, Hosts shows "Backlog triage failing since <time>" in red with a warning sign on the
+  host's card until a sweep succeeds.
 - **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a
   service token cannot switch triage on or move the threshold. The Worker compares the
   score with the threshold itself.
@@ -234,8 +234,8 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   score but write no text. An item or context holding either tag, including fullwidth,
   Cyrillic, Greek or other lookalike forms, or a letter that reads as either l or I, is
   refused with a 400.
-- **Floors.** A queued idea still goes through the spec, four reviews, the approver, merge
-  rules and any `spec-approval` gate.
+- **Floors.** A queued idea still goes through the spec, the reviews F2 requires, the
+  approver, merge rules and any `spec-approval` gate.
 - **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
   Workers AI usage bills against the account. Without the binding the route answers 503,
   and lines wait. In a 36-call live run, a call sent a median of 292 input tokens, which costs about
@@ -284,8 +284,9 @@ removes those, replaces secret-shaped text with `[secret-shaped text removed]`, 
 `review-findings` tag with `[review-findings tag removed]` and an `operator-preferences`
 tag with `[operator-preferences tag removed]`, and cuts the result to 8000 characters.
 When the text holds a tag or a secret shape in fullwidth or look-alike letters, the Worker
-folds those letters to ASCII first, so a token such as `ｇｈｐ＿…` is removed too. A
-review that quotes a secret or a tag, or writes an emoji such as ⚠️ or 👩‍💻, is still rated.
+folds those letters to ASCII first, and the rest of that review is folded with it, so a
+token such as `ｇｈｐ＿…` or `gһp_…` is removed too. A review that quotes a secret or a
+tag, or writes an emoji such as ⚠️ or 👩‍💻, is still rated.
 
 Reply 200: `{"decision": "escalate"|"continue", "confidence": int, "threshold": 80,
 "reason": text, "model": "@cf/cloudflare/clef-flash"}`. The reason is

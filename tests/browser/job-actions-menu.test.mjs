@@ -112,6 +112,12 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
           });
         assert.deepEqual(await ring("d-copy-link"), { style: "solid", width: "2px" }, label);
         if (!viewport.hasTouch) {
+          await page.hover("#d-copy-link");
+          assert.deepEqual(
+            await ring("d-copy-link"),
+            { style: "solid", width: "2px" },
+            `${label} focused hover keeps its ring`,
+          );
           await page.hover("#d-edit-idea");
           assert.equal((await ring("d-edit-idea")).style, "none", `${label} hover has no ring`);
         }

@@ -19,6 +19,8 @@
   factory.py routes pick|list|limit <name> [--minutes N]|clear <name>
                                             this host's dispatch routes from routes.md; pick prints
                                             the first not marked limited (exit 3 when all are)
+  factory.py experiment report <name>       print per-arm outcome metrics for one owner-model
+                                            experiment as JSON (read-only)
   factory.py unclaim <job-id>               release this session's claim on an idea, so it waits again
   factory.py deny-notes <job-id> [done]   print a denied job's unread notes wrapped as data, or mark them read
   factory.py pickup [--dry-run] [--limit N] [--max-inflight N]
@@ -45,6 +47,8 @@
   factory.py escalation <project-slug>/<job-id> <round>
                                             ask whether a review round's CHANGES findings need a person,
                                             print one JSON verdict
+  factory.py review-plan <project-slug>/<job-id> <round>
+                                            skip the ux and ui reviews of a round that changes nothing a person sees, print one JSON plan
   factory.py stop <worktree>                stop processes running out of a worktree
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
@@ -184,8 +188,8 @@ TAG_LOOKALIKES_FROM = ("‹⟨〈❮˂" "⁄∕⧸╱"
                        "‐‑‒–—―−⁃"
                        "аеорсѕАЕОРСЅТ"
                        "αορΑΕΟΡΤ"
-                       "\u0412\u0392\u041a\u039a\u043a\u03ba\u04c0\u04cf\u0261\u050d\u0456\u0406\u0399\u03b9\u0131\u041c\u039c\u043c")
-TAG_LOOKALIKES_TO = "<<<<<////--------aeopcsAEOPCSTaopAEOPTBBKKkkllggiIIiiMMm"
+                       "\u0412\u0392\u041a\u039a\u043a\u03ba\u04c0\u04cf\u0261\u050d\u0456\u0406\u0399\u03b9\u0131\u041c\u039c\u043c\u0443\u0445\u04bb\u0458\u0501\u051b\u051d\u04af\u041d\u0425\u0408\u051a\u051c\u04ae")
+TAG_LOOKALIKES_TO = "<<<<<////--------aeopcsAEOPCSTaopAEOPTBBKKkkllggiIIiiMMmyxhjdqwyHXJQWY"
 TAG_LOOKALIKES = str.maketrans(TAG_LOOKALIKES_FROM, TAG_LOOKALIKES_TO)
 NOTE_LINK = re.compile(r"://|\bwww\.|\b[a-z0-9-]+\.[a-z]{2,}/|\b\d{1,3}(?:\.\d{1,3}){3}[:/]", re.I | re.ASCII)
 # Rules 6 and 7, copied from SECRETS and PHRASES in worker/admission.js.
@@ -1624,11 +1628,20 @@ def inflight_count(data, project, minutes, device=None):
 
 
 def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None, project=None, by_host=False,
-                builds=False, skip_ids=frozenset()):
+                builds=False, experiment=None, route=None, skip_ids=frozenset()):
     """Claim up to limit of the oldest runnable ideas in one board write, and return their
     [{"id", "project", "repo_path", "session"}]. An empty session mints a tag per idea.
     builds also accepts jobs that Tracer scope approval moved to build.
+    experiment is read_experiment's dict and route the picked route tuple: each picked job
+    without a record gets an experiment stamp naming its arm and launch values, written once,
+    and an arm b job is never picked while the experiment is limited.
     skip_ids are ids pickup holds back for a batch."""
+    exp_limited = None
+    if experiment:
+        until = read_limits(home).get(experiment["name"])
+        if until and until > now():
+            exp_limited = until
+
     def change(text):
         data = load_board(text)
         picked = []
@@ -1651,6 +1664,18 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
                     or not JOB_ID.fullmatch(j["id"]) or ".." in j["id"] or j["id"] in skip_ids \
                     or blocking(j, device, session, minutes):
                 continue
+            record = j.get("experiment")
+            arm = record["arm"] if isinstance(record, dict) and record.get("arm") in ("a", "b") else None
+            if experiment:
+                if arm is None:
+                    arm = experiment_arm(j["id"], experiment["percent"])
+                if arm == "b" and exp_limited:
+                    continue
+                if not j.get("experiment"):
+                    triple = (experiment["provider"], experiment["model"], experiment["effort"]) \
+                        if arm == "b" else (route[1], route[2], route[3])
+                    j["experiment"] = {"name": experiment["name"], "arm": arm, "provider": triple[0],
+                                       "model": triple[1], "effort": triple[2]}
             tag = session or secrets.token_hex(3)
             claim = new_claim(device, tag)
             # Replace the claim whole, as hold does. The paseo key stays as it was.
@@ -2365,12 +2390,42 @@ def read_routes(home):
              "as <name>: <provider> <model> [<effort>]", 2)
     routes = []
     for name, value in meta.items():
+        # The optional experiment line is config, not a route.
+        if name == "experiment":
+            continue
         parts = value.split()
         if not SLUG.fullmatch(name) or len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) \
                 or not ROUTE_MODEL.fullmatch(parts[1]) or parts[2:] and parts[2] not in ROUTE_EFFORTS:
             fail(f"bad route {name!r} in {path}: use <name>: <provider> <model> [<effort>]", 2)
         routes.append((name, parts[0], parts[1], parts[2] if len(parts) == 3 else None))
     return routes
+
+
+def read_experiment(home, route_names):
+    """None, or {name, provider, model, effort, percent} from routes.md's optional experiment
+    line: arm a rides the picked route, arm b launches on the line's own values."""
+    path = Path(home, "routes.md")
+    line = (frontmatter(path)[0] if path.exists() else {}).get("experiment")
+    if line is None:
+        return None
+    parts = line.split()
+    if len(parts) not in (4, 5):
+        fail(f"bad experiment in {path}: use experiment: <name> <provider> <model> [<effort>] <percent>", 2)
+    name, provider, model = parts[0], parts[1], parts[2]
+    effort = parts[3] if len(parts) == 5 else None
+    percent = parts[-1]
+    if (not SLUG.fullmatch(name) or not SLUG.fullmatch(provider) or not ROUTE_MODEL.fullmatch(model)
+            or name in route_names
+            or effort is not None and effort not in ROUTE_EFFORTS
+            or not re.fullmatch(r"[0-9]{1,3}", percent) or not 0 <= int(percent) <= 100):
+        fail(f"bad experiment in {path}: use experiment: <name> <provider> <model> [<effort>] <percent>", 2)
+    return {"name": name, "provider": provider, "model": model, "effort": effort, "percent": int(percent)}
+
+
+def experiment_arm(job_id, percent):
+    """Arm "b" when the job id's stable hash bucket falls under percent, else "a"."""
+    bucket = int.from_bytes(hashlib.sha256(job_id.encode("utf-8")).digest()[:4], "big") % 100
+    return "b" if bucket < percent else "a"
 
 
 def read_limits(home):
@@ -2399,8 +2454,12 @@ def pick_route(home):
 
 
 def limit_route(home, name, minutes):
-    """Mark one route limited for minutes from now, and return its limited_until."""
-    if name not in [r[0] for r in read_routes(home)]:
+    """Mark one route or the experiment limited for minutes from now, and return its limited_until."""
+    valid = [r[0] for r in read_routes(home)]
+    experiment = read_experiment(home, valid)
+    if experiment:
+        valid.append(experiment["name"])
+    if name not in valid:
         fail(f"unknown route {name!r}: not in {Path(home, 'routes.md')}", 2)
     stamp = now()
     limits = {n: until for n, until in read_limits(home).items() if until > stamp}
@@ -2444,6 +2503,112 @@ def routes_cmd(sub, *args):
             write_atomic(path, json.dumps(limits, indent=2) + "\n")
     else:
         fail("usage: routes pick|list|limit <name> [--minutes N]|clear <name>", 2)
+
+
+# Stages that follow a completed review round, for the report's review-round mean.
+REVIEW_PAST_STAGES = ("approve", "pr-open", "merged", "closed")
+# The window a follow-up of an arm job counts in: 7 days from the original's done, else started.
+WINDOW_SECONDS = 7 * 86400
+# decision.md's verdict formats, from SKILL.md. Anything else before the PR ships is a skipped step.
+DECISION_VERDICTS = ("APPROVE", "ESCALATE", "CLOSED:")
+
+
+def stamp_of(value):
+    """A board timestamp as UTC, or None when it is missing or unparseable."""
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def arm_metrics(arm_jobs, follow_ups, jobs_root):
+    """One arm's outcome metrics from the board and this host's local job folders. Skipped
+    steps are listed only on readable evidence; evidence a folder cannot back counts as
+    coverage_unknown instead of an owner failure."""
+    stages = [j.get("stage") for j in arm_jobs.values()]
+    means = [max(j.get("round") or 0, len(j.get("rounds") or [])) for j in arm_jobs.values()
+             if j.get("stage") in REVIEW_PAST_STAGES]
+    skipped = {"missing_round_review": [], "missing_decision": [], "pr_before_approve": []}
+    coverage_unknown = 0
+    for job_id, j in sorted(arm_jobs.items()):
+        folder = jobs_root / (j.get("project") or "") / job_id
+        if not isinstance(j.get("project"), str) or not JOB_ID.fullmatch(job_id) or ".." in job_id \
+                or not folder.is_dir() or not (folder / "spec.md").is_file():
+            coverage_unknown += 1
+            continue
+        missed = False
+        for i, entry in enumerate(j.get("rounds") or []):
+            if not isinstance(entry, dict):
+                continue
+            for reviewer, verdict in entry.items():
+                if isinstance(verdict, str) and verdict not in ("", "pending") \
+                        and not (folder / f"round-{i + 1}" / f"review-{reviewer}.md").is_file():
+                    missed = True
+        if missed:
+            skipped["missing_round_review"].append(job_id)
+        if j.get("stage") in ("pr-open", "merged", "closed") and not (folder / "decision.md").is_file():
+            skipped["missing_decision"].append(job_id)
+        if j.get("pr"):
+            decision = folder / "decision.md"
+            if decision.is_file():
+                try:
+                    text = decision.read_text(encoding="utf-8")
+                except (OSError, UnicodeError):
+                    coverage_unknown += 1
+                    continue
+                first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+                if not first.startswith(DECISION_VERDICTS):
+                    skipped["pr_before_approve"].append(job_id)
+    counts = [j["resumes"]["count"] for j in arm_jobs.values() if isinstance(j.get("resumes"), dict)
+              and type(j["resumes"].get("count")) is int]
+    return {"jobs": len(arm_jobs), "merged": stages.count("merged"), "closed": stages.count("closed"),
+            "needs_human": stages.count("needs-human"),
+            "escalated": sum(1 for j in arm_jobs.values() if escalated(j)),
+            "mean_review_rounds": round(sum(means) / len(means), 1) if means else 0,
+            "changes_verdicts": sum(list(entry.values()).count("CHANGES") for j in arm_jobs.values()
+                                    for entry in (j.get("rounds") or []) if isinstance(entry, dict)),
+            "stuck_resumes": sum(counts),
+            "follow_ups_7d": follow_ups, "skipped_steps": skipped, "coverage_unknown": coverage_unknown}
+
+
+def experiment_cmd(sub, name):
+    """Read-only per-arm outcome report for one owner-model experiment. Attributes by each
+    job's recorded experiment field, never by re-hashing. Prints JSON, writes nothing."""
+    if sub != "report":
+        fail("usage: experiment report <name>", 2)
+    if not SLUG.fullmatch(name):
+        fail(f"bad experiment name {name!r}", 2)
+    home = factory_home()
+    data = read_board(home)
+    arm_jobs = {"a": {}, "b": {}}
+    for j in data["jobs"]:
+        if not isinstance(j, dict) or not isinstance(j.get("id"), str):
+            continue
+        record = j.get("experiment")
+        if isinstance(record, dict) and record.get("name") == name and record.get("arm") in ("a", "b"):
+            arm_jobs[record["arm"]][j["id"]] = j
+    follow = {arm: {"rework_of": [], "surfaced": [], "unknown_window": 0} for arm in ("a", "b")}
+    for j in data["jobs"]:
+        refs = j.get("refs") if isinstance(j, dict) else None
+        if not isinstance(refs, list) or not isinstance(j.get("id"), str):
+            continue
+        for ref in refs:
+            if not isinstance(ref, dict) or not isinstance(ref.get("id"), str) \
+                    or ref.get("kind") not in ("rework-of", "follow-up-of"):
+                continue
+            arm = next((a for a in ("a", "b") if ref["id"] in arm_jobs[a]), None)
+            if arm is None:
+                continue
+            original = arm_jobs[arm][ref["id"]]
+            anchor = stamp_of(original.get("done")) or stamp_of(original.get("started"))
+            age = stamp_of(j.get("started")) or stamp_of(j.get("updated"))
+            if anchor is None or age is None:
+                follow[arm]["unknown_window"] += 1
+            elif (age - anchor).total_seconds() <= WINDOW_SECONDS:
+                follow[arm]["rework_of" if ref["kind"] == "rework-of" else "surfaced"].append(j["id"])
+    print(json.dumps({"name": name,
+                      "a": arm_metrics(arm_jobs["a"], follow["a"], Path(home, "jobs")),
+                      "b": arm_metrics(arm_jobs["b"], follow["b"], Path(home, "jobs"))}, indent=2))
 
 
 def release_claim(home, job_id, device, session):
@@ -3740,6 +3905,14 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
             and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"]) and ".." not in j["id"]]
     jobs.sort(key=lambda j: not prioritized(j))
     starts = {j["id"] for j in jobs if tracer_start(j) or moved_here(j, device)}
+    experiment, exp_limited = None, None
+
+    def job_arm(j):
+        """This job's arm: the recorded one, else the hash bucket when the line is set."""
+        record = j.get("experiment") if j else None
+        if isinstance(record, dict) and record.get("arm") in ("a", "b"):
+            return record["arm"]
+        return experiment_arm(j["id"], experiment["percent"]) if j and experiment else None
 
     def base_skip(j):
         """Why this idea is not a candidate, or None."""
@@ -3759,6 +3932,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
         c = blocking(j, device, "", minutes)
         if c:
             return f"skip {j['id']} {project}: claimed by {c['device']} session {c.get('session')}"
+        if experiment and exp_limited and job_arm(j) == "b":
+            return f"skip {j['id']} {project}: experiment {experiment['name']} limited until {exp_limited}"
         return None
 
     holds = batch_holds(home, jobs, lambda j: base_skip(j) is None)
@@ -3788,12 +3963,30 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     if route:
         name, provider, model, effort = route
         template = route_launcher(home, route)
+        experiment = read_experiment(home, [r[0] for r in read_routes(home)])
+        if experiment:
+            until = read_limits(home).get(experiment["name"])
+            if until and until > now():
+                exp_limited = until
 
     def values(entry):
         return {"id": entry["id"], "project": entry["project"], "repo_path": entry["repo_path"],
                 "session": entry["session"], "provider": provider, "model": model, "effort": effort or "",
                 "prompt": launch_prompt(f"/factory {'recover' if entry['id'] in starts else 'idea'} {entry['id']} "
                                         f"--session {entry['session']}")}
+
+    def job_given(j, entry):
+        """(arm, argv values): an arm b job launches on its recorded triple, or the
+        experiment's when the record holds none; arm a on the route's own values."""
+        given = values(entry)
+        arm = job_arm(j)
+        if arm == "b":
+            record = j.get("experiment") if j else None
+            src = record if isinstance(record, dict) and record.get("provider") and record.get("model") \
+                else experiment
+            if src:
+                given = dict(given, provider=src["provider"], model=src["model"], effort=src.get("effort") or "")
+        return arm, given
 
     if dry:
         would, no_route = {}, False
@@ -3828,8 +4021,10 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
                 else:
                     would[slug] = would.get(slug, 0) + 1
                     entry = {"id": j["id"], "project": slug, "repo_path": paths[slug], "session": "<session>"}
-                    line = f"would launch {j['id']} {slug} on {name}: " \
-                        + shlex.join(launcher_argv(template, values(entry)))
+                    arm, given = job_given(j, entry)
+                    shown = f" arm {arm} model {given['model']}" if arm else ""
+                    line = f"would launch {j['id']} {slug} on {name}{shown}: " \
+                        + shlex.join(launcher_argv(template, given))
             print(line)
         if stalls is not None:
             print(f"host {device}: would take over {taken}")
@@ -3842,20 +4037,22 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     while launches < limit:
         for slug in eligible:
             picked = claim_ideas(home, device, "", minutes, paths, 1, cap, slug, by_host=by_host, builds=True,
-                                 skip_ids=frozenset(holds))
+                                 experiment=experiment, route=route, skip_ids=frozenset(holds))
             if picked:
                 break
         else:
             return
         entry = picked[0]
-        given = values(entry)
+        j = next((x for x in data["jobs"] if x.get("id") == entry["id"]), None)
+        arm, given = job_given(j, entry)
         ok, detail, log_path = launch_idea(home, entry, name, launcher_argv(template, given),
-                                           launch_env(given, provider, model))
+                                           launch_env(given, given["provider"], given["model"]))
         if ok:
             print(f"launched {entry['id']} {entry['project']} on {name} session {entry['session']}")
             launches += 1
             continue
-        launch_failed(home, name, entry["id"], detail, log_path,
+        limit_name = experiment["name"] if arm == "b" and experiment else name
+        launch_failed(home, limit_name, entry["id"], detail, log_path,
                       lambda: release_claim(home, entry["id"], device, entry["session"]))
         return
 
@@ -4072,6 +4269,105 @@ def prompt_cmd(target, role, *flags):
     print(out)
 
 
+# Repo-relative fnmatch patterns; "*" also crosses "/". A match means a person can see the change.
+VISIBLE_GLOBS = ("*.html", "*.htm", "*.css", "*.scss", "*.sass", "*.less", "*.svg", "*.png", "*.jpg",
+                 "*.jpeg", "*.gif", "*.webp", "*.ico", "*.vue", "*.svelte", "*.jsx", "*.tsx", "*.astro",
+                 "*.hbs", "*.njk", "*.ejs", "*.erb", "*.j2", "*.jinja", "*templates/*", "*components/*",
+                 "web/*", "public/*", "static/*", "assets/*")
+VISUAL_CRITERION = re.compile(r"screenshot|captur|before and after|before/after|visual evidence", re.I)
+SKIPPABLE_REVIEWERS = ("ux", "ui")
+REVIEW_PLAN_USAGE = "usage: review-plan <project-slug>/<job-id> <round>"
+
+
+def markdown_section(text, name):
+    """The lines under the first ## heading named name, up to the next ## heading, or None."""
+    lines = text.splitlines()
+    heading = re.compile(r"^##\s+(?:\d+\.\s*)?" + re.escape(name) + r"\b", re.I)
+    start = next((i for i, line in enumerate(lines) if heading.match(line)), None)
+    if start is None:
+        return None
+    end = next((i for i in range(start + 1, len(lines)) if re.match(r"^##\s", lines[i])), len(lines))
+    return "\n".join(lines[start + 1:end])
+
+
+def visible_globs(project_file):
+    """VISIBLE_GLOBS plus every backtick span in the project file's ## UI section."""
+    section = markdown_section(project_file.read_text(encoding="utf-8"), "UI") or ""
+    return VISIBLE_GLOBS + tuple(re.findall(r"`([^`\n]+)`", section))
+
+
+def plan_reason(spec_text, decision_text, changed, globs):
+    """(visible, reason): whether a round changes something a person sees, and the first rule that decided it."""
+    criteria = markdown_section(spec_text, "Acceptance criteria")
+    if criteria is None:
+        return True, "spec.md has no Acceptance criteria section"
+    if VISUAL_CRITERION.search(criteria):
+        return True, "spec.md has a visual-evidence acceptance criterion"
+    if re.search(r"^## Visible change[ \t]*$", decision_text, re.M):
+        return True, "decision.md names a visible change"
+    for path in changed:
+        glob = next((g for g in globs if fnmatch.fnmatchcase(path, g)), None)
+        if glob:
+            return True, f"{path} matches {glob}"
+    return False, (f"spec.md has no visual-evidence criterion and none of the {len(changed)} changed files "
+                   "matches a visible-file glob")
+
+
+def changed_files(wt, base):
+    """The paths the worktree's branch changes since it left origin/<base>, or None on any git failure."""
+    mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
+                        capture_output=True, text=True)
+    if mb.returncode:
+        return None
+    diff = subprocess.run(["git", "-C", str(wt), "diff", "--name-only", "--no-renames", "-z", mb.stdout.strip(),
+                           "HEAD"], capture_output=True, text=True)
+    if diff.returncode:
+        return None
+    return [p for p in diff.stdout.split("\0") if p]
+
+
+def review_plan_cmd(target, round_text):
+    """Write SKIPPED ux and ui reviews for a round that changes nothing a person sees, and print one JSON plan.
+    Any doubt (no worktree, a git failure, no Acceptance criteria section) runs all four reviewers."""
+    home, slug, job_id = r2_target(target, True)
+    if not re.fullmatch(r"[1-9][0-9]*", round_text):
+        fail("round must be a positive integer. " + REVIEW_PLAN_USAGE, 2)
+    data = read_board(home)
+    if not any(j.get("id") == job_id for j in data["jobs"]):
+        fail(f"no job {job_id} on the board", 4)
+    project_file = project_files(home, slug)[0]
+    base = frontmatter(project_file)[0].get("base") or "main"
+    stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
+    wt = home / "worktrees" / slug / (stacked or job_id)
+    folder = home / "jobs" / slug / job_id
+    round_folder = folder / f"round-{round_text}"
+    targets = [round_folder / f"review-{name}.md" for name in SKIPPABLE_REVIEWERS]
+    for node in (folder, round_folder, *targets):
+        if is_link(node):
+            fail(f"{node} is a symlink or junction; nothing was written", 6)
+    if not (folder / "spec.md").is_file():
+        fail(f"{folder / 'spec.md'} is missing", 4)
+    decision = folder / "decision.md"
+    changed = changed_files(wt, base) if wt.is_dir() else None
+    if changed is None:
+        visible, reason = True, f"the diff against origin/{base} could not be read"
+    else:
+        visible, reason = plan_reason((folder / "spec.md").read_text(encoding="utf-8"),
+                                      decision.read_text(encoding="utf-8") if decision.is_file() else "",
+                                      changed, visible_globs(project_file))
+    if visible:
+        print(json.dumps({"round": int(round_text), "run": list(TRACER_REVIEWERS), "skipped": [], "reason": reason}))
+        return
+    for path in targets:
+        if path.exists():
+            fail(f"{path} already exists; nothing was written", 6)
+    round_folder.mkdir(exist_ok=True)
+    for path in targets:
+        write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
+    print(json.dumps({"round": int(round_text), "run": ["security", "code"], "skipped": list(SKIPPABLE_REVIEWERS),
+                      "reason": reason}))
+
+
 WAIT_ARTIFACT = re.compile(r"spec\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
 WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S]"
 
@@ -4082,6 +4378,8 @@ def wait_valid(artifact, line):
         return bool(line.strip())
     if artifact == "decision.md":
         return line in ("APPROVE", "ESCALATE", "CHANGES") or line.startswith("CLOSED: ")
+    if line == "VERDICT: SKIPPED":
+        return bool(re.fullmatch(r"round-[1-9][0-9]*/review-(ux|ui)\.md", artifact))
     return line in ("VERDICT: PASS", "VERDICT: CHANGES")
 
 
@@ -5789,7 +6087,7 @@ def spec_tasks(text):
 
 
 def review_rounds(folder):
-    """[(n, {reviewer: PASS or CHANGES})] for each round whose four reviews all carry a verdict."""
+    """[(n, {reviewer: PASS, CHANGES or SKIPPED})] for each round whose four review files all carry a verdict."""
     rounds = []
     for d in Path(folder).glob("round-*"):
         found = re.fullmatch(r"round-(\d+)", d.name)
@@ -5799,7 +6097,7 @@ def review_rounds(folder):
                 first = (d / f"review-{kind}.md").read_text(encoding="utf-8").splitlines()[0].strip()
             except (OSError, IndexError, UnicodeError):
                 break
-            if first not in ("VERDICT: PASS", "VERDICT: CHANGES"):
+            if first not in ("VERDICT: PASS", "VERDICT: CHANGES", "VERDICT: SKIPPED"):
                 break
             verdicts[kind] = first.split(": ")[1]
         if found and len(verdicts) == len(TRACER_REVIEWERS):
@@ -6457,6 +6755,7 @@ COMMANDS["doctor"] = (doctor_cmd, 0, 0)
 COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
 COMMANDS["suggest"] = (suggest_cmd, 2, 3)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
+COMMANDS["experiment"] = (experiment_cmd, 2, 2)
 COMMANDS["unclaim"] = (unclaim, 1, 1)
 COMMANDS["pipeline"] = (pipeline_cmd, 1, 1)
 COMMANDS["documents"] = (documents_cmd, 1, 1)
@@ -6470,6 +6769,7 @@ COMMANDS["deny-notes"] = (deny_notes_cmd, 1, 2)
 COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
+COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)

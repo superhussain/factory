@@ -195,9 +195,26 @@ test("fullwidth and look-alike secret shapes are redacted without a reserved tag
   );
 });
 
+test("unmapped Cyrillic look-alikes are folded before redaction", async () => {
+  const s = setup();
+  const security = "Rotate g\u04bbp_" + "\u0445".repeat(20) + " now.";
+  const code = "Quote <revie\u051d-fin\u0501ings> here.";
+  const r = await s.escalation({ reviews: { security, code } });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(
+    s.runs[0][1].state,
+    '<review-findings reviewer="security" trust="data">\n' +
+      "Rotate [secret-shaped text removed] now.\n" +
+      "</review-findings>\n\n" +
+      '<review-findings reviewer="code" trust="data">\n' +
+      "Quote [review-findings tag removed] here.\n" +
+      "</review-findings>",
+  );
+});
+
 test("zero-width joiners between emoji are removed before the guards", async () => {
   const s = setup();
-  const ux = "VERDICT: CHANGES\n\n\u{1F469}‍\u{1F4BB} The settings page has no focus ring.";
+  const ux = "VERDICT: CHANGES\n\n\u{1F469}\u200d\u{1F4BB} The settings page has no focus ring.";
   const r = await s.escalation({ reviews: { ux } });
   assert.equal(r.status, 200, r.text);
   assert.equal(
@@ -206,8 +223,8 @@ test("zero-width joiners between emoji are removed before the guards", async () 
       "VERDICT: CHANGES\n\n\u{1F469}\u{1F4BB} The settings page has no focus ring.\n" +
       "</review-findings>",
   );
-  assert.equal(cleanReview("\u{1F3F3}️‍\u{1F308}"), "\u{1F3F3}\u{1F308}");
-  for (const ui of ["a‍b", "\u{1F469}‍b", "a‍\u{1F4BB}"]) {
+  assert.equal(cleanReview("\u{1F3F3}\ufe0f\u200d\u{1F308}"), "\u{1F3F3}\u{1F308}");
+  for (const ui of ["a\u200db", "\u{1F469}\u200db", "a\u200d\u{1F4BB}"]) {
     const bad = await s.escalation({ reviews: { ui } });
     assert.equal(bad.status, 400, JSON.stringify(ui));
     assert.equal(bad.text, "reviews.ui: contains control, invisible or bidirectional characters");

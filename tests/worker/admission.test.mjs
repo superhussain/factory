@@ -188,15 +188,28 @@ test("document profile keeps concrete rules and allows project-file text", () =>
     assert.equal(checkOperatorText(text, doc, "document"), null, JSON.stringify(text));
 });
 
+const cpuMs = (bodies) => {
+  const before = process.cpuUsage();
+  for (const body of bodies) checkOperatorText(body, "project document", "document");
+  const { user, system } = process.cpuUsage(before);
+  return (user + system) / 1000;
+};
+
 test("document profile stays linear on adversarial 1 MiB bodies", () => {
-  const size = 1 << 20;
   for (const unit of ["eyJ-", "eyJ_", ".eyJ", "-----BEGIN eyJ-", "eyJ" + x(10) + ".", ".eyJ—"]) {
-    const body = unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
-    const before = process.cpuUsage();
-    checkOperatorText(body, "project document", "document");
-    const { user, system } = process.cpuUsage(before);
-    const ms = (user + system) / 1000;
-    assert.ok(ms < 500, `${JSON.stringify(unit)} used ${ms.toFixed(0)} ms of CPU`);
+    const make = (n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+    const quarter = make(1 << 18);
+    const full = make(1 << 20);
+    let batch = Infinity;
+    let once = Infinity;
+    for (let round = 0; round < 5; round++) {
+      batch = Math.min(batch, cpuMs([quarter, quarter, quarter, quarter]));
+      once = Math.min(once, cpuMs([full]));
+    }
+    assert.ok(
+      once < 2 * batch + 20,
+      `${JSON.stringify(unit)} used ${once.toFixed(0)} ms of CPU on 1 MiB against ${batch.toFixed(0)} ms on four 256 KiB bodies`,
+    );
   }
   const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig";
   assert.equal(
@@ -411,4 +424,5 @@ test("floors are frozen F1-F11", () => {
     FLOORS.map((floor) => floor.id),
     Array.from({ length: 11 }, (_, i) => `F${i + 1}`),
   );
+  assert.match(FLOORS.find((f) => f.id === "F2").rule, /Security and code always run/);
 });

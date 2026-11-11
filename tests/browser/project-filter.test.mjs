@@ -1,7 +1,7 @@
 // Header project filter: a checkbox menu over a saved set of hidden project keys, its
 // label and "all projects" toggle, closing, reload, the legacy single-filter migration, the
 // mirrored Display fieldset and the menu layout with a long title on a narrow screen, where
-// the open menu sits 4px under the button even when the header wraps, and wraps it on touch.
+// the open menu sits 4px under the button even when the header wraps and the long title wraps on touch.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -408,12 +408,17 @@ test("project filter", { timeout: 180000 }, async (t) => {
           menuClientWidth: menu.clientWidth,
           scrollWidth: title.scrollWidth,
           clientWidth: title.clientWidth,
+          scrollHeight: title.scrollHeight,
+          clientHeight: title.clientHeight,
+          overflow: getComputedStyle(title).overflow,
           whiteSpace: getComputedStyle(title).whiteSpace,
           text: title.textContent,
           labelHeight: label.getBoundingClientRect().height,
         };
       });
       assert.ok(m.scrollWidth <= m.clientWidth);
+      assert.ok(m.scrollHeight <= m.clientHeight);
+      assert.equal(m.overflow, "visible");
       assert.equal(m.whiteSpace, "normal");
       assert.equal(m.text, LONG);
       assert.ok(m.labelHeight > 44);

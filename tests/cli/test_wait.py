@@ -53,6 +53,14 @@ class WaitTest(IsolatedTestCase):
                 self.assertEqual((code, out), (5, ""))
                 self.assertIn(rel, err)
 
+    def test_skipped_only_for_ux_and_ui(self):
+        for name, expected in (("ux", 0), ("ui", 0), ("security", 5), ("code", 5)):
+            with self.subTest(name):
+                rel = f"round-1/review-{name}.md"
+                self.write(rel, "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: a reason.\n")
+                code, out, _ = self.wait(rel, "--timeout", "0")
+                self.assertEqual((code, out), (expected, f"{rel}: VERDICT: SKIPPED\n" if expected == 0 else ""))
+
     def test_waits_for_a_file_that_lands_before_timeout(self):
         timer = threading.Timer(0.3, self.write, ("decision.md", "APPROVE\n"))
         timer.start()
