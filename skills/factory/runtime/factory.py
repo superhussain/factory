@@ -3034,8 +3034,13 @@ def takeover(home, data, device, minutes, paths, settings, dry):
                    FACTORY_REPO_PATH=given["repo_path"], FACTORY_SESSION=tag,
                    FACTORY_PROVIDER=given["provider"], FACTORY_MODEL=given["model"],
                    FACTORY_EFFORT=given["effort"], FACTORY_PROMPT=given["prompt"])
-        ok, why, log_path = launch_idea(home, entry, live[0], launcher_argv(template, given), env)
+        argv = launcher_argv(template, given)
+        ok, why, log_path = launch_idea(home, entry, live[0], argv, env)
         if ok:
+            record_agent(home, job_id, {
+                "role": "orchestrator", "harness": given["provider"],
+                "via": "paseo" if Path(argv[0]).stem.lower() == "paseo" else "launcher", "model": given["model"],
+                **({"effort": given["effort"]} if given["effort"] else {}), "session": tag})
             print(f"took over {job_id} {slug} from {session} on {live[0]} session {tag}")
             return 1
         with open(log_path, "rb") as log:
@@ -3980,9 +3985,14 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
         entry = picked[0]
         j = next((x for x in data["jobs"] if x.get("id") == entry["id"]), None)
         arm, given = job_given(j, entry)
-        ok, detail, log_path = launch_idea(home, entry, name, launcher_argv(template, given),
+        argv = launcher_argv(template, given)
+        ok, detail, log_path = launch_idea(home, entry, name, argv,
                                            launch_env(given, given["provider"], given["model"]))
         if ok:
+            record_agent(home, entry["id"], {
+                "role": "orchestrator", "harness": given["provider"],
+                "via": "paseo" if Path(argv[0]).stem.lower() == "paseo" else "launcher", "model": given["model"],
+                **({"effort": given["effort"]} if given["effort"] else {}), "session": entry["session"]})
             print(f"launched {entry['id']} {entry['project']} on {name} session {entry['session']}")
             launches += 1
             continue
