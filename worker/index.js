@@ -11,6 +11,7 @@ import {
 import { archiveGet, runArchive } from "./archive.js";
 import { escapeHtml, readServerConfig, renderDashboard, serveAsset } from "./assets.js";
 import {
+  cleanReview,
   ESCALATION_MODEL,
   ESCALATION_REASON_BUILDER,
   ESCALATION_REASON_PERSON,
@@ -694,21 +695,24 @@ async function reviewEscalation(request, env) {
   if (typeof reviews !== "object" || reviews === null || Array.isArray(reviews))
     return reply("reviews: must be an object", 400);
   if (!Object.keys(reviews).length) return reply("reviews: must name at least one reviewer", 400);
+  const cleaned = {};
   for (const [name, text] of Object.entries(reviews)) {
     const field = `reviews.${name}`;
     if (!REVIEWERS.includes(name)) return reply(`${field}: unknown reviewer`, 400);
     if (typeof text !== "string") return reply(`${field}: must be text`, 400);
     if ([...text].length > 8000) return reply(`${field}: over 8000 characters`, 400);
-    const error = checkOperatorText(text, field, "document");
+    const clean = cleanReview(text);
+    const error = checkOperatorText(clean, field, "document");
     if (error) return reply(error, 400);
-    if (hasReservedTag(text, "review-findings"))
+    if (hasReservedTag(clean, "review-findings"))
       return reply(`${field}: contains the reserved review-findings tag`, 400);
+    cleaned[name] = clean;
   }
   if (!env.AI)
     return reply("review escalation needs the Workers AI binding; deploy the current Worker", 503);
   let result;
   try {
-    result = await env.AI.run(ESCALATION_MODEL, escalationInput(reviews));
+    result = await env.AI.run(ESCALATION_MODEL, escalationInput(cleaned));
   } catch {
     return reply("the escalation model failed", 502);
   }
