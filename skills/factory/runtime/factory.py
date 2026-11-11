@@ -32,6 +32,14 @@
   factory.py documents <project-slug>       write the project's notes, decisions and runbook, wrapped as
                                             operator-preferences data, to projects/<slug>.documents.md
                                             and print its path
+  factory.py prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]
+                                            print a role's full agent prompt (spec, build, review-security,
+                                            review-ux, review-ui, review-code, approve), or write it to
+                                            <path> with mode 600 and print the path
+  factory.py wait <project-slug>/<job-id> <artifact>... [--timeout S]
+                                            print each finished job file's first line, checking once a
+                                            second for up to S seconds (default 60); exit 3 while one is
+                                            missing, 5 while one has no valid first line
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
@@ -3840,11 +3848,9 @@ def pipeline_view(slug, data):
             "versions": versions, "prompts": prompts}
 
 
-def pipeline_cmd(slug):
-    """Print the project's effective pipeline configuration. Nothing falls back to defaults."""
-    if not SLUG.fullmatch(slug):
-        fail("usage: pipeline <project-slug>", 2)
-    status, _, text = api(factory_home(), "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+def fetch_pipeline(home, slug):
+    """The project's effective pipeline configuration, as pipeline_view returns it. Nothing falls back to defaults."""
+    status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
     if status == 404:
         fail(f"no pipeline view for {slug}: register the project, or deploy the current Worker", 4)
     if status == 409:
@@ -3853,7 +3859,14 @@ def pipeline_cmd(slug):
         data = json.loads(text)
     except ValueError:
         fail(f"malformed pipeline view for {slug}: body", 5)
-    print(json.dumps(pipeline_view(slug, data), indent=2))
+    return pipeline_view(slug, data)
+
+
+def pipeline_cmd(slug):
+    """Print the project's effective pipeline configuration."""
+    if not SLUG.fullmatch(slug):
+        fail("usage: pipeline <project-slug>", 2)
+    print(json.dumps(fetch_pipeline(factory_home(), slug), indent=2))
 
 
 def documents_cmd(slug):
@@ -3882,6 +3895,162 @@ def documents_cmd(slug):
     write_atomic(path, PREFERENCES_SENTENCE + "\n\n" + "\n\n".join(envelopes) + "\n" if envelopes
                  else "This project has no notes.md, decisions.md or runbook.md.\n")
     print(path)
+
+
+PROMPT_ROLES = ("spec", "build", "review-security", "review-ux", "review-ui", "review-code", "approve")
+PROMPT_USAGE = "usage: prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]"
+
+
+def prompt_cmd(target, role, *flags):
+    """Print one role's full agent prompt, or with --out write it to a private file and print its path."""
+    home, slug, job_id = r2_target(target, True)
+    if role not in PROMPT_ROLES:
+        fail(f"bad role {role!r}: use one of {', '.join(PROMPT_ROLES)}", 2)
+    if len(flags) % 2:
+        fail(PROMPT_USAGE, 2)
+    options = {}
+    for flag, value in zip(flags[::2], flags[1::2]):
+        if flag not in ("--round", "--port", "--out") or flag in options:
+            fail(PROMPT_USAGE, 2)
+        options[flag] = value
+    review = role.startswith("review-")
+    if "--round" in options and not (role == "build" or review):
+        fail(f"{role} takes no --round", 2)
+    if "--port" in options and role != "build":
+        fail(f"{role} takes no --port", 2)
+    if review and "--round" not in options:
+        fail(f"{role} needs --round N", 2)
+    if "--round" in options and not re.fullmatch(r"[1-9][0-9]*", options["--round"]):
+        fail("--round must be a positive integer", 2)
+    if "--port" in options and not (re.fullmatch(r"[1-9][0-9]*", options["--port"])
+                                    and int(options["--port"]) <= 65535):
+        fail("--port must be 1 to 65535", 2)
+    out = options.get("--out")
+    if out is not None:
+        out = Path(os.path.normpath(out))
+        jobs = home / "jobs"
+        if not out.is_absolute() or out == jobs or jobs in out.parents:
+            fail(f"--out must be an absolute path outside {jobs}", 2)
+
+    data = read_board(home)
+    job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+    if job is None:
+        fail(f"no job {job_id} on the board", 4)
+    project_file = project_files(home, slug)[0]
+    documents = project_file.parent / f"{slug}.documents.md"
+    if not documents.is_file():
+        fail(f"no {documents}: run factory.py documents {slug} first", 4)
+    stage = "review" if review else role
+    pipeline = fetch_pipeline(home, slug)
+    base = frontmatter(project_file)[0].get("base") or "main"
+    folder = home / "jobs" / slug / job_id
+    worktrees = home / "worktrees" / slug
+    riders = riders_of(data, job_id)
+    stacked = next((r["id"] for r in riders if r.get("stacked") is True), None)
+    tree_id = stacked if stacked and (review or role == "approve") else job_id
+    skill = Path(HERE).parent
+    lines = [f"Job id: {job_id}",
+             f"Job folder: {folder}",
+             f"Worktree: {worktrees / tree_id} (branch factory/{tree_id}, base branch {base})",
+             f"Project file: {project_file}",
+             f"Project documents: {documents}",
+             f"Visuals reference: {skill / 'references' / 'visuals.md'}",
+             f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}"]
+    round_folder = folder / f"round-{options['--round']}" if "--round" in options else None
+    if role == "spec":
+        feature = job.get("idea") or job.get("title")
+        if not feature:
+            fail(f"{job_id} has no idea or title to spec", 4)
+        if (folder / "idea-images.md").is_file():
+            lines.append(f"Idea images: {folder / 'idea-images.md'}")
+        lines += ["", "Feature text:", feature]
+        if riders:
+            lines += ["", "Batched ideas (spec each one):"]
+            lines += [f"- {r['id']}: {r.get('idea') or r.get('title')}" for r in riders]
+    elif role == "build":
+        lines.append(f"Builder name: builder-{job_id}")
+        if "--port" in options:
+            lines.append(f"Dev-server port: {options['--port']}")
+        if round_folder:
+            lines.append(f"Round folder: {round_folder}")
+        if stacked:
+            lines.append(f"Rider worktree: {worktrees / stacked} (branch factory/{stacked})")
+    elif review:
+        lines += [f"Round folder: {round_folder}", f"Your file: {round_folder / (role + '.md')}"]
+    else:
+        lines.append(f"Your file: {folder / 'decision.md'}")
+    if stage in pipeline["prompts"]:
+        lines += ["", pipeline["prompts"][stage]]
+    text = "\n".join(lines) + "\n"
+    if out is None:
+        sys.stdout.write(text)
+        return
+    for node in [out, *out.parents]:
+        if node == home:
+            break
+        if is_link(node):
+            fail(f"{node} is a symlink or junction; nothing was written", 6)
+    for parent in reversed([p for p in out.parents if not p.exists()]):
+        parent.mkdir(mode=0o700)
+    write_atomic(str(out), text)
+    os.chmod(out, 0o600)
+    print(out)
+
+
+WAIT_ARTIFACT = re.compile(r"spec\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
+WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S]"
+
+
+def wait_valid(artifact, line):
+    """True when line is a finished first line for artifact."""
+    if artifact in ("spec.md", "build.md"):
+        return bool(line.strip())
+    if artifact == "decision.md":
+        return line in ("APPROVE", "ESCALATE", "CHANGES") or line.startswith("CLOSED: ")
+    return line in ("VERDICT: PASS", "VERDICT: CHANGES")
+
+
+def wait_cmd(target, *args):
+    """Print each artifact's first line once all are valid, checking once a second until --timeout."""
+    home, slug, job_id = r2_target(target, True)
+    artifacts, timeout = [], None
+    i = 0
+    while i < len(args):
+        if args[i] == "--timeout":
+            if timeout is not None or i + 1 == len(args) or not re.fullmatch(r"[0-9]+", args[i + 1]) \
+                    or int(args[i + 1]) > 600:
+                fail("--timeout takes one value from 0 to 600 seconds", 2)
+            timeout = int(args[i + 1])
+            i += 2
+        elif WAIT_ARTIFACT.fullmatch(args[i]):
+            artifacts.append(args[i])
+            i += 1
+        else:
+            fail(f"bad artifact {args[i]!r}. " + WAIT_USAGE, 2)
+    if not artifacts:
+        fail(WAIT_USAGE, 2)
+    folder = home / "jobs" / slug / job_id
+    deadline = time.monotonic() + (60 if timeout is None else timeout)
+    while True:
+        lines = {}
+        for artifact in artifacts:
+            path = folder / artifact
+            for node in (path, path.parent, folder):
+                if is_link(node):
+                    fail(f"{node} is a symlink or junction; nothing was read through it", 6)
+            if path.is_file():
+                lines[artifact] = (path.read_text(encoding="utf-8", errors="replace").splitlines() or [""])[0]
+        missing = [a for a in artifacts if a not in lines]
+        malformed = [a for a in artifacts if a in lines and not wait_valid(a, lines[a])]
+        if not missing and not malformed:
+            for artifact in artifacts:
+                print(f"{artifact}: {lines[artifact]}")
+            return
+        if time.monotonic() >= deadline:
+            if missing:
+                fail("still missing: " + ", ".join(missing), 3)
+            fail("no valid first line: " + ", ".join(malformed), 5)
+        time.sleep(1)
 
 
 def tracer_start(j):
@@ -6021,6 +6190,8 @@ COMMANDS["routes"] = (routes_cmd, 1, 4)
 COMMANDS["unclaim"] = (unclaim, 1, 1)
 COMMANDS["pipeline"] = (pipeline_cmd, 1, 1)
 COMMANDS["documents"] = (documents_cmd, 1, 1)
+COMMANDS["prompt"] = (prompt_cmd, 2, 8)
+COMMANDS["wait"] = (wait_cmd, 2, 22)
 COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
 COMMANDS["host"] = (host_cmd, 3, 3)
