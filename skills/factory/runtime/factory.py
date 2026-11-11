@@ -6190,15 +6190,16 @@ RETRO_JOB = re.compile(r"factory-(\d{2,5})-")
 RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
 RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+")
 RETRO_HEADERS = re.compile(
-    r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))(\s*[:=]\s*)[^\r\n'\"]+")
+    r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))"
+    r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)[^\r\n'\"\\]+")
 RETRO_URL_CREDS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+@")
 RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
-RETRO_USER_PASS = re.compile(r"(\s(?:-u|--user)(?:\s+|=)?)[^\s:]*:\S+")
+RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)[^\s:]*:\S+")
 RETRO_KEYVALUE = re.compile(
-    r"(?i)([A-Za-z0-9_-]*(?:token|secret|password|passwd|api[_-]?key|credential)[A-Za-z0-9_-]*)(\"?\s*[=:]\s*)"
+    r"(?i)([A-Za-z0-9_-]*(?:token|secret|password|passwd|api[_-]?key|credential)[A-Za-z0-9_-]*)(\\?[\"']?\s*[=:]\s*)"
     r"(?:\"[^\"]*\"|'[^']*'|\S+)")
 RETRO_FLAG = re.compile(
-    r"(?i)(--[A-Za-z0-9-]*(?:token|secret|password|passwd|api-?key|credential)[A-Za-z0-9-]*)(\s+)(?!-)\S+")
+    r"(?i)(--[A-Za-z0-9_-]*(?:token|secret|password|passwd|api[_-]?key|credential)[A-Za-z0-9_-]*)(\s+)(?!-)\S+")
 RETRO_HOME = re.compile(r"^(?:[A-Za-z]-)?-(?:home|Users)-[A-Za-z0-9_]+")
 RETRO_WRITE_ONLY = "retro digests are written only by the host's bound service token"
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",

@@ -88,18 +88,24 @@ class RetroRedactTest(RetroCase):
                              ("mysql --password hunter2 db", "hunter"), ("gh auth login --with-token abc-tok", "abc-tok"),
                              ("curl -u ci:hunter2 https://example.test", "hunter"),  # gitleaks:allow synthetic curl credentials
                              ("curl --user=ci:hunter2 https://example.test", "hunter"),  # gitleaks:allow synthetic curl credentials
-                             ("Authorization=Basic dXNlcjpw", "dXNlcjpw")):
+                             ("Authorization=Basic dXNlcjpw", "dXNlcjpw"), ("{'token': 'abcsecret'}", "abcsecret"),
+                             ("{'password': 'hunter2'}", "hunter"), ("{'Cookie': 'session=abc'}", "session=abc"),
+                             ("{'Authorization': 'Basic dXNl'}", "dXNl"), ('{\\"token\\":\\"abc123secret\\"}', "abc123"),
+                             ("--api_key hunter2", "hunter"), ("-u ci:hunter2 https://example.test", "hunter")):
             with self.subTest(text=text):
                 out = factory.retro_redact(text)
                 self.assertNotIn(secret, out)
                 self.assertIn("[redacted]", out)
+        for text, kept in (('{"token":"abcdefsecret"}', '{"token":[redacted]}'),
+                           ("CF_API_TOKEN=xyz curl", "CF_API_TOKEN=[redacted] curl"),
+                           ("git push -u origin main", "git push -u origin main")):
+            self.assertEqual(factory.retro_redact(text), kept)
 
     def test_project_folds_home(self):
         self.assertEqual(self.digest()[0]["project"], "~--paseo-worktrees-ab12-factory-1017-add-x")
         self.assertEqual(factory.retro_project("-Users-x-dev"), "~-dev")
         self.assertEqual(factory.retro_project("C--Users-x-dev"), "~-dev")
         self.assertEqual(factory.retro_project("-srv-home-x"), "-srv-home-x")
-        self.assertEqual(factory.retro_redact("git push -u origin main"), "git push -u origin main")
 
     def test_project_folds_a_hyphenated_home(self):
         for home, slug, folded in (("/Users/john.doe", "-Users-john-doe-dev", "~-dev"),

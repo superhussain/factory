@@ -177,10 +177,9 @@ denial excerpts are redacted, have paths and digits normalized, and are clipped
 to 160 characters. Header values, URL passwords, bearer tokens, `curl -u` user:pass,
 secret-named values and the value after a secret-named `--` flag become
 `[redacted]`. The home prefix of `project`, through this host's user name,
-becomes `~`, and every
-string and key is cut to 160 characters. A transcript deleted mid-run is
-skipped. A window with no sessions prints nothing and exits 0. A missing
-projects directory exits 4.
+becomes `~`, and every string and key is cut to 160 characters. A
+transcript deleted mid-run is skipped. A window with no sessions prints
+nothing and exits 0. A missing projects directory exits 4.
 
 `retro push` sends the one-day digest to `PUT /api/retro/<device>/<date>.jsonl`,
 where the date is this host's local date, and prints
