@@ -5027,7 +5027,7 @@ const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
 
 // Writes the move and drops the claim, so factory.py fences the old session and the target host
 // picks the job up. Returns an error message, '' once the board is changed, or 'unchanged' when
-// the board already holds this move.
+// the board already holds this move and no pickup has claimed it.
 function moveJob(board, id, to, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
