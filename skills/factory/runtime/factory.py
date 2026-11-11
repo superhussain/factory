@@ -33,6 +33,7 @@
                                             operator-preferences data, to projects/<slug>.documents.md
                                             and print its path
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
+  factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
                                             ask whether a review round's CHANGES findings need a person,
                                             print one JSON verdict
@@ -711,6 +712,8 @@ def board(factory, job_id):
         fail("only factory.py sets done", 2)
     if "resumes" in patch:
         fail("only factory.py sets resumes", 2)
+    if "stacked" in patch:
+        fail("only factory.py stack sets stacked", 2)
     if "origin" in patch:
         fail("only factory.py suggest sets origin", 2)
     if "started" in patch:
@@ -1654,6 +1657,39 @@ def batch_cmd(target, *idea_ids):
         result = {"lead": lead_id, "riders": [entry(j) for j in riders_of(data, lead_id)],
                   "candidates": candidates[:MAX_CANDIDATES]}
         return (dump_board(data) if idea_ids else None), result
+    print(json.dumps(cas(home, "/api/board", change), indent=2))
+
+
+def stack_cmd(target, rider_id):
+    """Mark one rider of a job at spec to ship as its own PR stacked on the job's PR. Prints {"lead", "stacked"} as JSON."""
+    home, slug, lead_id = r2_target(target, True)
+    device, session, minutes = holder(home)
+    if not JOB_ID.fullmatch(rider_id) or ".." in rider_id:
+        fail(f"bad job id {rider_id!r}. Nothing was written.", 2)
+
+    def change(text):
+        data = load_board(text)
+        lead = next((j for j in data["jobs"] if j.get("id") == lead_id), None)
+        if lead is None:
+            fail(f"no job {lead_id} on the board", 4)
+        rider = next((j for j in data["jobs"] if j.get("id") == rider_id), None)
+        if rider is None:
+            fail(f"no job {rider_id} on the board", 4)
+        if not mine(lead.get("claim") or {}, device, session):
+            fail(f"{lead_id} is not held by this session. Nothing was written.", 6)
+        if lead.get("stage") != "spec":
+            fail(f"stack runs while {lead_id} is at spec, not {lead.get('stage')}", 2)
+        if lead_of(rider) != lead_id:
+            fail(f"cannot stack {rider_id}: not batched into {lead_id}. Nothing was written.", 2)
+        other = next((j["id"] for j in riders_of(data, lead_id)
+                      if j["id"] != rider_id and j.get("stacked") is True), None)
+        if other:
+            fail(f"cannot stack {rider_id}: {other} is already stacked on {lead_id}. Nothing was written.", 2)
+        result = {"lead": lead_id, "stacked": rider_id}
+        if rider.get("stacked") is True:
+            return None, result
+        patch_job(data, rider_id, {"stacked": True, "note": f"stacked PR on {lead_id}"})
+        return dump_board(data), result
     print(json.dumps(cas(home, "/api/board", change), indent=2))
 
 
@@ -5841,6 +5877,7 @@ COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
+COMMANDS["stack"] = (stack_cmd, 2, 2)
 
 def main(argv=None):
     global _HOME_OVERRIDE, _LOCATED

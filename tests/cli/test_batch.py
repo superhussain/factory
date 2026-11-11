@@ -243,3 +243,52 @@ class BatchTest(IsolatedTestCase):
             code, out, _ = invoke(factory, ["stuck", "--limit", "5"])
         self.assertEqual(code, 0)
         self.assertEqual([j["id"] for j in json.loads(out)], [LEAD])
+
+    def stack(self, *args):
+        with patch.dict(os.environ, {"PASEO_AGENT_ID": ""}):
+            return invoke(factory, ["stack", *args, "--session", "tag"])
+
+    def refuse_stack(self, code, message, *args):
+        self.assertEqual(self.stack(*args), (code, "", f"factory.py: {message}\n"))
+        self.assertEqual(self.puts, 0)
+
+    def test_stack_marks_one_rider(self):
+        self.batch(TARGET, "091-sample-typo", "092-sample-csv-name")
+        self.puts = 0
+        code, out, _ = self.stack(TARGET, "092-sample-csv-name")
+        self.assertEqual((code, self.puts), (0, 1))
+        self.assertEqual(json.loads(out), {"lead": LEAD, "stacked": "092-sample-csv-name"})
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stacked"], j["note"], j["stage"]), (True, f"stacked PR on {LEAD}", "spec"))
+        self.assertNotIn("stacked", self.job("091-sample-typo"))
+        code, out, _ = self.stack(TARGET, "092-sample-csv-name")
+        self.assertEqual((code, self.puts), (0, 1))
+        self.assertEqual(json.loads(out), {"lead": LEAD, "stacked": "092-sample-csv-name"})
+
+    def test_stack_refusals_write_nothing(self):
+        self.batch(TARGET, "091-sample-typo", "092-sample-csv-name")
+        batched = json.loads(self.text)["jobs"]
+        self.puts = 0
+        self.refuse_stack(2, "bad job id '../x'. Nothing was written.", TARGET, "../x")
+        self.refuse_stack(2, "bad job id 'bad id'. Nothing was written.", TARGET, "bad id")
+        self.refuse_stack(4, "no job 999-sample-none on the board", "sample/999-sample-none", "092-sample-csv-name")
+        self.refuse_stack(4, "no job 999-sample-none on the board", TARGET, "999-sample-none")
+        rows = json.loads(json.dumps(batched))
+        rows[0]["claim"]["session"] = "other"
+        self.set_jobs(rows)
+        self.refuse_stack(6, f"{LEAD} is not held by this session. Nothing was written.", TARGET,
+                          "092-sample-csv-name")
+        rows[0].update(claim=dict(CLAIM), stage="build")
+        self.set_jobs(rows)
+        self.refuse_stack(2, f"stack runs while {LEAD} is at spec, not build", TARGET, "092-sample-csv-name")
+        rows[0]["stage"] = "spec"
+        self.set_jobs(rows)
+        self.refuse_stack(2, f"cannot stack 093-sample-login: not batched into {LEAD}. Nothing was written.",
+                          TARGET, "093-sample-login")
+        rows[1]["stacked"] = True
+        self.set_jobs(rows)
+        self.refuse_stack(2, f"cannot stack 092-sample-csv-name: 091-sample-typo is already stacked on {LEAD}. "
+                          "Nothing was written.", TARGET, "092-sample-csv-name")
+
+    def test_cli_registers_stack(self):
+        self.assertEqual(factory.COMMANDS["stack"], (factory.stack_cmd, 2, 2))
