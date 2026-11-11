@@ -462,7 +462,11 @@ migration; their command and JSON output contract are unchanged.
   spec 800, build run section 300, review 400, decision 200 — writing short bullets
   or headings rather than long paragraphs, and link overflow detail to a
   `<file>-evidence.md` beside it instead of dropping it.
-- Run the agents in the background and handle their completions as they arrive.
+- Run the agents in the background and act on each completion notification. Then
+  read the agent's file. Only when a notification arrived without a valid file, run
+  `python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...` once. Never poll for job files
+  with `until` or `while` loops, `sleep`, file mtimes, quiet windows, Monitor or a
+  task's output file.
   Spawn all four reviewers in one message. A turn that ends on text alone is a
   report, not the end of the run. While any agent or background command is still
   running, wait for it instead of ending the run. The run ends only at a real
@@ -472,7 +476,7 @@ migration; their command and JSON output contract are unchanged.
   the round folder. Record each verdict on the board as it lands, but never resume
   the builder mid-round. Read verdicts from each file's first line: reviewers write
   `VERDICT: PASS` or `VERDICT: CHANGES`, and the approver writes `APPROVE`,
-  `ESCALATE`, or `CHANGES`.
+  `ESCALATE`, or `CHANGES`. `wait` prints those first lines.
 - Max `$PIPELINE.review_rounds` review rounds per build cycle (2 unless pipeline settings say otherwise, at most 5). If
   the last allowed round of a cycle still has a CHANGES verdict, the job goes to
   `needs-human` with a note naming the reviewers that still want changes. A `/factory rework` starts a new cycle, so count

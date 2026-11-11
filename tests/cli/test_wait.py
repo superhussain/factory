@@ -75,3 +75,14 @@ class WaitTest(IsolatedTestCase):
         code, out, err = self.wait("decision.md", "--timeout", "0")
         self.assertEqual((code, out), (6, ""))
         self.assertIn("symlink or junction", err)
+
+    def test_skill_uses_wait(self):
+        skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
+        ban = ("Never poll for job files with `until` or `while` loops, `sleep`, file mtimes, quiet windows, "
+               "Monitor or a task's output file.")
+        self.assertIn(ban, skill)
+        self.assertIn('`python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...`', skill)
+        self.assertIn("`wait` prints those first lines.", skill)
+        rest = skill.replace(ban, "")
+        for loop in ("until [", "stat -c", "quiet"):
+            self.assertNotIn(loop, rest)
