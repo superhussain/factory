@@ -2047,6 +2047,14 @@ class ApiCertFallbackTest(unittest.TestCase):
         self.assertEqual(self.opener.open.call_count, 1)
         self.assertIn("Set SSL_CERT_FILE", err.getvalue())
 
+    def test_network_error_text_is_printable(self):
+        self.opener.open.side_effect = [OSError("timed out\x1b[2J")]
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+            factory.api(self.home, "GET", "/api/board")
+        self.assertEqual((caught.exception.code, err.getvalue()),
+                         (5, "factory.py: can't reach https://factory.example.test/api/board: timed out [2J\n"))
+
 
 class JobRelTest(unittest.TestCase):
     def test_walkthrough_html_names(self):

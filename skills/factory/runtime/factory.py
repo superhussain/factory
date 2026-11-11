@@ -51,8 +51,9 @@
   factory.py idea-images <project-slug>/<job-id>
                                             materialize a job's pasted images and their
                                             Markdown into the job folder, then push them
-  factory.py sync [<project-slug>]          pull every active job of a project, or of all projects;
-                                            skips merged and closed
+  factory.py sync [<project-slug>]          pull every active job of one project
+                                            or of all projects, skipping merged
+                                            and closed jobs
   factory.py tracer sync [<project-slug>[/<job-id>]]
                                             mirror jobs into Tracer for projects listed in tracer.json
   factory.py hold <project-slug>/<job-id> [take|released]
@@ -404,9 +405,9 @@ def api(factory, method, path, body=None, ok=(200,), headers=None, raw=False):
             break
         except (OSError, ValueError) as e:
             if not cert_error(e):
-                fail(f"can't reach {url}: {e}", 5)
+                fail(f"can't reach {url}: {printable_line(str(e), 200)}", 5)
             if attempt or not os.path.isfile(FALLBACK_CA_FILE) or os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR"):
-                fail(f"can't reach {url}: {e}. Set SSL_CERT_FILE to your system CA bundle and retry.", 5)
+                fail(f"can't reach {url}: {printable_line(str(e), 200)}. Set SSL_CERT_FILE to your system CA bundle and retry.", 5)
             opener = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(
                 context=ssl.create_default_context(cafile=FALLBACK_CA_FILE)))
     # Access answers a bad or missing token with a redirect to its login page.
@@ -466,6 +467,11 @@ def lead_of(j):
     refs = j.get("refs")
     return next((r["id"] for r in refs if isinstance(r, dict) and r.get("kind") == BATCH_REF), None) \
         if isinstance(refs, list) else None
+
+
+def batch_refs(refs):
+    """The lead ids of a refs list's batched-into refs."""
+    return {r["id"] for r in refs if isinstance(r, dict) and r.get("kind") == BATCH_REF} if isinstance(refs, list) else set()
 
 
 def riders_of(data, lead_id):
@@ -797,6 +803,9 @@ def board(factory, job_id):
         if "stage" in patch and not patch["stage"]:
             fail(f"a board write cannot clear {job_id}'s stage. "
                  'Close the job with {"stage": "closed"} instead. Nothing was written.', 2)
+        if "refs" in patch and batch_refs(patch["refs"]) != batch_refs((found or {}).get("refs")):
+            fail(f"only factory.py batch and the lead's mirror add or remove a batched-into ref. "
+                 f"Keep {job_id}'s batched-into ref as it is. Nothing was written.", 2)
         job = patch_job(data, job_id, patch)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
@@ -1351,7 +1360,7 @@ def escalation_cmd(target, round_text):
             status, _, text = api(home, "POST", "/api/review/escalation", body, ok=(200, 400, 404, 502, 503),
                                   headers={"Content-Type": "application/json"})
     except SystemExit:
-        status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
+        status, text = printable_line(captured.getvalue().replace("factory.py: ", "", 1), 300) or "unknown error", ""
     verdict = escalation_verdict(text) if status == 200 else None
     if verdict is None:
         if status == 200:
@@ -4759,8 +4768,10 @@ def idea_images(target):
 
 
 def sync(slug=None):
-    """Pull every active job of one project, or of every project. Skips merged and closed
-    jobs, whose files no longer change; pull <project>/<id> fetches one."""
+    """Pull every active job of one project, or of every project.
+
+    It skips merged and closed jobs, whose files no longer change. pull <project>/<id>
+    fetches one finished job."""
     if slug:
         r2_target(slug, False)
     home, conflicted = factory_home(), []

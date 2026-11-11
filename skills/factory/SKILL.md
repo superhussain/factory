@@ -362,7 +362,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "note": "optional one-line status, e.g. escalation reason",
   "needs": "optional one line on what only the human can do, e.g. approve spec.md, or review and merge PR #123 held by merge: human",
   "port": "optional dev-server port or block the builder holds, e.g. 8130-8139",
-  "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | batched-into (set only by factory.py batch)" }],
+  "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | batched-into (set only by factory.py batch; board refuses it)" }],
   "stacked": "true on the one rider that ships as a PR stacked on its lead's PR; set only by factory.py stack",
   "build": { "state": "queued | running | done | failed", "runs": ["https://github.com/<repo>/actions/runs/1"] },
   "pipeline": { "global": 3, "project": 2 },
@@ -981,8 +981,8 @@ works from any directory.
    names before you pick it. Pick none when unsure. Run
    `batch <project>/<id> <idea-id> ... --session <tag>` with the picks. It moves them to
    `spec` behind this job with a `batched-into` ref, and from then on every stage and
-   `pr` this job gets is mirrored onto them. Exit 2, 4 or 6 writes nothing: report the
-   line and go on unbatched. Never patch a `batched-into` ref with `board`.
+   `pr` this job gets is mirrored onto them, except that a stacked rider never gets `pr`.
+   Exit 2, 4 or 6 writes nothing: report the line and go on unbatched. `board` refuses a patch that adds or removes a `batched-into` ref.
 6. Continue the loop from step 2 of `/factory <feature>`, with the `idea` field
    as the feature text. When the job has pasted images, also give the spec writer
    `$JOBS/<id>/idea-images.md` and its images, so the spec starts from the idea's
