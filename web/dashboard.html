@@ -1104,9 +1104,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     const etag = r.ok ? r.headers.get('ETag') || '' : '';
     setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
     // A socket open only catches writes made while it was down, so an unchanged board is not redrawn.
-    if (ifChanged && loaded && etag && etag === boardEtag) {
-      return true;
-    }
+    if (ifChanged && loaded && etag && etag === boardEtag) return true;
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
     boardArchived = Number.isInteger(data.archived?.max_id);
     boardUpdated = data.updated || '';
@@ -5090,7 +5088,10 @@ function closeJob(board, id, reason, now) {
   if (!j.project || j.stage === 'idea' || TERMINAL.includes(j.stage) || leadOf(j)) return 'This job can no longer be closed.';
   if (j.close) return j.close.reason === reason.trim() ? 'unchanged' : 'A close is already queued for this job.';
   const text = reason.trim();
-  if (!/^[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}$/.test(text)) return 'Enter a reason of 1 to 200 characters. Line breaks and control characters are not allowed.';
+  if (!/^[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}$/.test(text)) {
+    return 'Enter a reason of 1 to 200 characters. ' +
+      'Line breaks and control characters are not allowed.';
+  }
   j.close = { reason: text, at: now };
   j.updated = now;
   board.updated = now;

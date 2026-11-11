@@ -743,12 +743,12 @@ def board(factory, job_id):
                 fail(f"ids up to {floor} belong to archived jobs, so {job_id} cannot go back on the board. "
                      f"Read it with factory.py job {job_id}. Claim new ids with claim. "
                      "Nothing was written.", 2)
-        if found is None and not NEW_JOB_ID.fullmatch(job_id):
-            fail(f"bad job id {job_id!r}: a new job id is digits, a dash and a lowercase slug, "
-                 "like 003-rate-limiting. Nothing was written.", 2)
-        if found is None and not patch.get("stage"):
-            fail(f"{job_id} is not on the board, and a new row must set stage. "
-                 "Claim new ids with claim. Nothing was written.", 2)
+            if not NEW_JOB_ID.fullmatch(job_id):
+                fail(f"bad job id {job_id!r}: a new job id is digits, a dash and a lowercase slug, "
+                     "like 003-rate-limiting. Nothing was written.", 2)
+            if not patch.get("stage"):
+                fail(f"{job_id} is not on the board, and a new row must set stage. "
+                     "Claim new ids with claim. Nothing was written.", 2)
         held = blocking(found, device, session, minutes)
         if held:
             return None, (None, held)
@@ -1606,7 +1606,8 @@ def batch_cmd(target, *idea_ids):
     idea_ids = list(dict.fromkeys(idea_ids))
     for idea_id in idea_ids:
         if not JOB_ID.fullmatch(idea_id) or ".." in idea_id:
-            fail(f"bad job id {idea_id!r}. Nothing was written.", 2)
+            fail(f"bad job id {idea_id!r}: a job id is letters, digits, dots, dashes and underscores, "
+                 "like 003-rate-limiting. Nothing was written.", 2)
 
     def entry(j):
         return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title")}
@@ -3280,7 +3281,8 @@ def close_pass(home, data, device, minutes, dry):
         reason = close_reason(j)
         if reason is None:
             print(f"factory.py: pickup skips the close of {job_id}: "
-                  "its reason must be 1 to 200 characters, with no line breaks or control characters", file=sys.stderr)
+                  "its reason must be 1 to 200 characters, "
+                  "with no line breaks or control characters", file=sys.stderr)
             continue
         c = blocking(j, device, "", minutes)
         if c:
