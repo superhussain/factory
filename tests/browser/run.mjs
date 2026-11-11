@@ -715,6 +715,27 @@ async function capture(outdir, referencePath) {
       }
     };
     await view("jumper-archive-search", 1280, 900, "light", openArchiveJumper);
+    const openArchiveEmpty = async (page) => {
+      archivedBoard = true;
+      try {
+        await page.evaluate(() => poll());
+        await openJumper(page);
+        await page.type("#job-search", "zzz");
+        await page.evaluate(() =>
+          [...document.querySelectorAll('#job-results [role="option"]')]
+            .find((o) => o.querySelector(".title").textContent === "Search archived jobs")
+            .click(),
+        );
+        await page.waitForFunction(() =>
+          [...document.querySelectorAll("#job-results .meta")].some(
+            (el) => el.textContent === 'No archived jobs match "zzz". Pick to search again.',
+          ),
+        );
+      } finally {
+        archivedBoard = false;
+      }
+    };
+    await view("jumper-archive-empty", 1280, 900, "light", openArchiveEmpty);
     await view("backlog-triage-desktop", 1440, 900, "light", openTriage);
     await view("backlog-triage-mobile", 390, 844, "dark", openTriage);
     await view("backlog-triage-open-desktop", 1440, 900, "light", openTriageFirstPaint);
