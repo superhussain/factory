@@ -35,8 +35,8 @@ Every job still opens a PR, gets security and code reviews every round, UI and
 UX reviews in every round that changes something a person sees, and goes through
 the approver. `merge: "human"` holds every approved PR for a person, and
 `review_rounds` sets the round cap: 1 escalates after one round, and an
-all-projects value of 3 to 5 allows more rounds before needs-human. Nothing can
-skip the PR, the reviews or the approver.
+all-projects value of 3 to 5 allows more rounds before needs-human. Pipeline config
+cannot skip the PR, the reviews or the approver.
 
 ## Gate stages
 
