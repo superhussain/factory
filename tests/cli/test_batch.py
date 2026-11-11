@@ -1,3 +1,4 @@
+import io
 import json
 import os
 from pathlib import Path
@@ -228,9 +229,10 @@ class BatchTest(IsolatedTestCase):
         more = [f"{n}-sample-more" for n in range(100, 118)]
         self.set_jobs(jobs() + [idea(i) for i in more])
         with patch.dict(os.environ, {"FACTORY_SESSION": "tag"}):
-            with self.assertRaises(SystemExit) as raised:
+            with patch("sys.stderr", new_callable=io.StringIO) as err, self.assertRaises(SystemExit) as raised:
                 factory.batch_cmd(TARGET, "091-sample-typo", "092-sample-csv-name", "093-sample-login", *more)
         self.assertEqual((raised.exception.code, self.puts), (2, 0))
+        self.assertEqual(err.getvalue(), "factory.py: a batch holds at most 20 riders\n")
 
     def test_cli_accepts_twenty_idea_ids(self):
         self.assertEqual(factory.COMMANDS["batch"][1:], (1, 21))
