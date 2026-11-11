@@ -1339,9 +1339,7 @@ class MoveArchiveTest(MoveHostTest):
         self.set_stalls()
         self.moved(agent="9f1c2d3e-0000-4000-8000-000000000001", server="srv-lab")
         self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
-                                         "factory.py: pickup kept session 9f1c2d3e-0000-4000-8000-000000000001 of "
-                                         "042-sample-export: no claim recorded on this host, archive it by hand if "
-                                         "it still runs\n"))
+                                         self.hint("9f1c2d3e-0000-4000-8000-000000000001")))
         self.assertEqual(self.recorded(), [])
         self.assertEqual(self.pickup(), (0, "", ""))
 
