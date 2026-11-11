@@ -785,7 +785,7 @@ def board(factory, job_id):
                  'Close the job with {"stage": "closed"} instead. Nothing was written.', 2)
         if "refs" in patch and batch_refs(patch["refs"]) != batch_refs((found or {}).get("refs")):
             fail(f"only factory.py batch and the lead's mirror add or remove a batched-into ref. "
-                 f"Keep {job_id}'s batched-into ref as it is. Nothing was written.", 2)
+                 f"A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.", 2)
         job = patch_job(data, job_id, patch)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
