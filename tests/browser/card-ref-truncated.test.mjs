@@ -136,6 +136,56 @@ test("card ref truncated", { timeout: 240000 }, async (t) => {
         await tab(page, 2, true);
       });
 
+      await t.test(`focus ${scheme}`, async () => {
+        await page.focus(ACTIONS);
+        await tab(page, 2);
+        assert.equal(
+          await activeIs(page, `${WRAP} a.ref-focus[data-ref="061-sample-chart"]`),
+          true,
+        );
+        const e = await edges(page, SPAN);
+        assert.equal(e.focused, true);
+        assert.ok(e.scrollLeft > 0, `scrollLeft ${e.scrollLeft}`);
+        assert.ok(e.spanLeft >= e.rowLeft, `span left ${e.spanLeft} row left ${e.rowLeft}`);
+        assert.ok(e.spanLeft < e.rowRight, `span left ${e.spanLeft} row right ${e.rowRight}`);
+        await tab(page, 2, true);
+        assert.equal(await activeIs(page, ACTIONS), true);
+        assert.equal(await page.$(".ref-link.ref-focused"), null);
+        assert.equal((await edges(page, SPAN)).scrollLeft, 0);
+      });
+
+      await t.test(`labels ${scheme}`, async () => {
+        assert.deepEqual(
+          await page.$$eval(`${WRAP} a.ref-focus`, (els) =>
+            els.map((a) => [
+              a.textContent,
+              a.className,
+              getComputedStyle(a).position,
+              getComputedStyle(a).clipPath,
+            ]),
+          ),
+          LABELS.map((t) => [t, "ref-focus sr-only", "absolute", "inset(50%)"]),
+        );
+      });
+
+      await t.test(`rider ${scheme}`, async () => {
+        await page.focus(ACTIONS);
+        await tab(page, 3);
+        assert.equal(await activeIs(page, `${WRAP} a.ref-focus[data-ref="063-sample-typo"]`), true);
+        assert.equal(
+          await page.$eval(RIDER_SPAN, (el) => el.classList.contains("ref-focused")),
+          true,
+        );
+        await page.keyboard.press("Enter");
+        await page.waitForFunction(
+          () => document.querySelector("#d-title")?.textContent === "Fix the chart legend typo",
+          wait,
+        );
+        assert.equal(await page.evaluate(() => location.hash), "#063-sample-typo");
+        await page.click("#d-close");
+        await page.waitForSelector("#detail", { hidden: true });
+      });
+
       await page.close();
     }
     assert.deepEqual(errors, []);
