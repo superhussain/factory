@@ -479,7 +479,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (max-width: 760px) {
     header { position: relative; padding: 14px 16px; gap: 10px; }
     .filter-wrap { position: static; }
-    .filter-menu { left: 16px; right: 16px; min-width: 0; max-width: none; }
+    /* top: auto opens the menu right under #filter; left and right still come from the header. */
+    #filter { vertical-align: top; }
+    .filter-menu { top: auto; margin-top: 4px; left: 16px; right: 16px; min-width: 0; max-width: none; }
     :root { --icon-size: 32px; }
     .filter { padding: 4px 8px; }
 
@@ -1738,7 +1740,11 @@ function renderProjectFilter() {
     const box = Object.assign(document.createElement('input'), { type: 'checkbox' });
     box.dataset.project = key;
     const label = document.createElement('label');
-    label.append(box, Object.assign(document.createElement('span'), { className: 'filter-title', textContent: title, title }));
+    const text = document.createElement('span');
+    text.className = 'filter-title';
+    text.textContent = title;
+    text.title = title;
+    label.append(box, text);
     return label;
   });
   $('filter-menu').replaceChildren(...rows());

@@ -1,6 +1,7 @@
 // Header project filter: a checkbox menu over a saved set of hidden project keys, its
 // label and "all projects" toggle, closing, reload, the legacy single-filter migration, the
-// mirrored Display fieldset and the menu layout with a long title on a narrow screen.
+// mirrored Display fieldset and the menu layout with a long title on a narrow screen, where
+// the open menu sits 4px under the button even when the header wraps.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -12,7 +13,7 @@ import {
 } from "../support/browser-server.mjs";
 import support from "../support/project-filter.cjs";
 
-const { filterState } = support;
+const { filterState, serveProjects } = support;
 const JOBS = [
   { id: "090-alpha", project: "alpha", title: "Synthetic Alpha job", stage: "build" },
   { id: "091-beta", project: "beta", title: "Synthetic Beta job", stage: "spec" },
@@ -20,6 +21,10 @@ const JOBS = [
 ].map((job) => ({ ...job, updated: "2026-01-01T00:00:00Z" }));
 const LONG =
   "Synthetic Gamma project with a very long title that runs well past the edge of a narrow phone screen";
+const PROJECTS = [
+  { slug: "alpha", title: "Synthetic Alpha", repo: "example/sample", base: "main" },
+  { slug: "beta", title: "Synthetic Beta", repo: "example/sample", base: "main" },
+];
 const project = (title) => `---\nrepo: example/sample\nbase: main\ntitle: ${title}\n---\n`;
 const row = (key, title, checked, mixed = false) => ({ key, title, checked, mixed });
 const wait = { polling: 50 };
@@ -265,9 +270,41 @@ test("project filter", { timeout: 180000 }, async (t) => {
       await old.browserContext().close();
     });
 
+    await t.test("F13 comma key reload", async () => {
+      const comma = await open();
+      await serveProjects(comma, [
+        ...PROJECTS,
+        { slug: "a,b", title: "Synthetic Comma", repo: "example/sample", base: "main" },
+      ]);
+      await comma.evaluate(() => {
+        localStorage.clear();
+        localStorage.setItem("factory-projects-hidden", JSON.stringify(["a,b"]));
+      });
+      await comma.reload({ waitUntil: "domcontentloaded" });
+      await ready(comma);
+      assert.deepEqual(await filterState(comma), {
+        label: "3 selected",
+        rows: [
+          row("", "all projects", false, true),
+          row("alpha", "Synthetic Alpha", true),
+          row("beta", "Synthetic Beta", true),
+          row("a,b", "Synthetic Comma", false),
+          row(":unassigned", "No project yet", true),
+        ],
+        stored: '["a,b"]',
+      });
+      assert.deepEqual(await cards(comma), ["090-alpha", "091-beta", "092-loose"]);
+      await comma.browserContext().close();
+    });
+
     await t.test("F9 narrow long title", async () => {
-      await seedProject(origin, "gamma", project(LONG));
       const narrow = await open();
+      await serveProjects(narrow, [
+        ...PROJECTS,
+        { slug: "gamma", title: LONG, repo: "example/sample", base: "main" },
+      ]);
+      await narrow.reload({ waitUntil: "domcontentloaded" });
+      await ready(narrow);
       await narrow.setViewport({ width: 390, height: 844 });
       await narrow.click("#filter");
       const measure = () =>
@@ -283,6 +320,9 @@ test("project filter", { timeout: 180000 }, async (t) => {
           const accentColor = getComputedStyle(accent).color;
           accent.remove();
           return {
+            top: rect.top,
+            buttonBottom: document.getElementById("filter").getBoundingClientRect().bottom,
+            statusTop: document.querySelector("header .status").getBoundingClientRect().top,
             left: rect.left,
             right: rect.right,
             width: rect.width,
@@ -302,12 +342,15 @@ test("project filter", { timeout: 180000 }, async (t) => {
         assert.equal(m.title, LONG);
       };
       const phone = await measure();
+      assert.ok(phone.statusTop >= phone.buttonBottom);
+      assert.ok(Math.abs(phone.top - phone.buttonBottom - 4) < 1);
       assert.equal(phone.left, 16);
       assert.equal(phone.right, 374);
       title(phone);
       assert.ok(phone.accents.length > 0 && phone.accents.every(Boolean));
       await narrow.setViewport({ width: 1280, height: 900 });
       const desktop = await measure();
+      assert.ok(Math.abs(desktop.top - desktop.buttonBottom - 4) < 1);
       assert.ok(desktop.width <= 360);
       title(desktop);
       await narrow.browserContext().close();
