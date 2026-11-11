@@ -1693,7 +1693,7 @@ class CloseTest(PickupFixture):
                 self.calls.clear()
                 self.board["jobs"] = [self.closing(close={"reason": reason, "at": "2026-01-02T12:00:00Z"})]
                 self.assertEqual(self.pickup(), (0, "", "factory.py: pickup skips the close of 042-sample-export: "
-                                                        "its reason is not one line of 1 to 200 characters\n"))
+                                                        "its reason must be 1 to 200 characters, with no line breaks or control characters\n"))
                 self.assertEqual((self.puts(), self.files), ([], {}))
 
     def test_close_dry_run_writes_nothing(self):
