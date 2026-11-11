@@ -119,6 +119,19 @@ method or path under `/api/hosts` returns 404, and no route deletes a host.
 | `PUT /api/hosts/<id>/status` | the bound service token | write the status record; the Worker sets `seen` |
 | `GET /api/hosts/<id>/history` | person | every saved version of the host, newest first, with `saved_by` and `saved_at` |
 
+Retro digest routes store one redacted JSON-lines file per host per day at
+`retro/<id>/<date>.jsonl`, where the date is the host's local date. The bound
+host owns its file and nothing else writes the key. The body is at most 1 MiB of
+UTF-8, and each line is a JSON object whose `host` is the route's id. A bad id
+or calendar date answers 404, as does every other method. No route deletes a
+digest, and files are kept with no retention.
+
+| Route | Who | Effect |
+| --- | --- | --- |
+| `PUT /api/retro/<id>/<date>.jsonl` | the bound service token of a paired or active host | store or replace that host's digest for the date |
+| `GET /api/retro/<date>` | any service token | JSON list of host ids with a digest that day, in host record order |
+| `GET /api/retro/<id>/<date>.jsonl` | any service token | that host's digest as `application/x-ndjson` |
+
 The status may carry `triage_failed_since`, an ISO 8601 UTC time, while
 backlog triage fails on that host.
 

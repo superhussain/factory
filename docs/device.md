@@ -163,6 +163,8 @@ an automatic takeover or reset of review/approval counters.
 
 ```text
 python3 <installed-skill>/runtime/factory.py retro digest [--days N]
+python3 <installed-skill>/runtime/factory.py retro push
+python3 <installed-skill>/runtime/factory.py retro pull YYYY-MM-DD
 ```
 
 `retro digest` prints one JSON line per Claude Code main session whose
@@ -172,8 +174,21 @@ takes the host name from `device:` in `config.md`, else the hostname. Each row
 counts turns, tokens once per message, tools, errors and denials, and folds
 subagents in by type. It writes nothing and makes no network call. Error and
 denial excerpts are redacted, have paths and digits normalized, and are clipped
-to 160 characters. A window with no sessions prints nothing and exits 0. A
-missing projects directory exits 4.
+to 160 characters. Header values, URL passwords, bearer tokens, `curl -u` user:pass,
+secret-named values and the value after a secret-named `--` flag become
+`[redacted]`. The home prefix of `project`, through this host's user name,
+becomes `~`, and every string and key is cut to 160 characters. A
+transcript deleted mid-run is skipped. A window with no sessions prints
+nothing and exits 0. A missing projects directory exits 4.
+
+`retro push` sends the one-day digest to `PUT /api/retro/<device>/<date>.jsonl`,
+where the date is this host's local date, and prints
+`pushed N sessions to retro/<device>/<date>.jsonl`. It needs `device:` in
+`config.md` and this host's paired service token, else it exits 2 with the pair
+hint. A re-push the same day replaces that file. `retro pull YYYY-MM-DD` reads
+`GET /api/retro/<date>` and prints each listed host's lines in list order. A day
+no host pushed prints a note on stderr and exits 0. Raw transcripts never leave
+the host.
 
 ## Exit recovery
 

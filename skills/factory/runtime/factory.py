@@ -90,6 +90,8 @@
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
+  factory.py retro push                     upload that digest (last day) to retro/<device>/<local date>.jsonl
+  factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
 
 claim, next, hold, handoff, board, ideas, and stuck take --session <tag> (or
 FACTORY_SESSION). A session without one gets a new tag from claim, next, or hold,
@@ -6486,15 +6488,53 @@ RETRO_POLLS = {"until_file": re.compile(r"\buntil \[ -[fs] "),
 RETRO_JOB = re.compile(r"factory-(\d{2,5})-")
 RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
 RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+")
-RETRO_KEYVALUE = re.compile(r"(?i)\b(token|secret|password|api[_-]?key)(\s*[=:]\s*)\S+")
+RETRO_HEADERS = re.compile(
+    r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))"
+    r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)[^\r\n'\"\\]+")
+RETRO_URL_CREDS = re.compile(r"(?i)(?<![a-z0-9+.-])\b([a-z][a-z0-9+.-]{0,31}://)[^/\s@]+@")
+RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
+RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)[^\s:]*:\S+")
+RETRO_KEYVALUE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{0,64}?(?:token|secret|password|passwd|api[_-]?key|credential)"
+    r"[A-Za-z0-9_-]{0,64})(\\?[\"']?\s*[=:]\s*)"
+    r"(?:\"[^\"]*\"|'[^']*'|\S+)")
+RETRO_FLAG = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])(--[A-Za-z0-9_-]{0,64}?(?:token|secret|password|passwd|api[_-]?key|credential)"
+    r"[A-Za-z0-9_-]{0,64})(\s+)(?!-)\S+")
+RETRO_HOME = re.compile(r"^(?:[A-Za-z]-)?-(?:home|Users)-[A-Za-z0-9_]+")
+RETRO_WRITE_ONLY = "retro digests are written only by the host's bound service token"
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
 
 def retro_redact(text):
+    text = RETRO_HEADERS.sub(r"\1\2[redacted]", text)
+    text = RETRO_URL_CREDS.sub(r"\1[redacted]@", text)
+    text = RETRO_BEARER.sub(r"\1[redacted]", text)
+    text = RETRO_USER_PASS.sub(r"\1[redacted]", text)
+    text = RETRO_KEYVALUE.sub(r"\1\2[redacted]", text)
+    text = RETRO_FLAG.sub(r"\1\2[redacted]", text)
     for pattern in NOTE_SECRETS:
         text = pattern.sub("[redacted]", text)
-    return RETRO_KEYVALUE.sub(r"\1\2[redacted]", text)
+    return text
+
+
+def retro_project(name):
+    """name with its home prefix as ~. A slug turns every non-alphanumeric into -, so this host's
+    home slug finds where a hyphenated user name ends; any other home loses its first segment."""
+    home = re.sub(r"[^A-Za-z0-9]", "-", str(Path.home()))
+    if name == home or name.startswith(home + "-"):
+        return "~" + name[len(home):]
+    return RETRO_HOME.sub("~", name)
+
+
+def retro_clip(obj):
+    """obj with every string, and every dict key, cut to 160 characters."""
+    if isinstance(obj, dict):
+        return {k[:160]: retro_clip(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [retro_clip(v) for v in obj]
+    return obj[:160] if isinstance(obj, str) else obj
 
 
 def retro_pattern(text):
@@ -6624,29 +6664,37 @@ def retro_host():
     return (frontmatter(config)[0] if config.is_file() else {}).get("device") or socket.gethostname()
 
 
-def retro_digest(days):
+def retro_rows(days):
+    """This host's clipped digest rows from the last days, oldest session first."""
     root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
     if not root.is_dir():
         fail(f"no Claude Code transcripts at {root}", 4)
     host, cutoff, rows = retro_host(), time.time() - days * 86400, []
     for project in sorted(p for p in root.iterdir() if p.is_dir()):
         for path in sorted(project.glob("*.jsonl")):
-            if path.stat().st_mtime < cutoff:
+            try:
+                if path.stat().st_mtime < cutoff:
+                    continue
+                scan = retro_scan(path, True)
+            except OSError:
                 continue
-            scan = retro_scan(path, True)
             if scan["start"] is None:
                 continue
             job = RETRO_JOB.search(project.name)
-            row = {"host": host, "project": project.name, "session": path.stem,
+            row = {"host": host, "project": retro_project(project.name), "session": path.stem,
                    "job": job.group(1) if job else "ad-hoc", **scan}
-            by_type, subs = {}, sorted((project / path.stem / "subagents").glob("*.jsonl"))
-            for sub in subs:
+            by_type, scanned = {}, 0
+            for sub in sorted((project / path.stem / "subagents").glob("*.jsonl")):
                 meta = sub.with_suffix(".meta.json")
                 try:
                     kind = str(json.loads(meta.read_text(encoding="utf-8")).get("agentType") or "unknown")
                 except (OSError, ValueError, AttributeError):
                     kind = "unknown"
-                d = retro_scan(sub, False)
+                try:
+                    d = retro_scan(sub, False)
+                except OSError:
+                    continue
+                scanned += 1
                 t = by_type.setdefault(kind, {"count": 0, "turns": 0, "tokens": dict.fromkeys(RETRO_TOKENS, 0),
                                               "errors": 0, "denials": 0, "models": []})
                 t["count"] += 1
@@ -6658,16 +6706,61 @@ def retro_digest(days):
                     t["tokens"][key] += d["tokens"][key]
                 for key in RETRO_ENV_NOISE:
                     row["env_noise"][key] += d["env_noise"][key]
-            row["subagents"] = {"count": len(subs), "by_type": by_type}
-            rows.append(row)
-    for row in sorted(rows, key=lambda r: (r["start"], r["session"])):
+            row["subagents"] = {"count": scanned, "by_type": by_type}
+            rows.append(retro_clip(row))
+    return sorted(rows, key=lambda r: (r["start"], r["session"]))
+
+
+def retro_digest(days):
+    for row in retro_rows(days):
         print(json.dumps(row))
 
 
+def retro_push():
+    """PUT this host's digest to the Worker under its device name and today's local date."""
+    home = factory_home()
+    config = home / "config.md"
+    device = (frontmatter(config)[0] if config.is_file() else {}).get("device") or ""
+    hint = f"set device: in {config}; pair this host with factory.py host pair <id> <code>"
+    if not HOST_NAME.fullmatch(device):
+        fail(hint, 2)
+    rows = retro_rows(1)
+    key = f"retro/{device}/{datetime.now().date().isoformat()}.jsonl"
+    status, _, text = api(home, "PUT", f"/api/{key}", "".join(json.dumps(row) + "\n" for row in rows),
+                          ok=(200, 403), headers={"Content-Type": "application/x-ndjson"})
+    if status == 403 and text.strip() == RETRO_WRITE_ONLY:
+        fail(f"{RETRO_WRITE_ONLY}. {hint}", 2)
+    if status == 403:
+        fail(access_message(os.path.abspath(os.path.join(home, ".env"))), 5)
+    print(f"pushed {len(rows)} sessions to {key}")
+
+
+def retro_pull(date):
+    """Print every host's pushed digest for date, in the order the Worker lists the hosts."""
+    home = factory_home()
+    hosts = [h for h in json.loads(api(home, "GET", f"/api/retro/{date}")[2])
+             if isinstance(h, str) and HOST_NAME.fullmatch(h)]
+    if not hosts:
+        print(f"no host pushed a retro digest for {date}", file=sys.stderr)
+    for host in hosts:
+        sys.stdout.write(api(home, "GET", f"/api/retro/{host}/{date}.jsonl")[2])
+
+
+def retro_date(d):
+    try:
+        return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) and datetime.strptime(d, "%Y-%m-%d"))
+    except ValueError:
+        return False
+
+
 def retro_cmd(action, *args):
+    if action == "push" and not args:
+        return retro_push()
+    if action == "pull" and len(args) == 1 and retro_date(args[0]):
+        return retro_pull(args[0])
     days = args[1] if len(args) == 2 and args[0] == "--days" else "1" if not args else ""
     if action != "digest" or not (days.isascii() and days.isdigit()) or not 1 <= int(days) <= 90:
-        fail("usage: factory.py retro digest [--days N], N from 1 to 90", 2)
+        fail("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD, N from 1 to 90", 2)
     retro_digest(int(days))
 
 
