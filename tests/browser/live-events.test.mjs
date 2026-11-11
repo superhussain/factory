@@ -350,5 +350,57 @@ test("live board events", { timeout: 120000 }, async (t) => {
         await context.close();
       },
     );
+
+    await t.test(
+      "live L10 an expired sign-in stops socket retries until a board read succeeds",
+      async () => {
+        const { context, page, errors } = await open();
+        let signedOut = true;
+        await page.setRequestInterception(true);
+        page.on("request", (request) => {
+          if (signedOut && new URL(request.url()).pathname === "/board.json")
+            return request.respond({ status: 401, body: "" });
+          return request.continue();
+        });
+        assert.equal(await page.evaluate(() => poll()), false);
+        assert.equal(
+          await page.evaluate(() => !document.getElementById("conn-signin").hidden),
+          true,
+        );
+        await page.evaluate(() => liveSocket.close(1000));
+        await page.waitForFunction("liveSocket === null", wait);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.equal(await page.evaluate("liveSocket === null && liveRetryTimer === 0"), true);
+        signedOut = false;
+        assert.equal(await page.evaluate(() => poll()), true);
+        await page.waitForFunction("liveOpen", wait);
+        assert.deepEqual(
+          errors.filter((e) => !e.includes("401")),
+          [],
+        );
+        await context.close();
+      },
+    );
+
+    await t.test(
+      "live L11 an unchanged tick opens a deep-linked tab that just landed",
+      async () => {
+        const { context, page, errors } = await open();
+        await page.evaluate(() => {
+          location.hash = "001-sample/decision";
+        });
+        await page.waitForFunction('pendingTab() === "decision.md"', wait);
+        const put = await fetch(origin + "/api/jobs/sample/001-sample/decision.md", {
+          method: "PUT",
+          headers: { "If-None-Match": "*" },
+          body: "# Decision\n\nSynthetic decision.\n",
+        });
+        assert.equal(put.status, 200);
+        assert.equal(await page.evaluate(() => pollTick()), true);
+        await page.waitForSelector('#d-tabs .tab.active[data-name="decision.md"]', wait);
+        assert.deepEqual(errors, []);
+        await context.close();
+      },
+    );
   });
 });

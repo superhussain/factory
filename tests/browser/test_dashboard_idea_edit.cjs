@@ -510,6 +510,8 @@ function fakeUI(fetch) {
     script.slice(0, script.indexOf("loadProjects().then(")) +
       `
     renderBoard = () => {}; syncDetail = () => {}; renderDetail = () => {}; writeHash = () => {};
+    // setConnection() reads pollEvery(), which the page declares after this slice ends.
+    function pollEvery() { return 0; }
     this.ui = { openIdeaEditor: () => openIdeaEditor(drawerAction('d-edit-idea')), closeIdeaEditor, syncIdeaEditor, poll,
       setJobs(value) { jobs = value; }, target(id) { openId = id; drawerVersion++; },
       session() { return ideaEditor; }, jobs() { return jobs; } };
