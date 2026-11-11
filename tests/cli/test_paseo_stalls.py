@@ -112,7 +112,7 @@ class PaseoStallsTest(unittest.TestCase):
                  "provider": "claude/model-a"},
                 {"id": "bad id", "status": "idle", "provider": "claude/model-a"},
                 {"id": "ffff5555-6666-8777-8888-999900001111", "status": "idle",
-                 "provider": "claude-pe3/model-a"},
+                 "provider": "claude-alt/model-a"},
                 {"id": "abcd6666-7777-8888-9999-000011112222", "status": "idle",
                  "provider": "claudex/model-a"}],
             logs={ID: LIMIT, SECOND: WEEKLY,
