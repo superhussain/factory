@@ -233,6 +233,11 @@ def fail(msg, code=1):
     sys.exit(code)
 
 
+def printable_line(text, limit):
+    """text on one line: non-printable characters become spaces, whitespace collapses, cut to limit."""
+    return " ".join("".join(c if c.isprintable() else " " for c in text).split())[:limit]
+
+
 def now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -404,7 +409,8 @@ def api(factory, method, path, body=None, ok=(200,), headers=None, raw=False):
     if status not in ok and status in (301, 302, 303, 307, 308, 401, 403):
         fail(access_message(env_file), 5)
     if status not in ok:
-        fail(f"{method} {url} returned {status}: {text.strip()[:200]}", 5)
+        detail = text if isinstance(text, str) else text.decode("utf-8", "replace")
+        fail(f"{method} {url} returned {status}: {printable_line(detail, 200)}", 5)
     return status, got, text
 
 
@@ -546,7 +552,7 @@ def paseo_archive_command(agent):
     if not PASEO_ID.fullmatch(agent) or agent.startswith("-"):
         return None
     home = os.environ.get("PASEO_HOME")
-    return "paseo " + (f"--home {shlex.quote(home)} " if home else "") + f"archive --force {agent}"
+    return "paseo " + (f"--home {shlex.quote(home)} " if home and home.isprintable() else "") + f"archive --force {agent}"
 
 
 def paseo_claim_path(home, job_id, agent):
@@ -1327,7 +1333,7 @@ def escalation_cmd(target, round_text):
         if status == 200:
             why = "malformed reply"
         else:
-            detail = " ".join(text.split())[:200]
+            detail = printable_line(text, 200)
             why = f"{status}: {detail}" if detail else status
         print(f"factory.py: review escalation check failed ({why}); the review loop continues", file=sys.stderr)
         verdict = {**unchanged, "reason": "the escalation check failed"}
