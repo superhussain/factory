@@ -143,6 +143,9 @@ test("batch lead riders and rider actions", { timeout: 120000 }, async () => {
       (await drawerMenu(page)).filter((a) => FIVE.includes(a)).sort(),
       [...FIVE].sort(),
     );
+    // The open drawer covers the card button, so close it first.
+    await page.evaluate(() => (location.hash = ""));
+    await page.waitForFunction(() => document.querySelector("#detail").hidden);
     await openCardMenu(page, LEAD);
     assert.deepEqual(
       (await cardMenu(page)).filter((a) => FIVE.includes(a)).sort(),
