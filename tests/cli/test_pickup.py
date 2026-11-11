@@ -1609,8 +1609,8 @@ class CloseTest(PickupFixture):
         "## Left out\n\n"
         "- No agent reviewed this close. The reason is the owner's own words.\n"
         "- The next pickup run on each host that holds the worktree or branch runs "
-        "`factory.py cleanup alpha/042-sample-export` there. It keeps a dirty worktree and a branch "
-        "that is not merged.\n")
+        "`factory.py cleanup alpha/042-sample-export` there. It keeps a dirty worktree, and a branch "
+        "that is not merged unless origin holds the same commit.\n")
 
     def setUp(self):
         super().setUp()
@@ -1817,6 +1817,46 @@ class CloseCleanupTest(PickupFixture):
         self.assertNotIn("port", job)
         self.calls.clear()
         self.assert_silent(self.pickup())
+
+    def with_origin(self):
+        origin = self.home / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        self.git(self.repo_a, "remote", "add", "origin", str(origin))
+        self.git(self.repo_a, "push", "-q", "origin", "factory/042-sample-export")
+
+    def test_cleanup_deletes_a_branch_origin_holds(self):
+        self.with_origin()
+        self.board["jobs"] = [self.closed()]
+        self.assertEqual(self.pickup(), (0, "cleaned up 042-sample-export alpha\n", ""))
+        self.assertFalse(self.branch_exists())
+        self.assertEqual(self.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"], [])
+
+    def test_cleanup_keeps_a_branch_ahead_of_origin(self):
+        self.with_origin()
+        (self.wt / "more.txt").write_text("more\n")
+        self.git(self.wt, "add", "more.txt")
+        self.git(self.wt, "commit", "-q", "-m", "more")
+        self.board["jobs"] = [self.closed()]
+        self.assertEqual(self.pickup(), (0, f"cleaned up 042-sample-export alpha, left: {self.LEFT}\n", ""))
+        self.assertTrue(self.branch_exists())
+
+    def test_cleanup_keeps_a_branch_checked_out_elsewhere(self):
+        self.with_origin()
+        self.git(self.repo_a, "worktree", "remove", "--force", str(self.wt))
+        elsewhere = self.home / "elsewhere"
+        self.git(self.repo_a, "worktree", "add", "-q", str(elsewhere), "factory/042-sample-export")
+        self.board["jobs"] = [self.closed()]
+        self.pickup()
+        self.assertTrue(self.branch_exists())
+        left = self.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"]
+        self.assertEqual(len(left), 1)
+        self.assertTrue(left[0].startswith("branch factory/042-sample-export: checked out in "))
+
+    def test_cleanup_job_keeps_a_pushed_branch_by_default(self):
+        self.with_origin()
+        self.assertEqual(factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export"),
+                         ([f"worktree {self.wt}"], [self.LEFT]))
+        self.assertTrue(self.branch_exists())
 
     def test_cleanup_removes_a_merged_job(self):
         self.git(self.repo_a, "merge", "-q", "--no-ff", "-m", "merge", "factory/042-sample-export")

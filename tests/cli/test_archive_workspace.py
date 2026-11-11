@@ -194,8 +194,8 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
         return [f"commit: {line}" for line in self.git("-C", self.cwd, "log", "-2", "--format=%h %s").splitlines()]
 
     def test_inherited_commits_not_listed(self):
-        self.commit_inherited()
-        self.archived([f"commit: {self.git('-C', self.cwd, 'log', '-1', '--format=%h local').strip()}"])
+        commits = self.commit_inherited()
+        self.archived(commits[:1])
 
     def test_inherited_commits_without_creation_entry(self):
         self.archived(self.commit_inherited("-c", "core.logAllRefUpdates=false"))
