@@ -353,7 +353,12 @@ test("close job", { timeout: 240000 }, async (t) => {
         }
         await page.type("#close-job-reason", " again");
         await clearErr();
-        assert.equal(await failedSave(), "A close is already queued for this job.");
+        const edited = await failedSave();
+        if (width === 390)
+          await (
+            await page.$("#close-job-dlg")
+          ).screenshot({ path: `${SHOTS}close-edited-reason-390.png` });
+        assert.equal(edited, "A close is already queued for this job.");
         await activate("#close-job-cancel");
         await page.waitForSelector("#close-job-dlg:not([open])");
       });
