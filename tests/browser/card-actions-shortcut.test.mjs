@@ -1,6 +1,7 @@
 // The a and . keys on a hovered or focused board card, or with a job drawer open: the jumper
-// opens in actions mode with the card menu's items, then the job's PR and session links, filters
-// and runs one or opens a link, and Settings > Reference lists the keys. Cmd+K or Ctrl+K in actions mode switches to the normal jumper.
+// opens in actions mode with the card menu's items, then the job's PR and session links,
+// filters and runs one or opens a link, and Settings > Reference lists the keys. Cmd+K or
+// Ctrl+K in actions mode switches to the normal jumper.
 // Also covers the stale-action guard, the job-gone empty state and the card-gone focus fallback,
 // and captures the Reference section and the actions jumper for review.
 import assert from "node:assert/strict";
@@ -117,7 +118,7 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
       await page.waitForFunction(() => document.getElementById("job-picker").open);
       const state = await picker(page);
       assert.equal(state.heading, `Actions for ${ID}`);
-      assert.equal(state.label, "Search actions");
+      assert.equal(state.label, "Search actions and links");
       assert.deepEqual(state.options, [
         ...labels,
         "Open PR #46",
@@ -249,43 +250,46 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
           window.openedLinks.push([this.href, this.target, this.rel]);
         };
       });
-      await openActions(page, ID);
-      await page.keyboard.type("open pr");
-      const state = await picker(page);
-      assert.deepEqual(state.options, ["Open PR #46"]);
-      assert.equal(state.count, "0 actions · 1 link");
-      await page.keyboard.press("Enter");
-      assert.equal(await page.$eval("#job-picker", (el) => el.open), false);
-      assert.equal(await focused(page, ID), true);
+      try {
+        await openActions(page, ID);
+        await page.keyboard.type("open pr");
+        const state = await picker(page);
+        assert.deepEqual(state.options, ["Open PR #46"]);
+        assert.equal(state.count, "0 actions · 1 link");
+        await page.keyboard.press("Enter");
+        assert.equal(await page.$eval("#job-picker", (el) => el.open), false);
+        assert.equal(await focused(page, ID), true);
 
-      await openActions(page, ID);
-      await page.keyboard.type("session app");
-      assert.deepEqual((await picker(page)).options, ["Open in Session app"]);
-      await page.keyboard.press("Enter");
-      assert.equal(await page.$eval("#job-picker", (el) => el.open), false);
-      assert.deepEqual(await page.evaluate(() => window.openedLinks), [
-        ["https://github.com/example/sample/pull/46", "_blank", "noopener noreferrer"],
-        ["session://h/synthetic-server/agent/synthetic-agent", "", ""],
-      ]);
+        await openActions(page, ID);
+        await page.keyboard.type("session app");
+        assert.deepEqual((await picker(page)).options, ["Open in Session app"]);
+        await page.keyboard.press("Enter");
+        assert.equal(await page.$eval("#job-picker", (el) => el.open), false);
+        assert.deepEqual(await page.evaluate(() => window.openedLinks), [
+          ["https://github.com/example/sample/pull/46", "_blank", "noopener noreferrer"],
+          ["session://h/synthetic-server/agent/synthetic-agent", "", ""],
+        ]);
 
-      await openActions(page, ID);
-      await page.keyboard.type("open pr");
-      await page.evaluate((id) => {
-        jobs = jobs.map((j) => (j.id === id ? { ...j, pr: undefined } : j));
-        boardEtag = '"stale"';
-      }, ID);
-      await page.keyboard.press("Enter");
-      const stale = await picker(page);
-      assert.equal(stale.open, true);
-      assert.deepEqual(stale.options, []);
-      assert.equal((await page.evaluate(() => window.openedLinks)).length, 2);
-      await page.evaluate(() => window.fixtureBoardPoll());
-      assert.deepEqual((await picker(page)).options, ["Open PR #46"]);
-      await page.keyboard.press("Escape");
-      await page.waitForFunction(() => !document.getElementById("job-picker").open);
-      await page.evaluate(() => {
-        HTMLAnchorElement.prototype.click = window.anchorClick;
-      });
+        await openActions(page, ID);
+        await page.keyboard.type("open pr");
+        await page.evaluate((id) => {
+          jobs = jobs.map((j) => (j.id === id ? { ...j, pr: undefined } : j));
+          boardEtag = '"stale"';
+        }, ID);
+        await page.keyboard.press("Enter");
+        const stale = await picker(page);
+        assert.equal(stale.open, true);
+        assert.deepEqual(stale.options, []);
+        assert.equal((await page.evaluate(() => window.openedLinks)).length, 2);
+        await page.evaluate(() => window.fixtureBoardPoll());
+        assert.deepEqual((await picker(page)).options, ["Open PR #46"]);
+        await page.keyboard.press("Escape");
+        await page.waitForFunction(() => !document.getElementById("job-picker").open);
+      } finally {
+        await page.evaluate(() => {
+          HTMLAnchorElement.prototype.click = window.anchorClick;
+        });
+      }
     });
 
     await t.test("no target", async () => {
@@ -447,7 +451,7 @@ test("stale actions", { timeout: 180000 }, async (t) => {
       assert.equal(state.open, true);
       assert.deepEqual(state.options, []);
       assert.equal(state.count, "0 actions");
-      assert.deepEqual(await empty(page), [false, "No matching actions"]);
+      assert.deepEqual(await empty(page), [false, "No matching actions or links"]);
       assert.equal((await boardJob(origin, ID)).paused, undefined);
       await page.evaluate(() => window.fixtureBoardPoll());
       assert.deepEqual((await picker(page)).options, ["Pause pickup"]);

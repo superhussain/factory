@@ -1677,16 +1677,8 @@ function activateJobResult() {
     $('d-tabs').querySelector('.tab.active')?.focus();
     return;
   }
-  if (row.kind === 'link') {
-    const j = row.owner === openId ? jobs.find((x) => x.id === openId) : null;
-    const url = j && jobLinkUrl(j, row.link);
-    if (!url) return renderJobResults();
-    closeJobPicker();
-    openExternal(url);
-    return;
-  }
-  if (row.kind === 'job-link') {
-    const j = jobs.find((x) => x.id === pickerActions.id);
+  if (row.kind === 'link' || row.kind === 'job-link') {
+    const j = row.kind === 'link' ? (row.owner === openId ? jobs.find((x) => x.id === openId) : null) : jobs.find((x) => x.id === pickerActions.id);
     const url = j && jobLinkUrl(j, row.link);
     if (!url) return renderJobResults();
     closeJobPicker();
@@ -5940,13 +5932,15 @@ function renderJobActionResults() {
   const actions = (j ? jobActionsFor(j) : []).map((action) => ({
     kind: 'job-action', key: 'job-action:' + action, action, title: $(action).textContent, meta: 'Action · ' + j.id,
   })).filter((r) => tokens.every((t) => r.title.toLowerCase().includes(t)));
-  const links = (j ? jobLinkRows(j) : []).map(({ link, title, words, tab }) => ({
+  const linkRows = j ? jobLinkRows(j) : [];
+  const links = linkRows.map(({ link, title, words, tab }) => ({
     kind: 'job-link', key: 'job-link:' + link, link, title, words, meta: 'Link · ' + j.id + (tab ? ' · opens in a new tab' : ''),
   })).filter((r) => tokens.every((t) => r.words.toLowerCase().includes(t)));
   jobResults = [...actions, ...links];
   const A = actions.length, L = links.length;
   $('job-count').textContent = A + (A === 1 ? ' action' : ' actions') + (L ? ' · ' + L + (L === 1 ? ' link' : ' links') : '');
-  $('job-empty').textContent = j ? 'No matching actions' : 'This job is no longer on the board';
+  $('job-search-label').textContent = linkRows.length ? 'Search actions and links' : 'Search actions';
+  $('job-empty').textContent = !j ? 'This job is no longer on the board' : linkRows.length ? 'No matching actions or links' : 'No matching actions';
   $('job-empty').hidden = jobResults.length !== 0;
   renderPickerRows();
 }
