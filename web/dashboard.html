@@ -489,14 +489,14 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (max-width: 760px) {
     header { position: relative; padding: 14px 16px; gap: 10px; }
     .filter-wrap { position: static; }
-    /* top: auto opens the menu right under #filter; left and right still come from the header. */
     #filter { vertical-align: top; }
+    /* top: auto opens the menu right under #filter; left and right still come from the header. */
     .filter-menu { top: auto; margin-top: 4px; left: 16px; right: 16px; min-width: 0; max-width: none; }
     :root { --icon-size: 32px; }
     .filter { padding: 4px 8px; }
 
     .board { grid-template-columns: 1fr; padding: 16px; gap: 18px; }
-    .detail-head { padding: 14px 16px; }
+    .detail-head { padding: 14px 16px; position: relative; }
     .tabs { padding: 8px 16px; }
     .collapsed-col .column-toggle { writing-mode: horizontal-tb; width: 100%; align-items: center; }
     .collapsed-col .column-toggle > span:first-child { margin-inline-end: auto; }
@@ -508,7 +508,6 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head .close { flex: none; }
     .detail-head .links { order: 3; flex-basis: 100%; height: auto; }
     .detail-head .pr-link { margin-top: 8px; }
-    .detail-head { position: relative; }
     .detail-head .job-actions { position: static; }
     .detail-head .job-actions-menu { top: calc(100% + 4px); right: 16px; }
     .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
