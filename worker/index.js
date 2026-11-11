@@ -15,6 +15,7 @@ import {
   ESCALATION_MODEL,
   ESCALATION_REASON_BUILDER,
   ESCALATION_REASON_PERSON,
+  ESCALATION_TEXT_LIMIT,
   ESCALATION_THRESHOLD,
   escalationConfidence,
   escalationInput,
@@ -313,7 +314,9 @@ async function casPut(request, env, key, type) {
     const bad =
       (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
       (stored.etag === cond.get("If-Match")
-        ? (checkRowIds(stored.jobs, data.jobs) ?? checkArchived(stored, data))
+        ? (checkRowIds(stored.jobs, data.jobs) ??
+          checkArchived(stored, data) ??
+          checkRiderControls(stored.jobs, data.jobs))
         : null);
     if (bad) return reply(bad, 400);
   }
@@ -700,7 +703,8 @@ async function reviewEscalation(request, env) {
     const field = `reviews.${name}`;
     if (!REVIEWERS.includes(name)) return reply(`${field}: unknown reviewer`, 400);
     if (typeof text !== "string") return reply(`${field}: must be text`, 400);
-    if ([...text].length > 8000) return reply(`${field}: over 8000 characters`, 400);
+    if ([...text].length > ESCALATION_TEXT_LIMIT)
+      return reply(`${field}: over ${ESCALATION_TEXT_LIMIT} characters`, 400);
     const clean = cleanReview(text);
     const error = checkOperatorText(clean, field, "document");
     if (error) return reply(error, 400);
@@ -1073,6 +1077,30 @@ function checkArchived(stored, data) {
     const m = typeof j?.id === "string" && !ids.has(j.id) && /^(\d{3,})-/.exec(j.id);
     if (m && Number(m[1]) <= max)
       return `a board write cannot add ${quoteId(j.id)}: ids up to ${max} belong to archived jobs. Nothing was written. Upgrade the factory skill.`;
+  }
+  return null;
+}
+
+const RIDER_CONTROLS = ["move", "priority", "paused", "close"];
+const leadOfRow = (j) =>
+  Array.isArray(j?.refs)
+    ? (j.refs.find((r) => r?.kind === "batched-into" && typeof r.id === "string")?.id ?? null)
+    : null;
+
+// A rider follows its lead, so a write cannot add these dashboard controls to it.
+// An error message, or null.
+function checkRiderControls(storedJobs, jobs) {
+  const stored = new Map();
+  for (const j of storedJobs)
+    if (typeof j?.id === "string" && !stored.has(j.id)) stored.set(j.id, j);
+  for (const row of jobs) {
+    if (typeof row !== "object" || row === null || typeof row.id !== "string") continue;
+    const storedRow = stored.get(row.id);
+    const lead = leadOfRow(row) ?? leadOfRow(storedRow);
+    if (lead === null) continue;
+    const added = RIDER_CONTROLS.find((f) => f in row && !(storedRow && f in storedRow));
+    if (added)
+      return `a board write cannot add ${added} to ${quoteId(row.id)}: it is batched into ${quoteId(lead)} and follows its lead. Act on the lead instead. Nothing was written.`;
   }
   return null;
 }

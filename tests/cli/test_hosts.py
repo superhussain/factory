@@ -102,7 +102,8 @@ class PairTest(HostFixture):
                   "Each host needs its own Access service token."),
                  (403, b"Forbidden", 5, "Access rejected the service token"),
                  (401, b"", 5, "Access rejected the service token"),
-                 (500, b"boom", 5, "returned 500"))
+                 (500, b"boom", 5, "returned 500"),
+                 (500, b"boom\x1b[2Jdone", 5, "returned 500: boom [2Jdone"))
         for status, body, exit_code, message in cases:
             with self.subTest(status=status, body=body), http_fixture(
                     {PAIR: (status, body), STATUS: (200, b""), **DOCTOR}) as server:

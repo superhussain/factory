@@ -40,6 +40,7 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
     page.on("pageerror", (error) => errors.push(String(error)));
     const asked = [];
     let archivedField = false;
+    let held = null;
     await page.setRequestInterception(true);
     page.on("request", (request) => {
       const url = new URL(request.url());
@@ -56,15 +57,20 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
         return request.continue();
       const q = url.searchParams.get("q");
       asked.push(q);
-      if (q === "boom") return request.respond({ status: 500, body: "boom" });
-      const jobs = [ARCHIVED].filter((j) =>
-        [j.id, j.title, j.project].some((f) => f.toLowerCase().includes(q.toLowerCase())),
-      );
-      return request.respond({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ jobs, total: jobs.length }),
-      });
+      const respond = () => {
+        if (q === "boom") return request.respond({ status: 500, body: "boom" });
+        const jobs = [ARCHIVED].filter((j) =>
+          [j.id, j.title, j.project].some((f) => f.toLowerCase().includes(q.toLowerCase())),
+        );
+        return request.respond({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ jobs, total: jobs.length }),
+        });
+      };
+      const gate = held;
+      held = null;
+      return gate ? gate.then(respond) : respond();
     });
     const options = () =>
       page.$$eval('#job-results [role="option"]', (rows) =>
@@ -195,6 +201,25 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       await waitMeta('No archived jobs match "zzz". Pick to search again.');
       assert.equal(await count(), base + " · no archived matches");
       assert.equal(asked.at(-1), "zzz");
+    });
+
+    await t.test("a repeat pick re-announces", async () => {
+      const suffix = " · no archived matches";
+      const done = await count();
+      assert.ok(done.endsWith(suffix));
+      const base = done.slice(0, -suffix.length);
+      let release;
+      held = new Promise((resolve) => (release = resolve));
+      try {
+        await page.keyboard.press("Enter");
+        await waitMeta("Searching archived jobs");
+        assert.equal(await count(), base);
+      } finally {
+        release();
+      }
+      await waitMeta('No archived jobs match "zzz". Pick to search again.');
+      assert.equal(await count(), done);
+      assert.deepEqual(asked.slice(-2), ["zzz", "zzz"]);
     });
 
     await t.test("an error says so", async () => {

@@ -369,6 +369,7 @@ test("an empty jobs write keeps the archived field and its floor", async () => {
   const kept = await write({ ...board, jobs: [] });
   assert.equal(kept.status, 200);
   assert.deepEqual(s.read("board.json").archived, board.archived);
+  assert.equal(s.read("board.json").archived.max_id, 416);
 });
 
 test("the scheduled handler runs the pass through waitUntil", async () => {

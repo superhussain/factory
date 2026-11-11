@@ -1041,6 +1041,16 @@ class PaseoClaimHomeTest(IsolatedTestCase):
                 factory.claim_id(self.home, "sample-export", "sample")
         self.assertEqual(self.store["/api/board"], before)
 
+    def test_claim_id_resolves_home_before_the_folder_and_session(self):
+        fresh = self.home / "fresh"
+        with patch.dict(os.environ, {"FACTORY_SESSION": ""}), patch.object(
+                factory, "factory_home", side_effect=SystemExit(2)), patch.object(
+                factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}):
+            with self.assertRaises(SystemExit):
+                factory.claim_id(fresh, "sample-export", "sample")
+            self.assertEqual(os.environ["FACTORY_SESSION"], "")
+        self.assertFalse(fresh.exists())
+
     def test_board_without_paseo_skips_the_home(self):
         with patch.object(factory, "factory_home", side_effect=SystemExit(2)), patch.object(
                 factory, "paseo_session", return_value=None), \
@@ -1398,6 +1408,16 @@ class MoveFenceTest(IsolatedTestCase):
             factory.board(self.home, "001-test")
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("only the dashboard sets paused", err.getvalue())
+        self.assertEqual(self.store["/api/board"], before)
+
+    def test_board_refuses_a_stacked_patch(self):
+        before = self.store["/api/board"]
+        err = io.StringIO()
+        with patch.object(factory.sys, "stdin", io.StringIO('{"stacked": true}')), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            factory.board(self.home, "001-test")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("only factory.py stack sets stacked", err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
     def test_board_refuses_a_close_patch(self):
@@ -2036,6 +2056,14 @@ class ApiCertFallbackTest(unittest.TestCase):
         self.assertEqual(caught.exception.code, 5)
         self.assertEqual(self.opener.open.call_count, 1)
         self.assertIn("Set SSL_CERT_FILE", err.getvalue())
+
+    def test_network_error_text_is_printable(self):
+        self.opener.open.side_effect = [OSError("timed out\x1b[2J")]
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+            factory.api(self.home, "GET", "/api/board")
+        self.assertEqual((caught.exception.code, err.getvalue()),
+                         (5, "factory.py: can't reach https://factory.example.test/api/board: timed out [2J\n"))
 
 
 class JobRelTest(unittest.TestCase):

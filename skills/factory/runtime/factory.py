@@ -33,6 +33,7 @@
                                             operator-preferences data, to projects/<slug>.documents.md
                                             and print its path
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
+  factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
                                             ask whether a review round's CHANGES findings need a person,
                                             print one JSON verdict
@@ -50,7 +51,9 @@
   factory.py idea-images <project-slug>/<job-id>
                                             materialize a job's pasted images and their
                                             Markdown into the job folder, then push them
-  factory.py sync [<project-slug>]          pull every active job of a project, or of all projects; skips merged and closed
+  factory.py sync [<project-slug>]          pull every active job of one project
+                                            or of all projects, skipping merged
+                                            and closed jobs
   factory.py tracer sync [<project-slug>[/<job-id>]]
                                             mirror jobs into Tracer for projects listed in tracer.json
   factory.py hold <project-slug>/<job-id> [take|released]
@@ -127,6 +130,7 @@ SLUG = re.compile(r"[\w-]+")
 BACKLOG_LINE = re.compile(r"^- \[ \] ([\w-]+): (\S.*)$")
 # Starts with a word character, so "." and ".." are never ids.
 JOB_ID = re.compile(r"\w[\w.-]*", re.ASCII)
+BACKLOG_PICK = re.compile(r"backlog:[0-9a-f]{12}")
 # What a new board row's id must look like. Older rows keep the ids they have.
 NEW_JOB_ID = re.compile(r"[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*")
 JOB_REL = re.compile(r"(?:(round-\d+/)?[\w.-]+\.(md|png|jpe?g|gif|webp)|(round-\d+/)?[\w-]+\.walkthrough\.html|walkthrough\.html)", re.ASCII)
@@ -221,6 +225,8 @@ UNATTENDED = (
     "does not override the security floors, the confirmation a risky or destructive action "
     "needs, or any rule that holds work for a human.")
 _HOME_OVERRIDE = None
+# Inside one main() call, the pointer-selected home already validated, keyed by pointer path.
+_LOCATED = None
 BACKLOG_TEMPLATE = (
     "# factory backlog\n\n"
     "One feature per line, as `- [ ] <slug>: <feature>`. `factory.py backlog add` appends one,\n"
@@ -231,6 +237,11 @@ BACKLOG_TEMPLATE = (
 def fail(msg, code=1):
     print(f"factory.py: {msg}", file=sys.stderr)
     sys.exit(code)
+
+
+def printable_line(text, limit):
+    """text on one line: non-printable characters become spaces, whitespace collapses, cut to limit."""
+    return " ".join("".join(c if c.isprintable() else " " for c in text).split())[:limit]
 
 
 def now():
@@ -395,16 +406,17 @@ def api(factory, method, path, body=None, ok=(200,), headers=None, raw=False):
             break
         except (OSError, ValueError) as e:
             if not cert_error(e):
-                fail(f"can't reach {url}: {e}", 5)
+                fail(f"can't reach {url}: {printable_line(str(e), 200)}", 5)
             if attempt or not os.path.isfile(FALLBACK_CA_FILE) or os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR"):
-                fail(f"can't reach {url}: {e}. Set SSL_CERT_FILE to your system CA bundle and retry.", 5)
+                fail(f"can't reach {url}: {printable_line(str(e), 200)}. Set SSL_CERT_FILE to your system CA bundle and retry.", 5)
             opener = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(
                 context=ssl.create_default_context(cafile=FALLBACK_CA_FILE)))
     # Access answers a bad or missing token with a redirect to its login page.
     if status not in ok and status in (301, 302, 303, 307, 308, 401, 403):
         fail(access_message(env_file), 5)
     if status not in ok:
-        fail(f"{method} {url} returned {status}: {text.strip()[:200]}", 5)
+        detail = text if isinstance(text, str) else text.decode("utf-8", "replace")
+        fail(f"{method} {url} returned {status}: {printable_line(detail, 200)}", 5)
     return status, got, text
 
 
@@ -446,7 +458,7 @@ def patch_job(data, job_id, patch):
             job["done"] = job["updated"]
         else:
             job.pop("done", None)
-    if (job.get("stage") != prev or "pr" in patch) and lead_of(job) is None:
+    if (job.get("stage") != prev or "pr" in patch or "needs" in patch) and lead_of(job) is None:
         mirror_batch(data, job)
     return job
 
@@ -458,21 +470,57 @@ def lead_of(j):
         if isinstance(refs, list) else None
 
 
+def batch_refs(refs):
+    """The lead ids of a refs list's batched-into refs."""
+    return {r["id"] for r in refs if isinstance(r, dict) and r.get("kind") == BATCH_REF} if isinstance(refs, list) else set()
+
+
 def riders_of(data, lead_id):
     return [j for j in data["jobs"] if lead_of(j) == lead_id]
 
 
 def mirror_batch(data, lead):
-    """Move a lead's riders with it: its stage and PR, or back to idea when it closes."""
+    """Move a lead's riders with it: its stage and PR, or back to idea when it closes. A stacked
+    rider takes the stage only, and leaves the batch when the lead merges. Each rider shows the
+    lead's needs ask while the lead is at needs-human."""
     for rider in riders_of(data, lead["id"]):
         if rider.get("stage") in TERMINAL:
             continue
+        stacked = rider.get("stacked") is True
+        refs = [r for r in rider["refs"] if isinstance(r, dict) and r.get("kind") != BATCH_REF]
+        ask = lead.get("needs") if lead.get("stage") == "needs-human" else None
         if lead.get("stage") == "closed":
-            refs = [r for r in rider["refs"] if isinstance(r, dict) and r.get("kind") != BATCH_REF]
-            patch_job(data, rider["id"], {"stage": IDEA, "refs": refs or None,
-                                          "note": f"unbatched: {lead['id']} closed"})
+            change = {"stage": IDEA, "refs": refs or None, "note": f"unbatched: {lead['id']} closed",
+                      "needs": None}
+            if stacked:
+                change.update(stacked=None, pr=None)
+                if rider.get("pr"):
+                    change["note"] += f"; stacked PR {rider['pr']} is still open"
+            patch_job(data, rider["id"], change)
+        elif not stacked:
+            change = {"stage": lead.get("stage"), "pr": lead.get("pr"), "needs": ask}
+            if not unchanged(rider, change):
+                patch_job(data, rider["id"], change)
+        elif lead.get("stage") != "merged":
+            change = {"stage": lead.get("stage"), "needs": ask}
+            if not unchanged(rider, change):
+                patch_job(data, rider["id"], change)
+        elif rider.get("pr"):
+            refs = [{"id": lead["id"], "kind": "follow-up-of"} if r.get("kind") == BATCH_REF else r
+                    for r in rider["refs"] if isinstance(r, dict)]
+            patch_job(data, rider["id"], {"refs": refs, "stacked": None,
+                                          "automerge": True if lead.get("automerge") is True else None,
+                                          "escalated": True if lead.get("escalated") is True else None,
+                                          "note": f"stacked on {lead['id']}, which merged", "needs": None})
         else:
-            patch_job(data, rider["id"], {"stage": lead.get("stage"), "pr": lead.get("pr")})
+            patch_job(data, rider["id"], {"stage": IDEA, "refs": refs or None, "stacked": None,
+                                          "note": f"unbatched: {lead['id']} merged before its stacked PR opened",
+                                          "needs": None})
+
+
+def unchanged(rider, change):
+    """True when patching rider with change would set nothing new."""
+    return all(rider.get(k) == v for k, v in change.items())
 
 
 def merge_patch(target, patch):
@@ -546,7 +594,7 @@ def paseo_archive_command(agent):
     if not PASEO_ID.fullmatch(agent) or agent.startswith("-"):
         return None
     home = os.environ.get("PASEO_HOME")
-    return "paseo " + (f"--home {shlex.quote(home)} " if home else "") + f"archive --force {agent}"
+    return "paseo " + (f"--home {shlex.quote(home)} " if home and home.isprintable() else "") + f"archive --force {agent}"
 
 
 def paseo_claim_path(home, job_id, agent):
@@ -702,6 +750,8 @@ def board(factory, job_id):
         fail("only factory.py sets done", 2)
     if "resumes" in patch:
         fail("only factory.py sets resumes", 2)
+    if "stacked" in patch:
+        fail("only factory.py stack sets stacked", 2)
     if "origin" in patch:
         fail("only factory.py suggest sets origin", 2)
     if "started" in patch:
@@ -767,6 +817,9 @@ def board(factory, job_id):
         if "stage" in patch and not patch["stage"]:
             fail(f"a board write cannot clear {job_id}'s stage. "
                  'Close the job with {"stage": "closed"} instead. Nothing was written.', 2)
+        if "refs" in patch and batch_refs(patch["refs"]) != batch_refs((found or {}).get("refs")):
+            fail(f"only factory.py batch and the lead's mirror add or remove a batched-into ref. "
+                 f"A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.", 2)
         job = patch_job(data, job_id, patch)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
@@ -953,6 +1006,8 @@ def claim_id(factory, feature_slug, project_slug):
     for slug in (feature_slug, project_slug):
         if not SLUG.fullmatch(slug):
             fail(f"bad slug {slug!r}: use letters, digits, - and _", 2)
+    paseo = paseo_session()
+    home = factory_home() if paseo else None
     jobs = Path(factory, "jobs")
     jobs.mkdir(parents=True, exist_ok=True)
 
@@ -960,8 +1015,6 @@ def claim_id(factory, feature_slug, project_slug):
     local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
     new_session()
     device, session, _ = holder(factory)
-    paseo = paseo_session()
-    home = factory_home() if paseo else None
 
     def add(text):
         data = load_board(text)
@@ -1106,10 +1159,11 @@ def backlog_add(item, context=None):
     if item.splitlines() != [item]:
         fail(f"bad item {item!r}: it must be one line, with no line or paragraph separators", 2)
     item = item.rstrip()
+    line = f"- [ ] {item}"
     m = re.fullmatch(r"([\w-]+): (\S.*)", item)
     if not m:
         fail(f"bad item {item!r}: use <slug>: <feature> on one line", 2)
-    block = "".join(("  " + line).rstrip() + "\n" for line in context.split("\n")) if context else ""
+    block = "".join(("  " + row).rstrip() + "\n" for row in context.split("\n")) if context else ""
     home = factory_home()
     projects = {p["slug"] for p in json.loads(api(home, "GET", "/projects.json")[2])}
     if m.group(1) not in projects:
@@ -1118,28 +1172,28 @@ def backlog_add(item, context=None):
     def append(text):
         text = BACKLOG_TEMPLATE if text is None else text
         done = re.compile(rf"- \[x\] {re.escape(item)} \((\S+)\)")
-        lines = [line.rstrip("\r") for line in text.split("\n")]
-        if f"- [ ] {item}" in lines:
+        lines = [row.rstrip() for row in text.split("\n")]
+        if line in lines:
             return None, ""
         checked = next((m.group(1) for m in map(done.fullmatch, lines) if m), None)
         if checked:
             return None, checked
         if text and not text.endswith("\n"):
             text += "\n"
-        return text + f"- [ ] {item}\n" + block, True
+        return text + line + "\n" + block, True
     added = cas(home, "/api/backlog", append)
     if added is not True:
-        print(f"already in backlog: {item}")
-        print(f"link: {api_url(home)}/#{added}" if added else f"link: {backlog_link(home, f'- [ ] {item}')}")
+        print(f"already in backlog: {item}" + (" (the --context file was not added)" if context else ""))
+        print(f"link: {api_url(home)}/#{urllib.parse.quote(added, safe='')}" if added else f"link: {backlog_link(home, line)}")
         return
     print(f"added {item}" + (" with context" if context else ""))
-    print(f"link: {backlog_link(home, f'- [ ] {item}')}")
+    print(f"link: {backlog_link(home, line)}")
     verdict, final = backlog_triage(home, item, context)
     left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict)
     if final and (verdict is None or verdict["decision"] != "queue" or left):
         triaged = read_triaged(home)
-        if f"- [ ] {item}" not in triaged:
-            save_triaged(home, triaged + [f"- [ ] {item}"])
+        if line not in triaged:
+            save_triaged(home, triaged + [line])
 
 
 def report_verdict(home, slug, feature, item, verdict):
@@ -1192,6 +1246,22 @@ def unchecked_lines(text):
         while held and not held[-1].strip():
             held.pop()
         found.append((line, m.group(1), m.group(2), "\n".join(held)))
+    return found
+
+
+def backlog_candidates(text, slug):
+    """{"backlog:<key>": (raw, feature, ref, entry)} for the project's unchecked backlog lines, in
+    file order. entry is the batch candidate {"id", "title", "idea"}; ref is the suffix match or None."""
+    found = {}
+    for raw, line_slug, feature, context in unchecked_lines(text):
+        key = f"backlog:{backlog_key(raw)}"
+        if line_slug != slug or key in found:
+            continue
+        feature = feature.rstrip()
+        ref = BACKLOG_SUFFIX.search(feature)
+        body = (feature[:ref.start()] if ref else feature).strip()
+        found[key] = (raw, feature, ref, {"id": key, "title": body[:80],
+                                          "idea": f"{body}\n\n{context}" if context else body})
     return found
 
 
@@ -1320,13 +1390,13 @@ def escalation_cmd(target, round_text):
             status, _, text = api(home, "POST", "/api/review/escalation", body, ok=(200, 400, 404, 502, 503),
                                   headers={"Content-Type": "application/json"})
     except SystemExit:
-        status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
+        status, text = printable_line(captured.getvalue().replace("factory.py: ", "", 1), 300) or "unknown error", ""
     verdict = escalation_verdict(text) if status == 200 else None
     if verdict is None:
         if status == 200:
             why = "malformed reply"
         else:
-            detail = " ".join(text.split())[:200]
+            detail = printable_line(text, 200)
             why = f"{status}: {detail}" if detail else status
         print(f"factory.py: review escalation check failed ({why}); the review loop continues", file=sys.stderr)
         verdict = {**unchanged, "reason": "the escalation check failed"}
@@ -1599,15 +1669,25 @@ def batch_problem(data, j, slug, device, session, minutes):
 
 
 def batch_cmd(target, *idea_ids):
-    """List the project's ideas that can ride in a job at spec, or attach up to MAX_RIDERS of them
-    as riders in one board write. Prints {"lead", "riders", "candidates"} as JSON."""
+    """List the project's ideas and unchecked backlog lines that can ride in a job at spec, or attach
+    up to MAX_RIDERS of them as riders. A backlog line becomes a new rider job and is checked off with
+    its id. Prints {"lead", "riders", "candidates"} as JSON."""
     home, slug, lead_id = r2_target(target, True)
     device, session, minutes = holder(home)
     idea_ids = list(dict.fromkeys(idea_ids))
     for idea_id in idea_ids:
-        if not JOB_ID.fullmatch(idea_id) or ".." in idea_id:
+        if not BACKLOG_PICK.fullmatch(idea_id) and (not JOB_ID.fullmatch(idea_id) or ".." in idea_id):
             fail(f"bad job id {idea_id!r}: a job id is letters, digits, dots, dashes and underscores, "
                  "like 003-rate-limiting. Nothing was written.", 2)
+    status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
+    lines = backlog_candidates(text if status == 200 else "", slug)
+    line_picks = [i for i in idea_ids if BACKLOG_PICK.fullmatch(i)]
+    job_picks = [i for i in idea_ids if not BACKLOG_PICK.fullmatch(i)]
+    for pick in line_picks:
+        if pick not in lines:
+            fail(f"no unchecked {slug} backlog line {pick}. Nothing was written.", 4)
+    jobs = Path(home, "jobs")
+    local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
 
     def entry(j):
         return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title")}
@@ -1627,7 +1707,7 @@ def batch_cmd(target, *idea_ids):
             if len(riders_of(data, lead_id)) + len(idea_ids) > MAX_RIDERS:
                 fail(f"a batch holds at most {MAX_RIDERS} ideas", 2)
             picked = []
-            for idea_id in idea_ids:
+            for idea_id in job_picks:
                 j = next((x for x in data["jobs"] if x.get("id") == idea_id), None)
                 if j is None:
                     fail(f"no job {idea_id} on the board", 4)
@@ -1639,12 +1719,93 @@ def batch_cmd(target, *idea_ids):
                 j.pop("claim", None)
                 patch_job(data, j["id"], {"stage": "spec", "note": f"batched into {lead_id}",
                                           "refs": [*(j.get("refs") or []), {"id": lead_id, "kind": BATCH_REF}]})
+        made = {}
+        for pick in line_picks:
+            _, _, ref, candidate = lines[pick]
+            job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]],
+                                 feature_slug(candidate["title"]), archive_floor(data))
+            refs = ([{"id": ref.group(2), "kind": ref.group(1)}] if ref else []) + [{"id": lead_id, "kind": BATCH_REF}]
+            patch_job(data, job_id, {"project": slug, "title": candidate["title"], "idea": candidate["idea"],
+                                     "stage": "spec", "note": f"batched into {lead_id}", "refs": refs})
+            made[pick] = job_id
         candidates = [entry(j) for j in data["jobs"]
                       if j.get("id") != lead_id and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
                       and batch_problem(data, j, slug, device, session, minutes) is None]
+        candidates += [v[3] for k, v in lines.items() if k not in line_picks]
         result = {"lead": lead_id, "riders": [entry(j) for j in riders_of(data, lead_id)],
                   "candidates": candidates[:MAX_CANDIDATES]}
-        return (dump_board(data) if idea_ids else None), result
+        return (dump_board(data) if idea_ids else None), (result, made)
+    result, made = cas(home, "/api/board", change)
+
+    def mark(text):
+        rows, marked = (text or "").split("\n"), set()
+        for n, row in enumerate(rows):
+            pick = next((p for p in made if p not in marked and lines[p][0] == row.rstrip("\r")), None)
+            if pick:
+                rows[n] = f"- [x] {slug}: {lines[pick][1]} ({made[pick]})"
+                marked.add(pick)
+        return ("\n".join(rows) if marked else None), {p: r for p, r in made.items() if p not in marked}
+
+    def drop(ids):
+        def remove(text):
+            data = load_board(text)
+            keep = [j for j in data["jobs"]
+                    if not (j.get("id") in ids and lead_of(j) == lead_id and j.get("stage") == "spec")]
+            if len(keep) == len(data["jobs"]):
+                return None, None
+            data["jobs"], data["updated"] = keep, now()
+            return dump_board(data), None
+        cas(home, "/api/board", remove)
+
+    if made:
+        try:
+            missing = cas(home, "/api/backlog", mark)
+        except SystemExit:
+            try:
+                drop(set(made.values()))
+            except SystemExit:
+                pass
+            print(f"factory.py: batch removed {', '.join(made.values())}; their backlog lines stay unchecked",
+                  file=sys.stderr)
+            raise
+        for pick, rider_id in missing.items():
+            drop({rider_id})
+            print(f"factory.py: {pick} changed before batch could check it off; removed {rider_id}",
+                  file=sys.stderr)
+            result["riders"] = [r for r in result["riders"] if r["id"] != rider_id]
+    print(json.dumps(result, indent=2))
+
+
+def stack_cmd(target, rider_id):
+    """Mark one rider of a job at spec to ship as its own PR stacked on the job's PR. Prints {"lead", "stacked"} as JSON."""
+    home, slug, lead_id = r2_target(target, True)
+    device, session, minutes = holder(home)
+    if not JOB_ID.fullmatch(rider_id) or ".." in rider_id:
+        fail(f"bad job id {rider_id!r}. Nothing was written.", 2)
+
+    def change(text):
+        data = load_board(text)
+        lead = next((j for j in data["jobs"] if j.get("id") == lead_id), None)
+        if lead is None:
+            fail(f"no job {lead_id} on the board", 4)
+        rider = next((j for j in data["jobs"] if j.get("id") == rider_id), None)
+        if rider is None:
+            fail(f"no job {rider_id} on the board", 4)
+        if not mine(lead.get("claim") or {}, device, session):
+            fail(f"{lead_id} is not held by this session. Nothing was written.", 6)
+        if lead.get("stage") != "spec":
+            fail(f"stack runs while {lead_id} is at spec, not {lead.get('stage')}", 2)
+        if lead_of(rider) != lead_id:
+            fail(f"cannot stack {rider_id}: not batched into {lead_id}. Nothing was written.", 2)
+        other = next((j["id"] for j in riders_of(data, lead_id)
+                      if j["id"] != rider_id and j.get("stacked") is True), None)
+        if other:
+            fail(f"cannot stack {rider_id}: {other} is already stacked on {lead_id}. Nothing was written.", 2)
+        result = {"lead": lead_id, "stacked": rider_id}
+        if rider.get("stacked") is True:
+            return None, result
+        patch_job(data, rider_id, {"stacked": True, "note": f"stacked PR on {lead_id}"})
+        return dump_board(data), result
     print(json.dumps(cas(home, "/api/board", change), indent=2))
 
 
@@ -2307,9 +2468,8 @@ ADAPTER_TIMEOUT_SECONDS = 120
 TAKEOVER_MINUTES = 30
 
 
-def pickup_settings(home, slug, repo, device):
-    """(enabled, hosts, None) from the project's effective pipeline, or (None, None, reason).
-    When pickup is on and lists device, an unsafe checkout at repo is the reason."""
+def pickup_config(home, slug):
+    """(enabled, hosts, None) from the project's effective pipeline, or (None, None, reason)."""
     status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
     if status == 404:
         return None, None, "no pipeline view; register the project or deploy the current Worker"
@@ -2324,12 +2484,19 @@ def pickup_settings(home, slug, repo, device):
     p = view.get("pickup") if isinstance(view, dict) else None
     if isinstance(p, dict) and isinstance(p.get("enabled"), bool) and isinstance(p.get("hosts"), list) \
             and all(isinstance(h, str) and HOST_NAME.fullmatch(h) for h in p["hosts"]):
-        if p["enabled"] and device in p["hosts"]:
-            problem = checkout_problem(home, slug, repo)
-            if problem:
-                return None, None, problem
         return p["enabled"], p["hosts"], None
     return None, None, "malformed pickup in the pipeline view"
+
+
+def pickup_settings(home, slug, repo, device):
+    """(enabled, hosts, None) from the project's effective pipeline, or (None, None, reason).
+    When pickup is on and lists device, an unsafe checkout at repo is the reason."""
+    enabled, hosts, why = pickup_config(home, slug)
+    if enabled and device in hosts:
+        problem = checkout_problem(home, slug, repo)
+        if problem:
+            return None, None, problem
+    return enabled, hosts, why
 
 
 def host_max_inflight(home, device):
@@ -3186,6 +3353,15 @@ def close_reason(j):
     return r if CLOSE_REASON.fullmatch(r) else None
 
 
+def recorded_holders(j):
+    """Hosts the board records as holding the job: its claim and each move's from, sorted."""
+    c, m = j.get("claim"), j.get("move")
+    found = [c.get("device")] if isinstance(c, dict) else []
+    if isinstance(m, dict):
+        found += [x.get("from") for x in [*earlier_moves(m), m]]
+    return sorted({h for h in found if isinstance(h, str) and HOST_NAME.fullmatch(h)})
+
+
 def closing_message(job_id):
     return f"{job_id} has a close queued from the dashboard. Nothing else was written. Stop this session."
 
@@ -3201,56 +3377,82 @@ PR_EVIDENCE = {"closed": "closed by pickup with a comment that links this page",
 
 
 def gh_pr(*args):
-    """(returncode, stdout) of `gh pr <args>`, (1, "") when it cannot run, None without gh."""
+    """(returncode, stdout) of gh pr <args>: (1, "") when it cannot start,
+    ("timeout", "") past 60 seconds, None without gh."""
     gh = shutil.which("gh")
     if gh is None:
         return None
     try:
-        r = subprocess.run([gh, "pr", *args], capture_output=True, encoding="utf-8", errors="replace", timeout=60,
-                           stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired):
+        r = subprocess.run([gh, "pr", *args], capture_output=True, encoding="utf-8",
+                           errors="replace", timeout=60, stdin=subprocess.DEVNULL)
+    except OSError:
         return 1, ""
+    except subprocess.TimeoutExpired:
+        return "timeout", ""
     return r.returncode, r.stdout
 
 
 def close_pull_request(home, j, device):
-    """Close the job's open PR with a comment. (state, why): closed, merged, already closed or open."""
+    """Close the job's open PR with a comment. Returns (state, why)."""
     pr, md = j["pr"], project_files(home, j["project"])[0]
-    repo = frontmatter(md)[0].get("repo", "") if md.exists() else ""
+    if not md.exists():
+        return "open", f"there is no project file for {j['project']} on {device}"
+    repo = frontmatter(md)[0].get("repo", "")
     m = GH_PR.fullmatch(pr) if isinstance(pr, str) else None
     if not repo:
         return "open", "the project file names no repo"
     if not (m and m[1].lower() == repo.lower()):
         return "open", f"its URL is not a pull request in {repo}"
-    view = gh_pr("view", pr, "--json", "state,headRefName",
-                  "--jq", '.state + " " + .headRefName')
+    view = gh_pr("view", pr, "--json", "state,isCrossRepository,headRefName", "--jq",
+                 '.state + " " + (.isCrossRepository | tostring) + " " + .headRefName')
     if view is None:
         return "open", f"gh is not installed on {device}"
+    if view[0] == "timeout":
+        return "open", f"gh pr view timed out after 60 seconds on {device}"
     if view[0]:
         return "open", f"gh pr view exited {view[0]} (check gh auth status on {device})"
-    state, _, head = view[1].strip().partition(" ")
-    if not head:
-        return "open", "gh pr view reported no head branch"
-    if head != j.get("branch"):
-        return "open", f"its head branch {head} is not the job's branch {j.get('branch') or 'none'}"
+    state, _, rest = view[1].strip().partition(" ")
+    cross, _, head = rest.partition(" ")
     if state in ("MERGED", "CLOSED"):
         return ("merged" if state == "MERGED" else "already closed"), ""
+    if not head:
+        return "open", "gh pr view reported no head branch"
+    if cross != "false":
+        return "open", f"its head branch {head} comes from another repository, not {repo}"
+    branch = j.get("branch")
+    if not branch:
+        return "open", "the job has no branch"
+    if head != branch:
+        return "open", f"its head branch {head} is not the job's branch {branch}"
     if state != "OPEN":
         return "open", f"gh pr view reported state {state}"
     comment = PR_CLOSE_COMMENT.format(id=j["id"], link=f"{api_url(home)}/#{j['id']}/decision")
     close = gh_pr("close", pr, "--comment", comment)
     if close is None:
         return "open", f"gh is not installed on {device}"
-    return ("open", f"gh pr close exited {close[0]} (check gh auth status on {device})") if close[0] else ("closed", "")
+    if close[0] == "timeout":
+        return "open", f"gh pr close timed out after 60 seconds on {device}"
+    if close[0]:
+        return "open", f"gh pr close exited {close[0]} (check gh auth status on {device})"
+    return "closed", ""
 
 
-def close_decision(j, reason, device, earlier, outcome):
+def close_decision(j, reason, device, earlier, outcome, pickup):
     """decision.md for a job closed from the dashboard. earlier is the decision.md it replaces, or None.
     outcome is close_pull_request's (state, why), or None without a pr."""
     at, stage, pr = j["close"]["at"], j.get("stage"), j.get("pr")
     state, why = outcome or (None, "")
     open_pr = (f"- Pull request {pr} stays open because {why}. Close it on GitHub if it should not merge.\n"
                if state == "open" else "")
+    enabled, hosts, unread = pickup
+    holders = recorded_holders(j)
+    uncovered = [h for h in holders if not (enabled and h in hosts)]
+    manual = (f"- No host is named for a manual cleanup, because {device} could not read "
+              f"the project's pickup hosts: {unread}.\n" if holders and unread else
+              f"- Hosts that need `factory.py cleanup {j['project']}/{j['id']}` run by hand: "
+              + ", ".join(f"`{h}`" for h in uncovered)
+              + ". The board records them as holding this job, and the project's pickup is off "
+              "or does not list them.\n" if uncovered else "")
     text = (f"CLOSED: {reason}\n\n"
             f"**Summary.** Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: "
             f"{reason}. Nothing else is owed unless Left out says so.\n\n"
@@ -3265,13 +3467,16 @@ def close_decision(j, reason, device, earlier, outcome):
             f"{open_pr}"
             "- The next pickup run on each host that holds the worktree or branch runs "
             f"`factory.py cleanup {j['project']}/{j['id']}` there when the project's pickup is on "
-            "and lists that host. It keeps a dirty worktree, and a branch that is not merged unless "
-            "origin holds the same commit. On any other host, run that command there by hand.\n")
+            f"and lists that host. On any other host, run `factory.py cleanup {j['project']}/{j['id']}` "
+            "by hand. It keeps a dirty worktree, and a branch that is not merged unless "
+            "origin holds the same commit.\n"
+            f"{manual}")
     return text + "\n## Earlier decision\n\n" + earlier if earlier else text
 
 
 def close_pass(home, data, device, minutes, dry):
     """Close each job the dashboard queued a close for: decision.md first, then the stage."""
+    configs = {}
     for j in data["jobs"]:
         job_id, project = j.get("id"), j.get("project")
         if not (closing(j) and j.get("stage") not in TERMINAL
@@ -3298,11 +3503,14 @@ def close_pass(home, data, device, minutes, dry):
             print(f"closed pull request {pr} for {job_id}")
         elif outcome and outcome[0] == "open":
             print(f"factory.py: pickup leaves pull request {pr} open: {outcome[1]}", file=sys.stderr)
+        if project not in configs:
+            configs[project] = pickup_config(home, project)
+        config = configs[project]
 
-        def write(text, j=j, reason=reason, outcome=outcome):
+        def write(text, j=j, reason=reason, outcome=outcome, config=config):
             if text is not None and text.startswith("CLOSED:"):
                 return None, None
-            return close_decision(j, reason, device, text, outcome), None
+            return close_decision(j, reason, device, text, outcome, config), None
         cas(home, f"/api/jobs/{project}/{job_id}/decision.md", write)
 
         def change(text, job_id=job_id, at=j["close"]["at"], reason=reason):
@@ -3719,19 +3927,27 @@ def read_location(pointer):
         fail(f"Invalid location pointer: {pointer}.", 2)
 
 
+# Every command calls factory_home before its first write, which keeps "Nothing was written." true.
 def factory_home():
     selected = _HOME_OVERRIDE or os.environ.get("FACTORY_HOME")
     if selected:
         home = Path(selected)
         if not home.is_absolute():
-            fail("factory home must be absolute", 2)
+            fail("factory home must be absolute. Nothing was written.", 2)
         try:
             return home.resolve()
         except (OSError, RuntimeError):
-            fail("cannot resolve factory home", 2)
+            fail("cannot resolve factory home. Nothing was written.", 2)
     root = config_root()
     pointer = root / "factory-location.json"
-    return read_location(pointer) if os.path.lexists(pointer) else root / "factory"
+    if not os.path.lexists(pointer):
+        return root / "factory"
+    if _LOCATED is not None and pointer in _LOCATED:
+        return _LOCATED[pointer]
+    home = read_location(pointer)
+    if _LOCATED is not None:
+        _LOCATED[pointer] = home
+    return home
 
 
 def regular_metadata(path):
@@ -4671,7 +4887,10 @@ def idea_images(target):
 
 
 def sync(slug=None):
-    """Pull every active job of one project, or of every project. It skips merged and closed jobs, whose files no longer change; pull <project>/<id> fetches one."""
+    """Pull every active job of one project, or of every project.
+
+    It skips merged and closed jobs, whose files no longer change. pull <project>/<id>
+    fetches one finished job."""
     if slug:
         r2_target(slug, False)
     home, conflicted = factory_home(), []
@@ -4892,7 +5111,7 @@ def archive_workspace(target, *flags):
     if not archived:
         code, _ = paseo_run(["archive", agent, "--force"])
         if code:
-            fail(f"paseo archive {agent} exit {code}")
+            fail(f"workspace {wks} archived, but agent archive failed: paseo archive {agent} exit {code}")
 
 
 def stuck(*args):
@@ -5116,12 +5335,23 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
         lines = re.sub(r", use --\w+ to .*", "", err).strip().splitlines()
         return (lines or [f"git exited {code}"])[0]
 
+    def not_merged(detail=None):
+        head = run_git("rev-parse", "--abbrev-ref", "HEAD")[1] or "HEAD"
+        return f"not merged into {head}" + (f" and {detail}" if detail else "")
+
     def pushed_tip_error():
         """None after deleting a branch whose tip origin holds, else the reason it stays."""
-        tip = run_git("rev-parse", f"refs/heads/{branch}")[1]
-        code, out, _ = run_git("ls-remote", "origin", f"refs/heads/{branch}")
-        if not tip or code != 0 or out.split() != [tip, f"refs/heads/{branch}"]:
-            return f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}"
+        ref = f"refs/heads/{branch}"
+        tip = run_git("rev-parse", ref)[1]
+        if not tip:
+            return not_merged()
+        code, out, _ = run_git("ls-remote", "origin", ref)
+        if code != 0:
+            return not_merged("origin could not be reached")
+        if not out:
+            return not_merged("origin has no such branch")
+        if out.split() != [tip, ref]:
+            return not_merged("origin is at a different commit")
         path = None
         for line in run_git("worktree", "list", "--porcelain")[1].splitlines():
             if line.startswith("worktree "):
@@ -5149,8 +5379,7 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             if code is None:
                 error = err
             elif code:
-                error = (pushed_tip_error() if drop_pushed else
-                         f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}")
+                error = pushed_tip_error() if drop_pushed else not_merged()
             elif run_git("config", "--get", f"branch.{branch}.merge")[1]:
                 error = first_error("branch", "--unset-upstream", branch) or first_error("branch", "-d", branch)
             else:
@@ -5797,9 +6026,10 @@ COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
+COMMANDS["stack"] = (stack_cmd, 2, 2)
 
 def main(argv=None):
-    global _HOME_OVERRIDE
+    global _HOME_OVERRIDE, _LOCATED
     args = list(sys.argv[1:] if argv is None else argv)
     options, positional = {}, []
     i = 0
@@ -5850,7 +6080,9 @@ def main(argv=None):
     if session and not SLUG.fullmatch(session):
         fail("bad session tag: use letters, digits, - and _", 2)
     old_home, old_session = _HOME_OVERRIDE, os.environ.get("FACTORY_SESSION")
+    old_located = _LOCATED
     try:
+        _LOCATED = {}
         if home is not None:
             try:
                 _HOME_OVERRIDE = Path(home).resolve()
@@ -5866,6 +6098,7 @@ def main(argv=None):
             cmd(*positional[1:])
     finally:
         _HOME_OVERRIDE = old_home
+        _LOCATED = old_located
         if old_session is None:
             os.environ.pop("FACTORY_SESSION", None)
         else:

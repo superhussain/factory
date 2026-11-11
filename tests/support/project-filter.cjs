@@ -25,4 +25,18 @@ async function showOnly(page, key, root = "#filter-menu") {
     key,
   );
 }
-module.exports = { filterState, showOnly };
+// Serves list as projects.json to this page only, so a case never changes the shared origin.
+async function serveProjects(page, list) {
+  await page.setBypassServiceWorker(true);
+  await page.setRequestInterception(true);
+  page.on("request", (request) =>
+    new URL(request.url()).pathname.endsWith("/projects.json")
+      ? request.respond({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(list),
+        })
+      : request.continue(),
+  );
+}
+module.exports = { filterState, showOnly, serveProjects };

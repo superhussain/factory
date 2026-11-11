@@ -87,6 +87,7 @@ On macOS/Linux `config_root` is absolute nonempty `XDG_CONFIG_HOME`, otherwise
 normally `<USERPROFILE>/.config`; APPDATA is not selected implicitly. Empty
 environment values mean unset. Relative explicit home/XDG values fail with exit 2.
 Canonicalization creates nothing. Invalid pointers never fall back to an empty home.
+A command validates a pointer-selected home once, then reuses it until it exits.
 
 Existing state stays where it is. Explicitly select it offline:
 
@@ -152,7 +153,8 @@ python3 <installed-skill>/runtime/factory.py handoff sample/001-small-feature --
 Use the allocated ID, not the illustrative ID above. Claims without a supplied
 session print a new tag to stderr; reuse it for later ownership calls. `where`
 prints the ten v1 path/project keys as JSON. `sync` preserves drafts and conflict
-copies. It skips `merged` and `closed` jobs; `pull <slug>/<id>` fetches one. Handoff requires a quiescent checkpoint, clean published branch and the
+copies. It skips `merged` and `closed` jobs; `pull <slug>/<id>` fetches one.
+Handoff requires a quiescent checkpoint, clean published branch and the
 owning session. It uploads artifacts before releasing the claim. Resume follows
 the installed [execution guide](../skills/factory/references/execution.md), never
 an automatic takeover or reset of review/approval counters.

@@ -8,7 +8,7 @@
   "packageManager": "pnpm@11.9.0",
   "scripts": {
     "test:auth": "node --test tests/worker/access.test.mjs tests/worker/entry-auth.test.mjs",
-    "test:protocol": "node --test tests/worker/admission.test.mjs tests/worker/hosts.test.mjs tests/worker/pipeline-config.test.mjs tests/worker/triage.test.mjs tests/worker/escalation.test.mjs tests/worker/project-settings.test.mjs tests/worker/project-documents.test.mjs tests/worker/protocol-v1.test.mjs tests/worker/coverage.test.mjs tests/worker/lockfile.test.mjs tests/worker/nx-config.test.mjs tests/worker/pwa.test.mjs tests/worker/board-events.test.mjs tests/worker/public-repo-notes.test.mjs tests/worker/board-archive.test.mjs",
+    "test:protocol": "node tools/assets.mjs --prepare && node --test tests/worker/admission.test.mjs tests/worker/hosts.test.mjs tests/worker/pipeline-config.test.mjs tests/worker/triage.test.mjs tests/worker/escalation.test.mjs tests/worker/project-settings.test.mjs tests/worker/project-documents.test.mjs tests/worker/protocol-v1.test.mjs tests/worker/coverage.test.mjs tests/worker/lockfile.test.mjs tests/worker/nx-config.test.mjs tests/worker/pwa.test.mjs tests/worker/board-events.test.mjs tests/worker/public-repo-notes.test.mjs tests/worker/board-archive.test.mjs tests/worker/board-riders.test.mjs",
     "test:local": "node tools/local.mjs --check",
     "test:browser": "node tests/browser/run.mjs",
     "test:assets": "python3 tools/deploy.py dry-run --profile tests/fixtures/deployment-valid.json && node tools/assets.mjs --verify",

@@ -1,5 +1,7 @@
 import concurrent.futures
+import contextlib
 import errno
+import io
 import json
 import os
 import stat
@@ -49,6 +51,16 @@ class LocationTest(IsolatedTestCase):
         with patch.dict(os.environ, {"FACTORY_HOME": "relative"}):
             self.rejected(r.factory_home)
 
+    def test_bad_home_says_nothing_was_written(self):
+        cases = [({"FACTORY_HOME": "relative/home"}, None, "factory home must be absolute"),
+                 ({"FACTORY_HOME": str(self.root / "loop")}, RuntimeError, "cannot resolve factory home")]
+        for env, error, message in cases:
+            with self.subTest(message=message), patch.dict(os.environ, env), \
+                    (patch.object(self.runtime.Path, "resolve", side_effect=error) if error else contextlib.nullcontext()), \
+                    patch("sys.stderr", new_callable=io.StringIO) as err:
+                self.rejected(self.runtime.factory_home)
+                self.assertEqual(err.getvalue(), f"factory.py: {message}. Nothing was written.\n")
+
     def test_malformed_pointer_never_falls_back(self):
         self.pointer.parent.mkdir()
         values = [b"\xff", b"not json", b"[]", b'{"version":true,"home":"/"}',
@@ -82,6 +94,24 @@ class LocationTest(IsolatedTestCase):
         projects.symlink_to(self.root, target_is_directory=True)
         self.rejected(lambda: self.runtime.adopt_home(self.home, self.pointer))
         self.assertFalse(self.pointer.exists())
+
+    def test_one_command_validates_the_pointer_home_once(self):
+        r = self.runtime
+        r.adopt_home(self.home, self.pointer)
+        board = {"updated": "", "jobs": [{"id": job_id, "project": "sample", "stage": "build"}
+                                         for job_id in ("001-build", "002-build", "003-build")]}
+
+        def api(home, method, path, *args, **kwargs):
+            return (200, {}, r.dump_board(board)) if path == "/api/board" else (200, {}, "[]")
+
+        with patch.object(r, "api", side_effect=api), \
+                patch.object(r, "validate_home", wraps=r.validate_home) as validate:
+            code, out, _ = invoke(r, ["sync", "sample"])
+            self.assertEqual(code, 0)
+            self.assertEqual(validate.call_count, 1)
+            self.assertIn("sample/003-build: pulled 0 files", out)
+            r.factory_home()
+            self.assertEqual(validate.call_count, 2)
 
     def test_idempotence_conflicts_and_permissions(self):
         self.runtime.adopt_home(self.home, self.pointer)

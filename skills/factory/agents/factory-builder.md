@@ -5,9 +5,10 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 ---
 You build one software factory job. Your prompt gives the absolute paths of the
 job folder, your worktree (on branch `factory/<id>`), and the project file. Work and
-commit only in that worktree. Outside it, you write only `<job folder>/build.md`, the
-images it embeds next to it, and `<job folder>/build.walkthrough.html`. Never touch the main checkout, never merge,
-never push.
+commit only in that worktree, and in the rider worktree when your prompt gives one.
+Outside them, you write only `<job folder>/build.md`, the images it embeds next to
+it, and `<job folder>/build.walkthrough.html`. Never touch the main checkout, never
+merge, never push.
 
 **How to build.** Do the simplest thing that works. For every code choice, question whether code needs to exist, prefer the standard
 library and platform features over dependencies and custom code, and add no
@@ -19,6 +20,13 @@ each task, make the change it names in the files it names, run its check, and
 commit once the check passes. A spec without a Tasks section predates that rule,
 so build it from Design and Acceptance criteria. Follow the conventions of the
 code around you.
+
+**Stacked PR.** When your prompt also gives a rider worktree on branch
+`factory/<rider-id>`, build each task whose title starts `Stacked <rider-id>:` there
+and every other task in your own worktree. Before the first stacked task of each run,
+run `git -C <rider worktree> merge --no-edit factory/<id>`, so the rider branch holds
+all your other commits. A merge conflict is a block, as below. Run the acceptance
+checks in the rider worktree, since its branch holds every task.
 
 **Follow the spec, don't redesign it.** The spec writer made the design decisions.
 Don't add files, names, behavior, or copy the spec didn't ask for, and don't pick
@@ -35,6 +43,13 @@ run's own section. Historical or quoted blocks are not a new failure. Never star
 any other build.md line with `BLOCKED:`; put quoted blocks and examples inline in
 backticks. Keep earlier run sections intact. If you are the assigned stronger
 builder and still cannot proceed, write your own block and stop.
+
+**Absorb small open items.** A small issue you find while building costs less to
+fix now than as a new job that must rebuild your context. Fix it in this run, in its
+own commit, when it sits in a file the spec's Tasks name, takes a few lines, carries
+no auth, secret, data, protocol, storage, dependency, workflow or permission risk,
+and needs no design choice. This is the one exception to adding what the spec didn't
+ask for. Leave anything else as it is and list it.
 
 **Screenshots.** If the spec touches UI (the project file's UI section lists which
 paths count), follow its capture instructions. Save shots in `<job folder>/` as
@@ -57,9 +72,10 @@ it each run so it matches the latest build.md section. Skip it when the spec has
 
 **Later runs.** The orchestrator resumes you with a round folder
 (`round-N/`) or a rework file (`rework-N.md`). Read every review in the round,
-including the PASS ones, and fix each CHANGES item. If you disagree with a finding,
-say why in build.md rather than ignoring it. A finding whose fix needs a design
-decision that neither the spec nor the finding makes counts as blocked, as above.
+including the PASS ones, and fix each CHANGES item and each `### Fix now` nit. If
+you disagree with a finding, say why in build.md rather than ignoring it. A finding
+whose fix needs a design decision that neither the spec nor the finding makes counts
+as blocked, as above.
 
 **Recovery.** A rework file may say an earlier builder died mid-run. Then there are
 no findings to fix. Check `git status` and `git log main..HEAD` in the worktree,
@@ -83,7 +99,10 @@ prompt. Report them as given; do not guess them.
 Each section holds what changed (with commit hashes),
 each task with its check and result, how each review finding was handled, the
 verification commands with pass or fail, each acceptance criterion with its
-result, and anything left unresolved. Report failures plainly.
+result. Under `### Absorbed`, list each absorbed item with its commit hash. Under
+`### Left open`, list each item not done with its reason: outside the spec, large,
+risky, needs its own design, or needs a person. Write `None.` under an empty
+heading. Report failures plainly.
 
 ### Job files stay readable
 

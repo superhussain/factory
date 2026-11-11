@@ -27,6 +27,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     --info: #1d4ed8;
     --host-fg: #0f766e; --ref-fg: #be185d;
     --accent-soft: #ede9fe;
+    --archived-line: #6b7280;
     --code-bg: #f3f4f6;
     --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -42,6 +43,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       --info: #93c5fd;
       --host-fg: #5eead4; --ref-fg: #f9a8d4;
       --accent-soft: rgba(167, 139, 250, 0.16);
+      --archived-line: #374151;
       --code-bg: #273244;
     }
   }
@@ -56,6 +58,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     --info: #93c5fd;
     --host-fg: #5eead4; --ref-fg: #f9a8d4;
     --accent-soft: rgba(167, 139, 250, 0.16);
+    --archived-line: #374151;
     --code-bg: #273244;
   }
   * { box-sizing: border-box; }
@@ -78,7 +81,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .btn, .close, .card, .tab, .settings-nav a { transition: border-color .15s, background-color .15s, box-shadow .15s, color .15s; }
   .btn:focus-visible { border-color: var(--accent); outline: none; }
   /* Touch taps leave :hover set, so hover styles apply only to hover-capable pointers. */
-  @media (hover: hover) { .btn:hover { border-color: var(--accent); outline: none; } }
+  @media (hover: hover) { .btn:hover { border-color: var(--accent); } }
   .btn:disabled { opacity: .6; cursor: default; }
   /* Touch screens get a 44px tap target. Mouse layouts keep the compact button. */
   @media (pointer: coarse) { .btn:not(.icon) { min-height: 44px; } }
@@ -112,7 +115,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog textarea { resize: vertical; min-height: 140px; }
   dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
   .detail > .err, .detail > .copy-status { margin: 12px 20px; flex: none; }
-  .detail > .copy-status { font-size: 12px; color: var(--muted); }
+  .detail > .copy-status { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .detail > .copy-status:empty { display: none; }
   #idea-image-list, .gallery { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
   #idea-image-list li { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
@@ -159,7 +162,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .filter-menu .filter-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .filter-menu label:focus-within { background: var(--line); }
   @media (hover: hover) { .filter-menu label:hover { background: var(--line); } }
-  @media (pointer: coarse) { .filter-menu label { min-height: 44px; } }
+  @media (pointer: coarse) { .filter-menu label { min-height: 44px; white-space: normal; } .filter-menu .filter-title { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; } }
   .header-actions { display: flex; gap: inherit; }
   body[data-view="settings"] #board, body[data-view="settings"] #detail { display: none; }
   .settings-page { max-width: 1440px; margin: 0 auto; padding: 28px; }
@@ -195,6 +198,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .host-badge { display: inline-block; font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; margin-left: 6px; }
   .host-seen, .host-card p { font-size: 12px; color: var(--muted); margin: 6px 0; }
   .host-card p.host-alert { color: var(--alert); }
+  .host-alert-icon { margin-right: 4px; }
   .host-routes { display: block; overflow-x: auto; font-size: 12px; border-collapse: collapse; margin: 6px 0; }
   .host-routes th, .host-routes td { text-align: left; padding: 2px 8px 2px 0; white-space: nowrap; }
   @container (max-width: 440px) {
@@ -267,14 +271,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     display: grid; grid-template-columns: var(--cols, 1fr);
     gap: 20px; padding: 24px 28px; overflow-x: auto;
   }
-  .col h2 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
-    margin: 0 0 12px; font-weight: 600; display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center;
-  }
+  .col h2, .archive-head { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+  .col h2 { margin: 0 0 12px; display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; }
   .col.needs-you h2 { color: var(--alert); }
   .more { font: inherit; font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); background: none; border: 0; padding: 0 0 0 6px; cursor: pointer; }
   .more:focus-visible { color: var(--accent); text-decoration: underline; outline: none; }
-  @media (hover: hover) { .more:hover { color: var(--accent); text-decoration: underline; outline: none; } }
+  @media (hover: hover) { .more:hover { color: var(--accent); text-decoration: underline; } }
   .column-toggle {
     font: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit;
     background: transparent; border: 0; cursor: pointer; min-height: 44px; min-width: 36px;
@@ -290,7 +292,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .empty { color: var(--muted); font-size: 12px; padding: 8px 2px; opacity: .7; }
   .archive-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
   .blank .archive-list { align-items: center; margin-top: 16px; }
-  .archive-head { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin: 4px 0 0; }
+  .archive-head { margin: 4px 0 0; }
   .archive-count { font-size: 12px; color: var(--muted); margin: 0; }
   .archive-error { font-size: 12px; color: var(--alert); margin: 0; }
   .archive-more[aria-disabled="true"] { opacity: .6; cursor: default; }
@@ -305,8 +307,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(17,24,39,.05);
     padding: 14px 16px; cursor: pointer;
   }
+  /* Before the focus, hover and selected rules, so those still show on an archived card. */
+  .card.archived { border-style: dashed; border-color: var(--archived-line); background: transparent; box-shadow: none; }
   .card:focus-visible { border-color: var(--accent); outline: none; }
-  @media (hover: hover) { .card:hover { border-color: var(--accent); outline: none; } }
+  @media (hover: hover) { .card:hover { border-color: var(--accent); } }
   .card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .card.needs-you { border: 1px solid var(--alert); border-left-width: 4px; background: var(--alert-bg); }
   .card .id { font: 11px/1.3 var(--font-mono); color: var(--muted); }
@@ -320,6 +324,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   /* One fact per row: a long value is cut, and the title tooltip keeps it whole. Inline-size
      containment keeps an unwrapped row from widening the card and its column. */
   .card .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; contain: inline-size; }
+  /* The ellipsis would hide a focused ref that markRefFocus scrolled into view. */
+  .card .line:has(.ref-focused) { text-overflow: clip; }
   .card .id { display: flex; gap: 6px; align-items: center; }
   .card .id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .card .title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
@@ -328,15 +334,17 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .meta.host { color: var(--host-fg); }
   .card .ref-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   @media (hover: hover) { .card .ref-link:hover { color: var(--accent); text-decoration-thickness: 2px; } }
-  .card .ref-link.ref-focused { background: var(--accent); color: var(--panel); border-radius: 3px; box-shadow: -2px 0 0 var(--accent), 2px 0 0 var(--accent); text-decoration-thickness: 2px; }
-  .ref-focus { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  /* The end margin gives the right shadow 2px of the row's scroll range, so a ref at the row's end keeps it. */
+  .card .ref-link.ref-focused { background: var(--accent); color: var(--panel); border-radius: 3px; box-shadow: -2px 0 0 var(--accent), 2px 0 0 var(--accent); text-decoration-thickness: 2px; margin-inline-end: 2px; }
+  /* .sr-only hides the stand-in; this pins it inside .card-wrap. */
+  .ref-focus { top: 0; left: 0; }
   .backlog-card {
     overflow-wrap: anywhere;
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(17,24,39,.05);
     padding: 14px 16px; display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
   }
   .backlog-card:focus-visible { border-color: var(--accent); outline: none; }
-  @media (hover: hover) { .backlog-card:hover { border-color: var(--accent); outline: none; } }
+  @media (hover: hover) { .backlog-card:hover { border-color: var(--accent); } }
   .backlog-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .backlog-card:disabled { cursor: progress; opacity: .6; }
   .backlog-card .title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
@@ -360,8 +368,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (hover: hover) { .card-actions:hover { background: var(--line); } }
   .card-actions svg { width: 16px; height: 16px; }
   @media (pointer: coarse) { .card-actions::after { content: ""; position: absolute; inset: -8px -8px -8px -4px; } }
-  .card-actions-menu { position: fixed; right: auto; z-index: 30; }
-  .board-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .job-actions-menu.card-actions-menu { position: fixed; right: auto; z-index: 30; }
+  .board-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); overflow-wrap: anywhere; }
   .board-status[hidden] { display: none; }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
   @media (hover: hover) { .pr-link:hover { text-decoration: underline; } }
@@ -369,13 +377,17 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   /* The text is ~15px tall; this invisible box makes a ~41px tap target without moving the layout. */
   .pr-link::after { content: ""; position: absolute; inset: -13px -8px; }
   .card-wrap > .pr-link { position: absolute; top: 13px; right: 48px; }
+  .card-wrap .card.archived .id, .card-wrap .card.archived .proj { padding-right: 0; }
+  .card-wrap.has-pr .card.archived .id { padding-right: 64px; }
+  .card-wrap > .card.archived ~ .pr-link { right: 16px; }
+  body.compact .card-wrap > .card.archived ~ .pr-link { right: 8px; }
   .detail-head .links { flex: none; display: flex; gap: 16px; align-items: center; height: var(--icon-size); }
   .detail-head .btn { flex: none; }
   .job-actions { position: relative; flex: none; }
   .job-actions-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; min-width: 200px; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .job-actions-menu[hidden] { display: none; }
   .job-actions-menu .btn { border: 0; text-align: left; border-radius: 6px; padding: 8px 12px; }
-  .job-actions-menu .btn:focus-visible { background: var(--line); }
+  .job-actions-menu .btn:focus-visible { background: var(--line); outline: 2px solid var(--accent); outline-offset: -2px; }
   @media (hover: hover) { .job-actions-menu .btn:hover { background: var(--line); } }
   .detail-head .pr-link { position: relative; font-size: 12px; }
   .detail-head .pr-link[hidden] { display: none; }
@@ -396,9 +408,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .detail[hidden] { display: none; }
   /* Drag handle on the drawer's left edge. The width lives in --drawer-w and localStorage. */
-  .detail-resize { position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; touch-action: none; z-index: 1; }
-  .detail-resize:focus-visible, .detail.resizing .detail-resize { outline: none; background: linear-gradient(90deg, transparent 3px, var(--accent) 3px 5px, transparent 5px); }
-  @media (hover: hover) { .detail-resize:hover { outline: none; background: linear-gradient(90deg, transparent 3px, var(--accent) 3px 5px, transparent 5px); } }
+  .detail-resize { position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; touch-action: none; z-index: 1; --resize-grip: linear-gradient(90deg, transparent 3px, var(--accent) 3px 5px, transparent 5px); }
+  .detail-resize:focus-visible, .detail.resizing .detail-resize { outline: none; background: var(--resize-grip); }
+  @media (hover: hover) { .detail-resize:hover { background: var(--resize-grip); } }
   body.resizing-drawer { user-select: none; cursor: col-resize; }
   .detail-head { padding: 18px 24px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: flex-start; }
   .detail-head .titles { flex: 1; min-width: 0; }
@@ -429,7 +441,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .doc pre code { padding: 0; background: none; }
   .doc a { color: var(--accent); }
   .doc .new-tab { display: inline-block; margin-left: 1px; font-size: .85em; }
-  .doc .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   /* GitHub-style sizing: a screenshot stays narrower than the drawer and shorter than the screen.
      The click opens it full size. */
   .doc .img-link { display: inline-block; vertical-align: top; max-width: min(100%, 480px); margin: 4px 0; border-radius: 6px; }
@@ -477,7 +489,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (max-width: 760px) {
     header { position: relative; padding: 14px 16px; gap: 10px; }
     .filter-wrap { position: static; }
-    .filter-menu { left: 16px; right: 16px; min-width: 0; max-width: none; }
+    /* top: auto opens the menu right under #filter; left and right still come from the header. */
+    #filter { vertical-align: top; }
+    .filter-menu { top: auto; margin-top: 4px; left: 16px; right: 16px; min-width: 0; max-width: none; }
     :root { --icon-size: 32px; }
     .filter { padding: 4px 8px; }
 
@@ -494,6 +508,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head .close { flex: none; }
     .detail-head .links { order: 3; flex-basis: 100%; height: auto; }
     .detail-head .pr-link { margin-top: 8px; }
+    .detail-head { position: relative; }
+    .detail-head .job-actions { position: static; }
+    .detail-head .job-actions-menu { top: calc(100% + 4px); right: 16px; }
     .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
     .doc { padding: 16px 16px 40px; }
     .pager > .doc, .pager > .gallery { touch-action: pan-y pinch-zoom; }
@@ -1103,7 +1120,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     if (version !== boardReadVersion) return false;
     const etag = r.ok ? r.headers.get('ETag') || '' : '';
     setConnection(r.headers.get('X-Factory-Offline') ? 'offline' : 'online');
-    // A socket open only catches writes made while it was down, so an unchanged board is not redrawn.
+    // A socket open or a timer tick redraws only a changed board, so a focused card is not read again.
     if (ifChanged && loaded && etag && etag === boardEtag) return true;
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
     boardArchived = Number.isInteger(data.archived?.max_id);
@@ -1249,6 +1266,9 @@ const leadOf = (j) => refs(j).find((r) => r.kind === 'batched-into')?.id ?? null
 // The riders batched into a lead, in board order.
 const ridersOf = (id) => jobs.filter((x) => leadOf(x) === id).map((x) => x.id);
 
+// A rider's own batch note repeats its batched-into ref line, so its card leaves it out.
+const batchNote = (j) => leadOf(j) !== null && j.note === 'batched into ' + leadOf(j);
+
 function buildState(j) {
   const s = j.build && j.build.state;
   return BUILD_STATES.includes(s) ? s : null;
@@ -1324,11 +1344,13 @@ function refLine(r) {
 }
 
 // The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
-// A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
+// Each on-board ref and rider also gets a visually hidden stand-in link after the actions trigger, named for this card, so Tab reaches it.
+// A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise. A rider's batch note is left out.
 function card(j, inNeeds, archived = false) {
-  const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
+  const ask = inNeeds && asks(j.needs) ? j.needs : batchNote(j) ? '' : j.note;
   const riders = archived ? [] : ridersOf(j.id);
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
+  const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
     '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span>' +
@@ -1354,7 +1376,8 @@ function card(j, inNeeds, archived = false) {
     (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub" title="">PR #' + esc(pr.n) + '</a>' : '') +
     (archived ? '' : '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
     ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') +
-    refs(j).filter((r) => jobs.some((x) => x.id === r.id)).map((r) => '<a class="ref-focus" href="#' + esc(r.id) + '" data-ref="' + esc(r.id) + '">' + esc(REF_KINDS[r.kind]) + ' ' + esc(r.id) + '</a>').join('') + '</div>';
+    refs(j).filter((r) => jobs.some((x) => x.id === r.id)).map((r) => standIn(r.id, REF_KINDS[r.kind] + ' ' + r.id)).join('') +
+    riders.map((id) => standIn(id, 'batches ' + id)).join('') + '</div>';
 }
 
 // Not a .card, so arrow-key card navigation skips it.
@@ -1490,7 +1513,12 @@ function renderJobResults() {
     }))
     : [{ kind: 'archive-search', key: 'command:archive-search', query: rawQuery, title: 'Search archived jobs', meta: archiveSearchMeta(rawQuery) }];
   // #job-count is the live region, so every archive outcome changes its text.
-  const archiveCount = !archiveRows.length || archiveSearch?.query !== rawQuery ? '' : found.length ? ' · ' + found.length + ' archived' + (archiveSearch.total > found.length ? ' of ' + archiveSearch.total : '') : archiveSearch.status === 'done' ? ' · no archived matches' : archiveSearch.status === 'error' ? ' · archive search failed' : '';
+  let archiveCount = '';
+  if (archiveRows.length && archiveSearch?.query === rawQuery) {
+    if (found.length) archiveCount = ' · ' + found.length + ' archived' + (archiveSearch.total > found.length ? ' of ' + archiveSearch.total : '');
+    else if (archiveSearch.status === 'done') archiveCount = ' · no archived matches';
+    else if (archiveSearch.status === 'error') archiveCount = ' · archive search failed';
+  }
   const sections = [
     { id: 'pages', title: 'Pages', rows: actions.filter((r) => r.kind === 'page') },
     { id: 'links', title: 'Links', rows: actions.filter((r) => r.kind === 'link') },
@@ -1574,7 +1602,7 @@ function actionsOpener() {
 function openJobPicker() {
   if (document.querySelector('dialog[open]:not(#job-picker)')) return;
   if ($('job-picker').open && pickerMode === 'actions') {
-    // Cmd+K in actions mode swaps to the normal jumper; Escape still returns to the card.
+    // Cmd+K in actions mode swaps to the normal jumper.
     pickerFocus = actionsOpener();
     pickerMode = 'job';
     pickerActions = null;
@@ -1637,7 +1665,8 @@ function activateJobResult() {
     const j = jobs.find((x) => x.id === id);
     if (!j || !jobActionsFor(j).includes(row.action)) return renderJobResults();
     closeJobPicker();
-    JOB_ACTION_RUN[row.action](drawer && openId === id ? drawerAction(row.action) : cardAction(id, inNeeds));
+    if (drawer && openId === id) JOB_ACTION_RUN[row.action](drawerAction(row.action));
+    else runCardAction(row.action, id, inNeeds);
     return;
   }
   if (row.kind === 'archive-search') {
@@ -1726,7 +1755,11 @@ function renderProjectFilter() {
     const box = Object.assign(document.createElement('input'), { type: 'checkbox' });
     box.dataset.project = key;
     const label = document.createElement('label');
-    label.append(box, Object.assign(document.createElement('span'), { className: 'filter-title', textContent: title, title }));
+    const text = document.createElement('span');
+    text.className = 'filter-title';
+    text.textContent = title;
+    text.title = title;
+    label.append(box, text);
     return label;
   });
   $('filter-menu').replaceChildren(...rows());
@@ -2743,8 +2776,9 @@ function hostCard(h) {
   if (h.status) {
     const st = h.status;
     li.append(make('p', {textContent:st.os + ', ' + st.scheduler + ', last pickup ' + (st.last_pickup ? hostUtc(st.last_pickup) : 'never') + '. Bundle ' + (st.bundle?.commit?.slice(0, 7) ?? 'unknown') + '.' + (st.doctor === 'ok' ? ' Doctor ok.' : '')}));
-    if (st.doctor !== 'ok') li.append(make('p', {className:'host-doctor host-alert', textContent:'Doctor failed: ' + st.doctor.join(', ') + '.'}));
-    if (st.triage_failed_since) li.append(make('p', {className:'host-triage host-alert', textContent:'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'}));
+    const alertLine = (cls, text) => make('p', {className:cls + ' host-alert'}, make('span', {className:'host-alert-icon', ariaHidden:'true', textContent:'⚠︎'}), make('span', {className:'sr-only', textContent:'Warning: '}), text);
+    if (st.doctor !== 'ok') li.append(alertLine('host-doctor', 'Doctor failed: ' + st.doctor.join(', ') + '.'));
+    if (st.triage_failed_since) li.append(alertLine('host-triage', 'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'));
     const heads = ['Route', 'Provider', 'Model', 'Effort', 'Limited until'];
     const cells = (tag, values) => make('tr', {}, ...values.map((value, i) => {
       const cell = make(tag, {textContent:value});
@@ -2915,9 +2949,11 @@ function renderBoard() {
   const focusRaw = focused?.dataset.raw;
   const focusStage = focused?.dataset.stage;
   const focusClass = focused && (focused.classList.contains('more') ? 'more' : focused.classList.contains('archive-more') ? 'archive-more' : 'column-toggle');
-  // A redraw replaces every card node, so focus goes back to the same job's card or menu trigger.
-  const focusedCard = $('board').contains(document.activeElement) ? document.activeElement.closest('.card, .card-actions') : null;
-  const focusCard = focusedCard && { trigger: focusedCard.classList.contains('card-actions'), id: focusedCard.dataset.id ?? focusedCard.dataset.actions };
+  // A redraw replaces every card node, so focus goes back to the same job's card, PR link or menu trigger.
+  const focusedCard = $('board').contains(document.activeElement) ? document.activeElement.closest('.card, .card-actions, .card-wrap > .pr-link') : null;
+  const focusCard = focusedCard && (focusedCard.classList.contains('pr-link')
+    ? { kind: 'pr', id: focusedCard.parentElement.querySelector('.card').dataset.id }
+    : { kind: focusedCard.classList.contains('card-actions') ? 'trigger' : 'card', id: focusedCard.dataset.id ?? focusedCard.dataset.actions });
   if (!jobs.length && !backlog.length && !archiveList.open) {
     $('board').innerHTML = '<div class="blank"><h2>No jobs yet</h2>' +
       '<p>Start one with <code>/factory &lt;feature&gt;</code> or <code>/factory next</code>.</p>' +
@@ -2942,7 +2978,9 @@ function renderBoard() {
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   if (!settingsShown) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
-  $('board').style.setProperty('--cols', collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']).join(' '));
+  const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
+  // An empty auto track takes the free space, so the filter-empty line spans the board and not only a few narrow columns.
+  $('board').style.setProperty('--cols', tracks.concat(noneShown ? ['auto'] : []).join(' '));
   $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : '') + COLUMNS.map((s, i) => {
     if (hiddenColumns.has(s)) return '';
     let list = lists[i];
@@ -2973,9 +3011,11 @@ function renderBoard() {
     control?.focus({ preventScroll: true });
   }
   if (focusCard) {
-    [...$('board').querySelectorAll(focusCard.trigger ? '.card-actions' : '.card')]
-      .find((el) => (focusCard.trigger ? el.dataset.actions : el.dataset.id) === focusCard.id)
-      ?.focus({ preventScroll: true });
+    const trigger = focusCard.kind === 'trigger';
+    const el = [...$('board').querySelectorAll(trigger ? '.card-actions' : '.card')]
+      .find((x) => (trigger ? x.dataset.actions : x.dataset.id) === focusCard.id);
+    // A PR link the redraw dropped (field hidden, PR cleared) hands focus to its card.
+    (focusCard.kind === 'pr' ? el?.parentElement.querySelector(':scope > .pr-link') ?? el : el)?.focus({ preventScroll: true });
   }
   syncCardActions();
 }
@@ -3277,6 +3317,8 @@ async function loadArchivedJob(id) {
   if (archiveMisses.has(id)) return { job: null };
   try {
     const r = await fetch('./api/board/archive?id=' + encodeURIComponent(id), { cache: 'no-store' });
+    // An expired Access session answers 401 or 403. The banner offers sign-in, and the id is not cached as a miss.
+    if (r.status === 401 || r.status === 403) { setConnection('signin'); return { job: null }; }
     if (r.status === 404) {
       archiveMisses.add(id);
       return { job: null };
@@ -4878,6 +4920,7 @@ function focusOpener(opener) {
   target.focus();
 }
 
+const BOARD_STATUS_MS = 12000, COPIED_STATUS_MS = 2000;
 let boardStatusTimer = 0;
 
 // A separate task sets the text after the toast empties, so a repeat is announced again.
@@ -4888,7 +4931,7 @@ function showBoardStatus(text) {
   if (!text) return;
   boardStatusTimer = setTimeout(() => {
     $('board-status').textContent = text;
-    boardStatusTimer = setTimeout(() => showBoardStatus(''), 6000);
+    boardStatusTimer = setTimeout(() => showBoardStatus(''), text === 'Copied' ? COPIED_STATUS_MS : BOARD_STATUS_MS);
   }, 100);
 }
 
@@ -4897,7 +4940,7 @@ function showCopyStatus(text) {
   // A separate task empties the live region first, so a repeat copy is announced again.
   copyStatusTimer = setTimeout(() => {
     $('d-copy-status').textContent = text;
-    if (text === 'Copied') copyStatusTimer = setTimeout(clearCopyStatus, 2000);
+    if (text === 'Copied') copyStatusTimer = setTimeout(clearCopyStatus, COPIED_STATUS_MS);
   }, 100);
 }
 
@@ -4910,6 +4953,10 @@ function clearCopyStatus() {
 
 function jobLink(id) {
   return location.origin + location.pathname + location.search + '#' + encodeURIComponent(id);
+}
+
+function backlogLink(key) {
+  return location.origin + location.pathname + location.search + '#/backlog/' + key;
 }
 
 function enabledJobActions() {
@@ -4981,15 +5028,15 @@ const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
 
 // Writes the move and drops the claim, so factory.py fences the old session and the target host
 // picks the job up. Returns an error message, '' once the board is changed, or 'unchanged' when
-// the board already holds this move.
+// the board already holds this move and no pickup has claimed it.
 function moveJob(board, id, to, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
   if (!j.project || !MOVE_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be moved.';
-  if (!j.claim && j.move?.to === to) return 'unchanged';
+  if (!j.claim && j.move?.to === to && !('claimed' in j.move)) return 'unchanged';
   const from = j.claim?.device ?? (!j.claim && j.move && !moveStopped(j.move) ? j.move.from : undefined);
-  if (to === from) return 'This job already runs on ' + to + '.';
-  if (queuedStops(j.move).some((x) => x.from === to)) return 'A stop is still queued on ' + to + '. Pick another host.';
+  if (to === from) return 'This job already runs on ' + hostName(to) + '.';
+  if (queuedStops(j.move).some((x) => x.from === to)) return 'A stop is still queued on ' + hostName(to) + '. Pick another host.';
   writeMove(board, j, to, now);
   return '';
 }
@@ -5112,10 +5159,13 @@ async function openMoveHost(ctx) {
   select.replaceChildren();
   const pending = !j.claim && j.move && !moveStopped(j.move) ? j.move : null;
   const current = j.claim?.device ?? pending?.from;
-  const help = (name) => j.claim?.device
-    ? j.id + ' runs on ' + name(j.claim.device) + '. Moving it stops that session and starts the job on the host you pick. If ' + name(j.claim.device) + ' is offline, the stop waits until it comes back.'
-    : pending?.to ? j.id + ' is moving to ' + name(pending.to) + '. The host you pick starts it instead.'
-    : j.id + ' has no host right now. The host you pick starts it.';
+  const help = (name) => {
+    const on = j.claim?.device && name(j.claim.device);
+    return on
+      ? j.id + ' runs on ' + on + '. Moving it stops that session and starts the job on the host you pick. If ' + on + ' is offline, the stop waits until it comes back.'
+      : pending?.to ? j.id + ' is moving to ' + name(pending.to) + '. The host you pick starts it instead.'
+      : j.id + ' has no host right now. The host you pick starts it.';
+  };
   $('move-host-help').textContent = help(hostName);
   let hosts = [];
   let blocked = [];
@@ -5125,12 +5175,13 @@ async function openMoveHost(ctx) {
     if (!h.ok || !p.ok) throw new Error('load');
     const [list, view] = [await h.json(), await p.json()];
     $('move-host-help').textContent = help((id) => list.find((x) => x.id === id)?.label || hostName(id));
+    const hostLabel = (x) => x.label || hostName(x.id);
     const listed = view.pickup?.enabled ? view.pickup.hosts : [];
     const others = list.filter((x) => x.state === 'active' && listed.includes(x.id) && x.id !== current && x.id !== pending?.to);
     const queued = new Set(queuedStops(j.move).map((q) => q.from));
     hosts = others.filter((x) => !queued.has(x.id));
-    blocked = others.filter((x) => queued.has(x.id)).map((x) => x.id);
-    blockedOffline = others.filter((x) => queued.has(x.id) && x.offline).map((x) => x.id);
+    blocked = others.filter((x) => queued.has(x.id)).map(hostLabel);
+    blockedOffline = others.filter((x) => queued.has(x.id) && x.offline).map(hostLabel);
   } catch {
     err.textContent = 'Could not load hosts. Try again.';
     err.hidden = false;
@@ -5138,17 +5189,26 @@ async function openMoveHost(ctx) {
   for (const h of hosts) select.add(new Option(h.label + ' (' + h.id + ')' + (h.offline ? ' · offline' : ''), h.id));
   select.hidden = !hosts.length;
   $('move-host-label').hidden = !hosts.length;
+  let emptyText = '';
   if (!hosts.length && err.hidden) {
-    let late = '';
-    if (blockedOffline.length === 1) late = blockedOffline[0] + ' is offline and stops the job only when it comes back online. ';
-    else if (blockedOffline.length) late = blockedOffline.join(', ') + ' are offline and stop the job only when they come back online. ';
-    empty.textContent = blocked.length
-      ? 'Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '. ' + late + 'Try again after one of them stops the job.'
-      : 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
-    empty.hidden = false;
+    if (blocked.length) {
+      const parts = ['Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '.'];
+      if (blockedOffline.length === 1) parts.push(blockedOffline[0] + ' is offline and stops the job only when it comes back online.');
+      else if (blockedOffline.length) parts.push(blockedOffline.join(', ') + ' are offline and stop the job only when they come back online.');
+      parts.push('Try again after one of them stops the job.');
+      emptyText = parts.join(' ');
+    } else emptyText = 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
   }
+  empty.textContent = '';
+  empty.hidden = !emptyText;
   $('move-host-save').disabled = !hosts.length;
   $('move-host-dlg').showModal();
+  if (emptyText) {
+    const opened = moveHost;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (moveHost === opened) empty.textContent = emptyText;
+    }));
+  }
 }
 
 function closeMoveHost() {
@@ -5165,16 +5225,23 @@ $('move-host-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!moveHost || $('move-host-save').disabled) return;
   const { id } = moveHost;
+  const dlg = moveHost;
+  let refused = false;
   const to = $('move-host-select').value;
   $('move-host-save').disabled = true;
   try {
     await casBoard((board) => {
       const message = moveJob(board, id, to, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
-      if (message) throw new Error(message);
+      if (message) {
+        refused = true;
+        throw new Error(message);
+      }
     });
   } catch (x) {
-    $('move-host-err').textContent = boardSaveError(x, 'The move may have saved. Press Move job again with the same host to check. It will not queue a second move.');
+    if (!refused && dlg.uncertain) x.uncertain = true;
+    dlg.uncertain = !!x.uncertain;
+    $('move-host-err').textContent = boardSaveError(x, 'The move may have saved. Press Move job again with the same host to check. It will not queue a duplicate move.');
     $('move-host-err').hidden = false;
     $('move-host-save').disabled = false;
     return;
@@ -5212,15 +5279,22 @@ $('close-job-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!closeDialog || $('close-job-save').disabled) return;
   const { id } = closeDialog;
+  const dlg = closeDialog;
+  let refused = false;
   $('close-job-save').disabled = true;
   try {
     await casBoard((board) => {
       const message = closeJob(board, id, $('close-job-reason').value, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
-      if (message) throw new Error(message);
+      if (message) {
+        refused = true;
+        throw new Error(message);
+      }
     });
   } catch (x) {
-    $('close-job-err').textContent = boardSaveError(x, 'The close may have saved. Press Close job again with the same reason to check. It will not queue a second close.');
+    if (!refused && dlg.uncertain) x.uncertain = true;
+    dlg.uncertain = !!x.uncertain;
+    $('close-job-err').textContent = boardSaveError(x, 'The close may have saved. Press Close job again to check. It will not queue a second close or change a saved reason.');
     $('close-job-err').hidden = false;
     $('close-job-save').disabled = false;
     return;
@@ -5451,13 +5525,14 @@ async function resumeAction(ctx) {
   }
 }
 async function copyLinkAction(ctx) {
-  let copied = true;
+  let link = '', copied = true;
   try {
-    await navigator.clipboard.writeText(ctx.id === null ? location.origin + location.pathname + location.search + location.hash : jobLink(ctx.id));
+    link = ctx.id !== null ? jobLink(ctx.id) : backlogLink(backlog.find((b) => b.raw === openBacklogRaw).key);
+    await navigator.clipboard.writeText(link);
   } catch {
     copied = false;
   }
-  if (ctx.live()) ctx.status(copied ? 'Copied' : 'Copy is unavailable. Copy the link from the address bar.');
+  if (ctx.live()) ctx.status(copied ? 'Copied' : link ? `Copy is unavailable. The link is ${link}` : 'Copy is unavailable. Open the item again and copy its link.');
 }
 $('idea-cancel').addEventListener('click', () => { if (!locked()) $('idea-dlg').close(); });
 // Escape closes the dialog like Cancel, except while a save runs or a submission is
@@ -5645,9 +5720,9 @@ async function reconcile(cause) {
     if (!r.ok) throw new Error(r.status);
     const hit = (await r.json()).jobs.find((j) => j.capture_id === snap.capture_id);
     if (hit) return hit.id;
-    showErr('Not confirmed: ' + cause.message + '. The board has no record of it yet, but the save could still land late. Retry re-checks with the same content and will not add a duplicate.');
+    showErr(boardSaveError(cause, 'The board has no record of it yet, but the save could still land late. Retry re-checks with the same content and will not add a duplicate.'));
   } catch {
-    showErr('Could not confirm whether the idea was saved: ' + cause.message + '. Retry checks again and will not add a duplicate.');
+    showErr('Could not confirm whether the idea was saved: ' + String(cause.message || cause).replace(/[\s.]+$/, '') + '. Retry checks again and will not add a duplicate.');
   }
   return null;
 }
@@ -5765,6 +5840,19 @@ const JOB_ACTION_RUN = {
 };
 for (const id of JOB_ACTIONS) $(id).addEventListener('click', () => JOB_ACTION_RUN[id](drawerAction(id)));
 
+// One run per job and action at a time; a second click while the first is in flight does nothing.
+const cardRuns = new Set();
+async function runCardAction(action, id, inNeeds) {
+  const key = id + ':' + action;
+  if (cardRuns.has(key)) return;
+  cardRuns.add(key);
+  try {
+    await JOB_ACTION_RUN[action](cardAction(id, inNeeds));
+  } finally {
+    cardRuns.delete(key);
+  }
+}
+
 // One menu for every card. It lives outside #board, so a poll redraw keeps it and syncCardActions re-finds its trigger.
 function buildCardActionsMenu() {
   $('card-actions-menu').innerHTML = JOB_ACTIONS.map((id) =>
@@ -5836,12 +5924,14 @@ function syncCardActions(focus) {
     return;
   }
   const shown = jobActionsFor(j);
+  const active = $('card-actions-menu').contains(document.activeElement) ? document.activeElement : null;
   for (const b of $('card-actions-menu').children) b.hidden = !shown.includes(b.dataset.action);
   trigger.setAttribute('aria-expanded', 'true');
   $('card-actions-menu').hidden = false;
   placeCardActions(trigger);
   const items = cardActionItems();
   if (focus) (focus === 'last' ? items[items.length - 1] : items[0])?.focus();
+  else if (active?.hidden) items[0]?.focus();
 }
 
 // Below the trigger when it fits, else above, right edges aligned, 8px inside the viewport.
@@ -5871,16 +5961,24 @@ $('board').addEventListener('pointerover', (e) => {
   hoveredCard = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : null;
 });
 $('board').addEventListener('pointerleave', () => { hoveredCard = null; });
-// The stand-in link holds keyboard focus; the visible span shows it.
+// The stand-in link holds keyboard focus; the visible span shows it. A span that runs past the
+// row's ellipsis scrolls into the row while focused, and the row scrolls back on blur.
 function markRefFocus(e, on) {
   const a = e.target.closest?.('a.ref-focus');
-  a?.closest('.card-wrap').querySelector('.ref-link[data-ref="' + CSS.escape(a.dataset.ref) + '"]')?.classList.toggle('ref-focused', on);
+  const span = a?.closest('.card-wrap').querySelector('.ref-link[data-ref="' + CSS.escape(a.dataset.ref) + '"]');
+  if (!span) return;
+  span.classList.toggle('ref-focused', on);
+  const row = span.closest('.line');
+  if (!on) { row.scrollLeft = 0; return; }
+  const s = span.getBoundingClientRect(), r = row.getBoundingClientRect();
+  if (s.right + 2 > r.right) row.scrollLeft += s.left - r.left - 4;
 }
 $('board').addEventListener('focusin', (e) => markRefFocus(e, true));
 $('board').addEventListener('focusout', (e) => markRefFocus(e, false));
 
-// A focused card wins over a hovered one, and either wins over the open drawer's job.
+// An open card menu wins, then a focused card, then a hovered one, then the open drawer's job.
 function cardShortcutTarget(e) {
+  if (cardMenu && jobs.some((x) => x.id === cardMenu.id)) return { id: cardMenu.id, inNeeds: cardMenu.inNeeds };
   const c = e.target.closest?.('#board .card-wrap')?.querySelector('.card');
   const target = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : hoveredCard;
   if (target && jobs.some((x) => x.id === target.id)) return target;
@@ -5888,12 +5986,13 @@ function cardShortcutTarget(e) {
 }
 $('card-actions-menu').addEventListener('click', (e) => {
   const item = e.target.closest('[data-action]');
-  if (!item || !cardMenu) return;
+  if (!item || item.hidden || !cardMenu) return;
   const { id, inNeeds } = cardMenu;
   closeCardActions(true);
-  JOB_ACTION_RUN[item.dataset.action](cardAction(id, inNeeds));
+  runCardAction(item.dataset.action, id, inNeeds);
 });
 $('card-actions-menu').addEventListener('keydown', (e) => {
+  if (e.key === 'a' || e.key === '.') return;
   e.stopPropagation();
   const items = cardActionItems();
   const at = items.indexOf(document.activeElement);
@@ -6218,7 +6317,7 @@ function applyDisplay() {
 // The board timer runs only while the live socket is closed. Hidden or unfocused windows
 // never poll unless notifications are on. Returning to the window refreshes at once.
 // A tick reads the backlog only when the last read is 2 minutes old.
-function pollTick() { return poll({ withBacklog: Date.now() - backlogReadAt >= BACKLOG_POLL_MS }); }
+function pollTick() { return poll({ ifChanged: true, withBacklog: Date.now() - backlogReadAt >= BACKLOG_POLL_MS }); }
 function schedulePoll() {
   clearInterval(pollTimer);
   const away = document.hidden || !document.hasFocus();

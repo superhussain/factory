@@ -70,6 +70,36 @@ class BoardIdTest(IsolatedTestCase):
                     'Close the job with {"stage": "closed"} instead. Nothing was written.\n')))
                 self.assertEqual((self.ids(), self.puts), (["412-fix-login"], 0))
 
+    def batched(self):
+        self.text = factory.dump_board({"updated": "", "jobs": [
+            {"id": "412-fix-login", "project": "sample", "stage": "build",
+             "refs": [{"id": "411-sample-lead", "kind": "batched-into"}]}]})
+
+    def test_refuses_removing_a_batched_into_ref(self):
+        for body in ('{"refs": null}', '{"refs": []}'):
+            with self.subTest(body=body):
+                self.batched()
+                self.assertEqual(self.patch_board("412-fix-login", body), (2, "", (
+                    "factory.py: only factory.py batch and the lead's mirror add or remove a batched-into ref. "
+                    "A refs patch for 412-fix-login must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.\n")))
+                self.assertEqual(self.puts, 0)
+
+    def test_refuses_adding_a_batched_into_ref(self):
+        refs = '"refs": [{"id": "411-sample-lead", "kind": "batched-into"}]'
+        for job_id, body in (("412-fix-login", "{" + refs + "}"),
+                             ("413-add-export", '{"stage": "idea", "project": "sample", ' + refs + "}")):
+            with self.subTest(job_id=job_id):
+                self.assertEqual(self.patch_board(job_id, body), (2, "", (
+                    "factory.py: only factory.py batch and the lead's mirror add or remove a batched-into ref. "
+                    f"A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.\n")))
+                self.assertEqual((self.ids(), self.puts), (["412-fix-login"], 0))
+
+    def test_keeps_a_batched_into_ref_while_editing_refs(self):
+        self.batched()
+        refs = [{"id": "411-sample-lead", "kind": "batched-into"}, {"id": "400-sample-old", "kind": "follow-up-of"}]
+        code, out, _ = self.patch_board("412-fix-login", json.dumps({"refs": refs}))
+        self.assertEqual((code, json.loads(out)["refs"], self.puts), (0, refs, 1))
+
     def test_adds_a_well_formed_new_id(self):
         for job_id in ("413-add-export", "414-a", "1000-a1-b2"):
             with self.subTest(job_id=job_id):
@@ -159,6 +189,13 @@ class ArchiveFloorTest(IsolatedTestCase):
             {"updated": "", "jobs": [{"id": "414-retry-sync", "project": "sample", "stage": "closed"}]})
         self.assertEqual(self.board("413-add-export", '{"stage": "closed", "project": "sample"}')[0], 0)
         self.assertIn("413-add-export", self.ids())
+
+    def test_board_skips_the_floor_for_an_existing_row(self):
+        with patch.object(factory, "archive_floor", wraps=factory.archive_floor) as floor:
+            self.assertEqual(self.board("414-retry-sync", '{"note": "x"}')[0], 0)
+            floor.assert_not_called()
+            self.assertEqual(self.board("417-new-thing", '{"stage": "closed", "project": "sample"}')[0], 0)
+            floor.assert_called_once()
 
     def test_job_falls_back_to_the_archive(self):
         with patch.object(factory, "factory_home", return_value=self.home):

@@ -10,6 +10,7 @@ LEAD = "090-sample-export-csv"
 TARGET = f"sample/{LEAD}"
 REF = {"id": LEAD, "kind": "batched-into"}
 NOW = "2026-01-01T12:00:00Z"
+LINE = "- [ ] sample: Name the weekly CSV weekly-<date>.csv (follow-up-of 080-sample-report)"
 CLAIM = {"device": "test", "session": "tag", "since": NOW, "seen": NOW}
 
 
@@ -32,6 +33,9 @@ class BatchTest(IsolatedTestCase):
         self.home.mkdir(parents=True)
         (self.home / "config.md").write_text("---\ndevice: test\n---\n")
         self.puts = 0
+        self.backlog = "# Backlog\n"
+        self.backlog_puts = 0
+        self.on_board_put = None
         self.set_jobs(jobs())
         api = patch.object(factory, "api", side_effect=self.api)
         api.start()
@@ -41,9 +45,17 @@ class BatchTest(IsolatedTestCase):
         self.text = factory.dump_board({"updated": "", "jobs": rows})
 
     def api(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if path == "/api/backlog":
+            if method == "PUT":
+                self.backlog_puts += 1
+                self.backlog = body
+            return 200, {"ETag": '"synthetic"'}, self.backlog
         if method == "PUT":
             self.puts += 1
             self.text = body
+            hook, self.on_board_put = self.on_board_put, None
+            if hook:
+                hook()
         return 200, {"ETag": '"synthetic"'}, self.text
 
     def job(self, job_id):
@@ -129,6 +141,59 @@ class BatchTest(IsolatedTestCase):
         self.assertEqual(self.ids(out, "riders"), ["091-sample-typo", "092-sample-csv-name"])
         self.assertEqual(result["riders"][0]["idea"], "Fix the header typo")
         self.assertEqual(self.ids(out, "candidates"), ["093-sample-login"])
+        self.assertEqual(self.backlog_puts, 0)
+
+    def set_backlog(self):
+        self.backlog = ("# Backlog\n\n"
+                        f"{LINE}\n"
+                        "  Use the ISO date.\n"
+                        "- [ ] elsewhere: Add SSO login\n")
+        return f"backlog:{factory.backlog_key(LINE)}"
+
+    def test_lists_backlog_lines_after_ideas(self):
+        key = self.set_backlog()
+        code, out, _ = self.batch(TARGET)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.ids(out, "candidates"),
+                         ["091-sample-typo", "092-sample-csv-name", "093-sample-login", key])
+        self.assertEqual(json.loads(out)["candidates"][-1],
+                         {"id": key, "title": "Name the weekly CSV weekly-<date>.csv",
+                          "idea": "Name the weekly CSV weekly-<date>.csv\n\nUse the ISO date."})
+
+    def test_attach_backlog_line_adds_rider_and_checks_it_off(self):
+        key = self.set_backlog()
+        code, out, _ = self.batch(TARGET, key)
+        self.assertEqual((code, self.puts, self.backlog_puts), (0, 1, 1))
+        j = self.job("094-name-the-weekly")
+        self.assertEqual((j["project"], j["stage"], j["note"], j["refs"]),
+                         ("sample", "spec", f"batched into {LEAD}",
+                          [{"id": "080-sample-report", "kind": "follow-up-of"}, REF]))
+        self.assertEqual((j["title"], j["idea"]), ("Name the weekly CSV weekly-<date>.csv",
+                                                   "Name the weekly CSV weekly-<date>.csv\n\nUse the ISO date."))
+        self.assertIn("- [x] sample: Name the weekly CSV weekly-<date>.csv (follow-up-of 080-sample-report) "
+                      "(094-name-the-weekly)\n  Use the ISO date.\n", self.backlog)
+        self.assertIn("- [ ] elsewhere: Add SSO login\n", self.backlog)
+        self.assertEqual(self.ids(out, "riders"), ["094-name-the-weekly"])
+        self.assertNotIn(key, self.ids(out, "candidates"))
+
+    def test_unknown_backlog_key_writes_nothing(self):
+        self.set_backlog()
+        self.refuse(4, "no unchecked sample backlog line backlog:000000000000. Nothing was written.",
+                    TARGET, "backlog:000000000000")
+        self.assertEqual(self.backlog_puts, 0)
+
+    def test_changed_line_drops_its_rider(self):
+        key = self.set_backlog()
+
+        def take():
+            self.backlog = self.backlog.replace(LINE, LINE + " (095-sample-taken)")
+        self.on_board_put = take
+        code, out, err = self.batch(TARGET, key)
+        self.assertEqual(code, 0)
+        self.assertEqual(err, f"factory.py: {key} changed before batch could check it off; "
+                              "removed 094-name-the-weekly\n")
+        self.assertNotIn("094-name-the-weekly", [j["id"] for j in json.loads(self.text)["jobs"]])
+        self.assertEqual((json.loads(out)["riders"], self.backlog_puts), ([], 0))
 
     def test_attach_refusals_write_nothing(self):
         self.refuse(4, "no job 999-sample-none on the board", "sample/999-sample-none")
@@ -193,6 +258,32 @@ class BatchTest(IsolatedTestCase):
         self.assertEqual((j["stage"], j["done"]), ("merged", self.job(LEAD)["done"]))
         self.assertEqual(self.job("093-sample-login")["stage"], "idea")
 
+    def test_lead_needs_mirror_onto_riders_at_needs_human(self):
+        self.batch(TARGET, "091-sample-typo")
+        self.patch_lead({"stage": "needs-human", "needs": "Pick the CSV date format in needs.md"})
+        j = self.job("091-sample-typo")
+        self.assertEqual((j["stage"], j["needs"]), ("needs-human", "Pick the CSV date format in needs.md"))
+        self.patch_lead({"needs": "Pick the CSV file name in needs.md"})
+        self.assertEqual(self.job("091-sample-typo")["needs"], "Pick the CSV file name in needs.md")
+        self.patch_lead({"stage": "build"})
+        self.assertNotIn("needs", self.job("091-sample-typo"))
+
+    def test_needs_only_patch_skips_unchanged_riders(self):
+        self.batch(TARGET, "091-sample-typo")
+        self.patch_lead({"stage": "build"})
+        before = self.job("091-sample-typo")["updated"]
+        with patch.object(factory, "now", return_value="2026-01-01T13:00:00Z"):
+            self.patch_lead({"needs": None})
+        self.assertEqual(self.job("091-sample-typo")["updated"], before)
+
+    def test_closed_lead_clears_rider_needs(self):
+        self.batch(TARGET, "091-sample-typo")
+        self.patch_lead({"stage": "needs-human", "needs": "Pick the CSV date format in needs.md"})
+        self.patch_lead({"stage": "closed"})
+        j = self.job("091-sample-typo")
+        self.assertEqual(j["stage"], "idea")
+        self.assertNotIn("needs", j)
+
     def test_closed_lead_returns_riders_to_idea(self):
         self.batch(TARGET, "091-sample-typo")
         self.patch_lead({"stage": "closed"})
@@ -243,3 +334,135 @@ class BatchTest(IsolatedTestCase):
             code, out, _ = invoke(factory, ["stuck", "--limit", "5"])
         self.assertEqual(code, 0)
         self.assertEqual([j["id"] for j in json.loads(out)], [LEAD])
+
+    def stack(self, *args):
+        with patch.dict(os.environ, {"PASEO_AGENT_ID": ""}):
+            return invoke(factory, ["stack", *args, "--session", "tag"])
+
+    def refuse_stack(self, code, message, *args):
+        self.assertEqual(self.stack(*args), (code, "", f"factory.py: {message}\n"))
+        self.assertEqual(self.puts, 0)
+
+    def test_stack_marks_one_rider(self):
+        self.batch(TARGET, "091-sample-typo", "092-sample-csv-name")
+        self.puts = 0
+        code, out, _ = self.stack(TARGET, "092-sample-csv-name")
+        self.assertEqual((code, self.puts), (0, 1))
+        self.assertEqual(json.loads(out), {"lead": LEAD, "stacked": "092-sample-csv-name"})
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stacked"], j["note"], j["stage"]), (True, f"stacked PR on {LEAD}", "spec"))
+        self.assertNotIn("stacked", self.job("091-sample-typo"))
+        code, out, _ = self.stack(TARGET, "092-sample-csv-name")
+        self.assertEqual((code, self.puts), (0, 1))
+        self.assertEqual(json.loads(out), {"lead": LEAD, "stacked": "092-sample-csv-name"})
+
+    def test_stack_refusals_write_nothing(self):
+        self.batch(TARGET, "091-sample-typo", "092-sample-csv-name")
+        batched = json.loads(self.text)["jobs"]
+        self.puts = 0
+        self.refuse_stack(2, "bad job id '../x'. Nothing was written.", TARGET, "../x")
+        self.refuse_stack(2, "bad job id 'bad id'. Nothing was written.", TARGET, "bad id")
+        self.refuse_stack(4, "no job 999-sample-none on the board", "sample/999-sample-none", "092-sample-csv-name")
+        self.refuse_stack(4, "no job 999-sample-none on the board", TARGET, "999-sample-none")
+        rows = json.loads(json.dumps(batched))
+        rows[0]["claim"]["session"] = "other"
+        self.set_jobs(rows)
+        self.refuse_stack(6, f"{LEAD} is not held by this session. Nothing was written.", TARGET,
+                          "092-sample-csv-name")
+        rows[0].update(claim=dict(CLAIM), stage="build")
+        self.set_jobs(rows)
+        self.refuse_stack(2, f"stack runs while {LEAD} is at spec, not build", TARGET, "092-sample-csv-name")
+        rows[0]["stage"] = "spec"
+        self.set_jobs(rows)
+        self.refuse_stack(2, f"cannot stack 093-sample-login: not batched into {LEAD}. Nothing was written.",
+                          TARGET, "093-sample-login")
+        rows[1]["stacked"] = True
+        self.set_jobs(rows)
+        self.refuse_stack(2, f"cannot stack 092-sample-csv-name: 091-sample-typo is already stacked on {LEAD}. "
+                          "Nothing was written.", TARGET, "092-sample-csv-name")
+
+    def test_cli_registers_stack(self):
+        self.assertEqual(factory.COMMANDS["stack"], (factory.stack_cmd, 2, 2))
+
+    def stacked_batch(self):
+        self.batch(TARGET, "091-sample-typo", "092-sample-csv-name")
+        self.stack(TARGET, "092-sample-csv-name")
+
+    def test_stacked_rider_keeps_its_own_pr(self):
+        self.stacked_batch()
+        self.patch_lead({"stage": "build"})
+        self.assertEqual(self.job("092-sample-csv-name")["stage"], "build")
+        self.patch_lead({"stage": "pr-open", "pr": "https://example.test/pr/41"})
+        self.assertEqual(self.job("091-sample-typo")["pr"], "https://example.test/pr/41")
+        j = self.job("092-sample-csv-name")
+        self.assertEqual(j["stage"], "pr-open")
+        self.assertNotIn("pr", j)
+        rows = json.loads(self.text)["jobs"]
+        rows[2]["pr"] = "https://example.test/pr/42"
+        self.set_jobs(rows)
+        self.patch_lead({"stage": "needs-human"})
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stage"], j["pr"]), ("needs-human", "https://example.test/pr/42"))
+
+    def test_stacked_rider_takes_lead_needs_at_needs_human(self):
+        self.stacked_batch()
+        self.patch_lead({"stage": "needs-human", "needs": "Pick the CSV date format in needs.md"})
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stage"], j["needs"]), ("needs-human", "Pick the CSV date format in needs.md"))
+        self.patch_lead({"stage": "build"})
+        j = self.job("092-sample-csv-name")
+        self.assertEqual(j["stage"], "build")
+        self.assertNotIn("needs", j)
+
+    def test_merged_lead_releases_stacked_rider(self):
+        rows = jobs()
+        rows[2]["refs"] = ["junk", {"id": "001-sample-old", "kind": "follow-up-of"}]
+        self.set_jobs(rows)
+        self.stacked_batch()
+        self.patch_lead({"stage": "pr-open", "pr": "https://example.test/pr/41", "automerge": True})
+        rows = json.loads(self.text)["jobs"]
+        rows[2]["pr"] = "https://example.test/pr/42"
+        self.set_jobs(rows)
+        self.patch_lead({"stage": "merged"})
+        self.assertEqual(self.job("091-sample-typo")["stage"], "merged")
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stage"], j["pr"], j["automerge"], j["note"]),
+                         ("pr-open", "https://example.test/pr/42", True, f"stacked on {LEAD}, which merged"))
+        self.assertEqual(j["refs"], [{"id": "001-sample-old", "kind": "follow-up-of"},
+                                     {"id": LEAD, "kind": "follow-up-of"}])
+        self.assertNotIn("stacked", j)
+        self.assertNotIn("escalated", j)
+        self.assertIsNone(factory.lead_of(j))
+
+    def test_stacked_rider_needs_cleared_on_merge_from_needs_human(self):
+        self.stacked_batch()
+        rows = json.loads(self.text)["jobs"]
+        rows[2]["pr"] = "https://example.test/pr/42"
+        self.set_jobs(rows)
+        self.patch_lead({"stage": "needs-human", "needs": "Pick the CSV date format in needs.md"})
+        self.assertEqual(self.job("092-sample-csv-name")["needs"], "Pick the CSV date format in needs.md")
+        self.patch_lead({"stage": "merged"})
+        self.assertNotIn("needs", self.job("092-sample-csv-name"))
+
+    def test_merged_lead_unbatches_stacked_rider_without_pr(self):
+        self.stacked_batch()
+        self.patch_lead({"stage": "pr-open", "pr": "https://example.test/pr/41", "escalated": True})
+        self.patch_lead({"stage": "merged"})
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stage"], j["note"]), ("idea", f"unbatched: {LEAD} merged before its stacked PR opened"))
+        for key in ("refs", "stacked", "pr", "escalated"):
+            self.assertNotIn(key, j)
+
+    def test_closed_lead_unbatches_stacked_rider(self):
+        self.stacked_batch()
+        self.patch_lead({"stage": "pr-open", "pr": "https://example.test/pr/41"})
+        rows = json.loads(self.text)["jobs"]
+        rows[2]["pr"] = "https://example.test/pr/42"
+        self.set_jobs(rows)
+        self.patch_lead({"stage": "closed"})
+        j = self.job("092-sample-csv-name")
+        self.assertEqual((j["stage"], j["note"]),
+                         ("idea", f"unbatched: {LEAD} closed; stacked PR https://example.test/pr/42 is still open"))
+        for key in ("refs", "stacked", "pr"):
+            self.assertNotIn(key, j)
+        self.assertEqual(self.job("091-sample-typo")["note"], f"unbatched: {LEAD} closed")

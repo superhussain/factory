@@ -98,6 +98,16 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
         await press("ArrowUp", "d-pause", true);
         await press("Home", "d-edit-idea", true);
         await press("End", "d-copy-link", true);
+        const ring = (id) =>
+          page.$eval(`#${id}`, (el) => {
+            const s = getComputedStyle(el);
+            return { style: s.outlineStyle, width: s.outlineWidth };
+          });
+        assert.deepEqual(await ring("d-copy-link"), { style: "solid", width: "2px" }, label);
+        if (!viewport.hasTouch) {
+          await page.hover("#d-edit-idea");
+          assert.equal((await ring("d-edit-idea")).style, "none", `${label} hover has no ring`);
+        }
         await press("Escape", "d-actions", false);
         await press("ArrowDown", "d-edit-idea", true);
         await press("Tab", "d-close", false);
@@ -113,6 +123,15 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
 
         await activate("#d-actions");
         assert.deepEqual(await state(page), openAt("d-edit-idea"), `${label} open by pointer`);
+        const rect = (sel) => page.$eval(sel, (el) => el.getBoundingClientRect().toJSON());
+        const [menu, head, button] = [
+          await rect("#d-actions-menu"),
+          await rect(".detail-head"),
+          await rect("#d-actions"),
+        ];
+        if (viewport.width <= 760) assert.ok(menu.top >= head.bottom, `${label} menu below header`);
+        else
+          assert.equal(Math.round(menu.top - button.bottom), 4, `${label} menu under its button`);
         await activate("#d-actions");
         assert.deepEqual(await state(page), closedAt("d-actions"), `${label} close by pointer`);
 

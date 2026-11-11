@@ -5,6 +5,7 @@
 // views against the read-only reference page and is never part of CI or assertions.
 // Each capture side gets up to three attempts in a fresh browser context, so one hung page
 // under host load does not end the run.
+// Capture pages bypass the dashboard service worker so request interception answers /board.json.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";
@@ -318,7 +319,9 @@ async function capture(outdir, referencePath) {
 
     let archivedBoard = false;
     let archivePageFails = false;
+    let archiveSearchFails = false;
     let longProject = false;
+    let refBoard = false;
     async function view(name, width, height, theme, prepare, touch = false) {
       for (const side of ["before", "after"]) {
         await retryCapture(`${side}-${name}`, async () => {
@@ -378,6 +381,29 @@ async function capture(outdir, referencePath) {
                   ]),
                 });
               }
+              if (refBoard && target.pathname === "/board.json") {
+                const board = await fetch(target.href);
+                const body = await board.json();
+                return request.respond({
+                  status: board.status,
+                  contentType: "application/json",
+                  headers: { ETag: board.headers.get("ETag") ?? "" },
+                  body: JSON.stringify({
+                    ...body,
+                    jobs: body.jobs.map((j) =>
+                      j.id === "002-needs"
+                        ? {
+                            ...j,
+                            refs: [
+                              { kind: "follow-up-of", id: "004-rework-capture" },
+                              { kind: "follow-up-of", id: "001-capture" },
+                            ],
+                          }
+                        : j,
+                    ),
+                  }),
+                });
+              }
               if (archivedBoard && target.pathname === "/board.json") {
                 const board = await fetch(target.href);
                 return request.respond({
@@ -405,6 +431,12 @@ async function capture(outdir, referencePath) {
                       total: 52,
                     }),
                   });
+                if (archiveSearchFails && target.searchParams.has("q"))
+                  return request.respond({
+                    status: 500,
+                    contentType: "text/plain",
+                    body: "unavailable",
+                  });
                 const q = target.searchParams.get("q");
                 if (q !== null) {
                   const jobs = [CAPTURE_ARCHIVED].filter((j) =>
@@ -418,6 +450,12 @@ async function capture(outdir, referencePath) {
                     body: JSON.stringify({ jobs, total: jobs.length }),
                   });
                 }
+                if (target.searchParams.get("id") === "413-expired-link")
+                  return request.respond({
+                    status: 401,
+                    contentType: "text/plain",
+                    body: "unauthorized",
+                  });
                 if (target.searchParams.get("id") === "411-sync-retry")
                   return request.respond({
                     status: 503,
@@ -559,6 +597,12 @@ async function capture(outdir, referencePath) {
       });
       await page.waitForSelector("#job-picker[open]");
     };
+    const clickArchiveSearch = (page) =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('#job-results [role="option"]')]
+          .find((o) => o.querySelector(".title").textContent === "Search archived jobs")
+          .click(),
+      );
     const openIdea = async (page) => {
       await page.waitForSelector("#new-idea:not([hidden])");
       await page.click("#new-idea");
@@ -588,6 +632,7 @@ async function capture(outdir, referencePath) {
     try {
       await view("filter-long-desktop", 1440, 900, "light", openFilter);
       await view("filter-long-mobile", 390, 844, "dark", openFilter);
+      await view("filter-long-touch", 390, 844, "dark", (page) => page.tap("#filter"), true);
     } finally {
       longProject = false;
     }
@@ -598,6 +643,43 @@ async function capture(outdir, referencePath) {
     };
     await view("filter-none-desktop", 1440, 900, "light", hideAllProjects);
     await view("filter-none-mobile", 390, 844, "dark", hideAllProjects);
+    const hideColumnsAndProjects = async (page) => {
+      await page.evaluate(() =>
+        localStorage.setItem(
+          "factory-hidden-columns",
+          "backlog,idea,spec,build,review,approve,pr-open,closed",
+        ),
+      );
+      await page.reload({ waitUntil: "networkidle0" });
+      await page.waitForSelector("#filter:not([hidden])");
+      await hideAllProjects(page);
+    };
+    await view("filter-none-few-columns-desktop", 1440, 900, "light", hideColumnsAndProjects);
+    const focusSecondRef = async (page) => {
+      await page.focus('.card-actions[data-actions="002-needs"]');
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      const scrolled = await page.evaluate(() => {
+        const a = document.activeElement;
+        a.closest(".card-wrap").scrollIntoView({ block: "center" });
+        const row = a.closest(".card-wrap").querySelector(".refs.line");
+        return a.matches('a.ref-focus[data-ref="001-capture"]') && row.scrollLeft > 0;
+      });
+      if (!scrolled)
+        throw new Error("card ref capture: 001-capture ref not focused in a scrolled row");
+    };
+    refBoard = true;
+    try {
+      await view("card-ref-focus-mobile", 390, 844, "dark", focusSecondRef);
+    } finally {
+      refBoard = false;
+    }
+    const focusSecondMenuItem = async (page) => {
+      await page.focus('.card-actions[data-actions="001-capture"]');
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowDown");
+    };
+    await view("card-menu-focus-desktop", 1440, 900, "light", focusSecondMenuItem);
     // Both pages have the decision page, so both sides open it.
     const openDecision = async (page) => {
       await page.click(".backlog-card");
@@ -644,7 +726,8 @@ async function capture(outdir, referencePath) {
       await page.waitForSelector("#backlog-form");
       await page.waitForSelector("#backlog-triage:not([hidden])");
     };
-    const openTriageFirstPaint = async (page, side) => {
+    // The after side waits until the board has prefetched all three triage verdicts.
+    const openTriagePrefetched = async (page, side) => {
       if (side === "after") await page.waitForFunction(() => backlogTriageSeen.size === 3);
       await page.click('.backlog-card[data-index="1"]');
       await page.waitForSelector("#backlog-form");
@@ -662,14 +745,21 @@ async function capture(outdir, referencePath) {
       );
     };
     const openArchivedDrawer = async (page, side) => {
+      // Both sides wait for the archive answer, so the before shot is not a timed guess.
+      const answered = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/api/board/archive" && url.searchParams.get("id") === "412-fix-login"
+        );
+      });
       await page.evaluate(() => {
         location.hash = "#412-fix-login";
       });
+      await answered;
       if (side === "after")
         await page.waitForFunction(
           () => document.querySelector("#d-doc h1")?.textContent === "Synthetic login fix",
         );
-      else await new Promise((resolve) => setTimeout(resolve, 1000));
     };
     // The reference has no archive list, so its side shows the closed column.
     // Terminal columns start collapsed, so both sides expand closed first.
@@ -695,6 +785,32 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
+    const settleArchiveSettings = async (page, name) => {
+      try {
+        await page.waitForFunction(() => {
+          const t = document.getElementById("pipeline-status").textContent;
+          return t.startsWith("Fix before saving") || t === "Unsaved changes";
+        });
+      } catch (error) {
+        const seen = await page.$eval("#pipeline-status", (el) => el.textContent);
+        throw new Error(
+          name + ' capture status wait timed out; #pipeline-status read "' + seen + '"',
+          {
+            cause: error,
+          },
+        );
+      }
+      await page.evaluate(() =>
+        document.getElementById("pipeline-archive").scrollIntoView({ block: "start" }),
+      );
+      const cropped = await page.evaluate(() =>
+        ["pipeline-archive", "pipeline-status"].filter((id) => {
+          const r = document.getElementById(id).getBoundingClientRect();
+          return r.top < 0 || r.bottom > window.innerHeight;
+        }),
+      );
+      if (cropped.length) throw new Error(name + " capture crops " + cropped.join(", "));
+    };
     const openArchivePrefill = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/pipeline";
@@ -708,20 +824,7 @@ async function capture(outdir, referencePath) {
       );
       await page.select("#pipeline-archive-mode", "");
       await page.select("#pipeline-archive-mode", "count");
-      await page.waitForFunction(() => {
-        const t = document.getElementById("pipeline-status").textContent;
-        return t.startsWith("Fix before saving") || t === "Unsaved changes";
-      });
-      await page.evaluate(() =>
-        document.getElementById("pipeline-archive").scrollIntoView({ block: "start" }),
-      );
-      const cropped = await page.evaluate(() =>
-        ["pipeline-archive", "pipeline-status"].filter((id) => {
-          const r = document.getElementById(id).getBoundingClientRect();
-          return r.top < 0 || r.bottom > window.innerHeight;
-        }),
-      );
-      if (cropped.length) throw new Error("archive-prefill capture crops " + cropped.join(", "));
+      await settleArchiveSettings(page, "archive-prefill");
     };
     await view("archive-prefill", 1280, 900, "light", openArchivePrefill);
     const openArchiveSwap = async (page) => {
@@ -738,9 +841,7 @@ async function capture(outdir, referencePath) {
       await page.select("#pipeline-archive-mode", "");
       await page.select("#pipeline-archive-mode", "age");
       await page.select("#pipeline-archive-mode", "count");
-      await page.evaluate(() =>
-        document.getElementById("pipeline-archive").scrollIntoView({ block: "center" }),
-      );
+      await settleArchiveSettings(page, "archive-swap");
     };
     await view("archive-swap", 1280, 900, "light", openArchiveSwap);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
@@ -763,6 +864,20 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
+    const openArchivedLoadSignin = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#413-expired-link";
+      });
+      if (side === "after")
+        await page.waitForFunction(() => !document.getElementById("conn-banner").hidden);
+      else
+        await page.waitForFunction(() =>
+          document
+            .getElementById("board-status")
+            .textContent.startsWith("Could not load archived job"),
+        );
+    };
+    await view("archived-load-signin", 1280, 900, "light", openArchivedLoadSignin);
     await view("archive-list", 1280, 900, "light", openArchiveList);
     await view("archive-list-mobile", 390, 844, "dark", openArchiveList);
     const openArchiveListError = async (page, side) => {
@@ -814,11 +929,7 @@ async function capture(outdir, referencePath) {
         await openJumper(page);
         await page.type("#job-search", "login");
         if (side !== "after") return;
-        await page.evaluate(() =>
-          [...document.querySelectorAll('#job-results [role="option"]')]
-            .find((o) => o.querySelector(".title").textContent === "Search archived jobs")
-            .click(),
-        );
+        await clickArchiveSearch(page);
         await page.waitForFunction(() =>
           [...document.querySelectorAll("#job-results .title")].some(
             (el) => el.textContent === "Synthetic login fix",
@@ -835,11 +946,7 @@ async function capture(outdir, referencePath) {
         await page.evaluate(() => poll());
         await openJumper(page);
         await page.type("#job-search", "zzz");
-        await page.evaluate(() =>
-          [...document.querySelectorAll('#job-results [role="option"]')]
-            .find((o) => o.querySelector(".title").textContent === "Search archived jobs")
-            .click(),
-        );
+        await clickArchiveSearch(page);
         await page.waitForFunction(() =>
           [...document.querySelectorAll("#job-results .meta")].some(
             (el) => el.textContent === 'No archived jobs match "zzz". Pick to search again.',
@@ -850,10 +957,29 @@ async function capture(outdir, referencePath) {
       }
     };
     await view("jumper-archive-empty", 1280, 900, "light", openArchiveEmpty);
+    const openArchiveFailed = async (page) => {
+      archivedBoard = true;
+      archiveSearchFails = true;
+      try {
+        await page.evaluate(() => poll());
+        await openJumper(page);
+        await page.type("#job-search", "zzz");
+        await clickArchiveSearch(page);
+        await page.waitForFunction(() =>
+          [...document.querySelectorAll("#job-results .meta")].some(
+            (el) => el.textContent === "Could not search archived jobs. Pick to try again.",
+          ),
+        );
+      } finally {
+        archivedBoard = false;
+        archiveSearchFails = false;
+      }
+    };
+    await view("jumper-archive-failed", 1280, 900, "light", openArchiveFailed);
     await view("backlog-triage-desktop", 1440, 900, "light", openTriage);
     await view("backlog-triage-mobile", 390, 844, "dark", openTriage);
-    await view("backlog-triage-open-desktop", 1440, 900, "light", openTriageFirstPaint);
-    await view("backlog-triage-open-mobile", 390, 844, "dark", openTriageFirstPaint);
+    await view("backlog-triage-open-desktop", 1440, 900, "light", openTriagePrefetched);
+    await view("backlog-triage-open-mobile", 390, 844, "dark", openTriagePrefetched);
     await view("backlog-decide-desktop", 1440, 900, "light", openDecision);
     await view("backlog-decide-mobile", 390, 844, "dark", openDecision);
     await view("backlog-decide-touch", 390, 844, "dark", openDecision, true);

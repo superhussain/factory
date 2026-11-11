@@ -292,7 +292,7 @@ class PublicCutoverTest(unittest.TestCase):
             (*git, "remote", "add", "archive", f"git@github.com:{ARCHIVE}.git"),
             (*git, "fetch", "origin", "--prune"),
             (*git, "switch", "--detach", "origin/main"),
-            (*git, "for-each-ref", "--format=%(refname:short)%09%(upstream)", "refs/heads"),
+            (*git, "for-each-ref", "--format=%(refname:lstrip=2)%09%(upstream)", "refs/heads"),
             (*git, "merge-base", "--is-ancestor", "main", "origin/main"),
             (*git, "merge-base", "--is-ancestor", "factory/650", "origin/main"),
             (*git, "merge-base", "--is-ancestor", "fresh", "origin/main"),
@@ -327,6 +327,20 @@ class PublicCutoverTest(unittest.TestCase):
         self.assertNotIn(("branch", "-m"), [argv[3:5] for argv in argvs])
         self.assertIn("no private branches left", out)
         self.assertIn("unset upstream on archive/main", out)
+
+    def test_repoint_shadowed_archive_branch(self):
+        git = ("git", "-C", self.checkout)
+        fake = FakeRunner({
+            (*git, "remote", "get-url", "archive"): (0, f"git@github.com:{ARCHIVE}.git\n"),
+            (*git, "for-each-ref", "--format=%(refname:short)%09%(upstream)", "refs/heads"):
+                (0, "heads/archive/main\t\n"),
+            (*git, "for-each-ref", "--format=%(refname:lstrip=2)%09%(upstream)", "refs/heads"):
+                (0, "archive/main\t\n"),
+        }, checkout=self.checkout)
+        code, out = self.main(fake, "--repoint-only")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn(("branch", "-m"), [argv[3:5] for argv in fake.argvs()])
+        self.assertIn("no private branches left", out)
 
     def test_bad_usage_exits_2(self):
         no_checkout = [arg for arg in self.argv("--repoint-only") if arg not in ("--checkout", self.checkout)]

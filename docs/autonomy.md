@@ -220,7 +220,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   prints the error and "backlog triage stopped; unsent lines wait for the next pickup run". The sweep
   keeps the holds it recorded, and pickup still claims and launches ideas. While the sweep keeps
   failing, pickup's host status carries `triage_failed_since`, the start of the first failing run.
-  Settings, Hosts shows "Backlog triage failing since <time>" in red on the host's card until a sweep
+  Settings, Hosts shows "Backlog triage failing since <time>" in red with a warning sign on the host's card until a sweep
   succeeds.
 - **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a
   service token cannot switch triage on or move the threshold. The Worker compares the
@@ -278,10 +278,14 @@ sequenceDiagram
 
 Request: `{"reviews": {"security"?: text, "ux"?: text, "ui"?: text, "code"?: text}}`, at
 least one key, body cap `160 << 10` bytes. A review over 8000 characters, an unknown
-reviewer or key, or control or invisible characters get a 400. Before the call, the Worker
-replaces secret-shaped text with `[secret-shaped text removed]` and each `review-findings` or
-`operator-preferences` tag with `[review-findings tag removed]` or
-`[operator-preferences tag removed]`, so a review that quotes one is still rated.
+reviewer or key, or a control or invisible character gets a 400. Variation selectors and
+zero-width joiners between emoji are the two exceptions. Before the call, the Worker
+removes those, replaces secret-shaped text with `[secret-shaped text removed]`, replaces a
+`review-findings` tag with `[review-findings tag removed]` and an `operator-preferences`
+tag with `[operator-preferences tag removed]`, and cuts the result to 8000 characters.
+When the text holds a tag or a secret shape in fullwidth or look-alike letters, the Worker
+folds those letters to ASCII first, so a token such as `ｇｈｐ＿…` is removed too. A
+review that quotes a secret or a tag, or writes an emoji such as ⚠️ or 👩‍💻, is still rated.
 
 Reply 200: `{"decision": "escalate"|"continue", "confidence": int, "threshold": 80,
 "reason": text, "model": "@cf/cloudflare/clef-flash"}`. The reason is

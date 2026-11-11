@@ -1341,8 +1341,19 @@ async function browserTest(url) {
     await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
     assert.deepEqual(frozen.idea_images, names);
     assert.equal(frozen.idea, before);
-    await request.respond({ status: 503, body: "synthetic uncertain save" });
+    await request.respond({ status: 503, body: "Storage is busy." });
     await page.waitForFunction(() => !inflight && snap?.uncertain === true, { polling: 50 });
+    if (captureDir) {
+      await (
+        await page.$("#idea-dlg")
+      ).screenshot({
+        path: path.join(captureDir, "idea-uncertain-1280.png"),
+      });
+    }
+    assert.equal(
+      await page.$eval("#idea-err", (e) => e.textContent),
+      "Not confirmed: saving the board failed: 503 Storage is busy. The board has no record of it yet, but the save could still land late. Retry re-checks with the same content and will not add a duplicate.",
+    );
     assert.equal(await page.$eval("#idea-add", (e) => e.textContent), "Retry");
     assert.equal(await disabled("#idea-add"), false);
     assert.equal(await page.$eval("#idea-text", (e) => e.readOnly), true);

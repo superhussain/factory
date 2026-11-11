@@ -17,7 +17,8 @@ concrete way to check it: a command, a grep, a type that must compile, or a shor
 manual step. Keep the feature small. If the request is more than one reviewable PR,
 spec the smallest useful slice and list each remaining slice under **Sub-jobs**, one
 `- <feature>` line each, written so it stands alone as a feature request. The
-orchestrator queues them as their own jobs.
+orchestrator queues them as their own jobs. Fold small fixes the job's own files need
+into Tasks rather than Sub-jobs. Sub-jobs are for slices that need their own PR.
 
 The builder executes the spec and is told not to make design decisions, so
 settle every implementation choice here: the approach, file and function names, fields,
@@ -65,6 +66,11 @@ carry the lead idea as the running example. If one of them turns out unrelated t
 rest, say so under Risks and still spec it. A batch can hold up to 20 ideas. Give each
 small one a single line under Scope and one criterion, and spend the word budget on
 the ones that need it.
+When one batched idea needs its own review (a migration, a storage or auth change,
+or design work of its own), add a `## Stacked PR` section right after Non-goals with
+one line, `- <id>: <reason>`. Stack at most one idea per batch. Put its tasks last
+and start each of their titles with `Stacked <id>:`. It ships as a second PR stacked
+on this job's PR, so a finding on it cannot hold up the rest.
 
 ### Job files stay readable
 

@@ -116,13 +116,23 @@ export function redactSecrets(text, mark) {
   return SECRETS_ALL.reduce((out, pattern) => out.replace(pattern, mark), text);
 }
 
+/** Whether text holds a secret shape. */
+export function hasSecret(text) {
+  return SECRETS.some((pattern) => pattern.test(text));
+}
+
+/** The regex source for a `name` tag after the fold, with i and l matching each other. */
+export function foldedTagSource(name) {
+  return `<\\/?\\s*${name.replace(/[il]/g, "[il]")}`;
+}
+
 /** The `{ tag, folded }` regexes for a reserved tag name, built once per name. */
 function reservedTagPatterns(name) {
   let patterns = RESERVED_TAG_PATTERNS.get(name);
   if (!patterns) {
     patterns = {
       tag: new RegExp(`<\\/?\\s*${name}`, "i"),
-      folded: new RegExp(`<\\/?\\s*${name.replace(/[il]/g, "[il]")}`, "i"),
+      folded: new RegExp(foldedTagSource(name), "i"),
     };
     RESERVED_TAG_PATTERNS.set(name, patterns);
   }
@@ -154,7 +164,7 @@ export function checkOperatorText(text, field, kind = "note") {
   if (hasReservedTag(text, "operator-preferences"))
     return `${field}: contains the reserved envelope tag`;
   if (note && LINKS.some((pattern) => pattern.test(text))) return `${field}: links are not allowed`;
-  if (SECRETS.some((pattern) => pattern.test(text))) return `${field}: looks like a secret`;
+  if (hasSecret(text)) return `${field}: looks like a secret`;
   if (!note) return null;
   for (const [id, pattern] of PHRASES) {
     if (pattern.test(text))

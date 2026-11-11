@@ -1,6 +1,7 @@
 // The "Show archived jobs" button under the merged and closed columns pages
 // GET /api/board/archive?page=N (answered here by request interception) into one shared list.
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
@@ -36,6 +37,7 @@ const ROWS = [
   row("412-fix-login", "Fix login", "merged", "2026-09-01T12:00:00Z", {
     round: 1,
     branch: "factory/412-fix-login",
+    pr: "https://github.com/example/sample/pull/12",
   }),
   ...Array.from({ length: 49 }, (_, k) =>
     row(
@@ -46,10 +48,12 @@ const ROWS = [
     ),
   ),
 ];
+const SHOTS = new URL("../../.context/shots/", import.meta.url).pathname;
 const wait = { polling: 50 };
 
 test("archived jobs page under the terminal columns", { timeout: 180000 }, async (t) => {
   await prepareAssets();
+  await mkdir(SHOTS, { recursive: true });
   await withBrowserFixture(async ({ browser, origin }) => {
     await seedProject(
       origin,
@@ -161,6 +165,77 @@ test("archived jobs page under the terminal columns", { timeout: 180000 }, async
         await page.$eval(".archive-count", (el) => el.textContent),
         "52 of 52 archived jobs loaded",
       );
+    });
+
+    await t.test("archived cards have their own style", async () => {
+      const styles = await page.evaluate(() => {
+        const css = (el, ...props) => props.map((p) => getComputedStyle(el)[p]);
+        const card = (id) => document.querySelector(`.card[data-id="${id}"]`);
+        const old = card("413-old-suggestion");
+        const login = card("412-fix-login");
+        const type = ["fontSize", "letterSpacing", "textTransform", "fontWeight", "color"];
+        return {
+          frame: css(old, "borderTopStyle", "borderTopColor", "backgroundColor", "boxShadow"),
+          noPr: [
+            css(old.querySelector(".id"), "paddingRight")[0],
+            css(old.querySelector(".proj"), "paddingRight")[0],
+          ],
+          withPr: [
+            css(login.querySelector(".id"), "paddingRight")[0],
+            css(login.closest(".card-wrap").querySelector(".pr-link"), "right")[0],
+          ],
+          head: css(document.querySelector(".archive-head"), ...type),
+          col: css(document.querySelector(".col.closed h2"), ...type),
+        };
+      });
+      assert.deepEqual(styles.frame, ["dashed", "rgb(107, 114, 128)", "rgba(0, 0, 0, 0)", "none"]);
+      assert.deepEqual(styles.noPr, ["0px", "0px"]);
+      assert.deepEqual(styles.withPr, ["64px", "16px"]);
+      assert.deepEqual(styles.head, styles.col);
+    });
+
+    await t.test("archived card states", async () => {
+      const CARD = '.card[data-id="412-fix-login"]';
+      const WRAP = `.card-wrap:has(> ${CARD})`;
+      const shot = async (name) => {
+        await page.mouse.move(5, 5);
+        await (await page.$(WRAP)).screenshot({ path: `${SHOTS}${name}` });
+      };
+      const look = () =>
+        page.$eval(CARD, (c) => [
+          getComputedStyle(c).borderTopColor,
+          getComputedStyle(c).boxShadow,
+          getComputedStyle(c.parentElement.querySelector(".pr-link")).right,
+        ]);
+      const ACCENT = "rgb(124, 58, 237)";
+      await shot("archived-card-1280.png");
+      await page.evaluate(() => {
+        openId = "412-fix-login";
+        renderBoard();
+      });
+      await shot("archived-selected-1280.png");
+      assert.deepEqual(await look(), [ACCENT, `${ACCENT} 0px 0px 0px 1px`, "16px"]);
+      await page.evaluate(() => {
+        openId = null;
+        document.body.classList.add("compact");
+        renderBoard();
+      });
+      await shot("archived-compact-1280.png");
+      assert.deepEqual(await look(), ["rgb(107, 114, 128)", "none", "8px"]);
+      await page.hover(CARD);
+      // The .15s border-color transition has to finish before the colour reads as accent.
+      await page.waitForFunction(
+        (sel, c) => getComputedStyle(document.querySelector(sel)).borderTopColor === c,
+        wait,
+        CARD,
+        ACCENT,
+      );
+      assert.equal((await look())[0], ACCENT);
+      await page.mouse.move(5, 5);
+      await page.evaluate(() => {
+        document.body.classList.remove("compact");
+        renderBoard();
+      });
     });
 
     await t.test("a redraw keeps the list", async () => {

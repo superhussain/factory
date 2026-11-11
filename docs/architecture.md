@@ -79,6 +79,8 @@ conditions** for legacy-client compatibility (a blind write), while malformed
 present conditions return 428. Project files, board and backlog keep strict
 conditional semantics. A board write that names the stored version also
 cannot change a row's id: one write may not drop a stored id and add a row.
+It also cannot add `move`, `priority`, `paused` or `close` to a row with a
+`batched-into` ref, since a rider follows its lead.
 New device clients always send conditions; the blind
 write remains an honest compatibility surface, unsafe under concurrent writers.
 
@@ -205,7 +207,7 @@ sequenceDiagram
   socket retries with backoff (1, 2, 4 ... 30 s), then every 30 s until it opens.
   A hidden tab keeps its socket only while notifications are on. A `changed` event
   re-reads only its key.
-- A socket open re-reads `board.json` but redraws only when its `ETag` changed.
+- A socket open or a poll timer tick re-reads `board.json` but redraws only when its `ETag` changed, so a focused card is not read again.
   The header dot is solid while live and a ring while polling.
 
 | Request to `/events/board` | Result |
