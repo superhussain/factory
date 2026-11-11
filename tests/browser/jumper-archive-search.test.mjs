@@ -88,6 +88,7 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       await page.evaluate(() => document.getElementById("job-jump").click());
       await page.waitForSelector("#job-picker[open]", wait);
     };
+    const count = () => page.$eval("#job-count", (el) => el.textContent);
     const waitMeta = (meta) =>
       page.waitForFunction(
         (m) =>
@@ -188,8 +189,11 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
     await t.test("zero matches say so", async () => {
       await openJumper();
       await page.type("#job-search", "zzz");
+      const base = await count();
+      assert.ok(!base.includes("archived"));
       await page.keyboard.press("Enter");
       await waitMeta('No archived jobs match "zzz". Pick to search again.');
+      assert.equal(await count(), base + " · no archived matches");
       assert.equal(asked.at(-1), "zzz");
     });
 
@@ -198,8 +202,11 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       await page.waitForFunction(() => !document.getElementById("job-picker").open, wait);
       await openJumper();
       await page.type("#job-search", "boom");
+      const base = await count();
+      assert.ok(!base.includes("archived"));
       await page.keyboard.press("Enter");
       await waitMeta("Could not search archived jobs. Pick to try again.");
+      assert.equal(await count(), base + " · archive search failed");
       assert.equal(asked.at(-1), "boom");
     });
 
