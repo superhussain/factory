@@ -19,6 +19,8 @@
   factory.py routes pick|list|limit <name> [--minutes N]|clear <name>
                                             this host's dispatch routes from routes.md; pick prints
                                             the first not marked limited (exit 3 when all are)
+  factory.py experiment report <name>       print per-arm outcome metrics for one owner-model
+                                            experiment as JSON (read-only)
   factory.py unclaim <job-id>               release this session's claim on an idea, so it waits again
   factory.py deny-notes <job-id> [done]   print a denied job's unread notes wrapped as data, or mark them read
   factory.py pickup [--dry-run] [--limit N] [--max-inflight N]
@@ -1616,10 +1618,19 @@ def inflight_count(data, project, minutes, device=None):
 
 
 def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None, project=None, by_host=False,
-                builds=False):
+                builds=False, experiment=None, route=None):
     """Claim up to limit of the oldest runnable ideas in one board write, and return their
     [{"id", "project", "repo_path", "session"}]. An empty session mints a tag per idea.
-    builds also accepts jobs that Tracer scope approval moved to build."""
+    builds also accepts jobs that Tracer scope approval moved to build.
+    experiment is read_experiment's dict and route the picked route tuple: each picked job
+    without a record gets an experiment stamp naming its arm and launch values, written once,
+    and an arm b job is never picked while the experiment is limited."""
+    exp_limited = None
+    if experiment:
+        until = read_limits(home).get(experiment["name"])
+        if until and until > now():
+            exp_limited = until
+
     def change(text):
         data = load_board(text)
         picked = []
@@ -1642,6 +1653,18 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
                     or not JOB_ID.fullmatch(j["id"]) or ".." in j["id"] \
                     or blocking(j, device, session, minutes):
                 continue
+            record = j.get("experiment")
+            arm = record["arm"] if isinstance(record, dict) and record.get("arm") in ("a", "b") else None
+            if experiment:
+                if arm is None:
+                    arm = experiment_arm(j["id"], experiment["percent"])
+                if arm == "b" and exp_limited:
+                    continue
+                if not j.get("experiment"):
+                    triple = (experiment["provider"], experiment["model"], experiment["effort"]) \
+                        if arm == "b" else (route[1], route[2], route[3])
+                    j["experiment"] = {"name": experiment["name"], "arm": arm, "provider": triple[0],
+                                       "model": triple[1], "effort": triple[2]}
             tag = session or secrets.token_hex(3)
             claim = new_claim(device, tag)
             # Replace the claim whole, as hold does. The paseo key stays as it was.
@@ -2353,12 +2376,42 @@ def read_routes(home):
              "as <name>: <provider> <model> [<effort>]", 2)
     routes = []
     for name, value in meta.items():
+        # The optional experiment line is config, not a route.
+        if name == "experiment":
+            continue
         parts = value.split()
         if not SLUG.fullmatch(name) or len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) \
                 or not ROUTE_MODEL.fullmatch(parts[1]) or parts[2:] and parts[2] not in ROUTE_EFFORTS:
             fail(f"bad route {name!r} in {path}: use <name>: <provider> <model> [<effort>]", 2)
         routes.append((name, parts[0], parts[1], parts[2] if len(parts) == 3 else None))
     return routes
+
+
+def read_experiment(home, route_names):
+    """None, or {name, provider, model, effort, percent} from routes.md's optional experiment
+    line: arm a rides the picked route, arm b launches on the line's own values."""
+    path = Path(home, "routes.md")
+    line = (frontmatter(path)[0] if path.exists() else {}).get("experiment")
+    if line is None:
+        return None
+    parts = line.split()
+    if len(parts) not in (4, 5):
+        fail(f"bad experiment in {path}: use experiment: <name> <provider> <model> [<effort>] <percent>", 2)
+    name, provider, model = parts[0], parts[1], parts[2]
+    effort = parts[3] if len(parts) == 5 else None
+    percent = parts[-1]
+    if (not SLUG.fullmatch(name) or not SLUG.fullmatch(provider) or not ROUTE_MODEL.fullmatch(model)
+            or name in route_names
+            or effort is not None and effort not in ROUTE_EFFORTS
+            or not re.fullmatch(r"[0-9]{1,3}", percent) or not 0 <= int(percent) <= 100):
+        fail(f"bad experiment in {path}: use experiment: <name> <provider> <model> [<effort>] <percent>", 2)
+    return {"name": name, "provider": provider, "model": model, "effort": effort, "percent": int(percent)}
+
+
+def experiment_arm(job_id, percent):
+    """Arm "b" when the job id's stable hash bucket falls under percent, else "a"."""
+    bucket = int.from_bytes(hashlib.sha256(job_id.encode("utf-8")).digest()[:4], "big") % 100
+    return "b" if bucket < percent else "a"
 
 
 def read_limits(home):
@@ -2387,8 +2440,12 @@ def pick_route(home):
 
 
 def limit_route(home, name, minutes):
-    """Mark one route limited for minutes from now, and return its limited_until."""
-    if name not in [r[0] for r in read_routes(home)]:
+    """Mark one route or the experiment limited for minutes from now, and return its limited_until."""
+    valid = [r[0] for r in read_routes(home)]
+    experiment = read_experiment(home, valid)
+    if experiment:
+        valid.append(experiment["name"])
+    if name not in valid:
         fail(f"unknown route {name!r}: not in {Path(home, 'routes.md')}", 2)
     stamp = now()
     limits = {n: until for n, until in read_limits(home).items() if until > stamp}
@@ -2432,6 +2489,112 @@ def routes_cmd(sub, *args):
             write_atomic(path, json.dumps(limits, indent=2) + "\n")
     else:
         fail("usage: routes pick|list|limit <name> [--minutes N]|clear <name>", 2)
+
+
+# Stages that follow a completed review round, for the report's review-round mean.
+REVIEW_PAST_STAGES = ("approve", "pr-open", "merged", "closed")
+# The window a follow-up of an arm job counts in: 7 days from the original's done, else started.
+WINDOW_SECONDS = 7 * 86400
+# decision.md's verdict formats, from SKILL.md. Anything else before the PR ships is a skipped step.
+DECISION_VERDICTS = ("APPROVE", "ESCALATE", "CLOSED:")
+
+
+def stamp_of(value):
+    """A board timestamp as UTC, or None when it is missing or unparseable."""
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def arm_metrics(arm_jobs, follow_ups, jobs_root):
+    """One arm's outcome metrics from the board and this host's local job folders. Skipped
+    steps are listed only on readable evidence; evidence a folder cannot back counts as
+    coverage_unknown instead of an owner failure."""
+    stages = [j.get("stage") for j in arm_jobs.values()]
+    means = [max(j.get("round") or 0, len(j.get("rounds") or [])) for j in arm_jobs.values()
+             if j.get("stage") in REVIEW_PAST_STAGES]
+    skipped = {"missing_round_review": [], "missing_decision": [], "pr_before_approve": []}
+    coverage_unknown = 0
+    for job_id, j in sorted(arm_jobs.items()):
+        folder = jobs_root / (j.get("project") or "") / job_id
+        if not isinstance(j.get("project"), str) or not JOB_ID.fullmatch(job_id) or ".." in job_id \
+                or not folder.is_dir() or not (folder / "spec.md").is_file():
+            coverage_unknown += 1
+            continue
+        missed = False
+        for i, entry in enumerate(j.get("rounds") or []):
+            if not isinstance(entry, dict):
+                continue
+            for reviewer, verdict in entry.items():
+                if isinstance(verdict, str) and verdict not in ("", "pending") \
+                        and not (folder / f"round-{i + 1}" / f"review-{reviewer}.md").is_file():
+                    missed = True
+        if missed:
+            skipped["missing_round_review"].append(job_id)
+        if j.get("stage") in ("pr-open", "merged", "closed") and not (folder / "decision.md").is_file():
+            skipped["missing_decision"].append(job_id)
+        if j.get("pr"):
+            decision = folder / "decision.md"
+            if decision.is_file():
+                try:
+                    text = decision.read_text(encoding="utf-8")
+                except (OSError, UnicodeError):
+                    coverage_unknown += 1
+                    continue
+                first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+                if not first.startswith(DECISION_VERDICTS):
+                    skipped["pr_before_approve"].append(job_id)
+    counts = [j["resumes"]["count"] for j in arm_jobs.values() if isinstance(j.get("resumes"), dict)
+              and type(j["resumes"].get("count")) is int]
+    return {"jobs": len(arm_jobs), "merged": stages.count("merged"), "closed": stages.count("closed"),
+            "needs_human": stages.count("needs-human"),
+            "escalated": sum(1 for j in arm_jobs.values() if escalated(j)),
+            "mean_review_rounds": round(sum(means) / len(means), 1) if means else 0,
+            "changes_verdicts": sum(list(entry.values()).count("CHANGES") for j in arm_jobs.values()
+                                    for entry in (j.get("rounds") or []) if isinstance(entry, dict)),
+            "stuck_resumes": sum(counts),
+            "follow_ups_7d": follow_ups, "skipped_steps": skipped, "coverage_unknown": coverage_unknown}
+
+
+def experiment_cmd(sub, name):
+    """Read-only per-arm outcome report for one owner-model experiment. Attributes by each
+    job's recorded experiment field, never by re-hashing. Prints JSON, writes nothing."""
+    if sub != "report":
+        fail("usage: experiment report <name>", 2)
+    if not SLUG.fullmatch(name):
+        fail(f"bad experiment name {name!r}", 2)
+    home = factory_home()
+    data = read_board(home)
+    arm_jobs = {"a": {}, "b": {}}
+    for j in data["jobs"]:
+        if not isinstance(j, dict) or not isinstance(j.get("id"), str):
+            continue
+        record = j.get("experiment")
+        if isinstance(record, dict) and record.get("name") == name and record.get("arm") in ("a", "b"):
+            arm_jobs[record["arm"]][j["id"]] = j
+    follow = {arm: {"rework_of": [], "surfaced": [], "unknown_window": 0} for arm in ("a", "b")}
+    for j in data["jobs"]:
+        refs = j.get("refs") if isinstance(j, dict) else None
+        if not isinstance(refs, list) or not isinstance(j.get("id"), str):
+            continue
+        for ref in refs:
+            if not isinstance(ref, dict) or not isinstance(ref.get("id"), str) \
+                    or ref.get("kind") not in ("rework-of", "follow-up-of"):
+                continue
+            arm = next((a for a in ("a", "b") if ref["id"] in arm_jobs[a]), None)
+            if arm is None:
+                continue
+            original = arm_jobs[arm][ref["id"]]
+            anchor = stamp_of(original.get("done")) or stamp_of(original.get("started"))
+            age = stamp_of(j.get("started")) or stamp_of(j.get("updated"))
+            if anchor is None or age is None:
+                follow[arm]["unknown_window"] += 1
+            elif (age - anchor).total_seconds() <= WINDOW_SECONDS:
+                follow[arm]["rework_of" if ref["kind"] == "rework-of" else "surfaced"].append(j["id"])
+    print(json.dumps({"name": name,
+                      "a": arm_metrics(arm_jobs["a"], follow["a"], Path(home, "jobs")),
+                      "b": arm_metrics(arm_jobs["b"], follow["b"], Path(home, "jobs"))}, indent=2))
 
 
 def release_claim(home, job_id, device, session):
@@ -3674,6 +3837,14 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
             and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"]) and ".." not in j["id"]]
     jobs.sort(key=lambda j: not prioritized(j))
     starts = {j["id"] for j in jobs if tracer_start(j) or moved_here(j, device)}
+    experiment, exp_limited = None, None
+
+    def job_arm(j):
+        """This job's arm: the recorded one, else the hash bucket when the line is set."""
+        record = j.get("experiment") if j else None
+        if isinstance(record, dict) and record.get("arm") in ("a", "b"):
+            return record["arm"]
+        return experiment_arm(j["id"], experiment["percent"]) if j and experiment else None
 
     def skip(j):
         """Why this idea is not a candidate, or None."""
@@ -3693,6 +3864,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
         c = blocking(j, device, "", minutes)
         if c:
             return f"skip {j['id']} {project}: claimed by {c['device']} session {c.get('session')}"
+        if experiment and exp_limited and job_arm(j) == "b":
+            return f"skip {j['id']} {project}: experiment {experiment['name']} limited until {exp_limited}"
         return None
 
     eligible = []
@@ -3716,12 +3889,30 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     if route:
         name, provider, model, effort = route
         template = route_launcher(home, route)
+        experiment = read_experiment(home, [r[0] for r in read_routes(home)])
+        if experiment:
+            until = read_limits(home).get(experiment["name"])
+            if until and until > now():
+                exp_limited = until
 
     def values(entry):
         return {"id": entry["id"], "project": entry["project"], "repo_path": entry["repo_path"],
                 "session": entry["session"], "provider": provider, "model": model, "effort": effort or "",
                 "prompt": launch_prompt(f"/factory {'recover' if entry['id'] in starts else 'idea'} {entry['id']} "
                                         f"--session {entry['session']}")}
+
+    def job_given(j, entry):
+        """(arm, argv values): an arm b job launches on its recorded triple, or the
+        experiment's when the record holds none; arm a on the route's own values."""
+        given = values(entry)
+        arm = job_arm(j)
+        if arm == "b":
+            record = j.get("experiment") if j else None
+            src = record if isinstance(record, dict) and record.get("provider") and record.get("model") \
+                else experiment
+            if src:
+                given = dict(given, provider=src["provider"], model=src["model"], effort=src.get("effort") or "")
+        return arm, given
 
     if dry:
         would, no_route = {}, False
@@ -3756,8 +3947,10 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
                 else:
                     would[slug] = would.get(slug, 0) + 1
                     entry = {"id": j["id"], "project": slug, "repo_path": paths[slug], "session": "<session>"}
-                    line = f"would launch {j['id']} {slug} on {name}: " \
-                        + shlex.join(launcher_argv(template, values(entry)))
+                    arm, given = job_given(j, entry)
+                    shown = f" arm {arm} model {given['model']}" if arm else ""
+                    line = f"would launch {j['id']} {slug} on {name}{shown}: " \
+                        + shlex.join(launcher_argv(template, given))
             print(line)
         if stalls is not None:
             print(f"host {device}: would take over {taken}")
@@ -3769,20 +3962,23 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     launches = taken
     while launches < limit:
         for slug in eligible:
-            picked = claim_ideas(home, device, "", minutes, paths, 1, cap, slug, by_host=by_host, builds=True)
+            picked = claim_ideas(home, device, "", minutes, paths, 1, cap, slug, by_host=by_host, builds=True,
+                                 experiment=experiment, route=route)
             if picked:
                 break
         else:
             return
         entry = picked[0]
-        given = values(entry)
+        j = next((x for x in data["jobs"] if x.get("id") == entry["id"]), None)
+        arm, given = job_given(j, entry)
         ok, detail, log_path = launch_idea(home, entry, name, launcher_argv(template, given),
-                                           launch_env(given, provider, model))
+                                           launch_env(given, given["provider"], given["model"]))
         if ok:
             print(f"launched {entry['id']} {entry['project']} on {name} session {entry['session']}")
             launches += 1
             continue
-        launch_failed(home, name, entry["id"], detail, log_path,
+        limit_name = experiment["name"] if arm == "b" and experiment else name
+        launch_failed(home, limit_name, entry["id"], detail, log_path,
                       lambda: release_claim(home, entry["id"], device, entry["session"]))
         return
 
@@ -6384,6 +6580,7 @@ COMMANDS["doctor"] = (doctor_cmd, 0, 0)
 COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
 COMMANDS["suggest"] = (suggest_cmd, 2, 3)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
+COMMANDS["experiment"] = (experiment_cmd, 2, 2)
 COMMANDS["unclaim"] = (unclaim, 1, 1)
 COMMANDS["pipeline"] = (pipeline_cmd, 1, 1)
 COMMANDS["documents"] = (documents_cmd, 1, 1)

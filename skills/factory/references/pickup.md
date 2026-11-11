@@ -83,6 +83,42 @@ claim (`hold`), never by setting `needs`.
 Work projects list host `work-laptop`, personal projects list `home-pc`, and a
 shared project lists both.
 
+## Owner model experiment
+
+- `routes.md` may carry one optional `experiment:` line in the frontmatter:
+  `experiment: <name> <provider> <model> [<effort>] <percent>`, for example
+  `experiment: pilot provider-b model-b high 50`. The name must differ from every
+  route name. A malformed line exits 2 before anything is claimed.
+- Pickup splits new ideas by a stable hash of the job id: arm `a` rides the picked
+  route unchanged, arm `b` launches on the line's own provider, model and effort.
+  The same id always lands in the same arm; percent 0 or 100 sends every idea to
+  one arm. Route limits and fallback for the route itself are unchanged.
+- At first claim pickup stamps the job's `experiment` field:
+  `{name, arm, provider, model, effort}` — the arm and the values it launched
+  with. Pickup never rewrites it. A relaunch (recover, rerun, move) of an arm `b`
+  job launches on the recorded triple, even when the line changed or was
+  removed; an arm `a` relaunch launches on the route's current values. The
+  report attributes by the recorded name, so renaming the experiment starts a
+  new population.
+- An arm `b` launch that fails on a usage limit marks the experiment's own key in
+  `route-limits.json`, not the route's. While that key is limited, arm `b` jobs
+  are skipped for the run (`skip <id> <project>: experiment <name> limited until
+  <ts>`) and arm `a` jobs still launch; they never silently launch as arm `a`.
+  An arm `a` failure limits the route name as today, which stops both arms since
+  both ride its launcher, until it clears.
+- Dry run prints ` arm <a|b> model <model>` on each `would launch` line when the
+  line is set or the job carries a record; without the line the output is
+  unchanged.
+- `factory.py experiment report <name>` reads the board and the local job folders
+  and prints per-arm metrics as JSON: job and stage counts, escalations, mean
+  review rounds over jobs past review, CHANGES verdicts, stuck resumes, 7-day
+  follow-ups split into `rework_of` (rework-of refs, the defect-fix signal) and
+  `surfaced` (follow-up-of refs, no defect claim), `skipped_steps` found in local
+  evidence (`missing_round_review`, `missing_decision`, `pr_before_approve`),
+  and `coverage_unknown` where a job's local evidence is incomplete. It is
+  read-only and writes nothing. Role dispatch does not read the field: only
+  pickup's launch path and the report do.
+
 ## Launcher examples
 
 Model ids are written as `<model>`; copy them from your own routing

@@ -272,6 +272,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "build": { "state": "queued | running | done | failed", "runs": ["https://github.com/<repo>/actions/runs/1"] },
   "pipeline": { "global": 3, "project": 2 },
   "backlog": { "line": "- [ ] <slug>: <feature>", "decision": "approved | denied | rework", "at": "...", "notes": "optional", "answers": "optional", "notes_read": "..." },
+  "experiment": { "name": "pilot", "arm": "a | b", "provider": "provider-b", "model": "model-b", "effort": "high" },
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
   "started": "2026-10-15T11:40:00Z",
   "updated": "2026-10-15T12:00:00Z",
@@ -304,6 +305,10 @@ Approve also appends the notes to `idea`.
 
 How the dashboard's idea column, Assign project and backlog decision page behave is in [dashboard](references/dashboard.md).
 
+`experiment` is set only by pickup, at first claim, when `routes.md` sets an owner-model
+experiment: the arm the job launched on and the provider, model and effort it launched
+with. Pickup never rewrites it, and a relaunch of an arm `b` job launches on the recorded
+triple. `factory.py experiment report <name>` attributes outcomes by it.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
 
