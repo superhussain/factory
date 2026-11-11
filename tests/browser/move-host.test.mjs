@@ -71,7 +71,7 @@ const JOBS = [
   },
 ];
 const MOVE_HINT =
-  " The move may have saved. Press Move job again with the same host to check. It will not queue a second move.";
+  " The move may have saved. Press Move job again with the same host to check. It will not queue a duplicate move.";
 const PICKUP_HOSTS = ["lab-linux", "studio-mac", "new-box", "spare-pc", "old-laptop"];
 
 const freezeClock = (page) =>

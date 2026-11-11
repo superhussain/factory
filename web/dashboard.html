@@ -5233,7 +5233,7 @@ $('move-host-form').addEventListener('submit', async (e) => {
   } catch (x) {
     if (!refused && dlg.uncertain) x.uncertain = true;
     dlg.uncertain = !!x.uncertain;
-    $('move-host-err').textContent = boardSaveError(x, 'The move may have saved. Press Move job again with the same host to check. It will not queue a second move.');
+    $('move-host-err').textContent = boardSaveError(x, 'The move may have saved. Press Move job again with the same host to check. It will not queue a duplicate move.');
     $('move-host-err').hidden = false;
     $('move-host-save').disabled = false;
     return;
@@ -5286,7 +5286,7 @@ $('close-job-form').addEventListener('submit', async (e) => {
   } catch (x) {
     if (!refused && dlg.uncertain) x.uncertain = true;
     dlg.uncertain = !!x.uncertain;
-    $('close-job-err').textContent = boardSaveError(x, 'The close may have saved. Press Close job again with the same reason to check. It will not queue a second close.');
+    $('close-job-err').textContent = boardSaveError(x, 'The close may have saved. Press Close job again to check. It will not queue a second close or change a saved reason.');
     $('close-job-err').hidden = false;
     $('close-job-save').disabled = false;
     return;

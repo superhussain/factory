@@ -54,7 +54,7 @@ const VIEWPORTS = [
 ];
 const CARD = '.card[data-id="042-sample-export"]';
 const CLOSE_HINT =
-  " The close may have saved. Press Close job again with the same reason to check. It will not queue a second close.";
+  " The close may have saved. Press Close job again to check. It will not queue a second close or change a saved reason.";
 // null sends board writes through, 'drop' aborts them unsent, 'land' sends then aborts the page's copy,
 // '5xx' answers 503 with a body ending in a period.
 let putMode = null;
