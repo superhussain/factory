@@ -6506,6 +6506,11 @@ RETRO_FLAG = re.compile(
     r"[A-Za-z0-9_-]{0,64})(\s+)(?!-)\S+")
 RETRO_HOME = re.compile(r"^(?:[A-Za-z]-)?-(?:home|Users)-[A-Za-z0-9_]+")
 RETRO_WRITE_ONLY = "retro digests are written only by the host's bound service token"
+RETRO_REPLY_SCHEMA = "factory.retro/1"
+RETRO_CATEGORIES = ("navigation", "automated-checks", "reviewer-rules", "steering", "tool-economy",
+                    "information-access", "permissions")
+RETRO_SESSION_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[0-9a-f-]{8,36}", re.ASCII)
+MAX_RETRO_BYTES = 131072
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
@@ -6873,6 +6878,106 @@ def retro_aggregate(days):
                       "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
                       "digest": str(folder / "digest.jsonl"), "transcripts": agg["transcripts"],
                       "out": str(folder / "reply.json"), "findings": str(folder / "findings.md")}, indent=2))
+
+
+def check_refs(value):
+    return check_list(value, 1, 5) or next(
+        ("must be host/session refs" for r in value if not (isinstance(r, str) and RETRO_SESSION_REF.fullmatch(r))),
+        None)
+
+
+def check_retro(doc, projects):
+    """The first violation of the factory.retro/1 reply as "<where>: <problem>", or None."""
+    def first(*checks):
+        return next(((where, err) for where, err in checks if err), None)
+
+    err = check_keys(doc, ("schema", "run", "findings", "suggestions"))
+    if err:
+        return f"reply: {err}"
+    found = first(
+        ("schema", None if doc["schema"] == RETRO_REPLY_SCHEMA else f"must be {RETRO_REPLY_SCHEMA}"),
+        ("run", None if isinstance(doc["run"], str) and RUN_TAG.fullmatch(doc["run"])
+         else "must match [A-Za-z0-9_-]{1,64}"),
+        ("findings", check_list(doc["findings"], 1, 12)),
+        ("suggestions", check_list(doc["suggestions"], 0, MAX_PER_RUN)))
+    if found:
+        return "%s: %s" % found
+    for i, f in enumerate(doc["findings"]):
+        err = check_keys(f, ("title", "category", "count", "cost", "sessions", "root_cause", "fix", "project"))
+        if err:
+            return f"findings[{i}]: {err}"
+        found = first(
+            ("title", check_text(f["title"], 1, 80)),
+            ("category", None if f["category"] in RETRO_CATEGORIES
+             else f"must be one of {', '.join(RETRO_CATEGORIES)}"),
+            ("count", None if type(f["count"]) is int and 1 <= f["count"] <= 10_000_000
+             else "must be a whole number from 1 to 10000000"),
+            ("cost", None if type(f["cost"]) is int and 1 <= f["cost"] <= 1_000_000_000
+             else "must be a whole number from 1 to 1000000000"),
+            ("sessions", check_refs(f["sessions"])),
+            ("root_cause", check_text(f["root_cause"], 1, 300)),
+            ("fix", check_text(f["fix"], 1, 300)),
+            ("project", None if f["project"] in projects else "must be a project in aggregate.json"))
+        if found:
+            return f"findings[{i}].%s: %s" % found
+    if doc["suggestions"]:
+        return check_suggestions({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": doc["run"],
+                                  "suggestions": doc["suggestions"]})
+    return None
+
+
+def render_findings(agg, doc):
+    """findings.md: the reply's findings ranked by count x cost, built from checked fields only."""
+    def cell(text):
+        return text.replace("|", "\\|")
+
+    ranked = sorted(doc["findings"], key=lambda f: (-f["count"] * f["cost"], f["title"]))
+    sessions = sum(h["sessions"] for h in agg["hosts"].values())
+    lines = [f"# Retro {doc['run']}", "",
+             f"Window {agg['from']} to {agg['to']} · hosts {', '.join(sorted(agg['hosts']))} · "
+             f"{sessions} sessions · ranked by count x cost", "",
+             "| Rank | Finding | Category | Count | Cost each | Score | Target |",
+             "| --- | --- | --- | --- | --- | --- | --- |"]
+    for n, f in enumerate(ranked, 1):
+        lines.append(f"| {n} | {cell(f['title'])} | {f['category']} | {f['count']:,} | {f['cost']:,} | "
+                     f"{f['count'] * f['cost']:,} | {f['project']} |")
+    for n, f in enumerate(ranked, 1):
+        lines += ["", f"## {n}. {f['title']}", "", "Root cause:", "", quote(f["root_cause"]), "", "Fix:", "",
+                  quote(f["fix"]), "", "Sessions: " + ", ".join(f"`{r}`" for r in f["sessions"])]
+    return "\n".join(lines) + "\n"
+
+
+def retro_admit(run):
+    """Check a retro run's reply, write its ranked findings.md and admit its cards through suggest admit."""
+    home = factory_home()
+    folder = home / "retro" / run
+    path = folder / "reply.json"
+    if is_link(folder.parent) or is_link(folder) or not path.is_file():
+        fail(f"no retro run {run}", 4)
+    with open(path, "rb") as f:
+        raw = f.read(MAX_RETRO_BYTES + 1)
+    if len(raw) > MAX_RETRO_BYTES:
+        fail(f"{path} is larger than {MAX_RETRO_BYTES} bytes; nothing written", 2)
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except ValueError as e:
+        fail(f"{path} is not UTF-8 JSON: {e}; nothing written", 2)
+    if doc == {"none": True}:
+        fail("the retro agent found nothing", 3)
+    agg = json.loads((folder / "aggregate.json").read_text(encoding="utf-8"))
+    err = check_retro(doc, agg["projects"]) or (doc["run"] != run and f"run: must be {run}")
+    if err:
+        fail(f"{path}: {err}; nothing written", 2)
+    findings = folder / "findings.md"
+    findings.write_text(render_findings(agg, doc), encoding="utf-8")
+    print(f"wrote {findings}")
+    if not doc["suggestions"]:
+        print("no suggestions")
+        return
+    suggestions = folder / "suggestions.json"
+    suggestions.write_text(json.dumps({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run,
+                                       "suggestions": doc["suggestions"]}, indent=2) + "\n", encoding="utf-8")
+    suggest_admit(str(suggestions))
 
 
 def retro_date(d):
