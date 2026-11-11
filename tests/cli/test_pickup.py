@@ -1813,6 +1813,9 @@ class GhPrTest(IsolatedTestCase):
 
 class CloseCleanupTest(PickupFixture):
     LEFT = "branch factory/042-sample-export: not merged into main"
+    UNREACHABLE = LEFT + " and origin could not be reached"
+    MISSING = LEFT + " and origin has no such branch"
+    BEHIND = LEFT + " and origin is at a different commit"
 
     def setUp(self):
         super().setUp()
@@ -1842,13 +1845,13 @@ class CloseCleanupTest(PickupFixture):
 
     def test_cleanup_keeps_an_unmerged_branch(self):
         self.board["jobs"] = [self.closed()]
-        self.assertEqual(self.pickup(), (0, f"cleaned up 042-sample-export alpha, left: {self.LEFT}\n", ""))
+        self.assertEqual(self.pickup(), (0, f"cleaned up 042-sample-export alpha, left: {self.UNREACHABLE}\n", ""))
         self.assertFalse(self.wt.exists())
         self.assertTrue(self.branch_exists())
         job = self.job("042-sample-export")
         record = job["close"]["cleanup"][DEVICE]
         self.assertEqual(set(record), {"at", "left"})
-        self.assertEqual(record["left"], [self.LEFT])
+        self.assertEqual(record["left"], [self.UNREACHABLE])
         self.assertNotIn("port", job)
         self.calls.clear()
         self.assert_silent(self.pickup())
@@ -1872,8 +1875,17 @@ class CloseCleanupTest(PickupFixture):
         self.git(self.wt, "add", "more.txt")
         self.git(self.wt, "commit", "-q", "-m", "more")
         self.board["jobs"] = [self.closed()]
-        self.assertEqual(self.pickup(), (0, f"cleaned up 042-sample-export alpha, left: {self.LEFT}\n", ""))
+        self.assertEqual(self.pickup(), (0, f"cleaned up 042-sample-export alpha, left: {self.BEHIND}\n", ""))
         self.assertTrue(self.branch_exists())
+
+    def test_cleanup_keeps_a_branch_origin_lacks(self):
+        origin = self.home / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        self.git(self.repo_a, "remote", "add", "origin", str(origin))
+        self.board["jobs"] = [self.closed()]
+        self.assertEqual(self.pickup(), (0, f"cleaned up 042-sample-export alpha, left: {self.MISSING}\n", ""))
+        self.assertTrue(self.branch_exists())
+        self.assertEqual(self.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"], [self.MISSING])
 
     def test_cleanup_keeps_a_branch_checked_out_elsewhere(self):
         self.with_origin()
