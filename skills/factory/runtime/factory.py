@@ -3197,13 +3197,15 @@ def close_pull_request(home, j, device):
     pr, md = j["pr"], project_files(home, j["project"])[0]
     repo = frontmatter(md)[0].get("repo", "") if md.exists() else ""
     m = GH_PR.fullmatch(pr) if isinstance(pr, str) else None
+    if not repo:
+        return "open", "the project file names no repo"
     if not (m and m[1].lower() == repo.lower()):
-        return "open", f"its URL is not a pull request in {repo or 'the project repository'}"
+        return "open", f"its URL is not a pull request in {repo}"
     view = gh_pr("view", pr, "--json", "state", "--jq", ".state")
     if view is None:
         return "open", f"gh is not installed on {device}"
     if view[0]:
-        return "open", f"gh pr view exited {view[0]}"
+        return "open", f"gh pr view exited {view[0]} (check gh auth status on {device})"
     state = view[1].strip()
     if state in ("MERGED", "CLOSED"):
         return ("merged" if state == "MERGED" else "already closed"), ""
@@ -3211,7 +3213,7 @@ def close_pull_request(home, j, device):
         return "open", f"gh pr view reported state {state}"
     comment = PR_CLOSE_COMMENT.format(id=j["id"], link=f"{api_url(home)}/#{j['id']}/decision")
     code = gh_pr("close", pr, "--comment", comment)[0]
-    return ("open", f"gh pr close exited {code}") if code else ("closed", "")
+    return ("open", f"gh pr close exited {code} (check gh auth status on {device})") if code else ("closed", "")
 
 
 def close_decision(j, reason, device, earlier, outcome):

@@ -1743,21 +1743,24 @@ class CloseTest(PickupFixture):
 
     def test_close_leaves_the_pull_request_open(self):
         other = "https://github.com/other/repo/pull/7"
-        cases = (("gh None", None, self.PR, True, "gh is not installed on host-a"),
-                 ("view exit 1", {"view": (1, "")}, self.PR, True, "gh pr view exited 1"),
-                 ("state DRAFT", {"view": (0, "DRAFT\n")}, self.PR, True, "gh pr view reported state DRAFT"),
-                 ("close exit 1", {"view": (0, "OPEN\n"), "close": (1, "")}, self.PR, True,
-                  "gh pr close exited 1"),
-                 ("other repo", {}, other, True, "its URL is not a pull request in sample/alpha"),
-                 ("no project file", {}, self.PR, False,
-                  "its URL is not a pull request in the project repository"))
-        for name, answers, pr, project_file, why in cases:
+        full, hint = "---\nrepo: sample/alpha\n---\n", " (check gh auth status on host-a)"
+        cases = (("gh None", None, self.PR, full, "gh is not installed on host-a"),
+                 ("view exit 1", {"view": (1, "")}, self.PR, full, "gh pr view exited 1" + hint),
+                 ("state DRAFT", {"view": (0, "DRAFT\n")}, self.PR, full, "gh pr view reported state DRAFT"),
+                 ("close exit 1", {"view": (0, "OPEN\n"), "close": (1, "")}, self.PR, full,
+                  "gh pr close exited 1" + hint),
+                 ("other repo", {}, other, full, "its URL is not a pull request in sample/alpha"),
+                 ("no repo", {}, self.PR, "---\nname: alpha\n---\n", "the project file names no repo"),
+                 ("no project file", {}, self.PR, None, "the project file names no repo"))
+        for name, answers, pr, project_text, why in cases:
             with self.subTest(name):
                 self.calls.clear()
                 self.files.clear()
                 self.gh_answers = answers
-                if not project_file:
+                if project_text is None:
                     (self.home / "projects" / "alpha.md").unlink()
+                else:
+                    (self.home / "projects" / "alpha.md").write_text(project_text)
                 self.board["jobs"] = [self.closing(pr=pr)]
                 self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n",
                                                  f"factory.py: pickup leaves pull request {pr} open: {why}\n"))
