@@ -737,8 +737,8 @@ async function capture(outdir, referencePath) {
     };
     await view("archive-swap", 1280, 900, "light", openArchiveSwap);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
-    const openArchivedLoadFailed = async (page, side) => {
-      // Both sides wait until the archive has answered the link, so neither shot is taken mid-request.
+    const openArchivedLoadFailed = async (page) => {
+      // Both sides wait for the archive answer and then the toast text, so neither shot is taken mid-request.
       const answered = page.waitForResponse((response) => {
         const url = new URL(response.url());
         return (
@@ -749,12 +749,11 @@ async function capture(outdir, referencePath) {
         location.hash = "#411-sync-retry";
       });
       await answered;
-      if (side === "after")
-        await page.waitForFunction(() =>
-          document
-            .getElementById("board-status")
-            .textContent.startsWith("Could not load archived job"),
-        );
+      await page.waitForFunction(() =>
+        document
+          .getElementById("board-status")
+          .textContent.startsWith("Could not load archived job"),
+      );
     };
     await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
     await view("archive-list", 1280, 900, "light", openArchiveList);

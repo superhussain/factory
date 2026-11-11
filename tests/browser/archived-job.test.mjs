@@ -170,7 +170,7 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
       await page.waitForFunction(() => archiveMisses.has("999-missing"), wait);
       await page.evaluate(() => poll());
       await page.evaluate(() => poll());
-      // Awaiting the open attempt a poll makes means any archive fetch it starts has been answered and counted.
+      // Awaiting the open attempt a poll makes counts any archive fetch it starts.
       await page.evaluate(() => syncDetail());
       assert.equal(asked.filter((id) => id === "999-missing").length, 1);
       assert.equal((await meta()).includes("999-missing"), false);
