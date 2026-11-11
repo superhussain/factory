@@ -5025,7 +5025,7 @@ function moveJob(board, id, to, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
   if (!j.project || !MOVE_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be moved.';
-  if (!j.claim && j.move?.to === to) return 'unchanged';
+  if (!j.claim && j.move?.to === to && !('claimed' in j.move)) return 'unchanged';
   const from = j.claim?.device ?? (!j.claim && j.move && !moveStopped(j.move) ? j.move.from : undefined);
   if (to === from) return 'This job already runs on ' + to + '.';
   if (queuedStops(j.move).some((x) => x.from === to)) return 'A stop is still queued on ' + to + '. Pick another host.';
@@ -5210,15 +5210,22 @@ $('move-host-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!moveHost || $('move-host-save').disabled) return;
   const { id } = moveHost;
+  const dlg = moveHost;
+  let refused = false;
   const to = $('move-host-select').value;
   $('move-host-save').disabled = true;
   try {
     await casBoard((board) => {
       const message = moveJob(board, id, to, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
-      if (message) throw new Error(message);
+      if (message) {
+        refused = true;
+        throw new Error(message);
+      }
     });
   } catch (x) {
+    if (!refused && dlg.uncertain) x.uncertain = true;
+    dlg.uncertain = !!x.uncertain;
     $('move-host-err').textContent = boardSaveError(x, 'The move may have saved. Press Move job again with the same host to check. It will not queue a second move.');
     $('move-host-err').hidden = false;
     $('move-host-save').disabled = false;
@@ -5257,14 +5264,21 @@ $('close-job-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!closeDialog || $('close-job-save').disabled) return;
   const { id } = closeDialog;
+  const dlg = closeDialog;
+  let refused = false;
   $('close-job-save').disabled = true;
   try {
     await casBoard((board) => {
       const message = closeJob(board, id, $('close-job-reason').value, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
-      if (message) throw new Error(message);
+      if (message) {
+        refused = true;
+        throw new Error(message);
+      }
     });
   } catch (x) {
+    if (!refused && dlg.uncertain) x.uncertain = true;
+    dlg.uncertain = !!x.uncertain;
     $('close-job-err').textContent = boardSaveError(x, 'The close may have saved. Press Close job again with the same reason to check. It will not queue a second close.');
     $('close-job-err').hidden = false;
     $('close-job-save').disabled = false;
