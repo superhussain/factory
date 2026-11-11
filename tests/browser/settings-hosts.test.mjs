@@ -49,7 +49,16 @@ const setValue = (page, selector, value) =>
 const clickNow = (page, selector) =>
   page.evaluate((s) => document.querySelector(s).click(), selector);
 const read = (page, selector, name) =>
-  page.evaluate((s, n) => document.querySelector(s)[n], selector, name);
+  page.evaluate(
+    (s, n) => {
+      const el = document.querySelector(s);
+      if (!el) throw new Error("read: no element matches " + s);
+      if (!(n in el)) throw new Error("read: " + s + " has no property " + n);
+      return el[n];
+    },
+    selector,
+    name,
+  );
 const cardMessage = (page, id) =>
   read(page, `.host-card[data-id="${id}"] .host-msg`, "textContent");
 const waitCardMessage = (page, id, text) =>
@@ -150,6 +159,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       );
       assert.deepEqual(leaks, []);
       await live.click("#host-code-done");
+      await assert.rejects(read(live, "#host-code", "hiddn"), /has no property hiddn/);
       assert.equal(await live.$eval("#host-code", (el) => el.hidden), true);
       assert.equal(await live.$eval("#host-code-command", (el) => el.textContent), "");
     });
