@@ -266,6 +266,13 @@ test("card lines", { timeout: 240000 }, async (t) => {
         assert.equal(await color(page, link), await tokenColor(page, "--ref-fg"));
       });
 
+      await t.test(`ref focus ${scheme}`, async () => {
+        await page.focus('.card-actions[data-actions="042-sample-export"]');
+        await page.keyboard.press("Tab");
+        await settle(page);
+        await page.screenshot({ path: `${SHOTS}card-lines-ref-focus${suffix}.png`, clip });
+      });
+
       await t.test(`ref link ${scheme}`, async () => {
         assert.equal(await page.$('.card[data-id="043-orphan"] .ref-link'), null);
         assert.equal(
