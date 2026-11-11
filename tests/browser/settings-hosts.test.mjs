@@ -48,6 +48,14 @@ const setValue = (page, selector, value) =>
   );
 const clickNow = (page, selector) =>
   page.evaluate((s) => document.querySelector(s).click(), selector);
+const shoot = async (page, selector, path) =>
+  page.screenshot({
+    path,
+    clip: await page.evaluate((s) => {
+      const r = document.querySelector(s).getBoundingClientRect();
+      return { x: r.x + scrollX, y: r.y + scrollY, width: r.width, height: r.height };
+    }, selector),
+  });
 const read = (page, selector, name) =>
   page.evaluate(
     (s, n) => {
@@ -229,10 +237,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       );
       await clickNow(live, '[aria-label="New code Elsewhere"]');
       await live.waitForSelector("#host-code:not([hidden])", wait);
-      assert.match(
-        (await read(live, "#host-code-command", "textContent")).split(" ").at(-1),
-        CODE,
-      );
+      assert.match((await read(live, "#host-code-command", "textContent")).split(" ").at(-1), CODE);
       await live.waitForFunction(
         () =>
           document.querySelector('.host-card[data-id="test-host"] .host-badge')?.textContent ===
@@ -437,12 +442,10 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       const lab = '.host-card[data-id="lab-linux"]';
       if (captureDir) {
         await mkdir(captureDir, { recursive: true });
-        await (await page.$(card)).screenshot({ path: join(captureDir, "host-card-1280.png") });
-        await (
-          await page.$(lab)
-        ).screenshot({ path: join(captureDir, "host-card-doctor-1280.png") });
+        await shoot(page, card, join(captureDir, "host-card-1280.png"));
+        await shoot(page, lab, join(captureDir, "host-card-doctor-1280.png"));
         await page.setViewport({ width: 390, height: 844 });
-        await (await page.$(card)).screenshot({ path: join(captureDir, "host-card-390.png") });
+        await shoot(page, card, join(captureDir, "host-card-390.png"));
       }
       // One in-page read, so a renderHosts() rebuild cannot split the values.
       const alerts = () =>
