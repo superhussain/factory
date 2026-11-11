@@ -158,6 +158,7 @@
   "tests/browser/drawer-links.test.mjs",
   "tests/browser/backlog-triage.test.mjs",
   "tests/browser/live-events.test.mjs",
+  "tests/browser/live-keepalive.test.mjs",
   "tests/browser/archived-job.test.mjs",
   "tests/browser/archive-list.test.mjs",
   "tests/browser/archive-empty-board.test.mjs",

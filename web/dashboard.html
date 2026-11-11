@@ -1008,10 +1008,39 @@ function setConnection(state) {
   $('conn-text').textContent = text;
   $('conn-signin').hidden = state !== 'signin';
   const polling = state === 'online' && !liveOpen;
-  const label = polling ? 'Polling every ' + pollSeconds + ' seconds until live updates reconnect' : title;
+  const label = polling ? 'Polling every ' + pollSeconds + ' seconds until live updates reconnect' + (liveNote && '. ' + liveNote) : title;
   drawDot(polling ? dot + ' polling' : dot, label);
 }
 function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
+// Keepalive: an open socket sends "ping" every 25 s and the room's auto-response answers "pong", so proxies that drop quiet connections keep it. No pong for 60 s closes it. liveNote names how the last socket closed, for the polling dot.
+const LIVE_PING_MS = 25000, LIVE_PONG_TIMEOUT_MS = 60000;
+let liveNote = '';
+function keepLive(ws) {
+  const startedAt = Date.now();
+  let openedAt = 0, pongAt = 0, silent = false;
+  const timer = setInterval(function livePing() {
+    if (!openedAt || silent) return;
+    if (Date.now() - pongAt > LIVE_PONG_TIMEOUT_MS) {
+      silent = true;
+      ws.close(4000, 'no pong');
+    } else ws.send('ping');
+  }, LIVE_PING_MS);
+  ws.addEventListener('open', () => { openedAt = pongAt = Date.now(); });
+  ws.addEventListener('message', (e) => {
+    if (e.data !== 'pong') return;
+    pongAt = Date.now();
+    e.stopImmediatePropagation();
+  });
+  ws.addEventListener('close', (e) => {
+    clearInterval(timer);
+    const secs = (n) => Math.round(n / 1000) + ' seconds';
+    if (e.code === 1000 && !silent) { liveNote = ''; return; }
+    const when = openedAt ? 'after ' + secs(Date.now() - openedAt) + ' open' : 'before it opened, ' + secs(Date.now() - startedAt) + ' after it started';
+    liveNote = silent
+      ? 'Last live connection stopped answering pings ' + when
+      : 'Last live connection closed with code ' + e.code + (e.reason ? ' (' + e.reason + ')' : '') + ' ' + when;
+  });
+}
 $('conn-signin').addEventListener('click', () => location.reload());
 window.addEventListener('offline', () => { setConnection('offline'); syncLive(); schedulePoll(); });
 window.addEventListener('online', async () => {
@@ -6190,6 +6219,7 @@ function openLive() {
   liveRetryTimer = 0;
   const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + LIVE_PATH);
   liveSocket = ws;
+  keepLive(ws);
   ws.addEventListener('open', () => {
     if (ws !== liveSocket) return;
     liveOpen = true;

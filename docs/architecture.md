@@ -213,6 +213,8 @@ sequenceDiagram
 | `Origin` other than the request origin | 403 |
 | user, same origin, upgrade | 101 from the room |
 
+An open dashboard socket sends `ping` every 25 s. The room answers `pong` through `setWebSocketAutoResponse`, which does not wake it, so proxies that close quiet connections keep the socket. A socket with no `pong` for 60 s is closed and the tab polls. While polling, the dot's title names how the last socket closed: code, reason and time open, or that it never opened.
+
 ## Draft preservation
 
 The dashboard keeps draft state in browser-local records keyed
