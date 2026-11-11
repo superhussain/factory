@@ -193,6 +193,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .host-id { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .host-badge { display: inline-block; font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; margin-left: 6px; }
   .host-seen, .host-card p { font-size: 12px; color: var(--muted); margin: 6px 0; }
+  .host-card p.host-alert { color: var(--alert); }
   .host-routes { display: block; overflow-x: auto; font-size: 12px; border-collapse: collapse; margin: 6px 0; }
   .host-routes th, .host-routes td { text-align: left; padding: 2px 8px 2px 0; white-space: nowrap; }
   .host-card input, #host-add input { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
@@ -2663,8 +2664,9 @@ function hostCard(h) {
   }[h.state] ?? ''}));
   if (h.status) {
     const st = h.status;
-    li.append(make('p', {textContent:st.os + ', ' + st.scheduler + ', last pickup ' + (st.last_pickup ? hostUtc(st.last_pickup) : 'never') + '. Bundle ' + (st.bundle?.commit?.slice(0, 7) ?? 'unknown') + '. Doctor ' + (st.doctor === 'ok' ? 'ok' : 'failed: ' + st.doctor.join(', ')) + '.'}));
-    if (st.triage_failed_since) li.append(make('p', {className:'host-triage', textContent:'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'}));
+    li.append(make('p', {textContent:st.os + ', ' + st.scheduler + ', last pickup ' + (st.last_pickup ? hostUtc(st.last_pickup) : 'never') + '. Bundle ' + (st.bundle?.commit?.slice(0, 7) ?? 'unknown') + '.' + (st.doctor === 'ok' ? ' Doctor ok.' : '')}));
+    if (st.doctor !== 'ok') li.append(make('p', {className:'host-doctor host-alert', textContent:'Doctor failed: ' + st.doctor.join(', ') + '.'}));
+    if (st.triage_failed_since) li.append(make('p', {className:'host-triage host-alert', textContent:'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'}));
     const cells = (tag, values) => make('tr', {}, ...values.map(value => make(tag, {textContent:value})));
     li.append(make('table', {className:'host-routes'}, make('caption', {textContent:'Routes (set on the device)'}),
       make('thead', {}, cells('th', ['Route', 'Provider', 'Model', 'Effort', 'Limited until'])),
