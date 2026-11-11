@@ -666,6 +666,9 @@ def forget_paseo_claim(home, job_id, agent):
         pass
 
 
+CLAIM_REFRESH_MINUTES = 10
+
+
 def new_claim(device, session, since=None):
     stamp = now()
     return {"device": device, "session": session, "since": since or stamp, "seen": stamp}
@@ -682,6 +685,17 @@ def blocking(job, device, session, minutes):
         return None
     seen = datetime.strptime(c["seen"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     return c if datetime.now(timezone.utc) - seen < timedelta(minutes=minutes) else None
+
+
+def fresh_hold(job, device, session, paseo, take):
+    """True when hold would only refresh this session's claim, seen within CLAIM_REFRESH_MINUTES."""
+    c = job.get("claim") or {}
+    if take or not c or not mine(c, device, session) or "started" not in job:
+        return False
+    if (job.get("handoff") or {}).get("state") == "ready" or job.get("paseo") != paseo:
+        return False
+    seen = datetime.strptime(c["seen"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - seen < timedelta(minutes=CLAIM_REFRESH_MINUTES)
 
 
 def earlier_moves(m):
@@ -914,6 +928,8 @@ def hold(target, take=None):
             held = job["claim"]
         if held and take != "take":
             return None, ("held", held, None)
+        if fresh_hold(job, device, session, paseo, take):
+            return None, ("ok", None, job["started"])
         c = dict(job.get("claim") or {})
         keep = bool(c) and mine(c, device, session)
         # Replace the claim whole rather than merging into the old one.
