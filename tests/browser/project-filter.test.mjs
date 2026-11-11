@@ -1,7 +1,7 @@
 // Header project filter: a checkbox menu over a saved set of hidden project keys, its
 // label and "all projects" toggle, closing, reload, the legacy single-filter migration, the
 // mirrored Display fieldset and the menu layout with a long title on a narrow screen, where
-// the open menu sits 4px under the button even when the header wraps.
+// the open menu sits 4px under the button even when the header wraps, and wraps it on touch.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -354,6 +354,43 @@ test("project filter", { timeout: 180000 }, async (t) => {
       assert.ok(desktop.width <= 360);
       title(desktop);
       await narrow.browserContext().close();
+    });
+
+    await t.test("F14 touch wraps long title", async () => {
+      const touch = await open();
+      await serveProjects(touch, [
+        ...PROJECTS,
+        { slug: "gamma", title: LONG, repo: "example/sample", base: "main" },
+      ]);
+      await touch.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+      await touch.reload({ waitUntil: "domcontentloaded" });
+      await ready(touch);
+      await touch.tap("#filter");
+      const m = await touch.evaluate(() => {
+        const menu = document.getElementById("filter-menu");
+        const rect = menu.getBoundingClientRect();
+        const label = menu.querySelector('[data-project="gamma"]').closest("label");
+        const title = label.querySelector(".filter-title");
+        return {
+          left: rect.left,
+          right: rect.right,
+          menuScrollWidth: menu.scrollWidth,
+          menuClientWidth: menu.clientWidth,
+          scrollWidth: title.scrollWidth,
+          clientWidth: title.clientWidth,
+          whiteSpace: getComputedStyle(title).whiteSpace,
+          text: title.textContent,
+          labelHeight: label.getBoundingClientRect().height,
+        };
+      });
+      assert.ok(m.scrollWidth <= m.clientWidth);
+      assert.equal(m.whiteSpace, "normal");
+      assert.equal(m.text, LONG);
+      assert.ok(m.labelHeight > 44);
+      assert.equal(m.left, 16);
+      assert.equal(m.right, 374);
+      assert.ok(m.menuScrollWidth <= m.menuClientWidth);
+      await touch.browserContext().close();
     });
 
     await t.test("F12 no jobs", async () => {
