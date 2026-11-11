@@ -5148,17 +5148,26 @@ async function openMoveHost(ctx) {
   for (const h of hosts) select.add(new Option(h.label + ' (' + h.id + ')' + (h.offline ? ' · offline' : ''), h.id));
   select.hidden = !hosts.length;
   $('move-host-label').hidden = !hosts.length;
+  let emptyText = '';
   if (!hosts.length && err.hidden) {
-    let late = '';
-    if (blockedOffline.length === 1) late = blockedOffline[0] + ' is offline and stops the job only when it comes back online. ';
-    else if (blockedOffline.length) late = blockedOffline.join(', ') + ' are offline and stop the job only when they come back online. ';
-    empty.textContent = blocked.length
-      ? 'Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '. ' + late + 'Try again after one of them stops the job.'
-      : 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
-    empty.hidden = false;
+    if (blocked.length) {
+      const parts = ['Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '.'];
+      if (blockedOffline.length === 1) parts.push(blockedOffline[0] + ' is offline and stops the job only when it comes back online.');
+      else if (blockedOffline.length) parts.push(blockedOffline.join(', ') + ' are offline and stop the job only when they come back online.');
+      parts.push('Try again after one of them stops the job.');
+      emptyText = parts.join(' ');
+    } else emptyText = 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
   }
+  empty.textContent = '';
+  empty.hidden = !emptyText;
   $('move-host-save').disabled = !hosts.length;
   $('move-host-dlg').showModal();
+  if (emptyText) {
+    const opened = moveHost;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (moveHost === opened) empty.textContent = emptyText;
+    }));
+  }
 }
 
 function closeMoveHost() {
