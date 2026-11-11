@@ -181,6 +181,28 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
       assert.equal(await statusHidden(), true);
     });
 
+    await t.test("a tab change on the same failing id stays quiet", async () => {
+      await page.evaluate(() => {
+        location.hash = "#411-sync-retry";
+      });
+      await page.waitForFunction(
+        (text) => document.getElementById("board-status").textContent === text,
+        wait,
+        FAILED,
+      );
+      await page.evaluate(() => showBoardStatus(""));
+      const tries = asked.filter((id) => id === "411-sync-retry").length;
+      await page.evaluate(() => {
+        location.hash = "#411-sync-retry/spec.md";
+      });
+      await until(() => asked.filter((id) => id === "411-sync-retry").length > tries);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(await statusHidden(), true);
+      await page.evaluate(() => {
+        location.hash = "";
+      });
+    });
+
     await t.test("a failed archived load says so and retries", async () => {
       await page.evaluate(() => {
         location.hash = "#411-sync-retry";
