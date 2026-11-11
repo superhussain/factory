@@ -29,6 +29,7 @@ python3 "$FACTORY" init --agents claude
 - The destination is the skills root your agent reads. Use `$HOME/.agents/skills` for a shared folder.
 - `--agents` takes `claude`, `opencode`, `both` or `none`.
 - On Windows use `py -3` instead of `python3`.
+- Run steps 3 to 5 in the same terminal. In a new terminal, set `FACTORY` again first.
 
 See [device.md](device.md) for the full device setup.
 
@@ -91,7 +92,7 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | Deploy every merge to main | `deploy-main` workflow | [cloudflare.md](cloudflare.md#8-continuous-deployment-from-main) |
 | PR screenshots, Paseo, Tracer | device config | [integrations.md](integrations.md) |
 | Browser notifications and display | Settings, Notifications and Display | none |
-| Upgrade later | | [upgrade.md](upgrade.md) |
+| Upgrade later | This checkout, then each host | [upgrade.md](upgrade.md) |
 
 ## Set up with an agent
 
