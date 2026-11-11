@@ -1794,7 +1794,7 @@ class AgentInstallTest(IsolatedTestCase):
                 factory.init(temp, agents="both")
                 api.assert_not_called()
             self.assertEqual(unrelated.read_text(), "user-owned")
-            self.assertEqual(len(list(agents.glob("factory-*.md"))), 8)
+            self.assertEqual(len(list(agents.glob("factory-*.md"))), 9)
 
     def test_install_both_runtimes_and_preserve_opencode_model(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(Path, "home", return_value=Path(temp)):
@@ -1803,7 +1803,7 @@ class AgentInstallTest(IsolatedTestCase):
                 skill = SKILL_ROOT
                 factory.install_agents(skill, ("claude", "opencode"))
                 agents = xdg / "opencode" / "agents"
-                self.assertEqual(len(list(agents.glob("factory-*.md"))), 8)
+                self.assertEqual(len(list(agents.glob("factory-*.md"))), 9)
                 for source in (skill / "agents").glob("factory-*.md"):
                     self.assertEqual(source.read_bytes(), (Path(temp) / ".claude/agents" / source.name).read_bytes())
                     meta, body = factory.frontmatter(agents / source.name)
@@ -1904,7 +1904,7 @@ class AgentInstallTest(IsolatedTestCase):
             with patch.dict(os.environ, {"XDG_CONFIG_HOME": ""}):
                 factory.install_agents(skill, ("claude", "opencode"))
             agents = Path(temp) / ".config" / "opencode" / "agents"
-            self.assertEqual(len(list(agents.glob("factory-*.md"))), 8)
+            self.assertEqual(len(list(agents.glob("factory-*.md"))), 9)
 
 
 class ResumeInstructionTest(IsolatedTestCase):

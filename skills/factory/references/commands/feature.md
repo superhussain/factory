@@ -149,6 +149,6 @@ first line `CLOSED: <reason>`, pushed before the stage moves to `closed`.
 
 End with a short summary: the job's final stage, its rounds, what a human needs to
 do, if anything (usually nothing), and the final stage's deep link from the table
-in Rules. If that is a decision
+in [dashboard](../dashboard.md#stage-change-deep-links). If that is a decision
 for him, ask it through `needs.md` as Rules describes and link `#<id>/needs`.
 For a merged or closed job, give that summary before step 10, since archiving can end the session.

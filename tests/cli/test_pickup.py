@@ -331,7 +331,9 @@ class PickupTest(PickupFixture):
         self.assertEqual(log.read_text(encoding="utf-8").strip(), "started")
         if os.name != "nt":
             self.assertEqual(log.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(len(self.puts()), 1)
+        # The claim, then the orchestrator row in agents.
+        self.assertEqual(len(self.puts()), 2)
+        self.assertEqual([row["session"] for row in self.job("001-alpha")["agents"]], [tag])
         for path in self.root.rglob("*"):
             self.assertNotIn("pwned", path.name)
             if path.is_file() and path != self.fake:

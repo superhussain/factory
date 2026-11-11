@@ -22,8 +22,9 @@ REQUIRED = (
     "references/walkthrough.html", "schedules/explore.md", "schedules/resume.md",
 ) + tuple("references/commands/" + name + ".md" for name in (
     "feature", "next", "idea", "deny-notes", "approve", "approve-spec", "rework", "recover", "build", "init", "handoff",
-    "resume")) + tuple("agents/factory-" + name + ".md" for name in (
-    "approver", "builder", "explorer", "review-code", "review-security", "review-ui", "review-ux", "spec-writer"))
+    "resume", "retro")) + tuple("agents/factory-" + name + ".md" for name in (
+    "approver", "builder", "explorer", "review-code", "review-security", "review-ui", "review-ux", "spec-writer",
+    "retro"))
 
 
 def fail(message):

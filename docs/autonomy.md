@@ -104,7 +104,7 @@ Admission enforces these field limits:
 | --- | --- |
 | `schema`, `project`, `run`, `commit` | `factory.suggestions/1`, then the run's values as `explore` printed them |
 | `suggestions` | 1 to 5 objects |
-| `kind` | `bug-fix`, `test-gap`, `docs`, `cleanup`, `dependency-upgrade`, `migration`, `security` or `product-idea` |
+| `kind` | `bug-fix`, `test-gap`, `docs`, `cleanup`, `dependency-upgrade`, `migration`, `security`, `product-idea` or `tooling` |
 | `title` | 1 to 80 characters, one line |
 | `summary` | 1 to 600 characters, one paragraph |
 | `evidence` | 1 to 5 of `path`, `note` (1 to 200 characters, one line) and an optional `line` of at least 1 |
@@ -143,6 +143,30 @@ flowchart LR
   not abuse. A Worker-side human-only approval gate must land before stage 2.
 - Upgrade every host that runs `factory.py pickup` before the first `autonomy resume`.
   Older runtimes skip cards without a `project`, so unapproved cards stay put there too.
+
+## Retro cards
+
+`retro admit` admits the retro agent's cards through the same admission code, in
+retro mode. The caller sets the mode, never the file. A retro file has the keys
+`schema`, `by: "retro"`, `run` and `suggestions`, with no `project` or `commit`. The
+`suggest admit` command always runs in explorer mode, so a file carrying `by` exits 2
+there with nothing admitted, and explorer files behave exactly as before.
+
+- **Per-card project.** Each suggestion carries its own registered `project`. An
+  unregistered one exits 2 with nothing admitted. The title, fingerprint and open cap
+  use that project.
+- **No allowlist.** Admission skips the one-project allowlist for a retro file, and
+  `suggest approve` skips it for a card whose `origin.by` is `retro`, which only
+  `retro admit` writes. Approval still
+  needs a registered project and a human typing at a terminal.
+- **Unchanged gates.** The kill switch, the daily and open caps, fingerprint dedupe,
+  the field limits and the untrusted-text checks apply as they do to explorer files.
+- **Evidence.** Each evidence item is `{"note", "count", "sessions"}` with 1 to 5
+  `host/session` refs, so the classifier checks only `paths` for sensitive files.
+- **Kind.** `tooling` joins the suggestion kinds. It is not one of the kinds the
+  classifier flags.
+
+A retro card's `origin` holds `by: "retro"`, its project and run, and no `commit`.
 
 ## Stages
 

@@ -10,7 +10,7 @@ copied bundle read those installed references without opening this repository.
 Explicit `init --agents claude|opencode|both` installs only selected native
 destinations; default is `none`. No runtime binary is needed for installation.
 Optional absolute device config fields `claude_agents_dir` and
-`opencode_agents_dir` override native defaults. All eight sources and selected
+`opencode_agents_dir` override native defaults. All nine sources and selected
 destinations are preflighted before any role write. Later disk failures can leave
 some bodies refreshed; they report the destination and stop, not a false
 multi-file-transaction success.
@@ -22,7 +22,7 @@ Fresh Claude roles preserve source name/description/tools, without a model pin;
 fresh OpenCode roles get only description and `mode: all`. Native loader
 diagnostics own YAML validation. Unrelated roles are never modified.
 
-Run `opencode api get /api/agent` and manually confirm all eight `factory-*` IDs
+Run `opencode api get /api/agent` and manually confirm all nine `factory-*` IDs
 before native OpenCode dispatch. For Claude confirm installed role availability
 through its native agent interface; no activation CLI is assumed. Missing or
 invalid roles stop dispatch. Never bypass model pins, permissions, interactive
