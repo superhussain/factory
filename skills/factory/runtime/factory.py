@@ -1705,7 +1705,7 @@ def batch_cmd(target, *idea_ids):
             if "tracer" in lead:
                 fail(f"cannot batch into {lead_id}: follows Tracer", 2)
             if len(riders_of(data, lead_id)) + len(idea_ids) > MAX_RIDERS:
-                fail(f"a batch holds at most {MAX_RIDERS} ideas", 2)
+                fail(f"a batch holds at most {MAX_RIDERS} riders", 2)
             picked = []
             for idea_id in job_picks:
                 j = next((x for x in data["jobs"] if x.get("id") == idea_id), None)

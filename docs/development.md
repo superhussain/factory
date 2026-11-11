@@ -67,6 +67,16 @@ mise exec -- python3 tools/verify.py all       # device then hosted, each leaf o
 failing command stops the run with exit 1; invalid arguments or a missing pnpm
 exit 2. The `device` group and installed Python bundle need no Node, pnpm or mise.
 
+CLI tests import `support` from `tests/cli`. A command that names one test file,
+class or method needs the `PYTHONPATH` prefix in the first line below. On Windows,
+or in a shell without that prefix form, run the second line. Without either, the
+run fails with `No module named 'support'`.
+
+```sh
+PYTHONPATH=tests/cli python3 -B -m unittest tests.cli.test_pickup.CloseTest
+python3 -B -m unittest discover -s tests/cli -p test_pickup.py
+```
+
 CI runs the same leaves once each in one Ubuntu pull-request workflow with
 parallel jobs, and `verify.py all` is never a second CI run. The `targets` job
 runs `format:check`, the workflow contracts and the affected `auth`, `protocol`,
