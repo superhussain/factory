@@ -1002,6 +1002,7 @@ class PaseoClaimHomeTest(IsolatedTestCase):
     setUp = FactoryTest.setUp
     api = FactoryTest.api
     git = FactoryTest.git
+    saved = FactoryTest.saved
 
     def test_board_writes_marker_under_resolved_home(self):
         resolved = self.home / "resolved"
@@ -1020,6 +1021,31 @@ class PaseoClaimHomeTest(IsolatedTestCase):
             job_id = factory.claim_id(self.home, "sample-export", "sample")
         self.assertTrue((resolved / "paseo-claims" / job_id / "agent_new").is_file())
         self.assertFalse((self.home / "paseo-claims").exists())
+
+    def test_board_resolves_home_before_the_write(self):
+        before = self.store["/api/board"]
+        with patch.object(factory, "factory_home", side_effect=SystemExit(2)), patch.object(
+                factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}), \
+                patch.object(factory.sys, "stdin", io.StringIO('{"note": "checking"}')):
+            with self.assertRaises(SystemExit):
+                factory.board(self.home, "001-test")
+        self.assertEqual(self.store["/api/board"], before)
+
+    def test_claim_id_resolves_home_before_the_write(self):
+        before = self.store["/api/board"]
+        with patch.object(factory, "factory_home", side_effect=SystemExit(2)), patch.object(
+                factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}), \
+                patch.object(factory.sys, "stdin", io.StringIO('{"note": "checking"}')):
+            with self.assertRaises(SystemExit):
+                factory.claim_id(self.home, "sample-export", "sample")
+        self.assertEqual(self.store["/api/board"], before)
+
+    def test_board_without_paseo_skips_the_home(self):
+        with patch.object(factory, "factory_home", side_effect=SystemExit(2)), patch.object(
+                factory, "paseo_session", return_value=None), \
+                patch.object(factory.sys, "stdin", io.StringIO('{"note": "checking"}')):
+            factory.board(self.home, "001-test")
+        self.assertEqual(self.saved()["note"], "checking")
 
 
 class IdeaTest(IsolatedTestCase):
