@@ -329,10 +329,14 @@ class PublicCutoverTest(unittest.TestCase):
         self.assertIn("unset upstream on archive/main", out)
 
     def test_repoint_shadowed_archive_branch(self):
-        fake = FakeRunner({("git", "-C", self.checkout, "remote", "get-url", "archive"): (0, f"git@github.com:{ARCHIVE}.git\n"),
-                           ("git", "-C", self.checkout, "for-each-ref", "--format=%(refname:short)%09%(upstream)", "refs/heads"): (0, "heads/archive/main\t\n"),
-                           ("git", "-C", self.checkout, "for-each-ref", "--format=%(refname:lstrip=2)%09%(upstream)", "refs/heads"): (0, "archive/main\t\n")},
-                          checkout=self.checkout)
+        git = ("git", "-C", self.checkout)
+        fake = FakeRunner({
+            (*git, "remote", "get-url", "archive"): (0, f"git@github.com:{ARCHIVE}.git\n"),
+            (*git, "for-each-ref", "--format=%(refname:short)%09%(upstream)", "refs/heads"):
+                (0, "heads/archive/main\t\n"),
+            (*git, "for-each-ref", "--format=%(refname:lstrip=2)%09%(upstream)", "refs/heads"):
+                (0, "archive/main\t\n"),
+        }, checkout=self.checkout)
         code, out = self.main(fake, "--repoint-only")
         self.assertEqual(code, 0, out)
         self.assertNotIn(("branch", "-m"), [argv[3:5] for argv in fake.argvs()])

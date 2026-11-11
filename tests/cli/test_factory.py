@@ -1041,6 +1041,16 @@ class PaseoClaimHomeTest(IsolatedTestCase):
                 factory.claim_id(self.home, "sample-export", "sample")
         self.assertEqual(self.store["/api/board"], before)
 
+    def test_claim_id_resolves_home_before_the_folder_and_session(self):
+        fresh = self.home / "fresh"
+        with patch.dict(os.environ, {"FACTORY_SESSION": ""}), patch.object(
+                factory, "factory_home", side_effect=SystemExit(2)), patch.object(
+                factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}):
+            with self.assertRaises(SystemExit):
+                factory.claim_id(fresh, "sample-export", "sample")
+            self.assertEqual(os.environ["FACTORY_SESSION"], "")
+        self.assertFalse(fresh.exists())
+
     def test_board_without_paseo_skips_the_home(self):
         with patch.object(factory, "factory_home", side_effect=SystemExit(2)), patch.object(
                 factory, "paseo_session", return_value=None), \

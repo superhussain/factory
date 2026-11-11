@@ -1655,7 +1655,7 @@ class CloseTest(PickupFixture):
         return None if self.gh_answers is None else self.gh_answers[args[0]]
 
     def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
-        if path != self.DECISION:
+        if not (path.startswith("/api/jobs/alpha/") and path.endswith("/decision.md")):
             return super().request(home, method, path, body, ok, headers, raw)
         self.calls.append((method, path))
         if method == "GET":
@@ -1762,10 +1762,15 @@ class CloseTest(PickupFixture):
     def test_close_decision_says_why_no_host_is_named(self):
         self.views["alpha"] = (404, "")
         self.board["jobs"] = [self.closing()]
-        self.pickup()
+        self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
         self.assertIn("- No host is named for a manual cleanup, because host-a could not read the project's "
                       "pickup hosts: no pipeline view; register the project or deploy the current Worker.\n",
                       self.files[self.DECISION])
+
+    def test_close_reads_pickup_config_once_per_project(self):
+        self.board["jobs"] = [self.closing(), self.closing(id="043-sample-report")]
+        self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\nclosed 043-sample-report alpha\n", ""))
+        self.assertEqual(self.calls.count(("GET", "/api/pipeline/effective/alpha")), 1)
 
     def test_close_closes_an_open_pull_request(self):
         self.board["jobs"] = [self.closing(pr=self.PR)]
