@@ -214,7 +214,7 @@ test("unmapped Cyrillic look-alikes are folded before redaction", async () => {
 
 test("zero-width joiners between emoji are removed before the guards", async () => {
   const s = setup();
-  const ux = "VERDICT: CHANGES\n\n\u{1F469}‍\u{1F4BB} The settings page has no focus ring.";
+  const ux = "VERDICT: CHANGES\n\n\u{1F469}\u200d\u{1F4BB} The settings page has no focus ring.";
   const r = await s.escalation({ reviews: { ux } });
   assert.equal(r.status, 200, r.text);
   assert.equal(
@@ -223,8 +223,8 @@ test("zero-width joiners between emoji are removed before the guards", async () 
       "VERDICT: CHANGES\n\n\u{1F469}\u{1F4BB} The settings page has no focus ring.\n" +
       "</review-findings>",
   );
-  assert.equal(cleanReview("\u{1F3F3}️‍\u{1F308}"), "\u{1F3F3}\u{1F308}");
-  for (const ui of ["a‍b", "\u{1F469}‍b", "a‍\u{1F4BB}"]) {
+  assert.equal(cleanReview("\u{1F3F3}\ufe0f\u200d\u{1F308}"), "\u{1F3F3}\u{1F308}");
+  for (const ui of ["a\u200db", "\u{1F469}\u200db", "a\u200d\u{1F4BB}"]) {
     const bad = await s.escalation({ reviews: { ui } });
     assert.equal(bad.status, 400, JSON.stringify(ui));
     assert.equal(bad.text, "reviews.ui: contains control, invisible or bidirectional characters");
