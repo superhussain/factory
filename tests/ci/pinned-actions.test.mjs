@@ -34,7 +34,7 @@ const uses = texts.flatMap((text) => {
 });
 
 test("every remote uses is pinned to a full commit SHA", () => {
-  assert.ok(uses.length > 0);
+  assert.ok(uses.length > 0, "no workflow or action file has a uses step");
   for (const value of uses) {
     assert.match(value, /^\.\/|^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/);
   }
@@ -47,7 +47,7 @@ test("every pinned uses line names its release", () => {
       const value = usesValue(line);
       return value !== undefined && !value.startsWith("./");
     });
-  assert.ok(lines.length > 0);
+  assert.ok(lines.length > 0, "no workflow or action file has a remote uses line");
   for (const line of lines) {
     assert.match(line, pinnedLine);
   }
