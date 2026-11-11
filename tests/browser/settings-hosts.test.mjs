@@ -539,12 +539,17 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           (s) => getComputedStyle(document.querySelector(s)).display,
           `${fallback} td:last-child`,
         );
+      // The accessibility tree can lag a resize or a late renderHosts(), so re-query and retry.
       const tableNode = async () => {
-        const node = await page.accessibility.snapshot({
-          root: await page.$(table),
-          interestingOnly: false,
-        });
-        return [node.role, node.name];
+        for (let attempt = 1; attempt <= 40; attempt++) {
+          const node = await page.accessibility.snapshot({
+            root: await page.$(table),
+            interestingOnly: false,
+          });
+          if (node) return [node.role, node.name];
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        throw new Error("tableNode: no accessibility node for " + table + " after 40 tries");
       };
       const roleOf = (s) => page.evaluate((q) => document.querySelector(q).getAttribute("role"), s);
       await page.setViewport({ width: 390, height: 844 });
