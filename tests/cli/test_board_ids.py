@@ -70,6 +70,36 @@ class BoardIdTest(IsolatedTestCase):
                     'Close the job with {"stage": "closed"} instead. Nothing was written.\n')))
                 self.assertEqual((self.ids(), self.puts), (["412-fix-login"], 0))
 
+    def batched(self):
+        self.text = factory.dump_board({"updated": "", "jobs": [
+            {"id": "412-fix-login", "project": "sample", "stage": "build",
+             "refs": [{"id": "411-sample-lead", "kind": "batched-into"}]}]})
+
+    def test_refuses_removing_a_batched_into_ref(self):
+        for body in ('{"refs": null}', '{"refs": []}'):
+            with self.subTest(body=body):
+                self.batched()
+                self.assertEqual(self.patch_board("412-fix-login", body), (2, "", (
+                    "factory.py: only factory.py batch and the lead's mirror add or remove a batched-into ref. "
+                    "Keep 412-fix-login's batched-into ref as it is. Nothing was written.\n")))
+                self.assertEqual(self.puts, 0)
+
+    def test_refuses_adding_a_batched_into_ref(self):
+        refs = '"refs": [{"id": "411-sample-lead", "kind": "batched-into"}]'
+        for job_id, body in (("412-fix-login", "{" + refs + "}"),
+                             ("413-add-export", '{"stage": "idea", "project": "sample", ' + refs + "}")):
+            with self.subTest(job_id=job_id):
+                self.assertEqual(self.patch_board(job_id, body), (2, "", (
+                    "factory.py: only factory.py batch and the lead's mirror add or remove a batched-into ref. "
+                    f"Keep {job_id}'s batched-into ref as it is. Nothing was written.\n")))
+                self.assertEqual((self.ids(), self.puts), (["412-fix-login"], 0))
+
+    def test_keeps_a_batched_into_ref_while_editing_refs(self):
+        self.batched()
+        refs = [{"id": "411-sample-lead", "kind": "batched-into"}, {"id": "400-sample-old", "kind": "follow-up-of"}]
+        code, out, _ = self.patch_board("412-fix-login", json.dumps({"refs": refs}))
+        self.assertEqual((code, json.loads(out)["refs"], self.puts), (0, refs, 1))
+
     def test_adds_a_well_formed_new_id(self):
         for job_id in ("413-add-export", "414-a", "1000-a1-b2"):
             with self.subTest(job_id=job_id):

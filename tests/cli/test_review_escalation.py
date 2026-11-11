@@ -35,6 +35,8 @@ class ReviewEscalationTests(IsolatedTestCase):
             self.assertEqual(ok, (200, 400, 404, 502, 503))
             self.assertEqual(headers, {"Content-Type": "application/json"})
             self.posts.append(json.loads(body))
+            if isinstance(self.reply, OSError):
+                self.module.fail("can't reach https://factory.example.test/api/review/escalation: timed out\x1b[2J", 5)
             if isinstance(self.reply, Exception):
                 self.module.fail("can't reach https://factory.example.test/api/review/escalation: timed out", 5)
             status, text = self.reply
@@ -95,6 +97,7 @@ class ReviewEscalationTests(IsolatedTestCase):
             ((502, "  \n"), "502"),
             ((502, "line one\n\n" + "x" * 300), "502: " + ("line one " + "x" * 300)[:200]),
             (RuntimeError(), "can't reach https://factory.example.test/api/review/escalation: timed out"),
+            (OSError(), "can't reach https://factory.example.test/api/review/escalation: timed out [2J"),
             ((200, "not json"), "malformed reply"),
             ((200, json.dumps({**ESCALATE, "decision": "hold"})), "malformed reply"),
             ((200, json.dumps({**ESCALATE, "confidence": "91"})), "malformed reply"),
