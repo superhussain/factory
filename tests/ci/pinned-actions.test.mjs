@@ -3,13 +3,13 @@
 // Dependabot keeps those pins fresh.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { parse } from "yaml";
 
 const github = new URL("../../.github/", import.meta.url);
-const actionDirs = readdirSync(new URL("actions/", github), { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name);
+const actionDirs = readdirSync(new URL("actions/", github)).filter((name) =>
+  statSync(new URL(`actions/${name}`, github)).isDirectory(),
+);
 const actionFiles = (dir) =>
   ["action.yml", "action.yaml"]
     .map((file) => new URL(`actions/${dir}/${file}`, github))
