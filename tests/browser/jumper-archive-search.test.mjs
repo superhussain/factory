@@ -88,12 +88,22 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       await page.evaluate(() => document.getElementById("job-jump").click());
       await page.waitForSelector("#job-picker[open]", wait);
     };
+    const count = () => page.$eval("#job-count", (el) => el.textContent);
     const waitMeta = (meta) =>
       page.waitForFunction(
         (m) =>
           [...document.querySelectorAll("#job-results .meta")].some((el) => el.textContent === m),
         wait,
         meta,
+      );
+    const setQuery = (value) =>
+      page.$eval(
+        "#job-search",
+        (el, v) => {
+          el.value = v;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        },
+        value,
       );
 
     await t.test("a board without an archive shows no row", async () => {
@@ -179,8 +189,11 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
     await t.test("zero matches say so", async () => {
       await openJumper();
       await page.type("#job-search", "zzz");
+      const base = await count();
+      assert.ok(!base.includes("archived"));
       await page.keyboard.press("Enter");
       await waitMeta('No archived jobs match "zzz". Pick to search again.');
+      assert.equal(await count(), base + " · no archived matches");
       assert.equal(asked.at(-1), "zzz");
     });
 
@@ -189,9 +202,28 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       await page.waitForFunction(() => !document.getElementById("job-picker").open, wait);
       await openJumper();
       await page.type("#job-search", "boom");
+      const base = await count();
+      assert.ok(!base.includes("archived"));
       await page.keyboard.press("Enter");
       await waitMeta("Could not search archived jobs. Pick to try again.");
+      assert.equal(await count(), base + " · archive search failed");
       assert.equal(asked.at(-1), "boom");
+    });
+
+    await t.test("a query over 200 characters hides the row", async () => {
+      const before = asked.length;
+      await setQuery("a".repeat(200));
+      assert.deepEqual(await archiveOption(), {
+        title: "Search archived jobs",
+        meta: 'Command · Search the archive for "' + "a".repeat(200) + '"',
+        selected: "true",
+      });
+      await setQuery("a".repeat(201));
+      assert.equal(await archiveOption(), undefined);
+      assert.deepEqual(await options(), []);
+      await page.keyboard.press("Enter");
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(asked.length, before);
     });
 
     assert.deepEqual(errors, []);

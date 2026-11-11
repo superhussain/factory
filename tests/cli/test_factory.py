@@ -1002,24 +1002,51 @@ class PaseoClaimHomeTest(IsolatedTestCase):
     setUp = FactoryTest.setUp
     api = FactoryTest.api
     git = FactoryTest.git
+    saved = FactoryTest.saved
 
-    def test_board_writes_marker_under_resolved_home(self):
+    @contextlib.contextmanager
+    def resolved_home(self):
         resolved = self.home / "resolved"
         with patch.object(factory, "factory_home", return_value=resolved), patch.object(
-                factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}), \
-                patch.object(factory.sys, "stdin", io.StringIO('{"note": "checking"}')):
+                factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}):
+            yield resolved
+
+    def test_board_writes_marker_under_resolved_home(self):
+        with self.resolved_home() as resolved, patch.object(factory.sys, "stdin", io.StringIO('{"note": "checking"}')):
             factory.board(self.home, "001-test")
         self.assertTrue((resolved / "paseo-claims" / "001-test" / "agent_new").is_file())
         self.assertFalse((self.home / "paseo-claims").exists())
 
     def test_claim_id_writes_marker_under_resolved_home(self):
-        resolved = self.home / "resolved"
-        with patch.object(factory, "factory_home", return_value=resolved), patch.object(
-                factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}), \
-                patch.object(factory.sys, "stdin", io.StringIO('{"note": "checking"}')):
+        with self.resolved_home() as resolved:
             job_id = factory.claim_id(self.home, "sample-export", "sample")
         self.assertTrue((resolved / "paseo-claims" / job_id / "agent_new").is_file())
         self.assertFalse((self.home / "paseo-claims").exists())
+
+    def test_board_resolves_home_before_the_write(self):
+        before = self.store["/api/board"]
+        with patch.object(factory, "factory_home", side_effect=SystemExit(2)), patch.object(
+                factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}), \
+                patch.object(factory.sys, "stdin", io.StringIO('{"note": "checking"}')):
+            with self.assertRaises(SystemExit):
+                factory.board(self.home, "001-test")
+        self.assertEqual(self.store["/api/board"], before)
+
+    def test_claim_id_resolves_home_before_the_write(self):
+        before = self.store["/api/board"]
+        with patch.object(factory, "factory_home", side_effect=SystemExit(2)), patch.object(
+                factory, "paseo_session", return_value={"server": "srv_new", "agent": "agent_new"}), \
+                patch.object(factory.sys, "stdin", io.StringIO('{"note": "checking"}')):
+            with self.assertRaises(SystemExit):
+                factory.claim_id(self.home, "sample-export", "sample")
+        self.assertEqual(self.store["/api/board"], before)
+
+    def test_board_without_paseo_skips_the_home(self):
+        with patch.object(factory, "factory_home", side_effect=SystemExit(2)), patch.object(
+                factory, "paseo_session", return_value=None), \
+                patch.object(factory.sys, "stdin", io.StringIO('{"note": "checking"}')):
+            factory.board(self.home, "001-test")
+        self.assertEqual(self.saved()["note"], "checking")
 
 
 class IdeaTest(IsolatedTestCase):
@@ -1251,6 +1278,45 @@ class IdeaTest(IsolatedTestCase):
                 factory.sync()
 
 
+class SyncFinishedJobsTest(IsolatedTestCase):
+    def setUp(self):
+        IdeaTest.setUp(self)
+        self.paths = []
+        self.board["jobs"] += [
+            {"id": "010-merged", "stage": "merged", "project": "sample"},
+            {"id": "011-closed", "stage": "closed", "project": "sample"},
+            {"id": "012-build", "stage": "build", "project": "sample"},
+        ]
+
+    def request(self, home, method, path, body=None, ok=(200,), headers=None):
+        self.paths.append(path)
+        if path == "/api/board":
+            return 200, {"ETag": '"fixture"'}, factory.dump_board(self.board)
+        self.assertEqual(method, "GET")
+        return 200, {}, "[]"
+
+    def listings(self):
+        return [p for p in self.paths if p != "/api/board"]
+
+    def check_sync(self, *args):
+        factory.sync(*args)
+        self.assertEqual(self.listings(), ["/api/jobs/sample/012-build/?etags=1"])
+        out = self.output.getvalue()
+        self.assertIn("sample/012-build: pulled 0 files", out)
+        self.assertNotIn("010-merged", out)
+        self.assertNotIn("011-closed", out)
+
+    def test_bulk_sync_skips_merged_and_closed_jobs(self):
+        self.check_sync()
+
+    def test_project_sync_skips_merged_and_closed_jobs(self):
+        self.check_sync("sample")
+
+    def test_pull_still_lists_a_merged_job(self):
+        factory.pull("sample/010-merged")
+        self.assertEqual(self.listings(), ["/api/jobs/sample/010-merged/?etags=1"])
+
+
 class MoveFenceTest(IsolatedTestCase):
     setUp = FactoryTest.setUp
     api = FactoryTest.api
@@ -1460,6 +1526,7 @@ class BacklogReworkTest(IsolatedTestCase):
         self.addCleanup(patch.stopall)
         patch.object(factory, "factory_home", return_value=self.home).start()
         patch.object(factory.time, "sleep").start()
+        patch.object(factory, "api_url", lambda home: "https://factory.example").start()
         patch.object(factory, "api", side_effect=self.request).start()
 
     def request(self, home, method, path, body=None, ok=(200,), headers=None):
@@ -1490,7 +1557,7 @@ class BacklogReworkTest(IsolatedTestCase):
         self.assertIn("done", job)
         self.assertNotIn("claim", job)
         self.assertFalse(factory.deny_notes_due(job), "a closed rework job is not a deny-notes job")
-        self.assertTrue(out.startswith("added "))
+        self.assertEqual(out, "added " + self.LINE + "link: https://factory.example/#/backlog/355d066e943c\n")
 
     def test_copies_context_block(self):
         block = "  Recommend: approve\n\n  The operator exports the board by hand today.\n"
@@ -1500,7 +1567,7 @@ class BacklogReworkTest(IsolatedTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(self.docs["/api/backlog"],
                          "# factory backlog\n\n" + done + block + "- [ ] factory: Other item\n" + self.LINE + block)
-        self.assertTrue(out.endswith(" with context\n"))
+        self.assertTrue(out.startswith("added ") and " with context\nlink: https://factory.example/#/backlog/" in out)
 
     def test_ignores_other_lines_context(self):
         self.docs["/api/backlog"] += "- [x] sample: Other (003-other)\n  Recommend: approve\n"
@@ -1519,7 +1586,7 @@ class BacklogReworkTest(IsolatedTestCase):
                 code, out, err = self.run_rework("Add CSV export to the weekly report")
                 self.assertEqual((code, err), (0, ""))
                 self.assertEqual(self.docs["/api/backlog"], start + self.LINE)
-                self.assertEqual(out, "added " + self.LINE)
+                self.assertEqual(out, "added " + self.LINE + "link: https://factory.example/#/backlog/355d066e943c\n")
 
     def test_non_string_line_exits_2(self):
         for line in (7, ["x"]):

@@ -1028,6 +1028,9 @@ class MoveHostTest(MoveFixture):
         self.assertEqual(self.pickup(), (0, "", f"factory.py: pickup skips alpha: {line}\n"
                                                 f"factory.py: pickup skips the stop of 042-sample-export alpha: {line}\n"))
         self.assertEqual((self.stopped, self.puts()), ([], []))
+        self.assertNotIn("stopped", self.job("042-sample-export")["move"])
+        self.assertEqual(self.pickup("--dry-run"),
+                         (0, f"skip stop 042-sample-export alpha: {line}\nhost {DEVICE}: would launch 0\n", ""))
 
     def test_earlier_host_stops_after_a_second_move(self):
         self.moved(**{"from": "studio-mac", "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
@@ -1238,11 +1241,13 @@ class MoveArchiveTest(MoveHostTest):
 
     def hint(self, agent):
         return (f"factory.py: pickup kept session {agent} of 042-sample-export: "
-                "no claim recorded on this host, archive it by hand if it still runs\n")
+                "no claim recorded on this host, archive it by hand if it still runs"
+                f": paseo archive --force {agent}\n")
 
-    def skipped(self, shown):
+    def skipped(self, shown, agent=None):
         return (f"factory.py: pickup skipped archive of session {shown} of 042-sample-export: "
-                "not an id the stall adapter accepts, archive it by hand if it still runs\n")
+                "not an id the stall adapter accepts, archive it by hand if it still runs"
+                + (f": paseo archive --force {agent}" if agent else "") + "\n")
 
     def recorded(self):
         if not self.adapter_calls.exists():
@@ -1313,8 +1318,8 @@ class MoveArchiveTest(MoveHostTest):
                 hint = {"not claimed here": self.hint(self.AGENT),
                         "other session": self.hint("9f1c2d3e-0000-4000-8000-000000000001"),
                         "bad agent": self.skipped("-bad"),
-                        "non-hex agent": self.skipped("ab_cd"),
-                        "short agent": self.skipped("abc"),
+                        "non-hex agent": self.skipped("ab_cd", "ab_cd"),
+                        "short agent": self.skipped("abc", "abc"),
                         "unsafe agent": self.skipped("'ab\\x1b[2Jcd'")}.get(name, "")
                 self.assertEqual((code, err), (0, hint))
                 self.assertEqual(out, "stopped 042-sample-export alpha: moved to studio-mac\n")
@@ -1339,9 +1344,7 @@ class MoveArchiveTest(MoveHostTest):
         self.set_stalls()
         self.moved(agent="9f1c2d3e-0000-4000-8000-000000000001", server="srv-lab")
         self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
-                                         "factory.py: pickup kept session 9f1c2d3e-0000-4000-8000-000000000001 of "
-                                         "042-sample-export: no claim recorded on this host, archive it by hand if "
-                                         "it still runs\n"))
+                                         self.hint("9f1c2d3e-0000-4000-8000-000000000001")))
         self.assertEqual(self.recorded(), [])
         self.assertEqual(self.pickup(), (0, "", ""))
 
@@ -1351,11 +1354,21 @@ class MoveArchiveTest(MoveHostTest):
         spec.loader.exec_module(module)
         self.assertEqual(factory.ADAPTER_ID.pattern, module.ID_RE.pattern)
 
+    def test_hint_names_paseo_home(self):
+        factory.forget_paseo_claim(self.home, "042-sample-export", self.AGENT)
+        self.set_stalls()
+        self.moved(agent="9f1c2d3e-0000-4000-8000-000000000001", server="srv-lab")
+        home = self.root / "paseo home"
+        with patch.dict(os.environ, {"PASEO_HOME": str(home)}):
+            code, out, err = self.pickup()
+        self.assertEqual(err, self.hint("9f1c2d3e-0000-4000-8000-000000000001").replace(
+            "paseo archive", f"paseo --home '{home}' archive"))
+
     def test_non_hex_agent_stops_once(self):
         self.set_stalls()
         self.moved(agent="ab_cd", server="srv-lab")
         self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
-                                         self.skipped("ab_cd")))
+                                         self.skipped("ab_cd", "ab_cd")))
         self.assertEqual(self.recorded(), [])
         move = self.job("042-sample-export")["move"]
         self.assertIn("stopped", move)
@@ -1591,6 +1604,7 @@ class CloseTest(PickupFixture):
     DECISION = "/api/jobs/alpha/042-sample-export/decision.md"
     REASON = "Duplicate of 041-sample-report"
     PR = "https://github.com/sample/alpha/pull/7"
+    BRANCH_VIEW = ("view", PR, "--json", "state,headRefName", "--jq", '.state + " " + .headRefName')
     COMMENT = (
         "> \U0001f916 **Agent-authored report** \u2014 written by factory.py pickup on the owner's behalf, "
         "posted automatically. Tests not run.\n\n"
@@ -1609,15 +1623,16 @@ class CloseTest(PickupFixture):
         "## Left out\n\n"
         "- No agent reviewed this close. The reason is the owner's own words.\n"
         "- The next pickup run on each host that holds the worktree or branch runs "
-        "`factory.py cleanup alpha/042-sample-export` there. It keeps a dirty worktree and a branch "
-        "that is not merged.\n")
+        "`factory.py cleanup alpha/042-sample-export` there when the project's pickup is on "
+        "and lists that host. It keeps a dirty worktree, and a branch that is not merged unless "
+        "origin holds the same commit. On any other host, run that command there by hand.\n")
 
     def setUp(self):
         super().setUp()
         self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
         self.files = {}
         self.conditions = []
-        self.gh_answers = {"view": (0, "OPEN\n"), "close": (0, "")}
+        self.gh_answers = {"view": (0, "OPEN factory/042-sample-export\n"), "close": (0, "")}
         patch.object(factory, "api_url", return_value="https://factory.example.test").start()
         patch.object(factory, "gh_pr", side_effect=self.gh).start()
         (self.home / "projects").mkdir()
@@ -1693,7 +1708,7 @@ class CloseTest(PickupFixture):
                 self.calls.clear()
                 self.board["jobs"] = [self.closing(close={"reason": reason, "at": "2026-01-02T12:00:00Z"})]
                 self.assertEqual(self.pickup(), (0, "", "factory.py: pickup skips the close of 042-sample-export: "
-                                                        "its reason is not one line of 1 to 200 characters\n"))
+                                                        "its reason must be 1 to 200 characters, with no line breaks or control characters\n"))
                 self.assertEqual((self.puts(), self.files), ([], {}))
 
     def test_close_dry_run_writes_nothing(self):
@@ -1720,7 +1735,7 @@ class CloseTest(PickupFixture):
         self.assertEqual(self.pickup(), (0, f"closed pull request {self.PR} for 042-sample-export\n"
                                             "closed 042-sample-export alpha\n", ""))
         gh = [call for call in self.calls if call[0] == "gh"]
-        self.assertEqual(gh, [("gh", "view", self.PR, "--json", "state", "--jq", ".state"),
+        self.assertEqual(gh, [("gh",) + self.BRANCH_VIEW,
                               ("gh", "close", self.PR, "--comment", self.COMMENT)])
         self.assertLess(self.calls.index(gh[1]), self.calls.index(("PUT", self.DECISION)))
         self.assertIn(f"- Pull request: {self.PR}, closed by pickup with a comment that links this page.\n",
@@ -1733,31 +1748,39 @@ class CloseTest(PickupFixture):
             with self.subTest(state=state):
                 self.calls.clear()
                 self.files.clear()
-                self.gh_answers["view"] = (0, state + "\n")
+                self.gh_answers["view"] = (0, state + " factory/042-sample-export\n")
                 self.board["jobs"] = [self.closing(pr=self.PR)]
                 self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
                 self.assertEqual([call for call in self.calls if call[0] == "gh"],
-                                 [("gh", "view", self.PR, "--json", "state", "--jq", ".state")])
+                                 [("gh",) + self.BRANCH_VIEW])
                 self.assertIn(f"- Pull request: {self.PR}, {line}.\n", self.files[self.DECISION])
                 self.assertNotIn("stays open", self.files[self.DECISION])
 
     def test_close_leaves_the_pull_request_open(self):
         other = "https://github.com/other/repo/pull/7"
-        cases = (("gh None", None, self.PR, True, "gh is not installed on host-a"),
-                 ("view exit 1", {"view": (1, "")}, self.PR, True, "gh pr view exited 1"),
-                 ("state DRAFT", {"view": (0, "DRAFT\n")}, self.PR, True, "gh pr view reported state DRAFT"),
-                 ("close exit 1", {"view": (0, "OPEN\n"), "close": (1, "")}, self.PR, True,
-                  "gh pr close exited 1"),
-                 ("other repo", {}, other, True, "its URL is not a pull request in sample/alpha"),
-                 ("no project file", {}, self.PR, False,
-                  "its URL is not a pull request in the project repository"))
-        for name, answers, pr, project_file, why in cases:
+        full, hint = "---\nrepo: sample/alpha\n---\n", " (check gh auth status on host-a)"
+        cases = (("gh None", None, self.PR, full, "gh is not installed on host-a"),
+                 ("view exit 1", {"view": (1, "")}, self.PR, full, "gh pr view exited 1" + hint),
+                 ("state DRAFT", {"view": (0, "DRAFT factory/042-sample-export\n")}, self.PR, full, "gh pr view reported state DRAFT"),
+                 ("close exit 1", {"view": (0, "OPEN factory/042-sample-export\n"), "close": (1, "")}, self.PR,
+                  full, "gh pr close exited 1" + hint),
+                 ("head mismatch", {"view": (0, "OPEN factory/050-other\n")}, self.PR, full,
+                  "its head branch factory/050-other is not the job's branch factory/042-sample-export"),
+                 ("no head", {"view": (0, "OPEN\n")}, self.PR, full, "gh pr view reported no head branch"),
+                 ("gh vanishes", {"view": (0, "OPEN factory/042-sample-export\n"), "close": None}, self.PR, full,
+                  "gh is not installed on host-a"),
+                 ("other repo", {}, other, full, "its URL is not a pull request in sample/alpha"),
+                 ("no repo", {}, self.PR, "---\nname: alpha\n---\n", "the project file names no repo"),
+                 ("no project file", {}, self.PR, None, "the project file names no repo"))
+        for name, answers, pr, project_text, why in cases:
             with self.subTest(name):
                 self.calls.clear()
                 self.files.clear()
                 self.gh_answers = answers
-                if not project_file:
+                if project_text is None:
                     (self.home / "projects" / "alpha.md").unlink()
+                else:
+                    (self.home / "projects" / "alpha.md").write_text(project_text)
                 self.board["jobs"] = [self.closing(pr=pr)]
                 self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n",
                                                  f"factory.py: pickup leaves pull request {pr} open: {why}\n"))
@@ -1766,6 +1789,8 @@ class CloseTest(PickupFixture):
                 self.assertIn(f"- Pull request {pr} stays open because {why}. "
                               "Close it on GitHub if it should not merge.\n", text)
                 self.assertEqual(self.job("042-sample-export")["stage"], "closed")
+                if name in ("head mismatch", "no head"):
+                    self.assertNotIn("close", [call[1] for call in self.calls if call[0] == "gh"])
 
     def test_close_dry_run_names_the_pull_request(self):
         self.board["jobs"] = [self.closing(pr=self.PR)]
@@ -1774,6 +1799,16 @@ class CloseTest(PickupFixture):
         self.assertEqual(out.splitlines()[0], f"would close 042-sample-export alpha and pull request {self.PR}")
         self.assertEqual([call for call in self.calls if call[0] == "gh"], [])
         self.assertEqual((self.puts(), self.files), ([], {}))
+
+
+class GhPrTest(IsolatedTestCase):
+    @unittest.skipIf(os.name == "nt", "needs a POSIX shell script")
+    def test_gh_pr_replaces_bad_utf8(self):
+        gh = Path(tempfile.mkdtemp()) / "gh"
+        gh.write_text("#!/bin/sh\nprintf 'OPEN \\377\\n'\n", encoding="utf-8")
+        gh.chmod(0o755)
+        with patch.object(factory.shutil, "which", return_value=str(gh)):
+            self.assertEqual(factory.gh_pr("view", "x"), (0, "OPEN \ufffd\n"))
 
 
 class CloseCleanupTest(PickupFixture):
@@ -1817,6 +1852,46 @@ class CloseCleanupTest(PickupFixture):
         self.assertNotIn("port", job)
         self.calls.clear()
         self.assert_silent(self.pickup())
+
+    def with_origin(self):
+        origin = self.home / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        self.git(self.repo_a, "remote", "add", "origin", str(origin))
+        self.git(self.repo_a, "push", "-q", "origin", "factory/042-sample-export")
+
+    def test_cleanup_deletes_a_branch_origin_holds(self):
+        self.with_origin()
+        self.board["jobs"] = [self.closed()]
+        self.assertEqual(self.pickup(), (0, "cleaned up 042-sample-export alpha\n", ""))
+        self.assertFalse(self.branch_exists())
+        self.assertEqual(self.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"], [])
+
+    def test_cleanup_keeps_a_branch_ahead_of_origin(self):
+        self.with_origin()
+        (self.wt / "more.txt").write_text("more\n")
+        self.git(self.wt, "add", "more.txt")
+        self.git(self.wt, "commit", "-q", "-m", "more")
+        self.board["jobs"] = [self.closed()]
+        self.assertEqual(self.pickup(), (0, f"cleaned up 042-sample-export alpha, left: {self.LEFT}\n", ""))
+        self.assertTrue(self.branch_exists())
+
+    def test_cleanup_keeps_a_branch_checked_out_elsewhere(self):
+        self.with_origin()
+        self.git(self.repo_a, "worktree", "remove", "--force", str(self.wt))
+        elsewhere = self.home / "elsewhere"
+        self.git(self.repo_a, "worktree", "add", "-q", str(elsewhere), "factory/042-sample-export")
+        self.board["jobs"] = [self.closed()]
+        self.pickup()
+        self.assertTrue(self.branch_exists())
+        left = self.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"]
+        self.assertEqual(len(left), 1)
+        self.assertTrue(left[0].startswith("branch factory/042-sample-export: checked out in "))
+
+    def test_cleanup_job_keeps_a_pushed_branch_by_default(self):
+        self.with_origin()
+        self.assertEqual(factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export"),
+                         ([f"worktree {self.wt}"], [self.LEFT]))
+        self.assertTrue(self.branch_exists())
 
     def test_cleanup_removes_a_merged_job(self):
         self.git(self.repo_a, "merge", "-q", "--no-ff", "-m", "merge", "factory/042-sample-export")

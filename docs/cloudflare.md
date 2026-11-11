@@ -76,6 +76,8 @@ you can rerun it after a failure. It keeps an application under another name. It
 bucket only when it is empty, and never lists or deletes objects. Local files
 stay; the output names the ones that now point at a deleted instance.
 
+After `up`, continue with [getting-started.md](getting-started.md).
+
 Sections 1 to 8 below are the manual fallback.
 
 ## 1. Local tooling and account

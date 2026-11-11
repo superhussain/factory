@@ -50,7 +50,7 @@
   factory.py idea-images <project-slug>/<job-id>
                                             materialize a job's pasted images and their
                                             Markdown into the job folder, then push them
-  factory.py sync [<project-slug>]          pull every staged job of a project, or of all projects
+  factory.py sync [<project-slug>]          pull every active job of a project, or of all projects; skips merged and closed
   factory.py tracer sync [<project-slug>[/<job-id>]]
                                             mirror jobs into Tracer for projects listed in tracer.json
   factory.py hold <project-slug>/<job-id> [take|released]
@@ -468,7 +468,7 @@ def mirror_batch(data, lead):
         if rider.get("stage") in TERMINAL:
             continue
         if lead.get("stage") == "closed":
-            refs = [r for r in rider["refs"] if r.get("kind") != BATCH_REF]
+            refs = [r for r in rider["refs"] if isinstance(r, dict) and r.get("kind") != BATCH_REF]
             patch_job(data, rider["id"], {"stage": IDEA, "refs": refs or None,
                                           "note": f"unbatched: {lead['id']} closed"})
         else:
@@ -539,6 +539,14 @@ def paseo_session():
     if server and PASEO_ID.fullmatch(agent) and not agent.startswith("-"):
         return {"server": server, "agent": agent}
     return None
+
+
+def paseo_archive_command(agent):
+    """The paseo command that archives agent by hand on this host, or None when agent is unsafe to print as an argument."""
+    if not PASEO_ID.fullmatch(agent) or agent.startswith("-"):
+        return None
+    home = os.environ.get("PASEO_HOME")
+    return "paseo " + (f"--home {shlex.quote(home)} " if home else "") + f"archive --force {agent}"
 
 
 def paseo_claim_path(home, job_id, agent):
@@ -723,16 +731,18 @@ def board(factory, job_id):
     check_pipeline(patch.get("pipeline"))
     device, session, minutes = holder(factory)
     paseo = paseo_session()
+    home = factory_home() if paseo else None
 
     def change(text):
         data = load_board(text)
         found = next((j for j in data["jobs"] if j.get("id") == job_id), None)
-        m = re.match(r"(\d{3,})-", job_id)
-        floor = archive_floor(data)
-        if found is None and m and int(m.group(1)) <= floor:
-            fail(f"ids up to {floor} belong to archived jobs, so {job_id} cannot go back on the board. "
-                 f"Read it with factory.py job {job_id}. Claim new ids with claim. "
-                 "Nothing was written.", 2)
+        if found is None:
+            m = re.match(r"(\d{3,})-", job_id)
+            floor = archive_floor(data)
+            if m and int(m.group(1)) <= floor:
+                fail(f"ids up to {floor} belong to archived jobs, so {job_id} cannot go back on the board. "
+                     f"Read it with factory.py job {job_id}. Claim new ids with claim. "
+                     "Nothing was written.", 2)
         if found is None and not NEW_JOB_ID.fullmatch(job_id):
             fail(f"bad job id {job_id!r}: a new job id is digits, a dash and a lowercase slug, "
                  "like 003-rate-limiting. Nothing was written.", 2)
@@ -775,7 +785,7 @@ def board(factory, job_id):
         fail(f"{held_by(job_id, held)}. Nothing was written. Pass --session <tag> if this session "
              "holds it, or take it over with hold <project>/<id> take", 6)
     if paseo and job and job.get("paseo") == paseo:
-        record_paseo_claim(factory_home(), job_id, paseo)
+        record_paseo_claim(home, job_id, paseo)
     print(json.dumps(job, indent=2))
     if "stage" in patch or "rounds" in patch or (patch.get("tracer") or {}).get("follow") is True:
         tracer_after_board(Path(factory), job, patch)
@@ -951,6 +961,7 @@ def claim_id(factory, feature_slug, project_slug):
     new_session()
     device, session, _ = holder(factory)
     paseo = paseo_session()
+    home = factory_home() if paseo else None
 
     def add(text):
         data = load_board(text)
@@ -965,7 +976,7 @@ def claim_id(factory, feature_slug, project_slug):
         return dump_board(data), job_id
     job_id = cas(factory, "/api/board", add)
     if paseo:
-        record_paseo_claim(factory_home(), job_id, paseo)
+        record_paseo_claim(home, job_id, paseo)
     jobs.joinpath(project_slug, job_id).mkdir(parents=True, exist_ok=True)
     return job_id
 
@@ -1083,6 +1094,14 @@ def backlog_context(path):
     return text
 
 
+def backlog_key(line):
+    return hashlib.sha256(line.encode("utf-8")).hexdigest()[:12]
+
+
+def backlog_link(home, line):
+    return f"{api_url(home)}/#/backlog/{backlog_key(line)}"
+
+
 def backlog_add(item, context=None):
     if item.splitlines() != [item]:
         fail(f"bad item {item!r}: it must be one line, with no line or paragraph separators", 2)
@@ -1098,17 +1117,23 @@ def backlog_add(item, context=None):
 
     def append(text):
         text = BACKLOG_TEMPLATE if text is None else text
-        done = re.compile(rf"- \[x\] {re.escape(item)} \(\S+\)")
+        done = re.compile(rf"- \[x\] {re.escape(item)} \((\S+)\)")
         lines = [line.rstrip("\r") for line in text.split("\n")]
-        if f"- [ ] {item}" in lines or any(done.fullmatch(line) for line in lines):
-            return None, False
+        if f"- [ ] {item}" in lines:
+            return None, ""
+        checked = next((m.group(1) for m in map(done.fullmatch, lines) if m), None)
+        if checked:
+            return None, checked
         if text and not text.endswith("\n"):
             text += "\n"
         return text + f"- [ ] {item}\n" + block, True
-    if not cas(home, "/api/backlog", append):
+    added = cas(home, "/api/backlog", append)
+    if added is not True:
         print(f"already in backlog: {item}")
+        print(f"link: {api_url(home)}/#{added}" if added else f"link: {backlog_link(home, f'- [ ] {item}')}")
         return
     print(f"added {item}" + (" with context" if context else ""))
+    print(f"link: {backlog_link(home, f'- [ ] {item}')}")
     verdict, final = backlog_triage(home, item, context)
     left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict)
     if final and (verdict is None or verdict["decision"] != "queue" or left):
@@ -1298,7 +1323,11 @@ def escalation_cmd(target, round_text):
         status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
     verdict = escalation_verdict(text) if status == 200 else None
     if verdict is None:
-        why = "malformed reply" if status == 200 else status
+        if status == 200:
+            why = "malformed reply"
+        else:
+            detail = " ".join(text.split())[:200]
+            why = f"{status}: {detail}" if detail else status
         print(f"factory.py: review escalation check failed ({why}); the review loop continues", file=sys.stderr)
         verdict = {**unchanged, "reason": "the escalation check failed"}
     print(json.dumps(verdict))
@@ -1462,6 +1491,8 @@ def backlog_rework(job_id):
         return
     msg = f"added {line}" + (" with context" if held else "")
     print(msg if added else f"kept the existing line for {job_id}")
+    if added:
+        print(f"link: {backlog_link(home, line)}")
 
 
 def backlog_cmd(sub, item, flag=None, path=None):
@@ -1573,6 +1604,9 @@ def batch_cmd(target, *idea_ids):
     home, slug, lead_id = r2_target(target, True)
     device, session, minutes = holder(home)
     idea_ids = list(dict.fromkeys(idea_ids))
+    for idea_id in idea_ids:
+        if not JOB_ID.fullmatch(idea_id) or ".." in idea_id:
+            fail(f"bad job id {idea_id!r}. Nothing was written.", 2)
 
     def entry(j):
         return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title")}
@@ -3113,12 +3147,14 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
                 x["stopped"] = now()
             print(f"archived {noun} {names} and stopped {line}" if archives else f"stopped {line}")
             for a in kept:
+                cmd = paseo_archive_command(a)
                 print(f"factory.py: pickup kept session {a} of {job_id}: no claim recorded on this host, "
-                      "archive it by hand if it still runs", file=sys.stderr)
+                      "archive it by hand if it still runs" + (f": {cmd}" if cmd else ""), file=sys.stderr)
             for a in refused:
                 shown = a if PASEO_ID.fullmatch(a) else ascii(a[:64])
+                cmd = paseo_archive_command(a)
                 print(f"factory.py: pickup skipped archive of session {shown} of {job_id}: not an id the stall adapter "
-                      "accepts, archive it by hand if it still runs", file=sys.stderr)
+                      "accepts, archive it by hand if it still runs" + (f": {cmd}" if cmd else ""), file=sys.stderr)
 
 
 def prioritized(j):
@@ -3169,7 +3205,7 @@ def gh_pr(*args):
     if gh is None:
         return None
     try:
-        r = subprocess.run([gh, "pr", *args], capture_output=True, text=True, timeout=60,
+        r = subprocess.run([gh, "pr", *args], capture_output=True, encoding="utf-8", errors="replace", timeout=60,
                            stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return 1, ""
@@ -3181,21 +3217,30 @@ def close_pull_request(home, j, device):
     pr, md = j["pr"], project_files(home, j["project"])[0]
     repo = frontmatter(md)[0].get("repo", "") if md.exists() else ""
     m = GH_PR.fullmatch(pr) if isinstance(pr, str) else None
+    if not repo:
+        return "open", "the project file names no repo"
     if not (m and m[1].lower() == repo.lower()):
-        return "open", f"its URL is not a pull request in {repo or 'the project repository'}"
-    view = gh_pr("view", pr, "--json", "state", "--jq", ".state")
+        return "open", f"its URL is not a pull request in {repo}"
+    view = gh_pr("view", pr, "--json", "state,headRefName",
+                  "--jq", '.state + " " + .headRefName')
     if view is None:
         return "open", f"gh is not installed on {device}"
     if view[0]:
-        return "open", f"gh pr view exited {view[0]}"
-    state = view[1].strip()
+        return "open", f"gh pr view exited {view[0]} (check gh auth status on {device})"
+    state, _, head = view[1].strip().partition(" ")
+    if not head:
+        return "open", "gh pr view reported no head branch"
+    if head != j.get("branch"):
+        return "open", f"its head branch {head} is not the job's branch {j.get('branch') or 'none'}"
     if state in ("MERGED", "CLOSED"):
         return ("merged" if state == "MERGED" else "already closed"), ""
     if state != "OPEN":
         return "open", f"gh pr view reported state {state}"
     comment = PR_CLOSE_COMMENT.format(id=j["id"], link=f"{api_url(home)}/#{j['id']}/decision")
-    code = gh_pr("close", pr, "--comment", comment)[0]
-    return ("open", f"gh pr close exited {code}") if code else ("closed", "")
+    close = gh_pr("close", pr, "--comment", comment)
+    if close is None:
+        return "open", f"gh is not installed on {device}"
+    return ("open", f"gh pr close exited {close[0]} (check gh auth status on {device})") if close[0] else ("closed", "")
 
 
 def close_decision(j, reason, device, earlier, outcome):
@@ -3218,8 +3263,9 @@ def close_decision(j, reason, device, earlier, outcome):
             "- No agent reviewed this close. The reason is the owner's own words.\n"
             f"{open_pr}"
             "- The next pickup run on each host that holds the worktree or branch runs "
-            f"`factory.py cleanup {j['project']}/{j['id']}` there. It keeps a dirty worktree and a branch "
-            "that is not merged.\n")
+            f"`factory.py cleanup {j['project']}/{j['id']}` there when the project's pickup is on "
+            "and lists that host. It keeps a dirty worktree, and a branch that is not merged unless "
+            "origin holds the same commit. On any other host, run that command there by hand.\n")
     return text + "\n## Earlier decision\n\n" + earlier if earlier else text
 
 
@@ -3234,7 +3280,7 @@ def close_pass(home, data, device, minutes, dry):
         reason = close_reason(j)
         if reason is None:
             print(f"factory.py: pickup skips the close of {job_id}: "
-                  "its reason is not one line of 1 to 200 characters", file=sys.stderr)
+                  "its reason must be 1 to 200 characters, with no line breaks or control characters", file=sys.stderr)
             continue
         c = blocking(j, device, "", minutes)
         if c:
@@ -3299,7 +3345,7 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
         if dry:
             print(f"would clean up {job_id} {project}")
             continue
-        removed, left = cleanup_job(repo, wt, branch)
+        _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
 
         def change(text, job_id=job_id, closed=c["closed"], left=left):
             board = load_board(text)
@@ -4623,16 +4669,13 @@ def idea_images(target):
 
 
 def sync(slug=None):
-    """Pull every staged job of one project, or of every project."""
+    """Pull every active job of one project, or of every project. It skips merged and closed jobs, whose files no longer change; pull <project>/<id> fetches one."""
     if slug:
         r2_target(slug, False)
     home, conflicted = factory_home(), []
     for j in read_board(home)["jobs"]:
-        # Stubs and ideas have no job files to pull.
-        if j.get("stage") in (None, IDEA) or slug and j.get("project") != slug:
-            continue
-        if not j.get("project") and j.get("stage") == "closed" \
-                and isinstance(j.get("idea"), str) and not j.get("branch"):
+        # Stubs and ideas have no job files, and merged or closed jobs no longer change.
+        if j.get("stage") in (None, IDEA, *TERMINAL) or slug and j.get("project") != slug:
             continue
         _, project, job_id = r2_target(f"{j.get('project')}/{j.get('id')}", True)
         line, conflicts = pull_job(home, project, job_id)
@@ -5049,12 +5092,13 @@ def cleanup(target):
     sys.exit(1 if left else 0)
 
 
-def cleanup_job(repo, wt, branch):
-    """Stop and remove a job's worktree, then delete its branch when merged. (removed, left)."""
+def cleanup_job(repo, wt, branch, drop_pushed=False):
+    """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. (removed, left)."""
     def run_git(*args):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
-            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=20)
+            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=20,
+                               env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
         except subprocess.TimeoutExpired:
             return None, "", f"git {args[0]} timed out after 20 s"
         except OSError:
@@ -5069,6 +5113,20 @@ def cleanup_job(repo, wt, branch):
             return None
         lines = re.sub(r", use --\w+ to .*", "", err).strip().splitlines()
         return (lines or [f"git exited {code}"])[0]
+
+    def pushed_tip_error():
+        """None after deleting a branch whose tip origin holds, else the reason it stays."""
+        tip = run_git("rev-parse", f"refs/heads/{branch}")[1]
+        code, out, _ = run_git("ls-remote", "origin", f"refs/heads/{branch}")
+        if not tip or code != 0 or out.split() != [tip, f"refs/heads/{branch}"]:
+            return f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}"
+        path = None
+        for line in run_git("worktree", "list", "--porcelain")[1].splitlines():
+            if line.startswith("worktree "):
+                path = line[len("worktree "):]
+            elif line == f"branch refs/heads/{branch}":
+                return f"checked out in {path}"
+        return first_error("update-ref", "-d", f"refs/heads/{branch}", tip)
 
     removed, left = [], []
     if wt.exists():
@@ -5089,7 +5147,8 @@ def cleanup_job(repo, wt, branch):
             if code is None:
                 error = err
             elif code:
-                error = f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}"
+                error = (pushed_tip_error() if drop_pushed else
+                         f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}")
             elif run_git("config", "--get", f"branch.{branch}.merge")[1]:
                 error = first_error("branch", "--unset-upstream", branch) or first_error("branch", "-d", branch)
             else:

@@ -177,8 +177,9 @@ test("follow-up", { timeout: 240000 }, async (t) => {
         await page.waitForSelector("#detail", { hidden: true });
         await activate("#new-idea");
         await page.waitForFunction(() => document.getElementById("idea-dlg").open, wait);
-        assert.equal((await dialog(page)).ref, null);
-        assert.equal((await dialog(page)).title, "New idea");
+        const { ref, title } = await dialog(page);
+        assert.equal(ref, null);
+        assert.equal(title, "New idea");
         assert.equal(await dialogName(page), "New idea");
         const plain = await refA11y(page);
         assert.equal(plain.kids, 0);
@@ -195,6 +196,7 @@ test("follow-up", { timeout: 240000 }, async (t) => {
           project: "",
           focus: "idea-text",
         });
+        assert.equal(await dialogName(page), "New follow-up idea");
         await cancel();
       });
 

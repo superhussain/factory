@@ -76,7 +76,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .filter[hidden] { display: none; }
   .btn { font: inherit; font-size: 12px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
   .btn, .close, .card, .tab, .settings-nav a { transition: border-color .15s, background-color .15s, box-shadow .15s, color .15s; }
-  .btn:hover, .btn:focus-visible { border-color: var(--accent); outline: none; }
+  .btn:focus-visible { border-color: var(--accent); outline: none; }
+  /* Touch taps leave :hover set, so hover styles apply only to hover-capable pointers. */
+  @media (hover: hover) { .btn:hover { border-color: var(--accent); outline: none; } }
   .btn:disabled { opacity: .6; cursor: default; }
   /* Touch screens get a 44px tap target. Mouse layouts keep the compact button. */
   @media (pointer: coarse) { .btn:not(.icon) { min-height: 44px; } }
@@ -186,13 +188,24 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .project-list thead th { font-size: 12px; color: var(--muted); font-weight: 600; }
   .project-list th .muted { display: block; font-weight: 400; }
   .hosts-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 10px; }
-  .host-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+  .host-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; container-type: inline-size; }
   .host-card h4 { display: inline; margin: 0 8px 0 0; }
   .host-id { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .host-badge { display: inline-block; font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; margin-left: 6px; }
   .host-seen, .host-card p { font-size: 12px; color: var(--muted); margin: 6px 0; }
+  .host-card p.host-alert { color: var(--alert); }
   .host-routes { display: block; overflow-x: auto; font-size: 12px; border-collapse: collapse; margin: 6px 0; }
   .host-routes th, .host-routes td { text-align: left; padding: 2px 8px 2px 0; white-space: nowrap; }
+  @container (max-width: 440px) {
+    .host-routes caption, .host-routes tbody, .host-routes tr, .host-routes td { display: block; }
+    .host-routes caption { text-align: left; }
+    .host-routes thead { display: none; }
+    .host-routes tr + tr { border-top: 1px solid var(--line); }
+    .host-routes tr { padding: 4px 0; }
+    .host-routes td { white-space: normal; overflow-wrap: anywhere; padding: 0; }
+    .host-routes td:first-child { font-weight: 600; }
+    .host-routes td:not(:first-child)::before { content: attr(data-label) ": "; color: var(--muted); }
+  }
   .host-card input, #host-add input { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .host-code { border: 1px solid var(--accent); border-radius: 8px; padding: 12px; margin: 0 0 12px; }
   .host-code pre { overflow-x: auto; }
@@ -274,6 +287,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .cards[hidden] { display: none; }
   .empty { color: var(--muted); font-size: 12px; padding: 8px 2px; opacity: .7; }
   .archive-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+  .blank .archive-list { align-items: center; margin-top: 16px; }
   .archive-head { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin: 4px 0 0; }
   .archive-count { font-size: 12px; color: var(--muted); margin: 0; }
   .archive-error { font-size: 12px; color: var(--alert); margin: 0; }
@@ -282,6 +296,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .blank h2 { margin: 0 0 8px; font-size: 16px; color: var(--fg); }
   .blank p { margin: 4px 0; font-size: 13px; }
   .blank code { white-space: nowrap; font: 12px var(--font-mono); background: var(--line); border-radius: 4px; padding: 1px 5px; color: var(--fg); }
+  .filter-empty { grid-column: 1 / -1; margin: 0; padding: 8px 16px; text-align: center; font-size: 13px; color: var(--muted); }
   .card {
     overflow-wrap: anywhere;
     display: block; width: 100%; text-align: left; font: inherit; color: inherit;
@@ -310,6 +325,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .meta.host { color: var(--host-fg); }
   .card .ref-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   .card .ref-link:hover { color: var(--accent); text-decoration-thickness: 2px; }
+  .card .ref-link.ref-focused { background: var(--accent); color: var(--panel); border-radius: 3px; box-shadow: -2px 0 0 var(--accent), 2px 0 0 var(--accent); text-decoration-thickness: 2px; }
+  .ref-focus { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .backlog-card {
     overflow-wrap: anywhere;
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(17,24,39,.05);
@@ -354,7 +371,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .job-actions-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; min-width: 200px; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .job-actions-menu[hidden] { display: none; }
   .job-actions-menu .btn { border: 0; text-align: left; border-radius: 6px; padding: 8px 12px; }
-  .job-actions-menu .btn:hover, .job-actions-menu .btn:focus-visible { background: var(--line); }
+  .job-actions-menu .btn:focus-visible { background: var(--line); }
+  @media (hover: hover) { .job-actions-menu .btn:hover { background: var(--line); } }
   .detail-head .pr-link { position: relative; font-size: 12px; }
   .detail-head .pr-link[hidden] { display: none; }
   .rounds { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
@@ -384,7 +402,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #idea-ref code { font: 12px var(--font-mono); overflow-wrap: anywhere; }
   .close { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-size); height: var(--icon-size); padding: 0; background: none; border: 1px solid transparent; border-radius: 8px; color: var(--muted); cursor: pointer; }
   .close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-  .close:hover, .close:focus-visible { border-color: var(--accent); color: var(--fg); }
+  .close:focus-visible { border-color: var(--accent); color: var(--fg); }
+  @media (hover: hover) { .close:hover { border-color: var(--accent); color: var(--fg); } }
   .close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .tabs { position: relative; display: flex; gap: 4px; padding: 10px 24px; border-bottom: 1px solid var(--line); overflow-x: auto; flex: none; }
   .tabs[hidden] { display: none; }
@@ -512,7 +531,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <a class="pr-link" id="d-tracer" target="_blank" rel="noopener noreferrer" hidden>Tracer</a>
     </div>
     <div class="job-actions" id="d-actions-wrap">
-      <button class="btn icon" id="d-actions" aria-label="Job actions" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="d-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>
+      <button class="btn icon" id="d-actions" aria-label="Job actions" title="Job actions (A or .)" aria-keyshortcuts="a ." aria-haspopup="menu" aria-expanded="false" aria-controls="d-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>
       <div class="job-actions-menu" id="d-actions-menu" role="menu" aria-label="Job actions" hidden>
         <button class="btn" id="d-edit-idea" role="menuitem" tabindex="-1" hidden>Edit idea</button>
         <button class="btn" id="d-discard" role="menuitem" tabindex="-1" hidden>Discard idea</button>
@@ -831,7 +850,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
           <tr><td>N</td><td>New idea</td></tr>
           <tr><td>P</td><td>Select project</td></tr>
           <tr><td>S</td><td>Open Settings</td></tr>
-          <tr><td>A</td><td>Open the jumper with actions for the hovered or focused job card</td></tr>
+          <tr><td>A or .</td><td>Open the jumper with actions for the hovered or focused job card, or the open job</td></tr>
           <tr><td>B</td><td>Open the first backlog item</td></tr>
           <tr><td>A or D</td><td>Approve or deny the open backlog item</td></tr>
           <tr><td>Right or Left arrow</td><td>Move between cards and job pages</td></tr>
@@ -869,7 +888,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <h2 id="move-host-h">Move to another host</h2>
     <p class="muted" id="move-host-help"></p>
     <label id="move-host-label">Host<select id="move-host-select" aria-describedby="move-host-help"></select></label>
-    <p class="muted" id="move-host-empty" hidden></p>
+    <p class="muted" id="move-host-empty" role="status" aria-live="polite" hidden></p>
     <p class="err" id="move-host-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="move-host-cancel">Cancel</button><button class="btn primary" type="submit" id="move-host-save">Move job</button></div>
   </form>
@@ -989,10 +1008,39 @@ function setConnection(state) {
   $('conn-text').textContent = text;
   $('conn-signin').hidden = state !== 'signin';
   const polling = state === 'online' && !liveOpen;
-  const label = polling ? 'Polling every ' + pollSeconds + ' seconds until live updates reconnect' : title;
+  const label = polling ? 'Polling every ' + pollSeconds + ' seconds until live updates reconnect' + (liveNote && '. ' + liveNote) : title;
   drawDot(polling ? dot + ' polling' : dot, label);
 }
 function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
+// Keepalive: an open socket sends "ping" every 25 s and the room's auto-response answers "pong", so proxies that drop quiet connections keep it. No pong for 60 s closes it. liveNote names how the last socket closed, for the polling dot.
+const LIVE_PING_MS = 25000, LIVE_PONG_TIMEOUT_MS = 60000;
+let liveNote = '';
+function keepLive(ws) {
+  const startedAt = Date.now();
+  let openedAt = 0, pongAt = 0, silent = false;
+  const timer = setInterval(function livePing() {
+    if (!openedAt || silent) return;
+    if (Date.now() - pongAt > LIVE_PONG_TIMEOUT_MS) {
+      silent = true;
+      ws.close(4000, 'no pong');
+    } else ws.send('ping');
+  }, LIVE_PING_MS);
+  ws.addEventListener('open', () => { openedAt = pongAt = Date.now(); });
+  ws.addEventListener('message', (e) => {
+    if (e.data !== 'pong') return;
+    pongAt = Date.now();
+    e.stopImmediatePropagation();
+  });
+  ws.addEventListener('close', (e) => {
+    clearInterval(timer);
+    const secs = (n) => Math.round(n / 1000) + ' seconds';
+    if (e.code === 1000 && !silent) { liveNote = ''; return; }
+    const when = openedAt ? 'after ' + secs(Date.now() - openedAt) + ' open' : 'before it opened, ' + secs(Date.now() - startedAt) + ' after it started';
+    liveNote = silent
+      ? 'Last live connection stopped answering pings ' + when
+      : 'Last live connection closed with code ' + e.code + (e.reason ? ' (' + e.reason + ')' : '') + ' ' + when;
+  });
+}
 $('conn-signin').addEventListener('click', () => location.reload());
 window.addEventListener('offline', () => { setConnection('offline'); syncLive(); schedulePoll(); });
 window.addEventListener('online', async () => {
@@ -1033,7 +1081,7 @@ function refreshBacklog() {
   const version = boardReadVersion;
   // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
   const seen = backlog.map((b) => b.raw).join('\n');
-  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); });
+  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); });
 }
 
 async function poll({ ifChanged = false, withBacklog = true } = {}) {
@@ -1065,6 +1113,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     notifyNeeds();
     if (settingsShown === 'projects') renderProjectList();
     syncDetail();
+    syncBacklogRoute();
     syncIdeaEditor();
     if ($('job-picker').open) renderJobResults();
     return true;
@@ -1192,6 +1241,12 @@ function refs(j) {
   return Array.isArray(j.refs) ? j.refs.filter((r) => r && typeof r.id === 'string' && REF_KINDS[r.kind]) : [];
 }
 
+// The lead a rider is batched into, as in factory.py lead_of.
+const leadOf = (j) => refs(j).find((r) => r.kind === 'batched-into')?.id ?? null;
+
+// The riders batched into a lead, in board order.
+const ridersOf = (id) => jobs.filter((x) => leadOf(x) === id).map((x) => x.id);
+
 function buildState(j) {
   const s = j.build && j.build.state;
   return BUILD_STATES.includes(s) ? s : null;
@@ -1205,7 +1260,7 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused)].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
 }
 
 // A holder's stop is recorded only when stopped is a string, as in factory.py.
@@ -1260,19 +1315,21 @@ function line(cls, text) {
   return '<div class="' + cls + ' line" title="' + esc(text) + '">' + esc(text) + '</div>';
 }
 
-// A ref to a job on the board is a mouse target that opens it; others stay text.
+// A ref to a job on the board is a mouse target that opens it; card() adds its keyboard stand-in. Others stay text.
 function refLine(r) {
   const id = jobs.some((x) => x.id === r.id) ? '<span class="ref-link" data-ref="' + esc(r.id) + '">' + esc(r.id) + '</span>' : esc(r.id);
   return esc(REF_KINDS[r.kind]) + ' ' + id;
 }
 
 // The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
+// The wrapper holds the key hint, so the button's only shortcut cue is aria-keyshortcuts.
 // A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
 function card(j, inNeeds, archived = false) {
   const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
+  const riders = archived ? [] : ridersOf(j.id);
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
-    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' title="Press A for job actions" aria-keyshortcuts="a"') + '>' +
+    (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
     '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span>' +
       (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
@@ -1285,15 +1342,18 @@ function card(j, inNeeds, archived = false) {
       (j.branch ? line('meta branch', j.branch) : '') +
       line('meta round', 'round ' + (j.round ?? 0) + (buildState(j) ? ' · build ' + buildState(j) : ''))) +
     (refText ? '<div class="meta refs line" title="' + esc(refText) + '">' + refs(j).map(refLine).join(' &middot; ') + '</div>' : '') +
+    (riders.length ? '<div class="meta refs riders line" title="' + esc('batches ' + riders.join(' · ')) + '">batches ' +
+      riders.map((id) => '<span class="ref-link" data-ref="' + esc(id) + '">' + esc(id) + '</span>').join(' &middot; ') + '</div>' : '') +
     (hostLine(j) ? line('meta host', hostLine(j)) : '') +
     (j.tracer?.building === true ? line('meta tracer-building', 'Building in Tracer') : '') +
     (ask && (inNeeds || !hiddenCardFields.has('note')) ? line('note', ask) : '') +
     chips(j.rounds) + '</button>';
   const pr = hiddenCardFields.has('pr') ? null : prLink(j);
-  return '<div class="card-wrap' + (pr ? ' has-pr' : '') + '">' + btn +
-    (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub">PR #' + esc(pr.n) + '</a>' : '') +
+  return '<div class="card-wrap' + (pr ? ' has-pr' : '') + '"' + (archived ? '' : ' title="Job actions (A or .)"') + '>' + btn +
+    (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub" title="">PR #' + esc(pr.n) + '</a>' : '') +
     (archived ? '' : '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
-    ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') + '</div>';
+    ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') +
+    refs(j).filter((r) => jobs.some((x) => x.id === r.id)).map((r) => '<a class="ref-focus" href="#' + esc(r.id) + '" data-ref="' + esc(r.id) + '">' + esc(REF_KINDS[r.kind]) + ' ' + esc(r.id) + '</a>').join('') + '</div>';
 }
 
 // Not a .card, so arrow-key card navigation skips it.
@@ -1317,7 +1377,7 @@ const JOB_PICKER_STAGES = ['idea', 'spec', 'build', 'review', 'approve', 'pr-ope
 let selectedKey = null;
 let pickerFocus = null;
 let pickerMode = 'job';
-let pickerActions = null; // { id, inNeeds } while pickerMode is 'actions'
+let pickerActions = null; // { id, inNeeds, drawer } while pickerMode is 'actions'
 let savedJobQuery = '';
 const optionIds = new Map();
 
@@ -1428,6 +1488,8 @@ function renderJobResults() {
       meta: j.id + ' · ' + (projectName(j) || 'No project') + ' · ' + j.stage + ' · archived',
     }))
     : [{ kind: 'archive-search', key: 'command:archive-search', query: rawQuery, title: 'Search archived jobs', meta: archiveSearchMeta(rawQuery) }];
+  // #job-count is the live region, so every archive outcome changes its text.
+  const archiveCount = !archiveRows.length || archiveSearch?.query !== rawQuery ? '' : found.length ? ' · ' + found.length + ' archived' + (archiveSearch.total > found.length ? ' of ' + archiveSearch.total : '') : archiveSearch.status === 'done' ? ' · no archived matches' : archiveSearch.status === 'error' ? ' · archive search failed' : '';
   const sections = [
     { id: 'pages', title: 'Pages', rows: actions.filter((r) => r.kind === 'page') },
     { id: 'links', title: 'Links', rows: actions.filter((r) => r.kind === 'link') },
@@ -1441,7 +1503,7 @@ function renderJobResults() {
   $('job-count').textContent = matched.length + (matched.length === 1 ? ' job' : ' jobs') +
     (actions.length ? ' · ' + actions.length + ' for ' + openId : '') +
     (commands.length ? ' · ' + commands.length + (commands.length === 1 ? ' command' : ' commands') : '') +
-    (found.length && archiveRows.length ? ' · ' + found.length + ' archived' + (archiveSearch.total > found.length ? ' of ' + archiveSearch.total : '') : '');
+    archiveCount;
   $('job-empty').textContent = openId ? 'No matching jobs or actions' : 'No jobs found';
   $('job-empty').hidden = jobResults.length !== 0;
   renderPickerRows(sections);
@@ -1503,9 +1565,23 @@ function cancelJobPicker() {
   else closeJobPicker();
 }
 
+// Where focus returns when the actions jumper closes: the drawer's actions button, else the board card.
+function actionsOpener() {
+  return pickerActions.drawer && !$('detail').hidden ? $('d-actions') : boardCard(pickerActions.id, pickerActions.inNeeds);
+}
+
 function openJobPicker() {
   if (document.querySelector('dialog[open]:not(#job-picker)')) return;
-  if (!$('job-picker').open) {
+  if ($('job-picker').open && pickerMode === 'actions') {
+    // Cmd+K in actions mode swaps to the normal jumper; Escape still returns to the card.
+    pickerFocus = actionsOpener();
+    pickerMode = 'job';
+    pickerActions = null;
+    archiveSearch = null;
+    $('job-search').value = '';
+    selectedKey = null;
+    renderJobResults();
+  } else if (!$('job-picker').open) {
     pickerMode = 'job';
     savedJobQuery = '';
     archiveSearch = null;
@@ -1520,7 +1596,7 @@ function openJobPicker() {
 }
 
 function closeJobPicker(activate = false) {
-  const card = pickerActions && boardCard(pickerActions.id, pickerActions.inNeeds);
+  const card = pickerActions && actionsOpener();
   pickerMode = 'job';
   pickerActions = null;
   savedJobQuery = '';
@@ -1556,11 +1632,11 @@ function activateJobResult() {
     return;
   }
   if (row.kind === 'job-action') {
-    const { id, inNeeds } = pickerActions;
+    const { id, inNeeds, drawer } = pickerActions;
     const j = jobs.find((x) => x.id === id);
     if (!j || !jobActionsFor(j).includes(row.action)) return renderJobResults();
     closeJobPicker();
-    JOB_ACTION_RUN[row.action](cardAction(id, inNeeds));
+    JOB_ACTION_RUN[row.action](drawer && openId === id ? drawerAction(row.action) : cardAction(id, inNeeds));
     return;
   }
   if (row.kind === 'archive-search') {
@@ -2543,8 +2619,8 @@ listenTabs('pipeline-note-tabs', PIPELINE_NOTE_TABS, id => {
 });
 // Registered before the generic listeners so the draft reads the filled N.
 $('pipeline-archive-mode').addEventListener('input', () => {
-  const n = ARCHIVE_DEFAULT_N[$('pipeline-archive-mode').value];
-  if ($('pipeline-archive-n').value === '' && n) $('pipeline-archive-n').value = String(n);
+  const n = ARCHIVE_DEFAULT_N[$('pipeline-archive-mode').value], field = $('pipeline-archive-n');
+  if (n && (field.value === '' || Object.values(ARCHIVE_DEFAULT_N).map(String).includes(field.value))) field.value = String(n);
 });
 for (const id of ['pipeline-merge', 'pipeline-rounds', ...PIPELINE_GATES.map(gate => 'pipeline-gate-' + gate),
     'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules', 'pipeline-archive-mode', 'pipeline-archive-n',
@@ -2665,11 +2741,17 @@ function hostCard(h) {
   }[h.state] ?? ''}));
   if (h.status) {
     const st = h.status;
-    li.append(make('p', {textContent:st.os + ', ' + st.scheduler + ', last pickup ' + (st.last_pickup ? hostUtc(st.last_pickup) : 'never') + '. Bundle ' + (st.bundle?.commit?.slice(0, 7) ?? 'unknown') + '. Doctor ' + (st.doctor === 'ok' ? 'ok' : 'failed: ' + st.doctor.join(', ')) + '.'}));
-    if (st.triage_failed_since) li.append(make('p', {className:'host-triage', textContent:'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'}));
-    const cells = (tag, values) => make('tr', {}, ...values.map(value => make(tag, {textContent:value})));
+    li.append(make('p', {textContent:st.os + ', ' + st.scheduler + ', last pickup ' + (st.last_pickup ? hostUtc(st.last_pickup) : 'never') + '. Bundle ' + (st.bundle?.commit?.slice(0, 7) ?? 'unknown') + '.' + (st.doctor === 'ok' ? ' Doctor ok.' : '')}));
+    if (st.doctor !== 'ok') li.append(make('p', {className:'host-doctor host-alert', textContent:'Doctor failed: ' + st.doctor.join(', ') + '.'}));
+    if (st.triage_failed_since) li.append(make('p', {className:'host-triage host-alert', textContent:'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'}));
+    const heads = ['Route', 'Provider', 'Model', 'Effort', 'Limited until'];
+    const cells = (tag, values) => make('tr', {}, ...values.map((value, i) => {
+      const cell = make(tag, {textContent:value});
+      cell.dataset.label = heads[i];
+      return cell;
+    }));
     li.append(make('table', {className:'host-routes'}, make('caption', {textContent:'Routes (set on the device)'}),
-      make('thead', {}, cells('th', ['Route', 'Provider', 'Model', 'Effort', 'Limited until'])),
+      make('thead', {}, cells('th', heads)),
       make('tbody', {}, ...st.routes.map(r => cells('td', [r.name, r.provider, r.model, r.effort ?? 'none', r.limited_until ? hostUtc(r.limited_until) : 'none'])))));
   }
   const picks = hostProjects.get(h.id);
@@ -2825,20 +2907,28 @@ function archiveSection(s) {
     error + (a.page < a.pages ? button('Show more') : '') + '</div>';
 }
 
+const FILTER_EMPTY_HTML = '<p class="filter-empty" id="filter-empty">No projects selected. Pick projects in the project filter to show their jobs.</p>';
+
 function renderBoard() {
   const focused = $('board').contains(document.activeElement) ? document.activeElement.closest('.column-toggle, .more, .archive-more, [data-backlog-open]') : null;
   const focusRaw = focused?.dataset.raw;
   const focusStage = focused?.dataset.stage;
   const focusClass = focused && (focused.classList.contains('more') ? 'more' : focused.classList.contains('archive-more') ? 'archive-more' : 'column-toggle');
-  if (!jobs.length && !backlog.length) {
+  // A redraw replaces every card node, so focus goes back to the same job's card or menu trigger.
+  const focusedCard = $('board').contains(document.activeElement) ? document.activeElement.closest('.card, .card-actions') : null;
+  const focusCard = focusedCard && { trigger: focusedCard.classList.contains('card-actions'), id: focusedCard.dataset.id ?? focusedCard.dataset.actions };
+  if (!jobs.length && !backlog.length && !archiveList.open) {
     $('board').innerHTML = '<div class="blank"><h2>No jobs yet</h2>' +
       '<p>Start one with <code>/factory &lt;feature&gt;</code> or <code>/factory next</code>.</p>' +
-      '<p>Jobs show up here as they move through the loop.</p></div>';
+      '<p>Jobs show up here as they move through the loop.</p>' +
+      (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
     if (!settingsShown) document.title = BASE_TITLE;
+    if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
     return;
   }
+  const noneShown = !shownProjectKeys().length;
   const shown = jobs.filter((j) => isShown(j.project));
   renderedBacklog = backlog;
   for (const b of visibleBacklog()) if (!backlogTriageAsked.has(b.raw)) fetchBacklogTriage(b);
@@ -2852,7 +2942,7 @@ function renderBoard() {
   if (!settingsShown) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   $('board').style.setProperty('--cols', collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']).join(' '));
-  $('board').innerHTML = COLUMNS.map((s, i) => {
+  $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : '') + COLUMNS.map((s, i) => {
     if (hiddenColumns.has(s)) return '';
     let list = lists[i];
     let more = '';
@@ -2879,7 +2969,12 @@ function renderBoard() {
   else if (focused) {
     const control = $('board').querySelector('.' + focusClass + '[data-stage="' + focusStage + '"]') ||
       $('board').querySelector('.column-toggle[data-stage="' + focusStage + '"]');
-    control.focus({ preventScroll: true });
+    control?.focus({ preventScroll: true });
+  }
+  if (focusCard) {
+    [...$('board').querySelectorAll(focusCard.trigger ? '.card-actions' : '.card')]
+      .find((el) => (focusCard.trigger ? el.dataset.actions : el.dataset.id) === focusCard.id)
+      ?.focus({ preventScroll: true });
   }
   syncCardActions();
 }
@@ -3207,6 +3302,7 @@ async function loadArchivePage() {
       archivedJobs.set(row.id, row);
       if (!archiveList.rows.some((x) => x.id === row.id)) archiveList.rows.push(row);
     }
+    if (!archiveList.open && !jobs.length && !backlog.length) for (const s of TERMINAL) columnCollapsed.set(s, false);
     Object.assign(archiveList, { open: true, page: body.page, pages: body.pages, total: body.total });
   } catch {
     archiveList.error = 'Could not load archived jobs. Try again.';
@@ -3272,6 +3368,7 @@ async function openJob(id) {
     head.append(a);
   };
   for (const r of refs(j)) add(REF_KINDS[r.kind] + ' ', '#' + encodeURIComponent(r.id), r.id);
+  ridersOf(j.id).forEach((id, i) => add(i ? '' : 'batches ', '#' + encodeURIComponent(id), id));
   if (buildState(j)) {
     const runs = buildRuns(j);
     if (!runs.length) head.append((head.childNodes.length ? ' · ' : '') + 'build ' + buildState(j));
@@ -4016,12 +4113,12 @@ function handleBoardKeys(e) {
   } else if (e.key === 's') {
     e.preventDefault();
     location.hash = '#/settings/projects';
-  } else if (e.key === 'a') {
+  } else if (e.key === 'a' || e.key === '.') {
     if (openBacklogRaw !== null) return;
     const target = cardShortcutTarget(e);
     if (!target) return;
     e.preventDefault();
-    openJobActionsPicker(target.id, target.inNeeds);
+    openJobActionsPicker(target);
   }
 }
 document.addEventListener('keydown', handleBoardKeys);
@@ -4132,8 +4229,11 @@ function syncDetail() {
 
 window.addEventListener('hashchange', () => {
   archiveFailNoted = '';
+  const key = backlogRoute();
   const { id } = parseHash();
-  if (id) openJob(id); else if (openId) closeDetail();
+  if (key) openBacklogRoute(key);
+  else if (id) openJob(id);
+  else if (openId || openBacklogRaw !== null) closeDetail();
   renderRoute();
 });
 
@@ -4354,6 +4454,7 @@ function addIdea(board, snap, now) {
 const BACKLOG_LINE = /^- \[ \] ([\w-]+): (\S.*)$/;
 const BACKLOG_REF = / \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$/;
 let backlog = [];               // parsed items from the last good read
+let backlogLoaded = false;      // a 200 or 404 has been read at least once
 const backlogBusy = new Set();  // item.raw values with a decision in flight
 const backlogPending = new Map(); // item.raw -> captureId, kept until a decision settles
 
@@ -4409,9 +4510,53 @@ async function loadBacklog() {
     const r = await fetch('./api/backlog', { cache: 'no-store' });
     // Always read the body, so the request finishes even on a 404.
     const text = await r.text();
-    if (r.status === 200) backlog = backlogItems(text);
-    else if (r.status === 404) backlog = [];
+    if (r.status === 200) {
+      const items = backlogItems(text);
+      for (const item of items) item.key = await sha12(item.raw);
+      backlog = items;
+    } else if (r.status === 404) backlog = [];
+    else return;
+    backlogLoaded = true;
   } catch {}
+}
+
+const BACKLOG_GONE = 'That backlog item is no longer in the backlog. It was decided, reworded or removed.';
+let backlogRouteBusy = false;
+
+function backlogRoute() {
+  const m = /^#\/backlog\/([0-9a-f]{12})$/.exec(location.hash);
+  return m ? m[1] : null;
+}
+
+// Open the item, or the job it became, or say it is gone. Waits for both reads.
+async function openBacklogRoute(key) {
+  // A decision in flight reloads the lists before the drawer moves on, so its own key must not redirect yet.
+  if (backlogRouteBusy || backlogSaving || !loaded || !backlogLoaded) return;
+  backlogRouteBusy = true;
+  try {
+    const item = backlog.find((b) => b.key === key);
+    if (item) {
+      if (openBacklogRaw !== item.raw) openBacklogItem(item);
+      return;
+    }
+    let job = null;
+    for (const j of jobs) if (typeof j.backlog?.line === 'string' && await sha12(j.backlog.line) === key) job = j;
+    if (backlogRoute() !== key) return;
+    if (job) {
+      history.replaceState(null, '', location.pathname + location.search + '#' + encodeURIComponent(job.id));
+      openJob(job.id);
+    } else {
+      closeDetail();
+      showBoardStatus(BACKLOG_GONE);
+    }
+  } finally {
+    backlogRouteBusy = false;
+  }
+}
+
+function syncBacklogRoute() {
+  const key = backlogRoute();
+  if (key) openBacklogRoute(key);
 }
 
 // Adds the decided item as a job, or returns the id it already saved under captureId.
@@ -4532,7 +4677,7 @@ async function decideBacklog(item, decision, notes, answers) {
     return id;
   } catch (x) {
     if (!x.uncertain) backlogPending.delete(item.raw);
-    else x.message = 'Not confirmed: ' + x.message + '. Try again. It will not add a duplicate.';
+    else x.message = boardSaveError(x, 'Try again. It will not add a duplicate.');
     throw x;
   } finally {
     await loadBacklog();
@@ -4637,7 +4782,7 @@ async function casBoard(change) {
 // An uncertain save may have landed, so the dialog says so and the same retry confirms it.
 function boardSaveError(x, hint) {
   const text = String(x.message || x);
-  return x.uncertain ? 'Not confirmed: ' + text + '. ' + hint : text;
+  return x.uncertain ? 'Not confirmed: ' + text.replace(/[\s.]+$/, '') + '. ' + hint : text;
 }
 
 let ideaEditor = null;
@@ -4680,19 +4825,20 @@ const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host
 
 // The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
 function jobActionsFor(j) {
+  const rider = !!leadOf(j);
   const shown = {
     'd-edit-idea': canEditIdea(j),
     'd-discard': j.stage === 'idea',
     'd-follow-tracer': !!j.project && (TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) && j.tracer?.follow !== true && !tracerLink(j),
-    'd-move-host': !!j.project && MOVE_STAGES.includes(j.stage),
+    'd-move-host': !rider && !!j.project && MOVE_STAGES.includes(j.stage),
     'd-rerun': canRerun(j),
-    'd-prioritize': !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
+    'd-prioritize': !rider && !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
     'd-remove-priority': !!j.priority,
-    'd-pause': !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
+    'd-pause': !rider && !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
     'd-resume': !!j.paused,
     'd-copy-link': true,
     'd-follow-up': j.stage !== 'idea' && !$('new-idea').hidden,
-    'd-close-job': !!j.project && j.stage !== 'idea' && !TERMINAL.includes(j.stage) && !j.close,
+    'd-close-job': !rider && !!j.project && j.stage !== 'idea' && !TERMINAL.includes(j.stage) && !j.close,
   };
   return JOB_ACTIONS.filter((id) => shown[id]);
 }
@@ -4782,17 +4928,18 @@ function closeJobActions(refocus) {
 
 function syncJobActions() {
   // A job that left the board has nothing to act on, so its stale items go too. An archived
-  // job keeps only Copy link.
+  // job and a backlog item keep only Copy link.
   const wasShown = !$('d-actions-wrap').hidden;
   if (!jobs.some((j) => j.id === openId))
-    for (const id of JOB_ACTIONS) $(id).hidden = id !== 'd-copy-link' || !archivedJobs.has(openId);
+    for (const id of JOB_ACTIONS) $(id).hidden = id !== 'd-copy-link' || !(archivedJobs.has(openId) || openBacklogRaw !== null);
   const any = JOB_ACTIONS.some((id) => !$(id).hidden);
   $('d-actions-wrap').hidden = !any;
   if (any) return;
   const focused = document.activeElement;
   closeJobActions(false);
   // Chrome may already have blurred the hidden item, so focus on body counts as focus lost from the menu.
-  if (wasShown && !$('detail').hidden && ($('d-actions-wrap').contains(focused) || focused === document.body)) $('d-close').focus();
+  if (wasShown && !$('detail').hidden &&
+      ($('d-actions-wrap').contains(focused) || focused === document.body)) $('d-close').focus();
 }
 
 function syncIdeaEditor() {
@@ -4834,7 +4981,7 @@ const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
 function moveJob(board, id, to, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || !MOVE_STAGES.includes(j.stage)) return 'This job can no longer be moved.';
+  if (!j.project || !MOVE_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be moved.';
   if (!j.claim && j.move?.to === to) return 'unchanged';
   const from = j.claim?.device ?? (!j.claim && j.move && !moveStopped(j.move) ? j.move.from : undefined);
   if (to === from) return 'This job already runs on ' + to + '.';
@@ -4870,7 +5017,7 @@ function writeMove(board, j, to, now) {
 
 // A rerun is a move back to the job's own host: that host stops the session, then its pickup
 // claims the job and runs factory recover in a fresh session.
-const canRerun = (j) => !!j.project && MOVE_STAGES.includes(j.stage) && !!j.claim?.device && !j.paused && !asks(j.needs);
+const canRerun = (j) => !!j.project && MOVE_STAGES.includes(j.stage) && !!j.claim?.device && !j.paused && !asks(j.needs) && !leadOf(j);
 
 function rerunJob(board, id, host, now) {
   const j = board.jobs.find((x) => x.id === id);
@@ -4887,7 +5034,7 @@ const PRIORITY_STAGES = ['idea', ...MOVE_STAGES];
 function prioritizeJob(board, id, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || !PRIORITY_STAGES.includes(j.stage)) return 'This job can no longer be prioritized.';
+  if (!j.project || !PRIORITY_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be prioritized.';
   if (j.priority) return 'unchanged';
   j.priority = { at: now };
   j.updated = now;
@@ -4910,7 +5057,7 @@ function removePriority(board, id, now) {
 function pauseJob(board, id, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || TERMINAL.includes(j.stage)) return 'This job can no longer be paused.';
+  if (!j.project || TERMINAL.includes(j.stage) || leadOf(j)) return 'This job can no longer be paused.';
   if (j.paused) return 'unchanged';
   j.paused = { at: now };
   j.updated = now;
@@ -4934,10 +5081,10 @@ function resumeJob(board, id, now) {
 function closeJob(board, id, reason, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
-  if (!j.project || j.stage === 'idea' || TERMINAL.includes(j.stage)) return 'This job can no longer be closed.';
+  if (!j.project || j.stage === 'idea' || TERMINAL.includes(j.stage) || leadOf(j)) return 'This job can no longer be closed.';
   if (j.close) return j.close.reason === reason.trim() ? 'unchanged' : 'A close is already queued for this job.';
   const text = reason.trim();
-  if (!/^[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}$/.test(text)) return 'Enter a reason of 1 to 200 characters.';
+  if (!/^[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}$/.test(text)) return 'Enter a reason of 1 to 200 characters. Line breaks and control characters are not allowed.';
   j.close = { reason: text, at: now };
   j.updated = now;
   board.updated = now;
@@ -4983,9 +5130,11 @@ async function openMoveHost(ctx) {
   select.hidden = !hosts.length;
   $('move-host-label').hidden = !hosts.length;
   if (!hosts.length && err.hidden) {
-    const late = blockedOffline.length === 1 ? blockedOffline[0] + ' is offline and stops the job only when it comes back online.' : blockedOffline.length ? blockedOffline.join(', ') + ' are offline and stop the job only when they come back online.' : '';
+    let late = '';
+    if (blockedOffline.length === 1) late = blockedOffline[0] + ' is offline and stops the job only when it comes back online. ';
+    else if (blockedOffline.length) late = blockedOffline.join(', ') + ' are offline and stop the job only when they come back online. ';
     empty.textContent = blocked.length
-      ? 'Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '. Try again after one of them stops the job.' + (late ? ' ' + late : '')
+      ? 'Every other host that runs pickup for ' + j.project + ' still has a stop queued: ' + blocked.join(', ') + '. ' + late + 'Try again after one of them stops the job.'
       : 'No other active host runs pickup for ' + j.project + '. Add one in Settings, Hosts.';
     empty.hidden = false;
   }
@@ -5295,7 +5444,7 @@ async function resumeAction(ctx) {
 async function copyLinkAction(ctx) {
   let copied = true;
   try {
-    await navigator.clipboard.writeText(jobLink(ctx.id));
+    await navigator.clipboard.writeText(ctx.id === null ? location.origin + location.pathname + location.search + location.hash : jobLink(ctx.id));
   } catch {
     copied = false;
   }
@@ -5623,11 +5772,12 @@ function boardCard(id, inNeeds) {
 }
 
 // The jumper in actions mode lists what the card menu lists for one job.
-function openJobActionsPicker(id, inNeeds) {
+function openJobActionsPicker({ id, inNeeds, drawer = false }) {
   if (document.querySelector('dialog[open]')) return;
   closeCardActions(false);
+  closeJobActions(false);
   pickerMode = 'actions';
-  pickerActions = { id, inNeeds };
+  pickerActions = { id, inNeeds, drawer };
   savedJobQuery = '';
   pickerFocus = null;
   $('job-search').value = '';
@@ -5712,12 +5862,20 @@ $('board').addEventListener('pointerover', (e) => {
   hoveredCard = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : null;
 });
 $('board').addEventListener('pointerleave', () => { hoveredCard = null; });
+// The stand-in link holds keyboard focus; the visible span shows it.
+function markRefFocus(e, on) {
+  const a = e.target.closest?.('a.ref-focus');
+  a?.closest('.card-wrap').querySelector('.ref-link[data-ref="' + CSS.escape(a.dataset.ref) + '"]')?.classList.toggle('ref-focused', on);
+}
+$('board').addEventListener('focusin', (e) => markRefFocus(e, true));
+$('board').addEventListener('focusout', (e) => markRefFocus(e, false));
 
-// A focused card wins over a hovered one.
+// A focused card wins over a hovered one, and either wins over the open drawer's job.
 function cardShortcutTarget(e) {
   const c = e.target.closest?.('#board .card-wrap')?.querySelector('.card');
   const target = c ? { id: c.dataset.id, inNeeds: c.classList.contains('needs-you') } : hoveredCard;
-  return target && jobs.some((x) => x.id === target.id) ? target : null;
+  if (target && jobs.some((x) => x.id === target.id)) return target;
+  return jobs.some((x) => x.id === openId) ? { id: openId, inNeeds: false, drawer: true } : null;
 }
 $('card-actions-menu').addEventListener('click', (e) => {
   const item = e.target.closest('[data-action]');
@@ -5758,7 +5916,7 @@ function openBacklogItem(item) {
   docDir = null;
   docBase = null;
   docRepo = projects?.get(item.project)?.repo || null;
-  if (settingsRoute() === null) history.replaceState(null, '', location.pathname + location.search);
+  if (settingsRoute() === null) history.replaceState(null, '', location.pathname + location.search + '#/backlog/' + item.key);
   $('detail').hidden = false;
   $('d-title').textContent = 'Backlog item';
   $('d-meta').textContent = projectName({ project: item.project }) + ' · backlog';
@@ -6072,6 +6230,7 @@ function openLive() {
   liveRetryTimer = 0;
   const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + LIVE_PATH);
   liveSocket = ws;
+  keepLive(ws);
   ws.addEventListener('open', () => {
     if (ws !== liveSocket) return;
     liveOpen = true;

@@ -113,7 +113,8 @@ def repoint(args, path):
                and run([*git, "merge-base", "--is-ancestor", name, "origin/main"]).returncode != 0]
     for name in private:
         act([*git, "branch", "-m", name, f"archive/{name}"])
-    # Each renamed branch under its new archive/ name, plus older archive/* branches, if it tracks an upstream.
+    # Each renamed branch under its new archive/ name, plus older archive/*
+    # branches, if it tracks an upstream.
     tracking = [f"archive/{name}" if name in private else name for name, upstream in refs
                 if upstream and (name in private or name.startswith("archive/"))]
     for name in tracking:

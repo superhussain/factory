@@ -30,27 +30,11 @@ const JOBS = [
     branch: "factory/042-sample-export",
     round: 1,
     updated: "2026-01-01T00:00:00Z",
-    claim: {
-      device: "lab-linux",
-      session: "a1b2c3",
-      since: "2026-01-01T10:00:00Z",
-    },
+    claim: { device: "lab-linux", session: "a1b2c3", since: "2026-01-01T10:00:00Z" },
     paseo: { server: "srv-lab", agent: "4cec0a47-1d21-4115-945b-9e7dfb668ef4" },
   },
-  {
-    id: "043-unclaimed",
-    project: "sample",
-    title: "No host",
-    stage: "spec",
-    updated: NOW,
-  },
-  {
-    id: "044-open-pr",
-    project: "sample",
-    title: "Open PR",
-    stage: "pr-open",
-    updated: NOW,
-  },
+  { id: "043-unclaimed", project: "sample", title: "No host", stage: "spec", updated: NOW },
+  { id: "044-open-pr", project: "sample", title: "Open PR", stage: "pr-open", updated: NOW },
   { id: "045-no-project", title: "No project", stage: "build", updated: NOW },
   {
     id: "046-queued",
@@ -159,9 +143,7 @@ test("move host", { timeout: 240000 }, async (t) => {
               {
                 status: 200,
                 contentType: "application/json",
-                body: JSON.stringify({
-                  pickup: { enabled: true, hosts: pickupHosts },
-                }),
+                body: JSON.stringify({ pickup: { enabled: true, hosts: pickupHosts } }),
               },
               1,
             );
@@ -297,12 +279,7 @@ test("move host", { timeout: 240000 }, async (t) => {
               ...JOBS[0],
               claim: undefined,
               paseo: undefined,
-              move: {
-                from: "lab-linux",
-                session: "a1b2c3",
-                to: "studio-mac",
-                at: NOW,
-              },
+              move: { from: "lab-linux", session: "a1b2c3", to: "studio-mac", at: NOW },
             },
           ]);
           await page.evaluate(() => window.fixtureBoardPoll?.());
@@ -417,9 +394,7 @@ test("move host", { timeout: 240000 }, async (t) => {
         await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
         await (
           await page.$("#move-host-dlg")
-        ).screenshot({
-          path: `${SHOTS}after-move-dialog-chained${suffix}.png`,
-        });
+        ).screenshot({ path: `${SHOTS}after-move-dialog-chained${suffix}.png` });
         assert.deepEqual(await options(page), ["Cloud box (cloud-box)"]);
         await page.select("#move-host-select", "cloud-box");
         await page.click("#move-host-save");
@@ -475,9 +450,7 @@ test("move host", { timeout: 240000 }, async (t) => {
           wait,
         );
         const queued = await page.waitForSelector('.card[data-id="046-queued"]');
-        await queued.screenshot({
-          path: `${SHOTS}after-card-true-stopped${suffix}.png`,
-        });
+        await queued.screenshot({ path: `${SHOTS}after-card-true-stopped${suffix}.png` });
         assert.equal(
           await hostLine(page, "046-queued"),
           "on Studio Mac · stop queued on Lab Linux",
@@ -498,13 +471,7 @@ test("move host", { timeout: 240000 }, async (t) => {
               to: "cloud-box",
               at: NOW,
               claimed: NOW,
-              earlier: [
-                {
-                  from: "lab-linux",
-                  session: "a1b2c3",
-                  at: "2026-01-01T10:00:00Z",
-                },
-              ],
+              earlier: [{ from: "lab-linux", session: "a1b2c3", at: "2026-01-01T10:00:00Z" }],
             },
           },
         ]);
@@ -517,12 +484,17 @@ test("move host", { timeout: 240000 }, async (t) => {
         await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
         await (
           await page.$("#move-host-dlg")
-        ).screenshot({
-          path: `${SHOTS}after-move-dialog-stops-queued${suffix}.png`,
-        });
+        ).screenshot({ path: `${SHOTS}after-move-dialog-stops-queued${suffix}.png` });
         assert.equal(
           await page.$eval("#move-host-empty", (el) => el.textContent),
-          "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. Try again after one of them stops the job. lab-linux is offline and stops the job only when it comes back online.",
+          "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. lab-linux is offline and stops the job only when it comes back online. Try again after one of them stops the job.",
+        );
+        assert.equal(
+          await page.$eval(
+            "#move-host-empty",
+            (el) => el.getAttribute("role") + " " + el.getAttribute("aria-live"),
+          ),
+          "status polite",
         );
         for (const id of ["#move-host-label", "#move-host-select"]) {
           assert.equal(await page.$eval(id, (el) => getComputedStyle(el).display), "none");
@@ -556,31 +528,34 @@ test("move host", { timeout: 240000 }, async (t) => {
           },
         ]);
         pickupHosts = [...PICKUP_HOSTS, "cloud-box"];
-        const emptyText = async () => {
-          await page.evaluate(() => (location.hash = "#042-sample-export"));
-          await page.reload({ waitUntil: "domcontentloaded" });
-          await page.waitForSelector("#d-move-host:not([hidden])", wait);
-          await openJobActions(page);
-          await page.click("#d-move-host");
-          await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
-          const text = await page.$eval("#move-host-empty", (el) => el.textContent);
-          await page.click("#move-host-cancel");
-          return text;
-        };
-        studio.offline = true;
-        assert.ok(
-          (await emptyText()).endsWith(
-            " lab-linux, studio-mac are offline and stop the job only when they come back online.",
-          ),
-        );
-        lab.offline = false;
-        studio.offline = false;
-        assert.equal(
-          await emptyText(),
-          "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. Try again after one of them stops the job.",
-        );
-        lab.offline = true;
-        pickupHosts = PICKUP_HOSTS;
+        try {
+          const emptyText = async () => {
+            await page.evaluate(() => (location.hash = "#042-sample-export"));
+            await page.reload({ waitUntil: "domcontentloaded" });
+            await page.waitForSelector("#d-move-host:not([hidden])", wait);
+            await openJobActions(page);
+            await page.click("#d-move-host");
+            await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+            const text = await page.$eval("#move-host-empty", (el) => el.textContent);
+            await page.click("#move-host-cancel");
+            return text;
+          };
+          studio.offline = true;
+          assert.equal(
+            await emptyText(),
+            "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. lab-linux, studio-mac are offline and stop the job only when they come back online. Try again after one of them stops the job.",
+          );
+          lab.offline = false;
+          studio.offline = false;
+          assert.equal(
+            await emptyText(),
+            "Every other host that runs pickup for sample still has a stop queued: lab-linux, studio-mac. Try again after one of them stops the job.",
+          );
+        } finally {
+          lab.offline = true;
+          studio.offline = false;
+          pickupHosts = PICKUP_HOSTS;
+        }
       });
       await page.close();
     }

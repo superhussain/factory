@@ -24,3 +24,5 @@ then lints and format-checks only the staged `.js`/`.mjs`/`.cjs`/`.ts` files
 (see [development.md](docs/development.md)).
 `pnpm run format:check` is a CI gate. Run `mise exec -- pnpm run format` to
 apply oxfmt over `worker tools tests`; `.oxfmtrc.json` excludes `tests/fixtures/`.
+
+To set up a factory for a person, read `.claude/skills/factory-setup/SKILL.md` and follow it.

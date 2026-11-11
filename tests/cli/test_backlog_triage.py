@@ -10,6 +10,7 @@ from support import IsolatedTestCase, invoke, load_runtime
 ITEM = "sample: Add CSV export to reports"
 QUEUE = {"decision": "queue", "confidence": 86, "threshold": 80, "reason": "Rated by clef-flash against the project rules.",
          "model": "@cf/cloudflare/clef-flash"}
+LINK = f"link: https://factory.example/#/backlog/29a3c3690fe4\n"
 WARN = "factory.py: backlog triage failed ({}); the item waits in the backlog for review\n"
 
 
@@ -63,7 +64,8 @@ class TriageFixture(IsolatedTestCase):
                 self.after_board = None
             return result
 
-        for target, fake in (("factory_home", lambda: self.dir), ("api", api), ("cas", cas)):
+        for target, fake in (("factory_home", lambda: self.dir), ("api_url", lambda home: "https://factory.example"),
+                             ("api", api), ("cas", cas)):
             patcher = patch.object(self.module, target, fake)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -84,7 +86,7 @@ class BacklogTriageTests(TriageFixture):
         (self.dir / "jobs" / "sample" / "007-local-only").mkdir(parents=True)
         code, out, err = self.add()
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, f"added {ITEM}\nqueued {ITEM} as 008-add-csv-export: confidence 86% (threshold 80%)\n")
+        self.assertEqual(out, f"added {ITEM}\n{LINK}queued {ITEM} as 008-add-csv-export: confidence 86% (threshold 80%)\n")
         self.assertEqual(self.posts, [{"item": ITEM}])
         job = self.board()[-1]
         at = job["updated"]
@@ -129,7 +131,7 @@ class BacklogTriageTests(TriageFixture):
                 self.files["/api/backlog"] = "# Backlog\n"
                 (self.dir / "backlog-triage.json").unlink(missing_ok=True)
                 self.triage = (200, json.dumps(reply))
-                self.assertEqual(self.add(), (0, f"added {ITEM}\n" + printed, ""))
+                self.assertEqual(self.add(), (0, f"added {ITEM}\n{LINK}" + printed, ""))
                 self.assertEqual(self.files["/api/backlog"], line)
                 self.assertEqual(self.files["/api/board"], board)
                 self.assertEqual(self.cached(), cached)
@@ -138,7 +140,7 @@ class BacklogTriageTests(TriageFixture):
         self.triage = (200, json.dumps(HOLD))
         code, out, err = self.add(ITEM + "  ")
         self.assertEqual((code, err), (0, ""))
-        self.assertTrue(out.startswith(f"added {ITEM}\n"))
+        self.assertTrue(out.startswith(f"added {ITEM}\n{LINK}"))
         self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [ ] {ITEM}\n")
         self.assertEqual(self.posts, [{"item": ITEM}])
         self.assertEqual(self.cached(), [f"- [ ] {ITEM}"])
@@ -161,7 +163,7 @@ class BacklogTriageTests(TriageFixture):
                 self.files["/api/backlog"] = "# Backlog\n"
                 self.triage = triage
                 code, out, err = self.add()
-                self.assertEqual((code, out), (0, f"added {ITEM}\n"))
+                self.assertEqual((code, out), (0, f"added {ITEM}\n{LINK}"))
                 self.assertEqual(err, "" if reason is None else WARN.format(reason))
                 self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [ ] {ITEM}\n")
                 self.assertEqual(self.files["/api/board"], board)
@@ -174,7 +176,7 @@ class BacklogTriageTests(TriageFixture):
         self.after_board = claim_line
         code, out, err = self.add()
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, f"added {ITEM}\nkept {ITEM} in the backlog: its line changed before triage finished\n")
+        self.assertEqual(out, f"added {ITEM}\n{LINK}kept {ITEM} in the backlog: its line changed before triage finished\n")
         self.assertEqual([j["id"] for j in self.board()], ["003-old-job"])
         self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [x] {ITEM} (009-other)\n")
 
@@ -192,7 +194,7 @@ class BacklogTriageTests(TriageFixture):
     def test_a_failed_board_write_warns_and_exits_0(self):
         board = self.files["/api/board"]
         self.cas_down = {"/api/board"}
-        self.assertEqual(self.add(), (0, f"added {ITEM}\n",
+        self.assertEqual(self.add(), (0, f"added {ITEM}\n{LINK}",
                                       "factory.py: can't reach https://factory.example.test/api/board: timed out\n"
                                       f"factory.py: backlog triage could not queue {ITEM}; "
                                       "the item waits in the backlog for review\n"))
@@ -201,7 +203,7 @@ class BacklogTriageTests(TriageFixture):
 
     def test_a_failed_check_off_drops_the_row_and_exits_0(self):
         self.after_board = lambda: self.cas_down.add("/api/backlog")
-        self.assertEqual(self.add(), (0, f"added {ITEM}\n",
+        self.assertEqual(self.add(), (0, f"added {ITEM}\n{LINK}",
                                       "factory.py: can't reach https://factory.example.test/api/backlog: timed out\n"
                                       f"factory.py: backlog triage could not check off {ITEM}; it removed "
                                       "004-add-csv-export and the item waits in the backlog for review\n"))
@@ -210,7 +212,7 @@ class BacklogTriageTests(TriageFixture):
 
     def test_a_failed_check_off_and_drop_names_the_row(self):
         self.after_board = lambda: self.cas_down.update({"/api/backlog", "/api/board"})
-        self.assertEqual(self.add(), (0, f"added {ITEM}\n",
+        self.assertEqual(self.add(), (0, f"added {ITEM}\n{LINK}",
                                       "factory.py: can't reach https://factory.example.test/api/backlog: timed out\n"
                                       "factory.py: can't reach https://factory.example.test/api/board: timed out\n"
                                       f"factory.py: backlog triage queued {ITEM} as 004-add-csv-export but could not "
@@ -226,7 +228,7 @@ class BacklogTriageTests(TriageFixture):
         self.after_board = claim_line
         code, out, err = self.add()
         self.assertEqual(code, 0)
-        self.assertEqual(out, f"added {ITEM}\nkept {ITEM} in the backlog: its line changed before triage finished\n")
+        self.assertEqual(out, f"added {ITEM}\n{LINK}kept {ITEM} in the backlog: its line changed before triage finished\n")
         self.assertEqual(err, "factory.py: can't reach https://factory.example.test/api/board: timed out\n"
                               f"factory.py: backlog triage kept {ITEM} in the backlog but could not remove "
                               "004-add-csv-export; remove 004-add-csv-export by hand\n")

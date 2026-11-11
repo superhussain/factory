@@ -84,10 +84,14 @@ class ReviewEscalationTests(IsolatedTestCase):
 
     def test_every_worker_or_network_failure_warns_and_continues(self):
         for reply, why in (
-            ((400, "reviews.code: contains the reserved review-findings tag"), "400"),
-            ((404, "not found"), "404"),
-            ((502, "the escalation model failed"), "502"),
-            ((503, "review escalation needs the Workers AI binding; deploy the current Worker"), "503"),
+            ((400, "reviews.code: contains the reserved review-findings tag"),
+             "400: reviews.code: contains the reserved review-findings tag"),
+            ((404, "not found"), "404: not found"),
+            ((502, "the escalation model failed"), "502: the escalation model failed"),
+            ((503, "review escalation needs the Workers AI binding; deploy the current Worker"),
+             "503: review escalation needs the Workers AI binding; deploy the current Worker"),
+            ((502, "  \n"), "502"),
+            ((502, "line one\n\n" + "x" * 300), "502: " + ("line one " + "x" * 300)[:200]),
             (RuntimeError(), "can't reach https://factory.example.test/api/review/escalation: timed out"),
             ((200, "not json"), "malformed reply"),
             ((200, json.dumps({**ESCALATE, "decision": "hold"})), "malformed reply"),

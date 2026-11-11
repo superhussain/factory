@@ -268,7 +268,6 @@ test("prioritize", { timeout: 240000 }, async (t) => {
             await page.$("section.col.idea")
           ).screenshot({ path: `${SHOTS}after-idea-column-1280.png` });
         await sameOrder(["101-sample-urgent", "100-sample-idea"]);
-        assert.deepEqual(await ideaOrder(page), ["101-sample-urgent", "100-sample-idea"]);
         await page.evaluate(() => (window.now = "2026-01-02T12:00:02Z"));
         await openDrawer(page, "101-sample-urgent");
         await openJobActions(page);
@@ -279,7 +278,6 @@ test("prioritize", { timeout: 240000 }, async (t) => {
         );
         await closeDrawer(page);
         await sameOrder(boardOrder);
-        assert.deepEqual(await ideaOrder(page), boardOrder);
       });
 
       await t.test(`a job that left the board writes nothing ${width}`, async () => {

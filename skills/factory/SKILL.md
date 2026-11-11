@@ -155,7 +155,7 @@ reads and writes them, and job folders go up by hand:
   `If-Match` from `<slug>.sync.json`, never a save-time GET or retry. A missing baseline
   or existing `.remote` refuses the push. A new remote change still fails with 412.
 - `pull "$SLUG/<id>"` downloads what changed in R2 and keeps local edits, and
-  `sync "$SLUG"` does that for every job of the project.
+  `sync "$SLUG"` does that for every job of the project that is not `merged` or `closed`. A finished job's files don't change, so `pull "$SLUG/<id>"` fetches one when needed.
 - When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
   the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
   each file. `push` never uploads a `.remote`, and refuses the file until a human
@@ -273,6 +273,8 @@ to job/work commands.
 3. The first line of your reply is the deep link, `$DASHBOARD#<job-id>`. A link can
    also open one tab of the job: `$DASHBOARD#<job-id>/<file without .md>`, such as
    `#<job-id>/decision` or `#<job-id>/round-1/review-ux`.
+   A backlog line's link is `$DASHBOARD#/backlog/<key>`. `backlog add` prints it as
+   `link: <url>`. After the line is decided, the link opens the job it became.
 
 For a command that acts on an existing job (`rework`, `approve`, resuming a round,
 shipping), steps 1 and 2 are: `python3 <this skill's dir>/runtime/factory.py job <id>`
@@ -642,11 +644,13 @@ migration; their command and JSON output contract are unchanged.
   servers.
 - On cleanup, run `python3 "$RUNTIME" cleanup "$SLUG/<id>"` and clear `port`. It
   stops processes running out of `$WT`, runs `git worktree remove` without `--force`,
-  then `git branch -d factory/<id>` once it is merged into the checkout's HEAD, and prints `{"removed": [...], "left": [...]}`.
+  then `git branch -d factory/<id>` once it is merged into the checkout's HEAD, and
+  prints `{"removed": [...], "left": [...]}`.
   Exit 1 means something was left: a dirty worktree, a process it could not stop,
-  an unmerged branch, or a git call that failed or ran past 20 s. That is not a stop. Put `cleanup left: <first left item>` in
-  the job's `note` and continue. Never run `git branch -D`, `git worktree remove --force`
-  or `rm -rf` on a job's worktree, branch or folder, and never retry cleanup with force.
+  an unmerged branch, or a git call that failed or ran past 20 s. That is not a stop.
+  Put `cleanup left: <first left item>` in the job's `note` and continue. Never run
+  `git branch -D`, `git worktree remove --force` or `rm -rf` on a job's worktree,
+  branch or folder, and never retry cleanup with force.
 - Never put real secrets, tokens, or user data in screenshots, logs, or job files,
   since the Worker serves job markdown and images to anyone past the Access policy.
 - If an agent fails or writes a malformed file, re-run it once, then move the job
@@ -785,10 +789,10 @@ feature.
    run `push "$SLUG/<id>"`, patch
    `{"stage": "needs-human", "note": "review panel: round <N> findings need a person (clef-flash <confidence>%)", "needs": "decide on the round-<N> findings at $DASHBOARD#<id>/round-<N>/review-<r>, then run /factory rework <id> <note> or /factory approve <id>"}`,
    with `<r>` the first CHANGES reviewer in the order security, ux, ui, code, and
-   dispatch nothing. Any other decision continues the loop. Otherwise set stage `build`
-   and dispatch the builder per Rules (builder selection; fresh worker on a model
-   change), then repeat step 4 as round
-   N+1. If the builder blocks, follow Rules instead of starting a review round.
+   dispatch nothing. On any other decision, set stage `build` and dispatch the
+   builder per Rules (builder selection; fresh worker on a model change), then
+   repeat step 4 as round N+1. If the builder blocks, follow Rules instead of
+   starting a review round.
    If the builder only disputed findings and the branch head didn't move (same
    `git rev-parse factory/<id>` before and after its reply), round N+1
    re-runs only the reviewers that asked for changes. Copy the others' review files
@@ -894,6 +898,7 @@ A decision from the dashboard's backlog decision page checks lines off the same 
 
 To queue work, run `factory.py backlog add "<slug>: <feature>" [--context <file>]`, or edit
 `backlog.md` in R2 by hand. Rework lines carry `(rework-of <id>)` like any other ref.
+Report a queued item with the `link:` line `backlog add` prints.
 
 A question for him about the backlog itself, such as which line to run next or
 whether to drop one, has no job folder. When the decisions-via-askuserquestion

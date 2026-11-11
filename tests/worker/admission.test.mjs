@@ -192,10 +192,11 @@ test("document profile stays linear on adversarial 1 MiB bodies", () => {
   const size = 1 << 20;
   for (const unit of ["eyJ-", "eyJ_", ".eyJ", "-----BEGIN eyJ-", "eyJ" + x(10) + ".", ".eyJ—"]) {
     const body = unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
-    const start = performance.now();
+    const before = process.cpuUsage();
     checkOperatorText(body, "project document", "document");
-    const ms = performance.now() - start;
-    assert.ok(ms < 500, `${JSON.stringify(unit)} took ${ms.toFixed(0)} ms`);
+    const { user, system } = process.cpuUsage(before);
+    const ms = (user + system) / 1000;
+    assert.ok(ms < 500, `${JSON.stringify(unit)} used ${ms.toFixed(0)} ms of CPU`);
   }
   const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig";
   assert.equal(
@@ -215,6 +216,25 @@ test("the folded backlog-item check lets i and l match each other", () => {
   }
   assert.equal(hasReservedTag("<backiog-ltem>", "backlog-item"), false);
   assert.equal(hasReservedTag("Keep \u0406 and \u04c0 apart", "backlog-item"), false);
+});
+
+test("hasReservedTag builds its regexes once per tag name", () => {
+  const text = "<back\u0406og-item>";
+  hasReservedTag(text, "backlog-item");
+  const { RegExp: original } = globalThis;
+  let built = 0;
+  globalThis.RegExp = new Proxy(original, {
+    construct(target, args) {
+      built += 1;
+      return Reflect.construct(target, args);
+    },
+  });
+  try {
+    for (let i = 0; i < 3; i += 1) assert.equal(hasReservedTag(text, "backlog-item"), true);
+  } finally {
+    globalThis.RegExp = original;
+  }
+  assert.equal(built, 0);
 });
 
 test("validatePipeline rejects unknown keys at any depth, bad enums and types, and schema other than 1", () => {

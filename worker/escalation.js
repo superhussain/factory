@@ -1,4 +1,6 @@
 // Review escalation: one Workers AI call that rates a review round's CHANGES findings.
+import { foldLookalikes, hasReservedTag, redactSecrets } from "./admission.js";
+
 export const ESCALATION_MODEL = "@cf/cloudflare/clef-flash";
 export const ESCALATION_THRESHOLD = 80;
 export const REVIEWERS = ["security", "ux", "ui", "code"];
@@ -43,4 +45,20 @@ export function escalationConfidence(result) {
   const noul = result?.answers?.escalate?.noul;
   if (!Number.isFinite(noul) || noul < 0 || noul > 1) return null;
   return Math.round(noul * 100);
+}
+
+export const SECRET_MARK = "[secret-shaped text removed]";
+export const ESCALATION_TAGS = ["review-findings", "operator-preferences"];
+
+// Replaces what the admission rules refuse, so a review that quotes a secret or a tag is still rated.
+export function cleanReview(text) {
+  if (ESCALATION_TAGS.some((n) => hasReservedTag(text, n))) {
+    text = foldLookalikes(text);
+    for (const name of ESCALATION_TAGS)
+      text = text.replace(
+        new RegExp("<\\/?\\s*" + name.replace(/[il]/g, "[il]") + "[^<>\\n]*>?", "gi"),
+        `[${name} tag removed]`,
+      );
+  }
+  return redactSecrets(text, SECRET_MARK);
 }
