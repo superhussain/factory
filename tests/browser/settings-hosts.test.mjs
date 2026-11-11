@@ -52,7 +52,9 @@ const shoot = async (page, selector, path) =>
   page.screenshot({
     path,
     clip: await page.evaluate((s) => {
-      const r = document.querySelector(s).getBoundingClientRect();
+      const el = document.querySelector(s);
+      if (!el) throw new Error("shoot: no element matches " + s);
+      const r = el.getBoundingClientRect();
       return { x: r.x + scrollX, y: r.y + scrollY, width: r.width, height: r.height };
     }, selector),
   });
@@ -62,6 +64,7 @@ const read = (page, selector, name) =>
       const el = document.querySelector(s);
       if (!el) throw new Error("read: no element matches " + s);
       if (!(n in el)) throw new Error("read: " + s + " has no property " + n);
+      if (el[n] === undefined) throw new Error("read: " + s + "." + n + " is undefined");
       return el[n];
     },
     selector,
@@ -168,6 +171,23 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       assert.deepEqual(leaks, []);
       await live.click("#host-code-done");
       await assert.rejects(read(live, "#host-code", "hiddn"), /has no property hiddn/);
+      await assert.rejects(
+        shoot(live, "#no-such-node", "unused.png"),
+        /shoot: no element matches #no-such-node/,
+      );
+      await live.evaluate(() => {
+        Object.defineProperty(HTMLElement.prototype, "factoryProbe", {
+          value: undefined,
+          configurable: true,
+        });
+      });
+      await assert.rejects(
+        read(live, "#host-code", "factoryProbe"),
+        /read: #host-code\.factoryProbe is undefined/,
+      );
+      await live.evaluate(() => {
+        delete HTMLElement.prototype.factoryProbe;
+      });
       assert.equal(await read(live, "#host-code", "hidden"), true);
       assert.equal(await read(live, "#host-code-command", "textContent"), "");
     });
@@ -452,17 +472,26 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
         page.evaluate(
           (studio, linux) => {
             const q = (s) => document.querySelector(s);
+            const spoken = (el) =>
+              [...el.childNodes]
+                .filter((n) => !(n.nodeType === 1 && n.getAttribute("aria-hidden") === "true"))
+                .map((n) => n.textContent)
+                .join("");
             const meta = [...document.querySelectorAll(`${studio} p`)].find((p) =>
               p.textContent.startsWith("macOS, launchd"),
             );
             return {
-              triage: q(`${studio} .host-triage`).textContent,
+              triage: spoken(q(`${studio} .host-triage`)),
               triageColor: getComputedStyle(q(`${studio} .host-triage`)).color,
               labTriage: q(`${linux} .host-triage`) !== null,
-              doctor: q(`${linux} .host-doctor`).textContent,
+              doctor: spoken(q(`${linux} .host-doctor`)),
               doctorColor: getComputedStyle(q(`${linux} .host-doctor`)).color,
               studioDoctor: q(`${studio} .host-doctor`) !== null,
               metaColor: getComputedStyle(meta).color,
+              icons: [studio, linux].map((s) => {
+                const i = q(`${s} .host-alert-icon`);
+                return [i.getAttribute("aria-hidden"), i.textContent];
+              }),
             };
           },
           card,
@@ -470,10 +499,14 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
         );
       const text = {
         triage:
-          "Backlog triage failing since 2026-01-01 09:00 UTC. Pickup still launches ideas. " +
+          "Warning: Backlog triage failing since 2026-01-01 09:00 UTC. Pickup still launches ideas. " +
           "See the host's pickup log for the error.",
         labTriage: false,
-        doctor: "Doctor failed: schedule-entry.",
+        doctor: "Warning: Doctor failed: schedule-entry.",
+        icons: [
+          ["true", "⚠︎"],
+          ["true", "⚠︎"],
+        ],
         studioDoctor: false,
       };
       assert.deepEqual(await alerts(), {
