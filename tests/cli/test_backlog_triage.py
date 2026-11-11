@@ -115,6 +115,13 @@ class BacklogTriageTests(TriageFixture):
         self.assertTrue(job["idea"].startswith("Add CSV export to reports\n\nQueued by backlog triage:"))
         self.assertEqual(self.files["/api/backlog"].split("\n")[1], f"- [x] {item} (004-add-csv-export)")
 
+    def test_queue_skips_a_dotted_suffix_id(self):
+        code, _, _ = self.add(ITEM + " (follow-up-of a..b)")
+        self.assertEqual(code, 0)
+        job = self.board()[-1]
+        self.assertEqual(job["title"], "Add CSV export to reports")
+        self.assertNotIn("refs", job)
+
     def test_hold_and_off_change_nothing_after_the_append(self):
         line = f"# Backlog\n- [ ] {ITEM}\n"
         board = self.files["/api/board"]

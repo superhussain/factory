@@ -40,7 +40,8 @@ Before APPROVE, read build.md's `### Left open` and the final round's `### Fix n
 nits. When your prompt's `Rounds left` is 1 or more and the `### Fix now` nits are
 worth one more review round, return CHANGES listing them, because this job already
 holds their context. Otherwise APPROVE, and the orchestrator queues them as
-follow-ups. Never return CHANGES for an item outside the spec.
+follow-ups, except cosmetic nits (line wrapping, comment placement, punctuation,
+wording), which it drops. Never return CHANGES for an item outside the spec.
 
 Write exactly one markdown file, `<job folder>/decision.md`. Its first line is `APPROVE`,
 `ESCALATE`, or `CHANGES`. Its second line is a one-sentence reason, which the orchestrator uses

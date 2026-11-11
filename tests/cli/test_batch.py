@@ -80,11 +80,20 @@ class BatchTest(IsolatedTestCase):
         self.assertEqual(json.loads(out)["lead"], LEAD)
         self.assertEqual(json.loads(out)["riders"], [])
         self.assertEqual(json.loads(out)["candidates"][:2], [
-            {"id": "091-sample-typo", "title": "Title 091-sample-typo", "idea": "Fix the header typo"},
+            {"id": "091-sample-typo", "title": "Title 091-sample-typo", "idea": "Fix the header typo", "hold": False},
             {"id": "092-sample-csv-name", "title": "Title 092-sample-csv-name",
-             "idea": "Title 092-sample-csv-name"}])
+             "idea": "Title 092-sample-csv-name", "hold": False}])
         self.assertEqual(self.ids(out, "candidates"), ["091-sample-typo", "092-sample-csv-name", "093-sample-login"])
         self.assertEqual(self.puts, 0)
+
+    def test_candidates_mark_hold(self):
+        rows = jobs()
+        rows[2]["refs"] = [{"id": "080-sample-report", "kind": "follow-up-of"}]
+        self.set_jobs(rows)
+        code, out, _ = self.batch(TARGET)
+        self.assertEqual(code, 0)
+        hold = {c["id"]: c["hold"] for c in json.loads(out)["candidates"]}
+        self.assertEqual((hold["092-sample-csv-name"], hold["093-sample-login"]), (True, False))
 
     def test_excludes_each_ineligible_idea(self):
         others = [
@@ -177,6 +186,14 @@ class BatchTest(IsolatedTestCase):
         self.assertIn("- [ ] elsewhere: Add SSO login\n", self.backlog)
         self.assertEqual(self.ids(out, "riders"), ["094-name-the-weekly"])
         self.assertNotIn(key, self.ids(out, "candidates"))
+
+    def test_dotted_suffix_id_adds_no_ref(self):
+        line = "- [ ] sample: Rename the export button (follow-up-of a..b)"
+        self.backlog = f"# Backlog\n{line}\n"
+        code, out, _ = self.batch(TARGET, f"backlog:{factory.backlog_key(line)}")
+        self.assertEqual(code, 0)
+        j = self.job(self.ids(out, "riders")[0])
+        self.assertEqual((j["title"], j["refs"]), ("Rename the export button", [REF]))
 
     def test_unknown_backlog_key_writes_nothing(self):
         self.set_backlog()
@@ -379,6 +396,12 @@ class BatchTest(IsolatedTestCase):
         self.set_jobs(rows)
         self.refuse_stack(2, f"cannot stack 093-sample-login: not batched into {LEAD}. Nothing was written.",
                           TARGET, "093-sample-login")
+        rows[2]["stage"] = "closed"
+        self.set_jobs(rows)
+        self.refuse_stack(2, "cannot stack 092-sample-csv-name: it is closed. Nothing was written.",
+                          TARGET, "092-sample-csv-name")
+        rows[2]["stage"] = "spec"
+        self.set_jobs(rows)
         rows[1]["stacked"] = True
         self.set_jobs(rows)
         self.refuse_stack(2, f"cannot stack 092-sample-csv-name: 091-sample-typo is already stacked on {LEAD}. "

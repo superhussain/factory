@@ -331,7 +331,9 @@ class PickupTest(PickupFixture):
         self.assertEqual(log.read_text(encoding="utf-8").strip(), "started")
         if os.name != "nt":
             self.assertEqual(log.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(len(self.puts()), 1)
+        # The claim, then the orchestrator row in agents.
+        self.assertEqual(len(self.puts()), 2)
+        self.assertEqual([row["session"] for row in self.job("001-alpha")["agents"]], [tag])
         for path in self.root.rglob("*"):
             self.assertNotIn("pwned", path.name)
             if path.is_file() and path != self.fake:
@@ -1220,6 +1222,7 @@ class RerunTest(MoveHostTest):
 class MoveArchiveTest(MoveHostTest):
     AGENT = "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
     AGENT2 = "9b2d71e0-5a3c-4e8f-b1d2-7c6e5f4a3b21"
+    LEFT_OUT = " (left out --home because PASEO_HOME has unprintable characters)"
 
     def setUp(self):
         super().setUp()
@@ -1373,7 +1376,17 @@ class MoveArchiveTest(MoveHostTest):
         with patch.dict(os.environ, {"PASEO_HOME": str(home)}):
             self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
                                              self.hint("9f1c2d3e-0000-4000-8000-000000000001").replace(
-                                                 "\n", " (left out --home because PASEO_HOME has unprintable characters)\n")))
+                                                 ": paseo archive", self.LEFT_OUT + ": paseo archive")))
+
+    def test_skipped_hint_leaves_out_unprintable_paseo_home(self):
+        self.set_stalls()
+        self.moved(agent="ab_cd", server="srv-lab")
+        home = self.root / "paseo\x1bhome"
+        with patch.dict(os.environ, {"PASEO_HOME": str(home)}):
+            self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
+                                             self.skipped("ab_cd", "ab_cd").replace(
+                                                 ": paseo archive", self.LEFT_OUT + ": paseo archive")))
+        self.assertEqual(self.recorded(), [])
 
     def test_non_hex_agent_stops_once(self):
         self.set_stalls()
@@ -1751,22 +1764,25 @@ class CloseTest(PickupFixture):
                                                  "earlier": [{"from": "host-c"}, {"from": "bad host"}]})]
         self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
         self.assertIn("Hosts that need `factory.py cleanup alpha/042-sample-export` run by hand: `host-b`, `host-c`. "
-                      "The board records them as holding this job, and the project's pickup is off "
-                      "or does not list them.\n", self.files[self.DECISION])
+                      "The board records them as holding this job, and the project's pickup "
+                      "does not list them.\n", self.files[self.DECISION])
 
     def test_close_decision_names_hosts_when_pickup_is_off(self):
         self.views["alpha"] = (200, effective("alpha", {"pickup": {"enabled": False, "hosts": ["other-host", DEVICE]}}))
         self.board["jobs"] = [self.closing()]
         self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
-        self.assertIn("run by hand: `other-host`.", self.files[self.DECISION])
+        self.assertIn("Hosts that need `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. "
+                      "The board records them as holding this job, and the project's pickup is off.\n",
+                      self.files[self.DECISION])
 
-    def test_close_decision_says_why_no_host_is_named(self):
+    def test_close_decision_lists_hosts_when_pickup_is_unread(self):
         self.views["alpha"] = (404, "")
         self.board["jobs"] = [self.closing()]
         self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
-        self.assertIn("- No host is named for a manual cleanup, because host-a could not read the project's "
-                      "pickup hosts: no pipeline view; register the project or deploy the current Worker.\n",
-                      self.files[self.DECISION])
+        self.assertIn("- The board records `other-host` as holding this job, but host-a could not read the project's "
+                      "pickup hosts: no pipeline view; register the project or deploy the current Worker. "
+                      "Run `factory.py cleanup alpha/042-sample-export` by hand on each of those hosts that "
+                      "pickup does not cover.\n", self.files[self.DECISION])
 
     def test_close_reads_pickup_config_once_per_project(self):
         self.board["jobs"] = [self.closing(), self.closing(id="043-sample-report")]
@@ -2240,6 +2256,80 @@ class DenyNotesTest(PickupFixture):
             code, out, err = invoke(factory, ["board", str(self.home), "007-csv-export"])
         self.assertEqual((code, out, err), (2, "", "factory.py: only factory.py deny-notes sets backlog.notes_read\n"))
         self.assertEqual(self.calls, [])
+
+
+FOLLOW = [{"id": "090-alpha-old", "kind": "follow-up-of"}]
+HELD = ["101-wrap-doc-line", "102-move-comment", "103-drop-double-period", "104-fix-typo", "105-rename-flag"]
+
+
+class BatchHoldTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+
+    def held_ideas(self, count, **extra):
+        return [idea(job_id, "alpha", **dict({"refs": FOLLOW, "updated": stamp(minutes=-10)}, **extra))
+                for job_id in HELD[:count]]
+
+    def dry(self):
+        code, out, err = self.pickup("--dry-run", "--max-inflight", "5")
+        self.assertEqual((code, err), (0, ""))
+        # A launch line's argv carries the multi-line prompt; keep only the line starts.
+        return [line for line in out.splitlines() if line.startswith(("skip ", "would launch ", "host "))]
+
+    def waits(self, ids, line):
+        return [f"skip {job_id} alpha: waits for a batch ({line})" for job_id in ids]
+
+    def test_three_fresh_wait(self):
+        self.board["jobs"] = self.held_ideas(3)
+        self.assertEqual(self.dry(), self.waits(HELD[:3], "3 of 5 held, oldest 0h of 12h")
+                         + [f"host {DEVICE}: would launch 0"])
+
+    def test_five_release_one(self):
+        self.board["jobs"] = self.held_ideas(5)
+        lines = self.dry()
+        self.assertTrue(lines[0].startswith("would launch 101-wrap-doc-line alpha on primary: "))
+        self.assertEqual(lines[1:], [f"skip {job_id} alpha: batches behind 101-wrap-doc-line" for job_id in HELD[1:]]
+                         + [f"host {DEVICE}: would launch 1"])
+
+    def test_old_one_releases(self):
+        self.board["jobs"] = self.held_ideas(1, updated=stamp(hours=-13))
+        lines = self.dry()
+        self.assertTrue(lines[0].startswith("would launch 101-wrap-doc-line alpha on primary: "))
+        self.assertEqual(lines[1:], [f"host {DEVICE}: would launch 1"])
+
+    def test_triage_idea_waits(self):
+        self.board["jobs"] = [idea(HELD[0], "alpha", updated=stamp(minutes=-10),
+                                   backlog={"by": "triage", "decision": "approved"})]
+        self.assertEqual(self.dry(), self.waits(HELD[:1], "1 of 5 held, oldest 0h of 12h")
+                         + [f"host {DEVICE}: would launch 0"])
+
+    def test_person_idea_launches(self):
+        self.board["jobs"] = self.held_ideas(3) + [
+            idea("110-add-csv-export", "alpha", refs=FOLLOW, updated=stamp(minutes=-10), capture_id="c1")]
+        lines = self.dry()
+        self.assertEqual(lines[:3], self.waits(HELD[:3], "3 of 5 held, oldest 0h of 12h"))
+        self.assertTrue(lines[3].startswith("would launch 110-add-csv-export alpha on primary: "))
+        self.assertEqual(lines[4:], [f"host {DEVICE}: would launch 1"])
+
+    def test_view_hold_settings(self):
+        self.board["jobs"] = self.held_ideas(3)
+        view = effective("alpha", None, {"pickup": ON})
+        self.views["alpha"] = (200, dict(view, hold={"min_ideas": 3, "max_wait_hours": 1}))
+        lines = self.dry()
+        self.assertTrue(lines[0].startswith("would launch 101-wrap-doc-line alpha on primary: "))
+        self.assertEqual(lines[1:], [f"skip {job_id} alpha: batches behind 101-wrap-doc-line" for job_id in HELD[1:3]]
+                         + [f"host {DEVICE}: would launch 1"])
+        self.views["alpha"] = (200, dict(view, hold={"min_ideas": 0, "max_wait_hours": 1}))
+        self.assertEqual(self.dry(), self.waits(HELD[:3], "3 of 5 held, oldest 0h of 12h")
+                         + [f"host {DEVICE}: would launch 0"])
+
+    def test_real_run_claims_lead_only(self):
+        self.board["jobs"] = self.held_ideas(5)
+        code, out, err = self.pickup("--limit", "5", "--max-inflight", "5")
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, r"^launched 101-wrap-doc-line alpha on primary session [0-9a-f]{6}\n$")
+        self.assertEqual([j["id"] for j in self.board["jobs"] if "claim" in j], ["101-wrap-doc-line"])
 
 
 if __name__ == "__main__":

@@ -94,6 +94,11 @@
   factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
   factory.py retro aggregate [--days N]     pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
   factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, admit its cards
+  factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>]
+                                            append one row to the job's agents, after checking this
+                                            session holds the claim, and print it as JSON
+  factory.py agent report [<project-slug>]  count every job's agents rows by stage, role, harness, via,
+                                            model and effort, as a plain-text table
 
 claim, next, hold, handoff, board, ideas, and stuck take --session <tag> (or
 FACTORY_SESSION). A session without one gets a new tag from claim, next, or hold,
@@ -171,6 +176,8 @@ REF_KINDS = ("rework-of", "follow-up-of", "sub-job-of", "batched-into")
 # A rider is an idea that ships inside another job. It follows that lead's stage and PR.
 BATCH_REF = "batched-into"
 MAX_RIDERS = 20
+HOLD_MIN_IDEAS = 5
+HOLD_MAX_HOURS = 12
 MAX_CANDIDATES = 40
 BUILD_STATES = ("queued", "running", "done", "failed")
 # Ideas wait on the board with no claim, branch, or files until a pickup moves them to spec.
@@ -608,16 +615,17 @@ def paseo_session():
     return None
 
 
-def paseo_archive_command(agent):
-    """The paseo command that archives agent by hand on this host, or None when agent is unsafe to print as an argument.
+def paseo_archive_tail(agent):
+    """The end of an archive-by-hand hint for agent: "" when agent is unsafe to print as an argument, else the
+    command after a colon.
 
-    When PASEO_HOME is unprintable it is left out and a clause says so."""
+    When PASEO_HOME is unprintable it is left out and a clause before the colon says so."""
     if not PASEO_ID.fullmatch(agent) or agent.startswith("-"):
-        return None
+        return ""
     home = os.environ.get("PASEO_HOME")
     if home and not home.isprintable():
-        return f"paseo archive --force {agent} (left out --home because PASEO_HOME has unprintable characters)"
-    return "paseo " + (f"--home {shlex.quote(home)} " if home else "") + f"archive --force {agent}"
+        return f" (left out --home because PASEO_HOME has unprintable characters): paseo archive --force {agent}"
+    return ": paseo " + (f"--home {shlex.quote(home)} " if home else "") + f"archive --force {agent}"
 
 
 def paseo_claim_path(home, job_id, agent):
@@ -779,6 +787,8 @@ def board(factory, job_id):
         fail("only factory.py suggest sets origin", 2)
     if "started" in patch:
         fail("only factory.py sets started", 2)
+    if "agents" in patch:
+        fail("only factory.py agent and pickup set agents", 2)
     if "move" in patch:
         fail("only the dashboard and factory.py pickup set move", 2)
     if "priority" in patch:
@@ -1447,8 +1457,9 @@ def queue_backlog_item(home, slug, feature, verdict):
                "idea": f"{text}\n\nQueued by backlog triage: {score}. {verdict['reason']}",
                "backlog": {"line": raw, "decision": "approved", "at": at, "by": "triage",
                            "triage": {k: verdict[k] for k in ("model", "confidence", "threshold", "reason")}}}
-        if ref:
-            job["refs"] = [{"id": ref.group(2), "kind": ref.group(1)}]
+        refs = suffix_refs(ref)
+        if refs:
+            job["refs"] = refs
         data["jobs"].append(job)
         return dump_board(data), job_id
     try:
@@ -1504,6 +1515,11 @@ def queue_backlog_item(home, slug, feature, verdict):
 
 
 BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$", re.ASCII)
+
+
+def suffix_refs(ref):
+    """The refs a BACKLOG_SUFFIX match carries: none when there is no match or its id contains ".."."""
+    return [{"id": ref.group(2), "kind": ref.group(1)}] if ref and ".." not in ref.group(2) else []
 
 
 def backlog_held(text, done):
@@ -1625,13 +1641,14 @@ def inflight_count(data, project, minutes, device=None):
 
 
 def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None, project=None, by_host=False,
-                builds=False, experiment=None, route=None):
+                builds=False, experiment=None, route=None, skip_ids=frozenset()):
     """Claim up to limit of the oldest runnable ideas in one board write, and return their
     [{"id", "project", "repo_path", "session"}]. An empty session mints a tag per idea.
     builds also accepts jobs that Tracer scope approval moved to build.
     experiment is read_experiment's dict and route the picked route tuple: each picked job
     without a record gets an experiment stamp naming its arm and launch values, written once,
-    and an arm b job is never picked while the experiment is limited."""
+    and an arm b job is never picked while the experiment is limited.
+    skip_ids are ids pickup holds back for a batch."""
     exp_limited = None
     if experiment:
         until = read_limits(home).get(experiment["name"])
@@ -1657,7 +1674,7 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
             if not (j.get("stage") == "idea" or builds and (tracer_start(j) or moved_here(j, device))) \
                     or not repo or not os.path.isdir(repo) \
                     or (project and j["project"] != project) \
-                    or not JOB_ID.fullmatch(j["id"]) or ".." in j["id"] \
+                    or not JOB_ID.fullmatch(j["id"]) or ".." in j["id"] or j["id"] in skip_ids \
                     or blocking(j, device, session, minutes):
                 continue
             record = j.get("experiment")
@@ -1734,7 +1751,8 @@ def batch_cmd(target, *idea_ids):
     local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
 
     def entry(j):
-        return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title")}
+        return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title"),
+                "hold": batch_hold(j)}
 
     def change(text):
         data = load_board(text)
@@ -1768,7 +1786,7 @@ def batch_cmd(target, *idea_ids):
             _, _, ref, candidate = lines[pick]
             job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]],
                                  feature_slug(candidate["title"]), archive_floor(data))
-            refs = ([{"id": ref.group(2), "kind": ref.group(1)}] if ref else []) + [{"id": lead_id, "kind": BATCH_REF}]
+            refs = suffix_refs(ref) + [{"id": lead_id, "kind": BATCH_REF}]
             patch_job(data, job_id, {"project": slug, "title": candidate["title"], "idea": candidate["idea"],
                                      "stage": "spec", "note": f"batched into {lead_id}", "refs": refs})
             made[pick] = job_id
@@ -1841,6 +1859,8 @@ def stack_cmd(target, rider_id):
             fail(f"stack runs while {lead_id} is at spec, not {lead.get('stage')}", 2)
         if lead_of(rider) != lead_id:
             fail(f"cannot stack {rider_id}: not batched into {lead_id}. Nothing was written.", 2)
+        if rider.get("stage") in TERMINAL:
+            fail(f"cannot stack {rider_id}: it is {rider['stage']}. Nothing was written.", 2)
         other = next((j["id"] for j in riders_of(data, lead_id)
                       if j["id"] != rider_id and j.get("stacked") is True), None)
         if other:
@@ -2711,6 +2731,60 @@ def pickup_settings(home, slug, repo, device):
     return enabled, hosts, why
 
 
+def batch_hold(j):
+    """True when pickup holds this idea for a batch: a follow-up or a triage-queued idea that no
+    person added, approved or prioritized from the dashboard."""
+    if j.get("stage") != IDEA or "capture_id" in j or prioritized(j):
+        return False
+    refs = j.get("refs") if isinstance(j.get("refs"), list) else []
+    backlog = j.get("backlog") if isinstance(j.get("backlog"), dict) else {}
+    return any(isinstance(r, dict) and r.get("kind") == "follow-up-of" for r in refs) \
+        or backlog.get("by") == "triage"
+
+
+def hold_config(home, slug):
+    """(min_ideas, max_wait_hours) from the effective pipeline's optional hold, else the defaults."""
+    status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+    try:
+        hold = json.loads(text).get("hold") if status == 200 else None
+    except (ValueError, AttributeError):
+        hold = None
+    if isinstance(hold, dict) and type(hold.get("min_ideas")) is int and 1 <= hold["min_ideas"] <= MAX_RIDERS \
+            and type(hold.get("max_wait_hours")) is int and 1 <= hold["max_wait_hours"] <= 168:
+        return hold["min_ideas"], hold["max_wait_hours"]
+    return HOLD_MIN_IDEAS, HOLD_MAX_HOURS
+
+
+def batch_holds(home, jobs, runnable):
+    """{id: skip line} for the held ideas pickup does not launch this run. A project's held ideas
+    wait until it has min_ideas of them or the oldest has gone max_wait_hours without an update.
+    Then the first in board order launches and the rest batch behind it."""
+    groups = {}
+    for j in jobs:
+        if batch_hold(j) and runnable(j):
+            groups.setdefault(j["project"], []).append(j)
+    stamp, lines = datetime.now(timezone.utc), {}
+    for slug, held in groups.items():
+        least, hours = hold_config(home, slug)
+
+        def age(j):
+            try:
+                return stamp - datetime.strptime(j.get("updated", ""), "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                return timedelta(hours=hours)
+        oldest = max(age(j) for j in held)
+        if len(held) >= least or oldest >= timedelta(hours=hours):
+            for j in held[1:]:
+                lines[j["id"]] = f"skip {j['id']} {slug}: batches behind {held[0]['id']}"
+            continue
+        waited = max(0, int(oldest.total_seconds() // 3600))
+        for j in held:
+            lines[j["id"]] = (f"skip {j['id']} {slug}: waits for a batch "
+                              f"({len(held)} of {least} held, oldest {waited}h of {hours}h)")
+    return lines
+
+
 def host_max_inflight(home, device):
     """This host's max_inflight from the host registry (0 pauses pickup), or None when the Worker
     has no registry or no valid record for it."""
@@ -3060,9 +3134,11 @@ def takeover(home, data, device, minutes, paths, settings, dry):
                    FACTORY_REPO_PATH=given["repo_path"], FACTORY_SESSION=tag,
                    FACTORY_PROVIDER=given["provider"], FACTORY_MODEL=given["model"],
                    FACTORY_EFFORT=given["effort"], FACTORY_PROMPT=given["prompt"])
-        ok, why, log_path = launch_idea(home, entry, live[0], launcher_argv(template, given), env)
+        argv = launcher_argv(template, given)
+        ok, why, log_path = launch_idea(home, entry, live[0], argv, env)
         if ok:
             print(f"took over {job_id} {slug} from {session} on {live[0]} session {tag}")
+            record_agent(home, job_id, launch_row(given, argv, tag))
             return 1
         with open(log_path, "rb") as log:
             log.seek(max(0, os.path.getsize(log_path) - 4096))
@@ -3527,14 +3603,12 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
                 x["stopped"] = now()
             print(f"archived {noun} {names} and stopped {line}" if archives else f"stopped {line}")
             for a in kept:
-                cmd = paseo_archive_command(a)
                 print(f"factory.py: pickup kept session {a} of {job_id}: no claim recorded on this host, "
-                      "archive it by hand if it still runs" + (f": {cmd}" if cmd else ""), file=sys.stderr)
+                      "archive it by hand if it still runs" + paseo_archive_tail(a), file=sys.stderr)
             for a in refused:
                 shown = a if PASEO_ID.fullmatch(a) else ascii(a[:64])
-                cmd = paseo_archive_command(a)
                 print(f"factory.py: pickup skipped archive of session {shown} of {job_id}: not an id the stall adapter "
-                      "accepts, archive it by hand if it still runs" + (f": {cmd}" if cmd else ""), file=sys.stderr)
+                      "accepts, archive it by hand if it still runs" + paseo_archive_tail(a), file=sys.stderr)
 
 
 def prioritized(j):
@@ -3659,12 +3733,17 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
     enabled, hosts, unread = pickup
     holders = recorded_holders(j)
     uncovered = [h for h in holders if not (enabled and h in hosts)]
-    manual = (f"- No host is named for a manual cleanup, because {device} could not read "
-              f"the project's pickup hosts: {unread}.\n" if holders and unread else
-              f"- Hosts that need `factory.py cleanup {j['project']}/{j['id']}` run by hand: "
-              + ", ".join(f"`{h}`" for h in uncovered)
-              + ". The board records them as holding this job, and the project's pickup is off "
-              "or does not list them.\n" if uncovered else "")
+    task = f"`factory.py cleanup {j['project']}/{j['id']}`"
+    if holders and unread:
+        manual = (f"- The board records {', '.join(f'`{h}`' for h in holders)} as holding this job, but {device} "
+                  f"could not read the project's pickup hosts: {unread}. Run {task} by hand on each of those "
+                  "hosts that pickup does not cover.\n")
+    elif uncovered:
+        manual = (f"- Hosts that need {task} run by hand: " + ", ".join(f"`{h}`" for h in uncovered)
+                  + ". The board records them as holding this job, and the project's pickup "
+                  + ("is off" if enabled is False else "does not list them") + ".\n")
+    else:
+        manual = ""
     text = (f"CLOSED: {reason}\n\n"
             f"**Summary.** Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: "
             f"{reason}. Nothing else is owed unless Left out says so.\n\n"
@@ -3881,7 +3960,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
             return record["arm"]
         return experiment_arm(j["id"], experiment["percent"]) if j and experiment else None
 
-    def skip(j):
+    def base_skip(j):
         """Why this idea is not a candidate, or None."""
         project = j.get("project")
         if not project:
@@ -3902,6 +3981,12 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
         if experiment and exp_limited and job_arm(j) == "b":
             return f"skip {j['id']} {project}: experiment {experiment['name']} limited until {exp_limited}"
         return None
+
+    holds = batch_holds(home, jobs, lambda j: base_skip(j) is None)
+
+    def skip(j):
+        """Why this idea is not a candidate, or None."""
+        return base_skip(j) or holds.get(j["id"])
 
     eligible = []
     for j in jobs:
@@ -3998,7 +4083,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     while launches < limit:
         for slug in eligible:
             picked = claim_ideas(home, device, "", minutes, paths, 1, cap, slug, by_host=by_host, builds=True,
-                                 experiment=experiment, route=route)
+                                 experiment=experiment, route=route, skip_ids=frozenset(holds))
             if picked:
                 break
         else:
@@ -4006,10 +4091,12 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
         entry = picked[0]
         j = next((x for x in data["jobs"] if x.get("id") == entry["id"]), None)
         arm, given = job_given(j, entry)
-        ok, detail, log_path = launch_idea(home, entry, name, launcher_argv(template, given),
+        argv = launcher_argv(template, given)
+        ok, detail, log_path = launch_idea(home, entry, name, argv,
                                            launch_env(given, given["provider"], given["model"]))
         if ok:
             print(f"launched {entry['id']} {entry['project']} on {name} session {entry['session']}")
+            record_agent(home, entry["id"], launch_row(given, argv, entry["session"]))
             launches += 1
             continue
         limit_name = experiment["name"] if arm == "b" and experiment else name
@@ -7033,6 +7120,92 @@ def retro_cmd(action, *args):
     (retro_digest if action == "digest" else retro_aggregate)(int(days))
 
 
+AGENT_ROLES = ("orchestrator",) + PROMPT_ROLES
+AGENT_VIAS = ("native", "paseo", "launcher", "general", "direct")
+AGENT_ROWS_MAX = 32
+
+
+def launch_row(given, argv, tag):
+    """The orchestrator row for one pickup launch, on the values it actually used."""
+    return {"role": "orchestrator", "harness": given["provider"],
+            "via": "paseo" if Path(argv[0]).stem.lower() == "paseo" else "launcher", "model": given["model"],
+            **({"effort": given["effort"]} if given["effort"] else {}), "session": tag}
+
+
+def record_agent(home, job_id, row, claimant=None, project=None):
+    """One CAS: append row, stamped with the board's stage, round and time, to job_id's
+    agents, keeping the newest AGENT_ROWS_MAX. The saved row, or None for a missing job.
+    A claimant (device, session) pair must hold the job's claim, and a project must be
+    the job's own."""
+
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None:
+            return None, None
+        if project and job.get("project") != project:
+            fail(f"{job_id} belongs to {job.get('project')}, not {project}", 2)
+        if claimant:
+            c = job.get("claim")
+            if not c:
+                fail(f"{job_id} has no claim from this session; run hold first", 6)
+            if not mine(c, *claimant):
+                fail(f"{held_by(job_id, c)}. Nothing was written. Pass --session <tag> if this session "
+                     "holds it, or take it over with hold <project>/<id> take", 6)
+        full = {"at": now(), "stage": job.get("stage")}
+        if job.get("stage") == "review" and job.get("round") is not None:
+            full["round"] = job["round"]
+        full.update(row)
+        rows = job.get("agents") if isinstance(job.get("agents"), list) else []
+        patch_job(data, job_id, {"agents": (rows + [full])[-AGENT_ROWS_MAX:]})
+        return dump_board(data), full
+    return cas(home, "/api/board", change)
+
+
+AGENT_STAGES = ("idea",) + IN_FLIGHT + ("needs-human", "pr-open") + TERMINAL
+AGENT_RECORD_USAGE = "usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>]"
+AGENT_COLUMNS = ("stage", "role", "harness", "via", "model", "effort")
+
+
+def agent_cmd(sub, *args):
+    if sub == "record" and len(args) in (5, 6):
+        target, role, harness, via, model, *effort = args
+        if (role not in AGENT_ROLES or not SLUG.fullmatch(harness) or len(harness) > 64 or via not in AGENT_VIAS
+                or not ROUTE_MODEL.fullmatch(model) or effort and effort[0] not in ROUTE_EFFORTS):
+            fail(AGENT_RECORD_USAGE, 2)
+        home, slug, job_id = r2_target(target, True)
+        device, session, _ = holder(home)
+        row = {"role": role, "harness": harness, "via": via, "model": model}
+        if effort:
+            row["effort"] = effort[0]
+        row["session"] = session
+        saved = record_agent(home, job_id, row, (device, session), slug)
+        if saved is None:
+            fail(f"no job {job_id} on the board", 4)
+        print(json.dumps(saved))
+        return
+    if sub != "report" or len(args) > 1 or args and not SLUG.fullmatch(args[0]):
+        fail(AGENT_RECORD_USAGE + " | agent report [<project>]", 2)
+    counts = {}
+    for j in read_board(factory_home())["jobs"]:
+        if args and j.get("project") != args[0]:
+            continue
+        for row in j.get("agents") or []:
+            if not isinstance(row, dict):
+                continue
+            key = tuple(str(row.get(c) or "-") for c in AGENT_COLUMNS)
+            counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        print("no agent records")
+        return
+    order = {stage: i for i, stage in enumerate(AGENT_STAGES)}
+    lines = [AGENT_COLUMNS + ("count",)] + [
+        key + (str(counts[key]),) for key in sorted(counts, key=lambda k: (order.get(k[0], len(order)),) + k)]
+    widths = [max(len(line[i]) for line in lines) for i in range(len(lines[0]))]
+    for line in lines:
+        print("  ".join(cell.ljust(w) for cell, w in zip(line, widths)).rstrip())
+
+
 COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3),
             "board": (board, 2, 2), "next": (next_item, 0, 0), "backlog": (backlog_cmd, 2, 4),
             "stop": (stop, 1, 1), "push": (push, 1, 1), "pull": (pull, 1, 1), "sync": (sync, 0, 1),
@@ -7063,6 +7236,7 @@ COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
+COMMANDS["agent"] = (agent_cmd, 1, 7)
 
 def main(argv=None):
     global _HOME_OVERRIDE, _LOCATED
