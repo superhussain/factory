@@ -285,11 +285,30 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
     });
 
     await t.test("title", async () => {
-      const cards = await page.$$eval("#board .card", (els) =>
-        els.map((c) => [c.title, c.getAttribute("aria-keyshortcuts")]),
+      const cards = await page.$$eval("#board .card-wrap", (wraps) =>
+        wraps.map((wrap) => {
+          const card = wrap.querySelector(".card");
+          return [wrap.title, card.hasAttribute("title"), card.getAttribute("aria-keyshortcuts")];
+        }),
       );
       assert.equal(cards.length, JOBS.length);
-      for (const c of cards) assert.deepEqual(c, ["Press A or . for job actions", "a ."]);
+      for (const c of cards) assert.deepEqual(c, ["Job actions (A or .)", false, "a ."]);
+      const prTitle = await page.$eval(".card-wrap .pr-link", (a) => a.getAttribute("title"));
+      assert.equal(prTitle, "");
+      const node = await page.accessibility.snapshot({
+        root: await page.$(CARD(ID)),
+        interestingOnly: false,
+      });
+      assert.equal(node.description, undefined);
+      assert.equal(node.keyshortcuts, "a .");
+      console.log(
+        JSON.stringify({
+          wrap: cards[0],
+          prTitle,
+          description: node.description,
+          keyshortcuts: node.keyshortcuts,
+        }),
+      );
     });
 
     await t.test("reference", async () => {
