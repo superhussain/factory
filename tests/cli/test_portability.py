@@ -76,7 +76,7 @@ class PortabilityTest(IsolatedTestCase):
         files, _ = installer.tree(SKILL, source=True)
         self.assertEqual(set(files), set(installer.REQUIRED))
         self.assertIn("runtime/pr_screenshots.py", files)
-        self.assertEqual(len(files), 21)
+        self.assertEqual(len(files), 37)
         for name, data in files.items():
             text = data.decode("utf-8")
             self.assertNotIn("file://", text)
@@ -85,6 +85,13 @@ class PortabilityTest(IsolatedTestCase):
                 for link in re.findall(r"\]\(([^)]+)\)", text):
                     if link.startswith(("references/", "execution.md", "integrations.md")):
                         self.assertTrue((SKILL / name).parent.joinpath(link.split("#")[0]).is_file(), (name, link))
+
+    def test_skill_md_is_small_and_indexes_every_command(self):
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        self.assertLess(len(skill.encode("utf-8")), 45000)
+        commands = sorted((SKILL / "references/commands").glob("*.md"))
+        for path in commands:
+            self.assertIn(f"](references/commands/{path.name})", skill)
 
     def test_documented_setup_recovery_and_policy_topics(self):
         device = (ROOT / "docs/device.md").read_text()

@@ -185,4 +185,5 @@ class PromptTest(IsolatedTestCase):
         self.assertIn("`Your full prompt is in <printed path>. Read it first and follow it exactly.`", skill)
         self.assertIn("`prompt` ends each prompt with `$PIPELINE.prompts.<stage>` verbatim.", skill)
         self.assertIn("the absolute path in `$DOCUMENTS`", skill)
-        self.assertIn("`project`, and `idea` (the feature text)", skill)
+        feature = " ".join((SKILL / "references/commands/feature.md").read_text(encoding="utf-8").split())
+        self.assertIn("`project`, and `idea` (the feature text)", feature)

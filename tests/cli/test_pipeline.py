@@ -135,6 +135,7 @@ class PipelineTest(IsolatedTestCase):
         self.assertIn('Immediately before every `gh pr merge`, run `factory.py pipeline "$SLUG"` again', merge)
         self.assertIn("When `$PIPELINE.merge` is `human`, patch `automerge` false", merge)
         self.assertLess(merge.index("factory.py pipeline"), merge.index('`gh pr merge <n>'))
-        row = text.split("| pr-open, `automerge` true |")[1].split(" |")[0]
+        recover = " ".join((SKILL / "references/commands/recover.md").read_text(encoding="utf-8").split())
+        row = recover.split("| pr-open, `automerge` true |")[1].split(" |")[0]
         self.assertIn('re-running `factory.py pipeline "$SLUG"` right before `gh pr merge`', row)
         self.assertIn("`merge` `human` holds the PR for a person with `automerge` false", row)
