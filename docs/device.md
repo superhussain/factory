@@ -87,6 +87,7 @@ On macOS/Linux `config_root` is absolute nonempty `XDG_CONFIG_HOME`, otherwise
 normally `<USERPROFILE>/.config`; APPDATA is not selected implicitly. Empty
 environment values mean unset. Relative explicit home/XDG values fail with exit 2.
 Canonicalization creates nothing. Invalid pointers never fall back to an empty home.
+A command validates a pointer-selected home once, then reuses it until it exits.
 
 Existing state stays where it is. Explicitly select it offline:
 
