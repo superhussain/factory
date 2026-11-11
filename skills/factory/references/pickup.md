@@ -16,6 +16,17 @@ Each run, in order:
 - Skips ideas that are gated, held by a live claim, or waiting on a human, and
   projects whose effective pipeline has pickup off, does not list this host, or
   cannot be read. Each skip reason is printed once and the run goes on.
+- Holds back batchable ideas: an idea with a `follow-up-of` ref, or one backlog
+  triage queued (`backlog.by` is `triage`). An idea a person added or approved
+  from the dashboard (it has `capture_id`) or prioritized is never held. A
+  project's held ideas wait until it has 5 of them or the oldest has gone 12 hours
+  without an update, printing
+  `waits for a batch (<n> of <min> held, oldest <h>h of <max>h)`. Then pickup
+  launches the first in board order and skips the rest with `batches behind <id>`.
+  That session's `batch` step picks them up, since `batch` marks them
+  `"hold": true`. When the effective pipeline carries `hold` (`min_ideas` 1 to 20,
+  `max_wait_hours` 1 to 168), it replaces 5 and 12. `factory.py ideas` does not
+  hold.
 - Skips a project whose checkout fails the `unsafe checkout` check, when pickup
   is on and lists this host. It fetches `origin/<base>` (with
   `GIT_TERMINAL_PROMPT=0` and a 60 s limit, so a remote that asks for

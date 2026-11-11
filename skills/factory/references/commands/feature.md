@@ -75,8 +75,9 @@ feature.
    unresolved or left out), and final-round review nits under `### Fix now`,
    `### Follow-up` or an older nits heading that the merged diff did not apply. Items
    under `### Absorbed` are done, not open. Leave out spec sub-jobs (step 8 queues
-   them), `## Device check` items, and anything already on `$BASE`. Queue each
-   agent-doable item with
+   them), `## Device check` items, and anything already on `$BASE`. Drop cosmetic
+   nits (line wrapping, comment placement, punctuation, wording) instead of
+   queueing them. Queue each agent-doable item with
    `factory.py backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
    writing the file first as in step 8: first line `Recommend: approve`, then
    `Left open by <id> (PR #<n>): <source file>`. List person-only items but never

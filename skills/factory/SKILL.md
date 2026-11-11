@@ -483,8 +483,8 @@ only `factory.py deny-notes` writes it.
   risky, needs its own design, or needs a person. Absorbing never widens the spec
   (F10) or raises the round cap (F3). The builder lists absorbed items under
   `### Absorbed` and the rest under `### Left open` in its build.md run section.
-  Reviewers split nits into `### Fix now` and `### Follow-up`. The approver weighs
-  what is still open before APPROVE.
+  Reviewers split nits into `### Fix now` and `### Follow-up`. Cosmetic nits never
+  become follow-ups. The approver weighs what is still open before APPROVE.
 - A merged or closed job stays that way. New work on it is a new job with `refs`
   pointing back, so the board shows what is actually open. Use `rework-of` to fix
   or redo it, `follow-up-of` for work it surfaced, and `sub-job-of` for a slice
