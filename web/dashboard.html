@@ -2788,16 +2788,23 @@ function hostCard(h) {
     if (st.doctor !== 'ok') li.append(alertLine('host-doctor', 'Doctor failed: ' + st.doctor.join(', ') + '.'));
     if (st.triage_failed_since) li.append(alertLine('host-triage', 'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'));
     const heads = ['Route', 'Provider', 'Model', 'Effort', 'Limited until'];
-    const roled = (node, role) => (node.setAttribute('role', role), node);
-    const cells = (tag, values) => roled(make('tr', {}, ...values.map((value, i) => {
-      const cell = roled(make(tag, {textContent:value}), tag === 'th' ? 'columnheader' : 'cell');
-      cell.dataset.label = heads[i];
-      return cell;
-    })), 'row');
+    const cells = (tag, values) => {
+      const row = make('tr', {}, ...values.map((value, i) => {
+        const cell = make(tag, {textContent:value});
+        cell.setAttribute('role', tag === 'th' ? 'columnheader' : 'cell');
+        cell.dataset.label = heads[i];
+        return cell;
+      }));
+      row.setAttribute('role', 'row');
+      return row;
+    };
     const caption = make('caption', {id:'host-' + h.id + '-routes-caption', textContent:'Routes (set on the device)'});
-    const table = roled(make('table', {className:'host-routes'}, caption,
-      roled(make('thead', {}, cells('th', heads)), 'rowgroup'),
-      roled(make('tbody', {}, ...st.routes.map(r => cells('td', [r.name, r.provider, r.model, r.effort ?? 'none', r.limited_until ? hostUtc(r.limited_until) : 'none']))), 'rowgroup')), 'table');
+    const thead = make('thead', {}, cells('th', heads));
+    const tbody = make('tbody', {}, ...st.routes.map(r => cells('td', [r.name, r.provider, r.model, r.effort ?? 'none', r.limited_until ? hostUtc(r.limited_until) : 'none'])));
+    thead.setAttribute('role', 'rowgroup');
+    tbody.setAttribute('role', 'rowgroup');
+    const table = make('table', {className:'host-routes'}, caption, thead, tbody);
+    table.setAttribute('role', 'table');
     table.setAttribute('aria-labelledby', caption.id);
     li.append(table);
   }
