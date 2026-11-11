@@ -30,6 +30,7 @@ export async function blockLiveEvents(page) {
     window.WebSocket = class extends EventTarget {
       close() {}
     };
+    document.hasFocus = () => window.fixtureFocus !== false;
   });
 }
 
@@ -38,7 +39,7 @@ export async function controlBoardPolling(page) {
   await page.evaluateOnNewDocument(() => {
     const interval = window.setInterval;
     window.setInterval = (fn, ms, ...args) => {
-      if (fn.name === "poll" && ms === 3000) {
+      if (fn.name === "pollTick" && ms === 30000) {
         window.fixtureBoardPoll = () => fn(...args);
         return 0;
       }
