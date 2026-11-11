@@ -565,6 +565,12 @@ async function capture(outdir, referencePath) {
       });
       await page.waitForSelector("#job-picker[open]");
     };
+    const clickArchiveSearch = (page) =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('#job-results [role="option"]')]
+          .find((o) => o.querySelector(".title").textContent === "Search archived jobs")
+          .click(),
+      );
     const openIdea = async (page) => {
       await page.waitForSelector("#new-idea:not([hidden])");
       await page.click("#new-idea");
@@ -835,11 +841,7 @@ async function capture(outdir, referencePath) {
         await openJumper(page);
         await page.type("#job-search", "login");
         if (side !== "after") return;
-        await page.evaluate(() =>
-          [...document.querySelectorAll('#job-results [role="option"]')]
-            .find((o) => o.querySelector(".title").textContent === "Search archived jobs")
-            .click(),
-        );
+        await clickArchiveSearch(page);
         await page.waitForFunction(() =>
           [...document.querySelectorAll("#job-results .title")].some(
             (el) => el.textContent === "Synthetic login fix",
@@ -856,11 +858,7 @@ async function capture(outdir, referencePath) {
         await page.evaluate(() => poll());
         await openJumper(page);
         await page.type("#job-search", "zzz");
-        await page.evaluate(() =>
-          [...document.querySelectorAll('#job-results [role="option"]')]
-            .find((o) => o.querySelector(".title").textContent === "Search archived jobs")
-            .click(),
-        );
+        await clickArchiveSearch(page);
         await page.waitForFunction(() =>
           [...document.querySelectorAll("#job-results .meta")].some(
             (el) => el.textContent === 'No archived jobs match "zzz". Pick to search again.',
