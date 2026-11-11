@@ -1888,7 +1888,7 @@ def ideas(*args):
 AUTONOMY_DEFAULT = {"paused": True, "projects": [], "self": []}
 SUGGESTION_SCHEMA = "factory.suggestions/1"
 SUGGEST_KINDS = ("bug-fix", "test-gap", "docs", "cleanup", "dependency-upgrade", "migration",
-                 "security", "product-idea")
+                 "security", "product-idea", "tooling")
 HUMAN_KINDS = ("dependency-upgrade", "migration", "security", "product-idea")
 SENSITIVE_PATHS = (
     ".github/*", "*/.github/*", "*.gitlab-ci*", "*.circleci/*", "*buildkite*", "*jenkinsfile*",
@@ -2057,16 +2057,21 @@ def check_suggestions(doc):
     def first(*checks):
         return next(((where, err) for where, err in checks if err), None)
 
-    top = first(("file", check_keys(doc, ("schema", "project", "run", "commit", "suggestions"))))
+    def slug(value):
+        return None if isinstance(value, str) and SLUG.fullmatch(value) else "must be a project slug"
+
+    retro = isinstance(doc, dict) and "by" in doc
+    top = first(("file", check_keys(doc, ("schema", "by", "run", "suggestions") if retro
+                                    else ("schema", "project", "run", "commit", "suggestions"))))
     if top:
         return "%s: %s" % top
     found = first(
         ("schema", None if doc["schema"] == SUGGESTION_SCHEMA else f"must be {SUGGESTION_SCHEMA}"),
-        ("project", None if isinstance(doc["project"], str) and SLUG.fullmatch(doc["project"])
-         else "must be a project slug"),
+        ("by", None if not retro or doc["by"] == "retro" else "must be retro"),
+        ("project", None if retro else slug(doc["project"])),
         ("run", None if isinstance(doc["run"], str) and RUN_TAG.fullmatch(doc["run"])
          else "must match [A-Za-z0-9_-]{1,64}"),
-        ("commit", None if isinstance(doc["commit"], str) and COMMIT.fullmatch(doc["commit"])
+        ("commit", None if retro or isinstance(doc["commit"], str) and COMMIT.fullmatch(doc["commit"])
          else "must be 40 lowercase hex characters"),
         ("suggestions", check_list(doc["suggestions"], 1, MAX_PER_RUN)))
     if found:
@@ -2074,10 +2079,11 @@ def check_suggestions(doc):
     for i, s in enumerate(doc["suggestions"]):
         at = f"suggestions[{i}]"
         err = check_keys(s, ("kind", "title", "summary", "evidence", "paths", "size", "question",
-                             "options", "recommend", "reason"), ("diagram",))
+                             "options", "recommend", "reason") + (("project",) if retro else ()), ("diagram",))
         if err:
             return f"{at}: {err}"
         checks = [
+            ("project", slug(s["project"]) if retro else None),
             ("kind", None if s["kind"] in SUGGEST_KINDS else f"must be one of {', '.join(SUGGEST_KINDS)}"),
             ("title", check_text(s["title"], 1, 80)),
             ("summary", check_text(s["summary"], 1, 600, True)
@@ -2094,14 +2100,21 @@ def check_suggestions(doc):
         if found:
             return f"{at}.%s: %s" % found
         for j, e in enumerate(s["evidence"]):
-            err = check_keys(e, ("path", "note"), ("line",))
+            err = check_keys(e, ("note", "count", "sessions")) if retro else check_keys(e, ("path", "note"), ("line",))
             if err:
                 return f"{at}.evidence[{j}]: {err}"
-            found = first(
-                ("path", check_path(e["path"])),
-                ("line", "line" in e and not (type(e["line"]) is int and e["line"] >= 1)
-                 and "must be a whole number of at least 1"),
-                ("note", check_text(e["note"], 1, 200)))
+            if retro:
+                found = first(
+                    ("note", check_text(e["note"], 1, 200)),
+                    ("count", None if type(e["count"]) is int and e["count"] >= 1
+                     else "must be a whole number of at least 1"),
+                    ("sessions", check_refs(e["sessions"])))
+            else:
+                found = first(
+                    ("path", check_path(e["path"])),
+                    ("line", "line" in e and not (type(e["line"]) is int and e["line"] >= 1)
+                     and "must be a whole number of at least 1"),
+                    ("note", check_text(e["note"], 1, 200)))
             if found:
                 return f"{at}.evidence[{j}].%s: %s" % found
         bad = next(((j, check_path(p)) for j, p in enumerate(s["paths"]) if check_path(p)), None)
@@ -2146,7 +2159,7 @@ def classify(project, s, autonomy):
         reasons.append("no-paths")
     if len(s["paths"]) > 5:
         reasons.append(f"wide:{len(s['paths'])}")
-    for path in dict.fromkeys(s["paths"] + [e["path"] for e in s["evidence"]]):
+    for path in dict.fromkeys(s["paths"] + [e["path"] for e in s["evidence"] if "path" in e]):
         if any(fnmatch.fnmatchcase(path.lower(), pattern) for pattern in SENSITIVE_PATHS):
             reasons.append(f"path:{path}")
     return not reasons, reasons
@@ -2159,11 +2172,15 @@ def render_card(job_id, doc, s, reasons):
 
     keys = [o["key"] for o in s["options"]]
     gate = "Classifier reasons: " + ", ".join(reasons) if reasons else "Classifier: eligible"
-    lines = [f"## {s['title']}", "",
-             f"Explorer suggestion · kind {s['kind']} · project {doc['project']} · "
-             f"commit {doc['commit'][:12]} · run {doc['run']}", "",
+    header = (f"Retro suggestion · kind {s['kind']} · project {s['project']} · run {doc['run']}" if "by" in doc
+              else f"Explorer suggestion · kind {s['kind']} · project {doc['project']} · "
+                   f"commit {doc['commit'][:12]} · run {doc['run']}")
+    lines = [f"## {s['title']}", "", header, "",
              f"Gate: human. {gate}", "", "### Summary", "", quote(s["summary"]), "", "### Evidence", ""]
     for e in s["evidence"]:
+        if "sessions" in e:
+            lines.append(f"- {e['count']}x {e['note']} (sessions: {', '.join(f'`{r}`' for r in e['sessions'])})")
+            continue
         where = f"{e['path']}:{e['line']}" if "line" in e else e["path"]
         lines.append(f"- `{where}` {e['note']}")
     lines += ["", "### What is needed from you", "", quote(s["question"]), "",
@@ -2219,9 +2236,14 @@ def suggest_admit(path):
     for key in ("FACTORY_ACCESS_CLIENT_ID", "FACTORY_ACCESS_CLIENT_SECRET"):
         if env.get(key) and env[key] in text:
             fail(f"{path} holds this device's {key}; nothing admitted", 2)
-    slug = doc["project"]
-    if slug not in registered(home):
-        fail(f"{path}: project: {slug} is not a registered factory project; nothing admitted", 2)
+    retro = "by" in doc
+    projects = registered(home)
+    if not retro and doc["project"] not in projects:
+        fail(f"{path}: project: {doc['project']} is not a registered factory project; nothing admitted", 2)
+    for i, s in enumerate(doc["suggestions"] if retro else []):
+        if s["project"] not in projects:
+            fail(f"{path}: suggestions[{i}].project: {s['project']} is not a registered factory project; "
+                 "nothing admitted", 2)
     device = holder(home)[0]
     jobs_dir = Path(home, "jobs")
     local = [p.name for p in jobs_dir.glob("*")] + [p.name for p in jobs_dir.glob("*/*")]
@@ -2231,12 +2253,14 @@ def suggest_admit(path):
         autonomy = load_autonomy(data)
         if autonomy["paused"] is not False:
             fail("autonomy is paused; nothing admitted", 3)
-        if slug not in autonomy["projects"]:
-            fail(f"{slug} is not on the autonomy allowlist", 3)
+        if not retro and doc["project"] not in autonomy["projects"]:
+            fail(f"{doc['project']} is not on the autonomy allowlist", 3)
         stamp = now()
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         admitted, skipped = [], []
+        by = "retro" if retro else "explorer"
         for s in doc["suggestions"]:
+            slug = s["project"] if retro else doc["project"]
             fp = fingerprint(slug, s)
             origins = [(j, j["origin"]) for j in data["jobs"] if isinstance(j.get("origin"), dict)]
             dup = next((j.get("id") for j, o in origins if o.get("fingerprint") == fp), None)
@@ -2260,9 +2284,10 @@ def suggest_admit(path):
             pick = ", ".join(keys[:-1]) + " or " + keys[-1]
             data["jobs"].append({
                 "id": job_id, "stage": IDEA, "title": f"{slug}: {s['title']}",
-                "needs": f"Explorer suggestion: pick {pick} (recommended {s['recommend']}), or discard",
-                "note": f"explorer: {s['kind']}", "idea": render_card(job_id, doc, s, reasons),
-                "origin": {"by": "explorer", "project": slug, "run": doc["run"], "commit": doc["commit"],
+                "needs": f"{by.capitalize()} suggestion: pick {pick} (recommended {s['recommend']}), or discard",
+                "note": f"{by}: {s['kind']}", "idea": render_card(job_id, doc, s, reasons),
+                "origin": {"by": by, "project": slug, "run": doc["run"],
+                           **({} if retro else {"commit": doc["commit"]}),
                            "kind": s["kind"], "fingerprint": fp, "gate": "human", "eligible": eligible,
                            "reasons": reasons, "options": keys, "recommend": s["recommend"],
                            "created": stamp, "admitted_by": device},
@@ -2299,7 +2324,7 @@ def suggest_approve(job_id, option):
         if option not in (origin.get("options") or []):
             fail(f"{job_id} has no option {option}; nothing was changed", 2)
         slug = origin.get("project")
-        if slug not in projects or slug not in load_autonomy(data)["projects"]:
+        if slug not in projects or origin.get("by") != "retro" and slug not in load_autonomy(data)["projects"]:
             fail(f"{slug} is not a registered project on the autonomy allowlist; nothing was changed", 2)
         stamp = now()
         origin["approved"] = {"option": option, "device": device, "at": stamp}
