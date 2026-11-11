@@ -3200,38 +3200,51 @@ PR_EVIDENCE = {"closed": "closed by pickup with a comment that links this page",
 
 
 def gh_pr(*args):
-    """(returncode, stdout) of `gh pr <args>`, (1, "") when it cannot run, None without gh."""
+    """(returncode, stdout) of gh pr <args>: (1, "") when it cannot start,
+    ("timeout", "") past 60 seconds, None without gh."""
     gh = shutil.which("gh")
     if gh is None:
         return None
     try:
-        r = subprocess.run([gh, "pr", *args], capture_output=True, encoding="utf-8", errors="replace", timeout=60,
-                           stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired):
+        r = subprocess.run([gh, "pr", *args], capture_output=True, encoding="utf-8",
+                           errors="replace", timeout=60, stdin=subprocess.DEVNULL)
+    except OSError:
         return 1, ""
+    except subprocess.TimeoutExpired:
+        return "timeout", ""
     return r.returncode, r.stdout
 
 
 def close_pull_request(home, j, device):
-    """Close the job's open PR with a comment. (state, why): closed, merged, already closed or open."""
+    """Close the job's open PR with a comment. Returns (state, why)."""
     pr, md = j["pr"], project_files(home, j["project"])[0]
-    repo = frontmatter(md)[0].get("repo", "") if md.exists() else ""
+    if not md.exists():
+        return "open", f"there is no project file for {j['project']} on {device}"
+    repo = frontmatter(md)[0].get("repo", "")
     m = GH_PR.fullmatch(pr) if isinstance(pr, str) else None
     if not repo:
         return "open", "the project file names no repo"
     if not (m and m[1].lower() == repo.lower()):
         return "open", f"its URL is not a pull request in {repo}"
-    view = gh_pr("view", pr, "--json", "state,headRefName",
-                  "--jq", '.state + " " + .headRefName')
+    branch = j.get("branch")
+    if not branch:
+        return "open", "the job has no branch"
+    view = gh_pr("view", pr, "--json", "state,isCrossRepository,headRefName", "--jq",
+                 '.state + " " + (.isCrossRepository | tostring) + " " + .headRefName')
     if view is None:
         return "open", f"gh is not installed on {device}"
+    if view[0] == "timeout":
+        return "open", f"gh pr view timed out after 60 seconds on {device}"
     if view[0]:
         return "open", f"gh pr view exited {view[0]} (check gh auth status on {device})"
-    state, _, head = view[1].strip().partition(" ")
+    state, _, rest = view[1].strip().partition(" ")
+    cross, _, head = rest.partition(" ")
     if not head:
         return "open", "gh pr view reported no head branch"
-    if head != j.get("branch"):
-        return "open", f"its head branch {head} is not the job's branch {j.get('branch') or 'none'}"
+    if cross != "false":
+        return "open", f"its head branch {head} comes from another repository, not {repo}"
+    if head != branch:
+        return "open", f"its head branch {head} is not the job's branch {branch}"
     if state in ("MERGED", "CLOSED"):
         return ("merged" if state == "MERGED" else "already closed"), ""
     if state != "OPEN":
@@ -3240,7 +3253,11 @@ def close_pull_request(home, j, device):
     close = gh_pr("close", pr, "--comment", comment)
     if close is None:
         return "open", f"gh is not installed on {device}"
-    return ("open", f"gh pr close exited {close[0]} (check gh auth status on {device})") if close[0] else ("closed", "")
+    if close[0] == "timeout":
+        return "open", f"gh pr close timed out after 60 seconds on {device}"
+    if close[0]:
+        return "open", f"gh pr close exited {close[0]} (check gh auth status on {device})"
+    return "closed", ""
 
 
 def close_decision(j, reason, device, earlier, outcome):
