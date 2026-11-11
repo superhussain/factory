@@ -1624,8 +1624,9 @@ class CloseTest(PickupFixture):
         "- No agent reviewed this close. The reason is the owner's own words.\n"
         "- The next pickup run on each host that holds the worktree or branch runs "
         "`factory.py cleanup alpha/042-sample-export` there when the project's pickup is on "
-        "and lists that host. It keeps a dirty worktree, and a branch that is not merged unless "
-        "origin holds the same commit. On any other host, run that command there by hand.\n")
+        "and lists that host. On any other host, run `factory.py cleanup alpha/042-sample-export` "
+        "by hand. It keeps a dirty worktree, and a branch that is not merged unless "
+        "origin holds the same commit.\n")
 
     def setUp(self):
         super().setUp()
