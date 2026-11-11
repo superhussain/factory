@@ -1220,6 +1220,7 @@ class RerunTest(MoveHostTest):
 class MoveArchiveTest(MoveHostTest):
     AGENT = "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
     AGENT2 = "9b2d71e0-5a3c-4e8f-b1d2-7c6e5f4a3b21"
+    LEFT_OUT = " (left out --home because PASEO_HOME has unprintable characters)"
 
     def setUp(self):
         super().setUp()
@@ -1373,7 +1374,17 @@ class MoveArchiveTest(MoveHostTest):
         with patch.dict(os.environ, {"PASEO_HOME": str(home)}):
             self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
                                              self.hint("9f1c2d3e-0000-4000-8000-000000000001").replace(
-                                                 "\n", " (left out --home because PASEO_HOME has unprintable characters)\n")))
+                                                 ": paseo archive", self.LEFT_OUT + ": paseo archive")))
+
+    def test_skipped_hint_leaves_out_unprintable_paseo_home(self):
+        self.set_stalls()
+        self.moved(agent="ab_cd", server="srv-lab")
+        home = self.root / "paseo\x1bhome"
+        with patch.dict(os.environ, {"PASEO_HOME": str(home)}):
+            self.assertEqual(self.pickup(), (0, "stopped 042-sample-export alpha: moved to studio-mac\n",
+                                             self.skipped("ab_cd", "ab_cd").replace(
+                                                 ": paseo archive", self.LEFT_OUT + ": paseo archive")))
+        self.assertEqual(self.recorded(), [])
 
     def test_non_hex_agent_stops_once(self):
         self.set_stalls()
@@ -1751,22 +1762,25 @@ class CloseTest(PickupFixture):
                                                  "earlier": [{"from": "host-c"}, {"from": "bad host"}]})]
         self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
         self.assertIn("Hosts that need `factory.py cleanup alpha/042-sample-export` run by hand: `host-b`, `host-c`. "
-                      "The board records them as holding this job, and the project's pickup is off "
-                      "or does not list them.\n", self.files[self.DECISION])
+                      "The board records them as holding this job, and the project's pickup "
+                      "does not list them.\n", self.files[self.DECISION])
 
     def test_close_decision_names_hosts_when_pickup_is_off(self):
         self.views["alpha"] = (200, effective("alpha", {"pickup": {"enabled": False, "hosts": ["other-host", DEVICE]}}))
         self.board["jobs"] = [self.closing()]
         self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
-        self.assertIn("run by hand: `other-host`.", self.files[self.DECISION])
+        self.assertIn("Hosts that need `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. "
+                      "The board records them as holding this job, and the project's pickup is off.\n",
+                      self.files[self.DECISION])
 
-    def test_close_decision_says_why_no_host_is_named(self):
+    def test_close_decision_lists_hosts_when_pickup_is_unread(self):
         self.views["alpha"] = (404, "")
         self.board["jobs"] = [self.closing()]
         self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
-        self.assertIn("- No host is named for a manual cleanup, because host-a could not read the project's "
-                      "pickup hosts: no pipeline view; register the project or deploy the current Worker.\n",
-                      self.files[self.DECISION])
+        self.assertIn("- The board records `other-host` as holding this job, but host-a could not read the project's "
+                      "pickup hosts: no pipeline view; register the project or deploy the current Worker. "
+                      "Run `factory.py cleanup alpha/042-sample-export` by hand on each of those hosts that "
+                      "pickup does not cover.\n", self.files[self.DECISION])
 
     def test_close_reads_pickup_config_once_per_project(self):
         self.board["jobs"] = [self.closing(), self.closing(id="043-sample-report")]
