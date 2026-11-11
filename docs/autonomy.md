@@ -220,8 +220,8 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   prints the error and "backlog triage stopped; unsent lines wait for the next pickup run". The sweep
   keeps the holds it recorded, and pickup still claims and launches ideas. While the sweep keeps
   failing, pickup's host status carries `triage_failed_since`, the start of the first failing run.
-  Settings, Hosts shows "Backlog triage failing since <time>" in red with a warning sign on the host's card until a sweep
-  succeeds.
+  Settings, Hosts shows "Backlog triage failing since <time>" in red with a warning sign on the
+  host's card until a sweep succeeds.
 - **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a
   service token cannot switch triage on or move the threshold. The Worker compares the
   score with the threshold itself.
