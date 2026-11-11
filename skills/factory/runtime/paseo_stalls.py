@@ -126,9 +126,9 @@ def list_stalls():
             continue
         agent_id = agent.get("id")
         provider = agent.get("provider")
-        if agent.get("status") != "idle" or not isinstance(provider, str) \
-                or provider.split("/", 1)[0] != "claude" or not isinstance(agent_id, str) \
-                or not ID_RE.fullmatch(agent_id):
+        head = provider.split("/", 1)[0] if isinstance(provider, str) else ""
+        if agent.get("status") != "idle" or not (head == "claude" or head.startswith("claude-")) \
+                or not isinstance(agent_id, str) or not ID_RE.fullmatch(agent_id):
             continue
         found = stalled(agent_id)
         if not found:
