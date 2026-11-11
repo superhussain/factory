@@ -36,6 +36,10 @@
                                             print a role's full agent prompt (spec, build, review-security,
                                             review-ux, review-ui, review-code, approve), or write it to
                                             <path> with mode 600 and print the path
+  factory.py wait <project-slug>/<job-id> <artifact>... [--timeout S]
+                                            print each finished job file's first line, checking once a
+                                            second for up to S seconds (default 60); exit 3 while one is
+                                            missing, 5 while one has no valid first line
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
@@ -3993,6 +3997,62 @@ def prompt_cmd(target, role, *flags):
     print(out)
 
 
+WAIT_ARTIFACT = re.compile(r"spec\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
+WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S]"
+
+
+def wait_valid(artifact, line):
+    """True when line is a finished first line for artifact."""
+    if artifact in ("spec.md", "build.md"):
+        return bool(line.strip())
+    if artifact == "decision.md":
+        return line in ("APPROVE", "ESCALATE", "CHANGES") or line.startswith("CLOSED: ")
+    return line in ("VERDICT: PASS", "VERDICT: CHANGES")
+
+
+def wait_cmd(target, *args):
+    """Print each artifact's first line once all are valid, checking once a second until --timeout."""
+    home, slug, job_id = r2_target(target, True)
+    artifacts, timeout = [], None
+    i = 0
+    while i < len(args):
+        if args[i] == "--timeout":
+            if timeout is not None or i + 1 == len(args) or not re.fullmatch(r"[0-9]+", args[i + 1]) \
+                    or int(args[i + 1]) > 600:
+                fail("--timeout takes one value from 0 to 600 seconds", 2)
+            timeout = int(args[i + 1])
+            i += 2
+        elif WAIT_ARTIFACT.fullmatch(args[i]):
+            artifacts.append(args[i])
+            i += 1
+        else:
+            fail(f"bad artifact {args[i]!r}. " + WAIT_USAGE, 2)
+    if not artifacts:
+        fail(WAIT_USAGE, 2)
+    folder = home / "jobs" / slug / job_id
+    deadline = time.monotonic() + (60 if timeout is None else timeout)
+    while True:
+        lines = {}
+        for artifact in artifacts:
+            path = folder / artifact
+            for node in (path, path.parent, folder):
+                if is_link(node):
+                    fail(f"{node} is a symlink or junction; nothing was read through it", 6)
+            if path.is_file():
+                lines[artifact] = (path.read_text(encoding="utf-8", errors="replace").splitlines() or [""])[0]
+        missing = [a for a in artifacts if a not in lines]
+        malformed = [a for a in artifacts if a in lines and not wait_valid(a, lines[a])]
+        if not missing and not malformed:
+            for artifact in artifacts:
+                print(f"{artifact}: {lines[artifact]}")
+            return
+        if time.monotonic() >= deadline:
+            if missing:
+                fail("still missing: " + ", ".join(missing), 3)
+            fail("no valid first line: " + ", ".join(malformed), 5)
+        time.sleep(1)
+
+
 def tracer_start(j):
     """True when Tracer scope approval moved this job to build and no session has started it."""
     return j.get("stage") == "build" and j.get("note") == TRACER_APPROVED_NOTE
@@ -6131,6 +6191,7 @@ COMMANDS["unclaim"] = (unclaim, 1, 1)
 COMMANDS["pipeline"] = (pipeline_cmd, 1, 1)
 COMMANDS["documents"] = (documents_cmd, 1, 1)
 COMMANDS["prompt"] = (prompt_cmd, 2, 8)
+COMMANDS["wait"] = (wait_cmd, 2, 22)
 COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
 COMMANDS["host"] = (host_cmd, 3, 3)
