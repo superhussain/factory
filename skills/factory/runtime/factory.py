@@ -3315,7 +3315,7 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
         if dry:
             print(f"would clean up {job_id} {project}")
             continue
-        removed, left = cleanup_job(repo, wt, branch)
+        _, left = cleanup_job(repo, wt, branch)
 
         def change(text, job_id=job_id, closed=c["closed"], left=left):
             board = load_board(text)
