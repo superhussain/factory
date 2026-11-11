@@ -47,7 +47,7 @@ The pnpm scripts are the source of truth (`package.json`):
 | `format:check` | `oxfmt --check` over `worker tools tests` (CI gate; `tests/fixtures/` excluded by `.oxfmtrc.json`) |
 | `format` | `oxfmt` over `worker tools tests`, rewriting in place |
 | `test:assets` | Asset build, deployment dry-run, bundle verification |
-| `test:auth` | Production auth unit suites |
+| `test:auth` | Asset preparation, then production auth unit suites |
 | `test:protocol` | Asset preparation, then v1 protocol, settings, lockfile suites |
 | `test:local` | Local integration check on owned loopback ports |
 | `test:browser` | Full browser suite |
@@ -71,6 +71,7 @@ CLI tests import `support` from `tests/cli`. A command that names one test file,
 class or method needs the `PYTHONPATH` prefix in the first line below. On Windows,
 or in a shell without that prefix form, run the second line. Without either, the
 run fails with `No module named 'support'`.
+The discover form runs every test in that file; it cannot select one class or method.
 
 ```sh
 PYTHONPATH=tests/cli python3 -B -m unittest tests.cli.test_pickup.CloseTest

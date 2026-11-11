@@ -227,7 +227,12 @@ test("nx.json connects to no remote cache", () => {
 });
 
 test("test:protocol prepares the .build assets before its suites", () => {
-  assert.ok(
-    manifest.scripts["test:protocol"].startsWith("node tools/assets.mjs --prepare && node --test "),
+  assert.match(
+    manifest.scripts["test:protocol"],
+    /^node tools\/assets\.mjs --prepare && node --test /,
   );
+});
+
+test("test:auth prepares the .build assets before its suites", () => {
+  assert.match(manifest.scripts["test:auth"], /^node tools\/assets\.mjs --prepare && node --test /);
 });

@@ -37,7 +37,16 @@ const gzip9 = (bytes) => gzipSync(bytes, { level: 9 }).length;
 const gzipDefault = (bytes) => gzipSync(bytes, { level: constants.Z_DEFAULT_COMPRESSION }).length;
 
 export async function prepareAssets() {
-  const bytes = await readFile(new URL("node_modules/mermaid/dist/mermaid.min.js", root));
+  let bytes;
+  try {
+    bytes = await readFile(new URL("node_modules/mermaid/dist/mermaid.min.js", root));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    throw new Error(
+      "node_modules/mermaid/dist/mermaid.min.js is missing. Run mise exec -- pnpm install --frozen-lockfile first.",
+      { cause: error },
+    );
+  }
   const sri = "sha384-" + createHash("sha384").update(bytes).digest("base64");
   const gzip = gzip9(bytes);
   if (sri !== MERMAID_SRI || bytes.length !== 5494801) {
