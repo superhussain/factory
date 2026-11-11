@@ -177,6 +177,7 @@ flowchart LR
   I --> P[factory.py pickup]
   P[factory.py pickup] --> S[backlog_triage_pass]
   S --> W
+  S --> V[POST /api/backlog/triage/verdicts]
 ```
 
 Settings, Pipeline holds a `triage` block per scope. A project value replaces the global
@@ -203,14 +204,9 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   then checks the line off with the new id, as a dashboard Approve does. If the line
   changed meanwhile, it drops the row while the row is still an unclaimed idea.
 - **Hold.** The line waits in the backlog for a person, as before.
-  The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board fetches each listed line's verdict ahead, so the drawer opens with it in place.
+  The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board reads the stored verdicts of the lines it lists in one `POST /api/backlog/triage/verdicts` call per 50 lines. It reads again only when the listed lines change, and only for lines with no verdict yet. Opening a line with no verdict reads that line again.
 - **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
-  verdict from `backlog_triage_pass`, which `factory.py pickup` runs before it claims ideas
-  (never with `--dry-run`). Each run posts up to 5 unchecked lines, with the indented block
-  under each as context, for projects whose effective `triage.enabled` is true. Held lines,
-  and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this
-  host never sends them again. `backlog add` records its held line there too. A 409, 502,
-  503 or network failure warns, and the line is retried on the next run. Deleting the file
+  verdict from `backlog_triage_pass`. `factory.py pickup` runs it before it claims ideas, never with `--dry-run`, and at most once every 30 minutes per host. The host's `backlog-triage-sweep.json` holds the start of the last sweep, and `factory.py pickup --triage-now` runs a sweep at once. Each sweep takes up to 20 unchecked lines in projects whose effective `triage.enabled` is true and reads their stored verdicts in one `POST /api/backlog/triage/verdicts`. A line another host already held is recorded without a post. The rest are posted one at a time, with the indented block under each as context. Held lines, and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this host never sends them again. `backlog add` records its held line there too. A 404, 409, 502 or 503 reply, or a network failure, warns and ends the sweep. That line and the rest are retried on the next sweep. Deleting the file
   only causes rescoring. A line whose new idea row could not be checked off or removed goes
   there too, so it is never queued twice.
 - **Failure.** A 404 from an older Worker means off. Any other error prints a warning,
