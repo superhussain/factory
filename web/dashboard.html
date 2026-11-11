@@ -2974,7 +2974,9 @@ function renderBoard() {
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   if (!settingsShown) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
-  $('board').style.setProperty('--cols', collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']).join(' '));
+  const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
+  // An empty auto track takes the free space, so the filter-empty line spans the board and not only a few narrow columns.
+  $('board').style.setProperty('--cols', tracks.concat(noneShown ? ['auto'] : []).join(' '));
   $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : '') + COLUMNS.map((s, i) => {
     if (hiddenColumns.has(s)) return '';
     let list = lists[i];
