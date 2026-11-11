@@ -296,7 +296,8 @@ class RetroDigestTest(RetroCase):
                      ["retro", "digest", "--weeks", "2"]):
             code, out, _ = invoke(factory, args)
             self.assertEqual((code, out), (2, ""), args)
-        self.assertIn("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>",
+        self.assertIn("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>, "
+                      "N from 1 to 90 for digest and 1 to 30 for aggregate",
                       invoke(factory, ["retro", "push", "now"])[2])
         os.environ["CLAUDE_CONFIG_DIR"] = str(self.root / "missing")
         code, out, err = invoke(factory, ["retro", "digest"])
@@ -482,7 +483,8 @@ class RetroAggregateTest(RetroWorkerCase):
         self.assertIn(f"no host pushed a retro digest from {(today - timedelta(days=6)).isoformat()} to "
                       f"{today.isoformat()}", err)
         self.assertFalse((self.home / "retro").exists())
-        usage = "usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>"
+        usage = ("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>, "
+                 "N from 1 to 90 for digest and 1 to 30 for aggregate")
         for args in (["--days", "0"], ["--days", "31"], ["--days", "x"], ["--days"], ["now"]):
             with self.subTest(args=args):
                 code, out, err = invoke(factory, ["retro", "aggregate", *args])
@@ -576,11 +578,11 @@ class RetroAdmitTest(RetroCase):
 
     def test_suggestions_go_through_suggest_admit(self):
         seen = []
-        with patch.object(factory, "suggest_admit", side_effect=lambda path: seen.append(path)):
+        with patch.object(factory, "suggest_admit", side_effect=lambda *args: seen.append(args)):
             code, out, err = self.admit(reply(suggestions=[retro_suggestion()]))
         path = self.folder / "suggestions.json"
         self.assertEqual((code, err, out), (0, "", f"wrote {self.folder / 'findings.md'}\n"))
-        self.assertEqual(seen, [str(path)])
+        self.assertEqual(seen, [(str(path), "retro")])
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
                          {"schema": "factory.suggestions/1", "by": "retro", "run": RUN,
                           "suggestions": [retro_suggestion()]})
@@ -611,6 +613,10 @@ class RetroAdmitTest(RetroCase):
         self.assertEqual(self.admit({"none": True}), (3, "", "factory.py: the retro agent found nothing\n"))
         (self.folder / "reply.json").unlink()
         self.assertEqual(self.admit(None), (4, "", f"factory.py: no retro run {RUN}\n"))
+        self.admit(reply())
+        (self.folder / "aggregate.json").unlink()
+        self.assertEqual(self.admit(None), (4, "", f"factory.py: no retro run {RUN}\n"))
+        (self.folder / "reply.json").unlink()
         self.assertEqual(self.admit(None, "20261111T000000Z-ffffff"),
                          (4, "", "factory.py: no retro run 20261111T000000Z-ffffff\n"))
         for args in (["../x"], [RUN, "more"], []):
@@ -618,7 +624,7 @@ class RetroAdmitTest(RetroCase):
                 code, out, err = invoke(factory, ["retro", "admit", *args])
                 self.assertEqual((code, out), (2, ""))
                 self.assertIn("usage: factory.py retro", err)
-        self.assertEqual(sorted(p.name for p in self.folder.iterdir()), ["aggregate.json"])
+        self.assertEqual([p.name for p in self.folder.iterdir()], ["findings.md"])
 
     @unittest.skipIf(os.name == "nt", "symlinks")
     def test_linked_run_folder_refused(self):

@@ -207,8 +207,9 @@ linked `retro` or run folder exits 2.
 `factory.retro/1`. A bad reply exits 2 with nothing written, and `{"none": true}`
 exits 3. It writes `findings.md`, ranked by count times cost per occurrence, then
 writes the reply's cards to `suggestions.json` and runs `suggest admit` on it (see
-[Retro cards](autonomy.md#retro-cards)). A missing run or reply exits 4. The run
-folder stays on this host; nothing in it reaches R2.
+[Retro cards](autonomy.md#retro-cards)). A missing run, reply or `aggregate.json`
+exits 4. Admitted cards go to the board like any card; the run folder's files stay
+on this host.
 
 ## Exit recovery
 

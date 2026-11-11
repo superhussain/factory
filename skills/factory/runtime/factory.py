@@ -2052,15 +2052,16 @@ def check_list(value, lo, hi):
     return None
 
 
-def check_suggestions(doc):
-    """The first violation of the factory.suggestions/1 schema as "<where>: <problem>", or None."""
+def check_suggestions(doc, by="explorer"):
+    """The first violation of the factory.suggestions/1 schema as "<where>: <problem>", or None.
+    The caller sets by; a retro file must carry by: retro, and an explorer file no by key."""
     def first(*checks):
         return next(((where, err) for where, err in checks if err), None)
 
     def slug(value):
         return None if isinstance(value, str) and SLUG.fullmatch(value) else "must be a project slug"
 
-    retro = isinstance(doc, dict) and "by" in doc
+    retro = by == "retro"
     top = first(("file", check_keys(doc, ("schema", "by", "run", "suggestions") if retro
                                     else ("schema", "project", "run", "commit", "suggestions"))))
     if top:
@@ -2213,9 +2214,9 @@ def strings(value):
     return [s for item in items for s in strings(item)]
 
 
-def suggest_admit(path):
+def suggest_admit(path, by="explorer"):
     """Turn a checked suggestions file into gated idea cards. Requests only GET /projects.json
-    and GET/PUT /api/board, and never runs a process."""
+    and GET/PUT /api/board, and never runs a process. Only retro_admit passes by="retro"."""
     try:
         with open(path, "rb") as f:
             raw = f.read(MAX_SUGGESTION_BYTES + 1)
@@ -2227,7 +2228,7 @@ def suggest_admit(path):
         doc = json.loads(raw.decode("utf-8"))
     except ValueError as e:
         fail(f"{path} is not UTF-8 JSON: {e}; nothing admitted", 2)
-    err = check_suggestions(doc)
+    err = check_suggestions(doc, by)
     if err:
         fail(f"{path}: {err}; nothing admitted", 2)
     home = factory_home()
@@ -2236,7 +2237,7 @@ def suggest_admit(path):
     for key in ("FACTORY_ACCESS_CLIENT_ID", "FACTORY_ACCESS_CLIENT_SECRET"):
         if env.get(key) and env[key] in text:
             fail(f"{path} holds this device's {key}; nothing admitted", 2)
-    retro = "by" in doc
+    retro = by == "retro"
     projects = registered(home)
     if not retro and doc["project"] not in projects:
         fail(f"{path}: project: {doc['project']} is not a registered factory project; nothing admitted", 2)
@@ -2258,7 +2259,6 @@ def suggest_admit(path):
         stamp = now()
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         admitted, skipped = [], []
-        by = "retro" if retro else "explorer"
         for s in doc["suggestions"]:
             slug = s["project"] if retro else doc["project"]
             fp = fingerprint(slug, s)
@@ -2324,7 +2324,10 @@ def suggest_approve(job_id, option):
         if option not in (origin.get("options") or []):
             fail(f"{job_id} has no option {option}; nothing was changed", 2)
         slug = origin.get("project")
-        if slug not in projects or origin.get("by") != "retro" and slug not in load_autonomy(data)["projects"]:
+        if origin.get("by") == "retro":
+            if slug not in projects:
+                fail(f"{slug} is not a registered project; nothing was changed", 2)
+        elif slug not in projects or slug not in load_autonomy(data)["projects"]:
             fail(f"{slug} is not a registered project on the autonomy allowlist; nothing was changed", 2)
         stamp = now()
         origin["approved"] = {"option": option, "device": device, "at": stamp}
@@ -6948,7 +6951,7 @@ def check_retro(doc, projects):
             return f"findings[{i}].%s: %s" % found
     if doc["suggestions"]:
         return check_suggestions({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": doc["run"],
-                                  "suggestions": doc["suggestions"]})
+                                  "suggestions": doc["suggestions"]}, "retro")
     return None
 
 
@@ -6978,7 +6981,8 @@ def retro_admit(run):
     home = factory_home()
     folder = home / "retro" / run
     path = folder / "reply.json"
-    if is_link(folder.parent) or is_link(folder) or not path.is_file():
+    if is_link(folder.parent) or is_link(folder) or not path.is_file() \
+            or not (folder / "aggregate.json").is_file():
         fail(f"no retro run {run}", 4)
     with open(path, "rb") as f:
         raw = f.read(MAX_RETRO_BYTES + 1)
@@ -7003,7 +7007,7 @@ def retro_admit(run):
     suggestions = folder / "suggestions.json"
     suggestions.write_text(json.dumps({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run,
                                        "suggestions": doc["suggestions"]}, indent=2) + "\n", encoding="utf-8")
-    suggest_admit(str(suggestions))
+    suggest_admit(str(suggestions), "retro")
 
 
 def retro_date(d):
@@ -7024,7 +7028,8 @@ def retro_cmd(action, *args):
     default = "7" if action == "aggregate" else "1"
     days = default if not args else args[1] if len(args) == 2 and args[0] == "--days" else ""
     if not (days.isascii() and days.isdigit()) or not 1 <= int(days) <= most:
-        fail("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>", 2)
+        fail("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>, "
+             "N from 1 to 90 for digest and 1 to 30 for aggregate", 2)
     (retro_digest if action == "digest" else retro_aggregate)(int(days))
 
 

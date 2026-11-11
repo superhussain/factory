@@ -67,10 +67,16 @@ class SuggestCase(IsolatedTestCase):
         self.board = json.loads(body)
         return 200, {}, ""
 
+    def run_admit(self, path, by):
+        if by is None:
+            factory.suggest_cmd("admit", str(path))
+        else:
+            factory.suggest_admit(str(path), by)
+
     def puts(self):
         return sum(c.args[1] == "PUT" for c in self.api.call_args_list)
 
-    def admit(self, doc, code=0):
+    def admit(self, doc, code=0, by=None):
         path = self.home / "suggestions.json"
         path.write_bytes(doc if isinstance(doc, bytes) else (doc if isinstance(doc, str) else json.dumps(doc)).encode())
         self.output.seek(0)
@@ -78,10 +84,10 @@ class SuggestCase(IsolatedTestCase):
         with contextlib.redirect_stderr(io.StringIO()) as err:
             if code:
                 with self.assertRaises(SystemExit) as raised:
-                    factory.suggest_cmd("admit", str(path))
+                    self.run_admit(path, by)
                 self.assertEqual(raised.exception.code, code, err.getvalue())
             else:
-                factory.suggest_cmd("admit", str(path))
+                self.run_admit(path, by)
         return err.getvalue()
 
     def run_human(self, fn, *args, tty=True, typed=None):
@@ -160,6 +166,17 @@ class SuggestTest(SuggestCase):
         del doc["run"]
         self.admit(doc, 2)
         self.assertEqual(self.puts(), 0)
+
+    def test_cli_admit_refuses_a_retro_file(self):
+        before = json.dumps(self.board)
+        for doc in (retro(), dict(suggestions(), by="retro")):
+            with self.subTest(doc=sorted(doc)):
+                err = self.admit(doc, 2)
+                self.assertIn("nothing admitted", err)
+        self.assertEqual(json.dumps(self.board), before)
+        self.assertEqual(self.puts(), 0)
+        err = self.admit(suggestions(), 2, by="retro")
+        self.assertIn("nothing admitted", err)
 
     def test_admit_rejects_unregistered_project(self):
         err = self.admit(suggestions(project="nowhere"), 2)
@@ -584,9 +601,26 @@ def retro(*items, **over):
 
 
 class RetroSuggestTest(SuggestCase):
+    def admit(self, doc, code=0, by="retro"):
+        return super().admit(doc, code, by)
+
     def test_admit_retro_card(self):
-        self.admit(retro())
-        self.assertEqual(json.loads(self.output.getvalue()), {"admitted": ["008-guard-the-ls"], "skipped": []})
+        run = "20261111T090000Z-a1b2c3"
+        folder = self.home / "retro" / run
+        folder.mkdir(parents=True)
+        (folder / "aggregate.json").write_text(json.dumps({
+            "run": run, "from": "2026-11-05", "to": "2026-11-11", "projects": ["sample", "other"],
+            "hosts": {"host-a": {"sessions": 40, "jobs": 12, "ad_hoc": 3}}}), encoding="utf-8")
+        finding = {"title": "ls alias crashes in non-interactive shells", "category": "tool-economy", "count": 253,
+                   "cost": 250, "sessions": [REF], "root_cause": "The alias needs a terminal size.",
+                   "fix": "Alias ls only in interactive shells.", "project": "other"}
+        (folder / "reply.json").write_text(json.dumps({"schema": "factory.retro/1", "run": run, "findings": [finding],
+                                                       "suggestions": [retro_suggestion()]}), encoding="utf-8")
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            factory.retro_admit(run)
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual(self.output.getvalue().split("\n", 1)[1].strip(),
+                         json.dumps({"admitted": ["008-guard-the-ls"], "skipped": []}, indent=2))
         card = self.board["jobs"][-1]
         origin = card.pop("origin")
         idea = card.pop("idea")
@@ -636,8 +670,8 @@ class RetroSuggestTest(SuggestCase):
             with self.subTest(doc=str(doc)[:80]):
                 self.admit(doc, 2)
         self.assertEqual(self.puts(), 0)
-        # An explorer file may carry a project-less retro-shaped suggestion only without the by key.
-        self.admit(suggestions(suggestion(kind="tooling")))
+        # The suggest admit CLI takes tooling in an explorer file.
+        self.admit(suggestions(suggestion(kind="tooling")), by=None)
         self.assertEqual(self.board["jobs"][-1]["origin"]["by"], "explorer")
 
     def test_retro_dedupe_and_caps(self):
@@ -680,7 +714,7 @@ class RetroSuggestTest(SuggestCase):
         second["origin"]["project"] = "nowhere"
         code, err, _ = self.run_human(factory.suggest_cmd, "approve", second["id"], "A", typed=second["id"])
         self.assertEqual(code, 2)
-        self.assertIn("nowhere is not a registered project on the autonomy allowlist", err)
+        self.assertIn("nowhere is not a registered project; nothing was changed", err)
         # Only by: retro skips the allowlist.
         second["origin"].update(by="explorer", project="other")
         self.assertEqual(self.run_human(factory.suggest_cmd, "approve", second["id"], "A", typed=second["id"])[0], 2)

@@ -13,7 +13,9 @@ into a ranked `findings.md` and up to 5 gated idea cards.
    `transcripts` and `host`.
 4. Write its reply byte for byte to `out`.
 5. Run `python3 "$RUNTIME" retro admit <run>`. Report its output and the `findings`
-   path. Exit 3 means the agent found nothing or no card was admitted.
+   path. Exit 3 means the agent found nothing, autonomy is paused, or every card was a
+   duplicate or over a cap. In the last two cases `findings.md` is written, so still
+   report its path.
 
 Do the retro through these commands only, and edit neither the reply nor the run folder.
 Never run suggest approve or any autonomy command; a human approves each card.

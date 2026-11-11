@@ -146,15 +146,18 @@ flowchart LR
 
 ## Retro cards
 
-`/factory retro` admits the retro agent's cards through the same `suggest admit`. A
-retro file has the keys `schema`, `by: "retro"`, `run` and `suggestions`, with no
-`project` or `commit`. Files without `by` behave exactly as before.
+`retro admit` admits the retro agent's cards through the same admission code, in
+retro mode. The caller sets the mode, never the file. A retro file has the keys
+`schema`, `by: "retro"`, `run` and `suggestions`, with no `project` or `commit`. The
+`suggest admit` command always runs in explorer mode, so a file carrying `by` exits 2
+there with nothing admitted, and explorer files behave exactly as before.
 
 - **Per-card project.** Each suggestion carries its own registered `project`. An
   unregistered one exits 2 with nothing admitted. The title, fingerprint and open cap
   use that project.
 - **No allowlist.** Admission skips the one-project allowlist for a retro file, and
-  `suggest approve` skips it for a card whose `origin.by` is `retro`. Approval still
+  `suggest approve` skips it for a card whose `origin.by` is `retro`, which only
+  `retro admit` writes. Approval still
   needs a registered project and a human typing at a terminal.
 - **Unchanged gates.** The kill switch, the daily and open caps, fingerprint dedupe,
   the field limits and the untrusted-text checks apply as they do to explorer files.
