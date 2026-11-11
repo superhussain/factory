@@ -34,20 +34,24 @@ const freezeClock = (page) =>
       }
     };
   });
+// Host cards are rebuilt by every renderHosts(), and one load renders more than once.
+// Find and use a card node in one in-page call so it cannot detach in between.
 const setValue = (page, selector, value) =>
-  page.$eval(
-    selector,
-    (el, v) => {
+  page.evaluate(
+    (s, v) => {
+      const el = document.querySelector(s);
       el.value = v;
       el.dispatchEvent(new Event("input", { bubbles: true }));
     },
+    selector,
     value,
   );
-// Host-card buttons are rebuilt by every renderHosts(), and one load renders twice.
-// Click and read styles in-page so the node cannot detach between find and use.
-const clickNow = (page, selector) => page.$eval(selector, (el) => el.click());
+const clickNow = (page, selector) =>
+  page.evaluate((s) => document.querySelector(s).click(), selector);
+const read = (page, selector, name) =>
+  page.evaluate((s, n) => document.querySelector(s)[n], selector, name);
 const cardMessage = (page, id) =>
-  page.$eval(`.host-card[data-id="${id}"] .host-msg`, (el) => el.textContent);
+  read(page, `.host-card[data-id="${id}"] .host-msg`, "textContent");
 const waitCardMessage = (page, id, text) =>
   page.waitForFunction(
     (i, t) => document.querySelector(`.host-card[data-id="${i}"] .host-msg`)?.textContent === t,
@@ -55,8 +59,7 @@ const waitCardMessage = (page, id, text) =>
     id,
     text,
   );
-const badge = (page, id) =>
-  page.$eval(`.host-card[data-id="${id}"] .host-badge`, (el) => el.textContent);
+const badge = (page, id) => read(page, `.host-card[data-id="${id}"] .host-badge`, "textContent");
 const rows = (page, group) =>
   page.$$eval(`#${group} label`, (labels) =>
     labels.map((label) => [
@@ -159,17 +162,17 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await live.reload({ waitUntil: "domcontentloaded" });
       await waitForBoard(live);
       await live.waitForSelector('.host-card[data-id="test-host"]', wait);
-      assert.equal(await live.$eval("#host-test-host-label", (el) => el.value), "Renamed");
-      assert.equal(await live.$eval("#host-test-host-max", (el) => el.value), "3");
+      assert.equal(await read(live, "#host-test-host-label", "value"), "Renamed");
+      assert.equal(await read(live, "#host-test-host-max", "value"), "3");
       await setValue(live, "#host-test-host-max", "0");
       await clickNow(live, '[aria-label="Save Renamed"]');
       await waitCardMessage(live, "test-host", "Saved.");
       await live.reload({ waitUntil: "domcontentloaded" });
       await waitForBoard(live);
       await live.waitForSelector('.host-card[data-id="test-host"]', wait);
-      assert.equal(await live.$eval("#host-test-host-max", (el) => el.value), "0");
+      assert.equal(await read(live, "#host-test-host-max", "value"), "0");
       assert.ok(
-        (await live.$eval('.host-card[data-id="test-host"]', (li) => li.textContent)).includes(
+        (await read(live, '.host-card[data-id="test-host"]', "textContent")).includes(
           "Picks up: nothing while paused. Max in flight is 0.",
         ),
       );
@@ -194,18 +197,18 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await clickNow(live, '[aria-label="Save Renamed"]');
       await waitCardMessage(live, "test-host", CONFLICT);
       assert.equal(
-        await live.$eval('.host-card[data-id="test-host"] .host-msg', (el) =>
-          el.getAttribute("role"),
+        await live.evaluate(() =>
+          document.querySelector('.host-card[data-id="test-host"] .host-msg').getAttribute("role"),
         ),
         "alert",
       );
-      assert.equal(await live.$eval("#host-test-host-label", (el) => el.value), "Mine");
+      assert.equal(await read(live, "#host-test-host-label", "value"), "Mine");
     });
 
     await t.test("hosts H3 retire then new code", async () => {
       await live.click("#hosts-load");
       await live.waitForSelector('[aria-label="Retire Elsewhere"]', wait);
-      assert.equal(await live.$eval("#host-test-host-label", (el) => el.value), "Mine");
+      assert.equal(await read(live, "#host-test-host-label", "value"), "Mine");
       await clickNow(live, '[aria-label="Retire Elsewhere"]');
       await waitCardMessage(live, "test-host", "Retired.");
       await live.waitForFunction(
@@ -261,8 +264,8 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           document.querySelector('.host-card[data-id="studio-mac"]').textContent.includes("sample"),
         wait,
       );
-      const cards = await page.$$eval(".host-card", (lis) =>
-        lis.map((li) => ({
+      const cards = await page.evaluate(() =>
+        [...document.querySelectorAll(".host-card")].map((li) => ({
           id: li.dataset.id,
           heading: li.querySelector("h4").textContent,
           seen: li.querySelector(".host-seen")?.textContent ?? null,
@@ -330,7 +333,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           "Set 0 to pause pickup on this host. Jobs waiting on a human never count toward this limit.",
         ],
       );
-      const studio = await page.$eval('.host-card[data-id="studio-mac"]', (li) => li.textContent);
+      const studio = await read(page, '.host-card[data-id="studio-mac"]', "textContent");
       assert.ok(
         studio.includes(
           "macOS, launchd, last pickup 2026-01-01 11:00 UTC. Bundle 1a2b3c4. Doctor ok.",
@@ -339,18 +342,20 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       );
       assert.ok(studio.includes("fallbackopencodeexample-model-bnone2026-01-01 13:00 UTC"), studio);
       assert.ok(
-        (await page.$eval('.host-card[data-id="lab-linux"]', (li) => li.textContent)).includes(
+        (await read(page, '.host-card[data-id="lab-linux"]', "textContent")).includes(
           "Doctor failed: schedule-entry.",
         ),
       );
-      await page.click('[aria-label="Confirm New box"]');
+      await clickNow(page, '[aria-label="Confirm New box"]');
       await waitCardMessage(page, "new-box", "Confirmed. It picks up work now.");
       assert.deepEqual(confirmed, { body: '{"state":"active"}', ifMatch: '"etag-new-box"' });
       assert.equal(await cardMessage(page, "new-box"), "Confirmed. It picks up work now.");
 
       await st.test("hosts H6 keyboard and mobile width on hosts", async () => {
-        const wanted = await page.$$eval("#hosts-list button, #hosts-list input", (els) =>
-          els.map((el) => el.id || el.getAttribute("aria-label")),
+        const wanted = await page.evaluate(() =>
+          [...document.querySelectorAll("#hosts-list button, #hosts-list input")].map(
+            (el) => el.id || el.getAttribute("aria-label"),
+          ),
         );
         const reached = new Set();
         await page.focus("#hosts-settings-heading");
@@ -392,8 +397,9 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await page.click("#hosts-load");
       await page.waitForFunction(() => document.querySelectorAll(".host-card").length === 5, wait);
       const pills = (id) =>
-        page.$$eval(`.host-card[data-id="${id}"] .host-badge`, (els) =>
-          els.map((el) => el.textContent),
+        page.evaluate(
+          (s) => [...document.querySelectorAll(s)].map((el) => el.textContent),
+          `.host-card[data-id="${id}"] .host-badge`,
         );
       assert.deepEqual(await pills("new-box"), ["Paired, not confirmed", "Paused"]);
       assert.deepEqual(await pills("old-laptop"), ["Retired"]);
@@ -430,7 +436,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
         await (await page.$(card)).screenshot({ path: join(captureDir, "host-card-390.png") });
       }
       assert.equal(
-        await page.$eval(`${card} .host-triage`, (el) => el.textContent),
+        await read(page, `${card} .host-triage`, "textContent"),
         "Backlog triage failing since 2026-01-01 09:00 UTC. Pickup still launches ideas. " +
           "See the host's pickup log for the error.",
       );
@@ -440,10 +446,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       const alert = "rgb(209, 52, 47)";
       assert.equal(await color(`${card} .host-triage`), alert);
       const doctor = '.host-card[data-id="lab-linux"] .host-doctor';
-      assert.equal(
-        await page.$eval(doctor, (el) => el.textContent),
-        "Doctor failed: schedule-entry.",
-      );
+      assert.equal(await read(page, doctor, "textContent"), "Doctor failed: schedule-entry.");
       assert.equal(await color(doctor), alert);
       assert.equal(await page.$(`${card} .host-doctor`), null);
       assert.equal(
@@ -477,9 +480,12 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
         }, table),
         true,
       );
-      assert.equal(await page.$eval(`${fallback} td`, (el) => el.textContent), "fallback");
+      assert.equal(await read(page, `${fallback} td`, "textContent"), "fallback");
       assert.deepEqual(
-        await page.$$eval(`${fallback} td`, (cells) => cells.map((el) => el.dataset.label)),
+        await page.evaluate(
+          (s) => [...document.querySelectorAll(s)].map((el) => el.dataset.label),
+          `${fallback} td`,
+        ),
         ["Route", "Provider", "Model", "Effort", "Limited until"],
       );
       assert.equal(await display(), "block");

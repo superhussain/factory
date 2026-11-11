@@ -199,6 +199,13 @@ test("card actions", { timeout: 180000 }, async (t) => {
         {},
         ID,
       );
+      assert.equal(
+        await page.evaluate(
+          (sel) => document.activeElement === document.querySelector(sel),
+          TRIGGER,
+        ),
+        true,
+      );
       assert.equal(typeof (await boardJob(origin, ID)).paused?.at, "string");
       assert.equal(await page.$eval("#detail", (el) => el.hidden), true);
       assert.equal(await page.evaluate(() => location.hash), "");

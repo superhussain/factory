@@ -287,6 +287,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .cards[hidden] { display: none; }
   .empty { color: var(--muted); font-size: 12px; padding: 8px 2px; opacity: .7; }
   .archive-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+  .blank .archive-list { align-items: center; margin-top: 16px; }
   .archive-head { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin: 4px 0 0; }
   .archive-count { font-size: 12px; color: var(--muted); margin: 0; }
   .archive-error { font-size: 12px; color: var(--alert); margin: 0; }
@@ -2581,8 +2582,8 @@ listenTabs('pipeline-note-tabs', PIPELINE_NOTE_TABS, id => {
 });
 // Registered before the generic listeners so the draft reads the filled N.
 $('pipeline-archive-mode').addEventListener('input', () => {
-  const n = ARCHIVE_DEFAULT_N[$('pipeline-archive-mode').value];
-  if ($('pipeline-archive-n').value === '' && n) $('pipeline-archive-n').value = String(n);
+  const n = ARCHIVE_DEFAULT_N[$('pipeline-archive-mode').value], field = $('pipeline-archive-n');
+  if (n && (field.value === '' || Object.values(ARCHIVE_DEFAULT_N).map(String).includes(field.value))) field.value = String(n);
 });
 for (const id of ['pipeline-merge', 'pipeline-rounds', ...PIPELINE_GATES.map(gate => 'pipeline-gate-' + gate),
     'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules', 'pipeline-archive-mode', 'pipeline-archive-n',
@@ -2876,12 +2877,17 @@ function renderBoard() {
   const focusRaw = focused?.dataset.raw;
   const focusStage = focused?.dataset.stage;
   const focusClass = focused && (focused.classList.contains('more') ? 'more' : focused.classList.contains('archive-more') ? 'archive-more' : 'column-toggle');
-  if (!jobs.length && !backlog.length) {
+  // A redraw replaces every card node, so focus goes back to the same job's card or menu trigger.
+  const focusedCard = $('board').contains(document.activeElement) ? document.activeElement.closest('.card, .card-actions') : null;
+  const focusCard = focusedCard && { trigger: focusedCard.classList.contains('card-actions'), id: focusedCard.dataset.id ?? focusedCard.dataset.actions };
+  if (!jobs.length && !backlog.length && !archiveList.open) {
     $('board').innerHTML = '<div class="blank"><h2>No jobs yet</h2>' +
       '<p>Start one with <code>/factory &lt;feature&gt;</code> or <code>/factory next</code>.</p>' +
-      '<p>Jobs show up here as they move through the loop.</p></div>';
+      '<p>Jobs show up here as they move through the loop.</p>' +
+      (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
     if (!settingsShown) document.title = BASE_TITLE;
+    if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
     return;
   }
@@ -2926,7 +2932,12 @@ function renderBoard() {
   else if (focused) {
     const control = $('board').querySelector('.' + focusClass + '[data-stage="' + focusStage + '"]') ||
       $('board').querySelector('.column-toggle[data-stage="' + focusStage + '"]');
-    control.focus({ preventScroll: true });
+    control?.focus({ preventScroll: true });
+  }
+  if (focusCard) {
+    [...$('board').querySelectorAll(focusCard.trigger ? '.card-actions' : '.card')]
+      .find((el) => (focusCard.trigger ? el.dataset.actions : el.dataset.id) === focusCard.id)
+      ?.focus({ preventScroll: true });
   }
   syncCardActions();
 }
@@ -3255,6 +3266,7 @@ async function loadArchivePage(stage) {
       archivedJobs.set(row.id, row);
       if (!archiveList.rows.some((x) => x.id === row.id)) archiveList.rows.push(row);
     }
+    if (!archiveList.open && !jobs.length && !backlog.length) for (const s of TERMINAL) columnCollapsed.set(s, false);
     Object.assign(archiveList, { open: true, page: body.page, pages: body.pages, total: body.total });
   } catch {
     archiveList.error = 'Could not load archived jobs. Try again.';

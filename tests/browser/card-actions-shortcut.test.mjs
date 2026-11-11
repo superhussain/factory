@@ -190,6 +190,15 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
         {},
         CARD(ID),
       );
+      await page.mouse.move(5, 5);
+      await (await page.$(".col.pr-open")).screenshot({ path: `${SHOTS}card-focus-1440.png` });
+      assert.equal(
+        await page.evaluate(
+          (sel) => document.activeElement === document.querySelector(sel),
+          CARD(ID),
+        ),
+        true,
+      );
       assert.equal(typeof (await boardJob(origin, ID)).paused?.at, "string");
       assert.equal(await page.$eval("#job-picker", (el) => el.open), false);
       assert.equal(await page.$eval("#detail", (el) => el.hidden), true);

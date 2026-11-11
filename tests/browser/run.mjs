@@ -679,11 +679,41 @@ async function capture(outdir, referencePath) {
       );
       await page.select("#pipeline-archive-mode", "");
       await page.select("#pipeline-archive-mode", "count");
+      await page.waitForFunction(() => {
+        const t = document.getElementById("pipeline-status").textContent;
+        return t.startsWith("Fix before saving") || t === "Unsaved changes";
+      });
+      await page.evaluate(() =>
+        document.getElementById("pipeline-archive").scrollIntoView({ block: "start" }),
+      );
+      const cropped = await page.evaluate(() =>
+        ["pipeline-archive", "pipeline-status"].filter((id) => {
+          const r = document.getElementById(id).getBoundingClientRect();
+          return r.top < 0 || r.bottom > window.innerHeight;
+        }),
+      );
+      if (cropped.length) throw new Error("archive-prefill capture crops " + cropped.join(", "));
+    };
+    await view("archive-prefill", 1280, 900, "light", openArchivePrefill);
+    const openArchiveSwap = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/pipeline";
+      });
+      await page.waitForSelector("#settings-pipeline:not([hidden])");
+      await page.select("#pipeline-scope", "global");
+      await page.waitForFunction(
+        () =>
+          !document.getElementById("pipeline-archive").hidden &&
+          !document.getElementById("pipeline-archive-mode").disabled,
+      );
+      await page.select("#pipeline-archive-mode", "");
+      await page.select("#pipeline-archive-mode", "age");
+      await page.select("#pipeline-archive-mode", "count");
       await page.evaluate(() =>
         document.getElementById("pipeline-archive").scrollIntoView({ block: "center" }),
       );
     };
-    await view("archive-prefill", 1280, 900, "light", openArchivePrefill);
+    await view("archive-swap", 1280, 900, "light", openArchiveSwap);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
     const openArchivedLoadFailed = async (page, side) => {
       await page.evaluate(() => {
@@ -724,6 +754,27 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("archive-list-error", 1280, 900, "light", openArchiveListError);
+    // The reference has no archive button, so its side shows the plain blank board.
+    const openEmptyArchive = async (page) => {
+      await page.evaluate(() => {
+        jobs = [];
+        backlog = [];
+        boardArchived = true;
+        renderBoard();
+      });
+    };
+    const openEmptyArchiveLoaded = async (page, side) => {
+      await openEmptyArchive(page);
+      if (side === "after") {
+        await page.click(".blank .archive-more");
+        await page.waitForSelector('.col.closed .archive-list .card[data-id="413-old-suggestion"]');
+        await page.evaluate(() =>
+          document.querySelector(".col.closed").scrollIntoView({ block: "start", inline: "start" }),
+        );
+      }
+    };
+    await view("empty-archive", 1280, 900, "light", openEmptyArchive);
+    await view("empty-archive-loaded-mobile", 390, 844, "dark", openEmptyArchiveLoaded);
     const openArchiveJumper = async (page, side) => {
       archivedBoard = true;
       try {
