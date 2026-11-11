@@ -4873,7 +4873,8 @@ function syncJobActions() {
   const focused = document.activeElement;
   closeJobActions(false);
   // Chrome may already have blurred the hidden item, so focus on body counts as focus lost from the menu.
-  if (wasShown && !$('detail').hidden && ($('d-actions-wrap').contains(focused) || focused === document.body)) $('d-close').focus();
+  if (wasShown && !$('detail').hidden &&
+      ($('d-actions-wrap').contains(focused) || focused === document.body)) $('d-close').focus();
 }
 
 function syncIdeaEditor() {
