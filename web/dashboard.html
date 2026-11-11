@@ -1588,7 +1588,7 @@ function actionsOpener() {
 function openJobPicker() {
   if (document.querySelector('dialog[open]:not(#job-picker)')) return;
   if ($('job-picker').open && pickerMode === 'actions') {
-    // Cmd+K in actions mode swaps to the normal jumper; Escape still returns to the card.
+    // Cmd+K in actions mode swaps to the normal jumper.
     pickerFocus = actionsOpener();
     pickerMode = 'job';
     pickerActions = null;
