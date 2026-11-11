@@ -90,6 +90,31 @@ test("archived jobs from the blank board", { timeout: 180000 }, async (t) => {
       );
     });
 
+    await t.test("the hosts redraw keeps focus on the archive button", async () => {
+      const page = await openPage();
+      await page.waitForSelector(".blank .archive-more", wait);
+      const keeps = async () => {
+        await page.evaluate(async () => {
+          window.__oldButton = document.activeElement;
+          await loadHosts();
+        });
+        assert.deepEqual(
+          await page.evaluate(() => [
+            document.activeElement.matches(".blank .archive-more"),
+            document.activeElement !== window.__oldButton,
+          ]),
+          [true, true],
+        );
+      };
+      await page.focus(".blank .archive-more");
+      await keeps();
+      failNext = true;
+      await page.keyboard.press("Enter");
+      await page.waitForSelector(".blank .archive-error", wait);
+      await page.focus(".blank .archive-more");
+      await keeps();
+    });
+
     await t.test("the click loads page 1 and draws the columns", async () => {
       const page = await openPage();
       await page.waitForSelector(".blank .archive-more", wait);
