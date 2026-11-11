@@ -58,7 +58,7 @@ function helpers(fetch, extra = {}) {
     ) +
       script.slice(script.indexOf("function ideaSlug("), script.indexOf("let ideaEditor =")) +
       "\nthis.api = { backlogItems, parseBacklogContext, backlogAnswersText, loadBacklog, addBacklogJob, backlogReworkHistory, markBacklogLine, removeBacklogJob," +
-      " casBacklog, decideBacklog, backlogBusy, backlogPending, BOARD_UNCHANGED, get backlog() { return backlog; } };",
+      " casBacklog, decideBacklog, boardSaveError, backlogBusy, backlogPending, BOARD_UNCHANGED, get backlog() { return backlog; } };",
     context,
   );
   return { api: context.api, context };
@@ -327,6 +327,28 @@ async function offline() {
     s.backlog,
     "- [x] sample: First item (001-first-item)\n- [ ] sample: Third (blocked-by 002-x)\n",
   );
+  const uncertain = (message) => Object.assign(new Error(message), { uncertain: true });
+  assert.equal(
+    ctx.boardSaveError(uncertain("saving the board failed: 503 Storage is busy."), "Hint."),
+    "Not confirmed: saving the board failed: 503 Storage is busy. Hint.",
+  );
+  assert.equal(
+    ctx.boardSaveError(uncertain("saving the board failed: 503 Storage is busy.\n"), "Hint."),
+    "Not confirmed: saving the board failed: 503 Storage is busy. Hint.",
+  );
+  assert.equal(
+    ctx.boardSaveError(uncertain("connection reset"), "Hint."),
+    "Not confirmed: connection reset. Hint.",
+  );
+  assert.equal(ctx.boardSaveError(new Error("nope."), "Hint."), "nope.");
+  let fail5xx = 1;
+  s = store({ updated: "old", jobs: [] }, backlogText, {
+    put: (key) => (key === "backlog" && fail5xx-- > 0 ? response("Storage is busy.", 503) : null),
+  });
+  await assert.rejects(helpers(s.fetch).api.decideBacklog(first, "approved", "", ""), {
+    message:
+      "Not confirmed: saving the backlog failed: 503 Storage is busy. Try again. It will not add a duplicate.",
+  });
   const busy = [];
   s = store({ updated: "old", jobs: [] }, backlogText, {
     get: (key, st) => {
