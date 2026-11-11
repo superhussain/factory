@@ -36,6 +36,7 @@ const ROWS = [
   row("412-fix-login", "Fix login", "merged", "2026-09-01T12:00:00Z", {
     round: 1,
     branch: "factory/412-fix-login",
+    pr: "https://github.com/example/sample/pull/12",
   }),
   ...Array.from({ length: 49 }, (_, k) =>
     row(
@@ -161,6 +162,33 @@ test("archived jobs page under the terminal columns", { timeout: 180000 }, async
         await page.$eval(".archive-count", (el) => el.textContent),
         "52 of 52 archived jobs loaded",
       );
+    });
+
+    await t.test("archived cards have their own style", async () => {
+      const styles = await page.evaluate(() => {
+        const css = (el, ...props) => props.map((p) => getComputedStyle(el)[p]);
+        const card = (id) => document.querySelector(`.card[data-id="${id}"]`);
+        const old = card("413-old-suggestion");
+        const login = card("412-fix-login");
+        const type = ["fontSize", "letterSpacing", "textTransform", "fontWeight", "color"];
+        return {
+          frame: css(old, "borderTopStyle", "backgroundColor", "boxShadow"),
+          noPr: [
+            css(old.querySelector(".id"), "paddingRight")[0],
+            css(old.querySelector(".proj"), "paddingRight")[0],
+          ],
+          withPr: [
+            css(login.querySelector(".id"), "paddingRight")[0],
+            css(login.closest(".card-wrap").querySelector(".pr-link"), "right")[0],
+          ],
+          head: css(document.querySelector(".archive-head"), ...type),
+          col: css(document.querySelector(".col.closed h2"), ...type),
+        };
+      });
+      assert.deepEqual(styles.frame, ["dashed", "rgba(0, 0, 0, 0)", "none"]);
+      assert.deepEqual(styles.noPr, ["0px", "0px"]);
+      assert.deepEqual(styles.withPr, ["64px", "16px"]);
+      assert.deepEqual(styles.head, styles.col);
     });
 
     await t.test("a redraw keeps the list", async () => {
