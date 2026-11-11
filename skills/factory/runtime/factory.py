@@ -403,9 +403,9 @@ def api(factory, method, path, body=None, ok=(200,), headers=None, raw=False):
             break
         except (OSError, ValueError) as e:
             if not cert_error(e):
-                fail(f"can't reach {url}: {e}", 5)
+                fail(f"can't reach {url}: {printable_line(str(e), 200)}", 5)
             if attempt or not os.path.isfile(FALLBACK_CA_FILE) or os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR"):
-                fail(f"can't reach {url}: {e}. Set SSL_CERT_FILE to your system CA bundle and retry.", 5)
+                fail(f"can't reach {url}: {printable_line(str(e), 200)}. Set SSL_CERT_FILE to your system CA bundle and retry.", 5)
             opener = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(
                 context=ssl.create_default_context(cafile=FALLBACK_CA_FILE)))
     # Access answers a bad or missing token with a redirect to its login page.
@@ -1338,7 +1338,7 @@ def escalation_cmd(target, round_text):
             status, _, text = api(home, "POST", "/api/review/escalation", body, ok=(200, 400, 404, 502, 503),
                                   headers={"Content-Type": "application/json"})
     except SystemExit:
-        status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
+        status, text = printable_line(captured.getvalue().replace("factory.py: ", "", 1), 300) or "unknown error", ""
     verdict = escalation_verdict(text) if status == 200 else None
     if verdict is None:
         if status == 200:
