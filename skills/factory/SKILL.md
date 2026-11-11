@@ -638,7 +638,7 @@ migration; their command and JSON output contract are unchanged.
   secret, data, protocol, storage, dependency, workflow or permission risk, and needs
   no design choice. Queue it as a follow-up only when it is outside the spec, large,
   risky, needs its own design, or needs a person. Absorbing never widens the spec
-  (F10) or adds a review round (F3). The builder lists absorbed items under
+  (F10) or raises the round cap (F3). The builder lists absorbed items under
   `### Absorbed` and the rest under `### Left open` in its build.md run section.
   Reviewers split nits into `### Fix now` and `### Follow-up`. The approver weighs
   what is still open before APPROVE.
@@ -837,7 +837,8 @@ feature.
    into the new round folder and set them to `PASS` in the new board entry; only the
    re-run reviewers start `pending`.
 6. All PASS: set stage `approve` and spawn `factory-approver` with `Rounds left: <n>`,
-   the review rounds this build cycle still allows. It writes `decision.md`.
+   the review rounds this build cycle still allows, or 0 when the approver already
+   returned CHANGES this cycle. It writes `decision.md`.
    APPROVE ships the PR and merges it as Rules describes. ESCALATE ships a held PR
    at `pr-open` with `escalated` true and the board note "escalated:" plus the
    decision's reason. The PR URL goes in `pr`, not the note. CHANGES is a normal fix
@@ -859,9 +860,10 @@ feature.
    `build.md`'s last run lists under `### Left open` (or, in an older build.md, as
    unresolved or left out), and final-round review nits under `### Fix now`,
    `### Follow-up` or an older nits heading that the merged diff did not apply. Items
-   under `### Absorbed` are done, not open. Leave out spec sub-jobs (step 8 queues them),
-   `## Device check` items, and anything already on `$BASE`. Queue each agent-doable
-   item with `factory.py backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
+   under `### Absorbed` are done, not open. Leave out spec sub-jobs (step 8 queues
+   them), `## Device check` items, and anything already on `$BASE`. Queue each
+   agent-doable item with
+   `factory.py backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
    writing the file first as in step 8: first line `Recommend: approve`, then
    `Left open by <id> (PR #<n>): <source file>`. List person-only items but never
    queue them and never set `needs` for them. Then append `## Follow-ups` to
