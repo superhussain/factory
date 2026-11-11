@@ -153,12 +153,15 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
     });
 
     await t.test("menu open", async () => {
-      for (const blur of [false, true]) {
+      for (const [blur, key] of [
+        [false, "a"],
+        [true, "."],
+      ]) {
         await page.click(`.card-actions[data-actions="${ID}"]`);
         await page.waitForSelector(`${MENU}:not([hidden])`);
         await page.hover(CARD(IDEA));
         if (blur) await page.evaluate(() => document.activeElement.blur());
-        await page.keyboard.press("a");
+        await page.keyboard.press(key);
         await page.waitForFunction(() => document.getElementById("job-picker").open);
         assert.equal((await picker(page)).heading, `Actions for ${ID}`);
         assert.equal(await page.$eval(MENU, (el) => el.hidden), true);

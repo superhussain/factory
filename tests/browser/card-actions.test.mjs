@@ -355,6 +355,7 @@ test("card actions", { timeout: 180000 }, async (t) => {
           height: Math.max(a.bottom, b.bottom) + 8 - y,
         };
       }, TRIGGER);
+      await page.mouse.move(0, 0);
       await page.screenshot({
         path: `${SHOTS}card-menu-poll-focus-1440.png`,
         clip,
@@ -365,6 +366,7 @@ test("card actions", { timeout: 180000 }, async (t) => {
         expanded: "true",
         focus: "d-follow-tracer",
       });
+      assert.ok((await page.$eval(MENU, (el) => el.getBoundingClientRect().width)) < 400);
       await page.keyboard.press("Escape");
     });
 
