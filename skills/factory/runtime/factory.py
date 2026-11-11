@@ -4915,7 +4915,7 @@ def archive_workspace(target, *flags):
     if not archived:
         code, _ = paseo_run(["archive", agent, "--force"])
         if code:
-            fail(f"paseo archive {agent} exit {code}")
+            fail(f"workspace {wks} archived, but agent archive failed: paseo archive {agent} exit {code}")
 
 
 def stuck(*args):
