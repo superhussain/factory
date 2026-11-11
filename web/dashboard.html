@@ -188,13 +188,23 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .project-list thead th { font-size: 12px; color: var(--muted); font-weight: 600; }
   .project-list th .muted { display: block; font-weight: 400; }
   .hosts-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 10px; }
-  .host-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+  .host-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; container-type: inline-size; }
   .host-card h4 { display: inline; margin: 0 8px 0 0; }
   .host-id { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .host-badge { display: inline-block; font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; margin-left: 6px; }
   .host-seen, .host-card p { font-size: 12px; color: var(--muted); margin: 6px 0; }
   .host-routes { display: block; overflow-x: auto; font-size: 12px; border-collapse: collapse; margin: 6px 0; }
   .host-routes th, .host-routes td { text-align: left; padding: 2px 8px 2px 0; white-space: nowrap; }
+  @container (max-width: 440px) {
+    .host-routes caption, .host-routes tbody, .host-routes tr, .host-routes td { display: block; }
+    .host-routes caption { text-align: left; }
+    .host-routes thead { display: none; }
+    .host-routes tr + tr { border-top: 1px solid var(--line); }
+    .host-routes tr { padding: 4px 0; }
+    .host-routes td { white-space: normal; overflow-wrap: anywhere; padding: 0; }
+    .host-routes td:first-child { font-weight: 600; }
+    .host-routes td:not(:first-child)::before { content: attr(data-label) ": "; color: var(--muted); }
+  }
   .host-card input, #host-add input { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .host-code { border: 1px solid var(--accent); border-radius: 8px; padding: 12px; margin: 0 0 12px; }
   .host-code pre { overflow-x: auto; }
@@ -2665,9 +2675,14 @@ function hostCard(h) {
     const st = h.status;
     li.append(make('p', {textContent:st.os + ', ' + st.scheduler + ', last pickup ' + (st.last_pickup ? hostUtc(st.last_pickup) : 'never') + '. Bundle ' + (st.bundle?.commit?.slice(0, 7) ?? 'unknown') + '. Doctor ' + (st.doctor === 'ok' ? 'ok' : 'failed: ' + st.doctor.join(', ')) + '.'}));
     if (st.triage_failed_since) li.append(make('p', {className:'host-triage', textContent:'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'}));
-    const cells = (tag, values) => make('tr', {}, ...values.map(value => make(tag, {textContent:value})));
+    const heads = ['Route', 'Provider', 'Model', 'Effort', 'Limited until'];
+    const cells = (tag, values) => make('tr', {}, ...values.map((value, i) => {
+      const cell = make(tag, {textContent:value});
+      cell.dataset.label = heads[i];
+      return cell;
+    }));
     li.append(make('table', {className:'host-routes'}, make('caption', {textContent:'Routes (set on the device)'}),
-      make('thead', {}, cells('th', ['Route', 'Provider', 'Model', 'Effort', 'Limited until'])),
+      make('thead', {}, cells('th', heads)),
       make('tbody', {}, ...st.routes.map(r => cells('td', [r.name, r.provider, r.model, r.effort ?? 'none', r.limited_until ? hostUtc(r.limited_until) : 'none'])))));
   }
   const picks = hostProjects.get(h.id);
