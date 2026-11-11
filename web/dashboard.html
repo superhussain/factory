@@ -2581,8 +2581,8 @@ listenTabs('pipeline-note-tabs', PIPELINE_NOTE_TABS, id => {
 });
 // Registered before the generic listeners so the draft reads the filled N.
 $('pipeline-archive-mode').addEventListener('input', () => {
-  const n = ARCHIVE_DEFAULT_N[$('pipeline-archive-mode').value];
-  if ($('pipeline-archive-n').value === '' && n) $('pipeline-archive-n').value = String(n);
+  const n = ARCHIVE_DEFAULT_N[$('pipeline-archive-mode').value], field = $('pipeline-archive-n');
+  if (n && (field.value === '' || Object.values(ARCHIVE_DEFAULT_N).map(String).includes(field.value))) field.value = String(n);
 });
 for (const id of ['pipeline-merge', 'pipeline-rounds', ...PIPELINE_GATES.map(gate => 'pipeline-gate-' + gate),
     'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules', 'pipeline-archive-mode', 'pipeline-archive-n',
