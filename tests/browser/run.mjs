@@ -318,6 +318,7 @@ async function capture(outdir, referencePath) {
 
     let archivedBoard = false;
     let archivePageFails = false;
+    let archiveSearchFails = false;
     let longProject = false;
     async function view(name, width, height, theme, prepare, touch = false) {
       for (const side of ["before", "after"]) {
@@ -404,6 +405,12 @@ async function capture(outdir, referencePath) {
                       pages: 2,
                       total: 52,
                     }),
+                  });
+                if (archiveSearchFails && target.searchParams.has("q"))
+                  return request.respond({
+                    status: 500,
+                    contentType: "text/plain",
+                    body: "unavailable",
                   });
                 const q = target.searchParams.get("q");
                 if (q !== null) {
@@ -869,6 +876,25 @@ async function capture(outdir, referencePath) {
       }
     };
     await view("jumper-archive-empty", 1280, 900, "light", openArchiveEmpty);
+    const openArchiveFailed = async (page) => {
+      archivedBoard = true;
+      archiveSearchFails = true;
+      try {
+        await page.evaluate(() => poll());
+        await openJumper(page);
+        await page.type("#job-search", "zzz");
+        await clickArchiveSearch(page);
+        await page.waitForFunction(() =>
+          [...document.querySelectorAll("#job-results .meta")].some(
+            (el) => el.textContent === "Could not search archived jobs. Pick to try again.",
+          ),
+        );
+      } finally {
+        archivedBoard = false;
+        archiveSearchFails = false;
+      }
+    };
+    await view("jumper-archive-failed", 1280, 900, "light", openArchiveFailed);
     await view("backlog-triage-desktop", 1440, 900, "light", openTriage);
     await view("backlog-triage-mobile", 390, 844, "dark", openTriage);
     await view("backlog-triage-open-desktop", 1440, 900, "light", openTriagePrefetched);
