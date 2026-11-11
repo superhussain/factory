@@ -272,7 +272,7 @@ test("card lines", { timeout: 240000 }, async (t) => {
             el.getAttribute("href"),
             el.textContent,
           ]),
-          ["#041-sample-report", "follow-up of 041-sample-report"],
+          ["#041-sample-report", "042-sample-export: follow-up of 041-sample-report"],
         );
         assert.equal(await page.$('.card-wrap:has(.card[data-id="043-orphan"]) a.ref-focus'), null);
         await page.keyboard.press("Tab");
