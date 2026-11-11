@@ -100,6 +100,7 @@ const TOKENS = {
   },
 };
 const CARD = '.card[data-id="042-sample-export"]';
+const NEEDS_CARD = '.card[data-id="045-sample-needs"]';
 
 // Each read queries and measures in one evaluate, so a board redraw cannot detach the nodes.
 const cardLines = (page, id) =>
@@ -160,17 +161,12 @@ test("card lines", { timeout: 240000 }, async (t) => {
         return { x, y, width, height };
       }, CARD);
       await page.screenshot({ path: `${SHOTS}card-lines${suffix}.png`, clip });
-      await page.evaluate(() =>
-        document
-          .querySelector('.card[data-id="045-sample-needs"]')
-          .scrollIntoView({ block: "center", inline: "center" }),
-      );
-      const needsClip = await page.evaluate(() => {
-        const { x, y, width, height } = document
-          .querySelector('.card[data-id="045-sample-needs"]')
-          .getBoundingClientRect();
+      const needsClip = await page.evaluate((s) => {
+        const el = document.querySelector(s);
+        el.scrollIntoView({ block: "center", inline: "center" });
+        const { x, y, width, height } = el.getBoundingClientRect();
         return { x: x + scrollX, y: y + scrollY, width, height };
-      });
+      }, NEEDS_CARD);
       await page.screenshot({ path: `${SHOTS}card-needs${suffix}.png`, clip: needsClip });
 
       await t.test(`lines ${scheme}`, async () => {
