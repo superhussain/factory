@@ -397,6 +397,12 @@ async function capture(outdir, referencePath) {
                 body: JSON.stringify({ jobs, total: jobs.length }),
               });
             }
+            if (target.searchParams.get("id") === "413-expired-link")
+              return request.respond({
+                status: 401,
+                contentType: "text/plain",
+                body: "unauthorized",
+              });
             if (target.searchParams.get("id") === "411-sync-retry")
               return request.respond({
                 status: 503,
@@ -721,6 +727,20 @@ async function capture(outdir, referencePath) {
       else await new Promise((resolve) => setTimeout(resolve, 1000));
     };
     await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
+    const openArchivedLoadSignin = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#413-expired-link";
+      });
+      if (side === "after")
+        await page.waitForFunction(() => !document.getElementById("conn-banner").hidden);
+      else
+        await page.waitForFunction(() =>
+          document
+            .getElementById("board-status")
+            .textContent.startsWith("Could not load archived job"),
+        );
+    };
+    await view("archived-load-signin", 1280, 900, "light", openArchivedLoadSignin);
     await view("archive-list", 1280, 900, "light", openArchiveList);
     await view("archive-list-mobile", 390, 844, "dark", openArchiveList);
     // The reference has no archive button, so its side shows the plain blank board.
