@@ -181,13 +181,16 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           configurable: true,
         });
       });
-      await assert.rejects(
-        read(live, "#host-code", "factoryProbe"),
-        /read: #host-code\.factoryProbe is undefined/,
-      );
-      await live.evaluate(() => {
-        delete HTMLElement.prototype.factoryProbe;
-      });
+      try {
+        await assert.rejects(
+          read(live, "#host-code", "factoryProbe"),
+          /read: #host-code\.factoryProbe is undefined/,
+        );
+      } finally {
+        await live.evaluate(() => {
+          delete HTMLElement.prototype.factoryProbe;
+        });
+      }
       assert.equal(await read(live, "#host-code", "hidden"), true);
       assert.equal(await read(live, "#host-code-command", "textContent"), "");
     });
