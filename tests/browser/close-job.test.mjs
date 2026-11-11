@@ -55,6 +55,10 @@ const VIEWPORTS = [
 const CARD = '.card[data-id="042-sample-export"]';
 const CLOSE_HINT =
   " The close may have saved. Press Close job again to check. It will not queue a second close or change a saved reason.";
+const SAVED_CLOSE =
+  'The close is already saved, with the reason "' +
+  REASON +
+  '". A saved reason cannot be changed. Cancel closes this dialog and keeps the close.';
 // null sends board writes through, 'drop' aborts them unsent, 'land' sends then aborts the page's copy,
 // '5xx' answers 503 with a body ending in a period.
 let putMode = null;
@@ -358,7 +362,7 @@ test("close job", { timeout: 240000 }, async (t) => {
           await (
             await page.$("#close-job-dlg")
           ).screenshot({ path: `${SHOTS}close-edited-reason-390.png` });
-        assert.equal(edited, "A close is already queued for this job.");
+        assert.equal(edited, SAVED_CLOSE);
         await activate("#close-job-cancel");
         await page.waitForSelector("#close-job-dlg:not([open])");
       });
