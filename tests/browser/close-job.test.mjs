@@ -223,7 +223,10 @@ test("close job", { timeout: 240000 }, async (t) => {
         await page.type("#close-job-reason", "   ");
         await activate("#close-job-save");
         await page.waitForFunction(() => !document.getElementById("close-job-err").hidden, wait);
-        assert.equal(await errText(page), "Enter a reason of 1 to 200 characters.");
+        assert.equal(
+          await errText(page),
+          "Enter a reason of 1 to 200 characters. Line breaks and control characters are not allowed.",
+        );
         assert.equal(await boardText(origin), before);
         await activate("#close-job-cancel");
         await page.waitForSelector("#close-job-dlg:not([open])");
@@ -241,7 +244,10 @@ test("close job", { timeout: 240000 }, async (t) => {
         );
         await activate("#close-job-save");
         await page.waitForFunction(() => !document.getElementById("close-job-err").hidden, wait);
-        assert.equal(await errText(page), "Enter a reason of 1 to 200 characters.");
+        assert.equal(
+          await errText(page),
+          "Enter a reason of 1 to 200 characters. Line breaks and control characters are not allowed.",
+        );
         assert.equal(await boardText(origin), before);
         await activate("#close-job-cancel");
         await page.waitForSelector("#close-job-dlg:not([open])");

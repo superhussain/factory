@@ -3250,7 +3250,7 @@ def close_pass(home, data, device, minutes, dry):
         reason = close_reason(j)
         if reason is None:
             print(f"factory.py: pickup skips the close of {job_id}: "
-                  "its reason is not one line of 1 to 200 characters", file=sys.stderr)
+                  "its reason must be 1 to 200 characters, with no line breaks or control characters", file=sys.stderr)
             continue
         c = blocking(j, device, "", minutes)
         if c:
