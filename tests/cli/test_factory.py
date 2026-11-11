@@ -1278,6 +1278,45 @@ class IdeaTest(IsolatedTestCase):
                 factory.sync()
 
 
+class SyncFinishedJobsTest(IsolatedTestCase):
+    def setUp(self):
+        IdeaTest.setUp(self)
+        self.paths = []
+        self.board["jobs"] += [
+            {"id": "010-merged", "stage": "merged", "project": "sample"},
+            {"id": "011-closed", "stage": "closed", "project": "sample"},
+            {"id": "012-build", "stage": "build", "project": "sample"},
+        ]
+
+    def request(self, home, method, path, body=None, ok=(200,), headers=None):
+        self.paths.append(path)
+        if path == "/api/board":
+            return 200, {"ETag": '"fixture"'}, factory.dump_board(self.board)
+        self.assertEqual(method, "GET")
+        return 200, {}, "[]"
+
+    def listings(self):
+        return [p for p in self.paths if p != "/api/board"]
+
+    def check_sync(self, *args):
+        factory.sync(*args)
+        self.assertEqual(self.listings(), ["/api/jobs/sample/012-build/?etags=1"])
+        out = self.output.getvalue()
+        self.assertIn("sample/012-build: pulled 0 files", out)
+        self.assertNotIn("010-merged", out)
+        self.assertNotIn("011-closed", out)
+
+    def test_bulk_sync_skips_merged_and_closed_jobs(self):
+        self.check_sync()
+
+    def test_project_sync_skips_merged_and_closed_jobs(self):
+        self.check_sync("sample")
+
+    def test_pull_still_lists_a_merged_job(self):
+        factory.pull("sample/010-merged")
+        self.assertEqual(self.listings(), ["/api/jobs/sample/010-merged/?etags=1"])
+
+
 class MoveFenceTest(IsolatedTestCase):
     setUp = FactoryTest.setUp
     api = FactoryTest.api
