@@ -167,7 +167,7 @@ class PickupTest(PickupFixture):
 
     def test_a_worker_error_in_the_triage_pass_still_launches_ideas(self):
         cause = "factory.py: GET https://factory.example.test/api/backlog returned 500: boom"
-        self.sweep.side_effect = lambda home: factory.fail(cause.removeprefix("factory.py: "), 5)
+        self.sweep.side_effect = lambda home: factory.fail(cause[len("factory.py: "):], 5)
         self.board["jobs"] = [idea("001-alpha", "alpha")]
         self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
         code, out, err = self.pickup()
@@ -188,7 +188,7 @@ class PickupTest(PickupFixture):
         patch.object(factory, "tracer_follow_pass").start()
         build = patch.object(factory, "tracer_build_pass").start()
         cause = "factory.py: PUT https://factory.example.test/api/board returned 503: busy"
-        build.side_effect = lambda home: factory.fail(cause.removeprefix("factory.py: "), 5)
+        build.side_effect = lambda home: factory.fail(cause[len("factory.py: "):], 5)
         self.board["jobs"] = [idea("001-alpha", "alpha")]
         self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
         code, out, err = self.pickup()
@@ -202,7 +202,7 @@ class PickupTest(PickupFixture):
         follow = patch.object(factory, "tracer_follow_pass").start()
         build = patch.object(factory, "tracer_build_pass").start()
         cause = "factory.py: GET https://factory.example.test/api/board returned 503: busy"
-        follow.side_effect = lambda home: factory.fail(cause.removeprefix("factory.py: "), 5)
+        follow.side_effect = lambda home: factory.fail(cause[len("factory.py: "):], 5)
         self.board["jobs"] = [idea("001-alpha", "alpha")]
         self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
         code, out, err = self.pickup()
