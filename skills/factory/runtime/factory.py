@@ -5114,12 +5114,23 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
         lines = re.sub(r", use --\w+ to .*", "", err).strip().splitlines()
         return (lines or [f"git exited {code}"])[0]
 
+    def not_merged(detail=None):
+        head = run_git("rev-parse", "--abbrev-ref", "HEAD")[1] or "HEAD"
+        return f"not merged into {head}" + (f" and {detail}" if detail else "")
+
     def pushed_tip_error():
         """None after deleting a branch whose tip origin holds, else the reason it stays."""
         tip = run_git("rev-parse", f"refs/heads/{branch}")[1]
-        code, out, _ = run_git("ls-remote", "origin", f"refs/heads/{branch}")
-        if not tip or code != 0 or out.split() != [tip, f"refs/heads/{branch}"]:
-            return f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}"
+        ref = f"refs/heads/{branch}"
+        code, out, _ = run_git("ls-remote", "origin", ref)
+        if not tip:
+            return not_merged()
+        if code != 0:
+            return not_merged("origin could not be reached")
+        if not out:
+            return not_merged("origin has no such branch")
+        if out.split() != [tip, ref]:
+            return not_merged("origin is at a different commit")
         path = None
         for line in run_git("worktree", "list", "--porcelain")[1].splitlines():
             if line.startswith("worktree "):
@@ -5147,8 +5158,7 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             if code is None:
                 error = err
             elif code:
-                error = (pushed_tip_error() if drop_pushed else
-                         f"not merged into {run_git('rev-parse', '--abbrev-ref', 'HEAD')[1] or 'HEAD'}")
+                error = pushed_tip_error() if drop_pushed else not_merged()
             elif run_git("config", "--get", f"branch.{branch}.merge")[1]:
                 error = first_error("branch", "--unset-upstream", branch) or first_error("branch", "-d", branch)
             else:
