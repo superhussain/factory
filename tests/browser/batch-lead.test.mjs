@@ -69,7 +69,8 @@ async function shoot(page, selector, name) {
     const { x, y, width, height } = document.querySelector(s).getBoundingClientRect();
     return { x: x + scrollX, y: y + scrollY, width, height };
   }, selector);
-  await page.screenshot({ path: `${SHOTS}${name}.png`, clip });
+  // A full-page capture resizes the viewport, which closes an open menu.
+  await page.screenshot({ path: `${SHOTS}${name}.png`, clip, captureBeyondViewport: false });
 }
 
 const cardMenu = (page) =>
