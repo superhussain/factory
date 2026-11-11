@@ -2939,9 +2939,11 @@ function renderBoard() {
   const focusRaw = focused?.dataset.raw;
   const focusStage = focused?.dataset.stage;
   const focusClass = focused && (focused.classList.contains('more') ? 'more' : focused.classList.contains('archive-more') ? 'archive-more' : 'column-toggle');
-  // A redraw replaces every card node, so focus goes back to the same job's card or menu trigger.
-  const focusedCard = $('board').contains(document.activeElement) ? document.activeElement.closest('.card, .card-actions') : null;
-  const focusCard = focusedCard && { trigger: focusedCard.classList.contains('card-actions'), id: focusedCard.dataset.id ?? focusedCard.dataset.actions };
+  // A redraw replaces every card node, so focus goes back to the same job's card, PR link or menu trigger.
+  const focusedCard = $('board').contains(document.activeElement) ? document.activeElement.closest('.card, .card-actions, .card-wrap > .pr-link') : null;
+  const focusCard = focusedCard && (focusedCard.classList.contains('pr-link')
+    ? { kind: 'pr', id: focusedCard.parentElement.querySelector('.card').dataset.id }
+    : { kind: focusedCard.classList.contains('card-actions') ? 'trigger' : 'card', id: focusedCard.dataset.id ?? focusedCard.dataset.actions });
   if (!jobs.length && !backlog.length && !archiveList.open) {
     $('board').innerHTML = '<div class="blank"><h2>No jobs yet</h2>' +
       '<p>Start one with <code>/factory &lt;feature&gt;</code> or <code>/factory next</code>.</p>' +
@@ -2997,9 +2999,11 @@ function renderBoard() {
     control?.focus({ preventScroll: true });
   }
   if (focusCard) {
-    [...$('board').querySelectorAll(focusCard.trigger ? '.card-actions' : '.card')]
-      .find((el) => (focusCard.trigger ? el.dataset.actions : el.dataset.id) === focusCard.id)
-      ?.focus({ preventScroll: true });
+    const trigger = focusCard.kind === 'trigger';
+    const el = [...$('board').querySelectorAll(trigger ? '.card-actions' : '.card')]
+      .find((x) => (trigger ? x.dataset.actions : x.dataset.id) === focusCard.id);
+    // A PR link the redraw dropped (field hidden, PR cleared) hands focus to its card.
+    (focusCard.kind === 'pr' ? el?.parentElement.querySelector(':scope > .pr-link') ?? el : el)?.focus({ preventScroll: true });
   }
   syncCardActions();
 }
