@@ -48,8 +48,25 @@ const setValue = (page, selector, value) =>
   );
 const clickNow = (page, selector) =>
   page.evaluate((s) => document.querySelector(s).click(), selector);
+const shoot = async (page, selector, path) =>
+  page.screenshot({
+    path,
+    clip: await page.evaluate((s) => {
+      const r = document.querySelector(s).getBoundingClientRect();
+      return { x: r.x + scrollX, y: r.y + scrollY, width: r.width, height: r.height };
+    }, selector),
+  });
 const read = (page, selector, name) =>
-  page.evaluate((s, n) => document.querySelector(s)[n], selector, name);
+  page.evaluate(
+    (s, n) => {
+      const el = document.querySelector(s);
+      if (!el) throw new Error("read: no element matches " + s);
+      if (!(n in el)) throw new Error("read: " + s + " has no property " + n);
+      return el[n];
+    },
+    selector,
+    name,
+  );
 const cardMessage = (page, id) =>
   read(page, `.host-card[data-id="${id}"] .host-msg`, "textContent");
 const waitCardMessage = (page, id, text) =>
@@ -128,12 +145,12 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await live.type("#host-add-label", "Test host");
       await live.click("#host-add-save");
       await live.waitForSelector("#host-code:not([hidden])", wait);
-      const command = await live.$eval("#host-code-command", (el) => el.textContent);
+      const command = await read(live, "#host-code-command", "textContent");
       const code = command.split(" ").at(-1);
       assert.match(code, CODE);
       assert.equal(command, "factory.py host pair test-host " + code);
       assert.ok(
-        (await live.$eval("#host-code-text", (el) => el.textContent)).startsWith(
+        (await read(live, "#host-code-text", "textContent")).startsWith(
           "Pairing code for test-host: " + code + ". It works once and expires at ",
         ),
       );
@@ -150,8 +167,9 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       );
       assert.deepEqual(leaks, []);
       await live.click("#host-code-done");
-      assert.equal(await live.$eval("#host-code", (el) => el.hidden), true);
-      assert.equal(await live.$eval("#host-code-command", (el) => el.textContent), "");
+      await assert.rejects(read(live, "#host-code", "hiddn"), /has no property hiddn/);
+      assert.equal(await read(live, "#host-code", "hidden"), true);
+      assert.equal(await read(live, "#host-code-command", "textContent"), "");
     });
 
     await t.test("hosts H2 save and conflict keep typed values", async () => {
@@ -219,10 +237,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       );
       await clickNow(live, '[aria-label="New code Elsewhere"]');
       await live.waitForSelector("#host-code:not([hidden])", wait);
-      assert.match(
-        (await live.$eval("#host-code-command", (el) => el.textContent)).split(" ").at(-1),
-        CODE,
-      );
+      assert.match((await read(live, "#host-code-command", "textContent")).split(" ").at(-1), CODE);
       await live.waitForFunction(
         () =>
           document.querySelector('.host-card[data-id="test-host"] .host-badge')?.textContent ===
@@ -231,7 +246,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       );
       await live.click("#settings-nav-pipeline");
       await live.waitForSelector("#settings-pipeline:not([hidden])", wait);
-      assert.equal(await live.$eval("#host-code", (el) => el.hidden), true);
+      assert.equal(await read(live, "#host-code", "hidden"), true);
       await live.close();
     });
 
@@ -427,12 +442,10 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       const lab = '.host-card[data-id="lab-linux"]';
       if (captureDir) {
         await mkdir(captureDir, { recursive: true });
-        await (await page.$(card)).screenshot({ path: join(captureDir, "host-card-1280.png") });
-        await (
-          await page.$(lab)
-        ).screenshot({ path: join(captureDir, "host-card-doctor-1280.png") });
+        await shoot(page, card, join(captureDir, "host-card-1280.png"));
+        await shoot(page, lab, join(captureDir, "host-card-doctor-1280.png"));
         await page.setViewport({ width: 390, height: 844 });
-        await (await page.$(card)).screenshot({ path: join(captureDir, "host-card-390.png") });
+        await shoot(page, card, join(captureDir, "host-card-390.png"));
       }
       // One in-page read, so a renderHosts() rebuild cannot split the values.
       const alerts = () =>
