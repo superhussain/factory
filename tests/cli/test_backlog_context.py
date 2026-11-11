@@ -101,6 +101,22 @@ class BacklogContextTests(IsolatedTestCase):
                 self.assertEqual((self.writes, self.triaged), ([], []))
                 self.assertEqual(self.backlog, "# Backlog\r\n" + line + "\r\n")
 
+    def test_already_queued_says_the_context_was_not_added(self):
+        self.backlog = "# Backlog\n- [ ] " + ITEM + "\n"
+        (code, out, _), _ = self.add(CONTEXT)
+        self.assertEqual((code, out), (0, f"already in backlog: {ITEM} (the --context file was not added)\n{LINK}"))
+        self.assertEqual(self.writes, [])
+
+    def test_skips_a_stored_line_with_trailing_whitespace(self):
+        for line in ("- [ ] " + ITEM + "  \t", "- [x] " + ITEM + " (205-csv-export) "):
+            with self.subTest(line=line):
+                self.backlog = "# Backlog\n" + line + "\n"
+                self.writes = []
+                code, out, _ = invoke(self.module, ["backlog", "add", ITEM])
+                self.assertEqual(code, 0)
+                self.assertTrue(out.startswith(f"already in backlog: {ITEM}\n"), out)
+                self.assertEqual(self.writes, [])
+
     def test_normalizes_line_endings_and_edge_blank_lines(self):
         (code, _, _), _ = self.add("", raw=b"\r\n\r\n" + CONTEXT.replace("\n", "\r\n").encode() + b"\r\n\r\n")
         self.assertEqual(code, 0)

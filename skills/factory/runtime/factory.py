@@ -1125,7 +1125,7 @@ def backlog_add(item, context=None):
     def append(text):
         text = BACKLOG_TEMPLATE if text is None else text
         done = re.compile(rf"- \[x\] {re.escape(item)} \((\S+)\)")
-        lines = [row.rstrip("\r") for row in text.split("\n")]
+        lines = [row.rstrip() for row in text.split("\n")]
         if line in lines:
             return None, ""
         checked = next((m.group(1) for m in map(done.fullmatch, lines) if m), None)
@@ -1136,7 +1136,7 @@ def backlog_add(item, context=None):
         return text + line + "\n" + block, True
     added = cas(home, "/api/backlog", append)
     if added is not True:
-        print(f"already in backlog: {item}")
+        print(f"already in backlog: {item}" + (" (the --context file was not added)" if context else ""))
         print(f"link: {api_url(home)}/#{urllib.parse.quote(added, safe='')}" if added else f"link: {backlog_link(home, line)}")
         return
     print(f"added {item}" + (" with context" if context else ""))
@@ -3747,11 +3747,11 @@ def factory_home():
     if selected:
         home = Path(selected)
         if not home.is_absolute():
-            fail("factory home must be absolute", 2)
+            fail("factory home must be absolute. Nothing was written.", 2)
         try:
             return home.resolve()
         except (OSError, RuntimeError):
-            fail("cannot resolve factory home", 2)
+            fail("cannot resolve factory home. Nothing was written.", 2)
     root = config_root()
     pointer = root / "factory-location.json"
     return read_location(pointer) if os.path.lexists(pointer) else root / "factory"
@@ -4915,7 +4915,7 @@ def archive_workspace(target, *flags):
     if not archived:
         code, _ = paseo_run(["archive", agent, "--force"])
         if code:
-            fail(f"paseo archive {agent} exit {code}")
+            fail(f"workspace {wks} archived, but agent archive failed: paseo archive {agent} exit {code}")
 
 
 def stuck(*args):
@@ -5145,11 +5145,11 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
 
     def pushed_tip_error():
         """None after deleting a branch whose tip origin holds, else the reason it stays."""
-        tip = run_git("rev-parse", f"refs/heads/{branch}")[1]
         ref = f"refs/heads/{branch}"
-        code, out, _ = run_git("ls-remote", "origin", ref)
+        tip = run_git("rev-parse", ref)[1]
         if not tip:
             return not_merged()
+        code, out, _ = run_git("ls-remote", "origin", ref)
         if code != 0:
             return not_merged("origin could not be reached")
         if not out:

@@ -1944,6 +1944,21 @@ class CloseCleanupTest(PickupFixture):
                          ([f"worktree {self.wt}"], [self.LEFT]))
         self.assertTrue(self.branch_exists())
 
+    def test_cleanup_skips_ls_remote_without_a_branch_tip(self):
+        self.with_origin()
+        real, argvs = subprocess.run, []
+
+        def fake(argv, *a, **k):
+            argvs.append(argv)
+            if argv[-2:] == ["rev-parse", "refs/heads/factory/042-sample-export"]:
+                return subprocess.CompletedProcess(argv, 128, "", "")
+            return real(argv, *a, **k)
+
+        with patch.object(factory.subprocess, "run", side_effect=fake):
+            self.assertEqual(factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export", drop_pushed=True),
+                             ([f"worktree {self.wt}"], [self.LEFT]))
+        self.assertFalse(any("ls-remote" in argv for argv in argvs))
+
     def test_cleanup_removes_a_merged_job(self):
         self.git(self.repo_a, "merge", "-q", "--no-ff", "-m", "merge", "factory/042-sample-export")
         self.board["jobs"] = [self.closed()]

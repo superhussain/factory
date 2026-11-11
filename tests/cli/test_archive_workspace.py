@@ -308,7 +308,7 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
                      workspaces=[{"workspaceId": "wks_0a1b", "cwd": self.cwd, "isolation": "worktree"}])
         code, out, err = self.run_verb()
         self.assertEqual((code, out), (1, {"archived": "wks_0a1b", "leftovers": []}))
-        self.assertIn(f"paseo archive {AGENT} exit 3", err)
+        self.assertIn(f"factory.py: workspace wks_0a1b archived, but agent archive failed: paseo archive {AGENT} exit 3", err)
 
     def detach(self):
         self.git("-C", self.cwd, "switch", "-q", "--detach")
