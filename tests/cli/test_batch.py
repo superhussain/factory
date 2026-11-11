@@ -193,6 +193,24 @@ class BatchTest(IsolatedTestCase):
         self.assertEqual((j["stage"], j["done"]), ("merged", self.job(LEAD)["done"]))
         self.assertEqual(self.job("093-sample-login")["stage"], "idea")
 
+    def test_lead_needs_mirror_onto_riders_at_needs_human(self):
+        self.batch(TARGET, "091-sample-typo")
+        self.patch_lead({"stage": "needs-human", "needs": "Pick the CSV date format in needs.md"})
+        j = self.job("091-sample-typo")
+        self.assertEqual((j["stage"], j["needs"]), ("needs-human", "Pick the CSV date format in needs.md"))
+        self.patch_lead({"needs": "Pick the CSV file name in needs.md"})
+        self.assertEqual(self.job("091-sample-typo")["needs"], "Pick the CSV file name in needs.md")
+        self.patch_lead({"stage": "build"})
+        self.assertNotIn("needs", self.job("091-sample-typo"))
+
+    def test_closed_lead_clears_rider_needs(self):
+        self.batch(TARGET, "091-sample-typo")
+        self.patch_lead({"stage": "needs-human", "needs": "Pick the CSV date format in needs.md"})
+        self.patch_lead({"stage": "closed"})
+        j = self.job("091-sample-typo")
+        self.assertEqual(j["stage"], "idea")
+        self.assertNotIn("needs", j)
+
     def test_closed_lead_returns_riders_to_idea(self):
         self.batch(TARGET, "091-sample-typo")
         self.patch_lead({"stage": "closed"})

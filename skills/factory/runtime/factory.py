@@ -456,7 +456,7 @@ def patch_job(data, job_id, patch):
             job["done"] = job["updated"]
         else:
             job.pop("done", None)
-    if (job.get("stage") != prev or "pr" in patch) and lead_of(job) is None:
+    if (job.get("stage") != prev or "pr" in patch or "needs" in patch) and lead_of(job) is None:
         mirror_batch(data, job)
     return job
 
@@ -478,16 +478,17 @@ def riders_of(data, lead_id):
 
 
 def mirror_batch(data, lead):
-    """Move a lead's riders with it: its stage and PR, or back to idea when it closes."""
+    """Move a lead's riders with it: its stage, PR and needs-human ask, or back to idea when it closes."""
     for rider in riders_of(data, lead["id"]):
         if rider.get("stage") in TERMINAL:
             continue
         if lead.get("stage") == "closed":
             refs = [r for r in rider["refs"] if isinstance(r, dict) and r.get("kind") != BATCH_REF]
             patch_job(data, rider["id"], {"stage": IDEA, "refs": refs or None,
-                                          "note": f"unbatched: {lead['id']} closed"})
+                                          "note": f"unbatched: {lead['id']} closed", "needs": None})
         else:
-            patch_job(data, rider["id"], {"stage": lead.get("stage"), "pr": lead.get("pr")})
+            ask = lead.get("needs") if lead.get("stage") == "needs-human" else None
+            patch_job(data, rider["id"], {"stage": lead.get("stage"), "pr": lead.get("pr"), "needs": ask})
 
 
 def merge_patch(target, patch):
