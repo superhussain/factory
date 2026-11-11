@@ -2383,9 +2383,8 @@ ADAPTER_TIMEOUT_SECONDS = 120
 TAKEOVER_MINUTES = 30
 
 
-def pickup_settings(home, slug, repo, device):
-    """(enabled, hosts, None) from the project's effective pipeline, or (None, None, reason).
-    When pickup is on and lists device, an unsafe checkout at repo is the reason."""
+def pickup_config(home, slug):
+    """(enabled, hosts, None) from the project's effective pipeline, or (None, None, reason)."""
     status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
     if status == 404:
         return None, None, "no pipeline view; register the project or deploy the current Worker"
@@ -2400,12 +2399,19 @@ def pickup_settings(home, slug, repo, device):
     p = view.get("pickup") if isinstance(view, dict) else None
     if isinstance(p, dict) and isinstance(p.get("enabled"), bool) and isinstance(p.get("hosts"), list) \
             and all(isinstance(h, str) and HOST_NAME.fullmatch(h) for h in p["hosts"]):
-        if p["enabled"] and device in p["hosts"]:
-            problem = checkout_problem(home, slug, repo)
-            if problem:
-                return None, None, problem
         return p["enabled"], p["hosts"], None
     return None, None, "malformed pickup in the pipeline view"
+
+
+def pickup_settings(home, slug, repo, device):
+    """(enabled, hosts, None) from the project's effective pipeline, or (None, None, reason).
+    When pickup is on and lists device, an unsafe checkout at repo is the reason."""
+    enabled, hosts, why = pickup_config(home, slug)
+    if enabled and device in hosts:
+        problem = checkout_problem(home, slug, repo)
+        if problem:
+            return None, None, problem
+    return enabled, hosts, why
 
 
 def host_max_inflight(home, device):
