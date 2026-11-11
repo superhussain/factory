@@ -184,11 +184,12 @@ function checkCards(actual, expected, width) {
       assert.ok(actual[key].scrollWidth <= actual[key].clientWidth + 1, key + " mobile overflow");
     }
   for (const job of expected.jobs) {
+    const needsYou = Boolean(job.needs) || job.stage === "needs-human";
     const card = actual.cards[job.id];
     assert.ok(card, job.id);
     assert.equal(card.injected, 0);
     const expectedFields = {
-      "id line": job.id + (job.needs || job.stage === "needs-human" ? job.stage : ""),
+      "id line": job.id + (needsYou ? job.stage : ""),
       "proj line": "Wrap fixtures",
       title: job.title,
       ...(job.stage === "idea"
@@ -218,7 +219,7 @@ function checkCards(actual, expected, width) {
     }
     for (const field of card.fields) {
       if (field.selector.endsWith(" line")) {
-        if ((job.needs || job.stage === "needs-human") && field.selector === "note line") {
+        if (needsYou && field.selector === "note line") {
           const where = job.id + " " + field.selector;
           assert.equal(field.whiteSpace, "normal", where);
           assert.equal(field.clamp, "2", where);
