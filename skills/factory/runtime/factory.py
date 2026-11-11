@@ -3747,11 +3747,11 @@ def factory_home():
     if selected:
         home = Path(selected)
         if not home.is_absolute():
-            fail("factory home must be absolute", 2)
+            fail("factory home must be absolute. Nothing was written.", 2)
         try:
             return home.resolve()
         except (OSError, RuntimeError):
-            fail("cannot resolve factory home", 2)
+            fail("cannot resolve factory home. Nothing was written.", 2)
     root = config_root()
     pointer = root / "factory-location.json"
     return read_location(pointer) if os.path.lexists(pointer) else root / "factory"

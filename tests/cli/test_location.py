@@ -1,5 +1,6 @@
 import concurrent.futures
 import errno
+import io
 import json
 import os
 import stat
@@ -48,6 +49,16 @@ class LocationTest(IsolatedTestCase):
             self.rejected(r.factory_home)
         with patch.dict(os.environ, {"FACTORY_HOME": "relative"}):
             self.rejected(r.factory_home)
+
+    def test_bad_home_says_nothing_was_written(self):
+        cases = [({"FACTORY_HOME": "relative/home"}, None, "factory home must be absolute"),
+                 ({"FACTORY_HOME": str(self.root / "loop")}, RuntimeError, "cannot resolve factory home")]
+        for env, error, message in cases:
+            with self.subTest(message=message), patch.dict(os.environ, env), \
+                    patch.object(self.runtime.Path, "resolve", side_effect=error), \
+                    patch("sys.stderr", new_callable=io.StringIO) as err:
+                self.rejected(self.runtime.factory_home)
+                self.assertEqual(err.getvalue(), f"factory.py: {message}. Nothing was written.\n")
 
     def test_malformed_pointer_never_falls_back(self):
         self.pointer.parent.mkdir()
