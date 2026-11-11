@@ -473,16 +473,34 @@ def riders_of(data, lead_id):
 
 
 def mirror_batch(data, lead):
-    """Move a lead's riders with it: its stage and PR, or back to idea when it closes."""
+    """Move a lead's riders with it: its stage and PR, or back to idea when it closes. A stacked
+    rider takes the stage only, and leaves the batch when the lead merges."""
     for rider in riders_of(data, lead["id"]):
         if rider.get("stage") in TERMINAL:
             continue
+        stacked = rider.get("stacked") is True
+        refs = [r for r in rider["refs"] if isinstance(r, dict) and r.get("kind") != BATCH_REF]
         if lead.get("stage") == "closed":
-            refs = [r for r in rider["refs"] if isinstance(r, dict) and r.get("kind") != BATCH_REF]
-            patch_job(data, rider["id"], {"stage": IDEA, "refs": refs or None,
-                                          "note": f"unbatched: {lead['id']} closed"})
-        else:
+            change = {"stage": IDEA, "refs": refs or None, "note": f"unbatched: {lead['id']} closed"}
+            if stacked:
+                change.update(stacked=None, pr=None)
+                if rider.get("pr"):
+                    change["note"] += f"; stacked PR {rider['pr']} is still open"
+            patch_job(data, rider["id"], change)
+        elif not stacked:
             patch_job(data, rider["id"], {"stage": lead.get("stage"), "pr": lead.get("pr")})
+        elif lead.get("stage") != "merged":
+            patch_job(data, rider["id"], {"stage": lead.get("stage")})
+        elif rider.get("pr"):
+            refs = [{"id": lead["id"], "kind": "follow-up-of"} if r.get("kind") == BATCH_REF else r
+                    for r in rider["refs"] if isinstance(r, dict)]
+            patch_job(data, rider["id"], {"refs": refs, "stacked": None,
+                                          "automerge": True if lead.get("automerge") is True else None,
+                                          "escalated": True if lead.get("escalated") is True else None,
+                                          "note": f"stacked on {lead['id']}, which merged"})
+        else:
+            patch_job(data, rider["id"], {"stage": IDEA, "refs": refs or None, "stacked": None,
+                                          "note": f"unbatched: {lead['id']} merged before its stacked PR opened"})
 
 
 def merge_patch(target, patch):
