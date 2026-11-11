@@ -215,8 +215,8 @@ class BatchTest(IsolatedTestCase):
 
     def test_attach_refuses_bad_picked_ids(self):
         self.set_jobs(jobs() + [idea("bad id")])
-        self.refuse(2, "bad job id 'bad id'. Nothing was written.", TARGET, "bad id")
-        self.refuse(2, "bad job id '../x'. Nothing was written.", TARGET, "../x")
+        self.refuse(2, "bad job id 'bad id': a job id is letters, digits, dots, dashes and underscores, like 003-rate-limiting. Nothing was written.", TARGET, "bad id")
+        self.refuse(2, "bad job id '../x': a job id is letters, digits, dots, dashes and underscores, like 003-rate-limiting. Nothing was written.", TARGET, "../x")
 
     def test_attaches_twenty_riders(self):
         more = [f"{n}-sample-more" for n in range(100, 120)]
