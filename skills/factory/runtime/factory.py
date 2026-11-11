@@ -94,7 +94,6 @@ The board, backlog, and project files live in R2 behind the factory Worker at
 `api_url` in config.md. Job folders and worktrees stay on this device.
 """
 
-import collections
 import contextlib
 import fnmatch
 import http.client
@@ -6048,10 +6047,18 @@ def retro_text(content):
     return ""
 
 
+def retro_count(counts, key):
+    counts[key] = counts.get(key, 0) + 1
+
+
+def retro_ranked(counts):
+    return dict(sorted(counts.items(), key=lambda item: -item[1]))
+
+
 def retro_scan(path, main):
     """One transcript reduced to digest fields. main=False also counts isSidechain lines."""
-    usage, tools, cmds, models = {}, collections.Counter(), collections.Counter(), set()
-    attachments, calls, results = collections.Counter(), {}, []
+    usage, tools, cmds, models = {}, {}, {}, set()
+    attachments, calls, results = {}, {}, []
     stamps, human, interrupts, rounds, seen_assistant = [], 0, 0, [], False
     prompts = {"count": 0, "chars": 0}
     polls = dict.fromkeys(RETRO_POLLS, 0)
@@ -6069,7 +6076,8 @@ def retro_scan(path, main):
             content = msg.get("content")
             blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
             if e.get("type") == "attachment" and not seen_assistant and isinstance(e.get("attachment"), dict):
-                attachments[str(e["attachment"].get("type"))] += len(json.dumps(e["attachment"]).encode())
+                kind = str(e["attachment"].get("type"))
+                attachments[kind] = attachments.get(kind, 0) + len(json.dumps(e["attachment"]).encode())
             elif e.get("type") == "assistant":
                 seen_assistant = True
                 if isinstance(msg.get("model"), str):
@@ -6085,7 +6093,7 @@ def retro_scan(path, main):
                         continue
                     name = str(b.get("name"))
                     inp = b.get("input") if isinstance(b.get("input"), dict) else {}
-                    tools[name] += 1
+                    retro_count(tools, name)
                     calls[b.get("id")] = (name, inp)
                     rounds += [int(n) for n in re.findall(r"\bround-(\d+)/", json.dumps(inp))]
                     if name in ("Agent", "Task") and isinstance(inp.get("prompt"), str):
@@ -6096,7 +6104,7 @@ def retro_scan(path, main):
                         for key, pattern in RETRO_POLLS.items():
                             polls[key] += bool(pattern.search(target))
                         if name == "Bash":
-                            cmds[retro_command_key(target)] += 1
+                            retro_count(cmds, retro_command_key(target))
             elif e.get("type") == "user":
                 text = retro_text(content)
                 interrupts += "[Request interrupted" in text
@@ -6107,8 +6115,8 @@ def retro_scan(path, main):
                             results.append((name, inp, retro_text(b.get("content")), b.get("is_error") is True))
                 elif not e.get("isMeta") and not e.get("isSidechain") and text and not text.startswith("<"):
                     human += 1
-    errors = {"count": 0, "benign": 0, "patterns": collections.Counter()}
-    denials = {"count": 0, "blocked_sleep": 0, "patterns": collections.Counter()}
+    errors = {"count": 0, "benign": 0, "patterns": {}}
+    denials = {"count": 0, "blocked_sleep": 0, "patterns": {}}
     noise = dict.fromkeys(RETRO_ENV_NOISE, 0)
     for i, (name, inp, text, is_error) in enumerate(results):
         for key, needle in RETRO_ENV_NOISE.items():
@@ -6120,27 +6128,27 @@ def retro_scan(path, main):
             denials["blocked_sleep"] += 1
         elif any(phrase in text for phrase in RETRO_DENIALS):
             denials["count"] += 1
-            denials["patterns"][retro_pattern(text)] += 1
+            retro_count(denials["patterns"], retro_pattern(text))
         elif i == len(results) - 1 and (
                 (name == "Bash" and "archive-workspace" in command and "137" in text)
                 or ("archive_workspace" in name and "connection closed" in text.lower())):
             errors["benign"] += 1
         else:
             errors["count"] += 1
-            errors["patterns"][retro_pattern(text)] += 1
+            retro_count(errors["patterns"], retro_pattern(text))
     for bucket in (errors, denials):
-        bucket["patterns"] = dict(bucket["patterns"].most_common())
+        bucket["patterns"] = retro_ranked(bucket["patterns"])
     contexts = [u["uncached_input"] + u["cache_read"] + u["cache_write"] for u in usage.values()]
     return {"start": stamps[0] if stamps else None, "end": stamps[-1] if stamps else None,
             "turns": len(usage), "human_msgs": human, "interrupts": interrupts, "models": sorted(models),
-            "tools": dict(tools.most_common()),
+            "tools": retro_ranked(tools),
             "tokens": {key: sum(u[key] for u in usage.values()) for key in RETRO_TOKENS},
             "context": {"first_turn": contexts[0] if contexts else 0,
                         "mean_per_turn": round(sum(contexts) / len(contexts)) if contexts else 0},
-            "first_turn_attachments": dict(attachments), "agent_prompts": prompts,
+            "first_turn_attachments": attachments, "agent_prompts": prompts,
             "review_round_max": max(rounds) if rounds else None, "polls": polls, "env_noise": noise,
             "errors": errors, "denials": denials,
-            "repeated_cmds": {cmd: n for cmd, n in cmds.most_common(5) if n >= 3}}
+            "repeated_cmds": {cmd: n for cmd, n in list(retro_ranked(cmds).items())[:5] if n >= 3}}
 
 
 def retro_host():
