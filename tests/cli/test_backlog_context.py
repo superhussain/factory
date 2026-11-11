@@ -91,7 +91,8 @@ class BacklogContextTests(IsolatedTestCase):
 
     def test_skips_a_line_already_in_the_backlog(self):
         for line, link in (("- [ ] " + ITEM, LINK), ("- [x] " + ITEM + " (205-csv-export)",
-                                                       "link: https://factory.example/#205-csv-export\n")):
+                                                       "link: https://factory.example/#205-csv-export\n"),
+                           ("- [x] " + ITEM + " (205-csv#export)", "link: https://factory.example/#205-csv%23export\n")):
             with self.subTest(line=line):
                 self.backlog = "# Backlog\r\n" + line + "\r\n"
                 self.writes, self.triaged = [], []

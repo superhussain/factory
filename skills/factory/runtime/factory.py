@@ -1106,10 +1106,11 @@ def backlog_add(item, context=None):
     if item.splitlines() != [item]:
         fail(f"bad item {item!r}: it must be one line, with no line or paragraph separators", 2)
     item = item.rstrip()
+    line = f"- [ ] {item}"
     m = re.fullmatch(r"([\w-]+): (\S.*)", item)
     if not m:
         fail(f"bad item {item!r}: use <slug>: <feature> on one line", 2)
-    block = "".join(("  " + line).rstrip() + "\n" for line in context.split("\n")) if context else ""
+    block = "".join(("  " + row).rstrip() + "\n" for row in context.split("\n")) if context else ""
     home = factory_home()
     projects = {p["slug"] for p in json.loads(api(home, "GET", "/projects.json")[2])}
     if m.group(1) not in projects:
@@ -1118,28 +1119,28 @@ def backlog_add(item, context=None):
     def append(text):
         text = BACKLOG_TEMPLATE if text is None else text
         done = re.compile(rf"- \[x\] {re.escape(item)} \((\S+)\)")
-        lines = [line.rstrip("\r") for line in text.split("\n")]
-        if f"- [ ] {item}" in lines:
+        lines = [row.rstrip("\r") for row in text.split("\n")]
+        if line in lines:
             return None, ""
         checked = next((m.group(1) for m in map(done.fullmatch, lines) if m), None)
         if checked:
             return None, checked
         if text and not text.endswith("\n"):
             text += "\n"
-        return text + f"- [ ] {item}\n" + block, True
+        return text + line + "\n" + block, True
     added = cas(home, "/api/backlog", append)
     if added is not True:
         print(f"already in backlog: {item}")
-        print(f"link: {api_url(home)}/#{added}" if added else f"link: {backlog_link(home, f'- [ ] {item}')}")
+        print(f"link: {api_url(home)}/#{urllib.parse.quote(added, safe='')}" if added else f"link: {backlog_link(home, line)}")
         return
     print(f"added {item}" + (" with context" if context else ""))
-    print(f"link: {backlog_link(home, f'- [ ] {item}')}")
+    print(f"link: {backlog_link(home, line)}")
     verdict, final = backlog_triage(home, item, context)
     left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict)
     if final and (verdict is None or verdict["decision"] != "queue" or left):
         triaged = read_triaged(home)
-        if f"- [ ] {item}" not in triaged:
-            save_triaged(home, triaged + [f"- [ ] {item}"])
+        if line not in triaged:
+            save_triaged(home, triaged + [line])
 
 
 def report_verdict(home, slug, feature, item, verdict):

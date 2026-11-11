@@ -1462,6 +1462,12 @@ async function browserTest(url) {
     );
     await page.click("#d-copy-link");
     assert.deepEqual(await page.evaluate(() => window.copied), [url + "/#/backlog/" + key]);
+    await page.evaluate(() =>
+      history.replaceState(null, "", location.pathname + location.search + "#/settings"),
+    );
+    await page.click("#d-actions");
+    await page.click("#d-copy-link");
+    assert.equal(await page.evaluate(() => window.copied[1]), url + "/#/backlog/" + key);
 
     await linkTo("#/backlog/" + (await sha12(DECIDED)));
     await page.waitForFunction(
