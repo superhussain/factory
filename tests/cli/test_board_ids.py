@@ -81,7 +81,7 @@ class BoardIdTest(IsolatedTestCase):
                 self.batched()
                 self.assertEqual(self.patch_board("412-fix-login", body), (2, "", (
                     "factory.py: only factory.py batch and the lead's mirror add or remove a batched-into ref. "
-                    "Keep 412-fix-login's batched-into ref as it is. Nothing was written.\n")))
+                    "A refs patch for 412-fix-login must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.\n")))
                 self.assertEqual(self.puts, 0)
 
     def test_refuses_adding_a_batched_into_ref(self):
@@ -91,7 +91,7 @@ class BoardIdTest(IsolatedTestCase):
             with self.subTest(job_id=job_id):
                 self.assertEqual(self.patch_board(job_id, body), (2, "", (
                     "factory.py: only factory.py batch and the lead's mirror add or remove a batched-into ref. "
-                    f"Keep {job_id}'s batched-into ref as it is. Nothing was written.\n")))
+                    f"A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.\n")))
                 self.assertEqual((self.ids(), self.puts), (["412-fix-login"], 0))
 
     def test_keeps_a_batched_into_ref_while_editing_refs(self):
