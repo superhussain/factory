@@ -536,6 +536,14 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           (s) => getComputedStyle(document.querySelector(s)).display,
           `${fallback} td:last-child`,
         );
+      const tableNode = async () => {
+        const node = await page.accessibility.snapshot({
+          root: await page.$(table),
+          interestingOnly: false,
+        });
+        return [node.role, node.name];
+      };
+      const roleOf = (s) => page.evaluate((q) => document.querySelector(q).getAttribute("role"), s);
       await page.setViewport({ width: 390, height: 844 });
       assert.equal(
         await page.evaluate((s) => {
@@ -553,8 +561,27 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
         ["Route", "Provider", "Model", "Effort", "Limited until"],
       );
       assert.equal(await display(), "block");
+      assert.deepEqual(await tableNode(), ["table", "Routes (set on the device)"]);
+      assert.deepEqual(
+        [
+          await roleOf(`${table} thead`),
+          await roleOf(`${table} tbody`),
+          await roleOf(`${table} tr`),
+          await roleOf(`${table} th`),
+          await roleOf(`${fallback} td:last-child`),
+        ],
+        ["rowgroup", "rowgroup", "row", "columnheader", "cell"],
+      );
       await page.setViewport({ width: 1280, height: 900 });
       assert.equal(await display(), "table-cell");
+      assert.deepEqual(await tableNode(), ["table", "Routes (set on the device)"]);
+      assert.equal(
+        await page.evaluate(
+          (s) => getComputedStyle(document.querySelector(s)).textAlign,
+          `${table} caption`,
+        ),
+        "left",
+      );
       await page.close();
     });
 
