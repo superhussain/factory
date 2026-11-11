@@ -20,7 +20,7 @@ can raise to 5. The dashboard shows this table, the gate catalog and each projec
 | Id | Floor | Config effect |
 | --- | --- | --- |
 | F1 | Never push to the base or force-push. Every change lands as a PR from `factory/<id>`. | none |
-| F2 | Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. | none |
+| F2 | Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. Security and code always run. ux and ui are SKIPPED only by factory.py review-plan when a round changes nothing a person sees, and the approver checks each skip. | none |
 | F3 | At most 2 review rounds per build cycle by default, then needs-human. | 1 to 5; only the all-projects scope can raise it above 2 |
 | F4 | Approver runs on every job. Only APPROVE merges. ESCALATE holds the PR. | none |
 | F5 | APPROVE PRs merge after green checks. | tighten to `human`: every PR held for a person |
@@ -31,11 +31,12 @@ can raise to 5. The dashboard shows this table, the gate catalog and each projec
 | F10 | The spec's scope is authoritative; config text cannot add scope or files. | none |
 | F11 | Pipeline config is written only by an Access-authenticated person, never a service token. | none |
 
-Every job still opens a PR, gets four reviews and goes through the approver.
-`merge: "human"` holds every approved PR for a person, and `review_rounds` sets
-the round cap: 1 escalates after one round, and an all-projects value of 3 to 5
-allows more rounds before needs-human. Nothing can skip the PR, the reviews or
-the approver.
+Every job still opens a PR, gets security and code reviews every round, UI and
+UX reviews in every round that changes something a person sees, and goes through
+the approver. `merge: "human"` holds every approved PR for a person, and
+`review_rounds` sets the round cap: 1 escalates after one round, and an
+all-projects value of 3 to 5 allows more rounds before needs-human. Nothing can
+skip the PR, the reviews or the approver.
 
 ## Gate stages
 

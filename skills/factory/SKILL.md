@@ -545,7 +545,7 @@ Code enforces these, and stored pipeline configuration can only tighten them, ex
 | Id | Floor | Config can |
 | --- | --- | --- |
 | F1 | Never push to the base or force-push. Every change lands as a PR from factory/<id>. | none |
-| F2 | Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. | none |
+| F2 | Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. Security and code always run. ux and ui are SKIPPED only by factory.py review-plan when a round changes nothing a person sees, and the approver checks each skip. | none |
 | F3 | At most 2 review rounds per build cycle by default, then needs-human. | 1 to 5; only the all-projects scope can raise it above 2 |
 | F4 | Approver runs on every job. Only APPROVE merges. ESCALATE holds the PR. | none |
 | F5 | APPROVE PRs merge after green checks. | tighten to human: every PR held for a person |
@@ -565,7 +565,7 @@ The gate catalog is code: `GATES` in `worker/admission.js` and `PIPELINE_GATES` 
 `factory.py`. Pipeline configuration can switch a catalog gate on for every project
 or for one project, and a gate switched on globally applies to every project. Config
 cannot add a gate outside the catalog or remove a loop stage: the spec, the build,
-the four reviews, the approver and the PR always run.
+the reviews F2 requires, the approver and the PR always run.
 
 | Id | Gate | Holds |
 | --- | --- | --- |

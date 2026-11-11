@@ -234,8 +234,8 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   score but write no text. An item or context holding either tag, including fullwidth,
   Cyrillic, Greek or other lookalike forms, or a letter that reads as either l or I, is
   refused with a 400.
-- **Floors.** A queued idea still goes through the spec, four reviews, the approver, merge
-  rules and any `spec-approval` gate.
+- **Floors.** A queued idea still goes through the spec, the reviews F2 requires, the
+  approver, merge rules and any `spec-approval` gate.
 - **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
   Workers AI usage bills against the account. Without the binding the route answers 503,
   and lines wait. In a 36-call live run, a call sent a median of 292 input tokens, which costs about

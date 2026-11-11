@@ -411,4 +411,5 @@ test("floors are frozen F1-F11", () => {
     FLOORS.map((floor) => floor.id),
     Array.from({ length: 11 }, (_, i) => `F${i + 1}`),
   );
+  assert.match(FLOORS.find((f) => f.id === "F2").rule, /Security and code always run/);
 });
