@@ -367,6 +367,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "build": { "state": "queued | running | done | failed", "runs": ["https://github.com/<repo>/actions/runs/1"] },
   "pipeline": { "global": 3, "project": 2 },
   "backlog": { "line": "- [ ] <slug>: <feature>", "decision": "approved | denied | rework", "at": "...", "notes": "optional", "answers": "optional", "notes_read": "..." },
+  "experiment": { "name": "pilot", "arm": "a | b", "provider": "provider-b", "model": "model-b", "effort": "high" },
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
   "started": "2026-10-15T11:40:00Z",
   "updated": "2026-10-15T12:00:00Z",
@@ -395,8 +396,7 @@ device build. Jobs whose `runs` match rode the same build. Both are optional, an
 `factory.py pipeline`. `factory.py` rejects a malformed one.
 `backlog` is set only on jobs decided from the dashboard's Backlog column. It holds
 the backlog line, the decision, when it was made, and any notes typed with the decision.
-Approve also appends the notes to `idea`.
-A backlog card opens a decision page in the drawer that shows the full item.
+Approve also appends the notes to `idea`. A backlog card opens a decision page in the drawer that shows the full item.
 Approve adds an `idea` job that pickup starts. Deny adds a `closed` job with the note
 `denied from the backlog`. Both carry a `capture_id`.
 Rework needs notes. It adds an `idea` job with the note `rework requested from the backlog`.
@@ -404,6 +404,10 @@ Its pickup rewrites the line through `factory.py backlog rework`, and the new li
 back to Backlog with `(rework-of <id>)`. The decision page lists each earlier wording and
 its notes by following those links.
 When the item has context, the page shows the reasons, a Recommended badge and the agent's extra questions. Approve and Deny need every question answered. Answers go to `backlog.answers`, and on Approve also to the idea.
+`experiment` is set only by pickup, at first claim, when `routes.md` sets an owner-model
+experiment: the arm the job launched on and the provider, model and effort it launched
+with. Pickup never rewrites it, and a relaunch of an arm `b` job launches on the recorded
+triple. `factory.py experiment report <name>` attributes outcomes by it.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
 
