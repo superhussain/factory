@@ -101,6 +101,14 @@ class RetroRedactTest(RetroCase):
                            ("git push -u origin main", "git push -u origin main")):
             self.assertEqual(factory.retro_redact(text), kept)
 
+    def test_long_name_run_redacts_in_linear_time(self):
+        for text in ("a" * 30000, "-" * 30000, "a1" * 15000, "--" + "a" * 30000):
+            with self.subTest(text=text[:3]):
+                start = time.monotonic()
+                self.assertEqual(factory.retro_redact(text), text)
+                self.assertLess(time.monotonic() - start, 1)
+        self.assertEqual(factory.retro_redact("x" * 63 + "_token=xyz"), "x" * 63 + "_token=[redacted]")
+
     def test_project_folds_home(self):
         self.assertEqual(self.digest()[0]["project"], "~--paseo-worktrees-ab12-factory-1017-add-x")
         self.assertEqual(factory.retro_project("-Users-x-dev"), "~-dev")
