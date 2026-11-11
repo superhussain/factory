@@ -168,6 +168,8 @@ REF_KINDS = ("rework-of", "follow-up-of", "sub-job-of", "batched-into")
 # A rider is an idea that ships inside another job. It follows that lead's stage and PR.
 BATCH_REF = "batched-into"
 MAX_RIDERS = 20
+HOLD_MIN_IDEAS = 5
+HOLD_MAX_HOURS = 12
 MAX_CANDIDATES = 40
 BUILD_STATES = ("queued", "running", "done", "failed")
 # Ideas wait on the board with no claim, branch, or files until a pickup moves them to spec.
@@ -1444,8 +1446,9 @@ def queue_backlog_item(home, slug, feature, verdict):
                "idea": f"{text}\n\nQueued by backlog triage: {score}. {verdict['reason']}",
                "backlog": {"line": raw, "decision": "approved", "at": at, "by": "triage",
                            "triage": {k: verdict[k] for k in ("model", "confidence", "threshold", "reason")}}}
-        if ref:
-            job["refs"] = [{"id": ref.group(2), "kind": ref.group(1)}]
+        refs = suffix_refs(ref)
+        if refs:
+            job["refs"] = refs
         data["jobs"].append(job)
         return dump_board(data), job_id
     try:
@@ -1501,6 +1504,11 @@ def queue_backlog_item(home, slug, feature, verdict):
 
 
 BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$", re.ASCII)
+
+
+def suffix_refs(ref):
+    """The refs a BACKLOG_SUFFIX match carries: none when there is no match or its id contains ".."."""
+    return [{"id": ref.group(2), "kind": ref.group(1)}] if ref and ".." not in ref.group(2) else []
 
 
 def backlog_held(text, done):
@@ -1622,13 +1630,14 @@ def inflight_count(data, project, minutes, device=None):
 
 
 def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None, project=None, by_host=False,
-                builds=False, experiment=None, route=None):
+                builds=False, experiment=None, route=None, skip_ids=frozenset()):
     """Claim up to limit of the oldest runnable ideas in one board write, and return their
     [{"id", "project", "repo_path", "session"}]. An empty session mints a tag per idea.
     builds also accepts jobs that Tracer scope approval moved to build.
     experiment is read_experiment's dict and route the picked route tuple: each picked job
     without a record gets an experiment stamp naming its arm and launch values, written once,
-    and an arm b job is never picked while the experiment is limited."""
+    and an arm b job is never picked while the experiment is limited.
+    skip_ids are ids pickup holds back for a batch."""
     exp_limited = None
     if experiment:
         until = read_limits(home).get(experiment["name"])
@@ -1654,7 +1663,7 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
             if not (j.get("stage") == "idea" or builds and (tracer_start(j) or moved_here(j, device))) \
                     or not repo or not os.path.isdir(repo) \
                     or (project and j["project"] != project) \
-                    or not JOB_ID.fullmatch(j["id"]) or ".." in j["id"] \
+                    or not JOB_ID.fullmatch(j["id"]) or ".." in j["id"] or j["id"] in skip_ids \
                     or blocking(j, device, session, minutes):
                 continue
             record = j.get("experiment")
@@ -1731,7 +1740,8 @@ def batch_cmd(target, *idea_ids):
     local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
 
     def entry(j):
-        return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title")}
+        return {"id": j["id"], "title": j.get("title"), "idea": j.get("idea") or j.get("title"),
+                "hold": batch_hold(j)}
 
     def change(text):
         data = load_board(text)
@@ -1765,7 +1775,7 @@ def batch_cmd(target, *idea_ids):
             _, _, ref, candidate = lines[pick]
             job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]],
                                  feature_slug(candidate["title"]), archive_floor(data))
-            refs = ([{"id": ref.group(2), "kind": ref.group(1)}] if ref else []) + [{"id": lead_id, "kind": BATCH_REF}]
+            refs = suffix_refs(ref) + [{"id": lead_id, "kind": BATCH_REF}]
             patch_job(data, job_id, {"project": slug, "title": candidate["title"], "idea": candidate["idea"],
                                      "stage": "spec", "note": f"batched into {lead_id}", "refs": refs})
             made[pick] = job_id
@@ -1838,6 +1848,8 @@ def stack_cmd(target, rider_id):
             fail(f"stack runs while {lead_id} is at spec, not {lead.get('stage')}", 2)
         if lead_of(rider) != lead_id:
             fail(f"cannot stack {rider_id}: not batched into {lead_id}. Nothing was written.", 2)
+        if rider.get("stage") in TERMINAL:
+            fail(f"cannot stack {rider_id}: it is {rider['stage']}. Nothing was written.", 2)
         other = next((j["id"] for j in riders_of(data, lead_id)
                       if j["id"] != rider_id and j.get("stacked") is True), None)
         if other:
@@ -2678,6 +2690,60 @@ def pickup_settings(home, slug, repo, device):
         if problem:
             return None, None, problem
     return enabled, hosts, why
+
+
+def batch_hold(j):
+    """True when pickup holds this idea for a batch: a follow-up or a triage-queued idea that no
+    person added, approved or prioritized from the dashboard."""
+    if j.get("stage") != IDEA or "capture_id" in j or prioritized(j):
+        return False
+    refs = j.get("refs") if isinstance(j.get("refs"), list) else []
+    backlog = j.get("backlog") if isinstance(j.get("backlog"), dict) else {}
+    return any(isinstance(r, dict) and r.get("kind") == "follow-up-of" for r in refs) \
+        or backlog.get("by") == "triage"
+
+
+def hold_config(home, slug):
+    """(min_ideas, max_wait_hours) from the effective pipeline's optional hold, else the defaults."""
+    status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+    try:
+        hold = json.loads(text).get("hold") if status == 200 else None
+    except (ValueError, AttributeError):
+        hold = None
+    if isinstance(hold, dict) and type(hold.get("min_ideas")) is int and 1 <= hold["min_ideas"] <= MAX_RIDERS \
+            and type(hold.get("max_wait_hours")) is int and 1 <= hold["max_wait_hours"] <= 168:
+        return hold["min_ideas"], hold["max_wait_hours"]
+    return HOLD_MIN_IDEAS, HOLD_MAX_HOURS
+
+
+def batch_holds(home, jobs, runnable):
+    """{id: skip line} for the held ideas pickup does not launch this run. A project's held ideas
+    wait until it has min_ideas of them or the oldest has gone max_wait_hours without an update.
+    Then the first in board order launches and the rest batch behind it."""
+    groups = {}
+    for j in jobs:
+        if batch_hold(j) and runnable(j):
+            groups.setdefault(j["project"], []).append(j)
+    stamp, lines = datetime.now(timezone.utc), {}
+    for slug, held in groups.items():
+        least, hours = hold_config(home, slug)
+
+        def age(j):
+            try:
+                return stamp - datetime.strptime(j.get("updated", ""), "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                return timedelta(hours=hours)
+        oldest = max(age(j) for j in held)
+        if len(held) >= least or oldest >= timedelta(hours=hours):
+            for j in held[1:]:
+                lines[j["id"]] = f"skip {j['id']} {slug}: batches behind {held[0]['id']}"
+            continue
+        waited = max(0, int(oldest.total_seconds() // 3600))
+        for j in held:
+            lines[j["id"]] = (f"skip {j['id']} {slug}: waits for a batch "
+                              f"({len(held)} of {least} held, oldest {waited}h of {hours}h)")
+    return lines
 
 
 def host_max_inflight(home, device):
@@ -3850,7 +3916,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
             return record["arm"]
         return experiment_arm(j["id"], experiment["percent"]) if j and experiment else None
 
-    def skip(j):
+    def base_skip(j):
         """Why this idea is not a candidate, or None."""
         project = j.get("project")
         if not project:
@@ -3871,6 +3937,12 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
         if experiment and exp_limited and job_arm(j) == "b":
             return f"skip {j['id']} {project}: experiment {experiment['name']} limited until {exp_limited}"
         return None
+
+    holds = batch_holds(home, jobs, lambda j: base_skip(j) is None)
+
+    def skip(j):
+        """Why this idea is not a candidate, or None."""
+        return base_skip(j) or holds.get(j["id"])
 
     eligible = []
     for j in jobs:
@@ -3967,7 +4039,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     while launches < limit:
         for slug in eligible:
             picked = claim_ideas(home, device, "", minutes, paths, 1, cap, slug, by_host=by_host, builds=True,
-                                 experiment=experiment, route=route)
+                                 experiment=experiment, route=route, skip_ids=frozenset(holds))
             if picked:
                 break
         else:

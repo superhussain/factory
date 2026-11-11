@@ -31,8 +31,10 @@ Write exactly one markdown file, `<round folder>/review-security.md`. Its first 
 the fix. CHANGES is only for issues that must be fixed before merge. Put a nit under
 `### Fix now` when the builder can absorb it (a few lines, in a file the spec's Tasks
 name, no auth, secret, data, protocol, storage, dependency, workflow or permission
-risk, no design choice) and under `### Follow-up` otherwise, with the reason. Nits
-never change the verdict.
+risk, no design choice) and under `### Follow-up` otherwise, with the reason. A
+cosmetic nit (line wrapping, comment placement, punctuation, wording) goes under
+`### Fix now` or is dropped, never under `### Follow-up`. Nits never change the
+verdict.
 
 You may also write `<round folder>/review-security.walkthrough.html`, as the
 interactive walkthrough rules below say, when a CHANGES fix is easier shown than

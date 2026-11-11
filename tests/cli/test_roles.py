@@ -304,7 +304,11 @@ class RolesTest(IsolatedTestCase):
             for phrase in ("### Fix now", "### Follow-up", "Nits never change the verdict", risk):
                 self.assertIn(phrase, review, name)
             self.assertNotIn("a separate heading", review, name)
+            self.assertIn("goes under `### Fix now` or is dropped", review, name)
+        self.assertIn("Drop cosmetic nits", skill)
+        self.assertIn("Cosmetic nits never become follow-ups", skill)
         approver = flat("agents/factory-approver.md")
+        self.assertIn("which it drops", approver)
         self.assertIn("Rounds left", approver)
         self.assertIn("the `### Fix now` nits are worth one more review round", approver)
         self.assertNotIn("absorb bar", approver)

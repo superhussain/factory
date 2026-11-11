@@ -17,7 +17,8 @@ line on stderr. An item may be followed by indented context lines that
 4. Run `where <project>`, then step one of `/factory <slug>: <feature>` without
    the sync and claim, since `next` already claimed `<id>` for this session. A feature
    ending in `(<kind> <id>)`, such as `(sub-job-of 041-recipe-import)`, also sets
-   `refs` in that first board patch. Continue the loop from there.
+   `refs` in that first board patch. Leave `refs` unset when that id contains `..`.
+   Continue the loop from there.
 5. On exit 3, check the build queue as Builds describes before stopping.
 
 A decision from the dashboard's backlog decision page checks lines off the same way.
