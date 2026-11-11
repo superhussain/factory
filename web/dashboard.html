@@ -1266,6 +1266,9 @@ const leadOf = (j) => refs(j).find((r) => r.kind === 'batched-into')?.id ?? null
 // The riders batched into a lead, in board order.
 const ridersOf = (id) => jobs.filter((x) => leadOf(x) === id).map((x) => x.id);
 
+// A rider's own batch note repeats its batched-into ref line, so its card leaves it out.
+const batchNote = (j) => leadOf(j) !== null && j.note === 'batched into ' + leadOf(j);
+
 function buildState(j) {
   const s = j.build && j.build.state;
   return BUILD_STATES.includes(s) ? s : null;
@@ -1342,9 +1345,9 @@ function refLine(r) {
 
 // The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
 // Each on-board ref and rider also gets a visually hidden stand-in link after the actions trigger, named for this card, so Tab reaches it.
-// A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise.
+// A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise. A rider's batch note is left out.
 function card(j, inNeeds, archived = false) {
-  const ask = inNeeds && asks(j.needs) ? j.needs : j.note;
+  const ask = inNeeds && asks(j.needs) ? j.needs : batchNote(j) ? '' : j.note;
   const riders = archived ? [] : ridersOf(j.id);
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
