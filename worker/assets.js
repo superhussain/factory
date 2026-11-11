@@ -112,6 +112,13 @@ export function readServerConfig(env) {
   return { origin, title, issuer, audience, image_origins, agent_links, jira_origin };
 }
 
+// FNV-1a 32 of the dashboard source: a tab compares it with the version it loaded.
+export const DASHBOARD_VERSION = (() => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < page.length; i++) h = Math.imul(h ^ page.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(16).padStart(8, "0");
+})();
+
 const jsonScript = (value) =>
   JSON.stringify(value).replace(
     /[<>&\u2028\u2029]/g,
@@ -146,9 +153,10 @@ export function renderDashboard(env) {
     __FACTORY_CSP__: escapeHtml(csp),
     __FACTORY_CONFIG__: config,
     __FACTORY_REFERENCE__: reference,
+    __FACTORY_VERSION__: DASHBOARD_VERSION,
   };
   const html = page.replace(
-    /__FACTORY_(?:TITLE|CSP|CONFIG|REFERENCE)__/g,
+    /__FACTORY_(?:TITLE|CSP|CONFIG|REFERENCE|VERSION)__/g,
     (token) => values[token],
   );
   return response(html, "text/html", { "Content-Security-Policy": csp });
