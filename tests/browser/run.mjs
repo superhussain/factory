@@ -650,7 +650,8 @@ async function capture(outdir, referencePath) {
       await page.waitForSelector("#backlog-form");
       await page.waitForSelector("#backlog-triage:not([hidden])");
     };
-    const openTriageFirstPaint = async (page, side) => {
+    // The after side waits until the board has prefetched all three triage verdicts.
+    const openTriagePrefetched = async (page, side) => {
       if (side === "after") await page.waitForFunction(() => backlogTriageSeen.size === 3);
       await page.click('.backlog-card[data-index="1"]');
       await page.waitForSelector("#backlog-form");
@@ -872,8 +873,8 @@ async function capture(outdir, referencePath) {
     await view("jumper-archive-empty", 1280, 900, "light", openArchiveEmpty);
     await view("backlog-triage-desktop", 1440, 900, "light", openTriage);
     await view("backlog-triage-mobile", 390, 844, "dark", openTriage);
-    await view("backlog-triage-open-desktop", 1440, 900, "light", openTriageFirstPaint);
-    await view("backlog-triage-open-mobile", 390, 844, "dark", openTriageFirstPaint);
+    await view("backlog-triage-open-desktop", 1440, 900, "light", openTriagePrefetched);
+    await view("backlog-triage-open-mobile", 390, 844, "dark", openTriagePrefetched);
     await view("backlog-decide-desktop", 1440, 900, "light", openDecision);
     await view("backlog-decide-mobile", 390, 844, "dark", openDecision);
     await view("backlog-decide-touch", 390, 844, "dark", openDecision, true);
