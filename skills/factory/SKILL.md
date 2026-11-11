@@ -308,8 +308,8 @@ How the dashboard's idea column, Assign project and backlog decision page behave
 
 `experiment` is set only by pickup, at first claim, for an owner-model experiment; see
 [pickup](references/pickup.md#owner-model-experiment).
-`agents` keeps the newest 32 rows of who ran each stage. Only pickup launches and
-`agent record` append them; `agent report` counts them.
+Only pickup and `agent record` append `agents` rows, newest 32 kept;
+`agent report` counts them.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
 
@@ -492,8 +492,8 @@ only `factory.py deny-notes` writes it.
   risky, needs its own design, or needs a person. Absorbing never widens the spec
   (F10) or raises the round cap (F3). The builder lists absorbed items under
   `### Absorbed` and the rest under `### Left open` in its build.md run section.
-  Reviewers split nits into `### Fix now` and `### Follow-up`. The approver weighs
-  what is still open before APPROVE.
+  Reviewers split nits into `### Fix now` and `### Follow-up`. Cosmetic nits never
+  become follow-ups. The approver weighs what is still open before APPROVE.
 - A merged or closed job stays that way. New work on it is a new job with `refs`
   pointing back, so the board shows what is actually open. Use `rework-of` to fix
   or redo it, `follow-up-of` for work it surfaced, and `sub-job-of` for a slice

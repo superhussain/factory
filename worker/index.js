@@ -63,6 +63,9 @@ const MAX_ESCALATION = 160 << 10;
 // /api/hosts, /api/hosts/<id> and /api/hosts/<id>/<action>.
 const HOSTS = /^\/api\/hosts(?:\/([^/]+)(?:\/(code|pair|status|history))?)?$/;
 const MAX_BODY = 1 << 20;
+// A day's list of hosts with a retro digest, and one host's digest for that day.
+const RETRO_DAY = /^\/api\/retro\/(\d{4}-\d{2}-\d{2})$/;
+const RETRO_FILE = /^\/api\/retro\/([^/]+)\/(\d{4}-\d{2}-\d{2})\.jsonl$/;
 // board.json holds every job, merged ones included, so it outgrows the per-file cap.
 const MAX_BOARD = 4 << 20;
 const MAX_IMAGE = 5 << 20;
@@ -748,6 +751,13 @@ const PERSON_ONLY = "hosts are managed only by a signed-in person";
 const PAIRING_FAILED = "pairing code is wrong, used or expired";
 const TOKEN_TAKEN = "this service token is already bound to another host";
 const STATUS_ONLY = "status is written only by the host's bound service token";
+const RETRO_WRITE_ONLY = "retro digests are written only by the host's bound service token";
+const RETRO_READ_ONLY = "retro digests are read only by a device service token";
+const retroKey = (id, date) => `retro/${id}/${date}.jsonl`;
+const isCalendarDate = (date) => {
+  const time = Date.parse(`${date}T00:00:00Z`);
+  return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === date;
+};
 
 // A JSON body under the cap, or the error reply.
 async function readJson(request, max = MAX_PIPELINE) {
@@ -1007,6 +1017,45 @@ async function hostStatusPut(request, env, principal, id) {
   return reply("ok");
 }
 
+// A re-push replaces the host's file for that day. Every line is a JSON object naming the host.
+async function retroPut(request, env, principal, id, date) {
+  if (principal.kind !== "service" || !principal.client_id) return reply(RETRO_WRITE_ONLY, 403);
+  const obj = await env.BUCKET.get(hostKey(id));
+  const host = obj && JSON.parse(await obj.text());
+  if (host?.token !== principal.client_id || (host.state !== "paired" && host.state !== "active"))
+    return reply(RETRO_WRITE_ONLY, 403);
+  const bytes = await readCapped(request, MAX_BODY);
+  if (bytes === null) return reply("body over 1 MiB", 413);
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return reply("retro digest must be valid UTF-8", 400);
+  }
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  for (const [i, line] of lines.entries()) {
+    let row = null;
+    try {
+      row = JSON.parse(line);
+    } catch {}
+    if (typeof row !== "object" || row === null || Array.isArray(row) || row.host !== id)
+      return reply(`line ${i + 1} is not a JSON object with host ${id}`, 400);
+  }
+  await env.BUCKET.put(retroKey(id, date), bytes, {
+    httpMetadata: { contentType: "application/x-ndjson" },
+  });
+  return reply("ok");
+}
+
+// The hosts with a retro digest for the day, in host record order.
+async function retroDay(env, date) {
+  const out = [];
+  for (const { host } of await hostRecords(env))
+    if (await env.BUCKET.head(retroKey(host.id, date))) out.push(host.id);
+  return reply(JSON.stringify(out), 200, "application/json");
+}
+
 // Raw image bytes, never decoded as text, or null past the cap.
 const readImage = (request) => readCapped(request, MAX_IMAGE);
 
@@ -1207,6 +1256,21 @@ async function api(request, env, path, principal) {
         return hostStatusPut(request, env, principal, id);
     }
     return notFound();
+  }
+  m = path.match(RETRO_DAY);
+  if (m) {
+    if (method !== "GET" || !isCalendarDate(m[1])) return notFound();
+    if (principal.kind !== "service") return reply(RETRO_READ_ONLY, 403);
+    return retroDay(env, m[1]);
+  }
+  m = path.match(RETRO_FILE);
+  if (m) {
+    const [, id, date] = m;
+    if (!HOST_NAME.test(id) || !isCalendarDate(date)) return notFound();
+    if (method === "PUT") return retroPut(request, env, principal, id, date);
+    if (method !== "GET") return notFound();
+    if (principal.kind !== "service") return reply(RETRO_READ_ONLY, 403);
+    return getFile(env, retroKey(id, date), "application/x-ndjson");
   }
   m = path.match(IDEA_IMAGE_ROUTE);
   if (m) {

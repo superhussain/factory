@@ -53,7 +53,7 @@ Project settings rollout is Worker-first:
    upgrading clients first is not safe mixed-version writing.
 3. Reinstall on active devices, initialize as needed, then `pull <slug>` to adopt
    observed baselines. Equal caches adopt safely; divergent caches require the
-   `.remote` comparison above. Resume only after active writers are upgraded,
+   `.remote` comparison below. Resume only after active writers are upgraded,
    local drafts accounted for, and recovery complete. Offline old devices are
    blocked remotely but still need draft backups before any old `where`/`init`.
 4. No bulk R2 rewrite is needed. Correct unsupported legacy keys/values in a local
