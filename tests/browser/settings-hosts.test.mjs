@@ -454,6 +454,27 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await page.close();
     });
 
+    await t.test("hosts H9 the routes table fits the card at phone width", async () => {
+      const page = await open("#/settings/hosts", HOSTS);
+      await page.click("#hosts-load");
+      await page.waitForFunction(() => document.querySelectorAll(".host-card").length === 5, wait);
+      const table = '.host-card[data-id="studio-mac"] .host-routes';
+      const fallback = `${table} tbody tr:last-child`;
+      const display = () =>
+        page.$eval(`${fallback} td:last-child`, (el) => getComputedStyle(el).display);
+      await page.setViewport({ width: 390, height: 844 });
+      assert.equal(await page.$eval(table, (el) => el.scrollWidth <= el.clientWidth), true);
+      assert.equal(await page.$eval(`${fallback} td`, (el) => el.textContent), "fallback");
+      assert.deepEqual(
+        await page.$$eval(`${fallback} td`, (cells) => cells.map((el) => el.dataset.label)),
+        ["Route", "Provider", "Model", "Effort", "Limited until"],
+      );
+      assert.equal(await display(), "block");
+      await page.setViewport({ width: 1280, height: 900 });
+      assert.equal(await display(), "table-cell");
+      await page.close();
+    });
+
     await t.test("hosts H5 pickup checkboxes and the save-time check", async (st) => {
       const current = await fetch(origin + "/api/pipeline/projects/sample");
       const put = await fetch(origin + "/api/pipeline/projects/sample", {
