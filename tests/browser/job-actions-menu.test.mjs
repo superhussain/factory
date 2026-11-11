@@ -98,6 +98,16 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
         await press("ArrowUp", "d-pause", true);
         await press("Home", "d-edit-idea", true);
         await press("End", "d-copy-link", true);
+        const ring = (id) =>
+          page.$eval(`#${id}`, (el) => {
+            const s = getComputedStyle(el);
+            return { style: s.outlineStyle, width: s.outlineWidth };
+          });
+        assert.deepEqual(await ring("d-copy-link"), { style: "solid", width: "2px" }, label);
+        if (!viewport.hasTouch) {
+          await page.hover("#d-edit-idea");
+          assert.equal((await ring("d-edit-idea")).style, "none", `${label} hover has no ring`);
+        }
         await press("Escape", "d-actions", false);
         await press("ArrowDown", "d-edit-idea", true);
         await press("Tab", "d-close", false);

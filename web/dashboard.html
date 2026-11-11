@@ -334,7 +334,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .meta.host { color: var(--host-fg); }
   .card .ref-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   @media (hover: hover) { .card .ref-link:hover { color: var(--accent); text-decoration-thickness: 2px; } }
-  .card .ref-link.ref-focused { background: var(--accent); color: var(--panel); border-radius: 3px; box-shadow: -2px 0 0 var(--accent), 2px 0 0 var(--accent); text-decoration-thickness: 2px; }
+  /* The end margin gives the right shadow 2px of the row's scroll range, so a ref at the row's end keeps it. */
+  .card .ref-link.ref-focused { background: var(--accent); color: var(--panel); border-radius: 3px; box-shadow: -2px 0 0 var(--accent), 2px 0 0 var(--accent); text-decoration-thickness: 2px; margin-inline-end: 2px; }
   /* .sr-only hides the stand-in; this pins it inside .card-wrap. */
   .ref-focus { top: 0; left: 0; }
   .backlog-card {
@@ -386,7 +387,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .job-actions-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; min-width: 200px; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .job-actions-menu[hidden] { display: none; }
   .job-actions-menu .btn { border: 0; text-align: left; border-radius: 6px; padding: 8px 12px; }
-  .job-actions-menu .btn:focus-visible { background: var(--line); }
+  .job-actions-menu .btn:focus-visible { background: var(--line); outline: 2px solid var(--accent); outline-offset: -2px; }
   @media (hover: hover) { .job-actions-menu .btn:hover { background: var(--line); } }
   .detail-head .pr-link { position: relative; font-size: 12px; }
   .detail-head .pr-link[hidden] { display: none; }
@@ -2979,7 +2980,9 @@ function renderBoard() {
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   if (!settingsShown) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
-  $('board').style.setProperty('--cols', collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']).join(' '));
+  const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
+  // An empty auto track takes the free space, so the filter-empty line spans the board and not only a few narrow columns.
+  $('board').style.setProperty('--cols', tracks.concat(noneShown ? ['auto'] : []).join(' '));
   $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : '') + COLUMNS.map((s, i) => {
     if (hiddenColumns.has(s)) return '';
     let list = lists[i];
@@ -5963,7 +5966,7 @@ function markRefFocus(e, on) {
   const row = span.closest('.line');
   if (!on) { row.scrollLeft = 0; return; }
   const s = span.getBoundingClientRect(), r = row.getBoundingClientRect();
-  if (s.right > r.right) row.scrollLeft += s.left - r.left - 4;
+  if (s.right + 2 > r.right) row.scrollLeft += s.left - r.left - 4;
 }
 $('board').addEventListener('focusin', (e) => markRefFocus(e, true));
 $('board').addEventListener('focusout', (e) => markRefFocus(e, false));

@@ -320,6 +320,7 @@ async function capture(outdir, referencePath) {
     let archivePageFails = false;
     let archiveSearchFails = false;
     let longProject = false;
+    let refBoard = false;
     async function view(name, width, height, theme, prepare, touch = false) {
       for (const side of ["before", "after"]) {
         await retryCapture(`${side}-${name}`, async () => {
@@ -377,6 +378,29 @@ async function capture(outdir, referencePath) {
                     ...(await projects.json()),
                     { slug: "long", title: CAPTURE_LONG_TITLE, repo: "example/long", base: "main" },
                   ]),
+                });
+              }
+              if (refBoard && target.pathname === "/board.json") {
+                const board = await fetch(target.href);
+                const body = await board.json();
+                return request.respond({
+                  status: board.status,
+                  contentType: "application/json",
+                  headers: { ETag: board.headers.get("ETag") ?? "" },
+                  body: JSON.stringify({
+                    ...body,
+                    jobs: body.jobs.map((j) =>
+                      j.id === "002-needs"
+                        ? {
+                            ...j,
+                            refs: [
+                              { kind: "follow-up-of", id: "004-rework-capture" },
+                              { kind: "follow-up-of", id: "001-capture" },
+                            ],
+                          }
+                        : j,
+                    ),
+                  }),
                 });
               }
               if (archivedBoard && target.pathname === "/board.json") {
@@ -618,6 +642,43 @@ async function capture(outdir, referencePath) {
     };
     await view("filter-none-desktop", 1440, 900, "light", hideAllProjects);
     await view("filter-none-mobile", 390, 844, "dark", hideAllProjects);
+    const hideColumnsAndProjects = async (page) => {
+      await page.evaluate(() =>
+        localStorage.setItem(
+          "factory-hidden-columns",
+          "backlog,idea,spec,build,review,approve,pr-open,closed",
+        ),
+      );
+      await page.reload({ waitUntil: "networkidle0" });
+      await page.waitForSelector("#filter:not([hidden])");
+      await hideAllProjects(page);
+    };
+    await view("filter-none-few-columns-desktop", 1440, 900, "light", hideColumnsAndProjects);
+    const focusSecondRef = async (page) => {
+      await page.focus('.card-actions[data-actions="002-needs"]');
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      const scrolled = await page.evaluate(() => {
+        const a = document.activeElement;
+        a.closest(".card-wrap").scrollIntoView({ block: "center" });
+        const row = a.closest(".card-wrap").querySelector(".refs.line");
+        return a.matches('a.ref-focus[data-ref="001-capture"]') && row.scrollLeft > 0;
+      });
+      if (!scrolled)
+        throw new Error("card ref capture: 001-capture ref not focused in a scrolled row");
+    };
+    refBoard = true;
+    try {
+      await view("card-ref-focus-mobile", 390, 844, "dark", focusSecondRef);
+    } finally {
+      refBoard = false;
+    }
+    const focusSecondMenuItem = async (page) => {
+      await page.focus('.card-actions[data-actions="001-capture"]');
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowDown");
+    };
+    await view("card-menu-focus-desktop", 1440, 900, "light", focusSecondMenuItem);
     // Both pages have the decision page, so both sides open it.
     const openDecision = async (page) => {
       await page.click(".backlog-card");
