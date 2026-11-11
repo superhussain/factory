@@ -3,7 +3,18 @@
 // configuration (job 108 owns those targets) or credential-shaped strings.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const read = (name) => readFileSync(new URL(`../../${name}`, import.meta.url), "utf8");
 
@@ -235,4 +246,26 @@ test("test:protocol prepares the .build assets before its suites", () => {
 
 test("test:auth prepares the .build assets before its suites", () => {
   assert.match(manifest.scripts["test:auth"], /^node tools\/assets\.mjs --prepare && node --test /);
+});
+
+test("assets --prepare names pnpm install when node_modules is missing", () => {
+  // realpathSync: macOS tmp is a symlink, which would defeat the isMain check.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "assets-prepare-")));
+  try {
+    mkdirSync(join(dir, "tools"));
+    copyFileSync(new URL("../../tools/assets.mjs", import.meta.url), join(dir, "tools/assets.mjs"));
+    const run = spawnSync(process.execPath, [join(dir, "tools/assets.mjs"), "--prepare"], {
+      encoding: "utf8",
+    });
+    assert.equal(run.status, 1);
+    assert.ok(
+      run.stderr.includes(
+        "node_modules/mermaid/dist/mermaid.min.js is missing. Run mise exec -- pnpm install --frozen-lockfile first.",
+      ),
+      run.stderr,
+    );
+    assert.equal(existsSync(join(dir, ".build")), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
