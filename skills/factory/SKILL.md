@@ -789,10 +789,10 @@ feature.
    run `push "$SLUG/<id>"`, patch
    `{"stage": "needs-human", "note": "review panel: round <N> findings need a person (clef-flash <confidence>%)", "needs": "decide on the round-<N> findings at $DASHBOARD#<id>/round-<N>/review-<r>, then run /factory rework <id> <note> or /factory approve <id>"}`,
    with `<r>` the first CHANGES reviewer in the order security, ux, ui, code, and
-   dispatch nothing. Any other decision continues the loop. Otherwise set stage `build`
-   and dispatch the builder per Rules (builder selection; fresh worker on a model
-   change), then repeat step 4 as round
-   N+1. If the builder blocks, follow Rules instead of starting a review round.
+   dispatch nothing. On any other decision, set stage `build` and dispatch the
+   builder per Rules (builder selection; fresh worker on a model change), then
+   repeat step 4 as round N+1. If the builder blocks, follow Rules instead of
+   starting a review round.
    If the builder only disputed findings and the branch head didn't move (same
    `git rev-parse factory/<id>` before and after its reply), round N+1
    re-runs only the reviewers that asked for changes. Copy the others' review files
