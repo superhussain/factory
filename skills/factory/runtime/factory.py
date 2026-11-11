@@ -1125,7 +1125,7 @@ def backlog_add(item, context=None):
     def append(text):
         text = BACKLOG_TEMPLATE if text is None else text
         done = re.compile(rf"- \[x\] {re.escape(item)} \((\S+)\)")
-        lines = [row.rstrip("\r") for row in text.split("\n")]
+        lines = [row.rstrip() for row in text.split("\n")]
         if line in lines:
             return None, ""
         checked = next((m.group(1) for m in map(done.fullmatch, lines) if m), None)
@@ -1136,7 +1136,7 @@ def backlog_add(item, context=None):
         return text + line + "\n" + block, True
     added = cas(home, "/api/backlog", append)
     if added is not True:
-        print(f"already in backlog: {item}")
+        print(f"already in backlog: {item}" + (" (the --context file was not added)" if context else ""))
         print(f"link: {api_url(home)}/#{urllib.parse.quote(added, safe='')}" if added else f"link: {backlog_link(home, line)}")
         return
     print(f"added {item}" + (" with context" if context else ""))
