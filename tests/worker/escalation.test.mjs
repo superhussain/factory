@@ -171,6 +171,50 @@ test("variation selectors are removed before the guards", async () => {
   assert.equal(/[\ufe0f\u{e0100}]/u.test(s.runs[0][1].state), false);
 });
 
+test("fullwidth and look-alike secret shapes are redacted without a reserved tag", async () => {
+  const s = setup();
+  const security =
+    "The deploy log prints `ｇｈｐ＿" +
+    "ｘ".repeat(20) +
+    "`. Decide if deploy logs may hold tokens.";
+  const ux = "Кнопка has no focus ring.";
+  const code = "Drop the `ghр_" + "x".repeat(20) + "` fixture.";
+  const r = await s.escalation({ reviews: { security, ux, code } });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(
+    s.runs[0][1].state,
+    '<review-findings reviewer="security" trust="data">\n' +
+      "The deploy log prints `[secret-shaped text removed]`. Decide if deploy logs may hold tokens.\n" +
+      "</review-findings>\n\n" +
+      '<review-findings reviewer="ux" trust="data">\n' +
+      "Кнопка has no focus ring.\n" +
+      "</review-findings>\n\n" +
+      '<review-findings reviewer="code" trust="data">\n' +
+      "Drop the `[secret-shaped text removed]` fixture.\n" +
+      "</review-findings>",
+  );
+});
+
+test("zero-width joiners between emoji are removed before the guards", async () => {
+  const s = setup();
+  const ux = "VERDICT: CHANGES\n\n\u{1F469}‍\u{1F4BB} The settings page has no focus ring.";
+  const r = await s.escalation({ reviews: { ux } });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(
+    s.runs[0][1].state,
+    '<review-findings reviewer="ux" trust="data">\n' +
+      "VERDICT: CHANGES\n\n\u{1F469}\u{1F4BB} The settings page has no focus ring.\n" +
+      "</review-findings>",
+  );
+  assert.equal(cleanReview("\u{1F3F3}️‍\u{1F308}"), "\u{1F3F3}\u{1F308}");
+  for (const ui of ["a‍b", "\u{1F469}‍b", "a‍\u{1F4BB}"]) {
+    const bad = await s.escalation({ reviews: { ui } });
+    assert.equal(bad.status, 400, JSON.stringify(ui));
+    assert.equal(bad.text, "reviews.ui: contains control, invisible or bidirectional characters");
+  }
+  assert.equal(s.runs.length, 1);
+});
+
 test("an unclosed reserved tag is removed to the end of its line", async () => {
   const s = setup();
   const r = await s.escalation({
