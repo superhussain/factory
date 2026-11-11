@@ -325,7 +325,14 @@ test("card actions", { timeout: 180000 }, async (t) => {
           JOB_ACTION_RUN["d-resume"] = window.__real;
         });
       }
-      await setPaused(page, origin, false);
+      await page.waitForFunction(
+        (id) =>
+          ![...document.querySelectorAll(`.card[data-id="${id}"] .chip`)].some(
+            (c) => c.textContent === "Paused",
+          ),
+        {},
+        ID,
+      );
       await page.waitForFunction(() => cardRuns.size === 0);
     });
 
