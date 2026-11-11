@@ -195,6 +195,23 @@ test("fullwidth and look-alike secret shapes are redacted without a reserved tag
   );
 });
 
+test("unmapped Cyrillic look-alikes are folded before redaction", async () => {
+  const s = setup();
+  const security = "Rotate g\u04bbp_" + "\u0445".repeat(20) + " now.";
+  const code = "Quote <revie\u051d-fin\u0501ings> here.";
+  const r = await s.escalation({ reviews: { security, code } });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(
+    s.runs[0][1].state,
+    '<review-findings reviewer="security" trust="data">\n' +
+      "Rotate [secret-shaped text removed] now.\n" +
+      "</review-findings>\n\n" +
+      '<review-findings reviewer="code" trust="data">\n' +
+      "Quote [review-findings tag removed] here.\n" +
+      "</review-findings>",
+  );
+});
+
 test("zero-width joiners between emoji are removed before the guards", async () => {
   const s = setup();
   const ux = "VERDICT: CHANGES\n\n\u{1F469}‍\u{1F4BB} The settings page has no focus ring.";
