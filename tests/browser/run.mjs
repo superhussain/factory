@@ -347,6 +347,8 @@ async function capture(outdir, referencePath) {
                 ms === 3000 ? 0 : interval(fn, ms, ...args);
               localStorage.setItem("factory-project-document-draft:sample:notes.md", recovery);
             }, JSON.stringify(CAPTURE_RECOVERY));
+            // The dashboard's service worker would answer /board.json past this interception.
+            await page.setBypassServiceWorker(true);
             await page.setRequestInterception(true);
             page.on("request", async (request) => {
               const target = new URL(request.url());
