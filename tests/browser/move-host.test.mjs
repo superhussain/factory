@@ -252,6 +252,10 @@ test("move host", { timeout: 240000 }, async (t) => {
           await openJobActions(page);
           await page.click("#d-move-host");
           await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+          await page.waitForFunction(
+            () => document.getElementById("move-host-empty").textContent !== "",
+            wait,
+          );
           assert.equal(
             await page.$eval("#move-host-empty", (el) => el.textContent),
             "No other active host runs pickup for sample. Add one in Settings, Hosts.",
@@ -490,8 +494,20 @@ test("move host", { timeout: 240000 }, async (t) => {
           await page.reload({ waitUntil: "domcontentloaded" });
           await page.waitForSelector("#d-move-host:not([hidden])", wait);
           await openJobActions(page);
+          await page.evaluate(() => {
+            const d = document.getElementById("move-host-dlg");
+            d.showModal = function () {
+              window.emptyAtOpen = document.getElementById("move-host-empty").textContent;
+              return HTMLDialogElement.prototype.showModal.call(this);
+            };
+          });
           await page.click("#d-move-host");
           await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+          await page.waitForFunction(
+            () => document.getElementById("move-host-empty").textContent !== "",
+            wait,
+          );
+          assert.equal(await page.evaluate(() => window.emptyAtOpen), "");
           await (
             await page.$("#move-host-dlg")
           ).screenshot({ path: `${SHOTS}after-move-dialog-stops-queued${suffix}.png` });
@@ -548,6 +564,10 @@ test("move host", { timeout: 240000 }, async (t) => {
             await openJobActions(page);
             await page.click("#d-move-host");
             await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+            await page.waitForFunction(
+              () => document.getElementById("move-host-empty").textContent !== "",
+              wait,
+            );
             const text = await page.$eval("#move-host-empty", (el) => el.textContent);
             await page.click("#move-host-cancel");
             return text;
