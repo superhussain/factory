@@ -304,47 +304,48 @@ test("live board events", { timeout: 120000 }, async (t) => {
     await t.test(
       "live L4 an event during a drawer load does not load the drawer again",
       async () => {
-        const { context, page, frames, errors } = await open();
-        const SPEC = "/jobs/sample/001-sample/spec.md";
-        let specReads = 0;
-        let holding = true;
-        const held = [];
-        const boardDone = { count: 0 };
-        await page.setRequestInterception(true);
-        page.on("request", (request) => {
-          const path = new URL(request.url()).pathname;
-          if (path === SPEC) specReads++;
-          if (holding && path.startsWith("/jobs/")) return held.push(request);
-          return request.continue();
-        });
-        page.on("requestfinished", (request) => {
-          if (new URL(request.url()).pathname === "/board.json") boardDone.count++;
+        const { context, page, errors } = await open();
+        // Hold and count page fetches, not network events: sw.js hides /jobs/ reads from
+        // interception, and one held fetch can surface as two request events.
+        await page.evaluate(() => {
+          const real = window.fetch;
+          window.specReads = 0;
+          window.heldReads = [];
+          window.holdReads = true;
+          window.fetch = (input, init) => {
+            const path = new URL(String(input), location.href).pathname;
+            if (path === "/jobs/sample/001-sample/spec.md") window.specReads++;
+            if (!window.holdReads || !path.startsWith("/jobs/")) return real(input, init);
+            return new Promise((resolve) =>
+              window.heldReads.push(() => resolve(real(input, init))),
+            );
+          };
         });
         // A deep link names a tab, so the drawer waits for that file while it loads.
         await page.evaluate(() => {
           location.hash = "001-sample/spec";
         });
-        while (!held.length) await new Promise((resolve) => setTimeout(resolve, 20));
+        await page.waitForFunction(() => window.heldReads.length > 0, wait);
         // Another job's write: the open job's entry stays byte-identical.
         const current = await fetch(origin + "/board.json");
         const etag = current.headers.get("ETag");
         const board = await current.json();
         board.jobs.push({ ...job("build"), id: "002-sample", title: "Synthetic other job" });
-        const before = boardDone.count;
         const write = await fetch(origin + "/api/board", {
           method: "PUT",
           headers: { "If-Match": etag },
           body: JSON.stringify(board),
         });
         assert.equal(write.status, 200);
-        while (frames.length < 1 || boardDone.count === before)
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 100)));
-        holding = false;
-        for (const request of held) request.continue();
+        // poll() draws the new card and runs syncDetail in the same task.
+        await page.waitForSelector('.card[data-id="002-sample"]', wait);
+        await page.evaluate(() => {
+          window.holdReads = false;
+          for (const go of window.heldReads.splice(0)) go();
+        });
         await page.waitForSelector('#d-tabs .tab.active[data-name="spec.md"]', wait);
         await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
-        assert.equal(specReads, 1);
+        assert.equal(await page.evaluate(() => window.specReads), 1);
         assert.deepEqual(errors, []);
         await context.close();
       },
