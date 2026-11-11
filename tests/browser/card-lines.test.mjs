@@ -263,6 +263,7 @@ test("card lines", { timeout: 240000 }, async (t) => {
           "2px",
         );
         await page.mouse.move(0, 0);
+        await settle(page);
         assert.equal(await color(page, link), await tokenColor(page, "--ref-fg"));
       });
 
