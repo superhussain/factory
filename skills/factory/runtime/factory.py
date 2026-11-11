@@ -92,6 +92,8 @@
                                             from the last N days (default 1)
   factory.py retro push                     upload that digest (last day) to retro/<device>/<local date>.jsonl
   factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
+  factory.py retro aggregate [--days N]     pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
+  factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, admit its cards
 
 claim, next, hold, handoff, board, ideas, and stuck take --session <tag> (or
 FACTORY_SESSION). A session without one gets a new tag from claim, next, or hold,
@@ -125,6 +127,7 @@ import signal
 import socket
 import ssl
 import stat
+import statistics
 import subprocess
 import sys
 import tarfile
@@ -6664,9 +6667,13 @@ def retro_host():
     return (frontmatter(config)[0] if config.is_file() else {}).get("device") or socket.gethostname()
 
 
+def retro_transcripts():
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+
+
 def retro_rows(days):
     """This host's clipped digest rows from the last days, oldest session first."""
-    root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+    root = retro_transcripts()
     if not root.is_dir():
         fail(f"no Claude Code transcripts at {root}", 4)
     host, cutoff, rows = retro_host(), time.time() - days * 86400, []
@@ -6735,15 +6742,137 @@ def retro_push():
     print(f"pushed {len(rows)} sessions to {key}")
 
 
-def retro_pull(date):
-    """Print every host's pushed digest for date, in the order the Worker lists the hosts."""
-    home = factory_home()
+def retro_fetch(home, date):
+    """[(host, text)] for every host's pushed digest for date, in the order the Worker lists the hosts."""
     hosts = [h for h in json.loads(api(home, "GET", f"/api/retro/{date}")[2])
              if isinstance(h, str) and HOST_NAME.fullmatch(h)]
-    if not hosts:
+    return [(host, api(home, "GET", f"/api/retro/{host}/{date}.jsonl")[2]) for host in hosts]
+
+
+def retro_pull(date):
+    """Print every host's pushed digest for date, in the order the Worker lists the hosts."""
+    pushed = retro_fetch(factory_home(), date)
+    if not pushed:
         print(f"no host pushed a retro digest for {date}", file=sys.stderr)
-    for host in hosts:
-        sys.stdout.write(api(home, "GET", f"/api/retro/{host}/{date}.jsonl")[2])
+    for _, text in pushed:
+        sys.stdout.write(text)
+
+
+def retro_int(value):
+    return value if type(value) is int else 0
+
+
+def retro_dict(value):
+    return value if isinstance(value, dict) else {}
+
+
+def retro_sum(total, counts):
+    """Add counts' whole-number values into total, key by key."""
+    for key, value in retro_dict(counts).items():
+        total[key] = total.get(key, 0) + retro_int(value)
+    return total
+
+
+def retro_median(values):
+    return int(statistics.median(values)) if values else 0
+
+
+def retro_patterns(rows, pick):
+    """The top 20 {"text", "count", "sessions"} entries merged from each row's pick(row) counts."""
+    merged = {}
+    for row in rows:
+        for text, count in retro_dict(pick(row)).items():
+            entry = merged.setdefault(text, {"text": text, "count": 0, "sessions": []})
+            entry["count"] += retro_int(count)
+            ref = f"{row['host']}/{row['session']}"
+            if len(entry["sessions"]) < 5 and ref not in entry["sessions"]:
+                entry["sessions"].append(ref)
+    return sorted(merged.values(), key=lambda e: (-e["count"], e["text"]))[:20]
+
+
+def retro_aggregate(days):
+    """Pull every host's digest for the last days into <home>/retro/<run>/ for the retro agent."""
+    home = factory_home()
+    today = datetime.now().date()
+    dates = [(today - timedelta(days=back)).isoformat() for back in range(days - 1, -1, -1)]
+    rows, skipped = [], 0
+    for date in dates:
+        for _, text in retro_fetch(home, date):
+            for line in text.splitlines():
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    row = None
+                if not isinstance(row, dict) or not isinstance(row.get("host"), str) \
+                        or not isinstance(row.get("session"), str):
+                    skipped += 1
+                    continue
+                if row.get("job") == "ad-hoc":
+                    row["project"] = "ad-hoc"
+                rows.append(row)
+    if not rows:
+        fail(f"no host pushed a retro digest from {dates[0]} to {dates[-1]}", 3)
+    run = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(3)
+    folder = home / "retro" / run
+    if is_link(folder.parent) or is_link(folder):
+        fail(f"{folder} or its parent is a link; nothing written", 2)
+    hosts, subagents, sub, attachments = {}, {}, {}, {}
+    for row in rows:
+        h = hosts.setdefault(row["host"], {"sessions": 0, "jobs": set(), "ad_hoc": 0})
+        h["sessions"] += 1
+        if row.get("job") == "ad-hoc":
+            h["ad_hoc"] += 1
+        else:
+            h["jobs"].add(str(row.get("job")))
+        for kind, t in retro_dict(retro_dict(row.get("subagents")).get("by_type")).items():
+            t = retro_dict(t)
+            s = subagents.setdefault(kind, {"count": 0, "turns": 0, "errors": 0, "denials": 0, "tokens": {}})
+            for key in ("count", "turns", "errors", "denials"):
+                s[key] += retro_int(t.get(key))
+            retro_sum(s["tokens"], t.get("tokens"))
+            retro_sum(sub, t.get("tokens"))
+        for kind, size in retro_dict(row.get("first_turn_attachments")).items():
+            attachments.setdefault(kind, []).append(retro_int(size))
+    for h in hosts.values():
+        h["jobs"] = len(h["jobs"])
+
+    def total(key, field=None):
+        return sum(retro_int(retro_dict(r.get(key)).get(field) if field else r.get(key)) for r in rows)
+
+    def summed(key):
+        out = {}
+        for r in rows:
+            retro_sum(out, r.get(key))
+        return out
+
+    rounds = {}
+    for row in rows:
+        if type(row.get("review_round_max")) is int:
+            retro_count(rounds, str(row["review_round_max"]))
+    agg = {
+        "schema": "factory.retro-aggregate/1", "run": run, "from": dates[0], "to": dates[-1],
+        "host": retro_host(), "transcripts": str(retro_transcripts()), "projects": sorted(registered(home)),
+        "hosts": hosts, "tokens": {"main": summed("tokens"), "subagents": sub},
+        "context": {"first_turn_median": retro_median([retro_int(retro_dict(r.get("context")).get("first_turn"))
+                                                       for r in rows]),
+                    "mean_per_turn_median": retro_median([retro_int(retro_dict(r.get("context")).get("mean_per_turn"))
+                                                          for r in rows])},
+        "attachments_median": {kind: retro_median(sizes) for kind, sizes in attachments.items()},
+        "env_noise": summed("env_noise"), "polls": summed("polls"),
+        "denials": {"count": total("denials", "count"), "blocked_sleep": total("denials", "blocked_sleep"),
+                    "patterns": retro_patterns(rows, lambda r: retro_dict(r.get("denials")).get("patterns"))},
+        "errors": {"count": total("errors", "count"), "benign": total("errors", "benign"),
+                   "patterns": retro_patterns(rows, lambda r: retro_dict(r.get("errors")).get("patterns"))},
+        "repeated_cmds": retro_patterns(rows, lambda r: r.get("repeated_cmds")),
+        "subagents": subagents, "review_rounds": rounds, "agent_prompts": summed("agent_prompts"),
+        "human_msgs": total("human_msgs"), "interrupts": total("interrupts")}
+    folder.mkdir(parents=True)
+    (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
+    (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "sessions": len(rows),
+                      "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
+                      "digest": str(folder / "digest.jsonl"), "transcripts": agg["transcripts"],
+                      "out": str(folder / "reply.json"), "findings": str(folder / "findings.md")}, indent=2))
 
 
 def retro_date(d):
@@ -6758,10 +6887,14 @@ def retro_cmd(action, *args):
         return retro_push()
     if action == "pull" and len(args) == 1 and retro_date(args[0]):
         return retro_pull(args[0])
-    days = args[1] if len(args) == 2 and args[0] == "--days" else "1" if not args else ""
-    if action != "digest" or not (days.isascii() and days.isdigit()) or not 1 <= int(days) <= 90:
-        fail("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD, N from 1 to 90", 2)
-    retro_digest(int(days))
+    if action == "admit" and len(args) == 1 and RUN_TAG.fullmatch(args[0]):
+        return retro_admit(args[0])
+    most = {"digest": 90, "aggregate": 30}.get(action, 0)
+    default = "7" if action == "aggregate" else "1"
+    days = default if not args else args[1] if len(args) == 2 and args[0] == "--days" else ""
+    if not (days.isascii() and days.isdigit()) or not 1 <= int(days) <= most:
+        fail("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>", 2)
+    (retro_digest if action == "digest" else retro_aggregate)(int(days))
 
 
 COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3),

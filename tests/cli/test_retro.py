@@ -4,10 +4,11 @@ import re
 import shutil
 import tempfile
 import time
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from support import ROOT, IsolatedTestCase, http_fixture, invoke, load_runtime
 
@@ -294,7 +295,7 @@ class RetroDigestTest(RetroCase):
                      ["retro", "digest", "--weeks", "2"]):
             code, out, _ = invoke(factory, args)
             self.assertEqual((code, out), (2, ""), args)
-        self.assertIn("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD, N from 1 to 90",
+        self.assertIn("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>",
                       invoke(factory, ["retro", "push", "now"])[2])
         os.environ["CLAUDE_CONFIG_DIR"] = str(self.root / "missing")
         code, out, err = invoke(factory, ["retro", "digest"])
@@ -369,3 +370,132 @@ class RetroPullTest(RetroWorkerCase):
                     self.assertEqual((code, out), (2, ""))
                     self.assertIn("usage: factory.py retro digest", err)
             self.assertEqual(len(server.requests), 1)
+
+
+def digest_row(host, session, job="1017", **over):
+    row = {"host": host, "project": "~-dev-factory", "session": session, "job": job,
+           "start": "2026-11-10T09:00:00Z", "end": "2026-11-10T10:00:00Z", "turns": 4, "human_msgs": 1,
+           "interrupts": 0, "models": ["claude-opus-5-5"], "tools": {"Bash": 3},
+           "tokens": {"cache_read": 100, "cache_write": 10, "uncached_input": 5, "output": 1},
+           "context": {"first_turn": 1000, "mean_per_turn": 2000},
+           "first_turn_attachments": {"skill_listing": 300}, "agent_prompts": {"count": 1, "chars": 50},
+           "review_round_max": 1, "polls": {"sleep": 1}, "env_noise": {"winsize_crash": 2},
+           "errors": {"count": 2, "benign": 0, "patterns": {"winsize crash": 2}},
+           "denials": {"count": 1, "blocked_sleep": 1, "patterns": {"denied rm": 1}},
+           "repeated_cmds": {"ls <path>": 3},
+           "subagents": {"count": 1, "by_type": {"factory-builder": {
+               "count": 1, "turns": 7, "tokens": {"cache_read": 40, "cache_write": 0, "uncached_input": 2, "output": 3},
+               "errors": 1, "denials": 0, "models": ["claude-opus-5-5"]}}}}
+    row.update(over)
+    return row
+
+
+S1, S2, S3 = ("3ae1fc86-0000-4000-8000-00000000000%d" % n for n in (1, 2, 3))
+
+
+class RetroAggregateTest(RetroWorkerCase):
+    def window(self, days, pushed):
+        """Routes for every date in the window; pushed maps a date offset to {host: rows or text}."""
+        today, routes = datetime.now().date(), {"GET /projects.json": (200, [{"slug": "factory"}, {"slug": "huss-skills"}])}
+        for back in range(days):
+            date = (today - timedelta(days=back)).isoformat()
+            hosts = pushed.get(back, {})
+            routes[f"GET /api/retro/{date}"] = (200, list(hosts))
+            for host, rows in hosts.items():
+                text = rows if isinstance(rows, str) else "".join(json.dumps(r) + "\n" for r in rows)
+                routes[f"GET /api/retro/{host}/{date}.jsonl"] = (200, text.encode())
+        return routes
+
+    def aggregate(self, routes, *args):
+        with http_fixture(routes) as server:
+            self.config(server.origin, "device: host-a\n")
+            return invoke(factory, ["retro", "aggregate", *args])
+
+    def test_aggregate_writes_both_files(self):
+        pushed = {1: {"host-a": [digest_row("host-a", S1), digest_row("host-a", S2, job="ad-hoc",
+                                                                       review_round_max=None)]},
+                  0: {"host-b": "not json\n[1]\n" + json.dumps({"host": "host-b"}) + "\n"
+                      + json.dumps(digest_row("host-b", S3, errors={"count": 5, "benign": 1,
+                                                                     "patterns": {"winsize crash": 5}})) + "\n"}}
+        code, out, err = self.aggregate(self.window(7, pushed))
+        self.assertEqual((code, err), (0, ""))
+        printed = json.loads(out)
+        run = printed["run"]
+        self.assertRegex(run, r"^\d{8}T\d{6}Z-[0-9a-f]{6}$")
+        folder = self.home / "retro" / run
+        today = datetime.now().date()
+        self.assertEqual(printed, {
+            "run": run, "from": (today - timedelta(days=6)).isoformat(), "to": today.isoformat(),
+            "hosts": ["host-a", "host-b"], "sessions": 3, "skipped": 3, "dir": str(folder),
+            "aggregate": str(folder / "aggregate.json"), "digest": str(folder / "digest.jsonl"),
+            "transcripts": str(self.projects), "out": str(folder / "reply.json"),
+            "findings": str(folder / "findings.md")})
+        rows = [json.loads(line) for line in (folder / "digest.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([r["session"] for r in rows], [S1, S2, S3])
+        agg = json.loads((folder / "aggregate.json").read_text(encoding="utf-8"))
+        tokens = {"cache_read": 300, "cache_write": 30, "uncached_input": 15, "output": 3}
+        sub = {"cache_read": 120, "cache_write": 0, "uncached_input": 6, "output": 9}
+        self.assertEqual(agg, {
+            "schema": "factory.retro-aggregate/1", "run": run, "from": printed["from"], "to": printed["to"],
+            "host": "host-a", "transcripts": str(self.projects), "projects": ["factory", "huss-skills"],
+            "hosts": {"host-a": {"sessions": 2, "jobs": 1, "ad_hoc": 1}, "host-b": {"sessions": 1, "jobs": 1, "ad_hoc": 0}},
+            "tokens": {"main": tokens, "subagents": sub},
+            "context": {"first_turn_median": 1000, "mean_per_turn_median": 2000},
+            "attachments_median": {"skill_listing": 300},
+            "env_noise": {"winsize_crash": 6}, "polls": {"sleep": 3},
+            "denials": {"count": 3, "blocked_sleep": 3, "patterns": [
+                {"text": "denied rm", "count": 3, "sessions": [f"host-a/{S1}", f"host-a/{S2}", f"host-b/{S3}"]}]},
+            "errors": {"count": 9, "benign": 1, "patterns": [
+                {"text": "winsize crash", "count": 9, "sessions": [f"host-a/{S1}", f"host-a/{S2}", f"host-b/{S3}"]}]},
+            "repeated_cmds": [{"text": "ls <path>", "count": 9,
+                               "sessions": [f"host-a/{S1}", f"host-a/{S2}", f"host-b/{S3}"]}],
+            "subagents": {"factory-builder": {"count": 3, "turns": 21, "errors": 3, "denials": 0, "tokens": sub}},
+            "review_rounds": {"1": 2}, "agent_prompts": {"count": 3, "chars": 150}, "human_msgs": 3,
+            "interrupts": 0})
+
+    def test_patterns_ranked_and_capped(self):
+        many = {f"err {n:02d}": n + 1 for n in range(25)}
+        rows = [digest_row("host-a", f"{n:08x}", errors={"count": 1, "benign": 0, "patterns": many}) for n in range(7)]
+        code, out, _ = self.aggregate(self.window(1, {0: {"host-a": rows}}), "--days", "1")
+        self.assertEqual(code, 0)
+        agg = json.loads(Path(json.loads(out)["aggregate"]).read_text(encoding="utf-8"))
+        patterns = agg["errors"]["patterns"]
+        self.assertEqual([p["text"] for p in patterns], [f"err {n:02d}" for n in range(24, 4, -1)])
+        self.assertEqual(patterns[0]["count"], 25 * 7)
+        self.assertEqual(patterns[0]["sessions"], [f"host-a/{n:08x}" for n in range(5)])
+
+    def test_ad_hoc_masked(self):
+        rows = [digest_row("host-a", S1, job="ad-hoc", project="~-dev-private-thing"), digest_row("host-a", S2)]
+        code, out, _ = self.aggregate(self.window(7, {0: {"host-a": rows}}))
+        self.assertEqual(code, 0)
+        printed = json.loads(out)
+        for key in ("aggregate", "digest"):
+            self.assertNotIn("private-thing", Path(printed[key]).read_text(encoding="utf-8"))
+        masked = [json.loads(line) for line in Path(printed["digest"]).read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([r["project"] for r in masked], ["ad-hoc", "~-dev-factory"])
+
+    def test_empty_window_and_usage(self):
+        code, out, err = self.aggregate(self.window(7, {}))
+        today = datetime.now().date()
+        self.assertEqual((code, out), (3, ""))
+        self.assertIn(f"no host pushed a retro digest from {(today - timedelta(days=6)).isoformat()} to "
+                      f"{today.isoformat()}", err)
+        self.assertFalse((self.home / "retro").exists())
+        usage = "usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>"
+        for args in (["--days", "0"], ["--days", "31"], ["--days", "x"], ["--days"], ["now"]):
+            with self.subTest(args=args):
+                code, out, err = invoke(factory, ["retro", "aggregate", *args])
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn(usage, err)
+        code, out, _ = self.aggregate(self.window(30, {29: {"host-a": [digest_row("host-a", S1)]}}), "--days", "30")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["from"], (today - timedelta(days=29)).isoformat())
+
+    @unittest.skipIf(os.name == "nt", "symlinks")
+    def test_linked_retro_folder_refused(self):
+        target = self.root / "elsewhere"
+        target.mkdir()
+        (self.home / "retro").symlink_to(target)
+        code, out, _ = self.aggregate(self.window(1, {0: {"host-a": [digest_row("host-a", S1)]}}), "--days", "1")
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(list(target.iterdir()), [])
