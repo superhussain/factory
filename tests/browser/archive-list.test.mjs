@@ -223,6 +223,13 @@ test("archived jobs page under the terminal columns", { timeout: 180000 }, async
       await shot("archived-compact-1280.png");
       assert.deepEqual(await look(), ["rgb(107, 114, 128)", "none", "8px"]);
       await page.hover(CARD);
+      // The .15s border-color transition has to finish before the colour reads as accent.
+      await page.waitForFunction(
+        (sel, c) => getComputedStyle(document.querySelector(sel)).borderTopColor === c,
+        wait,
+        CARD,
+        ACCENT,
+      );
       assert.equal((await look())[0], ACCENT);
       await page.mouse.move(5, 5);
       await page.evaluate(() => {
