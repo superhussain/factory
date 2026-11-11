@@ -203,6 +203,22 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       assert.equal(asked.at(-1), "zzz");
     });
 
+    await t.test("a repeat pick re-announces", async () => {
+      const suffix = " · no archived matches";
+      const done = await count();
+      assert.ok(done.endsWith(suffix));
+      const base = done.slice(0, -suffix.length);
+      let release;
+      held = new Promise((resolve) => (release = resolve));
+      await page.keyboard.press("Enter");
+      await waitMeta("Searching archived jobs");
+      assert.equal(await count(), base);
+      release();
+      await waitMeta('No archived jobs match "zzz". Pick to search again.');
+      assert.equal(await count(), done);
+      assert.deepEqual(asked.slice(-2), ["zzz", "zzz"]);
+    });
+
     await t.test("an error says so", async () => {
       await page.keyboard.press("Escape");
       await page.waitForFunction(() => !document.getElementById("job-picker").open, wait);
