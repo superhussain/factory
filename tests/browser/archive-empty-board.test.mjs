@@ -68,6 +68,13 @@ test("archived jobs from the blank board", { timeout: 180000 }, async (t) => {
       });
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
       await page.waitForSelector(".blank", wait);
+      const missing = await page.evaluate(() =>
+        [
+          typeof hostRegistry === "undefined" && "hostRegistry",
+          typeof hostsLoadFailed === "undefined" && "hostsLoadFailed",
+        ].filter(Boolean),
+      );
+      assert.deepEqual(missing, [], `dashboard global missing: ${missing.join(", ")}`);
       // The startup hosts read redraws the board when it lands, which would detach a button found before it.
       await page.waitForFunction(() => hostRegistry !== null || hostsLoadFailed, wait);
       return page;
