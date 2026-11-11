@@ -1,5 +1,6 @@
 // The job actions button on every board card: its markup, the same items as the drawer menu,
 // running an action with the drawer closed, dialogs, copy, keyboard and the PR link beside it.
+// Hover styles apply only to hover-capable pointers, so a touch tap leaves none behind.
 // Also captures the open card menu for review.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
@@ -292,6 +293,66 @@ test("card actions", { timeout: 180000 }, async (t) => {
         } finally {
           await other.context.close();
         }
+      }
+    });
+
+    const CARD = `.card[data-id="${ID}"]`;
+    const ACCENT = "rgb(124, 58, 237)";
+    const border = (p) => p.$eval(CARD, (el) => getComputedStyle(el).borderTopColor);
+
+    await t.test("hover only on hover pointers", async () => {
+      const other = await openBoard(browser, origin, { width: 1440, height: 900 });
+      try {
+        const loose = await other.page.evaluate(() => {
+          const out = [];
+          const walk = (rules, gated) => {
+            for (const r of rules) {
+              if (r instanceof CSSMediaRule)
+                walk(r.cssRules, gated || r.conditionText === "(hover: hover)");
+              else if (r instanceof CSSStyleRule && r.selectorText.includes(":hover") && !gated)
+                out.push(r.selectorText);
+            }
+          };
+          for (const sheet of document.styleSheets) walk(sheet.cssRules, false);
+          return out;
+        });
+        assert.deepEqual(loose, []);
+        await other.page.addStyleTag({ content: "*{transition:none!important}" });
+        assert.equal(await other.page.evaluate(() => matchMedia("(hover: hover)").matches), true);
+        await other.page.hover(CARD);
+        assert.equal(await border(other.page), ACCENT);
+        assert.deepEqual(other.errors, []);
+      } finally {
+        await other.context.close();
+      }
+    });
+
+    await t.test("touch tap and keyboard", async () => {
+      const other = await openBoard(browser, origin, {
+        width: 390,
+        height: 844,
+        isMobile: true,
+        hasTouch: true,
+      });
+      try {
+        const p = other.page;
+        await p.addStyleTag({ content: "*{transition:none!important}" });
+        assert.equal(await p.evaluate(() => matchMedia("(hover: hover)").matches), false);
+        const background = () => p.$eval(TRIGGER, (el) => getComputedStyle(el).backgroundColor);
+        const rest = await background();
+        await p.focus(CARD);
+        await p.keyboard.press("Tab");
+        await p.keyboard.down("Shift");
+        await p.keyboard.press("Tab");
+        await p.keyboard.up("Shift");
+        const focused = (el) => el === document.activeElement && el.matches(":focus-visible");
+        assert.equal(await p.$eval(CARD, focused), true);
+        assert.equal(await border(p), ACCENT);
+        await p.tap(TRIGGER);
+        assert.equal(await background(), rest);
+        assert.deepEqual(other.errors, []);
+      } finally {
+        await other.context.close();
       }
     });
 
