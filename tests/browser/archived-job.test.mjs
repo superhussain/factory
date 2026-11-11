@@ -60,6 +60,7 @@ const ARCHIVE = [
 ];
 const wait = { polling: 50 };
 const FAILED = "Could not load archived job 411-sync-retry. Retrying while the link stays open.";
+const SIGNIN = "Your sign-in has expired.";
 
 test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
   await prepareAssets();
@@ -108,6 +109,10 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
       if (url.pathname !== "/api/board/archive") return request.continue();
       const id = url.searchParams.get("id");
       asked.push(id);
+      if (id === "413-expired-link")
+        return request.respond({ status: 401, contentType: "text/plain", body: "unauthorized" });
+      if (id === "414-denied-link")
+        return request.respond({ status: 403, contentType: "text/plain", body: "forbidden" });
       if (id === "411-sync-retry" && !syncRetryUp)
         return request.respond({ status: 503, contentType: "text/plain", body: "unavailable" });
       const row = ARCHIVE.find((j) => j.id === id);
@@ -239,6 +244,43 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
         wait,
       );
       assert.ok((await meta()).endsWith(" · archived, read-only"));
+    });
+
+    await t.test("an archive 401 or 403 shows sign-in, not the toast", async () => {
+      await page.evaluate(() => showBoardStatus(""));
+      const signinShown = () =>
+        page.waitForFunction(
+          (text) =>
+            !document.getElementById("conn-banner").hidden &&
+            document.getElementById("conn-text").textContent === text &&
+            !document.getElementById("conn-signin").hidden,
+          wait,
+          SIGNIN,
+        );
+      const reset = () =>
+        page.evaluate(() => {
+          setConnection("online");
+          location.hash = "";
+        });
+      for (const id of ["413-expired-link", "414-denied-link"]) {
+        await page.evaluate((hash) => {
+          location.hash = hash;
+        }, "#" + id);
+        await signinShown();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.equal(await statusHidden(), true);
+        assert.equal((await meta()).includes(id), false);
+        await reset();
+      }
+      const refetched = page.waitForResponse(
+        (response) => new URL(response.url()).searchParams.get("id") === "413-expired-link",
+      );
+      await page.evaluate(() => {
+        location.hash = "#413-expired-link";
+      });
+      await refetched;
+      assert.equal(asked.filter((id) => id === "413-expired-link").length, 2);
+      await reset();
     });
 
     await t.test("rework history walks archived rounds", async () => {

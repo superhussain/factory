@@ -3281,6 +3281,8 @@ async function loadArchivedJob(id) {
   if (archiveMisses.has(id)) return { job: null };
   try {
     const r = await fetch('./api/board/archive?id=' + encodeURIComponent(id), { cache: 'no-store' });
+    // An expired Access session answers 401 or 403. The banner offers sign-in, and the id is not cached as a miss.
+    if (r.status === 401 || r.status === 403) { setConnection('signin'); return { job: null }; }
     if (r.status === 404) {
       archiveMisses.add(id);
       return { job: null };
