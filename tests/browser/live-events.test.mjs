@@ -186,7 +186,7 @@ test("live board events", { timeout: 120000 }, async (t) => {
     );
 
     await t.test(
-      "live L6 a timer tick with an unchanged board keeps the focused card",
+      "live L9 a timer tick with an unchanged board keeps the focused card",
       async () => {
         const { context, page, errors } = await open();
         await page.focus('.card[data-id="001-sample"]');
