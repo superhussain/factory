@@ -1,6 +1,7 @@
 // The a and . keys on a hovered or focused board card, or with a job drawer open: the jumper
 // opens in actions mode with the card menu's items, filters and runs one, and Settings >
 // Reference lists the keys. Also captures the Reference section and the actions jumper for review.
+// Cmd+K or Ctrl+K in actions mode switches to the normal jumper.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -150,6 +151,31 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
       assert.equal(await focused(page, IDEA), true);
     });
 
+    await t.test("switch to jumper", async () => {
+      await openActions(page, ID);
+      await page.keyboard.type("pau");
+      await page.keyboard.down("Control");
+      await page.keyboard.press("k");
+      await page.keyboard.up("Control");
+      const shot = await page.$("#job-picker");
+      await shot.screenshot({ path: `${SHOTS}jumper-cmdk-1440.png` });
+      const state = await picker(page);
+      assert.equal(state.open, true);
+      assert.equal(state.heading, "Jump to job");
+      assert.equal(state.label, "Search jobs");
+      assert.equal(await page.$eval("#job-search", (el) => el.value), "");
+      assert.equal(await page.evaluate(() => document.activeElement.id), "job-search");
+      assert.ok(state.options.includes("Export the sample report as CSV"));
+      assert.ok(state.options.includes("Sample idea"));
+      await page.keyboard.down("Meta");
+      await page.keyboard.press("k");
+      await page.keyboard.up("Meta");
+      assert.equal((await picker(page)).heading, "Jump to job");
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => !document.getElementById("job-picker").open);
+      assert.equal(await focused(page, ID), true);
+    });
+
     await t.test("filter and run", async () => {
       await openActions(page, ID);
       await page.keyboard.type("pau");
@@ -224,6 +250,20 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
         await page.$eval("#d-actions", (el) => [el.title, el.getAttribute("aria-keyshortcuts")]),
         ["Job actions (A or .)", "a ."],
       );
+    });
+
+    await t.test("drawer switch to jumper", async () => {
+      await page.keyboard.press(".");
+      await page.waitForFunction(() => document.getElementById("job-picker").open);
+      assert.equal((await picker(page)).heading, `Actions for ${ID}`);
+      await page.keyboard.down("Meta");
+      await page.keyboard.press("k");
+      await page.keyboard.up("Meta");
+      assert.equal((await picker(page)).heading, "Jump to job");
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => !document.getElementById("job-picker").open);
+      assert.equal(await page.evaluate(() => document.activeElement.id), "d-actions");
+      assert.equal(await page.$eval("#detail", (el) => el.hidden), false);
     });
 
     await t.test("drawer run", async () => {
