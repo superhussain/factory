@@ -129,6 +129,20 @@ An optional, one-way mirror shows a job's tasks, progress and review outcomes in
 | `service` | Required Tracer service name, `[a-z0-9][a-z0-9._-]{0,39}` |
 | `language` | Optional, at most 40 characters |
 
+### Turn Tracer off
+
+To turn the whole integration off without editing `tracer.json` on each device, open Settings, Pipeline, pick the all-projects scope, and set **Tracer integration** to `Off`. It saves `"tracer": {"enabled": false}` in the all-projects pipeline document, and a project scope refuses the key. Absent means on.
+
+| Reader | Off behavior |
+| --- | --- |
+| Dashboard | hides Follow in Tracer, the Tracer link, the task list, the scope and waiting lines, and `Building in Tracer` |
+| Board patch, follow pass | return before any Tracer call |
+| Build pass | treats every project as unconfigured, so it clears `building` marks with no Tracer call |
+| `tracer sync` | prints `nothing to mirror: Tracer is off in Settings, Pipeline`, exit 0 |
+| Archive pass | a pending Tracer mirror no longer keeps a job on the board |
+
+Board fields and `tracer.json` stay as they are, so setting it back to `On (default)` resumes where it stopped. When a device cannot read the setting, pickup and board patches print their usual Tracer warning and `tracer sync` exits 5. Devices on an older bundle ignore the key and keep mirroring until they upgrade.
+
 ### Where the token file is
 
 Tracer writes its token to `TRACER_DATA/token`, and only when it starts with `TRACER_DATA` set, for example `TRACER_DATA=/abs/path/tracer-data uv run uvicorn app.main:app`. Point `token_file` at that file. On Daisy the path is `~/persist/tracer-data/token`, written out as an absolute path in the config.
