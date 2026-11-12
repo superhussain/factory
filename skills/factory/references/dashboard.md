@@ -25,6 +25,15 @@ then reinstall the skill on devices to refresh the runtime and promotion guard.
 Existing assigned jobs need no data migration. Existing schedules need no prompt
 migration; their command and JSON output contract are unchanged.
 
+## Babysit PR
+
+The drawer's top bar and job actions menu show Babysit PR on a `pr-open` job with a
+valid PR that is not a batch rider, paused, closing or already babysat. After a
+confirm it sets `babysit` and `priority` to `{at}` (an earlier `priority` stays),
+deletes `needs` and `escalated`, and sets the note `babysitting PR #<n>`. The card
+leaves needs you for pr-open with a Babysitting chip, and pickup launches
+`/factory babysit <id>`, as [pickup](pickup.md) describes.
+
 ## Stage-change deep links
 
 | Event | Link to |
