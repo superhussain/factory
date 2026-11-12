@@ -146,3 +146,16 @@ export async function focusVisible(page, selector) {
   }, selector);
   if (problem) throw new Error(`focus precondition failed for ${selector}: ${problem}`);
 }
+
+// Captures one element after two frames, clipped to its box.
+export async function shootCard(page, selector, path) {
+  await page.waitForSelector(selector);
+  await page.evaluate(
+    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+  );
+  const clip = await page.evaluate((s) => {
+    const { x, y, width, height } = document.querySelector(s).getBoundingClientRect();
+    return { x: x + scrollX, y: y + scrollY, width, height };
+  }, selector);
+  await page.screenshot({ path, clip });
+}
