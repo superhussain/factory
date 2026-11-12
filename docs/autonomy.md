@@ -151,27 +151,54 @@ flowchart LR
 
 ## Retro cards
 
-`retro admit` admits the retro agent's cards through the same admission code, in
-retro mode. The caller sets the mode, never the file. A retro file has the keys
-`schema`, `by: "retro"`, `run` and `suggestions`, with no `project` or `commit`. The
-`suggest admit` command always runs in explorer mode, so a file carrying `by` exits 2
-there with nothing admitted, and explorer files behave exactly as before.
+`retro admit` adds each retro card to the backlog as one held line, not as an idea
+card. The line is `- [ ] <project>: <title>`, and its indented context renders on the
+dashboard Backlog decision page as a one-pick form. A person answers it there with
+Approve or Deny.
 
-- **Per-card project.** Each suggestion carries its own registered `project`. An
-  unregistered one exits 2 with nothing admitted. The title, fingerprint and open cap
-  use that project.
-- **No allowlist.** Admission skips the one-project allowlist for a retro file, and
-  `suggest approve` skips it for a card whose `origin.by` is `retro`, which only
-  `retro admit` writes. Approval still
-  needs a registered project and a human typing at a terminal, or a relayed chat message.
-- **Unchanged gates.** The kill switch, the daily and open caps, fingerprint dedupe,
-  the field limits and the untrusted-text checks apply as they do to explorer files.
+```
+- [ ] other: Guard the ls alias
+  Recommend: approve
+
+  The ls alias crashes without a terminal.
+
+  Why Interactive only: It keeps colors for people.
+
+  Evidence:
+  - 253x winsize_crash in tool results (1 session)
+
+  Retro: run 20261111T090000Z-a1b2c3, fingerprint bac6f4150d124158, created 2026-11-12T05:40:00Z
+
+  ## Question: Guard the ls alias
+  How should the alias be guarded?
+  Pick: one
+  - Interactive only (recommended): Alias ls only in interactive shells. Pros: Keeps colors.
+  - Drop the alias: Remove the ls alias. Pros: Simplest fix. Cons: Loses colors.
+```
+
+- **Per-card project.** Each card carries its own registered `project`. An
+  unregistered one exits 2 with nothing added. The line, fingerprint and open cap use
+  that project. The one-project allowlist does not apply.
+- **Gates.** A paused kill switch exits 3 with nothing added. A card is skipped as
+  `duplicate <id>` when a board origin or the archive holds its fingerprint, and as
+  `duplicate in backlog` when a `Retro:` line under any backlog line, checked or not,
+  does. The daily cap counts board origins and `Retro:` lines created in the last 24
+  hours plus this run's adds. The open cap counts the project's idea origins, its
+  unchecked `Retro:` lines and this run's adds. Other skips are
+  `title ends in a backlog ref`, `context: <why>` and `already in backlog`. It prints
+  `{"admitted": [...], "skipped": [...]}` and exits 3 when nothing was added.
+- **Never triaged.** `backlog add` and the pickup triage sweep skip any line whose
+  context has a `Retro:` line, so the Worker never queues one. An older runtime's
+  sweep still rates them, so upgrade every pickup host before the first `retro admit`.
+- **Checks.** The field limits, the untrusted-text checks and the `.env` value check
+  apply as they do to explorer files. The summary and reason are collapsed to one line.
 - **Evidence.** Each evidence item is `{"note", "count", "sessions"}` with 1 to 5
-  `host/session` refs, so the classifier checks only `paths` for sensitive files.
-- **Kind.** `tooling` joins the suggestion kinds. It is not one of the kinds the
-  classifier flags.
+  `host/session` refs.
+- **Kind.** `tooling` joins the suggestion kinds.
 
-A retro card's `origin` holds `by: "retro"`, its project and run, and no `commit`.
+Retro idea cards admitted before this change keep `origin.by: "retro"` and still
+take `suggest approve`, which skips the allowlist for them but needs a registered
+project and a human typing at a terminal, or a relayed chat message.
 
 ## Stages
 
@@ -233,7 +260,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   then checks the line off with the new id, as a dashboard Approve does. If the line
   changed meanwhile, it drops the row while the row is still an unclaimed idea.
 - **Hold.** The line waits in the backlog for a person, as before.
-  The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board reads the stored verdicts of the lines it lists in one `POST /api/backlog/triage/verdicts` call per 50 lines. It reads again only when the listed lines change, and only for lines with no verdict yet. Opening a line with no verdict reads that line again.
+  The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board reads the stored verdicts of the lines it lists in one `POST /api/backlog/triage/verdicts` call per 50 lines. It reads again only when the listed lines change, and only for lines with no verdict yet. Opening a line with no verdict reads that line again. A line the Worker would refuse, such as one over 2000 characters, reads as no verdict and leaves the other lines' verdicts intact.
 - **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
   verdict from `backlog_triage_pass`. `factory.py pickup` runs it before it claims ideas, never with `--dry-run`, and at most once every 30 minutes per host. The host's `backlog-triage-sweep.json` holds the start of the last sweep, and `factory.py pickup --triage-now` runs a sweep at once. Each sweep takes up to 20 unchecked lines in projects whose effective `triage.enabled` is true and reads their stored verdicts in one `POST /api/backlog/triage/verdicts`. A line another host already held is recorded without a post. The rest are posted one at a time, with the indented block under each as context. Held lines, and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this host never sends them again. `backlog add` records its held line there too. A 404, 409, 502 or 503 reply, or a network failure, warns and ends the sweep. That line and the rest are retried on the next sweep. Deleting the file
   only causes rescoring. A line whose new idea row could not be checked off or removed goes

@@ -283,9 +283,9 @@ class RolesTest(IsolatedTestCase):
         command = (SKILL / "references/commands/retro.md").read_text(encoding="utf-8")
         for value in ("retro push", "retro aggregate", "factory-retro", "byte for byte", "retro admit <run>"):
             self.assertIn(value, command)
-        approve = [line for line in command.splitlines() if "suggest approve" in line]
-        self.assertEqual(len(approve), 1)
-        self.assertTrue(approve[0].startswith("Never "))
+        self.assertNotIn("suggest approve", command)
+        self.assertIn("\nNever run an autonomy command or decide a backlog line; a person decides each line.\n",
+                      command)
         self.assertIn("| `/factory retro [--days N]` | [retro](references/commands/retro.md) |",
                       (SKILL / "SKILL.md").read_text(encoding="utf-8"))
 

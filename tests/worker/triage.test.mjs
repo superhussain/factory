@@ -396,6 +396,15 @@ test("POST verdicts reads stored holds in input order in one request", async () 
   assert.equal(gets.length, 3);
   s.bucket.get = bucketGet;
 
+  const long = "sample: " + "x".repeat(1993);
+  const invalidGets = [];
+  s.bucket.get = async (key) => (invalidGets.push(key), bucketGet(key));
+  r = await read({ items: [ITEM, "no slug", long, ITEM] });
+  assert.equal(r.status, 200);
+  assert.deepEqual(JSON.parse(r.text), { verdicts: [recordA, null, null, recordA] });
+  assert.equal(invalidGets.length, 2);
+  s.bucket.get = bucketGet;
+
   r = await read({ items: Array.from({ length: 50 }, (_, i) => `sample: line ${i}`) });
   assert.equal(r.status, 200);
   assert.equal(JSON.parse(r.text).verdicts.length, 50);
@@ -412,10 +421,7 @@ test("POST verdicts reads stored holds in input order in one request", async () 
       "items: must be a list of 1 to 50 backlog items",
     ],
     [{ items: "x" }, "items: must be a list of 1 to 50 backlog items"],
-    [
-      { items: ["no slug"] },
-      'items[0]: must be one "<slug>: <feature>" line of at most 2000 characters',
-    ],
+    [{ items: [42] }, 'items[0]: must be one "<slug>: <feature>" line of at most 2000 characters'],
     [{ items: [ITEM], extra: 1 }, "extra: unknown field"],
     [[], "body: must be a JSON object"],
   ];
