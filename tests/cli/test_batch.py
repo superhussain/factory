@@ -215,8 +215,8 @@ class BatchTest(IsolatedTestCase):
         self.assertEqual((json.loads(out)["riders"], self.backlog_puts), ([], 0))
 
     def test_attach_refusals_write_nothing(self):
-        self.refuse(4, "no job 999-sample-none on the board", "sample/999-sample-none")
-        self.refuse(4, "no job 999-sample-none on the board", TARGET, "999-sample-none")
+        self.refuse(4, "no job 999-sample-none on the board. Nothing was written.", "sample/999-sample-none")
+        self.refuse(4, "no job 999-sample-none on the board. Nothing was written.", TARGET, "999-sample-none")
         self.set_jobs(jobs() + [idea("100-sample-other", project="elsewhere")])
         self.refuse(2, "cannot batch 100-sample-other: another project. Nothing was written.", TARGET,
                     "091-sample-typo", "100-sample-other")
@@ -227,7 +227,7 @@ class BatchTest(IsolatedTestCase):
         self.refuse(6, f"{LEAD} is not held by this session. Nothing was written.", TARGET, "091-sample-typo")
         rows[0].update(claim=dict(CLAIM), stage="build")
         self.set_jobs(rows)
-        self.refuse(2, f"batch runs while {LEAD} is at spec, not build", TARGET, "091-sample-typo")
+        self.refuse(2, f"batch runs while {LEAD} is at spec, not build. Nothing was written.", TARGET, "091-sample-typo")
         rows[0].update(stage="spec", tracer={"scope": "approved"})
         self.set_jobs(rows)
         self.refuse(2, f"cannot batch into {LEAD}: follows Tracer", TARGET, "091-sample-typo")
@@ -382,8 +382,8 @@ class BatchTest(IsolatedTestCase):
         self.puts = 0
         self.refuse_stack(2, "bad job id '../x'. Nothing was written.", TARGET, "../x")
         self.refuse_stack(2, "bad job id 'bad id'. Nothing was written.", TARGET, "bad id")
-        self.refuse_stack(4, "no job 999-sample-none on the board", "sample/999-sample-none", "092-sample-csv-name")
-        self.refuse_stack(4, "no job 999-sample-none on the board", TARGET, "999-sample-none")
+        self.refuse_stack(4, "no job 999-sample-none on the board. Nothing was written.", "sample/999-sample-none", "092-sample-csv-name")
+        self.refuse_stack(4, "no job 999-sample-none on the board. Nothing was written.", TARGET, "999-sample-none")
         rows = json.loads(json.dumps(batched))
         rows[0]["claim"]["session"] = "other"
         self.set_jobs(rows)
@@ -391,7 +391,7 @@ class BatchTest(IsolatedTestCase):
                           "092-sample-csv-name")
         rows[0].update(claim=dict(CLAIM), stage="build")
         self.set_jobs(rows)
-        self.refuse_stack(2, f"stack runs while {LEAD} is at spec, not build", TARGET, "092-sample-csv-name")
+        self.refuse_stack(2, f"stack runs while {LEAD} is at spec, not build. Nothing was written.", TARGET, "092-sample-csv-name")
         rows[0]["stage"] = "spec"
         self.set_jobs(rows)
         self.refuse_stack(2, f"cannot stack 093-sample-login: not batched into {LEAD}. Nothing was written.",

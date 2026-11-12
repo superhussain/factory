@@ -9,6 +9,7 @@ import {
   seedProject,
   seedBoard,
   blockLiveEvents,
+  shootCard,
 } from "../support/browser-server.mjs";
 
 const SHOTS = new URL("../../.context/shots/", import.meta.url).pathname;
@@ -36,34 +37,35 @@ const JOBS = [
 ];
 const CARD = '.card[data-id="091-sample-typo"]';
 
+async function seedSample(origin, jobs) {
+  await seedProject(
+    origin,
+    "sample",
+    "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+  );
+  await seedBoard(origin, jobs);
+}
+
+async function openBoard(browser, origin, width, height, scheme) {
+  const page = await browser.newPage();
+  await page.setViewport({ width, height });
+  await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: scheme }]);
+  await blockLiveEvents(page);
+  await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+  return page;
+}
+
 test("batched ref label", { timeout: 120000 }, async () => {
   await prepareAssets();
   await mkdir(SHOTS, { recursive: true });
   await withBrowserFixture(async ({ browser, origin }) => {
-    await seedProject(
-      origin,
-      "sample",
-      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
-    );
-    await seedBoard(origin, JOBS);
+    await seedSample(origin, JOBS);
     for (const [width, height, scheme, suffix] of [
       [1440, 900, "light", "desktop"],
       [390, 844, "dark", "mobile"],
     ]) {
-      const page = await browser.newPage();
-      await page.setViewport({ width, height });
-      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: scheme }]);
-      await blockLiveEvents(page);
-      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
-      await page.waitForSelector(CARD);
-      await page.evaluate(
-        () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
-      );
-      const clip = await page.evaluate((s) => {
-        const { x, y, width, height } = document.querySelector(s).getBoundingClientRect();
-        return { x: x + scrollX, y: y + scrollY, width, height };
-      }, CARD);
-      await page.screenshot({ path: `${SHOTS}batch-ref-${suffix}.png`, clip });
+      const page = await openBoard(browser, origin, width, height, scheme);
+      await shootCard(page, CARD, `${SHOTS}batch-ref-${suffix}.png`);
       assert.equal(
         await page.$eval(`${CARD} .refs`, (el) => el.textContent),
         "batched into 090-sample-export-csv",
@@ -81,12 +83,7 @@ test("batched rider needs ask", { timeout: 120000 }, async () => {
   await prepareAssets();
   await mkdir(SHOTS, { recursive: true });
   await withBrowserFixture(async ({ browser, origin }) => {
-    await seedProject(
-      origin,
-      "sample",
-      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
-    );
-    await seedBoard(origin, [
+    await seedSample(origin, [
       { ...JOBS[0], stage: "needs-human", needs: ASK },
       {
         id: "092-sample-csv-name",
@@ -100,20 +97,8 @@ test("batched rider needs ask", { timeout: 120000 }, async () => {
         updated: NOW,
       },
     ]);
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1440, height: 900 });
-    await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
-    await blockLiveEvents(page);
-    await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(NEEDS_CARD);
-    await page.evaluate(
-      () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
-    );
-    const clip = await page.evaluate((s) => {
-      const { x, y, width, height } = document.querySelector(s).getBoundingClientRect();
-      return { x: x + scrollX, y: y + scrollY, width, height };
-    }, NEEDS_CARD);
-    await page.screenshot({ path: `${SHOTS}batch-ref-needs-desktop.png`, clip });
+    const page = await openBoard(browser, origin, 1440, 900, "light");
+    await shootCard(page, NEEDS_CARD, `${SHOTS}batch-ref-needs-desktop.png`);
     assert.equal(await page.$eval(`${NEEDS_CARD} .note`, (el) => el.textContent), ASK);
     await page.close();
   });
@@ -125,12 +110,7 @@ test("batched rider waits on lead", { timeout: 120000 }, async () => {
   await prepareAssets();
   await mkdir(SHOTS, { recursive: true });
   await withBrowserFixture(async ({ browser, origin }) => {
-    await seedProject(
-      origin,
-      "sample",
-      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
-    );
-    await seedBoard(origin, [
+    await seedSample(origin, [
       { ...JOBS[0], stage: "needs-human" },
       {
         id: "093-sample-csv-header",
@@ -143,20 +123,8 @@ test("batched rider waits on lead", { timeout: 120000 }, async () => {
         updated: NOW,
       },
     ]);
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1440, height: 900 });
-    await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
-    await blockLiveEvents(page);
-    await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(WAIT_CARD);
-    await page.evaluate(
-      () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
-    );
-    const clip = await page.evaluate((s) => {
-      const { x, y, width, height } = document.querySelector(s).getBoundingClientRect();
-      return { x: x + scrollX, y: y + scrollY, width, height };
-    }, WAIT_CARD);
-    await page.screenshot({ path: `${SHOTS}batch-ref-waits-on-lead-desktop.png`, clip });
+    const page = await openBoard(browser, origin, 1440, 900, "light");
+    await shootCard(page, WAIT_CARD, `${SHOTS}batch-ref-waits-on-lead-desktop.png`);
     assert.equal(
       await page.$eval(`${WAIT_CARD} .note`, (el) => el.textContent),
       "Waiting on its lead",
