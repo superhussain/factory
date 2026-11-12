@@ -603,6 +603,13 @@ async function offlineContext() {
     api.ideaWithContext("a", "x".repeat(4000), "b".repeat(3950)),
     "a" + "b".repeat(3950),
   );
+  // The cap counts UTF-16 units, as a textarea maxlength does, and never splits a surrogate pair.
+  assert.equal(
+    api.ideaWithContext("a", "\u{1F600}".repeat(2100), "b"),
+    "a\n\nContext from the backlog:\n" +
+      "\u{1F600}".repeat(1959) +
+      "\n[context cut to fit the 4000-character idea limit]b",
+  );
   api.addBacklogJob(board, one, "rework", "Narrow it.", answers, "c4", now);
   assert.deepEqual(clone(board.jobs[3].backlog), {
     line: one.raw,

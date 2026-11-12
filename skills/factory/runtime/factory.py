@@ -1524,19 +1524,26 @@ def escalation_cmd(target, round_text):
 IDEA_LIMIT = 4000
 
 
+def utf16_len(s):
+    """Length in UTF-16 code units, the way the dashboard's textarea maxlength counts."""
+    return len(s.encode("utf-16-le")) // 2
+
+
 def idea_with_context(head, context, tail):
-    """head, the backlog context block, then tail, in at most IDEA_LIMIT characters. A long context
-    is cut with a note; if even that does not fit, the block is left out. The dashboard's
-    ideaWithContext matches."""
+    """head, the backlog context block, then tail, in at most IDEA_LIMIT UTF-16 units. A long
+    context is cut with a note, never inside a surrogate pair; if even that does not fit, the block
+    is left out. The dashboard's ideaWithContext matches."""
     if not context:
         return head + tail
     intro = "\n\nContext from the backlog:\n"
     cut = f"\n[context cut to fit the {IDEA_LIMIT}-character idea limit]"
     full = head + intro + context + tail
-    if len(full) <= IDEA_LIMIT:
+    if utf16_len(full) <= IDEA_LIMIT:
         return full
-    room = IDEA_LIMIT - len(head) - len(intro) - len(cut) - len(tail)
-    return head + intro + context[:room] + cut + tail if room > 0 else head + tail
+    room = IDEA_LIMIT - utf16_len(head) - utf16_len(intro) - utf16_len(cut) - utf16_len(tail)
+    if room <= 0:
+        return head + tail
+    return head + intro + context.encode("utf-16-le")[:2 * room].decode("utf-16-le", "ignore") + cut + tail
 
 
 def queue_backlog_item(home, slug, feature, verdict, context=None):

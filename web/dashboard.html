@@ -4714,8 +4714,9 @@ function syncBacklogRoute() {
   if (key) openBacklogRoute(key);
 }
 
-// head, the backlog context block, then tail, in at most 4000 characters. A long context is cut
-// with a note; if even that does not fit, the block is left out. factory.py idea_with_context matches.
+// head, the backlog context block, then tail, in at most 4000 UTF-16 units. A long context is cut
+// with a note, never inside a surrogate pair; if even that does not fit, the block is left out.
+// factory.py idea_with_context matches.
 function ideaWithContext(head, context, tail) {
   if (!context) return head + tail;
   const intro = '\n\nContext from the backlog:\n';
@@ -4723,7 +4724,9 @@ function ideaWithContext(head, context, tail) {
   const full = head + intro + context + tail;
   if (full.length <= 4000) return full;
   const room = 4000 - head.length - intro.length - cut.length - tail.length;
-  return room > 0 ? head + intro + context.slice(0, room) + cut + tail : head + tail;
+  if (room <= 0) return head + tail;
+  const kept = context.slice(0, room).replace(/[\uD800-\uDBFF]$/, '');
+  return head + intro + kept + cut + tail;
 }
 
 // Adds the decided item as a job, or returns the id it already saved under captureId.
