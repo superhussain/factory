@@ -83,7 +83,7 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 
 | Want | Where | Read |
 | --- | --- | --- |
-| Hold PRs for a person, change review rounds, require spec approval, add stage notes | Settings, Pipeline | [autonomy.md](autonomy.md) |
+| Hold PRs for a person, change review rounds, require spec approval, add stage notes, including Babysit PR instructions | Settings, Pipeline | [autonomy.md](autonomy.md) |
 | Add another computer | `bootstrap.py up` on it, then Settings, Hosts | [device.md](device.md#host-registration) |
 | Let hosts pick up ideas on a timer | `routes.md`, `launchers.json`, a 5 minute timer, pipeline `pickup` | [pickup.md](../skills/factory/references/pickup.md) |
 | Let a model triage the backlog | Settings, Pipeline, Backlog triage | [autonomy.md](autonomy.md#backlog-triage) |

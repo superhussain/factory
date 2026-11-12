@@ -371,6 +371,22 @@ test("effective view merges tighter values, 404s unregistered slugs and 409s inv
   }
 });
 
+test("a babysit note saves in both scopes and the effective view returns global then project", async () => {
+  const s = setup();
+  for (const [path, text] of [
+    ["/api/pipeline/global", "On fix-ci, fix the failing check and push."],
+    ["/api/pipeline/projects/sample", "On merge, queue the PR."],
+  ])
+    assert.equal((await s.put(path, doc({ stage_notes: { babysit: text } }))).status, 200);
+  const view = await (await s.send("/api/pipeline/effective/sample")).json();
+  assert.deepEqual(view.stage_notes, {
+    babysit: [
+      { source: "pipeline:global@1", text: "On fix-ci, fix the failing check and push." },
+      { source: "pipeline:sample@1", text: "On merge, queue the PR." },
+    ],
+  });
+});
+
 test("only the global scope raises review rounds above 2; a project can only lower them", async () => {
   const s = setup();
   const global = await s.put("/api/pipeline/global", doc({ review_rounds: 4 }));

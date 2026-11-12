@@ -298,9 +298,14 @@ test("board image reference counts, UUIDs, authoritative checks and stored-refer
   const s = await setup();
   const path = "/api/board";
   const write = (jobs) =>
-    s.request(path, "PUT", JSON.stringify({ jobs }), {
-      "If-Match": s.bucket.objects.get("board.json").httpEtag,
-    });
+    s.request(
+      path,
+      "PUT",
+      JSON.stringify({ jobs: jobs.map((j, i) => ({ id: `00${i + 1}-idea`, ...j })) }),
+      {
+        "If-Match": s.bucket.objects.get("board.json").httpEtag,
+      },
+    );
   const names = Array.from({ length: 9 }, (_, i) => i.toString(16).padStart(64, "0") + ".png");
   const invalid = [
     [{ capture_id: "not-uuid" }],
@@ -382,7 +387,7 @@ test("text and binary exact caps, streamed rejection and nonmutation", async () 
 test("simultaneous board claims preserve the single winner and exact ETag", async () => {
   const s = await setup();
   const etag = s.bucket.objects.get("board.json").httpEtag;
-  const bodies = ["A", "B"].map((claim) => JSON.stringify({ jobs: [{ id: "001", claim }] }));
+  const bodies = ["A", "B"].map((claim) => JSON.stringify({ jobs: [{ id: "001-claim", claim }] }));
   const responses = await Promise.all(
     bodies.map((body) => s.request("/api/board", "PUT", body, { "If-Match": etag })),
   );
@@ -466,10 +471,41 @@ test("a board write cannot change an existing row's id", async () => {
   );
 });
 
+test("a board write cannot add a row whose id is not a job id", async () => {
+  const s = await setup();
+  // Legacy rows keep their ids; only new rows are checked.
+  const LEGACY = { id: "deets-001-contact-id", project: "deets", stage: "merged" };
+  const REAL = { id: "1087-edit-cpcv-bid", project: "web", stage: "review" };
+  const stored = JSON.stringify({ jobs: [LEGACY, REAL] });
+  const write = (jobs) =>
+    s.request("/api/board", "PUT", JSON.stringify({ jobs }), {
+      "If-Match": s.bucket.objects.get("board.json").httpEtag,
+    });
+  for (const id of ["web/1087-edit-cpcv-bid", "592", "--help", "1087-edit cpcv", 1088]) {
+    await s.bucket.put("board.json", stored);
+    const before = snapshot(s.bucket);
+    const response = await write([LEGACY, REAL, { id, stage: "pr-open" }]);
+    assert.equal(response.status, 400, String(id));
+    assert.match(
+      await response.text(),
+      /^a board write cannot add .*a job id has no project prefix and is never a bare number/,
+    );
+    assert.deepEqual(snapshot(s.bucket), before);
+  }
+  for (const id of ["1088-add-or-clear", "097-PLAN-8453-ticket_assessment", "idea-1"]) {
+    await s.bucket.put("board.json", stored);
+    assert.equal(
+      (await write([{ ...LEGACY, stage: "closed" }, REAL, { id, stage: "idea" }])).status,
+      200,
+      id,
+    );
+  }
+});
+
 test("board accepts a document over 1 MiB up to the 4 MiB board cap", async () => {
   const s = await setup();
   const etag = s.bucket.objects.get("board.json").httpEtag;
-  const body = JSON.stringify({ jobs: [{ id: "001", note: "x".repeat(2 << 20) }] });
+  const body = JSON.stringify({ jobs: [{ id: "001-big", note: "x".repeat(2 << 20) }] });
   const response = await s.request("/api/board", "PUT", body, { "If-Match": etag });
   assert.equal(response.status, 200);
   assert.equal(await (await s.request("/api/board")).text(), body);
