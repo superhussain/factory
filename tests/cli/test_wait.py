@@ -53,6 +53,10 @@ class WaitTest(IsolatedTestCase):
                 code, out, err = self.wait(rel, "--timeout", "0")
                 self.assertEqual((code, out), (5, ""))
                 self.assertIn(rel, err)
+        self.assertIn('decision.md reads "MERGE"', self.wait("decision.md", "--timeout", "0")[2])
+        self.write("decision.md", "M" * 80 + "\n")
+        self.assertEqual(self.wait("decision.md", "--timeout", "0"),
+                         (5, "", f'factory.py: no valid first line: decision.md reads "{"M" * 60}"\n'))
 
     def test_skipped_only_for_ux_and_ui(self):
         for name, expected in (("ux", 0), ("ui", 0), ("security", 5), ("code", 5)):

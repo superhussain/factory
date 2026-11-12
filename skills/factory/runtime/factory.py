@@ -4900,8 +4900,10 @@ def prompt_cmd(target, role, *flags):
         fail(PROMPT_USAGE, 2)
     options = {}
     for flag, value in zip(flags[::2], flags[1::2]):
-        if flag not in ("--round", "--port", "--out") or flag in options:
-            fail(PROMPT_USAGE, 2)
+        if flag not in ("--round", "--port", "--out"):
+            fail(f"unknown flag {flag!r}. " + PROMPT_USAGE, 2)
+        if flag in options:
+            fail(f"{flag} given twice. " + PROMPT_USAGE, 2)
         options[flag] = value
     review = role.startswith("review-")
     if "--round" in options and not (role == "build" or review):
@@ -4918,9 +4920,9 @@ def prompt_cmd(target, role, *flags):
     out = options.get("--out")
     if out is not None:
         out = Path(os.path.normpath(out))
-        jobs = home / "jobs"
-        if not out.is_absolute() or out == jobs or jobs in out.parents:
-            fail(f"--out must be an absolute path outside {jobs}", 2)
+        prompts = home / "prompts"
+        if not (out.is_absolute() and prompts in out.parents):
+            fail(f"--out must be an absolute path under {prompts}", 2)
 
     data = read_board(home)
     job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
@@ -5147,7 +5149,8 @@ def wait_cmd(target, *args):
         if time.monotonic() >= deadline:
             if missing:
                 fail("still missing: " + ", ".join(missing), 3)
-            fail("no valid first line: " + ", ".join(malformed), 5)
+            fail("no valid first line: "
+                 + ", ".join(f'{a} reads "{printable_line(lines[a], 60)}"' for a in malformed), 5)
         time.sleep(1)
 
 
