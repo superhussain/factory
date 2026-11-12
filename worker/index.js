@@ -334,6 +334,7 @@ async function casPut(request, env, key, type) {
       (stored.etag === cond.get("If-Match")
         ? (checkRowIds(stored.jobs, data.jobs) ??
           checkArchived(stored, data) ??
+          checkNewIds(stored.jobs, data.jobs) ??
           checkRiderControls(stored.jobs, data.jobs))
         : null);
     if (bad) return reply(bad, 400);
@@ -1480,6 +1481,20 @@ function checkRowIds(storedJobs, jobs) {
   for (const [id, count] of left)
     if (count && typeof id === "string")
       return `a board write cannot change a row's id: ${quoteId(id)} is gone and a new row appeared. Nothing was written. Upgrade the factory skill, or drop and re-add the row in two writes.`;
+  return null;
+}
+
+// An error message, or null. A new row's id must be one job folder name, as JOB_DIR reads it, and
+// not a bare number. Otherwise a client that patches "<project>/<id>", "592" or a stray "--help"
+// as a job id adds a projectless duplicate whose links go nowhere. Stored rows keep their ids.
+function checkNewIds(storedJobs, jobs) {
+  const ids = new Set(storedJobs.map((j) => j?.id));
+  for (const j of jobs) {
+    const id = j?.id;
+    if (ids.has(id) || (typeof id === "string" && /^\w[\w.-]*$/.test(id) && !/^\d+$/.test(id)))
+      continue;
+    return `a board write cannot add ${quoteIdCut(String(id), QUOTED_ID_MAX)}: a job id has no project prefix and is never a bare number, like 003-rate-limiting. Nothing was written. Upgrade the factory skill, or claim new ids with factory.py claim.`;
+  }
   return null;
 }
 
