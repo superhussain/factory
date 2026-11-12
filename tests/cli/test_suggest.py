@@ -365,7 +365,7 @@ class SuggestTest(SuggestCase):
     def test_admission_calls_no_process(self):
         tree = ast.parse(Path(factory.__file__).read_text())
         names = {"load_autonomy", "check_text", "check_untrusted", "check_suggestions", "fingerprint", "classify",
-                 "quote", "render_card", "suggest_admit", "suggest_approve", "suggest_cmd"}
+                 "quote", "render_card", "suggest_admit", "suggest_approve", "suggest_cmd", "chat_quote"}
         banned = {"subprocess", "run", "git", "git_ok", "origin_git", "system", "Popen", "paseo_session", "worktree"}
         found = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names}
         self.assertEqual(set(found), names)
@@ -541,6 +541,46 @@ class SuggestTest(SuggestCase):
         self.assertEqual(self.run_human(factory.suggest_cmd, "approve", "999-none", "A", typed="999-none")[0], 4)
         self.assertEqual(json.dumps(self.board["jobs"][:-1]), json.dumps(json.loads(before)["jobs"]))
         self.assertNotIn("approved", self.board["jobs"][-1]["origin"])
+
+    def test_chat_approve(self):
+        self.admit(suggestions())
+        card = self.board["jobs"][-1]["id"]
+        message = "  approve the ls alias item,\ninteractive only  "
+        code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat", message, tty=False)
+        self.assertEqual(code, 0, err)
+        asked.assert_not_called()
+        job = self.board["jobs"][-1]
+        approved = job["origin"]["approved"]
+        self.assertEqual(list(approved.items()), [
+            ("option", "A"), ("via", "chat"), ("quote", "approve the ls alias item,\ninteractive only"),
+            ("device", "device"), ("at", approved["at"])])
+        self.assertEqual(job["project"], "sample")
+        self.assertNotIn("needs", job)
+        self.assertTrue(job["idea"].endswith(f"\n\n---\nApproved option A in chat by device at {approved['at']}: "
+                                             '"approve the ls alias item, interactive only"'))
+        self.assertFalse(factory.gated(job))
+
+    def test_chat_approve_needs_a_quote(self):
+        self.admit(suggestions())
+        card = self.board["jobs"][-1]["id"]
+        before, puts = json.dumps(self.board), self.puts()
+        for extra in ((), ("--chat", ""), ("--chat", "   ")):
+            with self.subTest(extra=extra):
+                code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", *extra, tty=False)
+                self.assertEqual(code, 2)
+                self.assertIn("suggest approve needs an interactive terminal; a human runs it", err)
+                asked.assert_not_called()
+        for message, why in (("approve A, see https://example.test/x", "must not hold a code fence or a link"),
+                             ("a" * 501, "must be a string of 1-500 characters")):
+            with self.subTest(message=message[:20]):
+                code, err, _ = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat", message, tty=False)
+                self.assertEqual(code, 2)
+                self.assertIn(f"--chat {why}; nothing was changed", err)
+        for args in (("--chat",), ("--note", "approve A"), ("--chat", "approve A", "extra")):
+            with self.subTest(args=args):
+                self.assertEqual(self.run_human(factory.suggest_cmd, "approve", card, "A", *args, tty=False)[0], 2)
+        self.assertEqual(json.dumps(self.board), before)
+        self.assertEqual(self.puts(), puts)
 
     def test_ideas_skips_gated(self):
         self.admit(suggestions())
