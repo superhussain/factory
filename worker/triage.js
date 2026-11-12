@@ -21,7 +21,12 @@ const DATA_NOTE =
  * stricter rule: each question's labels must be distinct, since the model's choices are keyed by label. */
 export function backlogQuestions(context) {
   const text = (context ?? "").replace(/\r\n?/g, "\n");
-  const lines = text.replace(/^(?:[ \t]*\n)+|(?:\n[ \t]*)+$/g, "").split("\n");
+  let lines = text.split("\n");
+  let top = 0;
+  let end = lines.length - 1;
+  while (top < end && /^[ \t]*$/.test(lines[top])) top++;
+  while (end > top && /^[ \t]*$/.test(lines[end])) end--;
+  lines = lines.slice(top, end + 1);
   if (
     !["Recommend: approve", "Recommend: deny"].includes(lines[0]) ||
     lines.join("\n").length > 6000

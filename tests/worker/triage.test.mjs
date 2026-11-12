@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { backlogQuestions } from "../../worker/triage.js";
 import { loadProduction, memoryBucket } from "../support/worker.mjs";
 
 const { serveFactory } = await loadProduction();
@@ -315,6 +316,13 @@ test("a CRLF many-pick context with two recommended options still reaches the mo
   const r = await s.triage({ item: QUESTION_ITEM, context });
   assert.equal(r.status, 200);
   assert.equal(s.runs.length, 1);
+});
+
+test("backlogQuestions trims a context of 5980 blank lines in linear time", () => {
+  const context = "## Question: a" + "\n".repeat(5980) + "x";
+  const start = performance.now();
+  assert.equal(backlogQuestions(context), null);
+  assert.ok(performance.now() - start < 50);
 });
 
 test("unparsable questions, no AI binding, a throw or an unusable reply give the fixed hold", async () => {
