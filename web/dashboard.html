@@ -140,8 +140,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   #pipeline-effective { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--code-bg); padding: 10px 12px; border-radius: 6px; }
   #pipeline-history { height: 160px; overflow-y: auto; padding-right: 4px; padding-bottom: 4px; scroll-padding-block: 4px; }
-  #pipeline-gates, #pipeline-pickup, #pipeline-triage, #pipeline-archive, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
-  #pipeline-gates legend, #pipeline-pickup legend, #pipeline-triage legend, #pipeline-archive legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+  #pipeline-gates, #pipeline-pickup, #pipeline-triage, #pipeline-archive, #pipeline-tracer, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
+  #pipeline-gates legend, #pipeline-pickup legend, #pipeline-triage legend, #pipeline-archive legend, #pipeline-tracer legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #pipeline-gates label { display: flex; gap: 8px; align-items: baseline; margin: 0; color: var(--fg); }
   a.btn { display: inline-block; text-decoration: none; }
   a.btn[aria-current="page"] { border-color: var(--accent); }
@@ -702,7 +702,15 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
             <option value="count">By count: keep the N most recent finished jobs</option>
           </select></label>
           <label for="pipeline-archive-n"><span id="pipeline-archive-n-text">Days</span><input type="number" id="pipeline-archive-n" aria-describedby="pipeline-archive-help" min="1" max="10000" step="1"></label>
-          <p id="pipeline-archive-help" class="muted">The Worker checks once an hour. Only merged and closed jobs move: never one with a claim, a question for you, an escalation, automerge, a queued or running build, unread deny notes or a pending Tracer mirror. Archived jobs keep their files and open read-only from links. This setting applies to all projects.</p>
+          <p id="pipeline-archive-help" class="muted">The Worker checks once an hour. Only merged and closed jobs move: never one with a claim, a question for you, an escalation, automerge, a queued or running build, unread deny notes or a pending Tracer mirror, unless Tracer is off. Archived jobs keep their files and open read-only from links. This setting applies to all projects.</p>
+        </fieldset>
+        <fieldset id="pipeline-tracer">
+          <legend>Tracer integration</legend>
+          <label for="pipeline-tracer-mode">Tracer<select id="pipeline-tracer-mode" aria-describedby="pipeline-tracer-help">
+            <option value="">On (default)</option>
+            <option value="off">Off</option>
+          </select></label>
+          <p id="pipeline-tracer-help" class="muted">Off hides Follow in Tracer, Tracer links, task lists and Building in Tracer, and devices make no Tracer calls. Board fields and tracer.json stay as they are, so turning it back on resumes where it stopped. This setting applies to all projects.</p>
         </fieldset>
         <div class="settings-tabs" id="pipeline-note-tabs" role="tablist" aria-label="Stage notes">
           <button type="button" role="tab" id="pipeline-note-tab-spec" data-name="spec" aria-selected="true" tabindex="0">Spec</button>
@@ -982,6 +990,7 @@ const BASE_TITLE = document.title;
 
 let jobs = [];
 let openId = null;
+let tracerOff = false;
 // The backlog line open in the drawer's decision page, or null. Never set together with openId.
 let openBacklogRaw = null;
 // item.raw -> triage verdict object, or null when the Worker has none stored.
@@ -1241,7 +1250,7 @@ function tracerTasks(j) {
 // Replaces the summary and rows only, so an opened list stays open across board polls.
 function renderTracerTasks(j) {
   const box = $('d-tracer-tasks');
-  const tasks = tracerTasks(j);
+  const tasks = tracerOff ? null : tracerTasks(j);
   box.hidden = !tasks;
   if (!tasks) return;
   const done = tasks.filter((t) => t.status === 'done').length;
@@ -1383,7 +1392,7 @@ function card(j, inNeeds, archived = false) {
     (riders.length ? '<div class="meta refs riders line" title="' + esc('batches ' + riders.join(' · ')) + '">batches ' +
       riders.map((id) => '<span class="ref-link" data-ref="' + esc(id) + '">' + esc(id) + '</span>').join(' &middot; ') + '</div>' : '') +
     (hostLine(j) ? line('meta host', hostLine(j)) : '') +
-    (j.tracer?.building === true ? line('meta tracer-building', 'Building in Tracer') : '') +
+    (!tracerOff && j.tracer?.building === true ? line('meta tracer-building', 'Building in Tracer') : '') +
     (ask && (inNeeds || !hiddenCardFields.has('note')) ? line('note', ask) : '') +
     chips(j.rounds) + '</button>';
   const pr = hiddenCardFields.has('pr') ? null : prLink(j);
@@ -2374,6 +2383,7 @@ function pipelineCanonical(doc) {
   if (pipelineObject(doc.pickup)) out.pickup = {enabled:doc.pickup.enabled, hosts:doc.pickup.hosts};
   if (pipelineObject(doc.triage)) out.triage = {enabled:doc.triage.enabled, threshold:doc.triage.threshold, rules:doc.triage.rules};
   if (pipelineObject(doc.archive)) out.archive = {mode:doc.archive.mode, n:doc.archive.n};
+  if (pipelineObject(doc.tracer)) out.tracer = {enabled:doc.tracer.enabled};
   const notes = {};
   for (const stage of PIPELINE_STAGES) if (doc.stage_notes?.[stage]) notes[stage] = doc.stage_notes[stage];
   if (Object.keys(notes).length) out.stage_notes = notes;
@@ -2402,6 +2412,7 @@ function pipelineFormDoc(current) {
     gates:PIPELINE_GATES.filter(gate => $('pipeline-gate-' + gate).checked),
     pickup:pickupFromFields('pipeline-pickup', current.pickup), triage:triageFromFields(),
     archive:$('pipeline-scope').value === 'global' ? archiveFromFields() : undefined,
+    tracer:$('pipeline-scope').value === 'global' && $('pipeline-tracer-mode').value === 'off' ? {enabled:false} : undefined,
     stage_notes:Object.fromEntries(PIPELINE_STAGES.map(stage => [stage, $('pipeline-note-' + stage).value]))}));
 }
 const pipelineDirty = s => pipelineCanonical(s.draft) !== pipelineCanonical(s.base ?? {schema:1});
@@ -2514,6 +2525,10 @@ function renderPipelineSettings() {
   if ($('pipeline-archive-n').value !== keep && document.activeElement !== $('pipeline-archive-n')) $('pipeline-archive-n').value = keep;
   $('pipeline-archive-n').disabled = busy || !$('pipeline-archive-mode').value;
   $('pipeline-archive-n').setAttribute('aria-invalid', String(!!archiveError));
+  $('pipeline-tracer').hidden = $('pipeline-scope').value !== 'global';
+  const tracerMode = d.tracer?.enabled === false ? 'off' : '';
+  if ($('pipeline-tracer-mode').value !== tracerMode) $('pipeline-tracer-mode').value = tracerMode;
+  $('pipeline-tracer-mode').disabled = busy;
   $('pipeline-scope').disabled = s?.phase === 'saving';
   $('pipeline-copy').disabled = !s;
   $('pipeline-load').disabled = busy;
@@ -2648,6 +2663,7 @@ async function savePipelineScope(scope = $('pipeline-scope').value) {
       Object.assign(s, {base:JSON.parse(body), baseEtag:settingsEtag(r.headers.get('ETag')), version, phase:'ready', message:'Saved as version ' + version});
       loadPipelineHistory(scope);
       loadPipelineEffective(scope);
+      if (scope === 'global') loadTracerSetting();
     } else if ([400,403,413,415].includes(r.status)) {
       throw new Error('Could not save: ' + text);
     } else throw new Error('Could not save. Your draft is kept. Try again.');
@@ -2724,7 +2740,7 @@ $('pipeline-archive-mode').addEventListener('input', () => {
   if (n && (field.value === '' || Object.values(ARCHIVE_DEFAULT_N).map(String).includes(field.value))) field.value = String(n);
 });
 for (const id of ['pipeline-merge', 'pipeline-rounds', ...PIPELINE_GATES.map(gate => 'pipeline-gate-' + gate),
-    'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules', 'pipeline-archive-mode', 'pipeline-archive-n',
+    'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules', 'pipeline-archive-mode', 'pipeline-archive-n', 'pipeline-tracer-mode',
     ...PIPELINE_STAGES.map(stage => 'pipeline-note-' + stage)]) {
   $(id).addEventListener('input', () => {
     const s = pipelineScopes.get($('pipeline-scope').value);
@@ -2785,6 +2801,20 @@ const hostUtc = iso => iso.slice(0, 10) + ' ' + iso.slice(11, 16) + ' UTC';
 function seenAgo(iso) {
   const minutes = Math.floor((Date.now() - Date.parse(iso)) / 60000);
   return minutes < 1 ? 'just now' : minutes < 60 ? minutes + ' min ago' : minutes < 48 * 60 ? Math.floor(minutes / 60) + ' h ago' : iso.slice(0, 10);
+}
+
+// Off only when the all-projects pipeline sets tracer.enabled to false. A failed read keeps the last value.
+async function loadTracerSetting() {
+  let off = tracerOff;
+  try {
+    const r = await fetch('./api/pipeline/global', {cache:'no-store'});
+    if (r.status === 404) off = false;
+    else if (r.status === 200 && !r.redirected) off = (await r.json())?.tracer?.enabled === false;
+  } catch {}
+  if (off === tracerOff) return;
+  tracerOff = off;
+  if (loaded) renderBoard();
+  if (openId) openJob(openId);
 }
 
 async function loadHosts() {
@@ -3374,7 +3404,7 @@ function renderDrawerLinks(j) {
     $(id).textContent = label || '';
     setLink($(id), shown(kind, paseo?.[kind]), "Open this job's session in " + (label || ''));
   }
-  setLink($('d-tracer'), shown('tracer', tracerLink(j)), "Open this job's feature in Tracer");
+  setLink($('d-tracer'), tracerOff ? null : shown('tracer', tracerLink(j)), "Open this job's feature in Tracer");
 }
 
 // Re-renders the header links of the job open in the drawer, if any.
@@ -3500,8 +3530,8 @@ async function openJob(id) {
     runs.forEach((u, i) => add(i ? '' : 'build ' + buildState(j) + ': ', u, 'run ' + u.match(/(\d+)$/)[1]));
   }
   renderDrawerLinks(j);
-  if (!tracerLink(j) && j.tracer?.follow === true) head.append((head.childNodes.length ? ' · ' : '') + 'Tracer: waiting for a device with tracer.json');
-  const scope = tracerScopeText(j);
+  if (!tracerOff && !tracerLink(j) && j.tracer?.follow === true) head.append((head.childNodes.length ? ' · ' : '') + 'Tracer: waiting for a device with tracer.json');
+  const scope = tracerOff ? '' : tracerScopeText(j);
   if (scope) head.append((head.childNodes.length ? ' · ' : '') + scope);
   renderTracerTasks(j);
   if (first) {
@@ -4954,7 +4984,7 @@ function jobActionsFor(j) {
   const shown = {
     'd-edit-idea': canEditIdea(j),
     'd-discard': j.stage === 'idea',
-    'd-follow-tracer': !!j.project && (TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) && j.tracer?.follow !== true && !tracerLink(j),
+    'd-follow-tracer': !tracerOff && !!j.project && (TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) && j.tracer?.follow !== true && !tracerLink(j),
     'd-move-host': !rider && !!j.project && MOVE_STAGES.includes(j.stage),
     'd-rerun': canRerun(j),
     'd-prioritize': !rider && !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
@@ -6415,7 +6445,7 @@ loadProjects().then(() => {
   if (settingsShown === 'display') enterDisplaySection();
   if (settingsShown === 'notifications') enterNotificationsSection();
   referenceReady = true; if (settingsShown === 'reference') loadReferenceEffective();
-  pollStarted = true; loadHosts(); poll(); syncLive(); schedulePoll();
+  pollStarted = true; loadHosts(); loadTracerSetting(); poll(); syncLive(); schedulePoll();
 });
 
 // Display settings live only in this browser. Each value is read against a fixed list,

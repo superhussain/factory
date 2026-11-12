@@ -245,7 +245,7 @@ echo '{"stage":"review","round":1,"rounds":[{"security":"pending","ux":"pending"
 `null` clears a key (`{"port": null}`), and `rounds` is always sent whole. The job's
 first patch also sets `"project": "<slug>"`.
 
-When `<home>/tracer.json` lists the project, a patch that sets `stage` or `rounds` also mirrors the job into Tracer, and a Tracer failure only prints one warning line. While Tracer builds a job, pickup saves its task statuses as `tracer.tasks`. See [integrations](references/integrations.md#tracer-mirror).
+When `<home>/tracer.json` lists the project, a patch that sets `stage` or `rounds` also mirrors the job into Tracer, and a Tracer failure only prints one warning line. While Tracer builds a job, pickup saves its task statuses as `tracer.tasks`. Off in Settings, Pipeline, Tracer integration skips all of this. See [integrations](references/integrations.md#tracer-mirror).
 
 ```json
 {

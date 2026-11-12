@@ -81,6 +81,12 @@ export async function seedBoard(origin, jobs, updated = "2026-01-01T00:00:00Z") 
   return put(origin, "/api/board", JSON.stringify({ updated, jobs }));
 }
 
+export async function seedPipeline(origin, doc) {
+  return put(origin, "/api/pipeline/global", JSON.stringify(doc), {
+    "Content-Type": "application/json",
+  });
+}
+
 export async function seedDocument(origin, slug, name, body) {
   return put(origin, `/api/project-documents/${slug}/${name}`, body, {
     "Content-Type": "text/markdown",

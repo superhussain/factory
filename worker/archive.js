@@ -16,7 +16,7 @@ const newestFirst = (a, b) =>
   doneAt(b) - doneAt(a) || (String(a.id) < String(b.id) ? 1 : String(a.id) > String(b.id) ? -1 : 0);
 
 /** Whether a row may leave the board: finished, and nothing on the device still needs it. */
-export function archivable(job) {
+export function archivable(job, tracerOff = false) {
   if (!terminal(job) || !Number.isFinite(doneAt(job))) return false;
   if (job.claim || job.needs || job.automerge) return false;
   if (job.escalated === true || /^escalated:/i.test(String(job.note ?? ""))) return false;
@@ -30,20 +30,22 @@ export function archivable(job) {
     !("notes_read" in backlog)
   )
     return false;
-  return !(job.tracer?.follow === true && !job.tracer.url);
+  return tracerOff || !(job.tracer?.follow === true && !job.tracer.url);
 }
 
 /** The Set of ids to move for a validated `archive` setting at Date `now`. */
-export function planArchive(jobs, setting, now) {
+export function planArchive(jobs, setting, now, tracerOff = false) {
   if (setting.mode === "age") {
     const cutoff = now.getTime() - setting.n * DAY;
-    return new Set(jobs.filter((j) => archivable(j) && doneAt(j) < cutoff).map((j) => j.id));
+    return new Set(
+      jobs.filter((j) => archivable(j, tracerOff) && doneAt(j) < cutoff).map((j) => j.id),
+    );
   }
   const finished = jobs.filter((j) => terminal(j) && Number.isFinite(doneAt(j))).sort(newestFirst);
   return new Set(
     finished
       .slice(setting.n)
-      .filter(archivable)
+      .filter((j) => archivable(j, tracerOff))
       .map((j) => j.id),
   );
 }
@@ -97,7 +99,12 @@ export async function runArchive(env, now) {
   if (!jobs) return { status: "none", moved: [] };
   const archive = await readJson(env, ARCHIVE_KEY);
   const archiveJobs = jobsOf(archive) ?? [];
-  const ids = planArchive(jobs, pipeline.data.archive, now);
+  const ids = planArchive(
+    jobs,
+    pipeline.data.archive,
+    now,
+    pipeline.data.tracer?.enabled === false,
+  );
   const boardIds = new Set(jobs.map((j) => j?.id));
   const stale = archiveJobs.some((j) => boardIds.has(j?.id));
   if (!ids.size && !stale) return { status: "none", moved: [] };
