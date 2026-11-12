@@ -157,6 +157,17 @@ test("Off, an invalid setting and every keep rule leave the board alone", async 
   assert.equal(warn.mock.calls.length, 0);
 });
 
+test("Tracer off lets a pending mirror go", async () => {
+  const old = { project: "sample", stage: "merged", done: "2026-01-01T00:00:00Z" };
+  const s = setup({ jobs: [{ ...old, id: "511-tracer", tracer: { follow: true } }] });
+  s.seed("pipeline/global.json", {
+    schema: 1,
+    archive: { mode: "age", n: 30 },
+    tracer: { enabled: false },
+  });
+  assert.deepEqual(await s.run(), { status: "archived", moved: ["511-tracer"] });
+});
+
 test("a count pass keeps the N newest finished rows", async () => {
   const s = setup({ archive: { mode: "count", n: 2 } });
   // Newest finished: 415, 416 stay. 412 and 413 move; 414 is kept by its unread notes.
