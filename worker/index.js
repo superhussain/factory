@@ -474,8 +474,9 @@ async function pipelinePut(request, env, principal, scope) {
   }
   const error = validatePipeline(doc);
   if (error) return reply(error, 400);
-  if (scope !== "global" && "archive" in doc)
-    return reply("archive: set only in the all-projects scope", 400);
+  for (const key of ["archive", "tracer"])
+    if (scope !== "global" && key in doc)
+      return reply(`${key}: set only in the all-projects scope`, 400);
   const key = pipelineKey(scope);
   const current = await env.BUCKET.head(key);
   if (cond.has("If-Match") ? current?.httpEtag !== cond.get("If-Match") : current)

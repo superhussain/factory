@@ -57,6 +57,7 @@ const KEYS = [
   "triage",
   "stage_notes",
   "archive",
+  "tracer",
 ];
 export const HOST_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
@@ -235,6 +236,12 @@ export function validatePipeline(doc) {
       const error = checkOperatorText(doc.stage_notes[stage], `stage_notes.${stage}`);
       if (error) return error;
     }
+  }
+  if ("tracer" in doc) {
+    if (!isObject(doc.tracer)) return "tracer: must be an object";
+    for (const key of Object.keys(doc.tracer))
+      if (key !== "enabled") return `tracer.${key}: unknown field`;
+    if (typeof doc.tracer.enabled !== "boolean") return "tracer.enabled: must be true or false";
   }
   return "archive" in doc ? archiveError(doc.archive) : null;
 }

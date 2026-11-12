@@ -405,3 +405,33 @@ test("the archive key validates field by field and saves only in the all-project
   const view = await (await s.send("/api/pipeline/effective/sample")).json();
   assert.equal("archive" in view, false);
 });
+
+test("the tracer key validates and saves only in the all-projects scope", async () => {
+  const s = setup();
+  const tracer = (value) => doc({ tracer: value });
+  for (const [body, text] of [
+    [tracer([]), "tracer: must be an object"],
+    [tracer(false), "tracer: must be an object"],
+    [tracer({ enabled: false, mode: "off" }), "tracer.mode: unknown field"],
+    [tracer({}), "tracer.enabled: must be true or false"],
+    [tracer({ enabled: "off" }), "tracer.enabled: must be true or false"],
+    [tracer({ enabled: 0 }), "tracer.enabled: must be true or false"],
+  ]) {
+    const response = await s.put("/api/pipeline/global", body);
+    assert.equal(response.status, 400, body);
+    assert.equal(await response.text(), text);
+  }
+  const scoped = await s.put("/api/pipeline/projects/sample", tracer({ enabled: false }));
+  assert.equal(scoped.status, 400);
+  assert.equal(await scoped.text(), "tracer: set only in the all-projects scope");
+  assert.equal(s.puts().length, 0);
+  for (const enabled of [false, true]) {
+    const current = s.bucket.objects.get("pipeline/global.json");
+    const headers = current ? { "If-Match": current.httpEtag } : { "If-None-Match": "*" };
+    assert.equal((await s.put("/api/pipeline/global", tracer({ enabled }), headers)).status, 200);
+    const saved = await (await s.send("/api/pipeline/global")).json();
+    assert.deepEqual(saved.tracer, { enabled });
+  }
+  const view = await (await s.send("/api/pipeline/effective/sample")).json();
+  assert.equal("tracer" in view, false);
+});
