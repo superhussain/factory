@@ -7488,10 +7488,12 @@ RETRO_SESSION_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[0-9a-f-]{8,36}
 RETRO_SESSION = re.compile(r"[0-9a-f-]{8,36}", re.ASCII)
 MAX_RETRO_BYTES = 131072
 RETRO_EDIT_SCHEMA = "factory.retro-edit/1"
+RETRO_DOC_EDIT_SCHEMA = "factory.retro-doc-edit/1"
 RETRO_EDIT_CHANGE = 600
 MAX_RETRO_EDITS = 2
 RETRO_EDITS_PER_DAY = 2
 RETRO_EDIT_SCOPE = "retro edits only allowlisted project scopes; global is person-only"
+RETRO_DOC_EDIT_SCOPE = "retro edits only allowlisted projects"
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
@@ -7917,8 +7919,10 @@ def retro_changed_chars(a, b):
 
 
 def check_edit(e, agg):
-    """The first violation of one retro stage-note edit as (field, problem), or None.
-    field is None for the whole edit."""
+    """The first violation of one retro edit as (field, problem), or None.
+    field is None for the whole edit. An edit with a file key edits a project file."""
+    if "file" in e:
+        return check_doc_edit(e, agg)
     err = check_keys(e, ("scope", "stage", "note", "summary"))
     if err:
         return None, err
@@ -7936,9 +7940,42 @@ def check_edit(e, agg):
     return None
 
 
+def check_doc_edit(e, agg):
+    """The first violation of one retro file edit as (field, problem), or None.
+    field is None for the whole edit."""
+    err = check_keys(e, ("file", "find", "replace", "summary"))
+    if err:
+        return None, err
+    documents = agg.get("documents", {})
+    if not isinstance(e["file"], str) or e["file"] not in documents:
+        return "file", "must be a file in aggregate.json"
+    found = next(((where, err) for where, err in (
+        ("find", check_text(e["find"], 1, 600, multiline=True)),
+        ("replace", check_text(e["replace"], 0, 600, multiline=True)),
+        ("summary", check_text(e["summary"], 1, 120))) if err), None)
+    if found:
+        return found
+    text = documents[e["file"]]["text"]
+    start = text.find(e["find"])
+    if start < 0 or text.find(e["find"], start + 1) >= 0:
+        return "find", "must match the stored text exactly once"
+    next_text = text[:start] + e["replace"] + text[start + len(e["find"]):]
+    if retro_changed_chars(text, next_text) > RETRO_EDIT_CHANGE:
+        return "find", f"changes more than {RETRO_EDIT_CHANGE} characters"
+    return None
+
+
 def retro_edits_today(home, scope):
     """How many retro versions scope has from the last 24 hours. Only retro saves carry run."""
     status, _, text = api(home, "GET", f"/api/pipeline/history/{scope}", ok=(200, 404))
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    return sum("run" in v and datetime.fromisoformat(v["saved_at"].replace("Z", "+00:00")) > cutoff
+               for v in (json.loads(text) if status == 200 else []))
+
+
+def retro_doc_edits_today(home, file):
+    """How many retro versions a project file (<slug>/<name>) has from the last 24 hours."""
+    status, _, text = api(home, "GET", f"/api/project-history/{file}", ok=(200, 404))
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     return sum("run" in v and datetime.fromisoformat(v["saved_at"].replace("Z", "+00:00")) > cutoff
                for v in (json.loads(text) if status == 200 else []))
@@ -7962,27 +7999,47 @@ def retro_apply_edits(home, run, edits, agg):
             results.append({"scope": f"edits[{i}]", "stage": "", "result": f"skipped: {where}: {bad[1]}",
                             "summary": ""})
             continue
-        row = {"scope": e["scope"], "stage": e["stage"], "summary": e["summary"]}
-        if e["scope"] == "global" or e["scope"][len("projects/"):] not in autonomy["projects"]:
-            print(f"skipped edits[{i}]: {RETRO_EDIT_SCOPE}")
-            results.append(dict(row, result=f"skipped: {RETRO_EDIT_SCOPE}"))
+        file = e.get("file")
+        row = {"scope": file or e["scope"], "stage": "" if file else e["stage"], "summary": e["summary"]}
+        if file:
+            listed, rule = file[:file.index("/")] in autonomy["projects"], RETRO_DOC_EDIT_SCOPE
+        else:
+            listed, rule = e["scope"] != "global" and e["scope"][len("projects/"):] in autonomy["projects"], RETRO_EDIT_SCOPE
+        if not listed:
+            print(f"skipped edits[{i}]: {rule}")
+            results.append(dict(row, result=f"skipped: {rule}"))
             continue
-        if retro_edits_today(home, e["scope"]) >= RETRO_EDITS_PER_DAY:
-            reason = f"retro edit cap: {RETRO_EDITS_PER_DAY} per scope per day"
+        today = retro_doc_edits_today(home, file) if file else retro_edits_today(home, e["scope"])
+        if today >= RETRO_EDITS_PER_DAY:
+            reason = f"retro edit cap: {RETRO_EDITS_PER_DAY} per {'file' if file else 'scope'} per day"
             print(f"skipped edits[{i}]: {reason}")
             results.append(dict(row, result=f"skipped: {reason}"))
             continue
-        body = {"schema": RETRO_EDIT_SCHEMA, "run": run, "base_version": agg["pipeline"][e["scope"]]["version"],
-                "stage": e["stage"], "note": e["note"], "summary": e["summary"]}
-        status, headers, text = api(home, "PUT", f"/api/pipeline/retro/{e['scope']}", json.dumps(body),
+        if file:
+            doc = agg["documents"][file]
+            body = {"schema": RETRO_DOC_EDIT_SCHEMA, "run": run, "base_version": doc["version"],
+                    "find": e["find"], "replace": e["replace"], "summary": e["summary"]}
+            route = f"/api/project-retro/{file}"
+        else:
+            body = {"schema": RETRO_EDIT_SCHEMA, "run": run, "base_version": agg["pipeline"][e["scope"]]["version"],
+                    "stage": e["stage"], "note": e["note"], "summary": e["summary"]}
+            route = f"/api/pipeline/retro/{e['scope']}"
+        status, headers, text = api(home, "PUT", route, json.dumps(body),
                                     ok=(200, 400, 403, 404, 409, 412, 413, 429),
                                     headers={"Content-Type": "application/json"})
         if status == 200:
-            version = headers["X-Pipeline-Version"]
-            scope = agg["pipeline"][e["scope"]]
-            scope["version"] = int(version)
-            scope["stage_notes"][e["stage"]] = e["note"]
-            print(f"edited {e['scope']} stage_notes.{e['stage']} to version {version}: {e['summary']}")
+            if file:
+                version = headers["X-Project-Version"]
+                start = doc["text"].index(e["find"])
+                doc["text"] = doc["text"][:start] + e["replace"] + doc["text"][start + len(e["find"]):]
+                doc["version"] = int(version)
+                print(f"edited {file} to version {version}: {e['summary']}")
+            else:
+                version = headers["X-Pipeline-Version"]
+                scope = agg["pipeline"][e["scope"]]
+                scope["version"] = int(version)
+                scope["stage_notes"][e["stage"]] = e["note"]
+                print(f"edited {e['scope']} stage_notes.{e['stage']} to version {version}: {e['summary']}")
             results.append(dict(row, result=f"version {version}"))
         else:
             reason = f"{status} {printable_line(text, 200)}".strip()
