@@ -1153,9 +1153,40 @@ def next_item():
 BACKLOG_USAGE = 'usage: backlog add "<slug>: <feature>" [--context <file>] | backlog rework <job-id> (feature on stdin)'
 
 
+def backlog_context_error(text):
+    """Why a normalized backlog context does not fit: a Recommend line, the reasons, then up to
+    three needs.md questions. None when it fits."""
+    lines = text.split("\n")
+    if len(text) > 6000:
+        return "longer than 6000 characters"
+    if NOTE_INVISIBLE.search(text):
+        return "holds a control or invisible character"
+    if not lines or lines[0] not in ("Recommend: approve", "Recommend: deny"):
+        return 'the first line must be "Recommend: approve" or "Recommend: deny"'
+    marks = [i for i, line in enumerate(lines) if line.startswith("## Question:")]
+    reasons = lines[1:marks[0] if marks else len(lines)]
+    if not any(line.strip() for line in reasons):
+        return "write the reasons first, then only ## Question: sections"
+    if len(marks) > 3:
+        return "at most 3 questions"
+    for n, start in enumerate(marks, 1):
+        sect = lines[start:marks[n] if n < len(marks) else len(lines)]
+        picks = [i for i, line in enumerate(sect) if line.startswith("Pick:")]
+        header = sect[0][len("## Question:"):].strip()
+        ok = 0 < len(header) <= 60 and len(picks) == 1 and sect[picks[0]] in ("Pick: one", "Pick: many")
+        rows = [line for line in sect[picks[0] + 1:] if line.strip()] if ok else []
+        ok = ok and any(line.strip() for line in sect[1:picks[0]]) and 2 <= len(rows) <= 4
+        found = [re.fullmatch(r"- (.+?)(?::\s+(.+))?", row) for row in rows]
+        ok = ok and all(found)
+        recs = sum(bool(m and re.search(r" \(recommended\)$", m.group(1), re.I)) for m in found)
+        if not ok or (sect[picks[0]] == "Pick: one" and recs > 1):
+            return f"question {n} is not in the needs.md question format"
+    return None
+
+
 def backlog_context(path):
-    """The normalized text of a backlog context file: a Recommend line, the reasons, then up to
-    three needs.md questions. Exits 2 with one message when the file does not fit."""
+    """The normalized text of a backlog context file. Exits 2 with one message when the file does
+    not fit backlog_context_error."""
     def bad(why):
         fail(f"context file {path}: {why}", 2)
     try:
@@ -1170,30 +1201,9 @@ def backlog_context(path):
     while lines and not lines[-1].strip():
         lines.pop()
     text = "\n".join(lines)
-    if len(text) > 6000:
-        bad("longer than 6000 characters")
-    if NOTE_INVISIBLE.search(text):
-        bad("holds a control or invisible character")
-    if not lines or lines[0] not in ("Recommend: approve", "Recommend: deny"):
-        bad('the first line must be "Recommend: approve" or "Recommend: deny"')
-    marks = [i for i, line in enumerate(lines) if line.startswith("## Question:")]
-    reasons = lines[1:marks[0] if marks else len(lines)]
-    if not any(line.strip() for line in reasons):
-        bad("write the reasons first, then only ## Question: sections")
-    if len(marks) > 3:
-        bad("at most 3 questions")
-    for n, start in enumerate(marks, 1):
-        sect = lines[start:marks[n] if n < len(marks) else len(lines)]
-        picks = [i for i, line in enumerate(sect) if line.startswith("Pick:")]
-        header = sect[0][len("## Question:"):].strip()
-        ok = 0 < len(header) <= 60 and len(picks) == 1 and sect[picks[0]] in ("Pick: one", "Pick: many")
-        rows = [line for line in sect[picks[0] + 1:] if line.strip()] if ok else []
-        ok = ok and any(line.strip() for line in sect[1:picks[0]]) and 2 <= len(rows) <= 4
-        found = [re.fullmatch(r"- (.+?)(?::\s+(.+))?", row) for row in rows]
-        ok = ok and all(found)
-        recs = sum(bool(m and re.search(r" \(recommended\)$", m.group(1), re.I)) for m in found)
-        if not ok or (sect[picks[0]] == "Pick: one" and recs > 1):
-            bad(f"question {n} is not in the needs.md question format")
+    why = backlog_context_error(text)
+    if why:
+        bad(why)
     return text
 
 
