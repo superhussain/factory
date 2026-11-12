@@ -1482,7 +1482,8 @@ class MoveFenceTest(IsolatedTestCase):
                 contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
             factory.board(self.home, "001-test")
         self.assertEqual(raised.exception.code, 2)
-        self.assertIn("only the dashboard and factory.py pickup set priority", err.getvalue())
+        self.assertIn("only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's "
+                      "chat, run factory.py control <job-id> prioritize --chat-file <file>", err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
     def test_board_refuses_a_paused_patch(self):

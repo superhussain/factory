@@ -104,6 +104,9 @@
   factory.py suggest approve <job-id> <A|B|C> [--chat-file <file> | --chat "<message>"]
                                             a human at a terminal approves one option of such a card,
                                             or --chat-file records a person's chat message instead
+  factory.py control <job-id> <prioritize|unprioritize> --chat-file <file> | --chat "<message>"
+                                            make the dashboard's Prioritize or Remove priority from a
+                                            person's chat message, print the result as JSON
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
@@ -824,7 +827,8 @@ def board(factory, job_id):
     if "move" in patch:
         fail("only the dashboard and factory.py pickup set move", 2)
     if "priority" in patch:
-        fail("only the dashboard and factory.py pickup set priority", 2)
+        fail("only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's chat, "
+             "run factory.py control <job-id> prioritize --chat-file <file>", 2)
     if "paused" in patch:
         fail("only the dashboard sets paused", 2)
     if patch.get("babysit") is not None:
@@ -2923,6 +2927,48 @@ def suggest_cmd(sub, *args):
         fail("usage: suggest admit <file> | " + SUGGEST_APPROVE_USAGE[len("usage: "):], 2)
 
 
+CONTROL_ACTIONS = ("prioritize", "unprioritize")
+PRIORITY_STAGES = (IDEA,) + IN_FLIGHT
+CONTROL_USAGE = 'usage: control <job-id> <prioritize|unprioritize> --chat-file <file> | --chat "<message>"'
+
+
+def control_cmd(job_id, action, flag, value):
+    """Make the dashboard's Prioritize or Remove priority from a person's chat message."""
+    if not JOB_ID.fullmatch(job_id) or ".." in job_id or action not in CONTROL_ACTIONS \
+            or flag not in ("--chat", "--chat-file"):
+        fail(CONTROL_USAGE, 2)
+    quote = chat_quote(read_chat_file(value), "--chat-file") if flag == "--chat-file" else chat_quote(value)
+    if quote is None:
+        fail(CONTROL_USAGE, 2)
+    home = factory_home()
+    device = holder(home)[0]
+
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None:
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
+        if action == "prioritize":
+            if not job.get("project"):
+                fail(f"{job_id} cannot be prioritized: it has no project. Nothing was written.", 2)
+            if job.get("stage") not in PRIORITY_STAGES:
+                fail(f"{job_id} cannot be prioritized: it is at {job.get('stage')}. Nothing was written.", 2)
+            if lead_of(job):
+                fail(f"{job_id} cannot be prioritized: it is a rider of {lead_of(job)}. Nothing was written.", 2)
+            if job.get("priority"):
+                return None, "unchanged"
+            stamp = now()
+            job["priority"] = {"at": stamp, "via": "chat", "quote": quote, "by": device}
+        else:
+            if not job.get("priority"):
+                return None, "unchanged"
+            stamp = now()
+            del job["priority"]
+        job["updated"] = data["updated"] = stamp
+        return dump_board(data), action + "d"
+    print(json.dumps({"id": job_id, "action": action, "result": cas(home, "/api/board", change)}))
+
+
 def snapshot(repo, commit, dest):
     """Write commit's regular files and directories into dest, with no .git and no links."""
     r = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", commit], capture_output=True)
@@ -4534,7 +4580,7 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
             print(f"cleaned up {job_id} {project}" + (f", left: {'; '.join(left)}" if left else ""))
 
 
-PRIORITY_NUDGE = ("The owner prioritized factory job {id} from the dashboard. If your turn ended while work "
+PRIORITY_NUDGE = ("The owner prioritized factory job {id}. If your turn ended while work "
                   "on it is still owed, continue with the next step now.")
 
 
@@ -8343,6 +8389,7 @@ COMMANDS["adopt-home"] = (adopt_home_cmd, 1, 1)
 COMMANDS["doctor"] = (doctor_cmd, 0, 0)
 COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
 COMMANDS["suggest"] = (suggest_cmd, 2, 5)
+COMMANDS["control"] = (control_cmd, 4, 4)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
 COMMANDS["experiment"] = (experiment_cmd, 2, 2)
 COMMANDS["unclaim"] = (unclaim, 1, 1)

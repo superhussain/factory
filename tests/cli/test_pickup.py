@@ -1521,7 +1521,7 @@ class MoveArchiveTest(MoveHostTest):
 
 class PriorityTest(PickupFixture):
     AT = "2026-01-02T12:00:00Z"
-    NUDGE = ("The owner prioritized factory job 042-sample-export from the dashboard. If your turn ended "
+    NUDGE = ("The owner prioritized factory job 042-sample-export. If your turn ended "
              "while work on it is still owed, continue with the next step now.")
 
     def setUp(self):
