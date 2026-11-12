@@ -43,10 +43,11 @@
                                             print a role's full agent prompt (spec, build, review-security,
                                             review-ux, review-ui, review-code, approve), or write it to
                                             <path> with mode 600 and print the path
-  factory.py wait <project-slug>/<job-id> <artifact>... [--timeout S]
+  factory.py wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]
                                             print each finished job file's first line, checking once a
                                             second for up to S seconds (default 60); exit 3 while one is
-                                            missing, 5 while one has no valid first line
+                                            missing, 5 while one has no valid first line; --hold runs
+                                            hold first to refresh this session's claim
   factory.py checks <project-slug>/<job-id> [--timeout S]
                                             print the job PR's checks as <bucket> <name> once none is
                                             pending, checking every 10 seconds for up to S seconds
@@ -4890,7 +4891,7 @@ def review_plan_cmd(target, round_text):
 
 
 WAIT_ARTIFACT = re.compile(r"spec\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
-WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S]"
+WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]"
 
 
 def wait_valid(artifact, line):
@@ -4907,10 +4908,15 @@ def wait_valid(artifact, line):
 def wait_cmd(target, *args):
     """Print each artifact's first line once all are valid, checking once a second until --timeout."""
     home, slug, job_id = r2_target(target, True)
-    artifacts, timeout = [], None
+    artifacts, timeout, refresh = [], None, False
     i = 0
     while i < len(args):
-        if args[i] == "--timeout":
+        if args[i] == "--hold":
+            if refresh:
+                fail("--hold given twice. " + WAIT_USAGE, 2)
+            refresh = True
+            i += 1
+        elif args[i] == "--timeout":
             if timeout is not None or i + 1 == len(args) or not re.fullmatch(r"[0-9]+", args[i + 1]) \
                     or int(args[i + 1]) > 600:
                 fail("--timeout takes one value from 0 to 600 seconds", 2)
@@ -4923,6 +4929,8 @@ def wait_cmd(target, *args):
             fail(f"bad artifact {args[i]!r}. " + WAIT_USAGE, 2)
     if not artifacts:
         fail(WAIT_USAGE, 2)
+    if refresh:
+        hold(target)
     folder = home / "jobs" / slug / job_id
     deadline = time.monotonic() + (60 if timeout is None else timeout)
     while True:
@@ -7787,7 +7795,7 @@ COMMANDS["unclaim"] = (unclaim, 1, 1)
 COMMANDS["pipeline"] = (pipeline_cmd, 1, 1)
 COMMANDS["documents"] = (documents_cmd, 1, 1)
 COMMANDS["prompt"] = (prompt_cmd, 2, 8)
-COMMANDS["wait"] = (wait_cmd, 2, 22)
+COMMANDS["wait"] = (wait_cmd, 2, 23)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
 COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
