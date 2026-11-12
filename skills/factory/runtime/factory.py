@@ -7185,6 +7185,7 @@ RETRO_EDIT_SCHEMA = "factory.retro-edit/1"
 RETRO_EDIT_CHANGE = 600
 MAX_RETRO_EDITS = 2
 RETRO_EDITS_PER_DAY = 2
+RETRO_EDIT_SCOPE = "retro edits only allowlisted project scopes; global is person-only"
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
@@ -7629,7 +7630,8 @@ def retro_apply_edits(home, run, edits, agg):
     """PUT each checked edit to the Worker's retro route while autonomy runs. Returns one
     {scope, stage, result, summary} row per edit; a bad edit's text is left out. A saved
     edit moves agg's version and note on, so a later edit to the same scope builds on it."""
-    if load_autonomy(load_board(api(home, "GET", "/api/board")[2]))["paused"] is not False:
+    autonomy = load_autonomy(load_board(api(home, "GET", "/api/board")[2]))
+    if autonomy["paused"] is not False:
         print("autonomy is paused; no pipeline edit")
         return [{"scope": f"edits[{i}]", "stage": "", "result": "not sent: autonomy is paused", "summary": ""}
                 for i in range(len(edits))]
@@ -7643,6 +7645,10 @@ def retro_apply_edits(home, run, edits, agg):
                             "summary": ""})
             continue
         row = {"scope": e["scope"], "stage": e["stage"], "summary": e["summary"]}
+        if e["scope"] == "global" or e["scope"][len("projects/"):] not in autonomy["projects"]:
+            print(f"skipped edits[{i}]: {RETRO_EDIT_SCOPE}")
+            results.append(dict(row, result=f"skipped: {RETRO_EDIT_SCOPE}"))
+            continue
         if retro_edits_today(home, e["scope"]) >= RETRO_EDITS_PER_DAY:
             reason = f"retro edit cap: {RETRO_EDITS_PER_DAY} per scope per day"
             print(f"skipped edits[{i}]: {reason}")

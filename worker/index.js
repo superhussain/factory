@@ -618,29 +618,30 @@ const RETRO_EDIT_CHANGE = 600;
 const RETRO_EDITS_PER_DAY = 2;
 const RETRO_EDIT_KEYS = ["schema", "run", "base_version", "stage", "note", "summary"];
 const RETRO_EDIT_HOST = "retro edits come only from a bound host";
+const RETRO_EDIT_SCOPE = "retro edits only allowlisted project scopes; global is person-only";
 const RUN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 
-// Whether the board's autonomy record is a well-formed one with paused set to false.
-// A missing or malformed record counts as paused, as in factory.py.
-async function autonomyRunning(env) {
+// The board's autonomy record as { running, projects }. running needs a well-formed record
+// with paused set to false; a missing or malformed record counts as paused, as in factory.py.
+// projects is the allowlist when it is a well-formed list, else empty.
+async function boardAutonomy(env) {
   const object = await env.BUCKET.get("board.json");
   let autonomy;
   try {
     autonomy = object && JSON.parse(await object.text()).autonomy;
   } catch {
-    return false;
+    autonomy = undefined;
   }
+  if (typeof autonomy !== "object" || autonomy === null || Array.isArray(autonomy))
+    return { running: false, projects: [] };
   const names = (list) =>
     list === undefined || (Array.isArray(list) && list.every((v) => typeof v === "string"));
-  return (
-    typeof autonomy === "object" &&
-    autonomy !== null &&
-    !Array.isArray(autonomy) &&
-    autonomy.paused === false &&
-    names(autonomy.projects) &&
-    names(autonomy.self) &&
-    (autonomy.projects?.length ?? 0) <= MAX_EXPLORER_PROJECTS
-  );
+  const listed =
+    names(autonomy.projects) && (autonomy.projects?.length ?? 0) <= MAX_EXPLORER_PROJECTS;
+  return {
+    running: autonomy.paused === false && listed && names(autonomy.self),
+    projects: listed ? (autonomy.projects ?? []) : [],
+  };
 }
 
 // The shape error in a factory.retro-edit/1 body, or null. Text rules run later, after the caps.
@@ -676,7 +677,10 @@ function retroEditShape(body) {
 async function pipelineRetroPut(request, env, principal, scope) {
   const host = await boundHost(env, principal);
   if (!host) return reply(RETRO_EDIT_HOST, 403);
-  if (!(await autonomyRunning(env))) return reply("autonomy is paused; no retro edit", 409);
+  const autonomy = await boardAutonomy(env);
+  if (scope === "global" || !autonomy.projects.includes(scope.slice("projects/".length)))
+    return reply(RETRO_EDIT_SCOPE, 403);
+  if (!autonomy.running) return reply("autonomy is paused; no retro edit", 409);
   const body = await readJson(request);
   if (body instanceof Response) return body;
   const shape = retroEditShape(body);

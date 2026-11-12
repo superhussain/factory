@@ -15,7 +15,8 @@ const RUN = "20261112T090000Z-a1b2c3";
 const SUMMARY = "Spec note: name the test file for each criterion";
 const NOTE = "Name the acceptance check for each criterion.";
 const STORED = { schema: 1, merge: "human", stage_notes: { spec: NOTE, build: "Run the tests." } };
-const RUNNING = { paused: false, projects: [], self: [] };
+const RUNNING = { paused: false, projects: ["factory"], self: [] };
+const SCOPE_RULE = "retro edits only allowlisted project scopes; global is person-only";
 
 async function setup({ autonomy = RUNNING, stored = STORED } = {}) {
   const bucket = memoryBucket();
@@ -30,11 +31,12 @@ async function setup({ autonomy = RUNNING, stored = STORED } = {}) {
     return { status: response.status, text: await response.text(), headers: response.headers };
   };
   const json = { "Content-Type": "application/json" };
-  bucket.objects.set("projects/factory.md", {
-    key: "projects/factory.md",
-    bytes: Buffer.from("---\n---\n"),
-    httpEtag: '"p"',
-  });
+  for (const slug of ["factory", "sample"])
+    bucket.objects.set(`projects/${slug}.md`, {
+      key: `projects/${slug}.md`,
+      bytes: Buffer.from("---\n---\n"),
+      httpEtag: '"p"',
+    });
   const created = await send("POST", "/api/hosts", {
     body: JSON.stringify({ id: "wsl", label: "wsl" }),
     headers: json,
@@ -50,11 +52,13 @@ async function setup({ autonomy = RUNNING, stored = STORED } = {}) {
     "board.json",
     JSON.stringify({ updated: "2026-11-12T09:00:00Z", jobs: [], ...(autonomy && { autonomy }) }),
   );
-  const saved = await send("PUT", "/api/pipeline/projects/factory", {
-    body: JSON.stringify(stored),
-    headers: { ...json, "If-None-Match": "*" },
-  });
-  assert.equal(saved.status, 200);
+  if (stored) {
+    const saved = await send("PUT", "/api/pipeline/projects/factory", {
+      body: JSON.stringify(stored),
+      headers: { ...json, "If-None-Match": "*" },
+    });
+    assert.equal(saved.status, 200);
+  }
   const edit = (fields = {}, { principal = wsl, scope = "projects/factory" } = {}) =>
     send("PUT", `/api/pipeline/retro/${scope}`, {
       body: JSON.stringify({
@@ -118,10 +122,10 @@ test("a bound host's retro edit saves the next version with retro metadata and o
 });
 
 test("a retro edit to a scope with no stored document starts it at version 1", async () => {
-  const s = await setup();
-  const r = await s.edit({ base_version: 0, note: "Keep it short." }, { scope: "global" });
+  const s = await setup({ stored: null });
+  const r = await s.edit({ base_version: 0, note: "Keep it short." });
   assert.deepEqual([r.status, r.headers.get("X-Pipeline-Version")], [200, "1"]);
-  assert.deepEqual(JSON.parse(s.bucket.objects.get("pipeline/global.json").bytes), {
+  assert.deepEqual(s.stored1(), {
     schema: 1,
     stage_notes: { spec: "Keep it short." },
   });
@@ -152,18 +156,22 @@ test("each gate refuses with its exact status and text and stores nothing", asyn
       409,
       "autonomy is paused; no retro edit",
     ],
-    ["no autonomy record", {}, { autonomy: null }, 409, "autonomy is paused; no retro edit"],
+    ["global scope", {}, { scope: "global" }, 403, SCOPE_RULE],
+    ["project off the allowlist", {}, { scope: "projects/sample" }, 403, SCOPE_RULE],
+    ["empty allowlist", {}, { autonomy: { ...RUNNING, projects: [] } }, 403, SCOPE_RULE],
+    ["no autonomy record", {}, { autonomy: null }, 403, SCOPE_RULE],
+    ["malformed list", {}, { autonomy: { ...RUNNING, projects: [1] } }, 403, SCOPE_RULE],
     [
-      "malformed record",
+      "malformed paused",
       {},
-      { autonomy: { paused: "no" } },
+      { autonomy: { ...RUNNING, paused: "no" } },
       409,
       "autonomy is paused; no retro edit",
     ],
     [
-      "malformed list",
+      "malformed self",
       {},
-      { autonomy: { ...RUNNING, projects: [1] } },
+      { autonomy: { ...RUNNING, self: [1] } },
       409,
       "autonomy is paused; no retro edit",
     ],
@@ -228,13 +236,18 @@ test("each gate refuses with its exact status and text and stores nothing", asyn
       "body: needs keys schema, run, base_version, stage, note, summary",
     ],
   ];
-  for (const [name, fields, { principal, autonomy }, status, text] of cases) {
+  for (const [name, fields, { principal, autonomy, scope }, status, text] of cases) {
     const s = await setup(autonomy === undefined ? {} : { autonomy });
     const before = s.puts();
-    const r = await s.edit(fields, { principal });
+    const r = await s.edit(fields, { principal, scope });
     assert.deepEqual([r.status, r.text], [status, text], name);
     assert.equal(s.puts(), before, name);
     assert.deepEqual(s.stored1(), STORED, name);
+    assert.equal(
+      [...s.bucket.objects.keys()].some((k) => /^pipeline\/(global|projects\/sample)/.test(k)),
+      false,
+      name,
+    );
   }
 });
 
@@ -277,8 +290,20 @@ test("at most 2 retro versions per scope in 24 hours", async () => {
   const third = await s.edit({ base_version: 3, note: NOTE + " Three." });
   assert.deepEqual([third.status, third.text], [429, "retro edit cap: 2 per scope per day"]);
   assert.equal(s.puts(), before);
-  // Another scope has its own cap.
-  assert.equal((await s.edit({ base_version: 0 }, { scope: "global" })).status, 200);
+  // Another allowlisted scope has its own cap.
+  await s.bucket.put(
+    "board.json",
+    JSON.stringify({
+      updated: "2026-11-12T09:00:00Z",
+      jobs: [],
+      autonomy: { ...RUNNING, projects: ["sample"] },
+    }),
+  );
+  assert.equal((await s.edit({ base_version: 0 }, { scope: "projects/sample" })).status, 200);
+  await s.bucket.put(
+    "board.json",
+    JSON.stringify({ updated: "2026-11-12T09:00:00Z", jobs: [], autonomy: RUNNING }),
+  );
   // A day later the window has moved on.
   mock.timers.setTime(Date.parse("2026-11-13T09:02:00Z"));
   try {

@@ -775,7 +775,7 @@ class RetroEditTest(RetroWorkerCase):
     def admit(self, edits, routes=None, paused=False):
         (self.folder / "reply.json").write_text(json.dumps(reply(edits=edits)), encoding="utf-8")
         board = {"updated": "2026-11-12T09:00:00Z", "jobs": [],
-                 "autonomy": {"paused": paused, "projects": [], "self": []}}
+                 "autonomy": {"paused": paused, "projects": ["factory"], "self": []}}
         routes = {"GET /api/board": (200, board), PUT_ROUTE: (200, b"ok", {"X-Pipeline-Version": "8"}),
                   **(routes or {})}
         with http_fixture(routes) as server:
@@ -815,15 +815,12 @@ class RetroEditTest(RetroWorkerCase):
         ]
         for bad, line in cases:
             with self.subTest(line=line):
-                code, out, err, requests, text = self.admit([bad, edit(scope="global", note="Keep it short.")],
-                                                            {"PUT /api/pipeline/retro/global": (
-                                                                200, b"ok", {"X-Pipeline-Version": "1"})})
+                code, out, err, requests, text = self.admit([bad, edit()])
                 self.assertEqual((code, err), (0, ""))
                 self.assertIn(f"skipped {line}\n", out)
-                self.assertIn("edited global stage_notes.spec to version 1", out)
+                self.assertIn("edited projects/factory stage_notes.spec to version 8", out)
                 self.assertEqual([f"{m} {p}" for m, p, _, _ in requests],
-                                 ["GET /api/board", "GET /api/pipeline/history/global",
-                                  "PUT /api/pipeline/retro/global"])
+                                 ["GET /api/board", "GET /api/pipeline/history/projects/factory", PUT_ROUTE])
                 self.assertIn(f"| edits[0] |  | skipped: {line.replace('|', chr(92) + '|')} |  |\n", text)
 
     def test_exactly_600_changed_characters_is_sent(self):
@@ -874,6 +871,22 @@ class RetroEditTest(RetroWorkerCase):
         history[1]["saved_at"] = recent(25)
         _, out, _, requests, _ = self.admit([edit()], {route: (200, history)})
         self.assertIn("PUT", [m for m, *_ in requests])
+
+    def test_global_and_unlisted_scopes_are_skipped(self):
+        self.write_agg_scope("projects/sample-tools")
+        rule = "retro edits only allowlisted project scopes; global is person-only"
+        code, out, err, requests, text = self.admit([edit(scope="global"), edit(scope="projects/sample-tools")])
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn(f"skipped edits[0]: {rule}\nskipped edits[1]: {rule}\n", out)
+        self.assertEqual([f"{m} {p}" for m, p, _, _ in requests], ["GET /api/board"])
+        self.assertIn(f"| global | spec | skipped: {rule} | {EDIT_SUMMARY} |", text)
+        self.assertIn(f"| projects/sample-tools | spec | skipped: {rule} | {EDIT_SUMMARY} |", text)
+
+    def write_agg_scope(self, scope):
+        path = self.folder / "aggregate.json"
+        agg = json.loads(path.read_text(encoding="utf-8"))
+        agg["pipeline"][scope] = {"version": 0, "stage_notes": {}}
+        path.write_text(json.dumps(agg), encoding="utf-8")
 
     def test_paused_autonomy_sends_no_put(self):
         code, out, err, requests, text = self.admit([edit(), edit(scope="global")], paused=True)
