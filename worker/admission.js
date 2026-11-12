@@ -56,6 +56,7 @@ const KEYS = [
   "gates",
   "pickup",
   "triage",
+  "hold",
   "stage_notes",
   "archive",
   "tracer",
@@ -228,6 +229,10 @@ export function validatePipeline(doc) {
       if (error) return error;
     }
   }
+  if ("hold" in doc) {
+    const error = holdError(doc.hold);
+    if (error) return error;
+  }
   if ("stage_notes" in doc) {
     if (!isObject(doc.stage_notes)) return "stage_notes: must be an object";
     for (const key of Object.keys(doc.stage_notes))
@@ -256,6 +261,24 @@ function archiveError(archive) {
     return 'archive.mode: must be "age" or "count"';
   if (!(Number.isInteger(archive.n) && archive.n >= 1 && archive.n <= 10000))
     return "archive.n: must be a whole number from 1 to 10000";
+  return null;
+}
+
+/** The first error in a pipeline `hold` value, or null. The dashboard holds the same copy. */
+function holdError(hold) {
+  if (!isObject(hold)) return "hold: must be an object";
+  for (const key of Object.keys(hold))
+    if (key !== "min_ideas" && key !== "max_wait_hours") return `hold.${key}: unknown field`;
+  if (!(Number.isInteger(hold.min_ideas) && hold.min_ideas >= 1 && hold.min_ideas <= 20))
+    return "hold.min_ideas: must be a whole number from 1 to 20";
+  if (
+    !(
+      Number.isInteger(hold.max_wait_hours) &&
+      hold.max_wait_hours >= 1 &&
+      hold.max_wait_hours <= 168
+    )
+  )
+    return "hold.max_wait_hours: must be a whole number from 1 to 168";
   return null;
 }
 
@@ -301,6 +324,7 @@ export function effectivePipeline(
     ),
     pickup: pickupOf(project?.pickup ?? global?.pickup, activeHosts),
     triage: project?.triage ?? global?.triage ?? { enabled: false, threshold: 90, rules: "" },
+    hold: project?.hold ?? global?.hold ?? { min_ideas: 5, max_wait_hours: 12 },
     stage_notes: stageNotes,
     versions: { global: globalVersion, project: projectVersion },
     floors: FLOORS.map((floor) => floor.id),
