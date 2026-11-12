@@ -212,6 +212,7 @@ The Worker replaces only `stage_notes[stage]` and saves the next version with
 | Gate | Refusal |
 | --- | --- |
 | a paired or active host's bound service token | 403 `retro edits come only from a bound host` |
+| a `projects/<slug>` scope whose slug is on the autonomy allowlist; `global` never | 403 `retro edits only allowlisted project scopes; global is person-only` |
 | autonomy `paused` is `false`; a missing or malformed record counts as paused | 409 `autonomy is paused; no retro edit` |
 | `base_version` is the stored version | 412 `precondition failed` |
 | at most 600 characters changed, counted after trimming the shared prefix and suffix | 413 `retro edit changes more than 600 characters` |
@@ -219,7 +220,7 @@ The Worker replaces only `stage_notes[stage]` and saves the next version with
 | note and summary pass the stage-note checks; the summary is one line of 1 to 120 characters | 400 `<field>: <reason>` |
 
 - **Device first.** Before any PUT, `retro admit` repeats the text checks, the `.env`
-  value check, the 600-character cap and the pause. While paused it prints
+  value check, the scope rule, the 600-character cap, the daily cap and the pause. While paused it prints
   `autonomy is paused; no pipeline edit` and sends nothing.
 - **Output.** Each edit prints `edited <scope> stage_notes.<stage> to version N: <summary>`
   or `skipped edits[i]...`, and `findings.md` lists it under Pipeline edits. Edits never

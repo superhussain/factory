@@ -77,7 +77,7 @@ version a person can restore.
 
 | Field | Example | Rule |
 | --- | --- | --- |
-| `scope` | `projects/factory` | a key of `pipeline` in `aggregate` |
+| `scope` | `projects/factory` | a `projects/<slug>` key of `pipeline` in `aggregate` whose project is on the autonomy allowlist; never `global` |
 | `stage` | `spec` | one of `spec`, `build`, `review`, `approve` |
 | `note` | full new note text | 1 to 2000 characters; line breaks allowed; at most 600 characters changed from the current note |
 | `summary` | `Spec note: name the test file for each criterion` | 1 to 120 characters, one line |

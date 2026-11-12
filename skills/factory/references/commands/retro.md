@@ -22,7 +22,9 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    An `edited <scope> stage_notes.<stage> to version N: <summary>` line means that
    edit is saved; a `skipped edits[i]` line or `autonomy is paused; no pipeline edit`
    means it is not. findings.md lists each under Pipeline edits. Edits never change
-   the exit code. A person undoes one with Restore to draft in Settings, Pipeline.
+   the exit code. Retro may edit only project scopes on the autonomy allowlist; `global`
+   is person-only, and admit skips any other scope. A person undoes an edit with Restore
+   to draft in Settings, Pipeline.
    A person decides each line on the dashboard Backlog decision page.
 
 Do the retro through these commands only, and edit neither the reply nor the run folder.
