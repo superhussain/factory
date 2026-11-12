@@ -349,6 +349,7 @@ test("Tracer off hides every Tracer control", { timeout: 120000 }, async () => {
         ...JOB,
         tracer: { follow: true, url: LINK, building: true, scope: "approved", tasks },
       },
+      { ...JOB, id: "043-sample-plain", title: "Plain" },
     ]);
     await seedPipeline(origin, { schema: 1, tracer: { enabled: false } });
     const { context, page, errors, drawer } = await openDrawer(browser, origin);
@@ -363,6 +364,15 @@ test("Tracer off hides every Tracer control", { timeout: 120000 }, async () => {
         refs: "",
       });
       assert.equal(await page.$eval("#d-tracer-tasks", (el) => el.hidden), true);
+      await page.evaluate(() => (location.hash = "#043-sample-plain"));
+      await page.waitForFunction(() => document.getElementById("d-title").textContent === "Plain");
+      await openJobActions(page);
+      assert.equal(await page.$eval("#d-follow-tracer", (el) => el.hidden), true);
+      assert.equal(
+        (await page.$eval("#d-actions-menu", (el) => el.innerText)).includes("Follow in Tracer"),
+        false,
+      );
+      await page.keyboard.press("Escape");
       await page.click("#settings-link");
       await page.click("#settings-nav-pipeline");
       await page.waitForSelector("#settings-pipeline:not([hidden])");
