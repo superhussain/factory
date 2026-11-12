@@ -792,6 +792,16 @@ async function capture(outdir, referencePath) {
       await page.evaluate(() =>
         document.querySelector("#display-poll").scrollIntoView({ block: "center" }),
       );
+      // The gear's aria-current border fades in over 0.15 s. A side whose dot is already live
+      // would otherwise catch it mid-transition.
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getElementById("settings-link")
+            .getAnimations()
+            .map((animation) => animation.finished),
+        ),
+      );
     };
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
     const settleArchiveSettings = async (page, name) => {
