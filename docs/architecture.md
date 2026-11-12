@@ -221,7 +221,7 @@ sequenceDiagram
   Retries stop while the sign-in has expired and resume after the next board read
   succeeds.
   A hidden tab keeps its socket only while notifications are on. A `changed` event
-  re-reads only its key.
+  re-reads only its key, once within 2 seconds of the first frame however many frames arrive; a frame during that read adds one more read.
 - A socket open or a poll timer tick re-reads `board.json` but redraws only when its `ETag` changed, so a focused card is not read again. A tick still reopens the job when the link names a tab or archived job that has not loaded.
   The header dot is solid while live and a ring while polling.
 
