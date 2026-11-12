@@ -553,6 +553,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <a class="pr-link" id="d-paseo-web" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-tracer" target="_blank" rel="noopener noreferrer" hidden>Tracer</a>
     </div>
+    <button class="btn" id="d-babysit-bar" title="Fix review comments and CI, then merge this PR" hidden>Babysit PR</button>
     <div class="job-actions" id="d-actions-wrap">
       <button class="btn icon" id="d-actions" aria-label="Job actions" title="Job actions (A or .)" aria-keyshortcuts="a ." aria-haspopup="menu" aria-expanded="false" aria-controls="d-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>
       <div class="job-actions-menu" id="d-actions-menu" role="menu" aria-label="Job actions" hidden>
@@ -561,6 +562,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-follow-tracer" role="menuitem" tabindex="-1" hidden>Follow in Tracer</button>
         <button class="btn" id="d-move-host" role="menuitem" tabindex="-1" hidden>Move to another host</button>
         <button class="btn" id="d-rerun" role="menuitem" tabindex="-1" hidden>Rerun stage</button>
+        <button class="btn" id="d-babysit" role="menuitem" tabindex="-1" title="Fix review comments and CI, then merge this PR" hidden>Babysit PR</button>
         <button class="btn" id="d-prioritize" role="menuitem" tabindex="-1" hidden>Prioritize</button>
         <button class="btn" id="d-remove-priority" role="menuitem" tabindex="-1" hidden>Remove priority</button>
         <button class="btn" id="d-pause" role="menuitem" tabindex="-1" hidden>Pause pickup</button>
@@ -574,6 +576,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   </div>
   <p class="err" id="d-edit-idea-err" role="alert" hidden></p>
   <p class="err" id="d-prioritize-err" role="alert" hidden></p>
+  <p class="err" id="d-babysit-err" role="alert" hidden></p>
   <p class="copy-status" id="d-copy-status" role="status"></p>
   <p class="err" id="d-pause-err" role="alert" hidden></p>
   <p class="err" id="d-rerun-err" role="alert" hidden></p>
@@ -1381,7 +1384,8 @@ function card(j, inNeeds, archived = false) {
       (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
       (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
-      (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') + '</div>' +
+      (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
+      (j.babysit?.at ? '<span class="chip">Babysitting</span>' : '') + '</div>' +
     line('proj', projectName(j)) +
     '<div class="title">' + esc(j.title || j.id) + '</div>' +
     (j.stage === 'idea' && !j.project ? '<div class="idea-text">Assign a project before starting.</div>' : '') +
@@ -3491,6 +3495,7 @@ async function openJob(id) {
   $('d-pipeline').hidden = !pipeline;
   const shown = jobActionsFor(j);
   for (const id of JOB_ACTIONS) $(id).hidden = !shown.includes(id);
+  $('d-babysit-bar').hidden = archived || !shown.includes('d-babysit');
   if (archived) for (const b of $('d-actions-menu').querySelectorAll('button')) b.hidden = b.id !== 'd-copy-link';
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
   if (first) {
@@ -3499,6 +3504,7 @@ async function openJob(id) {
     clearCopyStatus();
     $('d-edit-idea-err').hidden = true;
     $('d-prioritize-err').hidden = true;
+    $('d-babysit-err').hidden = true;
     $('d-pause-err').hidden = true;
     $('d-rerun-err').hidden = true;
     $('d-rerun-status').textContent = '';
@@ -4991,7 +4997,7 @@ async function openIdeaEditor(ctx) {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-prioritize', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
 
 // The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
 function jobActionsFor(j) {
@@ -5002,6 +5008,7 @@ function jobActionsFor(j) {
     'd-follow-tracer': !tracerOff && !!j.project && (TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) && j.tracer?.follow !== true && !tracerLink(j),
     'd-move-host': !rider && !!j.project && MOVE_STAGES.includes(j.stage),
     'd-rerun': canRerun(j),
+    'd-babysit': canBabysit(j),
     'd-prioritize': !rider && !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
     'd-remove-priority': !!j.priority,
     'd-pause': !rider && !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
@@ -5016,7 +5023,7 @@ function jobActionsFor(j) {
 // A runner's context. The drawer writes into its own lines and drops results once another job opens.
 function drawerAction(id) {
   const version = drawerVersion;
-  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
+  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
   return {
     id: openId,
     card: false,
@@ -5216,6 +5223,28 @@ function prioritizeJob(board, id, now) {
   if (!j.project || !PRIORITY_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be prioritized.';
   if (j.priority) return 'unchanged';
   j.priority = { at: now };
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
+// A pr-open job with a PR a person can hand to a /factory babysit session, which factory.py pickup launches.
+function canBabysit(j) {
+  return !!j.project && j.stage === 'pr-open' && !!prLink(j) && !leadOf(j) && !j.babysit && !j.paused && !j.close;
+}
+
+// Takes the job out of needs you and has pickup launch the session first.
+// Returns an error message, 'unchanged', or '' once the board is changed.
+function babysitJob(board, id, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (j.babysit) return 'unchanged';
+  if (!canBabysit(j)) return 'This PR can no longer be babysat.';
+  j.babysit = { at: now };
+  j.priority ??= { at: now };
+  delete j.needs;
+  delete j.escalated;
+  j.note = 'babysitting PR #' + prLink(j).n;
   j.updated = now;
   board.updated = now;
   return '';
@@ -5576,6 +5605,25 @@ async function prioritizeAction(ctx) {
   try {
     await casBoard((board) => {
       const message = prioritizeJob(board, ctx.id, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message) throw new Error(message);
+    });
+    await poll();
+  } catch (x) {
+    if (ctx.live()) ctx.report(String(x.message || x));
+  } finally {
+    if (ctx.button) ctx.button.disabled = false;
+  }
+}
+async function babysitAction(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
+  if (!j || !canBabysit(j)) return;
+  if (!confirm('Babysit PR #' + prLink(j).n + ' of ' + j.id + '? An agent fixes review comments, CI failures and conflicts, then merges the PR once GitHub shows an approval.')) return;
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = babysitJob(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
@@ -5975,6 +6023,7 @@ const JOB_ACTION_RUN = {
   'd-follow-tracer': followTracerAction,
   'd-move-host': openMoveHost,
   'd-rerun': rerunAction,
+  'd-babysit': babysitAction,
   'd-prioritize': prioritizeAction,
   'd-remove-priority': removePriorityAction,
   'd-pause': pauseAction,
@@ -5984,6 +6033,7 @@ const JOB_ACTION_RUN = {
   'd-close-job': openCloseDialog,
 };
 for (const id of JOB_ACTIONS) $(id).addEventListener('click', () => JOB_ACTION_RUN[id](drawerAction(id)));
+$('d-babysit-bar').addEventListener('click', () => babysitAction({ ...drawerAction('d-babysit'), button: $('d-babysit-bar') }));
 
 // One run per job and action at a time; a second click while the first is in flight does nothing.
 const cardRuns = new Set();
@@ -6192,7 +6242,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
