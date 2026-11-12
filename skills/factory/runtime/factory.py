@@ -7470,16 +7470,23 @@ RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+"
 RETRO_HEADERS = re.compile(
     r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))"
     r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)[^\r\n'\"\\]+")
-RETRO_URL_CREDS = re.compile(r"(?i)(?<![a-z0-9+.-])\b([a-z][a-z0-9+.-]{0,31}://)[^/\s@]+@")
+RETRO_URL_CREDS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{0,31}://)[^/\s@]+@")
 RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
 RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)[^\s:]*:\S+")
+RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential"
+RETRO_SECRET_WORD = re.compile(r"(?i)(?:" + RETRO_SECRET_WORDS + ")")
+RETRO_COUNT_WORD = re.compile(r"(?i)tokens")
+RETRO_COUNT = re.compile(r"\d{1,7}[,;)}\]]*")
 RETRO_KEYVALUE = re.compile(
-    r"(?i)(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{0,64}?(?:token|secret|password|passwd|api[_-]?key|credential)"
+    r"(?i)(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{0,64}?(?:" + RETRO_SECRET_WORDS + ")"
     r"[A-Za-z0-9_-]{0,64})(\\?[\"']?\s*[=:]\s*)"
-    r"(?:\"[^\"]*\"|'[^']*'|\S+)")
+    r"(\"[^\"]*\"|'[^']*'|\S+)")
 RETRO_FLAG = re.compile(
-    r"(?i)(?<![A-Za-z0-9_-])(--[A-Za-z0-9_-]{0,64}?(?:token|secret|password|passwd|api[_-]?key|credential)"
-    r"[A-Za-z0-9_-]{0,64})(\s+)(?!-)\S+")
+    r"(?i)(?<![A-Za-z0-9_-])(--[A-Za-z0-9_-]{0,64}?(?:" + RETRO_SECRET_WORDS + ")"
+    r"[A-Za-z0-9_-]{0,64})(\s+)(?!-)(\S+)")
+RETRO_LONG_KEYVALUE = re.compile(
+    r"(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{65,})(\\?[\"']?\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|\S+)")
+RETRO_LONG_FLAG = re.compile(r"(?<![A-Za-z0-9_-])(--[A-Za-z0-9_-]{65,})(\s+)(?!-)(\S+)")
 RETRO_HOME = re.compile(r"^(?:[A-Za-z]-)?-(?:home|Users)-[A-Za-z0-9_]+")
 RETRO_WRITE_ONLY = "retro digests are written only by the host's bound service token"
 RETRO_REPLY_SCHEMA = "factory.retro/1"
@@ -7499,13 +7506,21 @@ RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_c
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
 
+def retro_secret_pair(match):
+    name, sep, value = match.group(1, 2, 3)
+    if not RETRO_SECRET_WORD.search(name) or (
+            RETRO_COUNT.fullmatch(value) and not RETRO_SECRET_WORD.search(RETRO_COUNT_WORD.sub("", name))):
+        return match.group(0)
+    return name + sep + "[redacted]"
+
+
 def retro_redact(text):
     text = RETRO_HEADERS.sub(r"\1\2[redacted]", text)
     text = RETRO_URL_CREDS.sub(r"\1[redacted]@", text)
     text = RETRO_BEARER.sub(r"\1[redacted]", text)
     text = RETRO_USER_PASS.sub(r"\1[redacted]", text)
-    text = RETRO_KEYVALUE.sub(r"\1\2[redacted]", text)
-    text = RETRO_FLAG.sub(r"\1\2[redacted]", text)
+    for pattern in (RETRO_KEYVALUE, RETRO_FLAG, RETRO_LONG_KEYVALUE, RETRO_LONG_FLAG):
+        text = pattern.sub(retro_secret_pair, text)
     for pattern in NOTE_SECRETS:
         text = pattern.sub("[redacted]", text)
     return text
