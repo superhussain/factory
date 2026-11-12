@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { withBrowserFixture, seedProject } from "../support/browser-server.mjs";
+import { clickNow } from "../support/board-ready.cjs";
 
 const ROWS = [
   {
@@ -125,7 +126,12 @@ test("archived jobs from the blank board", { timeout: 180000 }, async (t) => {
     await t.test("the click loads page 1 and draws the columns", async () => {
       const page = await openPage();
       await page.waitForSelector(".blank .archive-more", wait);
-      await page.click(".blank .archive-more");
+      // Focus and click one fresh node: the redraw moves focus to a column toggle only from a focused button.
+      await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        el.focus();
+        el.click();
+      }, ".blank .archive-more");
       await page.waitForSelector(".col.closed .archive-list .card", wait);
       assert.equal(await page.$(".blank"), null);
       assert.ok(asked.includes("?page=1"));
@@ -155,7 +161,7 @@ test("archived jobs from the blank board", { timeout: 180000 }, async (t) => {
       const page = await openPage();
       await page.waitForSelector(".blank .archive-more", wait);
       failNext = true;
-      await page.click(".blank .archive-more");
+      await clickNow(page, ".blank .archive-more");
       await page.waitForSelector(".blank .archive-error", wait);
       assert.equal(
         await page.$eval(".archive-error", (el) => el.textContent),
@@ -172,7 +178,7 @@ test("archived jobs from the blank board", { timeout: 180000 }, async (t) => {
         await page.$eval(".blank .archive-more", (el) => el.textContent),
         "Show archived jobs",
       );
-      await page.click(".blank .archive-more");
+      await clickNow(page, ".blank .archive-more");
       await page.waitForSelector(".col.closed .archive-list .card", wait);
       assert.equal(await page.$(".blank"), null);
     });
