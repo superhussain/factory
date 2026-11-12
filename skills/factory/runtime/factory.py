@@ -6202,15 +6202,15 @@ TRACER_BIDI = re.compile("[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
 
 def tracer_enabled(home):
-    """False only when the all-projects pipeline document sets tracer.enabled to false."""
+    """True only when the all-projects pipeline document sets tracer.enabled to true."""
     status, _, text = api(home, "GET", "/api/pipeline/global", ok=(200, 404))
     if status == 404:
-        return True
+        return False
     try:
         doc = json.loads(text)
     except ValueError:
         fail("malformed all-projects pipeline document", 5)
-    return (doc.get("tracer") or {}).get("enabled") is not False
+    return (doc.get("tracer") or {}).get("enabled") is True
 
 
 def read_tracer(home, only=None):
