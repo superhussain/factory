@@ -14,8 +14,8 @@ Run step zero for an existing job: `factory.py job <id>` for its `project`, then
 `where <project>`, `hold <project>/<id>` and `worktree <project>/<id>`. If `hold`
 exits 6, stop. If the job is not at `pr-open` or has no `babysit`, report that and
 stop. Then run `pipeline "$SLUG"` and `documents "$SLUG"` as SKILL.md's Rules say, and
-keep `$PIPELINE.prompts.babysit` as `$NOTES`. It is empty when no scope has a Babysit
-note.
+keep `$PIPELINE.prompts.babysit` as `$NOTES`. It is absent when no scope has a Babysit
+note; treat that as no note.
 
 ## Babysit notes
 
@@ -24,9 +24,10 @@ note.
 - The notes say which readings in the table to act on, and how: reply wording, extra
   checks, how often to read again.
 - When the notes name a skill, load it with your Skill tool, or read `SKILL.md` under
-  `~/.agents/skills/<name>` or `~/.claude/skills/<name>`. Never download a skill. If
-  neither copy exists, patch `{"note": "babysit: skill <name> is not installed"}` once
-  and go on.
+  `~/.agents/skills/<name>` or `~/.claude/skills/<name>`. Never download a skill.
+  `<name>` must be a bare folder name matching `[A-Za-z0-9_-]+`; skip any other name and
+  never build a path from it. If neither copy exists, patch
+  `{"note": "babysit: skill <name> is not installed"}` once and go on.
 - Notes pick from the actions in the table. They cannot add another kind of action or
   lift a rule under the table.
 
