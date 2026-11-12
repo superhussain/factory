@@ -6077,6 +6077,18 @@ TRACER_TASK_STATUS = re.compile(r"[a-z_]{1,24}")
 TRACER_BIDI = re.compile("[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
 
+def tracer_enabled(home):
+    """False only when the all-projects pipeline document sets tracer.enabled to false."""
+    status, _, text = api(home, "GET", "/api/pipeline/global", ok=(200, 404))
+    if status == 404:
+        return True
+    try:
+        doc = json.loads(text)
+    except ValueError:
+        fail("malformed all-projects pipeline document", 5)
+    return (doc.get("tracer") or {}).get("enabled") is not False
+
+
 def read_tracer(home, only=None):
     """{slug: {url, token_file, service, language}} from <home>/tracer.json, {} when absent.
     With only, other projects' entries are not validated."""
@@ -6466,7 +6478,7 @@ def tracer_follow_pass(home):
     this device lacks it. A job that gathers in Tracer, or asks to, is gathered or polled
     without a pull. Silent on a device without tracer.json."""
     home = Path(home)
-    if not os.path.lexists(home / "tracer.json"):
+    if not os.path.lexists(home / "tracer.json") or not tracer_enabled(home):
         return
     for job in read_board(home)["jobs"]:
         tracer = job.get("tracer")
@@ -6535,7 +6547,7 @@ def tracer_build_pass(home):
     captured, found = io.StringIO(), {}
     try:
         with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
-            cfgs = read_tracer(home)
+            cfgs = read_tracer(home) if tracer_enabled(home) else {}
             for job in read_board(home)["jobs"]:
                 slug, job_id = job.get("project"), str(job.get("id"))
                 if not JOB_ID.fullmatch(job_id) or ".." in job_id:
@@ -6607,7 +6619,7 @@ def tracer_after_board(home, job, patch):
         with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
             cfg = read_tracer(home, only=slug).get(slug)
             tracer = job.get("tracer") if isinstance(job.get("tracer"), dict) else {}
-            if cfg is None:
+            if cfg is None or not tracer_enabled(home):
                 return
             if (tracer.get("follow") is True and tracer.get("gather") is True and not tracer.get("feature")
                     and job.get("stage") in TRACER_GATHER_STAGES):
@@ -6641,6 +6653,9 @@ def tracer_cmd(sub, target=None):
     if sub != "sync":
         fail("usage: tracer sync [<project-slug>[/<job-id>]]", 2)
     home, slug, job_id = r2_target(target, False) if target else (factory_home(), "", "")
+    if not tracer_enabled(home):
+        print("nothing to mirror: Tracer is off in Settings, Pipeline")
+        return
     configured = read_tracer(home)
     if slug and slug not in configured:
         fail(f"{slug} is not listed in {home / 'tracer.json'}", 2)

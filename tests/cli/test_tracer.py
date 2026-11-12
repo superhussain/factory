@@ -142,12 +142,17 @@ class TracerCase(IsolatedTestCase):
                     "title": "Sample feature"}
         self.board = {"jobs": [self.job]}
         self.board_writes = 0
+        self.pipeline = None
         self.folder = self.home / "jobs" / "sample" / "001-sample"
         self.folder.mkdir(parents=True)
         (self.folder / "spec.md").write_text(SPEC)
         patch.object(factory, "api", side_effect=self.api).start()
 
     def api(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if path == "/api/pipeline/global":
+            if self.pipeline is None:
+                return 404, {}, "not found"
+            return 200, {"ETag": "p"}, json.dumps(self.pipeline)
         assert path == "/api/board", path
         text = json.dumps(self.board)
         if method == "PUT":
@@ -1166,6 +1171,46 @@ class BuildPassTest(TracerCase):
                 self.assertEqual(self.stored.get("tracer"), left)
                 self.assertEqual(self.board_writes, 1)
                 self.assertEqual(fake.requests, [])
+
+
+class OffTest(TracerCase):
+    def setUp(self):
+        super().setUp()
+        self.pipeline = {"schema": 1, "tracer": {"enabled": False}}
+
+    def test_off_board_patch_makes_no_tracer_call(self):
+        with FakeTracer() as fake:
+            self.configure(fake)
+            code, out, err = self.board_patch({"stage": "build", "tracer": {"follow": True}})
+            self.assertEqual((code, err), (0, ""), err)
+            self.assertEqual(self.board["jobs"][0]["tracer"], {"follow": True})
+            self.assertEqual(fake.requests, [])
+
+    def test_off_follow_pass_and_sync(self):
+        self.job.update(stage="build", tracer={"follow": True})
+        with FakeTracer() as fake:
+            self.configure(fake)
+            with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                factory.tracer_follow_pass(self.home)
+            self.assertEqual((out.getvalue(), err.getvalue()), ("", ""))
+            for target in ((), ("sample",), ("sample/001-sample",)):
+                code, out, err = self.sync(*target)
+                self.assertEqual((code, out, err), (0, "nothing to mirror: Tracer is off in Settings, Pipeline\n", ""))
+            self.assertEqual(self.board_writes, 0)
+            self.assertEqual(fake.requests, [])
+
+    def test_off_build_pass_clears_mark(self):
+        self.job.update(stage="idea", tracer={"follow": True, "building": True})
+        with FakeTracer() as fake:
+            fake.features["plan-1234"] = {"id": "plan-1234", "ticket": "PLAN-1234", "stage": "build", "tasks": [],
+                                          "agents": [{"id": "tracer-build-1", "stage": "build", "kind": "session"}]}
+            self.configure(fake)
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                factory.tracer_build_pass(self.home)
+            self.assertEqual(err.getvalue(), "")
+            self.assertEqual(self.board["jobs"][0]["tracer"], {"follow": True})
+            self.assertEqual(self.board_writes, 1)
+            self.assertEqual(fake.requests, [])
 
 
 if __name__ == "__main__":
