@@ -45,10 +45,11 @@ class PrStateTest(IsolatedTestCase):
             job["pr"] = pr
         calls = []
 
-        def gh(*gh_args):
+        def gh(*gh_args, stderr=False):
             calls.append(gh_args)
             reading = readings[min(sum(c[0] == "view" for c in calls) - 1, len(readings) - 1)]
-            return {"view": reading[0], "checks": reading[1]}.get(gh_args[0], (reading + ((0, "false\n"),))[2])
+            answer = {"view": reading[0], "checks": reading[1]}.get(gh_args[0], (reading + ((0, "false\n"),))[2])
+            return answer + ("",) if stderr and answer else answer
 
         with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job]})}) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")

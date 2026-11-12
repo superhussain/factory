@@ -436,8 +436,8 @@ sets it, and a `/factory babysit` session clears it with `null`; `board` refuses
   merges the same way. Wait for checks with
   `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0 means they passed,
   or the repo has none. Exit 3 means they are still pending, so run it again. Exit 1
-  names the failing checks. Never poll `gh pr
-  checks` in a loop or with `--watch`.
+  names the failing checks. Exit 4 means no open PR; 5 means gh never answered.
+  Never poll `gh pr checks` in a loop or with `--watch`.
   Immediately before every `gh pr merge`, run `factory.py pipeline "$SLUG"` again
   and use that fresh `$PIPELINE`. A non-zero exit moves the job to `needs-human` as
   Pipeline configuration describes, and nothing merges. When `$PIPELINE.merge` is
