@@ -91,7 +91,7 @@ function expectedRows(text, withDrawer) {
       .map((j) => ({
         key: "job:" + j.id,
         title: j.title,
-        meta: j.id + " · Synthetic sample · " + j.stage,
+        meta: "Synthetic sample · " + j.id + " · " + j.stage,
         kind: "job",
       })),
   );

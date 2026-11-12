@@ -404,6 +404,7 @@ class RetroAggregateTest(RetroWorkerCase):
                                      "autonomy": {"paused": False, "projects": ["factory"], "self": []}}),
             "GET /api/pipeline/projects/factory": (200, {"schema": 1, "stage_notes": {"spec": "Keep it short."}},
                                                    {"X-Pipeline-Version": "7"}),
+            "GET /api/pipeline/effective/factory": (200, {"pickup": {"enabled": True, "hosts": ["host-a", "host-c"]}}),
             "GET /api/project-history/factory/project.md": (200, [{"version": 3, "saved_at": "2026-11-12T08:00:00Z"}]),
             "GET /api/project-history/factory/notes.md": (200, [{"version": 4, "saved_at": "2026-11-12T08:00:00Z"}]),
             "GET /api/project-history/factory/decisions.md": (200, []),
@@ -441,7 +442,8 @@ class RetroAggregateTest(RetroWorkerCase):
         today = datetime.now().date()
         self.assertEqual(printed, {
             "run": run, "from": (today - timedelta(days=6)).isoformat(), "to": today.isoformat(),
-            "hosts": ["host-a", "host-b"], "sessions": 3, "skipped": 3, "dir": str(folder),
+            "hosts": ["host-a", "host-b"], "expected": ["host-a", "host-c"], "sessions": 3, "skipped": 3,
+            "dir": str(folder),
             "aggregate": str(folder / "aggregate.json"), "digest": str(folder / "digest.jsonl"),
             "transcripts": str(self.projects), "out": str(folder / "reply.json"),
             "findings": str(folder / "findings.md")})

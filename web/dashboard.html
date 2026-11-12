@@ -1085,7 +1085,8 @@ function keepLive(ws) {
   });
   ws.addEventListener('close', (e) => {
     clearInterval(timer);
-    const secs = (n) => Math.round(n / 1000) + ' seconds';
+    if (liveSocket && ws !== liveSocket) return;
+    const secs = (n) => { const s = Math.round(n / 1000); return s + (s === 1 ? ' second' : ' seconds'); };
     if (e.code === 1000 && !silent) { liveNote = ''; return; }
     const when = openedAt ? 'after ' + secs(Date.now() - openedAt) + ' open' : 'before it opened, ' + secs(Date.now() - startedAt) + ' after it started';
     liveNote = silent
@@ -1573,14 +1574,14 @@ function renderJobResults() {
   const commands = [command, projectCommand].filter((r) => r && tokens.every((t) => r.words.includes(t)));
   const jobRows = matched.map((j) => ({
     kind: 'job', key: 'job:' + j.id, job: j, title: j.title || j.id,
-    meta: j.id + ' · ' + (projectName(j) || 'No project') + ' · ' + j.stage,
+    meta: projectName(j) + ' · ' + j.id + ' · ' + j.stage,
   }));
   const rawQuery = $('job-search').value.trim();
   const found = archiveSearch?.query === rawQuery && archiveSearch.status === 'done' ? archiveSearch.jobs : [];
   const archiveRows = !boardArchived || !rawQuery || [...rawQuery].length > 200 ? []
     : found.length ? found.map((j) => ({
       kind: 'job', key: 'archived:' + j.id, job: j, title: j.title || j.id,
-      meta: j.id + ' · ' + (projectName(j) || 'No project') + ' · ' + j.stage + ' · archived',
+      meta: projectName(j) + ' · ' + j.id + ' · ' + j.stage + ' · archived',
     }))
     : [{ kind: 'archive-search', key: 'command:archive-search', query: rawQuery, title: 'Search archived jobs', meta: archiveSearchMeta(rawQuery) }];
   // #job-count is the live region, so every archive outcome changes its text.
@@ -6683,6 +6684,7 @@ function openLive() {
   keepLive(ws);
   ws.addEventListener('open', () => {
     if (ws !== liveSocket) return;
+    liveNote = '';
     liveOpen = true;
     liveRetries = 0;
     schedulePoll();

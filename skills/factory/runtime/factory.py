@@ -4317,13 +4317,14 @@ PR_EVIDENCE = {"closed": "closed by pickup with a comment that links this page",
                "already closed": "already closed", "open": "still open"}
 
 
-def gh_pr(*args):
+def gh_pr(*args, stderr=False):
     """(returncode, stdout) of gh pr <args>: (1, "") when it cannot start,
-    ("timeout", "") past 60 seconds, None without gh."""
-    return gh_cli("pr", *args)
+    ("timeout", "") past 60 seconds, None without gh. With stderr, each tuple
+    gains gh's stderr, "" on failure."""
+    return gh_cli("pr", *args, stderr=stderr)
 
 
-def gh_cli(*args):
+def gh_cli(*args, stderr=False):
     """(returncode, stdout) of gh <args>, as gh_pr describes."""
     gh = shutil.which("gh")
     if gh is None:
@@ -4332,10 +4333,12 @@ def gh_cli(*args):
         r = subprocess.run([gh, *args], capture_output=True, encoding="utf-8",
                            errors="replace", timeout=60, stdin=subprocess.DEVNULL)
     except OSError:
-        return 1, ""
+        result = 1, "", ""
     except subprocess.TimeoutExpired:
-        return "timeout", ""
-    return r.returncode, r.stdout
+        result = "timeout", "", ""
+    else:
+        result = r.returncode, r.stdout, r.stderr
+    return result if stderr else result[:2]
 
 
 def close_pull_request(home, j, device):
@@ -5184,17 +5187,25 @@ def gh_pr_view(pr, *args):
 
 
 def pr_checks(pr):
-    """The PR's checks as gh pr checks lists them, or [] when gh lists none or prints something else."""
-    result = gh_pr("checks", pr, "--json", "name,bucket")
+    """(checks, problem): the PR's checks as gh pr checks lists them and None, or [] and why
+    the reply was unusable. gh's own no-checks reply is usable, as []."""
+    result = gh_pr("checks", pr, "--json", "name,bucket", stderr=True)
+    if result is None:
+        return [], "gh is not installed"
+    code, out, err = result
+    if code == "timeout":
+        return [], "timed out after 60 seconds"
     try:
-        checks = json.loads(result[1]) if result and result[0] != "timeout" else []
+        checks = json.loads(out)
     except ValueError:
-        checks = []
-    if not isinstance(checks, list) or not all(
+        checks = None
+    if isinstance(checks, list) and all(
             isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("bucket"), str)
             for c in checks):
-        checks = []
-    return checks
+        return checks, None
+    if code == 1 and not out.strip() and "no checks reported" in err:
+        return [], None
+    return [], f"exited {code} with no check list" if code else "printed no check list"
 
 
 def checks_cmd(target, *args):
@@ -5209,8 +5220,13 @@ def checks_cmd(target, *args):
     if state != "OPEN":
         fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
     start = time.monotonic()
+    usable = False
     while True:
-        checks = pr_checks(pr)
+        checks, problem = pr_checks(pr)
+        if problem:
+            print(f"factory.py: warning: gh pr checks gave no usable reply ({problem})", file=sys.stderr)
+        else:
+            usable = True
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
             for c in checks:
@@ -5220,6 +5236,8 @@ def checks_cmd(target, *args):
                 fail("failing checks: " + ", ".join(failing), 1)
             return
         elapsed = time.monotonic() - start
+        if not checks and not usable and elapsed >= min(CHECKS_REGISTER, timeout):
+            fail("gh pr checks never gave a usable reply", 5)
         if not checks and elapsed >= CHECKS_REGISTER:
             print("no checks reported")
             return
@@ -5244,7 +5262,7 @@ def pr_reading(pr):
         view = None
     if not isinstance(view, dict):
         fail("gh pr view printed no JSON object", 5)
-    listed = pr_checks(pr)
+    listed = pr_checks(pr)[0]
     if view.get("statusCheckRollup") and not listed:
         fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5)
     buckets = {c["bucket"] for c in listed}
@@ -7809,6 +7827,11 @@ def retro_aggregate(days):
         notes = json.loads(text).get("stage_notes", {}) if status == 200 else {}
         pipeline[scope] = {"version": int(headers["X-Pipeline-Version"]) if status == 200 else 0,
                            "stage_notes": notes}
+    expected = set()
+    for p in projects:
+        enabled, pickup_hosts, _ = pickup_config(home, p)
+        if enabled:
+            expected.update(pickup_hosts)
     documents = {}
     for slug in allow:
         for name in ("project.md", *DOCUMENT_NAMES):
@@ -7877,8 +7900,8 @@ def retro_aggregate(days):
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-    print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "sessions": len(rows),
-                      "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
+    print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "expected": sorted(expected),
+                      "sessions": len(rows), "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
                       "digest": str(folder / "digest.jsonl"), "transcripts": agg["transcripts"],
                       "out": str(folder / "reply.json"), "findings": str(folder / "findings.md")}, indent=2))
 
@@ -8224,12 +8247,27 @@ AGENT_RECORD_USAGE = "usage: agent record <project>/<id> <role> <harness> <via> 
 AGENT_COLUMNS = ("stage", "role", "harness", "via", "model", "effort")
 
 
+def agent_record_problem(role, harness, via, model, effort):
+    """The first bad field of an agent record, in argument order, or None."""
+    if role not in AGENT_ROLES:
+        return f'role "{role}" is not one of {", ".join(AGENT_ROLES)}'
+    if not SLUG.fullmatch(harness) or len(harness) > 64:
+        return f'harness "{harness}" must be 1 to 64 letters, digits, _ or -'
+    if via not in AGENT_VIAS:
+        return f'via "{via}" is not one of {", ".join(AGENT_VIAS)}'
+    if not ROUTE_MODEL.fullmatch(model):
+        return f'model "{model}" must be 1 to 200 letters, digits or _ . / : @ [ ] -'
+    if effort is not None and effort not in ROUTE_EFFORTS:
+        return f'effort "{effort}" is not one of {", ".join(ROUTE_EFFORTS)}'
+    return None
+
+
 def agent_cmd(sub, *args):
     if sub == "record" and len(args) in (5, 6):
         target, role, harness, via, model, *effort = args
-        if (role not in AGENT_ROLES or not SLUG.fullmatch(harness) or len(harness) > 64 or via not in AGENT_VIAS
-                or not ROUTE_MODEL.fullmatch(model) or effort and effort[0] not in ROUTE_EFFORTS):
-            fail(AGENT_RECORD_USAGE, 2)
+        problem = agent_record_problem(role, harness, via, model, effort[0] if effort else None)
+        if problem:
+            fail(f"{AGENT_RECORD_USAGE}: {problem}", 2)
         home, slug, job_id = r2_target(target, True)
         device, session, _ = holder(home)
         row = {"role": role, "harness": harness, "via": via, "model": model}
