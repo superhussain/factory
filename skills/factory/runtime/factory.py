@@ -4991,7 +4991,9 @@ def checks_cmd(target, *args):
             checks = json.loads(result[1]) if result and result[0] != "timeout" else []
         except ValueError:
             checks = []
-        if not isinstance(checks, list):
+        if not isinstance(checks, list) or not all(
+                isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("bucket"), str)
+                for c in checks):
             checks = []
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
@@ -5007,7 +5009,7 @@ def checks_cmd(target, *args):
             return
         if elapsed >= timeout:
             fail("still pending: " + ", ".join(pending) if pending else "no checks listed yet", 3)
-        time.sleep(CHECKS_INTERVAL)
+        time.sleep(min(CHECKS_INTERVAL, max(0, timeout - elapsed)))
 
 
 def tracer_start(j):

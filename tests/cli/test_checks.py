@@ -80,6 +80,19 @@ class ChecksTest(IsolatedTestCase):
         self.assertEqual((code, out, err), (3, "", "factory.py: still pending: test\n"))
         self.assertEqual(self.now, 540)
 
+    def test_last_sleep_stops_at_the_deadline(self):
+        code, out, err, _ = self.checks(OPEN, [listed(("pending", "test"))], "--timeout", "25")
+        self.assertEqual((code, out, err), (3, "", "factory.py: still pending: test\n"))
+        self.assertEqual(self.now, 25)
+
+    def test_malformed_list_counts_as_none_listed(self):
+        for body in ('["pass test"]', '[{"name": "test"}]', '[{"bucket": "pass", "name": 7}]',
+                     '[{"bucket": "pass", "name": "lint"}, null]'):
+            with self.subTest(body):
+                self.now = 0.0
+                code, out, err, _ = self.checks(OPEN, [(0, body)], "--timeout", "30")
+                self.assertEqual((code, out, err), (3, "", "factory.py: no checks listed yet\n"))
+
     def test_none_listed_at_deadline_before_120_seconds_exits_3(self):
         code, out, err, _ = self.checks(OPEN, [(1, "")], "--timeout", "30")
         self.assertEqual((code, out, err), (3, "", "factory.py: no checks listed yet\n"))
