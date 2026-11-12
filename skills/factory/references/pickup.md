@@ -95,8 +95,8 @@ claim (`hold`), never by setting `needs`.
   `{repo_path}`, `{session}`, `{provider}`, `{model}`, `{effort}` and `{prompt}`,
   where `{prompt}` is `/factory idea <id> --session <tag>`, a blank line, and the
   standing instruction below. A deny-notes launch sends
-  `/factory deny-notes <id> --session <tag>` in place of the idea command, and a
-  babysit launch sends `/factory babysit <id> --session <tag>`.
+  `/factory deny-notes <id> --session <tag>` in place of the idea command.
+  A babysit launch sends `/factory babysit <id> --session <tag>`.
   Pass `{prompt}` as one whole argument, as the
   examples below do. Its line breaks would split a shell command string or a
   Windows `.cmd` line. Unknown braces stay literal. The launcher also
