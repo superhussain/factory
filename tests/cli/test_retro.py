@@ -893,6 +893,10 @@ class RetroPatternTimingTest(unittest.TestCase):
         for name, pattern in patterns:
             for text in self.INPUTS:
                 with self.subTest(pattern=name, text=text[:8]):
-                    start = time.perf_counter()
-                    pattern.search(text)
-                    self.assertLess(time.perf_counter() - start, 0.05)
+                    # This thread's CPU time, best of 3, so a busy host's scheduling does not count.
+                    took = []
+                    for _ in range(3):
+                        start = time.thread_time()
+                        pattern.search(text)
+                        took.append(time.thread_time() - start)
+                    self.assertLess(min(took), 0.05)
