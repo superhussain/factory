@@ -8,7 +8,7 @@ Its pickup rewrites the line through `factory.py backlog rework`, and the new li
 back to Backlog with `(rework-of <id>)`. The decision page lists each earlier wording and
 its notes by following those links.
 When the item has context, the page shows the reasons, a Recommended badge and the agent's extra questions. Approve and Deny need every question answered. Answers go to `backlog.answers`, and on Approve also to the idea.
-`backlog decide --chat` makes the same writes from a person's chat message and adds `backlog.via`, `quote` and `by`.
+`backlog decide --chat-file` makes the same writes from a person's chat message and adds `backlog.via`, `quote` and `by`.
 
 `idea` is the first column. the user adds one from the dashboard's New idea button,
 which writes `id`, `title` (the first line), `idea`, `stage`, and `updated`, plus

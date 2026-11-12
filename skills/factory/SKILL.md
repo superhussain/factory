@@ -535,7 +535,7 @@ only `factory.py deny-notes` writes it.
   use never adds it.
 - Commands use `python3`, or `py -3` on Windows. No command needs bash: every
   command is `python3`, `git`, or `gh`.
-- Orchestrators run `suggest approve` and `backlog decide` only with `--chat`, as
+- Orchestrators run `suggest approve` and `backlog decide` only with `--chat-file`, as
   [chat decisions](references/chat-decisions.md) says. They never run `autonomy
   resume`, `autonomy allow` or `/factory approve-spec`, or approve scope in Tracer;
   a human does.
