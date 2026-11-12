@@ -25,6 +25,8 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    the exit code. Retro may edit only project scopes on the autonomy allowlist; `global`
    is person-only, and admit skips any other scope. A person undoes an edit with Restore
    to draft in Settings, Pipeline.
+   An `edited <file> to version N: <summary>` line means a file edit is saved through
+   `PUT /api/project-retro/<file>`; a person undoes it with Restore to draft in Settings, Projects.
    A person decides each line on the dashboard Backlog decision page.
 
 Do the retro through these commands only, and edit neither the reply nor the run folder.
