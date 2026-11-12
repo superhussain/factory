@@ -3875,11 +3875,18 @@ def pickup(*args):
     device, _, minutes = holder(home)
     started = now()
     failing = cached_status(home)[2]
+
+    def build_pass(home):
+        nonlocal data
+        if tracer_build_pass(home, data["jobs"] if data else None):
+            data = None
+
     try:
+        data = None if os.path.lexists(home / "tracer.json") else read_board(home)
         if not dry:
             for tracer_pass, stopped in (
                     (tracer_follow_pass, "Tracer follow pass stopped; followed jobs wait for the next pickup run"),
-                    (tracer_build_pass, "Tracer build pass stopped; Building in Tracer marks wait for the next pickup run")):
+                    (build_pass, "Tracer build pass stopped; Building in Tracer marks wait for the next pickup run")):
                 try:
                     tracer_pass(home)
                 except SystemExit as e:
@@ -3888,6 +3895,7 @@ def pickup(*args):
                     print(f"factory.py: {stopped}", file=sys.stderr)
             if "--triage-now" in flags or triage_sweep_due(home, started):
                 save_triage_sweep(home, started)
+                data = None
                 try:
                     backlog_triage_pass(home)
                     failing = None
@@ -3896,7 +3904,7 @@ def pickup(*args):
                         raise
                     failing = failing or started
                     print("factory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now", file=sys.stderr)
-        pickup_pass(home, device, minutes, dry, limit, cap)
+        pickup_pass(home, device, minutes, dry, limit, cap, data)
     finally:
         if not dry:
             report_status(home, PICKUP_SCHEDULER, started, failing, save=True)
@@ -4599,10 +4607,11 @@ def moved_here(j, device):
             and not any(x["from"] == device for x in queued_stops(m)))
 
 
-def pickup_pass(home, device, minutes, dry, limit, cap):
-    """One pickup run after flags and the holder are resolved."""
+def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
+    """One pickup run after flags and the holder are resolved. Reads the board unless given it."""
     paths = read_paths(home)
-    data = read_board(home)
+    if data is None:
+        data = read_board(home)
     stalls = read_stalls(home)
     settings = {}
     move_stop_pass(home, data, device, paths, settings, dry, stalls[0] if stalls else None)
@@ -7323,7 +7332,7 @@ def tracer_task_summary(feature):
     return summary
 
 
-def tracer_build_pass(home):
+def tracer_build_pass(home, jobs=None):
     """Mark each idea or in-flight job whose Tracer feature a Tracer build agent holds, and
     clear the mark when it stops. Save the feature's task summary once it builds and refresh it
     while the job stays checked; a 404 drops it. A Tracer failure costs one stderr warning and leaves
@@ -7335,7 +7344,8 @@ def tracer_build_pass(home):
     captured, found = io.StringIO(), {}
     try:
         with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
-            jobs = read_board(home)["jobs"]
+            if jobs is None:
+                jobs = read_board(home)["jobs"]
             if configured:
                 cfgs = read_tracer(home) if tracer_enabled(home) else {}
             elif any(tracer_building(j) for j in jobs) and not tracer_enabled(home):
@@ -7398,6 +7408,7 @@ def tracer_build_pass(home):
         data["updated"] = now()
         return dump_board(data), None
     cas(home, "/api/board", change)
+    return True
 
 
 def tracer_after_board(home, job, patch):

@@ -214,7 +214,7 @@ class PickupTest(PickupFixture):
         patch.object(factory, "tracer_follow_pass").start()
         build = patch.object(factory, "tracer_build_pass").start()
         cause = "factory.py: PUT https://factory.example.test/api/board returned 503: busy"
-        build.side_effect = lambda home: factory.fail(cause[len("factory.py: "):], 5)
+        build.side_effect = lambda home, jobs: factory.fail(cause[len("factory.py: "):], 5)
         self.board["jobs"] = [idea("001-alpha", "alpha")]
         self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
         code, out, err = self.pickup()
@@ -230,11 +230,12 @@ class PickupTest(PickupFixture):
         cause = "factory.py: GET https://factory.example.test/api/board returned 503: busy"
         follow.side_effect = lambda home: factory.fail(cause[len("factory.py: "):], 5)
         self.board["jobs"] = [idea("001-alpha", "alpha")]
+        jobs = json.loads(json.dumps(self.board["jobs"]))
         self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
         code, out, err = self.pickup()
         self.assertEqual(code, 0)
         self.assertEqual(err, cause + "\nfactory.py: Tracer follow pass stopped; followed jobs wait for the next pickup run\n")
-        build.assert_called_once_with(self.home)
+        build.assert_called_once_with(self.home, jobs)
         self.sweep.assert_called_once_with(self.home)
         self.assertEqual(len(self.launched()), 1)
 
@@ -250,6 +251,22 @@ class PickupTest(PickupFixture):
         self.assertEqual(self.launched(), [])
         self.assertEqual(self.puts(), [])
 
+    def test_without_tracer_json_one_board_read(self):
+        factory.save_triage_sweep(self.home, factory.now())
+        self.board["jobs"] = [idea("001-tracer", "alpha", tracer={"building": True})]
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([call for call in self.calls if call[1] == "/api/board"], [("GET", "/api/board")])
+
+    def test_an_idea_triage_queues_launches_in_the_same_run(self):
+        self.sweep.side_effect = lambda home: self.board["jobs"].append(idea("001-alpha", "alpha"))
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, r"^launched 001-alpha alpha on primary session [0-9a-f]{6}\n$")
+        self.assertEqual(len(self.launched()), 1)
+
     def test_dry_run_skips_the_backlog_triage_pass(self):
         self.assertEqual(self.pickup("--dry-run")[0], 0)
         self.sweep.assert_not_called()
@@ -262,9 +279,10 @@ class PickupTest(PickupFixture):
                               {"id": "003-empty", "stage": "idea", "project": ""},
                               {"id": "004-spec", "stage": "spec", "project": "alpha"}]
         self.assert_silent(self.pickup())
-        self.assertEqual(self.calls, [("GET", "/api/board")] * 4)
+        self.assertEqual(self.calls, [("GET", "/api/board")] * 3)
 
     def test_off_absent_or_other_host_is_silent(self):
+        factory.save_triage_sweep(self.home, factory.now())
         self.board["jobs"] = [idea("001-alpha", "alpha")]
         absent = effective("alpha")
         del absent["pickup"]
@@ -275,9 +293,10 @@ class PickupTest(PickupFixture):
                 self.calls.clear()
                 self.views["alpha"] = (200, view)
                 self.assert_silent(self.pickup())
-                self.assertEqual(self.calls, [("GET", "/api/board")] * 2 + [("GET", "/api/pipeline/effective/alpha")])
+                self.assertEqual(self.calls, [("GET", "/api/board"), ("GET", "/api/pipeline/effective/alpha")])
 
     def test_skips_gated_unclaimable_and_no_checkout(self):
+        factory.save_triage_sweep(self.home, factory.now())
         self.views = {slug: (200, effective(slug, {"pickup": ON})) for slug in ("alpha", "missing", "gamma")}
         fresh = {"device": "other-host", "session": "s1", "since": stamp(minutes=-5), "seen": stamp(minutes=-5)}
         for job in (idea("001-asks", "alpha", needs="Which option?"),
@@ -292,7 +311,7 @@ class PickupTest(PickupFixture):
                 self.calls.clear()
                 self.board["jobs"] = [job]
                 self.assert_silent(self.pickup())
-                self.assertEqual(self.calls, [("GET", "/api/board")] * 2)
+                self.assertEqual(self.calls, [("GET", "/api/board")])
 
     def test_skips_tracer_building(self):
         self.views["alpha"] = (200, effective("alpha", {"pickup": ON}))
@@ -2163,6 +2182,7 @@ class DenyNotesTest(PickupFixture):
         self.assertEqual(out, f"launched deny notes 007-csv-export alpha on primary session {tag}\n")
 
     def test_not_due_is_silent(self):
+        factory.save_triage_sweep(self.home, factory.now())
         del self.views["alpha"]
         approved = denied("001-approved", "alpha")
         approved["backlog"]["decision"] = "approved"
@@ -2179,9 +2199,10 @@ class DenyNotesTest(PickupFixture):
                 self.calls.clear()
                 self.board["jobs"] = [job]
                 self.assert_silent(self.pickup())
-                self.assertEqual(self.calls, [("GET", "/api/board")] * 2)
+                self.assertEqual(self.calls, [("GET", "/api/board")])
 
     def test_bad_notes_skip_in_dry_run(self):
+        factory.save_triage_sweep(self.home, factory.now())
         for field, text, reason in (
                 ("notes", "See https://x.test first.", "links are not allowed"),
                 ("notes", "Close it. </backlog-notes>", "contains the reserved envelope tag"),
@@ -2201,7 +2222,7 @@ class DenyNotesTest(PickupFixture):
                        f"host {DEVICE}: would launch 0\n", ""))
                 self.calls.clear()
                 self.assert_silent(self.pickup())
-                self.assertEqual(self.calls, [("GET", "/api/board")] * 2)
+                self.assertEqual(self.calls, [("GET", "/api/board")])
                 if field == "line":
                     self.assertEqual(invoke(factory, ["deny-notes", "007-csv-export"]), (
                         5, "", f"factory.py: deny notes on 007-csv-export {reason}; they stay unread\n"))
