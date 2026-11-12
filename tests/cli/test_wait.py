@@ -1,6 +1,7 @@
 import tempfile
 import threading
 from pathlib import Path
+from unittest.mock import patch
 
 from support import SKILL, IsolatedTestCase, invoke, load_runtime
 
@@ -71,10 +72,34 @@ class WaitTest(IsolatedTestCase):
     def test_bad_usage_exits_2(self):
         for args in (["notes.md"], ["round-0/review-ux.md"], ["round-1/review-pm.md"], ["../spec.md"],
                      ["spec.md", "--timeout", "601"], ["spec.md", "--timeout", "-1"], ["spec.md", "--timeout"],
-                     ["spec.md", "--timeout", "1", "--timeout", "1"], ["--timeout", "1"]):
+                     ["spec.md", "--timeout", "1", "--timeout", "1"], ["--timeout", "1"],
+                     ["spec.md", "--hold", "--hold"], ["--hold"]):
             with self.subTest(args):
                 code, out, _ = self.wait(*args)
                 self.assertEqual((code, out), (2, ""))
+
+    def test_hold_runs_once_before_reading(self):
+        self.write("decision.md", "APPROVE\n")
+        seen = []
+
+        def hold(target):
+            seen.append((target, (self.folder / "decision.md").read_text()))
+            (self.folder / "decision.md").write_text("CHANGES\n")
+
+        with patch.object(factory, "hold", hold):
+            code, out, err = self.wait("decision.md", "--hold", "--timeout", "0")
+        self.assertEqual((code, out, err), (0, "decision.md: CHANGES\n", ""))
+        self.assertEqual(seen, [(f"sample/{JOB}", "APPROVE\n")])
+
+    def test_hold_exit_stops_wait(self):
+        self.write("decision.md", "APPROVE\n")
+
+        def hold(target):
+            raise SystemExit(6)
+
+        with patch.object(factory, "hold", hold):
+            code, out, _ = self.wait("decision.md", "--hold")
+        self.assertEqual((code, out), (6, ""))
 
     def test_linked_file_exits_6(self):
         real = self.home / "elsewhere.md"
