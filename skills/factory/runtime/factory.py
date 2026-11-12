@@ -86,8 +86,9 @@
                                             resume and allow need a human typing at a terminal
   factory.py suggest admit <file>           turn an explorer's suggestions file into idea cards that
                                             wait on a human (exit 3 when paused or none admitted)
-  factory.py suggest approve <job-id> <A|B|C>
-                                            a human at a terminal approves one option of such a card
+  factory.py suggest approve <job-id> <A|B|C> [--chat "<message>"]
+                                            a human at a terminal approves one option of such a card,
+                                            or --chat records a person's chat message instead
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
@@ -2386,12 +2387,28 @@ def suggest_admit(path, by="explorer"):
         sys.exit(3)
 
 
-def suggest_approve(job_id, option):
-    """A human at a terminal approves one option of a gated explorer card, so the ideas
-    schedule may promote it."""
+CHAT_QUOTE_MAX = 500
+
+
+def chat_quote(text):
+    """The stripped --chat message, None when it is missing or blank, or exit 2 when it breaks a text rule."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    why = check_text(text, 1, CHAT_QUOTE_MAX, multiline=True)
+    if why:
+        fail(f"--chat {why}; nothing was changed", 2)
+    return text
+
+
+def suggest_approve(job_id, option, chat=None):
+    """A human at a terminal approves one option of a gated explorer card, or an orchestrator
+    relays a person's chat message, so the ideas schedule may promote it."""
     if not JOB_ID.fullmatch(job_id) or ".." in job_id or option not in ("A", "B", "C"):
-        fail("usage: suggest approve <job-id> <A|B|C>", 2)
-    human_confirm(job_id, f"Type {job_id} to approve option {option}: ", "suggest approve")
+        fail('usage: suggest approve <job-id> <A|B|C> [--chat "<message>"]', 2)
+    quote = chat_quote(chat)
+    if quote is None:
+        human_confirm(job_id, f"Type {job_id} to approve option {option}: ", "suggest approve")
     home = factory_home()
     projects = registered(home)
     device = holder(home)[0]
@@ -2414,10 +2431,15 @@ def suggest_approve(job_id, option):
         elif slug not in projects or slug not in load_autonomy(data)["projects"]:
             fail(f"{slug} is not a registered project on the autonomy allowlist; nothing was changed", 2)
         stamp = now()
-        origin["approved"] = {"option": option, "device": device, "at": stamp}
+        if quote is None:
+            origin["approved"] = {"option": option, "device": device, "at": stamp}
+            footer = f"Approved option {option} by {device} at {stamp}."
+        else:
+            origin["approved"] = {"option": option, "via": "chat", "quote": quote, "device": device, "at": stamp}
+            footer = f'Approved option {option} in chat by {device} at {stamp}: "{" ".join(quote.split())}"'
         job["project"] = slug
         job.pop("needs", None)
-        job["idea"] = f"{job.get('idea') or ''}\n\n---\nApproved option {option} by {device} at {stamp}."
+        job["idea"] = f"{job.get('idea') or ''}\n\n---\n{footer}"
         job["updated"] = data["updated"] = stamp
         return dump_board(data), job
     print(json.dumps(cas(home, "/api/board", change), indent=2))
@@ -2428,8 +2450,10 @@ def suggest_cmd(sub, *args):
         suggest_admit(args[0])
     elif sub == "approve" and len(args) == 2:
         suggest_approve(*args)
+    elif sub == "approve" and len(args) == 4 and args[2] == "--chat":
+        suggest_approve(args[0], args[1], args[3])
     else:
-        fail("usage: suggest admit <file> | suggest approve <job-id> <A|B|C>", 2)
+        fail('usage: suggest admit <file> | suggest approve <job-id> <A|B|C> [--chat "<message>"]', 2)
 
 
 def snapshot(repo, commit, dest):
@@ -7330,7 +7354,7 @@ COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3)
 COMMANDS["adopt-home"] = (adopt_home_cmd, 1, 1)
 COMMANDS["doctor"] = (doctor_cmd, 0, 0)
 COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
-COMMANDS["suggest"] = (suggest_cmd, 2, 3)
+COMMANDS["suggest"] = (suggest_cmd, 2, 5)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
 COMMANDS["experiment"] = (experiment_cmd, 2, 2)
 COMMANDS["unclaim"] = (unclaim, 1, 1)
