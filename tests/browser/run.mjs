@@ -321,10 +321,16 @@ async function capture(outdir, referencePath) {
     let archiveSearchFails = false;
     let longProject = false;
     let refBoard = false;
+    let grantLoopback = false;
     async function view(name, width, height, theme, prepare, touch = false) {
       for (const side of ["before", "after"]) {
         await retryCapture(`${side}-${name}`, async () => {
           const context = await browser.createBrowserContext();
+          if (grantLoopback)
+            await context.setPermission(origin, {
+              permission: { name: "loopback-network" },
+              state: "granted",
+            });
           try {
             const page = await context.newPage();
             await page.setViewport({
@@ -780,12 +786,7 @@ async function capture(outdir, referencePath) {
       });
       await page.waitForSelector("#settings-display:not([hidden])");
       // Pin the header dot to live on both sides, so the pair does not depend on socket timing.
-      // Request interception answers the before page, so Chrome's local network access checks
-      // block its socket to loopback until the context holds loopback-network. The dashboard's
-      // next socket retry, at most 30 s away, then opens.
-      await page
-        .browserContext()
-        .setPermission(origin, { permission: { name: "loopback-network" }, state: "granted" });
+      // view() grants loopback-network before navigation, so the first socket opens and the dot goes live.
       await page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
         timeout: 30000,
       });
@@ -803,7 +804,9 @@ async function capture(outdir, referencePath) {
         ),
       );
     };
+    grantLoopback = true;
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
+    grantLoopback = false;
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
