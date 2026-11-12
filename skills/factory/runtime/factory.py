@@ -169,7 +169,7 @@ JOB_ID = re.compile(r"\w[\w.-]*", re.ASCII)
 BACKLOG_PICK = re.compile(r"backlog:[0-9a-f]{12}")
 # What a new board row's id must look like. Older rows keep the ids they have.
 NEW_JOB_ID = re.compile(r"[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*")
-JOB_REL = re.compile(r"(?:(round-\d+/)?[\w.-]+\.(md|png|jpe?g|gif|webp)|(round-\d+/)?[\w-]+\.walkthrough\.html|walkthrough\.html)", re.ASCII)
+JOB_REL = re.compile(r"(?<![\w./-])(?:(round-\d+/)?[\w.-]+\.(md|png|jpe?g|gif|webp)|(round-\d+/)?[\w-]+\.walkthrough\.html|walkthrough\.html)", re.ASCII)
 # Paseo server and agent ids go on the shared board and into dashboard links.
 PASEO_ID = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
 # Agent ids the stall adapter archives. Mirrors ID_RE in paseo_stalls.py.
@@ -6538,7 +6538,7 @@ TRACER_BUILDER = "factory-builder"
 TRACER_REVIEWERS = ("security", "ux", "ui", "code")
 TRACER_SERVICE = re.compile(r"[a-z0-9][a-z0-9._-]{0,39}")
 TRACER_TOKEN = re.compile(r"[\x21-\x7e]{1,512}")
-TRACER_JIRA = re.compile(r"[A-Za-z][A-Za-z0-9]*-[1-9][0-9]*")
+TRACER_JIRA = re.compile(r"(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9]*-[1-9][0-9]*")
 TRACER_ROUND_RUN = re.compile(r"factory review round (\d+)\b")
 TRACER_TASKS_MAX = 30
 TRACER_TASK_ID = re.compile(r"[A-Za-z0-9._-]{1,40}")
