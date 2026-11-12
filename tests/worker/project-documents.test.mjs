@@ -21,18 +21,29 @@ function setup() {
     ["projects/sample.md", Buffer.from(config)],
     ["projects/second.md", Buffer.from(config)],
   ]);
+  const metadata = new Map();
   const calls = [];
   const principal = { verified: true };
   const env = {
     BUCKET: {
       async head(key) {
         calls.push(["head", key]);
-        return objects.has(key) ? { httpEtag: tag(objects.get(key)) } : null;
+        return objects.has(key)
+          ? { httpEtag: tag(objects.get(key)), customMetadata: metadata.get(key) }
+          : null;
       },
       async get(key) {
         calls.push(["get", key]);
         const bytes = objects.get(key);
-        return bytes && { body: bytes, httpEtag: tag(bytes), text: async () => bytes.toString() };
+        return (
+          bytes && {
+            body: bytes,
+            httpEtag: tag(bytes),
+            customMetadata: metadata.get(key),
+            text: async () => bytes.toString(),
+            arrayBuffer: async () => bytes,
+          }
+        );
       },
       async put(key, bytes, options) {
         calls.push(["put", key]);
@@ -46,6 +57,7 @@ function setup() {
         )
           return null;
         objects.set(key, Buffer.from(bytes));
+        metadata.set(key, options.customMetadata);
         return { httpEtag: tag(bytes) };
       },
       async list() {
@@ -200,7 +212,10 @@ test("strict write grammar, media and validation order leave bytes unchanged", a
     assert.equal(r.status, 400);
     assert.match(await r.text(), /^document (must be valid UTF-8|contains control characters)$/);
   }
-  assert.equal(s.calls.filter(([op]) => op === "put").length, 1);
+  assert.equal(
+    s.calls.filter(([op, key]) => op === "put" && !key.startsWith("project-history/")).length,
+    1,
+  );
   assert.equal(s.objects.get("project-documents/sample/notes.md").toString(), "original");
 });
 
@@ -241,7 +256,10 @@ test("exact bytes including Unicode, CRLF, HTML, empty and byte cap", async () =
     assert.equal(r.status, 413);
     assert.equal(await r.text(), "body over 1 MiB");
   }
-  assert.equal(s.calls.filter(([op]) => op === "put").length, 3);
+  assert.equal(
+    s.calls.filter(([op, key]) => op === "put" && !key.startsWith("project-history/")).length,
+    3,
+  );
 });
 
 test("document admission profile refuses before storage", async () => {
@@ -258,7 +276,10 @@ test("document admission profile refuses before storage", async () => {
     assert.equal(r.status, 400);
     assert.equal(await r.text(), "project document: " + reason);
   }
-  assert.equal(s.calls.filter(([op]) => op === "put").length, 1);
+  assert.equal(
+    s.calls.filter(([op, key]) => op === "put" && !key.startsWith("project-history/")).length,
+    1,
+  );
   assert.equal(s.objects.get("project-documents/sample/notes.md").toString(), "original");
   const allowed =
     "Run pnpm test.\tThen push.\r\nSee https://example.test/runbook\nDo not pass --no-verify.\n";
