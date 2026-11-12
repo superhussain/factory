@@ -749,7 +749,7 @@ async function capture(outdir, referencePath) {
         side === "after" ? "#pipeline-archive" : "#pipeline-triage",
       );
     };
-    const openArchivedDrawer = async (page, side) => {
+    const openArchivedDrawer = async (page) => {
       // Both sides wait for the archive answer, so the before shot is not a timed guess.
       const answered = page.waitForResponse((response) => {
         const url = new URL(response.url());
@@ -761,10 +761,9 @@ async function capture(outdir, referencePath) {
         location.hash = "#412-fix-login";
       });
       await answered;
-      if (side === "after")
-        await page.waitForFunction(
-          () => document.querySelector("#d-doc h1")?.textContent === "Synthetic login fix",
-        );
+      await page.waitForFunction(
+        () => document.querySelector("#d-doc h1")?.textContent === "Synthetic login fix",
+      );
     };
     // The reference has no archive list, so its side shows the closed column.
     // Terminal columns start collapsed, so both sides expand closed first.
@@ -814,7 +813,11 @@ async function capture(outdir, referencePath) {
           return t.startsWith("Fix before saving") || t === "Unsaved changes";
         });
       } catch (error) {
-        const seen = await page.$eval("#pipeline-status", (el) => el.textContent);
+        const seen = await page
+          .$eval("#pipeline-status", (el) => el.textContent)
+          .catch(() => {
+            throw error;
+          });
         throw new Error(
           name + ' capture status wait timed out; #pipeline-status read "' + seen + '"',
           {
