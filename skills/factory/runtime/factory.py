@@ -13,7 +13,8 @@
                                             recommendation, and questions indented under it
   factory.py backlog rework <job-id>        read a reworded feature on stdin, append it as
                                             (rework-of <job-id>), and close that rework job
-  factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes <text>] --chat "<message>"
+  factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes <text>]
+                         --chat-file <file> | --chat "<message>"
                                             make the dashboard's backlog decision from a person's chat
                                             message, print the job as JSON
   factory.py ideas [--limit N] [--max-inflight N] [--project <slug>]
@@ -89,9 +90,9 @@
                                             resume and allow need a human typing at a terminal
   factory.py suggest admit <file>           turn an explorer's suggestions file into idea cards that
                                             wait on a human (exit 3 when paused or none admitted)
-  factory.py suggest approve <job-id> <A|B|C> [--chat "<message>"]
+  factory.py suggest approve <job-id> <A|B|C> [--chat-file <file> | --chat "<message>"]
                                             a human at a terminal approves one option of such a card,
-                                            or --chat records a person's chat message instead
+                                            or --chat-file records a person's chat message instead
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
@@ -1668,7 +1669,7 @@ def backlog_rework(job_id):
 
 
 BACKLOG_DECIDE_USAGE = ('usage: backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes <text>] '
-                        '--chat "<message>"')
+                        '--chat-file <file> | --chat "<message>"')
 BACKLOG_UNANSWERED = "answer every question to approve or deny; pass --answers with one line per question"
 
 
@@ -1726,14 +1727,16 @@ def backlog_answers(path, questions, decision):
     if why:
         bad(why)
     lines = [line.rstrip() for line in text.split("\n") if line.strip()]
+    shape = "write one line per question, as - <header>: <answer>, for: " \
+        + (", ".join(q["header"] for q in questions) or "no questions")
     if len(lines) != len(questions):
-        bad("write one line per question, as - <header>: <answer>")
+        bad(shape)
     out, answered = [], 0
     for q, line in zip(questions, lines):
         prefix = f"- {q['header']}: "
         answer = line[len(prefix):].strip() if line.startswith(prefix) else ""
         if not answer:
-            bad("write one line per question, as - <header>: <answer>")
+            bad(shape)
         if answer == "no answer":
             if decision != "rework":
                 fail(BACKLOG_UNANSWERED, 2)
@@ -1744,23 +1747,23 @@ def backlog_answers(path, questions, decision):
         other = " ".join(other.split())
         for label in picked:
             if label not in q["labels"]:
-                bad(f"{label} is not an option of {q['header']}")
+                bad(f"{label} is not an option of {q['header']}; pick from {', '.join(q['labels'])}")
         if len(set(picked)) != len(picked) or q["pick"] == "one" and len(picked) > 1:
             bad(f"{q['header']} takes one pick" if q["pick"] == "one" else f"{q['header']} repeats a pick")
         if not picked and not other:
-            bad("write one line per question, as - <header>: <answer>")
+            bad(shape)
         answered += 1
         out.append(prefix + ". ".join(filter(None, [", ".join(picked), other and "Other: " + other])))
     return "\n".join(out) if answered else ""
 
 
-def backlog_decide(key, decision, answers=None, notes=None, chat=None):
+def backlog_decide(key, decision, answers=None, notes=None, chat=None, chat_file=None):
     """Approve, deny or rework a backlog item from a person's chat message, with the dashboard's
     writes: the board job first, then the checked line. A line that changed meanwhile drops the job."""
     stored = {"approve": "approved", "deny": "denied", "rework": "rework"}.get(decision)
     if stored is None or not re.fullmatch(r"[0-9a-f]{12}", key):
         fail(BACKLOG_DECIDE_USAGE, 2)
-    quote = chat_quote(chat)
+    quote = chat_quote(read_chat_file(chat_file) if chat_file else chat)
     if quote is None:
         fail(BACKLOG_DECIDE_USAGE, 2)
     note = (notes or "").strip()
@@ -1859,9 +1862,12 @@ def backlog_cmd(sub, item, *rest):
         return backlog_rework(item)
     if sub == "decide" and rest:
         flags = dict(zip(rest[1::2], rest[2::2]))
-        if len(rest) % 2 == 0 or len(flags) != len(rest) // 2 or not set(flags) <= {"--answers", "--notes", "--chat"}:
+        if len(rest) % 2 == 0 or len(flags) != len(rest) // 2 \
+                or not set(flags) <= {"--answers", "--notes", "--chat", "--chat-file"} \
+                or {"--chat", "--chat-file"} <= set(flags):
             fail(BACKLOG_DECIDE_USAGE, 2)
-        return backlog_decide(item, rest[0], flags.get("--answers"), flags.get("--notes"), flags.get("--chat"))
+        return backlog_decide(item, rest[0], flags.get("--answers"), flags.get("--notes"), flags.get("--chat"),
+                              flags.get("--chat-file"))
     flag, path = (rest + (None, None))[:2]
     if sub != "add" or len(rest) > 2 or flag not in (None, "--context") or (flag is None) != (path is None) \
             or path == "":
@@ -2160,8 +2166,9 @@ def ideas(*args):
 
 
 # Explorer suggestions become idea cards only through suggest admit, and a card reaches the
-# loop only after a human runs suggest approve. Loosening autonomy needs a human at a
-# terminal; tightening never does. Absent autonomy means paused.
+# loop only after a human runs suggest approve, or an orchestrator relays the person's chat
+# message. Loosening autonomy needs a human at a terminal; tightening never does. Absent
+# autonomy means paused.
 AUTONOMY_DEFAULT = {"paused": True, "projects": [], "self": []}
 SUGGESTION_SCHEMA = "factory.suggestions/1"
 SUGGEST_KINDS = ("bug-fix", "test-gap", "docs", "cleanup", "dependency-upgrade", "migration",
@@ -2471,7 +2478,7 @@ def render_card(job_id, doc, s, reasons):
     if "diagram" in s:
         lines += ["### Diagram", "", "```mermaid", s["diagram"], "```", ""]
     lines += ["### How to answer", "",
-              f"- Approve: run `suggest approve {job_id} <{'|'.join(keys)}>` in a terminal",
+              f"- Approve: run `suggest approve {job_id} <{'|'.join(keys)}>` in a terminal, or answer in chat",
               "- Reject: Discard in the idea drawer"]
     return "\n".join(lines) + "\n"
 
@@ -2585,6 +2592,7 @@ def suggest_admit(path, by="explorer"):
 
 
 CHAT_QUOTE_MAX = 500
+SUGGEST_APPROVE_USAGE = 'usage: suggest approve <job-id> <A|B|C> [--chat-file <file> | --chat "<message>"]'
 
 
 def chat_quote(text):
@@ -2598,12 +2606,23 @@ def chat_quote(text):
     return text
 
 
-def suggest_approve(job_id, option, chat=None):
+def read_chat_file(path):
+    """The text of a --chat-file, refused when it is a link or not UTF-8."""
+    if is_link(path):
+        fail(f"--chat-file {path} is a symlink or junction; nothing was changed", 6)
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            return f.read().replace("\r\n", "\n")
+    except (OSError, UnicodeDecodeError):
+        fail(f"--chat-file {path}: cannot read it as UTF-8 text; nothing was changed", 2)
+
+
+def suggest_approve(job_id, option, chat=None, chat_file=None):
     """A human at a terminal approves one option of a gated explorer card, or an orchestrator
     relays a person's chat message, so the ideas schedule may promote it."""
     if not JOB_ID.fullmatch(job_id) or ".." in job_id or option not in ("A", "B", "C"):
-        fail('usage: suggest approve <job-id> <A|B|C> [--chat "<message>"]', 2)
-    quote = chat_quote(chat)
+        fail(SUGGEST_APPROVE_USAGE, 2)
+    quote = chat_quote(read_chat_file(chat_file) if chat_file else chat)
     if quote is None:
         human_confirm(job_id, f"Type {job_id} to approve option {option}: ", "suggest approve")
     home = factory_home()
@@ -2648,9 +2667,11 @@ def suggest_cmd(sub, *args):
     elif sub == "approve" and len(args) == 2:
         suggest_approve(*args)
     elif sub == "approve" and len(args) == 4 and args[2] == "--chat":
-        suggest_approve(args[0], args[1], args[3])
+        suggest_approve(args[0], args[1], chat=args[3])
+    elif sub == "approve" and len(args) == 4 and args[2] == "--chat-file":
+        suggest_approve(args[0], args[1], chat_file=args[3])
     else:
-        fail('usage: suggest admit <file> | suggest approve <job-id> <A|B|C> [--chat "<message>"]', 2)
+        fail("usage: suggest admit <file> | " + SUGGEST_APPROVE_USAGE[len("usage: "):], 2)
 
 
 def snapshot(repo, commit, dest):

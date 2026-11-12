@@ -102,11 +102,12 @@ class BacklogDecideTests(TriageFixture):
             (("approve", None), 2, "answer every question to approve or deny; pass --answers with one line per question"),
             (("deny", "- Guard the ls alias: no answer"), 2,
              "answer every question to approve or deny; pass --answers with one line per question"),
-            (("approve", "- Guard the ls alias: Keep it"), 2, "Keep it is not an option of Guard the ls alias"),
+            (("approve", "- Guard the ls alias: Keep it"), 2,
+             "Keep it is not an option of Guard the ls alias; pick from Interactive only, Drop the alias"),
             (("rework", "- Guard the ls alias: Keep it", "--notes", "n"), 2, "Keep it is not an option"),
             (("approve", "- Guard the ls alias: Interactive only, Drop the alias"), 2,
              "Guard the ls alias takes one pick"),
-            (("approve", ""), 2, "one line per question"),
+            (("approve", ""), 2, "one line per question, as - <header>: <answer>, for: Guard the ls alias"),
             (("approve", ANSWER + "\n- Another: x"), 2, "one line per question"),
             (("approve", "- Other header: Interactive only"), 2, "one line per question"),
             (("approve", ANSWER + " see https://example.test/x"), 2, "links are not allowed"),
@@ -186,3 +187,26 @@ class BacklogDecideTests(TriageFixture):
         self.assertEqual(json.loads(out)["id"], "004-guard-the-ls")
         self.assertEqual([j["id"] for j in self.board()], ["003-old-job", "004-guard-the-ls"])
         self.assertIn("- [x] sample: Guard the ls alias (004-guard-the-ls)", self.files["/api/backlog"])
+
+    def test_chat_file(self):
+        path = self.dir / "chat.txt"
+        path.write_text(MESSAGE + "\n", encoding="utf-8")
+        link = self.dir / "link.txt"
+        link.symlink_to(path)
+        before = dict(self.files)
+        answers = self.dir / "answers.md"
+        answers.write_text(ANSWER, encoding="utf-8")
+        base = ["backlog", "decide", KEY, "approve", "--answers", str(answers)]
+        for extra, code, err in ((["--chat-file", str(link)], 6, "is a symlink or junction; nothing was changed"),
+                                 (["--chat-file", str(self.dir / "missing.txt")], 2, "cannot read it as UTF-8 text"),
+                                 (["--chat-file", str(path), "--chat", MESSAGE], 2, "usage: backlog decide")):
+            with self.subTest(extra=extra):
+                result = invoke(self.module, base + extra)
+                self.assertEqual(result[0], code, result[2])
+                self.assertIn(err, result[2])
+                self.unchanged(before)
+        code, _, err = invoke(self.module, base + ["--chat-file", str(path)])
+        self.assertEqual(code, 0, err)
+        job = self.board()[-1]
+        self.assertEqual((job["backlog"]["via"], job["backlog"]["quote"]), ("chat", MESSAGE))
+        self.assertTrue(job["idea"].endswith(self.footer("Approved", job["updated"])))

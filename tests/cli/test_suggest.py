@@ -132,7 +132,7 @@ class SuggestTest(SuggestCase):
             "**Recommendation: B.**", "", "> It fixes the cause.", "",
             "### Diagram", "", "```mermaid", "flowchart LR\n  A --> B", "```", "",
             "### How to answer", "",
-            "- Approve: run `suggest approve 008-fix-the-parser <A|B|C>` in a terminal",
+            "- Approve: run `suggest approve 008-fix-the-parser <A|B|C>` in a terminal, or answer in chat",
             "- Reject: Discard in the idea drawer", ""]))
         for key in ("project", "claim", "branch", "rounds"):
             self.assertNotIn(key, card)
@@ -365,7 +365,8 @@ class SuggestTest(SuggestCase):
     def test_admission_calls_no_process(self):
         tree = ast.parse(Path(factory.__file__).read_text())
         names = {"load_autonomy", "check_text", "check_untrusted", "check_suggestions", "fingerprint", "classify",
-                 "quote", "render_card", "suggest_admit", "suggest_approve", "suggest_cmd", "chat_quote"}
+                 "quote", "render_card", "suggest_admit", "suggest_approve", "suggest_cmd", "chat_quote",
+                 "read_chat_file"}
         banned = {"subprocess", "run", "git", "git_ok", "origin_git", "system", "Popen", "paseo_session", "worktree"}
         found = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names}
         self.assertEqual(set(found), names)
@@ -581,6 +582,30 @@ class SuggestTest(SuggestCase):
                 self.assertEqual(self.run_human(factory.suggest_cmd, "approve", card, "A", *args, tty=False)[0], 2)
         self.assertEqual(json.dumps(self.board), before)
         self.assertEqual(self.puts(), puts)
+
+    def test_chat_file_approve(self):
+        self.admit(suggestions())
+        card = self.board["jobs"][-1]["id"]
+        message = "approve `008-guard-the-ls` A, not $(whoami) or $5"
+        path = self.home / "chat.txt"
+        path.write_bytes((message + "\r\n").encode("utf-8"))
+        link = self.home / "link.txt"
+        link.symlink_to(path)
+        before, puts = json.dumps(self.board), self.puts()
+        for args, code, err in ((("--chat-file", str(link)), 6, "is a symlink or junction; nothing was changed"),
+                                (("--chat-file", str(self.home / "missing.txt")), 2, "cannot read it as UTF-8 text"),
+                                (("--chat-file", str(path), "--chat", message), 2, "usage: suggest admit")):
+            with self.subTest(args=args):
+                result = self.run_human(factory.suggest_cmd, "approve", card, "A", *args, tty=False)
+                self.assertEqual(result[:1], (code,))
+                self.assertIn(err, result[1])
+        self.assertEqual((json.dumps(self.board), self.puts()), (before, puts))
+        code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat-file", str(path), tty=False)
+        self.assertEqual(code, 0, err)
+        asked.assert_not_called()
+        approved = self.board["jobs"][-1]["origin"]["approved"]
+        self.assertEqual((approved["via"], approved["quote"]), ("chat", message))
+        self.assertTrue(self.board["jobs"][-1]["idea"].endswith(f': "{message}"'))
 
     def test_ideas_skips_gated(self):
         self.admit(suggestions())
