@@ -2269,7 +2269,8 @@ function unsavedWork() {
     || [...document.querySelectorAll(typing)].some(el => !blank(el))
     || [...document.querySelectorAll('#host-add input[type=text], #host-add input:not([type])')].some(el => !blank(el))
     || hostDrafts.size > 0
-    || backlogSaving || needsSaving
+    || backlogSaving || needsSaving || boardWrites > 0
+    || needsStorageFailed && [...needsMemory.values()].some(a => a.some(x => x.picked.length || x.other.trim()))
     || [...backlogDrafts.values()].some(d => d.pick || d.notes.trim() || d.answers.some(a => a.picked.length || a.other.trim()))
     || !!document.activeElement?.matches('textarea, input[type=text], input[type=search], input:not([type]), [contenteditable]');
 }
@@ -4672,7 +4673,15 @@ async function loadBacklog() {
     } else if (r.status === 404) backlog = [];
     else return;
     backlogLoaded = true;
+    pruneBacklogDrafts();
   } catch {}
+}
+
+// A draft whose item left the backlog can never show again, and it would hold a deploy reload forever.
+function pruneBacklogDrafts() {
+  for (const raw of [...backlogDrafts.keys()]) {
+    if (raw !== openBacklogRaw && !backlogBusy.has(raw) && !backlog.some((b) => b.raw === raw)) backlogDrafts.delete(raw);
+  }
 }
 
 const BACKLOG_GONE = 'That backlog item is no longer in the backlog. It was decided, reworded or removed.';
@@ -4904,34 +4913,38 @@ function followTracer(board, id, now) {
 // GET, change(board) in place, then PUT only if nobody wrote in between. Retries a 412.
 // change throws to abort with nothing written.
 const BOARD_UNCHANGED = Symbol('board unchanged');
+let boardWrites = 0;
 async function casBoard(change) {
-  for (let i = 0; i < 10; i++) {
-    const r = await fetch('./api/board', { cache: 'no-store' });
-    if (!r.ok && r.status !== 404) throw new Error('reading the board failed: ' + r.status);
-    const board = r.ok ? await r.json() : { updated: '', jobs: [] };
-    const result = change(board);
-    if (result === BOARD_UNCHANGED) return result;
-    // Cloudflare's edge may weaken the ETag. R2 compares the strong form.
-    const etag = r.headers.get('ETag');
-    if (r.ok && !etag) throw new Error('the board came back without an ETag, so nothing was saved');
-    const cond = r.ok ? { 'If-Match': etag.replace(/^W\//, '') } : { 'If-None-Match': '*' };
-    let put;
-    try {
-      put = await fetch('./api/board', { method: 'PUT', headers: cond, body: JSON.stringify(board, null, 2) + '\n' });
-    } catch (x) {
-      x.uncertain = true; // the request may have landed before the connection dropped
-      throw x;
+  boardWrites++;
+  try {
+    for (let i = 0; i < 10; i++) {
+      const r = await fetch('./api/board', { cache: 'no-store' });
+      if (!r.ok && r.status !== 404) throw new Error('reading the board failed: ' + r.status);
+      const board = r.ok ? await r.json() : { updated: '', jobs: [] };
+      const result = change(board);
+      if (result === BOARD_UNCHANGED) return result;
+      // Cloudflare's edge may weaken the ETag. R2 compares the strong form.
+      const etag = r.headers.get('ETag');
+      if (r.ok && !etag) throw new Error('the board came back without an ETag, so nothing was saved');
+      const cond = r.ok ? { 'If-Match': etag.replace(/^W\//, '') } : { 'If-None-Match': '*' };
+      let put;
+      try {
+        put = await fetch('./api/board', { method: 'PUT', headers: cond, body: JSON.stringify(board, null, 2) + '\n' });
+      } catch (x) {
+        x.uncertain = true; // the request may have landed before the connection dropped
+        throw x;
+      }
+      if (put.ok) return result;
+      if (put.status !== 412) {
+        const x = new Error('saving the board failed: ' + put.status);
+        x.uncertain = put.status >= 500; // classified before the body read: an aborted body read must not erase it
+        try { x.message += ' ' + (await put.text()).slice(0, 200); } catch {}
+        throw x;
+      }
+      await new Promise((res) => setTimeout(res, 50 + Math.random() * 450));
     }
-    if (put.ok) return result;
-    if (put.status !== 412) {
-      const x = new Error('saving the board failed: ' + put.status);
-      x.uncertain = put.status >= 500; // classified before the body read: an aborted body read must not erase it
-      try { x.message += ' ' + (await put.text()).slice(0, 200); } catch {}
-      throw x;
-    }
-    await new Promise((res) => setTimeout(res, 50 + Math.random() * 450));
-  }
-  throw new Error('the board kept changing, so nothing was saved after 10 tries');
+    throw new Error('the board kept changing, so nothing was saved after 10 tries');
+  } finally { boardWrites--; }
 }
 
 // An uncertain save may have landed, so the dialog says so and the same retry confirms it.
