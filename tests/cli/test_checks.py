@@ -147,6 +147,6 @@ class ChecksTest(IsolatedTestCase):
         skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
         self.assertIn('Wait for checks with `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0 means '
                       "they passed, or the repo has none. Exit 3 means they are still pending, so run it again. "
-                      "Exit 1 names the failing checks. Exit 4 means no open PR; 5 means gh never answered. Never poll `gh pr checks` in a loop or with `--watch`.", skill)
+                      "Exit 1 names the failing checks. Exit 4 means no open PR; 5 means gh never gave a usable reply. Never poll `gh pr checks` in a loop or with `--watch`.", skill)
         self.assertIn("Pass `--hold` to refresh this session's claim first, so a re-run during a long build needs "
                       "no separate `hold`.", skill)
