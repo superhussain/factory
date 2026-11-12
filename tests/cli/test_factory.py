@@ -1,3 +1,4 @@
+import ast
 import contextlib
 import hashlib
 import importlib.util
@@ -18,7 +19,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-from support import IsolatedTestCase, invoke
+from support import ROOT, IsolatedTestCase, invoke
 
 SKILL_ROOT = Path(__file__).resolve().parents[2] / "skills" / "factory"
 spec = importlib.util.spec_from_file_location("factory", SKILL_ROOT / "runtime" / "factory.py")
@@ -2160,6 +2161,14 @@ class JobRelTest(unittest.TestCase):
                     "a.b.walkthrough.html", ".walkthrough.html", "build.walkthrough.htm",
                     "round-1/x/y.walkthrough.html"):
             self.assertIsNone(factory.JOB_REL.fullmatch(rel), rel)
+
+
+class NoShadowedDefsTest(unittest.TestCase):
+    def test_no_top_level_name_defined_twice(self):
+        tree = ast.parse((ROOT / "skills/factory/runtime/factory.py").read_text(encoding="utf-8"))
+        names = [node.name for node in tree.body
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+        self.assertEqual(sorted({n for n in names if names.count(n) > 1}), [])
 
 
 if __name__ == "__main__":
