@@ -4975,13 +4975,8 @@ CHECKS_INTERVAL = 10
 CHECKS_REGISTER = 120
 
 
-def checks_cmd(target, *args):
-    """Print each PR check as `<bucket> <name>` once none is pending, checking every 10 seconds until --timeout."""
-    home, slug, job_id = r2_target(target, True)
-    if args and (args[0] != "--timeout" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
-                 or int(args[1]) > 600):
-        fail("--timeout takes one value from 0 to 600 seconds. " + CHECKS_USAGE, 2)
-    timeout = int(args[1]) if args else 300
+def board_pr(home, slug, job_id):
+    """The job's PR URL from the board, after checking it is a pull request in the project file repo."""
     job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
     pr = (job or {}).get("pr")
     if not isinstance(pr, str) or not pr:
@@ -4990,26 +4985,49 @@ def checks_cmd(target, *args):
     m = GH_PR.fullmatch(pr)
     if not (repo and m and m[1].lower() == repo.lower()):
         fail(f"{pr} is not a pull request in {repo or 'the project file repo'}", 4)
-    view = gh_pr("view", pr, "--json", "state", "--jq", ".state")
+    return pr
+
+
+def gh_pr_view(pr, *args):
+    """stdout of gh pr view <pr> <args>, failing with exit 5 when gh cannot answer."""
+    view = gh_pr("view", pr, *args)
     if view is None:
         fail("gh is not installed", 5)
     if view[0] == "timeout":
         fail("gh pr view timed out after 60 seconds", 5)
     if view[0]:
         fail(f"gh pr view exited {view[0]} (check gh auth status)", 5)
-    if view[1].strip() != "OPEN":
-        fail(f"{pr} is {view[1].strip() or 'in no state'}, not OPEN", 4)
+    return view[1]
+
+
+def pr_checks(pr):
+    """The PR's checks as gh pr checks lists them, or [] when gh lists none or prints something else."""
+    result = gh_pr("checks", pr, "--json", "name,bucket")
+    try:
+        checks = json.loads(result[1]) if result and result[0] != "timeout" else []
+    except ValueError:
+        checks = []
+    if not isinstance(checks, list) or not all(
+            isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("bucket"), str)
+            for c in checks):
+        checks = []
+    return checks
+
+
+def checks_cmd(target, *args):
+    """Print each PR check as `<bucket> <name>` once none is pending, checking every 10 seconds until --timeout."""
+    home, slug, job_id = r2_target(target, True)
+    if args and (args[0] != "--timeout" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
+                 or int(args[1]) > 600):
+        fail("--timeout takes one value from 0 to 600 seconds. " + CHECKS_USAGE, 2)
+    timeout = int(args[1]) if args else 300
+    pr = board_pr(home, slug, job_id)
+    state = gh_pr_view(pr, "--json", "state", "--jq", ".state").strip()
+    if state != "OPEN":
+        fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
     start = time.monotonic()
     while True:
-        result = gh_pr("checks", pr, "--json", "name,bucket")
-        try:
-            checks = json.loads(result[1]) if result and result[0] != "timeout" else []
-        except ValueError:
-            checks = []
-        if not isinstance(checks, list) or not all(
-                isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("bucket"), str)
-                for c in checks):
-            checks = []
+        checks = pr_checks(pr)
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
             for c in checks:
@@ -5025,6 +5043,70 @@ def checks_cmd(target, *args):
         if elapsed >= timeout:
             fail("still pending: " + ", ".join(pending) if pending else "no checks listed yet", 3)
         time.sleep(min(CHECKS_INTERVAL, max(0, timeout - elapsed)))
+
+
+PR_STATE_USAGE = "usage: pr-state <project-slug>/<job-id> [--wait S]"
+PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,isInMergeQueue,autoMergeRequest,commits"
+PR_STATE_INTERVAL = 30
+
+
+def pr_reading(pr):
+    """One reading of the PR for a babysit session, with the next step it calls for."""
+    try:
+        view = json.loads(gh_pr_view(pr, "--json", PR_STATE_FIELDS))
+    except ValueError:
+        view = None
+    if not isinstance(view, dict):
+        fail("gh pr view printed no JSON object", 5)
+    buckets = {c["bucket"] for c in pr_checks(pr)}
+    checks = "fail" if buckets & {"fail", "cancel"} else "pending" if "pending" in buckets \
+        else "pass" if buckets else "none"
+    commits = view.get("commits") or [{}]
+    head = str(commits[-1].get("committedDate") or "") if isinstance(commits[-1], dict) else ""
+    human = [r for r in view.get("latestReviews") or [] if isinstance(r, dict)
+             and not str((r.get("author") or {}).get("login") or "").endswith("[bot]")]
+    unanswered = any(r.get("state") in ("CHANGES_REQUESTED", "COMMENTED") and str(r.get("submittedAt") or "") > head
+                     for r in human)
+    decision = view.get("reviewDecision") or ""
+    approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
+    state = str(view.get("state") or "").lower()
+    queued = bool(view.get("isInMergeQueue") or view.get("autoMergeRequest"))
+    conflict = view.get("mergeStateStatus") == "DIRTY"
+    if state in ("merged", "closed"):
+        step = state
+    elif unanswered:
+        step = "fix-reviews"
+    elif not approved:
+        step = "needs-review"
+    elif conflict:
+        step = "rebase"
+    elif checks == "fail":
+        step = "fix-ci"
+    elif checks == "pending" or queued:
+        step = "wait"
+    else:
+        step = "merge"
+    return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
+            "review": "changes" if unanswered else "approved" if approved else "none",
+            "checks": checks, "queued": queued, "conflict": conflict, "next": step}
+
+
+def pr_state_cmd(target, *args):
+    """Print one JSON reading of the job's PR. --wait S re-reads every 30 seconds while next is wait."""
+    home, slug, job_id = r2_target(target, True)
+    if args and (args[0] != "--wait" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
+                 or not 1 <= int(args[1]) <= 600):
+        fail("--wait takes one value from 1 to 600 seconds. " + PR_STATE_USAGE, 2)
+    wait = int(args[1]) if args else 0
+    pr = board_pr(home, slug, job_id)
+    start = time.monotonic()
+    while True:
+        reading = pr_reading(pr)
+        elapsed = time.monotonic() - start
+        if reading["next"] != "wait" or elapsed >= wait:
+            print(json.dumps(reading))
+            return
+        time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
 
 
 def tracer_start(j):
@@ -7814,6 +7896,7 @@ COMMANDS["documents"] = (documents_cmd, 1, 1)
 COMMANDS["prompt"] = (prompt_cmd, 2, 8)
 COMMANDS["wait"] = (wait_cmd, 2, 23)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
+COMMANDS["pr-state"] = (pr_state_cmd, 1, 3)
 COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
 COMMANDS["host"] = (host_cmd, 3, 3)
