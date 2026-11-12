@@ -599,6 +599,18 @@ class SuggestTest(SuggestCase):
                 result = self.run_human(factory.suggest_cmd, "approve", card, "A", *args, tty=False)
                 self.assertEqual(result[:1], (code,))
                 self.assertIn(err, result[1])
+        empty = self.home / "empty.txt"
+        empty.write_text("  \n", encoding="utf-8")
+        bad = self.home / "bad.txt"
+        bad.write_text("see https://example.test/x", encoding="utf-8")
+        for file, err in ((empty, f"--chat-file {empty} is empty; nothing was changed"),
+                          (bad, "--chat-file must not hold a code fence or a link; nothing was changed")):
+            with self.subTest(file=file.name):
+                code, out, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat-file", str(file),
+                                                  tty=True, typed=card)
+                self.assertEqual(code, 2)
+                self.assertIn(err, out)
+                asked.assert_not_called()
         self.assertEqual((json.dumps(self.board), self.puts()), (before, puts))
         code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat-file", str(path), tty=False)
         self.assertEqual(code, 0, err)

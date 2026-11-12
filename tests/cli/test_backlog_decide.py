@@ -210,3 +210,43 @@ class BacklogDecideTests(TriageFixture):
         job = self.board()[-1]
         self.assertEqual((job["backlog"]["via"], job["backlog"]["quote"]), ("chat", MESSAGE))
         self.assertTrue(job["idea"].endswith(self.footer("Approved", job["updated"])))
+
+    def test_rerun_with_another_decision_replaces_the_unsaved_one(self):
+        self.cas_down = {"/api/backlog"}
+        self.assertEqual(self.decide("approve")[0], 5)
+        self.assertEqual(self.board()[-1]["backlog"]["decision"], "approved")
+        self.cas_down = set()
+        code, out, err = self.decide("deny", "- Guard the ls alias: Drop the alias")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["id"], "005-guard-the-ls")
+        self.assertEqual([(j["id"], j.get("backlog", {}).get("decision")) for j in self.board()],
+                         [("003-old-job", None), ("005-guard-the-ls", "denied")])
+        self.assertIn("- [x] sample: Guard the ls alias (005-guard-the-ls)", self.files["/api/backlog"])
+
+    def test_rerun_with_another_decision_keeps_a_claimed_job(self):
+        self.cas_down = {"/api/backlog"}
+        self.assertEqual(self.decide("approve")[0], 5)
+        self.cas_down = set()
+        board = json.loads(self.files["/api/board"])
+        board["jobs"][-1]["claim"] = {"device": "mac"}
+        self.files["/api/board"] = json.dumps(board)
+        before = dict(self.files)
+        code, _, err = self.decide("deny", "- Guard the ls alias: Drop the alias")
+        self.assertEqual(code, 6)
+        self.assertIn("004-guard-the-ls already holds another decision for this item and was picked up", err)
+        self.unchanged(before)
+
+    def test_chat_file_refusals_name_the_flag(self):
+        answers = self.dir / "answers.md"
+        answers.write_text(ANSWER, encoding="utf-8")
+        path = self.dir / "chat.txt"
+        before = dict(self.files)
+        for text, err in ((" \n", f"--chat-file {path} is empty; nothing was changed"),
+                          ("see https://example.test/x", "--chat-file must not hold a code fence or a link")):
+            with self.subTest(text=text):
+                path.write_text(text, encoding="utf-8")
+                code, _, out = invoke(self.module, ["backlog", "decide", KEY, "approve", "--answers", str(answers),
+                                                    "--chat-file", str(path)])
+                self.assertEqual(code, 2)
+                self.assertIn(err, out)
+                self.unchanged(before)

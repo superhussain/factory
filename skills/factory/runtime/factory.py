@@ -1778,7 +1778,7 @@ def backlog_decide(key, decision, answers=None, notes=None, chat=None, chat_file
     stored = {"approve": "approved", "deny": "denied", "rework": "rework"}.get(decision)
     if stored is None or not re.fullmatch(r"[0-9a-f]{12}", key):
         fail(BACKLOG_DECIDE_USAGE, 2)
-    quote = chat_quote(read_chat_file(chat_file) if chat_file else chat)
+    quote = chat_quote(read_chat_file(chat_file), "--chat-file") if chat_file else chat_quote(chat)
     if quote is None:
         fail(BACKLOG_DECIDE_USAGE, 2)
     note = (notes or "").strip()
@@ -1812,18 +1812,32 @@ def backlog_decide(key, decision, answers=None, notes=None, chat=None, chat_file
     local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
     verb = {"approved": "Approved", "denied": "Denied", "rework": "Rework requested"}[stored]
 
-    def mine(j):
+    def quoted(j):
         record = j.get("backlog")
         return isinstance(record, dict) and record.get("line") == raw and record.get("via") == "chat" \
             and record.get("quote") == quote
+
+    def mine(j):
+        return quoted(j) and j["backlog"].get("decision") == stored
+
+    def unstarted(j):
+        return j.get("stage") == IDEA and j.get("claim") is None \
+            or j.get("stage") == "closed" and j["backlog"].get("decision") == "denied"
 
     def add(board):
         data = load_board(board)
         prior = next((j for j in data["jobs"] if mine(j)), None)
         if prior:
             return None, prior["id"]
+        # A run that saved another decision for this quote but never checked the line off.
+        stale = [j for j in data["jobs"] if quoted(j) and not mine(j)]
+        for j in stale:
+            if not unstarted(j):
+                fail(f"{j['id']} already holds another decision for this item and was picked up; "
+                     "nothing was changed", 6)
         job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug(item),
                              archive_floor(data))
+        data["jobs"] = [j for j in data["jobs"] if j not in stale]
         at = data["updated"] = now()
         footer = f'\n\n---\n{verb} in chat by {device} at {at}: "{" ".join(quote.split())}"'
         record = {"line": raw, "decision": stored, "at": at, **({"notes": note} if note else {}),
@@ -1858,9 +1872,7 @@ def backlog_decide(key, decision, answers=None, notes=None, chat=None, chat_file
 
     def drop(board):
         data = load_board(board)
-        kept = [j for j in data["jobs"] if not (j.get("id") == job_id and mine(j) and (
-            j.get("stage") == IDEA and j.get("claim") is None
-            or j.get("stage") == "closed" and j["backlog"].get("decision") == "denied"))]
+        kept = [j for j in data["jobs"] if not (j.get("id") == job_id and mine(j) and unstarted(j))]
         if len(kept) == len(data["jobs"]):
             return None, False
         data["jobs"], data["updated"] = kept, now()
@@ -2710,26 +2722,29 @@ CHAT_QUOTE_MAX = 500
 SUGGEST_APPROVE_USAGE = 'usage: suggest approve <job-id> <A|B|C> [--chat-file <file> | --chat "<message>"]'
 
 
-def chat_quote(text):
+def chat_quote(text, flag="--chat"):
     """The stripped --chat message, None when it is missing or blank, or exit 2 when it breaks a text rule."""
     text = (text or "").strip()
     if not text:
         return None
     why = check_text(text, 1, CHAT_QUOTE_MAX, multiline=True)
     if why:
-        fail(f"--chat {why}; nothing was changed", 2)
+        fail(f"{flag} {why}; nothing was changed", 2)
     return text
 
 
 def read_chat_file(path):
-    """The text of a --chat-file, refused when it is a link or not UTF-8."""
+    """The text of a --chat-file, refused when it is a link, empty or not UTF-8."""
     if is_link(path):
         fail(f"--chat-file {path} is a symlink or junction; nothing was changed", 6)
     try:
         with open(path, encoding="utf-8", newline="") as f:
-            return f.read().replace("\r\n", "\n")
+            text = f.read().replace("\r\n", "\n")
     except (OSError, UnicodeDecodeError):
         fail(f"--chat-file {path}: cannot read it as UTF-8 text; nothing was changed", 2)
+    if not text.strip():
+        fail(f"--chat-file {path} is empty; nothing was changed", 2)
+    return text
 
 
 def suggest_approve(job_id, option, chat=None, chat_file=None):
@@ -2737,7 +2752,7 @@ def suggest_approve(job_id, option, chat=None, chat_file=None):
     relays a person's chat message, so the ideas schedule may promote it."""
     if not JOB_ID.fullmatch(job_id) or ".." in job_id or option not in ("A", "B", "C"):
         fail(SUGGEST_APPROVE_USAGE, 2)
-    quote = chat_quote(read_chat_file(chat_file) if chat_file else chat)
+    quote = chat_quote(read_chat_file(chat_file), "--chat-file") if chat_file else chat_quote(chat)
     if quote is None:
         human_confirm(job_id, f"Type {job_id} to approve option {option}: ", "suggest approve")
     home = factory_home()
