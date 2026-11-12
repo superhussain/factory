@@ -3894,6 +3894,7 @@ def pickup(*args):
                     print(f"factory.py: {stopped}", file=sys.stderr)
             if "--triage-now" in flags or triage_sweep_due(home, started):
                 save_triage_sweep(home, started)
+                data = None
                 try:
                     backlog_triage_pass(home)
                     failing = None
