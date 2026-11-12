@@ -29,5 +29,8 @@ Claude Code sessions, the aggregating host included, installs it.
   and `StandardErrorPath` `<home>/logs/retro-push.log`. Load with
   `launchctl bootstrap gui/$(id -u) <plist>`.
 
-- Task Scheduler (Windows):
-  `schtasks /Create /TN factory-retro-push /SC DAILY /ST 08:30 /TR "cmd /c py -3 <installed-skill>\runtime\factory.py retro push >> <home>\logs\retro-push.log 2>&1" /F`.
+- Task Scheduler (Windows): wrapper `%USERPROFILE%\.config\factory-retro-push.cmd`
+  that runs
+  `py -3 <installed-skill>\runtime\factory.py retro push >> <home>\logs\retro-push.log 2>&1`,
+  then
+  `schtasks /Create /TN factory-retro-push /SC DAILY /ST 08:30 /TR "%USERPROFILE%\.config\factory-retro-push.cmd" /F`.
