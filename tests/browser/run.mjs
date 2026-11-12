@@ -17,7 +17,6 @@ import { clickNow } from "../support/board-ready.cjs";
 import { retryCapture } from "./capture-retry.mjs";
 import { selectShard } from "./shard.mjs";
 
-const root = new URL("../", import.meta.url);
 const CASES = selectShard(
   JSON.parse(await readFile(new URL("../fixtures/browser-cases.json", import.meta.url), "utf8")),
   process.env.FACTORY_BROWSER_SHARD,
@@ -239,9 +238,9 @@ async function put(origin, route, body, type) {
   const current = await fetch(origin + route, { redirect: "manual" });
   if (!current.ok && current.status !== 404)
     throw new Error(`capture seed read ${route}: ${current.status}`);
-  const headers = {
-    ...(current.ok ? { "If-Match": current.headers.get("ETag") } : { "If-None-Match": "*" }),
-  };
+  const headers = current.ok
+    ? { "If-Match": current.headers.get("ETag") }
+    : { "If-None-Match": "*" };
   if (type) headers["Content-Type"] = type;
   const response = await fetch(origin + route, { method: "PUT", headers, body });
   if (response.status !== 200) throw new Error(`capture seed ${route}: ${response.status}`);
