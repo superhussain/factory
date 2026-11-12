@@ -94,7 +94,7 @@
   factory.py retro push                     upload that digest (last day) to retro/<device>/<local date>.jsonl
   factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
   factory.py retro aggregate [--days N]     pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
-  factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, admit its cards
+  factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, add its cards to the backlog
   factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>]
                                             append one row to the job's agents, after checking this
                                             session holds the claim, and print it as JSON
@@ -1245,15 +1245,19 @@ def backlog_add(item, context=None):
     if added is not True:
         print(f"already in backlog: {item}" + (" (the --context file was not added)" if context else ""))
         print(f"link: {api_url(home)}/#{urllib.parse.quote(added, safe='')}" if added else f"link: {backlog_link(home, line)}")
-        return
+        return False
     print(f"added {item}" + (" with context" if context else ""))
     print(f"link: {backlog_link(home, line)}")
+    if context and RETRO_MARK.search(context):
+        print(f"held {item} for review: retro items always wait for a person")
+        return True
     verdict, final = backlog_triage(home, item, context)
     left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict)
     if final and (verdict is None or verdict["decision"] != "queue" or left):
         triaged = read_triaged(home)
         if line not in triaged:
             save_triaged(home, triaged + [line])
+    return True
 
 
 def report_verdict(home, slug, feature, item, verdict):
@@ -1388,7 +1392,8 @@ def backlog_triage_pass(home):
             raw, slug = line[0], line[1]
             if len(picked) == TRIAGE_SWEEP_LIMIT:
                 break
-            if raw in triaged or slug not in projects or any(raw == p[0] for p in picked):
+            if raw in triaged or slug not in projects or any(raw == p[0] for p in picked) \
+                    or RETRO_MARK.search(line[3]):
                 continue
             if slug not in enabled:
                 enabled[slug] = triage_enabled(home, slug)
@@ -2288,6 +2293,55 @@ def render_card(job_id, doc, s, reasons):
     return "\n".join(lines) + "\n"
 
 
+RETRO_MARK = re.compile(r"^Retro: run [A-Za-z0-9_-]{1,64}, fingerprint [0-9a-f]{16}, "
+                        r"created \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", re.M)
+
+
+def retro_backlog_context(s, run, fp, created):
+    """The backlog context for a schema-checked retro card: a Recommend line, the summary, why the
+    recommended option, the evidence, the Retro provenance line and one needs.md question."""
+    def one_line(text):
+        return " ".join(text.split())
+
+    def sentence(text):
+        return text if text.endswith((".", "!", "?")) else text + "."
+
+    rec = next(o for o in s["options"] if o["key"] == s["recommend"])
+    header = s["title"] if len(s["title"]) <= 60 else s["title"][:57] + "..."
+    lines = ["Recommend: approve", "", one_line(s["summary"]), "",
+             f"Why {rec['label']}: {one_line(s['reason'])}", "", "Evidence:"]
+    for e in s["evidence"]:
+        n = len(e["sessions"])
+        lines.append(f"- {e['count']}x {e['note']} ({n} session{'' if n == 1 else 's'})")
+    lines += ["", f"Retro: run {run}, fingerprint {fp}, created {created}", "",
+              f"## Question: {header}", s["question"], "Pick: one"]
+    for o in [rec] + [o for o in s["options"] if o is not rec]:
+        row = f"- {o['label']}{' (recommended)' if o is rec else ''}: {sentence(o['detail'])}"
+        if o["pros"]:
+            row += f" Pros: {'; '.join(o['pros'])}."
+        if o["cons"]:
+            row += f" Cons: {'; '.join(o['cons'])}."
+        lines.append(row)
+    return "\n".join(lines)
+
+
+def retro_marks(text):
+    """{"fingerprint", "created", "project", "open"} for each Retro provenance line indented under a
+    backlog line, checked or not."""
+    marks, under = [], None
+    for line in text.split("\n"):
+        line = line.rstrip("\r")
+        m = re.match(r"- \[([ x])\] ([\w-]+): \S", line)
+        if m:
+            under = (m.group(2), m.group(1) == " ")
+        elif under and line.startswith("  ") and RETRO_MARK.fullmatch(line[2:]):
+            _, fp, created = (part.rsplit(" ", 1)[1] for part in line[2:].split(", "))
+            marks.append({"fingerprint": fp, "created": created, "project": under[0], "open": under[1]})
+        elif line and not line.startswith("  "):
+            under = None
+    return marks
+
+
 def created_since(j, cutoff):
     try:
         stamp = datetime.strptime(j["origin"]["created"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -2393,6 +2447,57 @@ def suggest_admit(path, by="explorer"):
     result = cas(home, "/api/board", change)
     print(json.dumps(result, indent=2))
     if not result["admitted"]:
+        sys.exit(3)
+
+
+def retro_backlog_admit(cards):
+    """Add each checked retro card as a held backlog line with a decision form. Skips duplicates
+    and cards over a cap, and exits 3 when autonomy is paused or nothing was added."""
+    home = factory_home()
+    projects = registered(home)
+    for i, s in enumerate(cards["suggestions"]):
+        if s["project"] not in projects:
+            fail(f"suggestions[{i}].project: {s['project']} is not a registered factory project; nothing admitted", 2)
+    data = load_board(api(home, "GET", "/api/board")[2])
+    if load_autonomy(data)["paused"] is not False:
+        fail("autonomy is paused; nothing admitted", 3)
+    status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
+    marks = retro_marks(text if status == 200 else "")
+    origins = [(j, j["origin"]) for j in data["jobs"] if isinstance(j.get("origin"), dict)]
+    archived = data.get("archived")
+    archived = archived.get("fingerprints") if isinstance(archived, dict) else None
+    archived = archived if isinstance(archived, dict) else {}
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    daily = sum(created_since(j, cutoff) for j, _ in origins) + sum(created_since({"origin": m}, cutoff) for m in marks)
+    admitted, added, skipped = [], [], []
+    for s in cards["suggestions"]:
+        slug = s["project"]
+        fp = fingerprint(slug, s)
+        dup = next((j.get("id") for j, o in origins if o.get("fingerprint") == fp), None) or archived.get(fp)
+        context = retro_backlog_context(s, cards["run"], fp, now())
+        why = backlog_context_error(context)
+        if dup:
+            reason = f"duplicate {dup}"
+        elif any(m["fingerprint"] == fp for m in marks):
+            reason = "duplicate in backlog"
+        elif daily + len(added) >= MAX_PER_DAY:
+            reason = "daily cap"
+        elif sum(j.get("stage") == IDEA and o.get("project") == slug for j, o in origins) \
+                + sum(m["open"] and m["project"] == slug for m in marks) + added.count(slug) >= MAX_OPEN_PER_PROJECT:
+            reason = "open cap"
+        elif BACKLOG_SUFFIX.search(s["title"]):
+            reason = "title ends in a backlog ref"
+        elif why:
+            reason = f"context: {why}"
+        elif not backlog_add(f"{slug}: {s['title']}", context):
+            reason = "already in backlog"
+        else:
+            admitted.append(f"{slug}: {s['title']}")
+            added.append(slug)
+            continue
+        skipped.append({"title": s["title"], "reason": reason})
+    print(json.dumps({"admitted": admitted, "skipped": skipped}, indent=2))
+    if not admitted:
         sys.exit(3)
 
 
@@ -7170,7 +7275,7 @@ def render_findings(agg, doc, rejected=()):
 
 
 def retro_admit(run):
-    """Check a retro run's reply, write its ranked findings.md and admit its cards through suggest admit.
+    """Check a retro run's reply, write its ranked findings.md and add its cards to the backlog.
     A bad finding is dropped and listed; a bad card admits no card."""
     home = factory_home()
     folder = home / "retro" / run
@@ -7218,7 +7323,7 @@ def retro_admit(run):
     if err:
         fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
     write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
-    suggest_admit(str(suggestions), "retro")
+    retro_backlog_admit(cards)
 
 
 def retro_date(d):

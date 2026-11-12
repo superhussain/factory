@@ -292,6 +292,18 @@ class BacklogTriagePassTests(TriageFixture):
         self.assertEqual(self.cached(), [RENAME])
         self.assertEqual(self.gets, ["/api/pipeline/effective/sample"])
 
+    def test_skips_retro_lines(self):
+        retro = "- [ ] sample: Guard the ls alias"
+        self.files["/api/backlog"] = (f"# Backlog\n{retro}\n  Recommend: approve\n\n  Reasons.\n\n"
+                                      "  Retro: run r1, fingerprint 0123456789abcdef, created 2026-11-12T05:40:00Z\n"
+                                      f"{PDF}\n")
+        out, err = self.sweep()
+        self.assertEqual(err, "")
+        self.assertEqual(self.reads, [["sample: Add PDF export to reports"]])
+        self.assertEqual(self.posts, [{"item": "sample: Add PDF export to reports"}])
+        self.assertEqual(self.cached(), None)
+        self.assertIn(retro + "\n", self.files["/api/backlog"])
+
     def test_one_verdict_read_per_sweep(self):
         self.sweep()
         self.assertEqual(self.backlog_gets, 1)
