@@ -217,7 +217,7 @@ function response(board, status = 200, etag = 'W/"1"') {
   return {
     ok: status >= 200 && status < 300,
     status,
-    headers: { get: () => etag },
+    headers: { get: (name) => (name === "ETag" ? etag : null) },
     json: async () => clone(board),
     text: async () => "synthetic error <img src=x>",
   };
@@ -469,6 +469,9 @@ function fakeUI(fetch) {
             this.listeners[type] = fn;
           },
           setAttribute() {},
+          contains() {
+            return false;
+          },
           getClientRects() {
             return this.hidden ? [] : [{}];
           },
@@ -509,9 +512,10 @@ function fakeUI(fetch) {
   vm.runInContext(
     script.slice(0, script.indexOf("loadProjects().then(")) +
       `
-    renderBoard = () => {}; syncDetail = () => {}; renderDetail = () => {}; writeHash = () => {};
+    renderBoard = () => {}; syncDetail = () => {}; renderDetail = () => {}; writeHash = () => {}; loadTracerSetting = async () => {};
     // setConnection() reads pollEvery(), which the page declares after this slice ends.
     function pollEvery() { return 0; }
+    let liveOpen = false;
     this.ui = { openIdeaEditor: () => openIdeaEditor(drawerAction('d-edit-idea')), closeIdeaEditor, syncIdeaEditor, poll,
       setJobs(value) { jobs = value; }, target(id) { openId = id; drawerVersion++; },
       session() { return ideaEditor; }, jobs() { return jobs; } };
@@ -568,6 +572,8 @@ async function offlineUI() {
   const session = v.session();
   board.jobs[0].project = "new-project";
   await v.poll();
+  assert.equal(v.$("dot").className, "dot ok polling");
+  assert.equal(v.$("dot").title, "Polling paused while this window is hidden or unfocused");
   assert.equal(v.$("edit-idea-save").disabled, false);
   board.jobs[0].claim = false;
   await v.poll();
@@ -787,7 +793,7 @@ async function browserTest(url) {
         "complete board preserves opaque fields and all other jobs",
       );
     };
-    for (const [name, width, height, theme] of [
+    for (const [, width, height, theme] of [
       ["desktop", 1280, 900, "light"],
       ["mobile", 390, 844, "dark"],
     ]) {
@@ -1420,7 +1426,7 @@ async function browserTest(url) {
         })),
       );
     };
-    for (const [name, width, height, theme] of [
+    for (const [, width, height, theme] of [
       ["desktop", 1280, 900, "light"],
       ["mobile", 390, 844, "dark"],
     ]) {
