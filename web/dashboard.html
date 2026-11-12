@@ -4714,6 +4714,18 @@ function syncBacklogRoute() {
   if (key) openBacklogRoute(key);
 }
 
+// head, the backlog context block, then tail, in at most 4000 characters. A long context is cut
+// with a note; if even that does not fit, the block is left out. factory.py idea_with_context matches.
+function ideaWithContext(head, context, tail) {
+  if (!context) return head + tail;
+  const intro = '\n\nContext from the backlog:\n';
+  const cut = '\n[context cut to fit the 4000-character idea limit]';
+  const full = head + intro + context + tail;
+  if (full.length <= 4000) return full;
+  const room = 4000 - head.length - intro.length - cut.length - tail.length;
+  return room > 0 ? head + intro + context.slice(0, room) + cut + tail : head + tail;
+}
+
 // Adds the decided item as a job, or returns the id it already saved under captureId.
 function addBacklogJob(board, item, decision, notes, answers, captureId, now) {
   const prior = board.jobs.find((j) => j.capture_id === captureId);
@@ -4728,8 +4740,8 @@ function addBacklogJob(board, item, decision, notes, answers, captureId, now) {
   const answered = ans ? { answers: ans } : {};
   board.jobs.push(decision === 'approved'
     ? { id, project: item.project, title: ideaTitle(item.text), stage: 'idea', updated: now,
-        idea: (note ? item.text + '\n\nNotes from the backlog decision:\n' + note : item.text) +
-          (ans ? '\n\nAnswers from the backlog decision:\n' + ans : ''),
+        idea: ideaWithContext(item.text, item.context,
+          (note ? '\n\nNotes from the backlog decision:\n' + note : '') + (ans ? '\n\nAnswers from the backlog decision:\n' + ans : '')),
         capture_id: captureId, backlog: { line: item.raw, decision: 'approved', at: now, ...(note ? { notes: note } : {}), ...answered }, ...refs }
     : decision === 'rework'
     ? { id, project: item.project, title: ideaTitle(item.text), idea: item.text, stage: 'idea', updated: now,
