@@ -123,8 +123,10 @@ Retro digest routes store one redacted JSON-lines file per host per day at
 `retro/<id>/<date>.jsonl`, where the date is the host's local date. The bound
 host owns its file and nothing else writes the key. The body is at most 1 MiB of
 UTF-8, and each line is a JSON object whose `host` is the route's id. A bad id
-or calendar date answers 404, as does every other method. No route deletes a
-digest, and files are kept with no retention.
+or calendar date answers 404, as does every other method. A PUT dated outside
+yesterday, today or tomorrow in UTC answers 400. No route deletes a digest. The
+hourly scheduled pass deletes digests dated more than 35 days before today's UTC
+date.
 
 | Route | Who | Effect |
 | --- | --- | --- |
