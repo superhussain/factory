@@ -63,7 +63,13 @@ test("a service principal cannot save but can read", async () => {
   assert.equal(history.status, 200);
   const [entry] = await history.json();
   assert.equal("saved_by" in entry, false);
-  assert.deepEqual(Object.keys(entry), ["version", "saved_at", "sha256", "history_copy"]);
+  assert.deepEqual(Object.keys(entry), [
+    "version",
+    "saved_at",
+    "sha256",
+    "summary",
+    "history_copy",
+  ]);
   const [own] = await (await s.send("/api/pipeline/history/global")).json();
   assert.equal(own.saved_by, "person@example.test");
   assert.equal((await s.send("/api/pipeline/effective/sample", { principal: device })).status, 200);
@@ -189,7 +195,15 @@ test("history lists every version newest first, serves exact bytes, reverts forw
     assert.ok(v.saved_at);
     assert.equal(v.sha256, hex(bodies[2 - i]));
     assert.equal(v.history_copy, true);
-    assert.deepEqual(Object.keys(v), ["version", "saved_by", "saved_at", "sha256", "history_copy"]);
+    assert.equal(v.summary, "");
+    assert.deepEqual(Object.keys(v), [
+      "version",
+      "saved_by",
+      "saved_at",
+      "sha256",
+      "summary",
+      "history_copy",
+    ]);
   }
   const second = await s.send("/api/pipeline/history/global/2");
   assert.equal(second.status, 200);
@@ -254,6 +268,43 @@ test("history lists every version newest first, serves exact bytes, reverts forw
       [5, true],
     ],
   );
+});
+
+test("a person's change summary round-trips through history and bad summaries store nothing", async () => {
+  const s = setup();
+  const path = "/api/pipeline/global";
+  const summary = "Undo retro run a1b2c3 · café";
+  const saved = await s.put(path, doc(), {
+    "If-None-Match": "*",
+    "X-Pipeline-Summary": encodeURIComponent(summary),
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(s.bucket.objects.get("pipeline/global.json").customMetadata.summary, summary);
+  const [entry] = await (await s.send("/api/pipeline/history/global")).json();
+  assert.equal(entry.summary, summary);
+  assert.equal("run" in entry || "host" in entry, false);
+  const etag = saved.headers.get("ETag");
+  const empty = await s.put(path, doc({ merge: "human" }), {
+    "If-Match": etag,
+    "X-Pipeline-Summary": "",
+  });
+  assert.equal(empty.status, 200);
+  assert.equal("summary" in s.bucket.objects.get("pipeline/global.json").customMetadata, false);
+  for (const [header, text] of [
+    ["%E0%A4%A", "summary: must be percent-encoded UTF-8"],
+    [encodeURIComponent("two\nlines"), "summary: must be one line of 1 to 120 characters"],
+    [encodeURIComponent("x".repeat(121)), "summary: must be one line of 1 to 120 characters"],
+    [encodeURIComponent("see https://example.test"), "summary: links are not allowed"],
+  ]) {
+    const before = s.puts().length;
+    const response = await s.put(path, doc(), {
+      "If-Match": empty.headers.get("ETag"),
+      "X-Pipeline-Summary": header,
+    });
+    assert.equal(response.status, 400, text);
+    assert.equal(await response.text(), text);
+    assert.equal(s.puts().length, before);
+  }
 });
 
 test("effective view merges tighter values, 404s unregistered slugs and 409s invalid stored documents", async () => {

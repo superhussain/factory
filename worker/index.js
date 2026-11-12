@@ -434,11 +434,20 @@ async function projectDocumentPut(request, env, key) {
 const pipelineKey = (scope) => `pipeline/${scope}.json`;
 const pipelineHistoryKey = (scope, version) =>
   `pipeline-history/${scope}/${String(version).padStart(6, "0")}.json`;
+const SUMMARY_MAX = 120;
 const pipelineVersion = (obj) => Number.parseInt(obj?.customMetadata?.version, 10) || 0;
 const sha256 = async (bytes) =>
   Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (x) =>
     x.toString(16).padStart(2, "0"),
   ).join("");
+
+// A history summary: one line of 1 to SUMMARY_MAX characters that passes the note checks.
+function checkSummary(text) {
+  const length = typeof text === "string" ? [...text].length : 0;
+  if (!length || length > SUMMARY_MAX || text.includes("\n") || text.includes("\r"))
+    return `summary: must be one line of 1 to ${SUMMARY_MAX} characters`;
+  return checkOperatorText(text, "summary");
+}
 
 function pipelineReply(obj, version) {
   return reply(obj.body, 200, "application/json", {
@@ -479,10 +488,24 @@ async function pipelinePut(request, env, principal, scope) {
   for (const key of ["archive", "tracer"])
     if (scope !== "global" && key in doc)
       return reply(`${key}: set only in the all-projects scope`, 400);
-  const key = pipelineKey(scope);
-  const current = await env.BUCKET.head(key);
+  let summary = request.headers.get("X-Pipeline-Summary") || "";
+  try {
+    summary = decodeURIComponent(summary);
+  } catch {
+    return reply("summary: must be percent-encoded UTF-8", 400);
+  }
+  const summaryError = summary && checkSummary(summary);
+  if (summaryError) return reply(summaryError, 400);
+  const current = await env.BUCKET.head(pipelineKey(scope));
   if (cond.has("If-Match") ? current?.httpEtag !== cond.get("If-Match") : current)
     return reply("precondition failed", 412);
+  return pipelineStore(env, scope, bytes, current, cond, { saved_by: principal.email, summary });
+}
+
+// Writes bytes as the next version of scope, conditional on cond, and copies it create-only
+// under pipeline-history/. meta is {saved_by, summary, run?, host?}; empty values are left out.
+async function pipelineStore(env, scope, bytes, current, cond, meta) {
+  const key = pipelineKey(scope);
   const cur = pipelineVersion(current);
   // Heal a history copy an earlier save failed to write, before this save replaces it.
   if (cur > 0 && !(await env.BUCKET.head(pipelineHistoryKey(scope, cur)))) {
@@ -503,9 +526,9 @@ async function pipelinePut(request, env, principal, scope) {
     httpMetadata: { contentType: "application/json" },
     customMetadata: {
       version: String(cur + 1),
-      saved_by: principal.email,
       saved_at: new Date().toISOString(),
       sha256: await sha256(bytes),
+      ...Object.fromEntries(Object.entries(meta).filter(([, value]) => value)),
     },
   };
   const obj = await env.BUCKET.put(key, bytes, { ...options, onlyIf: cond });
@@ -538,8 +561,17 @@ async function pipelineGet(env, scope) {
 async function pipelineHistory(env, scope, principal) {
   const versions = new Map();
   const add = (obj, copy) => {
-    const { version, saved_by, saved_at, sha256 } = obj.customMetadata;
-    const entry = { version: Number(version), saved_by, saved_at, sha256, history_copy: copy };
+    const { version, saved_by, saved_at, sha256, summary = "", run, host } = obj.customMetadata;
+    const entry = {
+      version: Number(version),
+      saved_by,
+      saved_at,
+      sha256,
+      summary,
+      ...(run && { run }),
+      ...(host && { host }),
+      history_copy: copy,
+    };
     if (principal.kind !== "user") delete entry.saved_by;
     versions.set(entry.version, entry);
   };
