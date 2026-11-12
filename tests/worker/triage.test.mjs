@@ -305,6 +305,18 @@ test("a question item asks clef-flash for a pick and a reason per option, and st
   );
 });
 
+test("a CRLF many-pick context with two recommended options still reaches the model", async () => {
+  const s = setup({ reply: QUESTION_REPLY });
+  await s.save("projects/sample", on());
+  const context = QUESTION_CONTEXT.replace("Pick: one", "Pick: many")
+    .replace("- Semicolon:", "- Semicolon (recommended):")
+    .split("\n")
+    .join("\r\n");
+  const r = await s.triage({ item: QUESTION_ITEM, context });
+  assert.equal(r.status, 200);
+  assert.equal(s.runs.length, 1);
+});
+
 test("unparsable questions, no AI binding, a throw or an unusable reply give the fixed hold", async () => {
   const s = setup({ reply: QUESTION_REPLY });
   await s.save("projects/sample", on());
@@ -315,6 +327,14 @@ test("unparsable questions, no AI binding, a throw or an unusable reply give the
     "Recommend: approve\nWorth it.\n## Question:\nWhich one?\nPick: one\n- CSV\n- TSV",
     "Recommend: approve\nWorth it.\n" +
       [1, 2, 3, 4].map((n) => `## Question: Q${n}\nWhich?\nPick: one\n- A\n- B`).join("\n"),
+    `Recommend: approve\nWorth it.\n## Question: ${"H".repeat(61)}\nWhich one?\nPick: one\n- CSV\n- TSV`,
+    "Recommend: approve\nWorth it.\n## Question: Format\nPick: one\n- CSV\n- TSV",
+    "Recommend: approve\nWorth it.\n## Question: Format\nWhich one?\nPick: one\n- CSV (recommended)\n- TSV (recommended)",
+    "Recommend: approve\nWorth it.\n## Question: Format\nWhich one?\nPick: one\n- CSV\n- TSV\n## Notes\nMore.",
+    "Recommend: approve\n## Question: Format\nWhich one?\nPick: one\n- CSV\n- TSV",
+    // 2990 four-byte characters pass the Worker's 6000-character body check, but as 5980 UTF-16 units
+    // they push the context past the dashboard's 6000-unit limit.
+    `Recommend: approve\n${"\u{1F600}".repeat(2990)}\n## Question: Format\nWhich one?\nPick: one\n- CSV\n- TSV`,
   ]) {
     const r = await s.triage({ item: QUESTION_ITEM, context });
     assert.equal(r.status, 200, context);
