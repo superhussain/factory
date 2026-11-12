@@ -18,7 +18,7 @@ All of these run through `factory.py` on a device.
 | `autonomy deny <slug>` | anyone | Removes a project from the allowlist. |
 | `autonomy self <slug>` | anyone | Marks a project as part of the factory itself, so the classifier flags its cards. |
 | `suggest admit <file>` | trusted launcher | Checks a `factory.suggestions/1` file and adds one gated idea card per new suggestion. |
-| `suggest approve <job-id> <A\|B\|C>` | human at a terminal | Approves one option after you type the job id, which lets `factory.py pickup` promote the card. |
+| `suggest approve <job-id> <A\|B\|C>` | human at a terminal, or an orchestrator relaying the person's chat message (`--chat`) | Approves one option after you type the job id, which lets `factory.py pickup` promote the card. |
 | `explore <slug>` | explorer schedule | Snapshots an allowlisted project's base for the explorer and prints the run's paths. Exits 3 when paused or not allowlisted. |
 | `explore <slug> done <run>` | explorer schedule | Removes that run's snapshot and keeps its suggestions file. |
 

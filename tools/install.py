@@ -17,7 +17,7 @@ from pathlib import Path
 REQUIRED = (
     "SKILL.md", "runtime/factory.py", "runtime/paseo_stalls.py", "runtime/pr_screenshots.py",
     "templates/config.md", "templates/project.md", "references/execution.md", "references/integrations.md",
-    "references/pickup.md", "references/visuals.md",
+    "references/pickup.md", "references/visuals.md", "references/chat-decisions.md",
     "references/project-settings.md", "references/dashboard.md", "references/needs.md", "references/schedules.md",
     "references/walkthrough.html", "schedules/explore.md", "schedules/resume.md",
 ) + tuple("references/commands/" + name + ".md" for name in (
