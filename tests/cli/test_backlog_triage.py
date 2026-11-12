@@ -126,8 +126,34 @@ class BacklogTriageTests(TriageFixture):
         job = self.board()[-1]
         self.assertEqual((job["id"], job["title"]), ("004-add-csv-export", "Add CSV export to reports"))
         self.assertEqual(job["refs"], [{"id": "002-reports", "kind": "sub-job-of"}])
-        self.assertTrue(job["idea"].startswith("Add CSV export to reports\n\nQueued by backlog triage:"))
+        self.assertTrue(job["idea"].startswith("Add CSV export to reports\n\nContext from the backlog:\n"
+                                               "Recommend: approve\nSmall.\n\nQueued by backlog triage:"))
         self.assertEqual(self.files["/api/backlog"].split("\n")[1], f"- [x] {item} (004-add-csv-export)")
+
+    def test_queue_copies_the_context_into_the_idea(self):
+        path = self.dir / "context.md"
+        path.write_text("Recommend: approve\nUsers ask for CSV weekly.\n", encoding="utf-8")
+        code, _, _ = self.add(ITEM, "--context", str(path))
+        self.assertEqual(code, 0)
+        self.assertEqual(self.board()[-1]["idea"],
+                         "Add CSV export to reports\n\nContext from the backlog:\n"
+                         "Recommend: approve\nUsers ask for CSV weekly.\n\n"
+                         "Queued by backlog triage: confidence 86% (threshold 80%). "
+                         "Rated by clef-flash against the project rules.")
+
+    def test_queue_cuts_a_long_context_to_the_idea_limit(self):
+        path = self.dir / "context.md"
+        path.write_text("Recommend: approve\n" + "y" * 5000 + "\n", encoding="utf-8")
+        code, _, _ = self.add(ITEM, "--context", str(path))
+        self.assertEqual(code, 0)
+        idea = self.board()[-1]["idea"]
+        self.assertEqual(len(idea), 4000)
+        self.assertTrue(idea.startswith("Add CSV export to reports\n\nContext from the backlog:\nRecommend: approve\nyyy"))
+        self.assertTrue(idea.endswith("y\n[context cut to fit the 4000-character idea limit]\n\n"
+                                      "Queued by backlog triage: confidence 86% (threshold 80%). "
+                                      "Rated by clef-flash against the project rules."))
+        self.assertEqual(self.module.idea_with_context("a", "x" * 4000, "b" * 3950), "a" + "b" * 3950)
+        self.assertEqual(self.module.idea_with_context("a", None, "b"), "ab")
 
     def test_queue_skips_a_dotted_suffix_id(self):
         code, _, _ = self.add(ITEM + " (follow-up-of a..b)")
@@ -291,6 +317,14 @@ class BacklogTriagePassTests(TriageFixture):
                          "- [x] sample: Add PDF export to reports (009-add-pdf-export)")
         self.assertEqual(self.cached(), [RENAME])
         self.assertEqual(self.gets, ["/api/pipeline/effective/sample"])
+
+    def test_a_queued_sweep_line_carries_its_context(self):
+        self.triage = (200, json.dumps(QUEUE))
+        out, err = self.sweep()
+        self.assertEqual(err, "")
+        self.assertEqual([j["idea"].split("\n\nQueued by")[0] for j in self.board()[-2:]],
+                         ["Add PDF export to reports",
+                          "Rename report filters\n\nContext from the backlog:\nRecommend: approve\nClearer names."])
 
     def test_one_verdict_read_per_sweep(self):
         self.sweep()
