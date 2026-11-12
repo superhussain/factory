@@ -322,7 +322,9 @@ async function capture(outdir, referencePath) {
     let longProject = false;
     let refBoard = false;
     let grantLoopback = false;
+    const onlyViews = process.env.FACTORY_CAPTURE_VIEWS?.split(",");
     async function view(name, width, height, theme, prepare, touch = false) {
+      if (onlyViews && !onlyViews.includes(name)) return;
       for (const side of ["before", "after"]) {
         await retryCapture(`${side}-${name}`, async () => {
           const context = await browser.createBrowserContext();
