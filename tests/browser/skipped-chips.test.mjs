@@ -60,7 +60,8 @@ test("skipped chips", { timeout: 120000 }, async (t) => {
       const chips = await page.evaluate(
         (sel) =>
           [...document.querySelectorAll(`${sel} .round .chip`)].map((c) => ({
-            text: c.textContent,
+            name: c.firstChild.textContent,
+            sr: c.querySelector(".sr-only")?.textContent,
             cls: c.className,
             title: c.title,
             outline: getComputedStyle(c).outlineStyle,
@@ -71,10 +72,14 @@ test("skipped chips", { timeout: 120000 }, async (t) => {
 
       await t.test(`${view.name} skipped chips`, () => {
         for (const name of ["ux", "ui"]) {
-          const chip = chips.find((c) => c.text === name);
+          const chip = chips.find((c) => c.name === name);
           assert.equal(chip.cls, "chip SKIPPED");
           assert.equal(chip.title, `${name}: SKIPPED`);
           assert.equal(chip.outline, "dashed");
+          assert.equal(chip.sr, " skipped");
+        }
+        for (const name of ["security", "code"]) {
+          assert.equal(chips.find((c) => c.name === name).sr, " passed");
         }
       });
       await t.test(`${view.name} no page errors`, () => {

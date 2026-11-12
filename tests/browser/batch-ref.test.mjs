@@ -159,8 +159,10 @@ test("batched rider waits on lead", { timeout: 120000 }, async () => {
     await page.screenshot({ path: `${SHOTS}batch-ref-waits-on-lead-desktop.png`, clip });
     assert.equal(
       await page.$eval(`${WAIT_CARD} .note`, (el) => el.textContent),
-      "Waiting on lead 090-sample-export-csv",
+      "Waiting on its lead",
     );
+    const text = await page.$eval(WAIT_CARD, (el) => el.textContent);
+    assert.equal(text.split("090-sample-export-csv").length - 1, 1);
     await page.close();
   });
 });

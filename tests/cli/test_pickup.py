@@ -1799,9 +1799,15 @@ class CloseTest(PickupFixture):
         self.views["alpha"] = (200, effective("alpha", {"pickup": {"enabled": False, "hosts": ["other-host", DEVICE]}}))
         self.board["jobs"] = [self.closing()]
         self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
-        self.assertIn("Hosts that need `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. "
-                      "The board records them as holding this job, and the project's pickup is off.\n",
+        self.assertIn("- Host that needs `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. "
+                      "The board records it as holding this job, and the project's pickup is off.\n",
                       self.files[self.DECISION])
+
+    def test_close_decision_names_one_host_pickup_skips(self):
+        text = factory.close_decision(self.closing(), self.REASON, DEVICE, None, None, (True, [DEVICE], None))
+        self.assertIn("- Host that needs `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. "
+                      "The board records it as holding this job, and the project's pickup "
+                      "does not list it.\n", text)
 
     def test_close_decision_lists_hosts_when_pickup_is_unread(self):
         self.views["alpha"] = (404, "")

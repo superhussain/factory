@@ -115,6 +115,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog label[hidden], dialog select[hidden], dialog textarea[hidden], dialog input[hidden] { display: none; }
   dialog textarea { resize: vertical; min-height: 140px; }
   dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
+  dialog .err.saved { color: inherit; }
   .detail > .err, .detail > .copy-status { margin: 12px 20px; flex: none; }
   .detail > .copy-status { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .detail > .copy-status:empty { display: none; }
@@ -1156,6 +1157,8 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
   }
 }
 
+const REVIEW_STATE_WORDS = { PASS: 'passed', CHANGES: 'changes requested', SKIPPED: 'skipped', pending: 'pending' };
+
 function chips(rounds) {
   if (!Array.isArray(rounds) || !rounds.length) return '';
   return '<div class="rounds">' + rounds.map((r, i) =>
@@ -1163,7 +1166,7 @@ function chips(rounds) {
     REVIEWERS.map((k) => {
       const v = (r && r[k]) || 'pending';
       const cls = v === 'PASS' || v === 'CHANGES' || v === 'SKIPPED' ? v : 'pending';
-      return '<span class="chip ' + cls + '" title="' + esc(k + ': ' + v) + '">' + esc(k) + '</span>';
+      return '<span class="chip ' + cls + '" title="' + esc(k + ': ' + v) + '">' + esc(k) + '<span class="sr-only"> ' + REVIEW_STATE_WORDS[cls] + '</span></span>';
     }).join('') + '</div>'
   ).join('') + '</div>';
 }
@@ -1356,10 +1359,10 @@ function refLine(r) {
 
 // The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
 // Each on-board ref and rider also gets a visually hidden stand-in link after the actions trigger, named for this card, so Tab reaches it.
-// A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise. A rider's batch note is left out, and a rider with no ask names its lead.
+// A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise. A rider's batch note is left out, and a rider with no ask says it waits on its lead, which its ref row names.
 function card(j, inNeeds, archived = false) {
   const own = inNeeds && asks(j.needs) ? j.needs : batchNote(j) ? '' : j.note;
-  const ask = own || (inNeeds && leadOf(j) ? 'Waiting on lead ' + leadOf(j) : '');
+  const ask = own || (inNeeds && leadOf(j) ? 'Waiting on its lead' : '');
   const riders = archived ? [] : ridersOf(j.id);
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
@@ -5207,13 +5210,13 @@ function resumeJob(board, id, now) {
 }
 
 // factory.py pickup writes decision.md with the reason, then moves the job to closed.
-// Returns an error message, '' once the board is changed, or 'unchanged' when the board already
-// holds this close.
+// Returns an error message, '' once the board is changed, 'unchanged' when the board already
+// holds this close, or 'saved' when it holds a close with another reason.
 function closeJob(board, id, reason, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
   if (!j.project || j.stage === 'idea' || TERMINAL.includes(j.stage) || leadOf(j)) return 'This job can no longer be closed.';
-  if (j.close) return j.close.reason === reason.trim() ? 'unchanged' : 'The close is already saved, with the reason "' + j.close.reason + '". A saved reason cannot be changed. Cancel closes this dialog and keeps the close.';
+  if (j.close) return j.close.reason === reason.trim() ? 'unchanged' : 'saved';
   const text = reason.trim();
   if (!/^[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}$/.test(text)) {
     return 'Enter a reason of 1 to 200 characters. ' +
@@ -5339,6 +5342,7 @@ function openCloseDialog(ctx) {
   $('close-job-help').textContent = j.id + ' stops at ' + j.stage + '. The next pickup run writes decision.md with your reason, then moves the job to Closed. If a session is running it, the close waits for that session to stop.';
   $('close-job-reason').value = '';
   $('close-job-err').textContent = '';
+  $('close-job-err').classList.remove('saved');
   $('close-job-err').hidden = true;
   $('close-job-save').disabled = false;
   $('close-job-dlg').showModal();
@@ -5361,11 +5365,17 @@ $('close-job-form').addEventListener('submit', async (e) => {
   const { id } = closeDialog;
   const dlg = closeDialog;
   let refused = false;
+  let savedReason = null;
   $('close-job-save').disabled = true;
   try {
     await casBoard((board) => {
+      savedReason = null;
       const message = closeJob(board, id, $('close-job-reason').value, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message === 'saved') {
+        savedReason = board.jobs.find((x) => x.id === id).close.reason;
+        return BOARD_UNCHANGED;
+      }
       if (message) {
         refused = true;
         throw new Error(message);
@@ -5374,7 +5384,17 @@ $('close-job-form').addEventListener('submit', async (e) => {
   } catch (x) {
     if (!refused && dlg.uncertain) x.uncertain = true;
     dlg.uncertain = !!x.uncertain;
+    $('close-job-err').classList.remove('saved');
     $('close-job-err').textContent = boardSaveError(x, 'The close may have saved. Press Close job again to check. It will not queue a second close or change a saved reason.');
+    $('close-job-err').hidden = false;
+    $('close-job-save').disabled = false;
+    return;
+  }
+  if (savedReason !== null) {
+    dlg.uncertain = false;
+    $('close-job-reason').value = savedReason;
+    $('close-job-err').classList.add('saved');
+    $('close-job-err').textContent = 'The close is already saved, with the reason "' + savedReason + '". A saved reason cannot be changed. Cancel closes this dialog and keeps the close.';
     $('close-job-err').hidden = false;
     $('close-job-save').disabled = false;
     return;
@@ -5979,6 +5999,7 @@ function renderJobActionResults() {
   const A = actions.length, L = links.length;
   $('job-count').textContent = A + (A === 1 ? ' action' : ' actions') + (L ? ' · ' + L + (L === 1 ? ' link' : ' links') : '');
   $('job-search-label').textContent = linkRows.length ? 'Search actions and links' : 'Search actions';
+  $('job-results').setAttribute('aria-label', linkRows.length ? 'Actions and links' : 'Actions');
   $('job-empty').textContent = !j ? 'This job is no longer on the board' : linkRows.length ? 'No matching actions or links' : 'No matching actions';
   $('job-empty').hidden = jobResults.length !== 0;
   renderPickerRows();

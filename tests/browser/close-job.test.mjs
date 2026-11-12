@@ -363,8 +363,18 @@ test("close job", { timeout: 240000 }, async (t) => {
             await page.$("#close-job-dlg")
           ).screenshot({ path: `${SHOTS}close-edited-reason-390.png` });
         assert.equal(edited, SAVED_CLOSE);
-        await activate("#close-job-cancel");
+        const shown = await page.$eval("#close-job-err", (el) => ({
+          saved: el.classList.contains("saved"),
+          color: getComputedStyle(el).color,
+          dialog: getComputedStyle(el.closest("dialog")).color,
+        }));
+        assert.equal(shown.saved, true);
+        assert.equal(shown.color, shown.dialog);
+        assert.equal(await page.$eval("#close-job-reason", (el) => el.value), REASON);
+        const saved = await boardText(origin);
+        await activate("#close-job-save");
         await page.waitForSelector("#close-job-dlg:not([open])");
+        assert.equal(await boardText(origin), saved);
       });
 
       await t.test(`a 5xx body ending in a period gets one period ${width}`, async () => {
