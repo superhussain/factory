@@ -7184,6 +7184,7 @@ MAX_RETRO_BYTES = 131072
 RETRO_EDIT_SCHEMA = "factory.retro-edit/1"
 RETRO_EDIT_CHANGE = 600
 MAX_RETRO_EDITS = 2
+RETRO_EDITS_PER_DAY = 2
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
@@ -7616,9 +7617,18 @@ def check_edit(e, agg):
     return None
 
 
+def retro_edits_today(home, scope):
+    """How many retro versions scope has from the last 24 hours. Only retro saves carry run."""
+    status, _, text = api(home, "GET", f"/api/pipeline/history/{scope}", ok=(200, 404))
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    return sum("run" in v and datetime.fromisoformat(v["saved_at"].replace("Z", "+00:00")) > cutoff
+               for v in (json.loads(text) if status == 200 else []))
+
+
 def retro_apply_edits(home, run, edits, agg):
     """PUT each checked edit to the Worker's retro route while autonomy runs. Returns one
-    {scope, stage, result, summary} row per edit; a bad edit's text is left out."""
+    {scope, stage, result, summary} row per edit; a bad edit's text is left out. A saved
+    edit moves agg's version and note on, so a later edit to the same scope builds on it."""
     if load_autonomy(load_board(api(home, "GET", "/api/board")[2]))["paused"] is not False:
         print("autonomy is paused; no pipeline edit")
         return [{"scope": f"edits[{i}]", "stage": "", "result": "not sent: autonomy is paused", "summary": ""}
@@ -7632,14 +7642,22 @@ def retro_apply_edits(home, run, edits, agg):
             results.append({"scope": f"edits[{i}]", "stage": "", "result": f"skipped: {where}: {bad[1]}",
                             "summary": ""})
             continue
+        row = {"scope": e["scope"], "stage": e["stage"], "summary": e["summary"]}
+        if retro_edits_today(home, e["scope"]) >= RETRO_EDITS_PER_DAY:
+            reason = f"retro edit cap: {RETRO_EDITS_PER_DAY} per scope per day"
+            print(f"skipped edits[{i}]: {reason}")
+            results.append(dict(row, result=f"skipped: {reason}"))
+            continue
         body = {"schema": RETRO_EDIT_SCHEMA, "run": run, "base_version": agg["pipeline"][e["scope"]]["version"],
                 "stage": e["stage"], "note": e["note"], "summary": e["summary"]}
         status, headers, text = api(home, "PUT", f"/api/pipeline/retro/{e['scope']}", json.dumps(body),
                                     ok=(200, 400, 403, 404, 409, 412, 413, 429),
                                     headers={"Content-Type": "application/json"})
-        row = {"scope": e["scope"], "stage": e["stage"], "summary": e["summary"]}
         if status == 200:
             version = headers["X-Pipeline-Version"]
+            scope = agg["pipeline"][e["scope"]]
+            scope["version"] = int(version)
+            scope["stage_notes"][e["stage"]] = e["note"]
             print(f"edited {e['scope']} stage_notes.{e['stage']} to version {version}: {e['summary']}")
             results.append(dict(row, result=f"version {version}"))
         else:

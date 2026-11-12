@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from support import ROOT, IsolatedTestCase, http_fixture, invoke, load_runtime
 
@@ -789,8 +789,9 @@ class RetroEditTest(RetroWorkerCase):
         self.assertEqual(out, f"wrote {self.folder / 'findings.md'}\n"
                               f"edited projects/factory stage_notes.spec to version 8: {EDIT_SUMMARY}\n"
                               "no suggestions\n")
-        self.assertEqual([f"{m} {p}" for m, p, _, _ in requests], ["GET /api/board", PUT_ROUTE])
-        _, _, headers, body = requests[1]
+        self.assertEqual([f"{m} {p}" for m, p, _, _ in requests],
+                         ["GET /api/board", "GET /api/pipeline/history/projects/factory", PUT_ROUTE])
+        _, _, headers, body = requests[2]
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertEqual(json.loads(body), {
             "schema": "factory.retro-edit/1", "run": RUN, "base_version": 7, "stage": "spec",
@@ -821,7 +822,8 @@ class RetroEditTest(RetroWorkerCase):
                 self.assertIn(f"skipped {line}\n", out)
                 self.assertIn("edited global stage_notes.spec to version 1", out)
                 self.assertEqual([f"{m} {p}" for m, p, _, _ in requests],
-                                 ["GET /api/board", "PUT /api/pipeline/retro/global"])
+                                 ["GET /api/board", "GET /api/pipeline/history/global",
+                                  "PUT /api/pipeline/retro/global"])
                 self.assertIn(f"| edits[0] |  | skipped: {line.replace('|', chr(92) + '|')} |  |\n", text)
 
     def test_exactly_600_changed_characters_is_sent(self):
@@ -831,7 +833,7 @@ class RetroEditTest(RetroWorkerCase):
         self.assertEqual(factory.retro_changed_chars("a\U0001F600c", "abc"), 2)
         code, out, _, requests, _ = self.admit([edit(note=note)])
         self.assertEqual(code, 0)
-        self.assertEqual(len(requests), 2)
+        self.assertEqual(len(requests), 3)
 
     def test_worker_refusals_are_skipped_without_changing_the_exit_code(self):
         for status, text in ((404, b"not found"), (409, b"autonomy is paused; no retro edit"),
@@ -842,6 +844,36 @@ class RetroEditTest(RetroWorkerCase):
                 self.assertIn(f"skipped edits[0]: {status} {text.decode()}\n", out)
                 self.assertIn(f"| projects/factory | spec | skipped: {status} {text.decode()} | {EDIT_SUMMARY} |",
                               table)
+
+    def test_second_edit_on_a_scope_builds_on_the_first(self):
+        build = edit(stage="build", note="Run the tests.", summary="Build note: run the tests")
+        # 600 characters from the saved note, but 639 from the aggregate's original one.
+        spec_again = edit(note=edit()["note"] + "y" * 600, summary="Spec note: keep it short")
+        code, out, err, requests, _ = self.admit([edit(), build])
+        self.assertEqual((code, err), (0, ""))
+        puts = [json.loads(body) for m, _, _, body in requests if m == "PUT"]
+        self.assertEqual([b["base_version"] for b in puts], [7, 8])
+        self.assertIn("edited projects/factory stage_notes.build to version 8", out)
+        # The 600-character cap measures a repeated stage against the note just saved.
+        _, out, _, requests, _ = self.admit([edit(), spec_again])
+        self.assertEqual(len([m for m, *_ in requests if m == "PUT"]), 2)
+
+    def test_device_daily_cap_counts_recent_retro_versions(self):
+        now = datetime.now(timezone.utc)
+        recent = lambda hours: (now - timedelta(hours=hours)).isoformat(timespec="milliseconds").replace(
+            "+00:00", "Z")
+        history = [{"version": 9, "saved_at": recent(1), "summary": "a", "run": "r1", "host": "wsl"},
+                   {"version": 8, "saved_at": recent(2), "summary": "b", "run": "r0", "host": "wsl"},
+                   {"version": 7, "saved_at": recent(3), "summary": ""}]
+        route = "GET /api/pipeline/history/projects/factory"
+        code, out, err, requests, text = self.admit([edit()], {route: (200, history)})
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("skipped edits[0]: retro edit cap: 2 per scope per day\n", out)
+        self.assertNotIn("PUT", [m for m, *_ in requests])
+        self.assertIn("| projects/factory | spec | skipped: retro edit cap: 2 per scope per day |", text)
+        history[1]["saved_at"] = recent(25)
+        _, out, _, requests, _ = self.admit([edit()], {route: (200, history)})
+        self.assertIn("PUT", [m for m, *_ in requests])
 
     def test_paused_autonomy_sends_no_put(self):
         code, out, err, requests, text = self.admit([edit(), edit(scope="global")], paused=True)
