@@ -53,6 +53,11 @@
                                             pending, checking every 10 seconds for up to S seconds
                                             (default 300); no checks after 120 seconds exits 0, a failing
                                             check 1, pending at the deadline 3, a bad pr 4, a gh problem 5
+  factory.py pr-state <project-slug>/<job-id> [--wait S]
+                                            print one JSON reading of the job PR for /factory babysit:
+                                            pr, state, review, checks, queued, conflict and next; --wait
+                                            re-reads every 30 seconds for up to S seconds (1 to 600) while
+                                            next is wait; a bad pr exits 4, a gh problem 5
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
