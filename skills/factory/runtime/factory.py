@@ -3755,9 +3755,12 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
                   f"could not read the project's pickup hosts: {unread}. Run {task} by hand on each of those "
                   "hosts that pickup does not cover.\n")
     elif uncovered:
-        manual = (f"- Hosts that need {task} run by hand: " + ", ".join(f"`{h}`" for h in uncovered)
-                  + ". The board records them as holding this job, and the project's pickup "
-                  + ("is off" if enabled is False else "does not list them") + ".\n")
+        one = len(uncovered) == 1
+        them = "it" if one else "them"
+        manual = (f"- {'Host that needs' if one else 'Hosts that need'} {task} run by hand: "
+                  + ", ".join(f"`{h}`" for h in uncovered)
+                  + f". The board records {them} as holding this job, and the project's pickup "
+                  + ("is off" if enabled is False else f"does not list {them}") + ".\n")
     else:
         manual = ""
     text = (f"CLOSED: {reason}\n\n"
