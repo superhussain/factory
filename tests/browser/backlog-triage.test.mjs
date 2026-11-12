@@ -11,6 +11,8 @@ const TRAILING_ITEM = "sample: Add a sidebar";
 const MISSING_ITEM = "sample: Add a footer";
 const MALFORMED_ITEM = "sample: Add a header";
 const LATE_ITEM = "sample: Add a changelog";
+const LONG_ITEM = "sample: " + "x".repeat(1993);
+const NEIGHBOR_ITEM = "sample: Add a status page";
 const MODEL_VERDICT = {
   item: MODEL_ITEM,
   decision: "hold",
@@ -241,6 +243,49 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
         "Confidence 40% is below the 80% threshold. Rated by clef-flash against the project rules.",
       );
       assert.equal(verdictReads.length, 3);
+    });
+
+    await t.test("an over-long line does not blank the rest of its batch", async () => {
+      const neighbor = await send(
+        "POST",
+        "/api/backlog/triage",
+        JSON.stringify({ item: NEIGHBOR_ITEM, context: "Recommend: deny\nSynthetic reason." }),
+      );
+      assert.equal(neighbor.status, 200);
+      const etag = (await send("GET", "/api/backlog")).headers.get("etag");
+      const text =
+        "# Backlog\n\n" +
+        [...lines, LATE_ITEM, LONG_ITEM, NEIGHBOR_ITEM].map((l) => `- [ ] ${l}\n`).join("");
+      assert.equal(
+        (
+          await send("PUT", "/api/backlog", text, {
+            "If-Match": etag,
+            "Content-Type": "text/markdown",
+          })
+        ).status,
+        200,
+      );
+      await page.evaluate(async () => {
+        await loadBacklog();
+        renderBoard();
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll(".backlog-card").length === 8,
+        wait,
+      );
+      assert.deepEqual(verdictReads[3], [MISSING_ITEM, LONG_ITEM, NEIGHBOR_ITEM]);
+      await page.waitForFunction(
+        (line) => backlogTriageSeen.get("- [ ] " + line)?.decision === "hold",
+        wait,
+        NEIGHBOR_ITEM,
+      );
+      await open(NEIGHBOR_ITEM);
+      await page.waitForSelector("#backlog-triage:not([hidden])", wait);
+      assert.equal(
+        (await section()).paragraphs[0],
+        "Held without a model score because its author recommends deny.",
+      );
+      assert.equal(verdictReads.length, 4);
     });
 
     assert.equal(itemReads, 0);
