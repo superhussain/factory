@@ -53,6 +53,11 @@
                                             pending, checking every 10 seconds for up to S seconds
                                             (default 300); no checks after 120 seconds exits 0, a failing
                                             check 1, pending at the deadline 3, a bad pr 4, a gh problem 5
+  factory.py pr-state <project-slug>/<job-id> [--wait S]
+                                            print one JSON reading of the job PR for /factory babysit:
+                                            pr, state, review, checks, queued, conflict and next; --wait
+                                            re-reads every 30 seconds for up to S seconds (1 to 600) while
+                                            next is wait; a bad pr exits 4, a gh problem 5
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
@@ -821,6 +826,8 @@ def board(factory, job_id):
         fail("only the dashboard and factory.py pickup set priority", 2)
     if "paused" in patch:
         fail("only the dashboard sets paused", 2)
+    if patch.get("babysit") is not None:
+        fail("only the dashboard sets babysit; a session clears it with null", 2)
     if "close" in patch:
         fail("only the dashboard and factory.py pickup set close", 2)
     if "id" in patch:
@@ -1284,6 +1291,7 @@ def report_verdict(home, slug, feature, item, verdict, context=None):
 
 
 TRIAGE_SWEEP_LIMIT = 20
+TRIAGE_BATCH_LIMIT = 8
 TRIAGE_SWEEP_MINUTES = 30
 
 
@@ -1388,6 +1396,7 @@ def triage_enabled(home, slug):
 def backlog_triage_pass(home):
     """Rate up to TRIAGE_SWEEP_LIMIT unchecked backlog lines this host has no final verdict for, in
     projects with triage on. One verdicts read first records the lines another host already held.
+    Plain lines go TRIAGE_BATCH_LIMIT per batch call per project, then question lines post alone.
     Queued lines become ideas. The first retryable failure ends the sweep. A Worker error still
     saves the verdicts recorded so far."""
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
@@ -1411,16 +1420,41 @@ def backlog_triage_pass(home):
             if enabled[slug]:
                 picked.append(line)
         items = [f"{slug}: {feature.rstrip()}" for _, slug, feature, _ in picked]
-        for (raw, slug, feature, context), item, stored in zip(picked, items, stored_verdicts(home, items)):
+        rate = []
+        for line, item, stored in zip(picked, items, stored_verdicts(home, items)):
             if isinstance(stored, dict) and stored.get("decision") == "hold":
-                triaged.append(raw)
-                continue
-            verdict, final = backlog_triage(home, item, context or None)
+                triaged.append(line[0])
+            else:
+                rate.append((line, item))
+
+        def settle(line, item, verdict, final):
+            raw, slug, feature, context = line
             left = verdict is not None and report_verdict(home, slug, feature, item, verdict, context or None)
             if final and (verdict is None or verdict["decision"] != "queue" or left):
                 triaged.append(raw)
-            if verdict is None and not final:
-                break
+
+        def single(line, item):
+            verdict, final = backlog_triage(home, item, line[3] or None)
+            settle(line, item, verdict, final)
+            return verdict is None and not final
+
+        plain = [entry for entry in rate if not asks_questions(entry[0][3])]
+        chunks = []
+        for slug in dict.fromkeys(line[1] for line, _ in plain):
+            same = [entry for entry in plain if entry[0][1] == slug]
+            chunks += [same[i:i + TRIAGE_BATCH_LIMIT] for i in range(0, len(same), TRIAGE_BATCH_LIMIT)]
+        for chunk in chunks:
+            results, stopped = backlog_triage_batch(home, [(item, line[3] or None) for line, item in chunk])
+            if results is None:
+                stopped = any(single(line, item) for line, item in chunk)
+            else:
+                for (line, item), (verdict, final) in zip(chunk, results):
+                    settle(line, item, verdict, final)
+            if stopped:
+                return
+        for line, item in rate:
+            if asks_questions(line[3]) and single(line, item):
+                return
     finally:
         if triaged != cached:
             save_triaged(home, triaged)
@@ -1429,9 +1463,13 @@ def backlog_triage_pass(home):
 def triage_verdict(text):
     """The Worker's triage reply, or None when it is not one."""
     try:
-        reply = json.loads(text)
+        return triage_reply(json.loads(text))
     except ValueError:
         return None
+
+
+def triage_reply(reply):
+    """A parsed triage reply, or None when it is not one."""
     if not isinstance(reply, dict) or reply.get("decision") not in ("off", "queue", "hold"):
         return None
     if reply["decision"] == "off":
@@ -1464,6 +1502,54 @@ def backlog_triage(home, item, context):
               file=sys.stderr)
         return None, status == 400
     return (None, False) if verdict["decision"] == "off" else (verdict, True)
+
+
+def asks_questions(context):
+    """True when a backlog context has a `## Question:` row, so it goes to the single route."""
+    return any(row.startswith("## Question:") for row in re.split(r"\r\n|\r|\n", context or ""))
+
+
+def backlog_triage_batch(home, entries):
+    """(results, stopped) for up to TRIAGE_BATCH_LIMIT (item, context) lines of one project.
+    results holds (verdict, final) per entry, as backlog_triage does, or is None on a 400 or 404,
+    so the caller posts each line alone. A whole failure, off or a malformed reply sets stopped."""
+    body = json.dumps({"items": [{"item": item, **({"context": context} if context else {})}
+                                 for item, context in entries]}, ensure_ascii=False)
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(captured):
+            status, _, text = api(home, "POST", "/api/backlog/triage/batch", body,
+                                  ok=(200, 400, 404, 409, 502, 503),
+                                  headers={"Content-Type": "application/json"})
+    except SystemExit:
+        status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
+    if status in (400, 404):
+        return None, False
+    waiting = [(None, False)] * len(entries)
+    try:
+        reply = json.loads(text) if status == 200 else None
+    except ValueError:
+        reply = None
+    if reply == {"decision": "off"}:
+        return waiting, True
+    verdicts = reply.get("verdicts") if isinstance(reply, dict) else None
+    if not isinstance(verdicts, list) or len(verdicts) != len(entries):
+        why = "malformed reply" if status == 200 else status
+        print(f"factory.py: backlog triage failed ({why}); {len(entries)} items wait in the backlog for review",
+              file=sys.stderr)
+        return waiting, True
+    results = []
+    for (item, _), entry in zip(entries, verdicts):
+        verdict = triage_reply(entry)
+        if verdict is not None and verdict["decision"] != "off":
+            results.append((verdict, True))
+            continue
+        error = isinstance(entry, dict) and isinstance(entry.get("error"), str) and type(entry.get("status")) is int
+        why = entry["status"] if error else "malformed reply"
+        print(f"factory.py: backlog triage failed for {item} ({why}); the item waits in the backlog for review",
+              file=sys.stderr)
+        results.append((None, error and why == 400))
+    return results, False
 
 
 ESCALATION_TEXT_LIMIT = 8000
@@ -1524,19 +1610,26 @@ def escalation_cmd(target, round_text):
 IDEA_LIMIT = 4000
 
 
+def utf16_len(s):
+    """Length in UTF-16 code units, the way the dashboard's textarea maxlength counts."""
+    return len(s.encode("utf-16-le")) // 2
+
+
 def idea_with_context(head, context, tail):
-    """head, the backlog context block, then tail, in at most IDEA_LIMIT characters. A long context
-    is cut with a note; if even that does not fit, the block is left out. The dashboard's
-    ideaWithContext matches."""
+    """head, the backlog context block, then tail, in at most IDEA_LIMIT UTF-16 units. A long
+    context is cut with a note, never inside a surrogate pair; if even that does not fit, the block
+    is left out. The dashboard's ideaWithContext matches."""
     if not context:
         return head + tail
     intro = "\n\nContext from the backlog:\n"
     cut = f"\n[context cut to fit the {IDEA_LIMIT}-character idea limit]"
     full = head + intro + context + tail
-    if len(full) <= IDEA_LIMIT:
+    if utf16_len(full) <= IDEA_LIMIT:
         return full
-    room = IDEA_LIMIT - len(head) - len(intro) - len(cut) - len(tail)
-    return head + intro + context[:room] + cut + tail if room > 0 else head + tail
+    room = IDEA_LIMIT - utf16_len(head) - utf16_len(intro) - utf16_len(cut) - utf16_len(tail)
+    if room <= 0:
+        return head + tail
+    return head + intro + context.encode("utf-16-le")[:2 * room].decode("utf-16-le", "ignore") + cut + tail
 
 
 def queue_backlog_item(home, slug, feature, verdict, context=None):
@@ -1928,7 +2021,8 @@ def backlog_cmd(sub, item, *rest):
 
 def inflight_count(data, project, minutes, device=None):
     """Fresh in-flight jobs on the board: of one project, or of all when project is None,
-    and only this device's claims when device is set. A job waiting on a human never counts."""
+    and only this device's claims when device is set. A job waiting on a human, or handed to a
+    babysit session, never counts."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     count = 0
     for j in data["jobs"]:
@@ -1936,7 +2030,7 @@ def inflight_count(data, project, minutes, device=None):
             continue
         if device and (j.get("claim") or {}).get("device") != device:
             continue
-        if gated(j) or lead_of(j):
+        if gated(j) or lead_of(j) or babysitting(j):
             continue
         stage = j.get("stage")
         if stage == IDEA or tracer_start(j):
@@ -3886,8 +3980,8 @@ def claim_deny_notes(home, job_id, device, minutes, paths):
     return cas(home, "/api/board", change)
 
 
-def release_deny_notes(home, job_id, device, session):
-    """Drop this session's claim on a denied job, so the next pickup may try again."""
+def release_pickup_claim(home, job_id, device, session):
+    """Drop this session's claim on a job after a failed launch, so the next pickup may try again."""
     def change(text):
         data = load_board(text)
         j = next((j for j in data["jobs"] if j.get("id") == job_id), None)
@@ -3970,7 +4064,94 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
                         print(f"launched deny notes {j['id']} {j['project']} on {route[0]} session {tag}")
                     else:
                         launch_failed(home, route[0], j["id"], detail, log_path,
-                                      lambda: release_deny_notes(home, j["id"], device, tag), fatal=False)
+                                      lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)
+                    return
+        if dry:
+            print(line)
+
+
+def babysit_due(j):
+    """True when a pr-open job carries a dashboard Babysit PR click."""
+    return j.get("stage") == "pr-open" and babysitting(j) and isinstance(j.get("id"), str) \
+        and bool(JOB_ID.fullmatch(j["id"])) and ".." not in j["id"]
+
+
+def claim_babysit(home, job_id, device, minutes, paths):
+    """Claim a babysit job in one board write, and return the new session tag, else None. Only the claim changes."""
+    tag = secrets.token_hex(3)
+
+    def change(text):
+        data = load_board(text)
+        j = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        project = (j or {}).get("project")
+        if (j is None or not babysit_due(j) or gated(j) or paused(j) or closing(j)
+                or project not in paths or not os.path.isdir(paths[project])
+                or blocking(j, device, "", minutes)):
+            return None, None
+        j["claim"] = new_claim(device, tag)
+        j["updated"] = data["updated"] = now()
+        return dump_board(data), tag
+    return cas(home, "/api/board", change)
+
+
+def babysit_pass(home, data, device, minutes, paths, settings, dry):
+    """Launch at most one /factory babysit session for a job the dashboard handed to one."""
+    def skip(j):
+        """Why this job is not ready, or None."""
+        project = j.get("project")
+        if not project:
+            return f"skip babysit {j['id']}: no project"
+        head = f"skip babysit {j['id']} {project}"
+        if gated(j):
+            return f"{head}: waiting on a human"
+        if paused(j):
+            return f"{head}: paused"
+        if closing(j):
+            return f"{head}: closing"
+        c = blocking(j, device, "", minutes)
+        if c:
+            return f"{head}: claimed by {c['device']} session {c.get('session')}"
+        reason = pickup_reason(home, project, paths, settings, device, dry)
+        return f"{head}: {reason}" if reason else None
+
+    def values(j, session, route):
+        _, provider, model, effort = route
+        return {"id": j["id"], "project": j["project"], "repo_path": paths[j["project"]], "session": session,
+                "provider": provider, "model": model, "effort": effort or "",
+                "prompt": launch_prompt(f"/factory babysit {j['id']} --session {session}")}
+
+    ready = False
+    for j in (j for j in data["jobs"] if babysit_due(j)):
+        line = skip(j)
+        if line is None and ready:
+            line = f"wait babysit {j['id']} {j['project']}: one babysit launch per run"
+        elif line is None:
+            ready = True
+            route = pick_route(home)
+            if route is None and not dry:
+                return
+            if route is None:
+                stamp = now()
+                active = {n: until for n, until in read_limits(home).items() if until > stamp}
+                line = "no route: no available route: " + ", ".join(
+                    f"{r[0]} until {active[r[0]]}" for r in read_routes(home))
+            else:
+                template = route_launcher(home, route)
+                if dry:
+                    line = f"would launch babysit {j['id']} {j['project']} on {route[0]}: " \
+                        + shlex.join(launcher_argv(template, values(j, "<session>", route)))
+                else:
+                    tag = claim_babysit(home, j["id"], device, minutes, paths)
+                    if tag is None:
+                        return
+                    given = values(j, tag, route)
+                    ok, detail, log_path = launch_idea(home, given, route[0], launcher_argv(template, given),
+                                                       launch_env(given, route[1], route[2]))
+                    if ok:
+                        print(f"launched babysit {j['id']} {j['project']} on {route[0]} session {tag}")
+                    else:
+                        launch_failed(home, route[0], j["id"], detail, log_path,
+                                      lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)
                     return
         if dry:
             print(line)
@@ -4084,6 +4265,12 @@ def prioritized(j):
     return isinstance(p, dict) and isinstance(p.get("at"), str)
 
 
+def babysitting(j):
+    """True when the dashboard handed this job's PR to a babysit session."""
+    b = j.get("babysit")
+    return isinstance(b, dict) and isinstance(b.get("at"), str)
+
+
 def paused(j):
     """True when the dashboard paused pickup for this job."""
     p = j.get("paused")
@@ -4132,11 +4319,16 @@ PR_EVIDENCE = {"closed": "closed by pickup with a comment that links this page",
 def gh_pr(*args):
     """(returncode, stdout) of gh pr <args>: (1, "") when it cannot start,
     ("timeout", "") past 60 seconds, None without gh."""
+    return gh_cli("pr", *args)
+
+
+def gh_cli(*args):
+    """(returncode, stdout) of gh <args>, as gh_pr describes."""
     gh = shutil.which("gh")
     if gh is None:
         return None
     try:
-        r = subprocess.run([gh, "pr", *args], capture_output=True, encoding="utf-8",
+        r = subprocess.run([gh, *args], capture_output=True, encoding="utf-8",
                            errors="replace", timeout=60, stdin=subprocess.DEVNULL)
     except OSError:
         return 1, ""
@@ -4413,6 +4605,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     close_pass(home, data, device, minutes, dry)
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
+    babysit_pass(home, data, device, minutes, paths, settings, dry)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
     if not dry and taken >= limit:
@@ -4960,13 +5153,8 @@ CHECKS_INTERVAL = 10
 CHECKS_REGISTER = 120
 
 
-def checks_cmd(target, *args):
-    """Print each PR check as `<bucket> <name>` once none is pending, checking every 10 seconds until --timeout."""
-    home, slug, job_id = r2_target(target, True)
-    if args and (args[0] != "--timeout" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
-                 or int(args[1]) > 600):
-        fail("--timeout takes one value from 0 to 600 seconds. " + CHECKS_USAGE, 2)
-    timeout = int(args[1]) if args else 300
+def board_pr(home, slug, job_id):
+    """The job's PR URL from the board, after checking it is a pull request in the project file repo."""
     job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
     pr = (job or {}).get("pr")
     if not isinstance(pr, str) or not pr:
@@ -4975,26 +5163,53 @@ def checks_cmd(target, *args):
     m = GH_PR.fullmatch(pr)
     if not (repo and m and m[1].lower() == repo.lower()):
         fail(f"{pr} is not a pull request in {repo or 'the project file repo'}", 4)
-    view = gh_pr("view", pr, "--json", "state", "--jq", ".state")
-    if view is None:
+    return pr
+
+
+def gh_answer(result, what):
+    """stdout of a gh_cli result, failing with exit 5 when gh cannot answer."""
+    if result is None:
         fail("gh is not installed", 5)
-    if view[0] == "timeout":
-        fail("gh pr view timed out after 60 seconds", 5)
-    if view[0]:
-        fail(f"gh pr view exited {view[0]} (check gh auth status)", 5)
-    if view[1].strip() != "OPEN":
-        fail(f"{pr} is {view[1].strip() or 'in no state'}, not OPEN", 4)
+    if result[0] == "timeout":
+        fail(f"{what} timed out after 60 seconds", 5)
+    if result[0]:
+        fail(f"{what} exited {result[0]} (check gh auth status)", 5)
+    return result[1]
+
+
+def gh_pr_view(pr, *args):
+    """stdout of gh pr view <pr> <args>, failing with exit 5 when gh cannot answer."""
+    return gh_answer(gh_pr("view", pr, *args), "gh pr view")
+
+
+def pr_checks(pr):
+    """The PR's checks as gh pr checks lists them, or [] when gh lists none or prints something else."""
+    result = gh_pr("checks", pr, "--json", "name,bucket")
+    try:
+        checks = json.loads(result[1]) if result and result[0] != "timeout" else []
+    except ValueError:
+        checks = []
+    if not isinstance(checks, list) or not all(
+            isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("bucket"), str)
+            for c in checks):
+        checks = []
+    return checks
+
+
+def checks_cmd(target, *args):
+    """Print each PR check as `<bucket> <name>` once none is pending, checking every 10 seconds until --timeout."""
+    home, slug, job_id = r2_target(target, True)
+    if args and (args[0] != "--timeout" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
+                 or int(args[1]) > 600):
+        fail("--timeout takes one value from 0 to 600 seconds. " + CHECKS_USAGE, 2)
+    timeout = int(args[1]) if args else 300
+    pr = board_pr(home, slug, job_id)
+    state = gh_pr_view(pr, "--json", "state", "--jq", ".state").strip()
+    if state != "OPEN":
+        fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
     start = time.monotonic()
     while True:
-        result = gh_pr("checks", pr, "--json", "name,bucket")
-        try:
-            checks = json.loads(result[1]) if result and result[0] != "timeout" else []
-        except ValueError:
-            checks = []
-        if not isinstance(checks, list) or not all(
-                isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("bucket"), str)
-                for c in checks):
-            checks = []
+        checks = pr_checks(pr)
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
             for c in checks:
@@ -5010,6 +5225,92 @@ def checks_cmd(target, *args):
         if elapsed >= timeout:
             fail("still pending: " + ", ".join(pending) if pending else "no checks listed yet", 3)
         time.sleep(min(CHECKS_INTERVAL, max(0, timeout - elapsed)))
+
+
+PR_STATE_USAGE = "usage: pr-state <project-slug>/<job-id> [--wait S]"
+PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup"
+PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
+# gh pr view --json has no isInMergeQueue field, so it comes from GraphQL.
+PR_QUEUE_QUERY = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isInMergeQueue}}}"
+PR_STATE_INTERVAL = 30
+
+
+def pr_reading(pr):
+    """One reading of the PR for a babysit session, with the next step it calls for."""
+    try:
+        view = json.loads(gh_pr_view(pr, "--json", PR_STATE_FIELDS))
+    except ValueError:
+        view = None
+    if not isinstance(view, dict):
+        fail("gh pr view printed no JSON object", 5)
+    listed = pr_checks(pr)
+    if view.get("statusCheckRollup") and not listed:
+        fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5)
+    buckets = {c["bucket"] for c in listed}
+    checks = "fail" if buckets & {"fail", "cancel"} else "pending" if "pending" in buckets \
+        else "pass" if buckets else "none"
+    commits = view.get("commits") or [{}]
+    head = str(commits[-1].get("committedDate") or "") if isinstance(commits[-1], dict) else ""
+    try:
+        new = time.time() - datetime.strptime(head, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp() \
+            < CHECKS_REGISTER
+    except ValueError:
+        new = False
+
+    def login(item):
+        return str((item.get("author") or {}).get("login") or "")
+
+    author = login(view)
+    reviews = [r for r in view.get("latestReviews") or [] if isinstance(r, dict)]
+    replied = max([head] + [str(r.get("submittedAt") or "") for r in reviews if login(r) == author])
+    human = [r for r in reviews if r.get("authorAssociation") in PR_REVIEWERS
+             and login(r) != author and not login(r).endswith("[bot]")]
+    unanswered = any(r.get("state") in ("CHANGES_REQUESTED", "COMMENTED")
+                     and str(r.get("submittedAt") or "") > replied for r in human)
+    decision = view.get("reviewDecision") or ""
+    approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
+    state = str(view.get("state") or "").lower()
+    owner, name, _, number = pr.split("/")[3:7]
+    in_queue = gh_answer(gh_cli("api", "graphql", "-f", PR_QUEUE_QUERY, "-f", f"o={owner}", "-f", f"r={name}",
+                                "-F", f"n={number}", "--jq", ".data.repository.pullRequest.isInMergeQueue"),
+                         "gh api graphql").strip() == "true"
+    queued = in_queue or bool(view.get("autoMergeRequest"))
+    conflict = view.get("mergeStateStatus") == "DIRTY"
+    if state in ("merged", "closed"):
+        step = state
+    elif unanswered:
+        step = "fix-reviews"
+    elif not approved:
+        step = "needs-review"
+    elif conflict:
+        step = "rebase"
+    elif checks == "fail":
+        step = "fix-ci"
+    elif checks == "pending" or queued or (checks == "none" and new):
+        step = "wait"
+    else:
+        step = "merge"
+    return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
+            "review": "changes" if unanswered else "approved" if approved else "none",
+            "checks": checks, "queued": queued, "conflict": conflict, "next": step}
+
+
+def pr_state_cmd(target, *args):
+    """Print one JSON reading of the job's PR. --wait S re-reads every 30 seconds while next is wait."""
+    home, slug, job_id = r2_target(target, True)
+    if args and (args[0] != "--wait" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
+                 or not 1 <= int(args[1]) <= 600):
+        fail("--wait takes one value from 1 to 600 seconds. " + PR_STATE_USAGE, 2)
+    wait = int(args[1]) if args else 0
+    pr = board_pr(home, slug, job_id)
+    start = time.monotonic()
+    while True:
+        reading = pr_reading(pr)
+        elapsed = time.monotonic() - start
+        if reading["next"] != "wait" or elapsed >= wait:
+            print(json.dumps(reading))
+            return
+        time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
 
 
 def tracer_start(j):
@@ -7911,6 +8212,7 @@ COMMANDS["documents"] = (documents_cmd, 1, 1)
 COMMANDS["prompt"] = (prompt_cmd, 2, 8)
 COMMANDS["wait"] = (wait_cmd, 2, 23)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
+COMMANDS["pr-state"] = (pr_state_cmd, 1, 3)
 COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
 COMMANDS["host"] = (host_cmd, 3, 3)

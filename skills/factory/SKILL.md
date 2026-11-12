@@ -157,11 +157,8 @@ reads and writes them, and job folders go up by hand:
 - In a job that changes UI, the builder saves screenshots in `$JOBS/<id>/` and embeds
   them in build.md by relative path, before and after pairs side by side in a
   `| Before | After |` table. The builder never uploads to the public image host.
-   Private build-tab evidence is the default. A project may opt into its own
-   publisher in its UI or PRs section. The bundle ships one, runtime/pr_screenshots.py.
-   Use it only when the project's PRs section names it; a project's own screenshot
-   rule always wins. Without one, ordinary reviews and PRs use
-   private evidence links; absence of public image hosting never blocks shipping.
+   Private build-tab evidence is the default; a project may opt into a publisher, see
+   [integrations](references/integrations.md#links-images-and-evidence).
    Keep only captions that match the final round.
 - Never put code in job files, because the dashboard serves them.
 - Job ids are `NNN-slug`, unique across the whole factory. The slug is a few
@@ -312,6 +309,8 @@ Only pickup and `agent record` append `agents` rows, newest 32 kept;
 `agent report` counts them.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
+`babysit` is `{at}` once a person presses Babysit PR on a `pr-open` job. Only the dashboard
+sets it, and a `/factory babysit` session clears it with `null`; `board` refuses any other value.
 
 ## Rules
 
@@ -344,12 +343,9 @@ only `factory.py deny-notes` writes it.
   shows as a stepper. It also accepts `### Step 1. Title` headings. UI jobs and complex
   system jobs also get a `walkthrough.html`, which the
   dashboard runs sandboxed with no network. Other jobs may skip it. When the spec has one, the builder adds
-  `build.walkthrough.html` showing what was built. A reviewer or the approver may add
-  `<page>.walkthrough.html` beside its own file when a fix or risk is easier shown
-  than told. Every walkthrough copies `references/walkthrough.html` and follows `references/visuals.md`, and the
-  dashboard shows each one on its own page's tab. An image sits next
-  to its markdown file and is embedded by relative path. The agent definitions say so
-  too. Keep it that way when editing them. Open every job file with a summary
+  `build.walkthrough.html` showing what was built. Every walkthrough copies `references/walkthrough.html` and follows `references/visuals.md`, and the
+  dashboard shows each one on its own page's tab. Images sit beside their markdown file,
+  embedded by relative path; keep the agent definitions saying so. Open every job file with a summary
   of at most 120 words after any required first line: what changed and why, status,
   remaining gates, next action. Keep to the word budgets in the agent definitions —
   spec 800, build run section 300, review 400, decision 200 — writing short bullets
@@ -614,6 +610,7 @@ Read a command's file before you run it.
 | `/factory idea <id>` | [idea](references/commands/idea.md) | Pickup or a person starts an idea. |
 | `/factory next` | [next](references/commands/next.md) | You take the next backlog line or queue work. |
 | `/factory deny-notes <id>` | [deny-notes](references/commands/deny-notes.md) | Pickup hands you a denied job's notes. |
+| `/factory babysit <id>` | [babysit](references/commands/babysit.md) | Pickup hands you a PR a person asked to babysit to merge. |
 | `/factory approve <id>` | [approve](references/commands/approve.md) | A person approves a `needs-human` job. |
 | `/factory approve-spec <id>` | [approve-spec](references/commands/approve-spec.md) | A person passes the spec-approval gate. |
 | `/factory rework <id> <note>` | [rework](references/commands/rework.md) | A person asks for rework, or a job is stuck after a dead session. |

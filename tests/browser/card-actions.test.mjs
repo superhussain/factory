@@ -415,6 +415,8 @@ test("card actions", { timeout: 180000 }, async (t) => {
       await page.focus(TRIGGER);
       await page.keyboard.press("ArrowDown");
       await page.keyboard.press("ArrowDown");
+      assert.equal((await menuState(page)).focus, "d-babysit");
+      await page.keyboard.press("ArrowDown");
       assert.equal((await menuState(page)).focus, "d-pause");
       await setPaused(page, origin, true);
       const clip = await page.evaluate((sel) => {

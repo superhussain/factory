@@ -265,6 +265,7 @@ flowchart LR
   I --> P[factory.py pickup]
   P[factory.py pickup] --> S[backlog_triage_pass]
   S --> W
+  S --> X[POST /api/backlog/triage/batch]
   S --> V[POST /api/backlog/triage/verdicts]
 ```
 
@@ -296,7 +297,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 - **Hold.** The line waits in the backlog for a person, as before.
   The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board reads the stored verdicts of the lines it lists in one `POST /api/backlog/triage/verdicts` call per 50 lines. It reads again only when the listed lines change, and only for lines with no verdict yet. Opening a line with no verdict reads that line again. A line the Worker would refuse, such as one over 2000 characters, reads as no verdict and leaves the other lines' verdicts intact.
 - **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
-  verdict from `backlog_triage_pass`. `factory.py pickup` runs it before it claims ideas, never with `--dry-run`, and at most once every 30 minutes per host. The host's `backlog-triage-sweep.json` holds the start of the last sweep, and `factory.py pickup --triage-now` runs a sweep at once. Each sweep takes up to 20 unchecked lines in projects whose effective `triage.enabled` is true and reads their stored verdicts in one `POST /api/backlog/triage/verdicts`. A line another host already held is recorded without a post. The rest are posted one at a time, with the indented block under each as context. Held lines, and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this host never sends them again. `backlog add` records its held line there too. A 404, 409, 502 or 503 reply, or a network failure, warns and ends the sweep. That line and the rest are retried on the next sweep. Deleting the file
+  verdict from `backlog_triage_pass`. `factory.py pickup` runs it before it claims ideas, never with `--dry-run`, and at most once every 30 minutes per host. The host's `backlog-triage-sweep.json` holds the start of the last sweep, and `factory.py pickup --triage-now` runs a sweep at once. Each sweep takes up to 20 unchecked lines in projects whose effective `triage.enabled` is true and reads their stored verdicts in one `POST /api/backlog/triage/verdicts`. A line another host already held is recorded without a post. The rest go with the indented block under each as context. Plain lines go up to 8 per `POST /api/backlog/triage/batch` call, one project per call, in file order. Lines whose context has a `## Question:` line then post alone to `POST /api/backlog/triage`. An older Worker answers the batch route with 404, and a batch it refuses whole gets a 400, so those lines post one at a time. In a batch reply, an entry the model answered unusably (502) warns and waits for the next sweep without ending it, and an entry refused with a 400 is recorded like a single 400. Held lines, and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this host never sends them again. `backlog add` records its held line there too. A 404, 409, 502 or 503 reply, or a network failure, warns and ends the sweep. That line and the rest are retried on the next sweep. Deleting the file
   only causes rescoring. A line whose new idea row could not be checked off or removed goes
   there too, so it is never queued twice.
 - **Failure.** A 404 from an older Worker means off. Any other error prints a warning,
@@ -316,11 +317,13 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   question of type `noul`. In `state` the rules travel in an `operator-preferences` envelope and
   the item in a `backlog-item` envelope, both marked as data. The question asks whether the item
   should be built now without a person reviewing it, and its yes probability times 100, rounded,
-  is the confidence. The verdict's `reason` is fixed text: `Rated by clef-flash against the
-  project rules.`, or `Rated by clef-flash.` when the rules are empty, so an item can move the
-  score but write no text. An item or context holding either tag, including fullwidth,
-  Cyrillic, Greek or other lookalike forms, or a letter that reads as either l or I, is
-  refused with a 400.
+  is the confidence. A batch call puts each item in its own `backlog-item id="<n>"` envelope,
+  where `<n>` is the item's position in the request, and asks one `build.<n>` question per item
+  that judges only item `<n>`, under the same rules envelope. The verdict's `reason` is fixed
+  text: `Rated by clef-flash against the project rules.`, or `Rated by clef-flash.` when the rules
+  are empty, so an item can move the score but write no text. An item or context holding either
+  tag, including fullwidth, Cyrillic, Greek or other lookalike forms, or a letter that reads as
+  either l or I, is refused with a 400.
   For an item whose context has `## Question:` sections, the same call adds one `choice`
   question `q<i>` per backlog question, over its options, and one `choice` question
   `q<i>.o<k>` per option, over fixed reasons such as `It gives the item the most value.`

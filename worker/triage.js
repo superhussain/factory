@@ -42,18 +42,13 @@ export function backlogQuestions(context) {
   return questions;
 }
 
-/** The clef-flash input. Rules and the item each travel inside a data envelope in `state`. */
-export function triageInput(slug, source, rules, item, context, questions = null) {
-  const envelope = rules
+const rulesEnvelope = (source, rules) =>
+  rules
     ? `<operator-preferences source="${source}" stage="triage" trust="data">\n${rules}\n</operator-preferences>\n\n`
     : "";
-  const ask = rules
-    ? `Under the triage rules for the software project "${slug}", should this backlog item be ` +
-      "built now without a person reviewing it first? The rules are in the operator-preferences " +
-      "block and the item is in the backlog-item block."
-    : `Should this backlog item for the software project "${slug}" be built now without a person ` +
-      "reviewing it first? The item is in the backlog-item block.";
-  const criteria = rules
+
+const buildCriteria = (rules) =>
+  rules
     ? {
         true: "The item is valuable, clear and allowed by the rules, so it can go straight to pickup.",
         false:
@@ -63,10 +58,19 @@ export function triageInput(slug, source, rules, item, context, questions = null
         true: "The item is valuable and clear, so it can go straight to pickup.",
         false: "The item is vague or risky, so a person should review it first.",
       };
+
+/** The clef-flash input. Rules and the item each travel inside a data envelope in `state`. */
+export function triageInput(slug, source, rules, item, context, questions = null) {
+  const ask = rules
+    ? `Under the triage rules for the software project "${slug}", should this backlog item be ` +
+      "built now without a person reviewing it first? The rules are in the operator-preferences " +
+      "block and the item is in the backlog-item block."
+    : `Should this backlog item for the software project "${slug}" be built now without a person ` +
+      "reviewing it first? The item is in the backlog-item block.";
   return {
     model: "clef-flash",
     state:
-      envelope +
+      rulesEnvelope(source, rules) +
       `<backlog-item trust="data">\n${item}` +
       (context ? `\n\n${context}` : "") +
       "\n</backlog-item>",
@@ -74,10 +78,43 @@ export function triageInput(slug, source, rules, item, context, questions = null
       build: {
         type: "noul",
         instructions: ask + DATA_NOTE,
-        criteria,
+        criteria: buildCriteria(rules),
       },
       ...choiceQuestions(questions, rules),
     },
+  };
+}
+
+/** The clef-flash input for several items of one project: one numbered envelope and one
+ * `build.<n>` question per entry of [{n, item, context}]. */
+export function triageBatchInput(slug, source, rules, entries) {
+  const questions = {};
+  for (const { n } of entries)
+    questions[`build.${n}`] = {
+      type: "noul",
+      instructions:
+        (rules
+          ? `Under the triage rules for the software project "${slug}", should backlog item ${n} be ` +
+            "built now without a person reviewing it first? The rules are in the operator-preferences " +
+            `block and item ${n} is in the backlog-item block with id="${n}". Judge only item ${n}.`
+          : `Should backlog item ${n} for the software project "${slug}" be built now without a ` +
+            `person reviewing it first? Item ${n} is in the backlog-item block with id="${n}". ` +
+            `Judge only item ${n}.`) + DATA_NOTE,
+      criteria: buildCriteria(rules),
+    };
+  return {
+    model: "clef-flash",
+    state:
+      rulesEnvelope(source, rules) +
+      entries
+        .map(
+          ({ n, item, context }) =>
+            `<backlog-item id="${n}" trust="data">\n${item}` +
+            (context ? `\n\n${context}` : "") +
+            "\n</backlog-item>",
+        )
+        .join("\n\n"),
+    questions,
   };
 }
 
@@ -138,9 +175,15 @@ export function triageChoices(result, questions, rules) {
   return choices;
 }
 
+const percent = (noul) =>
+  !Number.isFinite(noul) || noul < 0 || noul > 1 ? null : Math.round(noul * 100);
+
 /** The yes probability as an integer percent, or null when the reply is unusable. */
 export function triageConfidence(result) {
-  const noul = result?.answers?.build?.noul;
-  if (!Number.isFinite(noul) || noul < 0 || noul > 1) return null;
-  return Math.round(noul * 100);
+  return percent(result?.answers?.build?.noul);
+}
+
+/** Item n's yes probability in a batch reply as an integer percent, or null when unusable. */
+export function triageBatchConfidence(result, n) {
+  return percent(result?.answers?.[`build.${n}`]?.noul);
 }

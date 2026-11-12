@@ -41,6 +41,8 @@ import {
   TRIAGE_REASON,
   TRIAGE_REASON_NO_RULES,
   backlogQuestions,
+  triageBatchConfidence,
+  triageBatchInput,
   triageChoices,
   triageConfidence,
   triageInput,
@@ -67,6 +69,8 @@ const PIPELINE_EFFECTIVE = /^\/api\/pipeline\/effective\/([\w-]+)$/;
 const MAX_PIPELINE = 16 << 10;
 // 2000 + 6000 characters at up to 4 UTF-8 bytes each, plus JSON keys and escapes.
 const MAX_TRIAGE = 64 << 10;
+// Eight single triage bodies.
+const MAX_TRIAGE_BATCH = 512 << 10;
 // 50 items of 2000 characters at up to 4 UTF-8 bytes each, plus JSON quotes and escapes.
 const MAX_TRIAGE_READ = 512 << 10;
 // Four reviews of 8000 characters at up to 4 UTF-8 bytes each, plus JSON keys and escapes.
@@ -808,6 +812,36 @@ async function backlogTriageVerdicts(request, env) {
   return reply(JSON.stringify({ verdicts }), 200, "application/json");
 }
 
+// The 400 text for a backlog item and its optional context, or null when both are fine.
+function triageItemError(item, context) {
+  if (!backlogItemMatch(item)) return BAD_BACKLOG_ITEM;
+  if (context !== undefined && typeof context !== "string") return "context: must be text";
+  if (context !== undefined && [...context].length > 6000) return "context: over 6000 characters";
+  for (const [field, text] of [
+    ["item", item],
+    ["context", context],
+  ]) {
+    if (text === undefined) continue;
+    const error = checkOperatorText(text, field, "document");
+    if (error) return error;
+    if (hasReservedTag(text, "backlog-item"))
+      return `${field}: contains the reserved backlog-item tag`;
+  }
+  return null;
+}
+
+// Keeps a hold so other hosts can read it, and drops any older hold for a queued item.
+async function storeTriageVerdict(env, item, verdict) {
+  const key = await triageKey(item);
+  if (verdict.decision === "hold")
+    await env.BUCKET.put(
+      key,
+      JSON.stringify({ item, ...verdict, at: new Date().toISOString() }),
+      JSON_TYPE,
+    );
+  else await env.BUCKET.delete(key);
+}
+
 // Rates one new backlog line against its project's triage rules. The Worker compares the
 // score with the threshold, so a device cannot move the bar.
 async function backlogTriage(request, env) {
@@ -818,22 +852,9 @@ async function backlogTriage(request, env) {
   for (const key of Object.keys(body))
     if (key !== "item" && key !== "context") return reply(`${key}: unknown field`, 400);
   const { item, context } = body;
+  const error = triageItemError(item, context);
+  if (error) return reply(error, 400);
   const m = backlogItemMatch(item);
-  if (!m) return reply(BAD_BACKLOG_ITEM, 400);
-  if (context !== undefined && typeof context !== "string")
-    return reply("context: must be text", 400);
-  if (context !== undefined && [...context].length > 6000)
-    return reply("context: over 6000 characters", 400);
-  for (const [field, text] of [
-    ["item", item],
-    ["context", context],
-  ]) {
-    if (text === undefined) continue;
-    const error = checkOperatorText(text, field, "document");
-    if (error) return reply(error, 400);
-    if (hasReservedTag(text, "backlog-item"))
-      return reply(`${field}: contains the reserved backlog-item tag`, 400);
-  }
   const slug = m[1];
   if (!(await env.BUCKET.head(`projects/${slug}.md`))) return notFound();
   const docs = await pipelineDocs(env, slug);
@@ -844,14 +865,7 @@ async function backlogTriage(request, env) {
   if (!triage.enabled) return json({ decision: "off" });
   const { threshold } = triage;
   const finish = async (verdict) => {
-    const key = await triageKey(item);
-    if (verdict.decision === "hold")
-      await env.BUCKET.put(
-        key,
-        JSON.stringify({ item, ...verdict, at: new Date().toISOString() }),
-        JSON_TYPE,
-      );
-    else await env.BUCKET.delete(key);
+    await storeTriageVerdict(env, item, verdict);
     return json(verdict);
   };
   const lines = (context ?? "").split(/\r\n|\r|\n/);
@@ -903,6 +917,93 @@ async function backlogTriage(request, env) {
     reason: triage.rules ? TRIAGE_REASON : TRIAGE_REASON_NO_RULES,
     model: TRIAGE_MODEL,
   });
+}
+
+// Rates up to 8 plain backlog lines of one project in one model call. Each entry gets its own
+// verdict, or its own error, so one bad item or answer holds only that line.
+async function backlogTriageBatch(request, env) {
+  const body = await readJson(request, MAX_TRIAGE_BATCH);
+  if (body instanceof Response) return body;
+  if (typeof body !== "object" || body === null || Array.isArray(body))
+    return reply("body: must be a JSON object", 400);
+  for (const key of Object.keys(body))
+    if (key !== "items") return reply(`${key}: unknown field`, 400);
+  const { items } = body;
+  if (!Array.isArray(items) || items.length < 1 || items.length > 8)
+    return reply("items: must be a list of 1 to 8 entries", 400);
+  for (const [i, entry] of items.entries()) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry))
+      return reply(`items[${i}]: must be a JSON object`, 400);
+    for (const key of Object.keys(entry))
+      if (key !== "item" && key !== "context")
+        return reply(`items[${i}].${key}: unknown field`, 400);
+  }
+  const slugs = new Set(items.map(({ item }) => backlogItemMatch(item)?.[1]).filter(Boolean));
+  if (slugs.size > 1) return reply("items: every item must name the same project", 400);
+  const errors = items.map(({ item, context }) => triageItemError(item, context));
+  const json = (obj) => reply(JSON.stringify(obj), 200, "application/json");
+  if (!slugs.size) return json({ verdicts: errors.map((error) => ({ error, status: 400 })) });
+  const [slug] = slugs;
+  if (!(await env.BUCKET.head(`projects/${slug}.md`))) return notFound();
+  const docs = await pipelineDocs(env, slug);
+  if (!docs) return reply(PIPELINE_INVALID, 409);
+  const [, globalVersion, project, projectVersion] = docs;
+  const { triage } = effectivePipeline(slug, ...docs);
+  if (!triage.enabled) return json({ decision: "off" });
+  const { threshold } = triage;
+  const verdicts = items.map(({ context }, i) => {
+    if (errors[i]) return { error: errors[i], status: 400 };
+    const lines = (context ?? "").split(/\r\n|\r|\n/);
+    if (lines[0] === "Recommend: deny")
+      return {
+        decision: "hold",
+        confidence: null,
+        threshold,
+        reason: "its author recommends deny",
+        model: null,
+      };
+    if (lines.some((line) => line.startsWith("## Question:")))
+      return {
+        error: "context: an item that asks questions goes to POST /api/backlog/triage",
+        status: 400,
+      };
+    return null;
+  });
+  const entries = items.flatMap(({ item, context }, i) =>
+    verdicts[i] ? [] : [{ n: i + 1, item, context }],
+  );
+  if (entries.length) {
+    if (!env.AI)
+      return reply("backlog triage needs the Workers AI binding; deploy the current Worker", 503);
+    const source = project?.triage
+      ? `pipeline:${slug}@${projectVersion}`
+      : `pipeline:global@${globalVersion}`;
+    let result;
+    try {
+      result = await env.AI.run(
+        TRIAGE_MODEL,
+        triageBatchInput(slug, source, triage.rules, entries),
+      );
+    } catch {
+      return reply("the triage model failed", 502);
+    }
+    for (const { n } of entries) {
+      const confidence = triageBatchConfidence(result, n);
+      verdicts[n - 1] =
+        confidence === null
+          ? { error: "the triage model gave an unusable reply", status: 502 }
+          : {
+              decision: confidence >= threshold ? "queue" : "hold",
+              confidence,
+              threshold,
+              reason: triage.rules ? TRIAGE_REASON : TRIAGE_REASON_NO_RULES,
+              model: TRIAGE_MODEL,
+            };
+    }
+  }
+  for (const [i, verdict] of verdicts.entries())
+    if (verdict.decision) await storeTriageVerdict(env, items[i].item, verdict);
+  return json({ verdicts });
 }
 
 // Rates one review round's CHANGES findings. The Worker compares the score with the fixed
@@ -1398,7 +1499,7 @@ function checkArchived(stored, data) {
   return null;
 }
 
-const RIDER_CONTROLS = ["move", "priority", "paused", "close"];
+const RIDER_CONTROLS = ["move", "priority", "paused", "close", "babysit"];
 const leadOfRow = (j) =>
   Array.isArray(j?.refs)
     ? (j.refs.find((r) => r?.kind === "batched-into" && typeof r.id === "string")?.id ?? null)
@@ -1553,6 +1654,8 @@ async function api(request, env, path, principal) {
     if (method === "PUT") return ideaImagePut(request, env, m[1]);
     return notFound();
   }
+  if (path === "/api/backlog/triage/batch" && method === "POST")
+    return backlogTriageBatch(request, env);
   if (path === "/api/backlog/triage/verdicts" && method === "POST")
     return backlogTriageVerdicts(request, env);
   if (path === "/api/backlog/triage" && method === "POST") return backlogTriage(request, env);

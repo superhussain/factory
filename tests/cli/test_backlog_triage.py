@@ -23,6 +23,8 @@ class TriageFixture(IsolatedTestCase):
                       "/api/board": json.dumps({"updated": "", "jobs": [{"id": "003-old-job", "stage": "done"}]})}
         self.triage = (200, json.dumps(QUEUE))
         self.posts = []
+        self.batch = (404, "")
+        self.batches = []
         self.after_board = None
         self.cas_down = set()
         self.views = {"sample": (200, {"triage": {"enabled": True, "threshold": 80}})}
@@ -56,6 +58,17 @@ class TriageFixture(IsolatedTestCase):
                 if self.read_status == 404:
                     return 404, {}, ""
                 return 200, {}, json.dumps({"verdicts": [self.stored.get(item) for item in items]})
+            if (method, path) == ("POST", "/api/backlog/triage/batch"):
+                self.assertEqual(ok, (200, 400, 404, 409, 502, 503))
+                self.assertEqual(headers, {"Content-Type": "application/json"})
+                self.batches.append(json.loads(body)["items"])
+                batch = self.batch(self.batches[-1]) if callable(self.batch) else self.batch
+                if isinstance(batch, Exception):
+                    self.module.fail("can't reach https://factory.example.test/api/backlog/triage/batch: timed out", 5)
+                status, text = batch
+                if status not in ok:
+                    self.module.fail(f"POST returned {status}", 5)
+                return status, {}, text
             self.assertEqual((method, path), ("POST", "/api/backlog/triage"))
             self.assertEqual(headers, {"Content-Type": "application/json"})
             self.posts.append(json.loads(body))
@@ -154,6 +167,12 @@ class BacklogTriageTests(TriageFixture):
                                       "Rated by clef-flash against the project rules."))
         self.assertEqual(self.module.idea_with_context("a", "x" * 4000, "b" * 3950), "a" + "b" * 3950)
         self.assertEqual(self.module.idea_with_context("a", None, "b"), "ab")
+
+    def test_idea_limit_counts_utf16_units(self):
+        idea = self.module.idea_with_context("a", "\U0001F600" * 2100, "b")
+        self.assertEqual(idea, "a\n\nContext from the backlog:\n" + "\U0001F600" * 1959
+                         + "\n[context cut to fit the 4000-character idea limit]b")
+        self.assertEqual(self.module.utf16_len(idea), 3999)
 
     def test_queue_skips_a_dotted_suffix_id(self):
         code, _, _ = self.add(ITEM + " (follow-up-of a..b)")
@@ -449,3 +468,129 @@ class BacklogTriagePassTests(TriageFixture):
                     self.assertEqual(err, WARN.format(reason) * len(self.posts))
                     self.assertEqual(self.cached() or [], cached)
                 self.assertEqual(self.files["/api/backlog"], EXAMPLE)
+
+
+DROP = "- [ ] sample: Drop the legacy CSV header"
+ASK = "- [ ] sample: Add CSV export to the report page"
+ASK_CONTEXT = "Recommend: approve\n## Question: Delimiter\nPick: one\n- Comma\n- Tab"
+SWEEP = EXAMPLE + f"{DROP}\n  Recommend: deny\n" + f"{ASK}\n" + "".join(f"  {row}\n" for row in ASK_CONTEXT.split("\n"))
+DENY = {"decision": "hold", "confidence": None, "threshold": 80, "reason": "its author recommends deny", "model": None}
+ASKS = {**DENY, "reason": "it asks questions a person must answer"}
+UNUSABLE = {"error": "the triage model gave an unusable reply", "status": 502}
+BATCH_WARN = "factory.py: backlog triage failed for {} ({}); the item waits in the backlog for review\n"
+HELD_RENAME = ("held sample: Rename report filters (rework-of 006-filter-names) for review: "
+               "confidence 62% (threshold 80%): Rated by clef-flash against the project rules.\n")
+
+
+class BacklogTriageBatchTests(TriageFixture):
+    def setUp(self):
+        super().setUp()
+        self.files["/api/backlog"] = SWEEP
+        self.files["/api/board"] = json.dumps({"updated": "", "jobs": [{"id": "008-old-job", "stage": "done"}]})
+        self.triage = lambda item: (200, json.dumps(ASKS if "report page" in item else HOLD))
+
+    sweep = BacklogTriagePassTests.sweep
+
+    def verdicts(self, *verdicts):
+        return 200, json.dumps({"verdicts": list(verdicts)})
+
+    def test_the_sweep_batches_plain_lines_and_posts_question_lines_alone(self):
+        self.batch = self.verdicts(QUEUE, HOLD, DENY)
+        out, err = self.sweep()
+        self.assertEqual(err, "")
+        self.assertEqual(out, "queued sample: Add PDF export to reports as 009-add-pdf-export: "
+                              "confidence 86% (threshold 80%)\n" + HELD_RENAME +
+                              "held sample: Drop the legacy CSV header for review: its author recommends deny\n"
+                              "held sample: Add CSV export to the report page for review: "
+                              "it asks questions a person must answer\n")
+        self.assertEqual(self.batches, [[{"item": "sample: Add PDF export to reports"},
+                                         {"item": "sample: Rename report filters (rework-of 006-filter-names)",
+                                          "context": "Recommend: approve\nClearer names."},
+                                         {"item": "sample: Drop the legacy CSV header", "context": "Recommend: deny"}]])
+        self.assertEqual(self.posts, [{"item": "sample: Add CSV export to the report page", "context": ASK_CONTEXT}])
+        self.assertEqual(self.cached(), [RENAME, DROP, ASK])
+        self.assertEqual(self.board()[-1]["id"], "009-add-pdf-export")
+        self.assertEqual(self.gets, ["/api/pipeline/effective/sample"])
+
+    def test_a_sweep_sends_at_most_eight_lines_per_batch_and_one_project_each(self):
+        self.batch = lambda items: self.verdicts(*[HOLD] * len(items))
+        self.files["/api/backlog"] = "# Backlog\n" + "".join(f"- [ ] sample: Idea number {n}\n" for n in range(22))
+        self.sweep()
+        self.assertEqual([len(batch) for batch in self.batches], [8, 8, 4])
+        self.assertEqual(self.posts, [])
+        self.assertEqual(self.cached(), [f"- [ ] sample: Idea number {n}" for n in range(20)])
+
+        self.batches.clear()
+        (self.dir / "backlog-triage.json").unlink()
+        self.files["/api/backlog"] = "# Backlog\n" + "".join(
+            f"- [ ] sample: Idea number {n}\n- [ ] beta: Dark mode {n}\n" if n < 3 else f"- [ ] sample: Idea number {n}\n"
+            for n in range(10))
+        self.views["beta"] = (200, {"triage": {"enabled": True, "threshold": 80}})
+        self.sweep()
+        self.assertEqual([[entry["item"].split(":")[0] for entry in batch] for batch in self.batches],
+                         [["sample"] * 8, ["sample"] * 2, ["beta"] * 3])
+        self.assertEqual(self.batches[2], [{"item": f"beta: Dark mode {n}"} for n in range(3)])
+
+    def test_one_unusable_answer_holds_only_that_line(self):
+        self.batch = self.verdicts(QUEUE, UNUSABLE, {"error": "context: over 6000 characters", "status": 400})
+        out, err = self.sweep()
+        self.assertEqual(out, "queued sample: Add PDF export to reports as 009-add-pdf-export: "
+                              "confidence 86% (threshold 80%)\n"
+                              "held sample: Add CSV export to the report page for review: "
+                              "it asks questions a person must answer\n")
+        self.assertEqual(err, BATCH_WARN.format("sample: Rename report filters (rework-of 006-filter-names)", 502)
+                         + BATCH_WARN.format("sample: Drop the legacy CSV header", 400))
+        self.assertEqual(len(self.batches), 1)
+        self.assertEqual([p["item"] for p in self.posts], ["sample: Add CSV export to the report page"])
+        self.assertEqual(self.cached(), [DROP, ASK])
+
+        self.batches.clear()
+        self.posts.clear()
+        self.batch = self.verdicts({**HOLD, "confidence": "62"})
+        out, err = self.sweep()
+        self.assertEqual(out, "")
+        self.assertEqual(err, BATCH_WARN.format("sample: Rename report filters (rework-of 006-filter-names)",
+                                                "malformed reply"))
+        self.assertEqual(self.posts, [])
+        self.assertEqual(self.cached(), [DROP, ASK])
+
+    def test_batch_failures_end_the_sweep_or_fall_back(self):
+        whole = "factory.py: backlog triage failed ({}); 3 items wait in the backlog for review\n"
+        for batch, reason in (
+            ((409, "stored pipeline configuration no longer validates"), "409"),
+            ((502, "the triage model failed"), "502"),
+            ((503, "backlog triage needs the Workers AI binding"), "503"),
+            ((500, "boom"), "POST returned 500"),
+            (OSError("timed out"), "can't reach https://factory.example.test/api/backlog/triage/batch: timed out"),
+            ((200, "not json"), "malformed reply"),
+            (self.verdicts(QUEUE), "malformed reply"),
+            ((200, json.dumps({"decision": "off"})), None),
+        ):
+            with self.subTest(batch=batch):
+                (self.dir / "backlog-triage.json").unlink(missing_ok=True)
+                self.batches.clear()
+                self.posts.clear()
+                self.batch = batch
+                out, err = self.sweep()
+                self.assertEqual(out, "")
+                self.assertEqual(err, "" if reason is None else whole.format(reason))
+                self.assertEqual(len(self.batches), 1)
+                self.assertEqual(self.posts, [])
+                self.assertIsNone(self.cached())
+                self.assertEqual(self.files["/api/backlog"], SWEEP)
+
+        for batch in ((404, ""), (400, "items: must be a list of 1 to 8 entries")):
+            with self.subTest(batch=batch):
+                (self.dir / "backlog-triage.json").unlink(missing_ok=True)
+                self.batches.clear()
+                self.posts.clear()
+                self.batch = batch
+                out, err = self.sweep()
+                self.assertEqual(err, "")
+                self.assertEqual(len(self.batches), 1)
+                self.assertEqual([p["item"] for p in self.posts],
+                                 ["sample: Add PDF export to reports",
+                                  "sample: Rename report filters (rework-of 006-filter-names)",
+                                  "sample: Drop the legacy CSV header",
+                                  "sample: Add CSV export to the report page"])
+                self.assertEqual(self.cached(), [PDF, RENAME, DROP, ASK])

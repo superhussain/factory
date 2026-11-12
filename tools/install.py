@@ -21,7 +21,7 @@ REQUIRED = (
     "references/project-settings.md", "references/dashboard.md", "references/needs.md", "references/schedules.md",
     "references/walkthrough.html", "schedules/explore.md", "schedules/resume.md", "schedules/retro.md",
 ) + tuple("references/commands/" + name + ".md" for name in (
-    "feature", "next", "idea", "deny-notes", "approve", "approve-spec", "rework", "recover", "build", "init", "handoff",
+    "feature", "next", "idea", "deny-notes", "babysit", "approve", "approve-spec", "rework", "recover", "build", "init", "handoff",
     "resume", "retro")) + tuple("agents/factory-" + name + ".md" for name in (
     "approver", "builder", "explorer", "review-code", "review-security", "review-ui", "review-ux", "spec-writer",
     "retro"))

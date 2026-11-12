@@ -60,7 +60,7 @@ const expectedItems = {
     "d-follow-up",
     "d-close-job",
   ],
-  "linked-job": ["d-pause", "d-copy-link", "d-follow-up", "d-close-job"],
+  "linked-job": ["d-babysit", "d-pause", "d-copy-link", "d-follow-up", "d-close-job"],
   "closed-job": ["d-copy-link", "d-follow-up"],
 };
 const PROJECT_DOC = "---\nrepo: example/layout\nbase: main\ntitle: Synthetic layout project\n---\n";
@@ -78,6 +78,7 @@ const selectors = [
   "#d-pr",
   "#d-paseo",
   "#d-paseo-web",
+  "#d-babysit-bar",
   "#d-actions",
   "#d-close",
 ];
@@ -136,6 +137,7 @@ async function geometry(page) {
       "d-discard",
       "d-follow-tracer",
       "d-move-host",
+      "d-babysit",
       "d-prioritize",
       "d-pause",
       "d-copy-link",
@@ -162,6 +164,7 @@ async function geometry(page) {
       bounds,
       items,
       actions: document.getElementById("d-actions").getClientRects().length > 0,
+      babysit: !document.getElementById("d-babysit-bar").hidden,
       text,
       closeHit: close === hit || close.contains(hit),
       closeLabel: close.getAttribute("aria-label"),
@@ -187,7 +190,12 @@ function checkGeometry(g, fixture, width, label) {
   assert.ok(g.closeHit, label + " close hit target");
   assert.ok(g.pageWidth <= g.viewport, label + " document horizontal overflow");
   assert.ok(g.headWidth <= g.headClientWidth, label + " header horizontal overflow");
-  const boxes = [".detail-head .titles", ...(g.actions ? ["#d-actions"] : []), "#d-close"];
+  const boxes = [
+    ".detail-head .titles",
+    ...(g.babysit ? ["#d-babysit-bar"] : []),
+    ...(g.actions ? ["#d-actions"] : []),
+    "#d-close",
+  ];
   if (g.links.length) boxes.push(".detail-head .links");
   for (const key of boxes) {
     const r = g.bounds[key];
@@ -223,12 +231,12 @@ function checkGeometry(g, fixture, width, label) {
     if (width < 760) assert.ok(t.lines.length > 1, label + " " + t.id + " long text wraps");
   }
   // The title takes the full remaining header width. On mobile the wrapped title row is
-  // titles, the actions toggle (when any item exists), then close, with 12px gaps.
+  // titles, Babysit PR (when shown), the actions toggle (when any item exists), then close, with 12px gaps.
   // On desktop the empty links box also occupies a gap slot, so assert the flex contract
   // instead of gap arithmetic: titles grows and can shrink for wrapping.
   const titles = g.bounds[".detail-head .titles"];
   if (width < 760) {
-    const neighbour = g.actions ? g.bounds["#d-actions"] : g.bounds["#d-close"];
+    const neighbour = g.bounds[boxes[1]];
     assert.ok(
       Math.abs(titles.right + 12 - neighbour.left) <= 1,
       label + " title takes the full remaining header width",
@@ -264,7 +272,7 @@ async function keyboard(page, fixture, label, support) {
   const focused = () => page.evaluate(() => document.activeElement.id);
   await support.focusVisible(page, "#d-refs a");
   const sequence = [
-    ...(fixture.name === "linked-job" ? ["d-pr", "d-paseo", "d-paseo-web"] : []),
+    ...(fixture.name === "linked-job" ? ["d-pr", "d-paseo", "d-paseo-web", "d-babysit-bar"] : []),
     ...(items.length ? ["d-actions"] : []),
     "d-close",
   ];
