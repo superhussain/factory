@@ -680,3 +680,16 @@ class RetroAdmitTest(RetroCase):
         self.admit(reply())
         (self.home / "retro" / "linked").symlink_to(self.folder)
         self.assertEqual(self.admit(None, "linked"), (4, "", "factory.py: no retro run linked\n"))
+
+
+class RetroRoleCardTest(unittest.TestCase):
+    def test_role_card_fields_pass_admission(self):
+        role = (ROOT / "skills/factory/agents/factory-retro.md").read_text(encoding="utf-8")
+        table = role.split("| Card field | Limit |\n| --- | --- |\n")[1].split("\n\n")[0]
+        names = {re.match(r"\| `(\w+)` \|", row).group(1) for row in table.splitlines()}
+        full = dict(retro_suggestion(), diagram="flowchart LR\n  A --> B")
+        card = {k: v for k, v in full.items() if k in names}
+        self.assertEqual(names, set(full))
+        self.assertIsNone(factory.check_suggestions(
+            {"schema": factory.SUGGESTION_SCHEMA, "by": "retro", "run": RUN, "suggestions": [card]}, "retro"))
+        self.assertNotIn("docs/autonomy.md", role)
