@@ -400,8 +400,18 @@ class RetroAggregateTest(RetroWorkerCase):
         """Routes for every date in the window; pushed maps a date offset to {host: rows or text}."""
         today, routes = datetime.now().date(), {
             "GET /projects.json": (200, [{"slug": "factory"}, {"slug": "sample-tools"}]),
+            "GET /api/board": (200, {"updated": "2026-11-12T09:00:00Z", "jobs": [],
+                                     "autonomy": {"paused": False, "projects": ["factory"], "self": []}}),
             "GET /api/pipeline/projects/factory": (200, {"schema": 1, "stage_notes": {"spec": "Keep it short."}},
-                                                   {"X-Pipeline-Version": "7"})}
+                                                   {"X-Pipeline-Version": "7"}),
+            "GET /api/project-history/factory/project.md": (200, [{"version": 3, "saved_at": "2026-11-12T08:00:00Z"}]),
+            "GET /api/project-history/factory/notes.md": (200, [{"version": 4, "saved_at": "2026-11-12T08:00:00Z"}]),
+            "GET /api/project-history/factory/decisions.md": (200, []),
+            "GET /api/project-history/factory/runbook.md": (200, [{"version": 1, "saved_at": "2026-11-12T08:00:00Z"}]),
+            "GET /api/projects/factory.md": (200, b"---\nrepo: example/factory\nbase: main\ntitle: Factory\n---\n"),
+            "GET /api/project-documents/factory/notes.md": (200, b"- Run pnpm test.\n"),
+            "GET /api/project-documents/factory/decisions.md": (200, b"# Decisions\n"),
+            "GET /api/project-documents/factory/runbook.md": (200, b"# Runbook\n")}
         for back in range(days):
             date = (today - timedelta(days=back)).isoformat()
             hosts = pushed.get(back, {})
@@ -459,7 +469,12 @@ class RetroAggregateTest(RetroWorkerCase):
             "interrupts": 0,
             "pipeline": {"global": {"version": 0, "stage_notes": {}},
                          "projects/factory": {"version": 7, "stage_notes": {"spec": "Keep it short."}},
-                         "projects/sample-tools": {"version": 0, "stage_notes": {}}}})
+                         "projects/sample-tools": {"version": 0, "stage_notes": {}}},
+            "documents": {"factory/project.md": {"version": 3, "text": "---\nrepo: example/factory\nbase: main\ntitle: Factory\n---\n"},
+                          "factory/notes.md": {"version": 4, "text": "- Run pnpm test.\n"},
+                          "factory/decisions.md": {"version": 0, "text": "# Decisions\n"},
+                          "factory/runbook.md": {"version": 1, "text": "# Runbook\n"}}})
+        self.assertFalse(any(key.startswith("sample-tools") for key in agg["documents"]))
 
     def test_patterns_ranked_and_capped(self):
         many = {f"err {n:02d}": n + 1 for n in range(25)}

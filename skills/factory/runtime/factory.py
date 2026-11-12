@@ -7799,12 +7799,23 @@ def retro_aggregate(days):
     if not rows:
         fail(f"no host pushed a retro digest from {dates[0]} to {dates[-1]}", 3)
     projects = sorted(registered(home))
+    allow = load_autonomy(load_board(api(home, "GET", "/api/board")[2]))["projects"]
     pipeline = {}
     for scope in ["global"] + [f"projects/{p}" for p in projects]:
         status, headers, text = api(home, "GET", f"/api/pipeline/{scope}", ok=(200, 404))
         notes = json.loads(text).get("stage_notes", {}) if status == 200 else {}
         pipeline[scope] = {"version": int(headers["X-Pipeline-Version"]) if status == 200 else 0,
                            "stage_notes": notes}
+    documents = {}
+    for slug in allow:
+        for name in ("project.md", *DOCUMENT_NAMES):
+            status, _, text = api(home, "GET", f"/api/project-history/{slug}/{name}", ok=(200, 404))
+            versions = json.loads(text) if status == 200 else []
+            route = f"/api/projects/{slug}.md" if name == "project.md" else f"/api/project-documents/{slug}/{name}"
+            status, _, text = api(home, "GET", route, ok=(200, 404))
+            if status == 200:
+                documents[f"{slug}/{name}"] = {"version": versions[0]["version"] if versions else 0,
+                                               "text": text}
     run = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(3)
     folder = home / "retro" / run
     if is_link(folder.parent) or is_link(folder):
@@ -7858,7 +7869,8 @@ def retro_aggregate(days):
                    "patterns": retro_patterns(rows, lambda r: retro_dict(r.get("errors")).get("patterns"))},
         "repeated_cmds": retro_patterns(rows, lambda r: r.get("repeated_cmds")),
         "subagents": subagents, "review_rounds": rounds, "agent_prompts": summed("agent_prompts"),
-        "human_msgs": total("human_msgs"), "interrupts": total("interrupts"), "pipeline": pipeline}
+        "human_msgs": total("human_msgs"), "interrupts": total("interrupts"), "pipeline": pipeline,
+        "documents": documents}
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
