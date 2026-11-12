@@ -99,12 +99,7 @@ export async function runArchive(env, now) {
   if (!jobs) return { status: "none", moved: [] };
   const archive = await readJson(env, ARCHIVE_KEY);
   const archiveJobs = jobsOf(archive) ?? [];
-  const ids = planArchive(
-    jobs,
-    pipeline.data.archive,
-    now,
-    pipeline.data.tracer?.enabled === false,
-  );
+  const ids = planArchive(jobs, pipeline.data.archive, now, pipeline.data.tracer?.enabled !== true);
   const boardIds = new Set(jobs.map((j) => j?.id));
   const stale = archiveJobs.some((j) => boardIds.has(j?.id));
   if (!ids.size && !stale) return { status: "none", moved: [] };
