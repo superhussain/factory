@@ -326,12 +326,12 @@ async function capture(outdir, referencePath) {
       for (const side of ["before", "after"]) {
         await retryCapture(`${side}-${name}`, async () => {
           const context = await browser.createBrowserContext();
-          if (grantLoopback)
-            await context.setPermission(origin, {
-              permission: { name: "loopback-network" },
-              state: "granted",
-            });
           try {
+            if (grantLoopback)
+              await context.setPermission(origin, {
+                permission: { name: "loopback-network" },
+                state: "granted",
+              });
             const page = await context.newPage();
             await page.setViewport({
               width,
