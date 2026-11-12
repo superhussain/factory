@@ -57,7 +57,7 @@ function helpers(fetch, extra = {}) {
       script.indexOf("function answersMarkdown("),
     ) +
       script.slice(script.indexOf("function ideaSlug("), script.indexOf("let ideaEditor =")) +
-      "\nthis.api = { backlogItems, parseBacklogContext, backlogAnswersText, loadBacklog, addBacklogJob, backlogReworkHistory, markBacklogLine, removeBacklogJob," +
+      "\nthis.api = { backlogItems, parseBacklogContext, backlogAnswersText, loadBacklog, ideaWithContext, addBacklogJob, backlogReworkHistory, markBacklogLine, removeBacklogJob," +
       " casBacklog, decideBacklog, boardSaveError, backlogBusy, backlogPending, BOARD_UNCHANGED, get backlog() { return backlog; } };",
     context,
   );
@@ -552,7 +552,9 @@ async function offlineContext() {
     project: "sample",
     title: "With context",
     idea:
-      "With context\n\nNotes from the backlog decision:\nUse the drawer." +
+      "With context\n\nContext from the backlog:\n" +
+      CONTEXT +
+      "\n\nNotes from the backlog decision:\nUse the drawer." +
       "\n\nAnswers from the backlog decision:\n" +
       answers,
     stage: "idea",
@@ -578,7 +580,28 @@ async function offlineContext() {
   api.addBacklogJob(board, one, "approved", "", answers, "c3", now);
   assert.equal(
     board.jobs[2].idea,
-    "With context\n\nAnswers from the backlog decision:\n" + answers,
+    "With context\n\nContext from the backlog:\n" +
+      CONTEXT +
+      "\n\nAnswers from the backlog decision:\n" +
+      answers,
+  );
+
+  // A long context is cut so the idea stays at 4000 characters; with no room, no block.
+  const long = { ...one, context: "y".repeat(5000) };
+  api.addBacklogJob(board, long, "approved", "Use the drawer.", "", "c5", now);
+  const cut = board.jobs.at(-1).idea;
+  assert.equal(cut.length, 4000);
+  assert.ok(cut.startsWith("With context\n\nContext from the backlog:\nyyy"));
+  assert.ok(
+    cut.endsWith(
+      "y\n[context cut to fit the 4000-character idea limit]\n\nNotes from the backlog decision:\nUse the drawer.",
+    ),
+  );
+  board.jobs.pop();
+  assert.equal(api.ideaWithContext("a", "", "b"), "ab");
+  assert.equal(
+    api.ideaWithContext("a", "x".repeat(4000), "b".repeat(3950)),
+    "a" + "b".repeat(3950),
   );
   api.addBacklogJob(board, one, "rework", "Narrow it.", answers, "c4", now);
   assert.deepEqual(clone(board.jobs[3].backlog), {
@@ -1220,7 +1243,12 @@ async function browserTest(url) {
     const exported = (await read("/api/board")).jobs.find((j) => j.title === "Export the board");
     assert.equal(
       exported.idea,
-      "Export the board\n\nAnswers from the backlog decision:\n" + answers,
+      "Export the board\n\nContext from the backlog:\n" +
+        CONTEXT +
+        "\n\n" +
+        second +
+        "\n\nAnswers from the backlog decision:\n" +
+        answers,
     );
     assert.equal(exported.backlog.answers, answers);
     assert.ok(

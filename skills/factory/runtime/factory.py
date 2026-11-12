@@ -1252,7 +1252,7 @@ def backlog_add(item, context=None):
         print(f"held {item} for review: retro items always wait for a person")
         return True
     verdict, final = backlog_triage(home, item, context)
-    left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict)
+    left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict, context)
     if final and (verdict is None or verdict["decision"] != "queue" or left):
         triaged = read_triaged(home)
         if line not in triaged:
@@ -1260,10 +1260,10 @@ def backlog_add(item, context=None):
     return True
 
 
-def report_verdict(home, slug, feature, item, verdict):
+def report_verdict(home, slug, feature, item, verdict, context=None):
     """Queue a line the Worker queued, or print why it holds. Returns what queue_backlog_item returns for a queue, else False."""
     if verdict["decision"] == "queue":
-        return queue_backlog_item(home, slug, feature, verdict)
+        return queue_backlog_item(home, slug, feature, verdict, context)
     if verdict["confidence"] is None:
         print(f"held {item} for review: {verdict['reason']}")
     else:
@@ -1405,7 +1405,7 @@ def backlog_triage_pass(home):
                 triaged.append(raw)
                 continue
             verdict, final = backlog_triage(home, item, context or None)
-            left = verdict is not None and report_verdict(home, slug, feature, item, verdict)
+            left = verdict is not None and report_verdict(home, slug, feature, item, verdict, context or None)
             if final and (verdict is None or verdict["decision"] != "queue" or left):
                 triaged.append(raw)
             if verdict is None and not final:
@@ -1510,7 +1510,25 @@ def escalation_cmd(target, round_text):
     print(json.dumps(verdict))
 
 
-def queue_backlog_item(home, slug, feature, verdict):
+IDEA_LIMIT = 4000
+
+
+def idea_with_context(head, context, tail):
+    """head, the backlog context block, then tail, in at most IDEA_LIMIT characters. A long context
+    is cut with a note; if even that does not fit, the block is left out. The dashboard's
+    ideaWithContext matches."""
+    if not context:
+        return head + tail
+    intro = "\n\nContext from the backlog:\n"
+    cut = f"\n[context cut to fit the {IDEA_LIMIT}-character idea limit]"
+    full = head + intro + context + tail
+    if len(full) <= IDEA_LIMIT:
+        return full
+    room = IDEA_LIMIT - len(head) - len(intro) - len(cut) - len(tail)
+    return head + intro + context[:room] + cut + tail if room > 0 else head + tail
+
+
+def queue_backlog_item(home, slug, feature, verdict, context=None):
     """Queue a triaged line as an idea, as a dashboard Approve does: the board row first, so the
     id exists before the line names it. A line that changed meanwhile drops the unclaimed row.
     Returns True when it left the new idea row on the board beside an unchecked line."""
@@ -1528,7 +1546,7 @@ def queue_backlog_item(home, slug, feature, verdict):
                              archive_floor(data))
         at = data["updated"] = now()
         job = {"id": job_id, "project": slug, "title": text.strip()[:80], "stage": IDEA, "updated": at,
-               "idea": f"{text}\n\nQueued by backlog triage: {score}. {verdict['reason']}",
+               "idea": idea_with_context(text, context, f"\n\nQueued by backlog triage: {score}. {verdict['reason']}"),
                "backlog": {"line": raw, "decision": "approved", "at": at, "by": "triage",
                            "triage": {k: verdict[k] for k in ("model", "confidence", "threshold", "reason")}}}
         refs = suffix_refs(ref)

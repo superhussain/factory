@@ -249,13 +249,15 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 | --- | --- | --- |
 | triage off or not set | no | `off` |
 | context line 1 is `Recommend: deny` (LF or CRLF) | no | `hold` |
-| context has a `## Question:` line | no | `hold` |
+| context has a `## Question:` line | yes | `hold`, with `choices` |
 | confidence at or above the threshold | yes | `queue` |
 | confidence below the threshold | yes | `hold` |
 
 - **Queue.** `factory.py` adds an `idea` row with `backlog.by: "triage"` and the verdict,
   then checks the line off with the new id, as a dashboard Approve does. If the line
-  changed meanwhile, it drops the row while the row is still an unclaimed idea.
+  changed meanwhile, it drops the row while the row is still an unclaimed idea. The idea
+  carries the line's context under `Context from the backlog:`, cut so the idea stays within
+  4000 characters, as a dashboard Approve does.
 - **Hold.** The line waits in the backlog for a person, as before.
   The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board reads the stored verdicts of the lines it lists in one `POST /api/backlog/triage/verdicts` call per 50 lines. It reads again only when the listed lines change, and only for lines with no verdict yet. Opening a line with no verdict reads that line again. A line the Worker would refuse, such as one over 2000 characters, reads as no verdict and leaves the other lines' verdicts intact.
 - **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
@@ -283,13 +285,22 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   score but write no text. An item or context holding either tag, including fullwidth,
   Cyrillic, Greek or other lookalike forms, or a letter that reads as either l or I, is
   refused with a 400.
+  For an item whose context has `## Question:` sections, the same call adds one `choice`
+  question `q<i>` per backlog question, over its options, and one `choice` question
+  `q<i>.o<k>` per option, over fixed reasons such as `It gives the item the most value.`
+  (`It follows the project rules.` only when rules are set). The hold verdict then carries
+  `choices`: for each question its header, the model's pick and its percent, and each option's
+  percent and reason. The drawer shows them under Held by triage. If the questions do not parse,
+  the binding is missing, or the call fails or gives an unusable reply, the item gets the fixed
+  hold with no `choices`.
 - **Floors.** A queued idea still goes through the spec, the reviews F2 requires, the
   approver, merge rules and any `spec-approval` gate.
 - **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
   Workers AI usage bills against the account. Without the binding the route answers 503,
   and lines wait. In a 36-call live run, a call sent a median of 292 input tokens, which costs about
   $0.000011, or about 1 neuron. The free tier of 10,000 neurons a day covers about 9,900
-  calls.
+  calls. A question item with 3 questions of 4 options is an estimated 2000 to 2500 input
+  tokens, about 8 neurons. That is a guess until a live run measures it.
 
 To stop triage, set it to Off in Settings, Pipeline. Ideas it already queued stay
 ordinary ideas, and a person can discard them.

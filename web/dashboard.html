@@ -692,7 +692,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           </select></label>
           <label for="pipeline-triage-threshold">Confidence threshold (%)<input type="number" id="pipeline-triage-threshold" min="1" max="100" step="1"></label>
           <label for="pipeline-triage-rules">Triage rules<textarea id="pipeline-triage-rules" spellcheck="false"></textarea></label>
-          <p id="pipeline-triage-help" class="muted">When on, factory.py backlog add asks Cloudflare's clef-flash model whether a new item should be built without your review under these rules. Its yes probability, as a percent, is the confidence. At or above the threshold, the item moves to the idea column for pickup. Below it, the item waits here for you. Items that ask questions or recommend deny always wait. Rules cannot contain links, secrets or instructions to skip review. A project value replaces the global one whole.</p>
+          <p id="pipeline-triage-help" class="muted">When on, factory.py backlog add asks Cloudflare's clef-flash model whether a new item should be built without your review under these rules. Its yes probability, as a percent, is the confidence. At or above the threshold, the item moves to the idea column for pickup. Below it, the item waits here for you. Items that recommend deny always wait. Items that ask questions also wait, with the model's pick and a reason for each answer. Rules cannot contain links, secrets or instructions to skip review. A project value replaces the global one whole.</p>
         </fieldset>
         <fieldset id="pipeline-archive">
           <legend>Archive old jobs</legend>
@@ -4714,6 +4714,18 @@ function syncBacklogRoute() {
   if (key) openBacklogRoute(key);
 }
 
+// head, the backlog context block, then tail, in at most 4000 characters. A long context is cut
+// with a note; if even that does not fit, the block is left out. factory.py idea_with_context matches.
+function ideaWithContext(head, context, tail) {
+  if (!context) return head + tail;
+  const intro = '\n\nContext from the backlog:\n';
+  const cut = '\n[context cut to fit the 4000-character idea limit]';
+  const full = head + intro + context + tail;
+  if (full.length <= 4000) return full;
+  const room = 4000 - head.length - intro.length - cut.length - tail.length;
+  return room > 0 ? head + intro + context.slice(0, room) + cut + tail : head + tail;
+}
+
 // Adds the decided item as a job, or returns the id it already saved under captureId.
 function addBacklogJob(board, item, decision, notes, answers, captureId, now) {
   const prior = board.jobs.find((j) => j.capture_id === captureId);
@@ -4728,8 +4740,8 @@ function addBacklogJob(board, item, decision, notes, answers, captureId, now) {
   const answered = ans ? { answers: ans } : {};
   board.jobs.push(decision === 'approved'
     ? { id, project: item.project, title: ideaTitle(item.text), stage: 'idea', updated: now,
-        idea: (note ? item.text + '\n\nNotes from the backlog decision:\n' + note : item.text) +
-          (ans ? '\n\nAnswers from the backlog decision:\n' + ans : ''),
+        idea: ideaWithContext(item.text, item.context,
+          (note ? '\n\nNotes from the backlog decision:\n' + note : '') + (ans ? '\n\nAnswers from the backlog decision:\n' + ans : '')),
         capture_id: captureId, backlog: { line: item.raw, decision: 'approved', at: now, ...(note ? { notes: note } : {}), ...answered }, ...refs }
     : decision === 'rework'
     ? { id, project: item.project, title: ideaTitle(item.text), idea: item.text, stage: 'idea', updated: now,
@@ -6222,10 +6234,23 @@ async function fetchReworkHistory(item) {
   section.hidden = !history.length;
 }
 
+// A question item's verdict adds choices: the model's pick and a fixed reason for each option.
 function backlogTriageHtml(v) {
   if (typeof v?.reason !== 'string' || typeof v.at !== 'string' || !Number.isInteger(v.threshold) || !(v.confidence === null || Number.isInteger(v.confidence))) return '';
+  const checked = '<p class="muted">Checked ' + esc(ago(v.at)) + '</p>';
+  if (v.choices !== undefined) {
+    const str = (x) => typeof x === 'string';
+    const ok = Number.isInteger(v.confidence) && Array.isArray(v.choices) && v.choices.length && v.choices.every((c) =>
+      str(c?.header) && str(c.pick) && Number.isInteger(c.confidence) && Array.isArray(c.options) &&
+      c.options.every((o) => str(o?.label) && Number.isInteger(o.chance) && str(o.reason)));
+    if (!ok) return '';
+    return '<h3 id="backlog-triage-heading">Held by triage</h3><p>' +
+      esc('Held because ' + v.reason + '. Approval confidence ' + v.confidence + '% against the ' + v.threshold + '% threshold.') + '</p>' +
+      v.choices.map((c) => '<p>' + esc(c.header + ': clef-flash picks ' + c.pick + ' at ' + c.confidence + '%.') + '</p><ul class="triage-picks">' +
+        c.options.map((o) => '<li>' + esc(o.label + ', ' + o.chance + '%: ' + o.reason) + '</li>').join('') + '</ul>').join('') + checked;
+  }
   const why = v.confidence === null ? 'Held without a model score because ' + v.reason + '.' : 'Confidence ' + v.confidence + '% is below the ' + v.threshold + '% threshold. ' + v.reason;
-  return '<h3 id="backlog-triage-heading">Held by triage</h3><p>' + esc(why) + '</p><p class="muted">Checked ' + esc(ago(v.at)) + '</p>';
+  return '<h3 id="backlog-triage-heading">Held by triage</h3><p>' + esc(why) + '</p>' + checked;
 }
 
 // Reads triage for the visible backlog once per change in its lines: lines never read, and lines
