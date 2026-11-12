@@ -142,7 +142,7 @@ class TracerCase(IsolatedTestCase):
                     "title": "Sample feature"}
         self.board = {"jobs": [self.job]}
         self.board_writes = 0
-        self.pipeline = None
+        self.pipeline = {"schema": 1, "tracer": {"enabled": True}}
         self.folder = self.home / "jobs" / "sample" / "001-sample"
         self.folder.mkdir(parents=True)
         (self.folder / "spec.md").write_text(SPEC)
@@ -1177,6 +1177,14 @@ class OffTest(TracerCase):
     def setUp(self):
         super().setUp()
         self.pipeline = {"schema": 1, "tracer": {"enabled": False}}
+
+    def test_unset_setting_is_off(self):
+        for pipeline in (None, {"schema": 1}):
+            with self.subTest(pipeline=pipeline):
+                self.pipeline = pipeline
+                self.assertIs(factory.tracer_enabled(self.home), False)
+        self.pipeline = {"schema": 1, "tracer": {"enabled": True}}
+        self.assertIs(factory.tracer_enabled(self.home), True)
 
     def test_off_board_patch_makes_no_tracer_call(self):
         with FakeTracer() as fake:

@@ -104,6 +104,7 @@ async function makePage(browser, origin, width, theme, support) {
   });
   await page.goto(origin + "/dashboard.html", { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".card", { polling: 50 });
+  await page.waitForFunction(() => tracerOff === false);
   assert.equal(
     await page.evaluate(() => typeof window.fixtureBoardPoll),
     "function",
@@ -347,6 +348,7 @@ async function browserRun(origin) {
   const puppeteer = require("puppeteer-core");
   await support.seedProject(origin, "layout", PROJECT_DOC);
   await support.seedBoard(origin, fixtures);
+  await support.seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
   for (const fixture of fixtures) {
     if (fixture.stage === "idea") continue;
     const file = await fetch(origin + `/api/jobs/layout/${fixture.id}/spec.md`, {

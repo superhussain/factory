@@ -5,7 +5,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import {
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+  seedPipeline,
+} from "../support/browser-server.mjs";
 
 const JOB = {
   id: "042-sample-links",
@@ -33,6 +38,7 @@ test("drawer header links", { timeout: 180000 }, async (t) => {
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
     await seedBoard(origin, [JOB]);
+    await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
     const page = await (await browser.createBrowserContext()).newPage();
     const errors = [];
     page.on("pageerror", (error) => errors.push(String(error)));
@@ -40,6 +46,7 @@ test("drawer header links", { timeout: 180000 }, async (t) => {
       await page.setViewport(viewport);
       await page.goto("about:blank");
       await page.goto(`${origin}/#042-sample-links`, { waitUntil: "load" });
+      await page.waitForFunction(() => tracerOff === false);
       await page.waitForFunction(() => !document.getElementById("d-pr").hidden, wait);
     };
     const openDisplay = async () => {

@@ -49,7 +49,7 @@ const ROWS = [
   },
 ];
 
-function setup({ archive = { mode: "age", n: 30 }, jobs = ROWS, extra = {} } = {}) {
+function setup({ archive = { mode: "age", n: 30 }, jobs = ROWS, extra = {}, tracer = null } = {}) {
   const bucket = memoryBucket();
   const env = { BUCKET: bucket };
   const seed = (key, value) =>
@@ -58,7 +58,13 @@ function setup({ archive = { mode: "age", n: 30 }, jobs = ROWS, extra = {} } = {
       bytes: Buffer.from(typeof value === "string" ? value : JSON.stringify(value)),
       httpEtag: `"${key}-seed"`,
     });
-  if (archive !== null) seed("pipeline/global.json", { schema: 1, archive });
+  if (archive !== null)
+    seed(
+      "pipeline/global.json",
+      tracer === null
+        ? { schema: 1, archive }
+        : { schema: 1, archive, tracer: { enabled: tracer } },
+    );
   seed("board.json", { updated: "2026-11-09T09:00:00Z", jobs, ...extra });
   const read = (key) => JSON.parse(bucket.objects.get(key).bytes.toString());
   const send = (path, { method = "GET", body, headers = {}, principal = person } = {}) =>
@@ -143,7 +149,7 @@ test("Off, an invalid setting and every keep rule leave the board alone", async 
     },
     { ...old, id: "511-tracer", tracer: { follow: true } },
   ];
-  const s = setup({ jobs: kept });
+  const s = setup({ jobs: kept, tracer: true });
   assert.deepEqual(await s.run(), { status: "none", moved: [] });
   assert.deepEqual(ids(s.read("board.json").jobs), ids(kept));
   // Once the notes are read and the mirror exists, both may go.
@@ -152,6 +158,7 @@ test("Off, an invalid setting and every keep rule leave the board alone", async 
       { ...kept[9], backlog: { ...kept[9].backlog, notes_read: "2026-02-01" } },
       { ...kept[10], tracer: { follow: true, url: "https://tracer.example.test/1" } },
     ],
+    tracer: true,
   });
   assert.deepEqual((await done.run()).moved, ["510-deny-notes", "511-tracer"]);
   assert.equal(warn.mock.calls.length, 0);
@@ -165,6 +172,12 @@ test("Tracer off lets a pending mirror go", async () => {
     archive: { mode: "age", n: 30 },
     tracer: { enabled: false },
   });
+  assert.deepEqual(await s.run(), { status: "archived", moved: ["511-tracer"] });
+});
+
+test("Tracer unset lets a pending mirror go", async () => {
+  const old = { project: "sample", stage: "merged", done: "2026-01-01T00:00:00Z" };
+  const s = setup({ jobs: [{ ...old, id: "511-tracer", tracer: { follow: true } }] });
   assert.deepEqual(await s.run(), { status: "archived", moved: ["511-tracer"] });
 });
 
