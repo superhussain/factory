@@ -109,6 +109,7 @@ test("live keepalive", { timeout: 120000 }, async (t) => {
         /\. Last live connection closed with code 1006 after \d+ seconds open$/,
       );
       await page.waitForFunction("liveOpen", wait);
+      assert.equal(await page.evaluate("liveNote"), "");
       await page.evaluate("liveSocket.close(1000)");
       await page.waitForFunction("!liveOpen", wait);
       assert.equal(await title(page), await polling(page));
@@ -121,13 +122,41 @@ test("live keepalive", { timeout: 120000 }, async (t) => {
       const note = await page.evaluate(() => {
         const bare = new EventTarget();
         keepLive(bare);
+        const real = liveSocket;
+        liveSocket = bare;
         bare.dispatchEvent(Object.assign(new Event("close"), { code: 1011, reason: "synthetic" }));
+        liveSocket = real;
         return liveNote;
       });
       assert.equal(
         note,
         "Last live connection closed with code 1011 (synthetic) before it opened, 0 seconds after it started",
       );
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+    await t.test("live K5 a stale close keeps the note and one second is singular", async () => {
+      const { context, page, errors } = await open();
+      const notes = await page.evaluate(() => {
+        const real = liveSocket;
+        const one = new EventTarget();
+        keepLive(one);
+        liveSocket = one;
+        window.clockOffset += 1000;
+        one.dispatchEvent(Object.assign(new Event("close"), { code: 1011 }));
+        const first = liveNote;
+        liveSocket = real;
+        liveNote = "kept";
+        const stale = new EventTarget();
+        keepLive(stale);
+        stale.dispatchEvent(Object.assign(new Event("close"), { code: 1006 }));
+        return [first, liveNote];
+      });
+      assert.deepEqual(notes, [
+        "Last live connection closed with code 1011 before it opened, 1 second after it started",
+        "kept",
+      ]);
       assert.deepEqual(errors, []);
       await context.close();
     });

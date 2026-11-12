@@ -1083,7 +1083,8 @@ function keepLive(ws) {
   });
   ws.addEventListener('close', (e) => {
     clearInterval(timer);
-    const secs = (n) => Math.round(n / 1000) + ' seconds';
+    if (liveSocket && ws !== liveSocket) return;
+    const secs = (n) => { const s = Math.round(n / 1000); return s + (s === 1 ? ' second' : ' seconds'); };
     if (e.code === 1000 && !silent) { liveNote = ''; return; }
     const when = openedAt ? 'after ' + secs(Date.now() - openedAt) + ' open' : 'before it opened, ' + secs(Date.now() - startedAt) + ' after it started';
     liveNote = silent
@@ -6681,6 +6682,7 @@ function openLive() {
   keepLive(ws);
   ws.addEventListener('open', () => {
     if (ws !== liveSocket) return;
+    liveNote = '';
     liveOpen = true;
     liveRetries = 0;
     schedulePoll();
