@@ -89,6 +89,34 @@ test("deploy reload", { timeout: 120000 }, async (t) => {
       await context.close();
     });
 
+    await t.test("backlog draft waits", async () => {
+      const { context, page, state } = await open();
+      await page.evaluate(
+        "backlogDrafts.set('item', { pick: '', notes: 'needs a smaller scope', answers: [] })",
+      );
+      state.version = "0000beef";
+      await page.evaluate("poll()");
+      await new Promise((resolve) => setTimeout(resolve, 6500));
+      assert.equal(await page.evaluate("window.reloadMarker"), 1);
+      await page.evaluate("backlogDrafts.clear()");
+      await reloaded(page);
+      await context.close();
+    });
+
+    await t.test("offline tab waits for the connection", async () => {
+      const { context, page, state } = await open();
+      await page.evaluate("backlogSaving = true");
+      state.version = "0000beef";
+      await page.evaluate("poll()");
+      await page.evaluate("backlogSaving = false; setConnection('offline')");
+      await new Promise((resolve) => setTimeout(resolve, 6500));
+      assert.equal(await page.evaluate("window.reloadMarker"), 1);
+      assert.equal(await sentinel(page), true);
+      await page.evaluate("setConnection('online')");
+      await reloaded(page);
+      await context.close();
+    });
+
     await t.test("same version stays", async () => {
       const { context, page, state } = await open();
       state.version = await page.$eval('meta[name="factory-version"]', (el) => el.content);

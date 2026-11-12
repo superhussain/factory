@@ -2242,10 +2242,12 @@ function unsavedWork() {
     || [...document.querySelectorAll(typing)].some(el => !blank(el))
     || [...document.querySelectorAll('#host-add input[type=text], #host-add input:not([type])')].some(el => !blank(el))
     || hostDrafts.size > 0
+    || backlogSaving || needsSaving
+    || [...backlogDrafts.values()].some(d => d.pick || d.notes.trim() || d.answers.some(a => a.picked.length || a.other.trim()))
     || !!document.activeElement?.matches('textarea, input[type=text], input[type=search], input:not([type]), [contenteditable]');
 }
 async function reloadWhenIdle() {
-  if (!deployedVersion || unsavedWork()) return;
+  if (!deployedVersion || connState !== 'online' || !navigator.onLine || unsavedWork()) return;
   try {
     sessionStorage.setItem(RELOADED_KEY, deployedVersion);
     for (const name of await caches.keys()) await (await caches.open(name)).delete('/');
