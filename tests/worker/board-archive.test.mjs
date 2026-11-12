@@ -73,7 +73,7 @@ function setup({ archive = { mode: "age", n: 30 }, jobs = ROWS, extra = {} } = {
     );
   const run = () => {
     let pass;
-    worker.scheduled({ scheduledTime: NOW.getTime() }, env, { waitUntil: (p) => (pass = p) });
+    worker.scheduled({ scheduledTime: NOW.getTime() }, env, { waitUntil: (p) => (pass ??= p) });
     return pass;
   };
   return { bucket, env, seed, read, send, run };
@@ -376,6 +376,6 @@ test("the scheduled handler runs the pass through waitUntil", async () => {
   const s = setup();
   const pending = [];
   worker.scheduled({ scheduledTime: NOW.getTime() }, s.env, { waitUntil: (p) => pending.push(p) });
-  assert.equal(pending.length, 1);
+  assert.equal(pending.length, 2);
   assert.equal((await pending[0]).status, "archived");
 });

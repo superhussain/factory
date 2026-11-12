@@ -148,3 +148,30 @@ test("writes outside yesterday, today and tomorrow in UTC are refused", async ()
   assert.deepEqual(s.retroKeys(), kept);
   assert.equal((await s.put("mac", `${row("mac")}\n`, unbound, "2026-11-13")).status, 403);
 });
+
+test("the scheduled pass deletes retro digests older than 35 days", async () => {
+  const bucket = memoryBucket();
+  const keys = [
+    "retro/mac/2026-10-01.jsonl",
+    "retro/pc/2026-10-06.jsonl",
+    "retro/mac/2026-10-07.jsonl",
+    "retro/mac/2026-11-11.jsonl",
+    "retro/notes.txt",
+  ];
+  for (const key of keys) await bucket.put(key, `${row("mac")}\n`);
+  const pending = [];
+  (await loadProduction()).default.scheduled(
+    { scheduledTime: Date.parse("2026-11-11T12:00:00Z") },
+    { BUCKET: bucket },
+    { waitUntil: (p) => pending.push(p) },
+  );
+  assert.deepEqual(await pending[1], {
+    status: "pruned",
+    deleted: ["retro/mac/2026-10-01.jsonl", "retro/pc/2026-10-06.jsonl"],
+  });
+  assert.deepEqual([...bucket.objects.keys()].filter((k) => k.startsWith("retro/")).sort(), [
+    "retro/mac/2026-10-07.jsonl",
+    "retro/mac/2026-11-11.jsonl",
+    "retro/notes.txt",
+  ]);
+});

@@ -1100,6 +1100,29 @@ async function retroDay(env, date) {
   return reply(JSON.stringify(out), 200, "application/json");
 }
 
+const RETRO_KEY = /^retro\/[^/]+\/(\d{4}-\d{2}-\d{2})\.jsonl$/;
+
+// Deletes retro digests dated more than RETRO_KEEP_DAYS before now's UTC date.
+async function pruneRetro(env, now) {
+  const cutoff = new Date(utcDay(now.getTime()) - RETRO_KEEP_DAYS * DAY_MS)
+    .toISOString()
+    .slice(0, 10);
+  const deleted = [];
+  let cursor;
+  do {
+    const page = await env.BUCKET.list({ prefix: "retro/", cursor });
+    for (const { key } of page.objects) {
+      const date = key.match(RETRO_KEY)?.[1];
+      if (date && date < cutoff) {
+        await env.BUCKET.delete(key);
+        deleted.push(key);
+      }
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return { status: "pruned", deleted };
+}
+
 // Raw image bytes, never decoded as text, or null past the cap.
 const readImage = (request) => readCapped(request, MAX_IMAGE);
 
@@ -1409,6 +1432,7 @@ export default {
   },
   scheduled(controller, env, ctx) {
     ctx.waitUntil(runArchive(env, new Date(controller.scheduledTime)));
+    ctx.waitUntil(pruneRetro(env, new Date(controller.scheduledTime)));
   },
 };
 
