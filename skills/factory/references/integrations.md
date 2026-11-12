@@ -135,9 +135,9 @@ To turn the whole integration off without editing `tracer.json` on each device, 
 
 | Reader | Off behavior |
 | --- | --- |
-| Dashboard | hides Follow in Tracer, the Tracer link, the task list, the scope and waiting lines, and `Building in Tracer` |
+| Dashboard | hides Follow in Tracer, the Tracer link, the task list, the scope and waiting lines, and `Building in Tracer`; until a tab reads the setting, it hides them too |
 | Board patch, follow pass | return before any Tracer call |
-| Build pass | treats every project as unconfigured, so it clears `building` marks with no Tracer call |
+| Build pass | treats every project as unconfigured, so it clears `building` marks with no Tracer call, also on a device without `tracer.json` |
 | `tracer sync` | prints `nothing to mirror: Tracer is off in Settings, Pipeline`, exit 0 |
 | Archive pass | a pending Tracer mirror no longer keeps a job on the board |
 

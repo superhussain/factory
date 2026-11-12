@@ -6547,17 +6547,22 @@ def tracer_build_pass(home):
     """Mark each idea or in-flight job whose Tracer feature a Tracer build agent holds, and
     clear the mark when it stops. Save the feature's task summary once it builds and refresh it
     while the job stays checked; a 404 drops it. A Tracer failure costs one stderr warning and leaves
-    unchecked jobs as they were. Silent on a device without tracer.json. Polls only the feature id
+    unchecked jobs as they were. A device without tracer.json only clears marks, and only while Tracer is off. Polls only the feature id
     the job maps to, skips a job whose board names another feature, and fails the check on a feature
     with another ticket. Clears the mark, with no Tracer call, from a job outside that scope."""
     home = Path(home)
-    if not os.path.lexists(home / "tracer.json"):
-        return
+    configured = os.path.lexists(home / "tracer.json")
     captured, found = io.StringIO(), {}
     try:
         with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
-            cfgs = read_tracer(home) if tracer_enabled(home) else {}
-            for job in read_board(home)["jobs"]:
+            jobs = read_board(home)["jobs"]
+            if configured:
+                cfgs = read_tracer(home) if tracer_enabled(home) else {}
+            elif any(tracer_building(j) for j in jobs) and not tracer_enabled(home):
+                cfgs = {}
+            else:
+                return
+            for job in jobs:
                 slug, job_id = job.get("project"), str(job.get("id"))
                 if not JOB_ID.fullmatch(job_id) or ".." in job_id:
                     continue
