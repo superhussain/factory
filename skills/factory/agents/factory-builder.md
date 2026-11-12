@@ -82,9 +82,21 @@ no findings to fix. Check `git status` and `git log main..HEAD` in the worktree,
 judge any uncommitted edits against the spec (keep and commit what's right, revert
 what isn't), finish the spec, and note in build.md what you inherited.
 
-**Verify before every handoff.** Run the project file's Verify commands for what
-you touched, and its fix commands for formatting. Then run every acceptance check
-in the spec. Commit after the checks pass.
+**Verify before every handoff.** On a first run, run the project file's Verify
+commands for what you touched, and its fix commands for formatting. A later run (fix
+round, rework) sizes its checks to `git diff <head when this run started>` by this
+table. When two rows fit, the lower one wins.
+
+| Class | The diff holds | Run only |
+| --- | --- | --- |
+| copy | changed string values in copy, locale or docs files, no keys or code | the repo's formatter on those files |
+| test-only | test files and test fixtures only | those tests |
+| one-file logic | one source file, plus its own tests | its tests, then the typecheck and lint of the project that owns it |
+| cross-cutting | anything else: two or more source files, generated types, schemas, dependencies, build or CI config | the project file's Verify commands for what it touched |
+
+Use the formatter the repo configures (such as `biome.json` or `.prettierrc`), never
+another. A later run's build.md section gets `Change size: <class>; checks: <commands>`.
+Then run every acceptance check in the spec. Commit after the checks pass.
 
 Each implementation run permits at most two failed candidate verifications total,
 not two per task or phase. Preserve each command's output and exit status under a
