@@ -18,13 +18,14 @@ All of these run through `factory.py` on a device.
 | `autonomy deny <slug>` | anyone | Removes a project from the allowlist. |
 | `autonomy self <slug>` | anyone | Marks a project as part of the factory itself, so the classifier flags its cards. |
 | `suggest admit <file>` | trusted launcher | Checks a `factory.suggestions/1` file and adds one gated idea card per new suggestion. |
-| `suggest approve <job-id> <A\|B\|C>` | human at a terminal | Approves one option after you type the job id, which lets `factory.py pickup` promote the card. |
+| `suggest approve <job-id> <A\|B\|C>` | human at a terminal, or an orchestrator relaying the person's chat message (`--chat-file`) | Approves one option after you type the job id, or records the chat quote with `--chat-file`, which lets `factory.py pickup` promote the card. |
 | `explore <slug>` | explorer schedule | Snapshots an allowlisted project's base for the explorer and prints the run's paths. Exits 3 when paused or not allowlisted. |
 | `explore <slug> done <run>` | explorer schedule | Removes that run's snapshot and keeps its suggestions file. |
 
 Loosening (`resume`, `allow`, `approve`) needs an interactive terminal and a typed
-confirmation. Tightening never does. A missing `autonomy` record means paused, with an
-empty allowlist.
+confirmation, or for `approve` a relayed chat message (`suggest approve --chat-file`), as
+[chat decisions](../skills/factory/references/chat-decisions.md) says. Tightening never does.
+A missing `autonomy` record means paused, with an empty allowlist.
 
 ## What admission checks
 
@@ -129,6 +130,7 @@ flowchart LR
   F -->|schema, caps, allowlist, dedupe, classifier| A[factory.py suggest admit]
   A -->|CAS PUT, idea + needs, no project| B[(board.json)]
   H[human at terminal] -->|typed confirm| P[suggest approve]
+  O[orchestrator] -.->|chat quote| P
   P -->|sets project, clears needs| B
   B --> L[existing loop: spec, build, 4 reviews, approver, PR]
 ```
@@ -142,7 +144,8 @@ flowchart LR
   explorer card to any stage but `idea` or `closed`.
 - Honest limit: the Worker cannot yet tell a human from a service token, so a token
   holder could forge an approval with a raw PUT. The runtime guards stop automation,
-  not abuse. A Worker-side human-only approval gate must land before stage 2.
+  except an agent that runs `--chat-file` or `--chat`, which only the chat-decisions
+  rule holds back. They do not stop abuse. A Worker-side human-only approval gate must land before stage 2.
 - Upgrade every host that runs `factory.py pickup` before the first `autonomy resume`.
   Older runtimes skip cards without a `project`, so unapproved cards stay put there too.
 
@@ -195,7 +198,7 @@ Approve or Deny.
 
 Retro idea cards admitted before this change keep `origin.by: "retro"` and still
 take `suggest approve`, which skips the allowlist for them but needs a registered
-project and a human typing at a terminal.
+project and a human typing at a terminal, or a relayed chat message.
 
 ## Stages
 

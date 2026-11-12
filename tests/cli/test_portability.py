@@ -67,7 +67,7 @@ class PortabilityTest(IsolatedTestCase):
                     names = [node.module.split(".")[0]]
                 else:
                     continue
-                self.assertTrue(set(names) <= allowed | {"support", "test_factory", "test_suggest"}, (path.name, names))
+                self.assertTrue(set(names) <= allowed | {"support", "test_factory", "test_suggest", "test_backlog_triage"}, (path.name, names))
 
     def test_exact_bundle_and_relative_installed_references(self):
         spec = importlib.util.spec_from_file_location("installer", ROOT / "tools/install.py")
@@ -76,7 +76,7 @@ class PortabilityTest(IsolatedTestCase):
         files, _ = installer.tree(SKILL, source=True)
         self.assertEqual(set(files), set(installer.REQUIRED))
         self.assertIn("runtime/pr_screenshots.py", files)
-        self.assertEqual(len(files), 39)
+        self.assertEqual(len(files), 40)
         for name, data in files.items():
             text = data.decode("utf-8")
             self.assertNotIn("file://", text)

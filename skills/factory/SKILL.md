@@ -300,7 +300,7 @@ device build. Jobs whose `runs` match rode the same build. Both are optional, an
 `factory.py` rejects a malformed one.
 `pipeline` holds the pipeline configuration versions the job last ran under, from
 `factory.py pipeline`. `factory.py` rejects a malformed one.
-`backlog` is set only on jobs decided from the dashboard's Backlog column. It holds
+`backlog` is set only on jobs decided from the Backlog column or `backlog decide`. It holds
 the backlog line, the decision, when it was made, and any notes typed with the decision.
 Approve also appends the notes to `idea`.
 
@@ -535,8 +535,10 @@ only `factory.py deny-notes` writes it.
   use never adds it.
 - Commands use `python3`, or `py -3` on Windows. No command needs bash: every
   command is `python3`, `git`, or `gh`.
-- Orchestrators never run `suggest approve`, `autonomy resume`, `autonomy allow`
-  or `/factory approve-spec`, or approve scope in Tracer; a human does.
+- Orchestrators run `suggest approve` and `backlog decide` only with `--chat-file`, as
+  [chat decisions](references/chat-decisions.md) says. They never run `autonomy
+  resume`, `autonomy allow` or `/factory approve-spec`, or approve scope in Tracer;
+  a human does.
 
 ## Security floors
 
