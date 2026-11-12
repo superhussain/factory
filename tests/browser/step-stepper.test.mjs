@@ -86,7 +86,7 @@ const state = () =>
     };
   })();
 
-test("numbered step headings render as a stepper", async () => {
+test("numbered step headings render as a stepper", { timeout: 180000 }, async () => {
   await prepareAssets();
   await withBrowserFixture(async ({ browser, origin }) => {
     await seedProject(
@@ -128,6 +128,16 @@ test("numbered step headings render as a stepper", async () => {
         return request.abort();
       }
       return request.continue();
+    });
+    await page.evaluateOnNewDocument(() => {
+      window.addEventListener(
+        "error",
+        (event) => {
+          if (event.target instanceof HTMLScriptElement)
+            window.fixtureScriptError = event.target.src;
+        },
+        true,
+      );
     });
     try {
       await page.goto(origin + "/dashboard.html", { waitUntil: "domcontentloaded" });
@@ -177,7 +187,21 @@ test("numbered step headings render as a stepper", async () => {
       assert.ok(layout.before.startsWith("Running example"), layout.before);
       assert.equal(layout.after, "H2 Acceptance criteria");
 
-      // 3. Mermaid renders in every step, including the hidden step 3.
+      // 3. Mermaid renders in every step, including the hidden step 3. Three waits, so a
+      // timeout names the slow part; fetching and compiling the bundle grows with CPU contention.
+      await page.waitForFunction(
+        () => document.querySelectorAll("#d-doc pre.mermaid-src, #d-doc .mermaid svg").length === 2,
+        { timeout: 30000 },
+      );
+      await page.waitForFunction(
+        () => typeof window.mermaid?.render === "function" || window.fixtureScriptError,
+        { timeout: 90000 },
+      );
+      assert.equal(
+        await page.evaluate(() => window.fixtureScriptError ?? null),
+        null,
+        "the Mermaid bundle loaded",
+      );
       await page.waitForFunction(
         () => document.querySelectorAll("#d-doc .mermaid svg").length === 2,
         { timeout: 30000 },
