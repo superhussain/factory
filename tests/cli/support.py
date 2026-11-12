@@ -69,13 +69,15 @@ def http_fixture(routes):
         def do_GET(self):
             data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
             requests.append((self.command, self.path, dict(self.headers), data))
-            status, body = routes.get(f"{self.command} {self.path}", routes.get(self.path, (404, b"")))
+            status, body, *extra = routes.get(f"{self.command} {self.path}", routes.get(self.path, (404, b"")))
             if not isinstance(body, bytes):
                 body = json.dumps(body).encode("utf-8")
             self.send_response(status)
             if status == 302:
                 self.send_header("Location", "https://example.invalid/login")
             self.send_header("ETag", '"' + hashlib.sha256(body).hexdigest() + '"')
+            for name, value in (extra[0] if extra else {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
         do_POST = do_PUT = do_GET
