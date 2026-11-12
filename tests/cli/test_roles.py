@@ -292,7 +292,7 @@ class RolesTest(IsolatedTestCase):
     def test_retro_schedule(self):
         schedule = (SKILL / "schedules/retro.md").read_text(encoding="utf-8")
         for value in ("<installed-skill>", "<python-launcher>", "retro: autonomy paused", "no claude route", "claude-",
-                      "byte for byte"):
+                      "byte for byte", "`expected`"):
             self.assertIn(value, schedule)
         steps = ("routes pick", "autonomy status", "retro push", "retro aggregate --days 3", "factory-retro",
                  "retro admit <run>")

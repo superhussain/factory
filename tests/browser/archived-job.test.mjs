@@ -262,6 +262,8 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
           setConnection("online");
           location.hash = "";
         });
+      // The previous subtest leaves 411-sync-retry open; start with the drawer closed.
+      await reset();
       for (const id of ["413-expired-link", "414-denied-link"]) {
         await page.evaluate((hash) => {
           location.hash = hash;
@@ -270,6 +272,7 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
         await new Promise((resolve) => setTimeout(resolve, 300));
         assert.equal(await statusHidden(), true);
         assert.equal((await meta()).includes(id), false);
+        assert.equal(await page.$eval("#detail", (el) => el.hidden), true);
         await reset();
       }
       const refetched = page.waitForResponse(

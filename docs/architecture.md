@@ -147,6 +147,7 @@ date.
 | `GET /api/retro/<date>` | any service token | JSON list of host ids with a digest that day, in host record order |
 | `GET /api/retro/<id>/<date>.jsonl` | any service token | that host's digest as `application/x-ndjson` |
 | `PUT /api/pipeline/retro/<scope>` | the bound service token of a paired or active host, while autonomy runs, for an allowlisted project scope only (never `global`) | replace one stage note as the next pipeline version, saved by `retro`; see [autonomy.md](autonomy.md#retro-pipeline-edits) |
+| `PUT /api/project-retro/<slug>/<name>` | the bound service token of a paired or active host, while autonomy runs, for an allowlisted project only | splice one find-and-replace into a project file or document as the next version, saved by `retro`; see [autonomy.md](autonomy.md#retro-file-edits) |
 
 The status may carry `triage_failed_since`, an ISO 8601 UTC time, while
 backlog triage fails on that host.

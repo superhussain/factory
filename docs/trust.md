@@ -147,7 +147,8 @@ the copies to the JavaScript source. See [autonomy.md](autonomy.md). Admitted
 suggestions become idea cards only, never pipeline configuration (F11), and every
 card waits for explicit human approval before it becomes work. The one exception
 under F11 is `retro admit`, which may edit only stage notes, through
-`PUT /api/pipeline/retro/<scope>`, and only for a project scope on the autonomy
+`PUT /api/pipeline/retro/<scope>`, and project files and documents, through
+`PUT /api/project-retro/<slug>/<name>`, and only for a project scope on the autonomy
 allowlist. The `global` scope stays person-only. See
 [autonomy.md](autonomy.md#retro-pipeline-edits).
 

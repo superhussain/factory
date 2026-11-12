@@ -49,7 +49,7 @@ around it. Its keys are `schema` (`"factory.retro/1"`), `run` copied as given,
 | `.root_cause`, `.fix` | 1 to 300 characters, one line each |
 | `.project` | a slug from `projects` in `aggregate` |
 | `suggestions` | 0 to 5 idea cards |
-| `edits` | optional, 0 to 2 stage-note edits |
+| `edits` | optional, 0 to 2 stage-note or file edits |
 
 | Card field | Limit |
 | --- | --- |
@@ -70,10 +70,12 @@ A repo path is relative, at most 200 characters of `A-Z a-z 0-9 _ . / -`, with n
 `..` segment. Every field but diagram is required, and no other key is allowed. Do not add by; retro admit sets it.
 
 **Edits.** An edit replaces one stage note in pipeline config, the text every agent
-in that stage reads. `pipeline` in `aggregate` holds each scope's `version` and
-current `stage_notes`. Propose an edit only for a fix a short note line would make,
-such as naming a file agents keep searching for. Retro admit saves it as a new
-version a person can restore.
+in that stage reads, or splices one find-and-replace into a project file or document.
+`pipeline` in `aggregate` holds each scope's `version` and current `stage_notes`;
+`documents` holds each allowlisted project file's `version` and current `text`.
+Propose an edit only for a fix a short note line or one line of the file would make,
+such as naming a file agents keep searching for. Retro admit sends it to
+`PUT /api/project-retro/<file>` and saves it as a new version a person can restore.
 
 | Field | Example | Rule |
 | --- | --- | --- |
@@ -81,6 +83,13 @@ version a person can restore.
 | `stage` | `spec` | one of `spec`, `build`, `review`, `approve` |
 | `note` | full new note text | 1 to 2000 characters; line breaks allowed; at most 600 characters changed from the current note |
 | `summary` | `Spec note: name the test file for each criterion` | 1 to 120 characters, one line |
+
+| Field | Example | Rule |
+| --- | --- | --- |
+| `file` | `factory/notes.md` | a `<slug>/<name>` key of `documents` in `aggregate` whose project is on the autonomy allowlist; never `global` |
+| `find` | `- Run pnpm test.` | 1 to 600 characters; occurs exactly once in the stored text |
+| `replace` | `- Run pnpm test:protocol for Worker changes.` | 0 to 600 characters |
+| `summary` | `Notes: name the Worker test command` | 1 to 120 characters, one line |
 
 - No links, code fences, secrets or instructions in any string. Describe what
   happened and what each option would change.

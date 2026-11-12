@@ -62,6 +62,9 @@ const PROJECT_DOCUMENTS = /^\/api\/project-documents\/([A-Za-z0-9_-]+)$/;
 const PROJECT_DOCUMENT = /^\/api\/project-documents\/([A-Za-z0-9_-]+)\/([^/]+)$/;
 // History of a project file (project.md) or document: the list, or one version's bytes.
 const PROJECT_HISTORY = /^\/api\/project-history\/([\w-]+)\/([\w.-]+)(?:\/([1-9]\d*))?$/;
+// Retro admit's find-and-replace write to a project file or document.
+const PROJECT_RETRO = /^\/api\/project-retro\/([\w-]+)\/([\w.-]+)$/;
+const PROJECT_FILE_NAMES = ["project.md", ...PROJECT_DOCUMENT_NAMES];
 const REPO = /^[\w.-]+\/[\w.-]+$/;
 const BASE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 // Pipeline scopes are "global" or "projects/<slug>"; history keeps every saved version.
@@ -336,6 +339,7 @@ async function casPut(request, env, key, type) {
       (stored.etag === cond.get("If-Match")
         ? (checkRowIds(stored.jobs, data.jobs) ??
           checkArchived(stored, data) ??
+          checkNewIds(stored.jobs, data.jobs) ??
           checkRiderControls(stored.jobs, data.jobs))
         : null);
     if (bad) return reply(bad, 400);
@@ -698,6 +702,7 @@ const RETRO_EDIT_KEYS = ["schema", "run", "base_version", "stage", "note", "summ
 const RETRO_EDIT_HOST = "retro edits come only from a bound host";
 const RETRO_EDIT_SCOPE = "retro edits only allowlisted project scopes; global is person-only";
 const RUN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+const RETRO_DOC_EDIT_SCOPE = "retro edits only allowlisted projects";
 
 // The board's autonomy record as { running, projects }. running needs a well-formed record
 // with paused set to false; a missing or malformed record counts as paused, as in factory.py.
@@ -722,6 +727,18 @@ async function boardAutonomy(env) {
   };
 }
 
+// The run error in a retro body, or null.
+function retroRunError(run) {
+  if (
+    typeof run !== "string" ||
+    run.length < 1 ||
+    run.length > 64 ||
+    [...run].some((c) => !RUN_CHARS.includes(c))
+  )
+    return "run: must be 1 to 64 of A-Z a-z 0-9 _ -";
+  return null;
+}
+
 // The shape error in a factory.retro-edit/1 body, or null. Text rules run later, after the caps.
 function retroEditShape(body) {
   if (
@@ -733,18 +750,36 @@ function retroEditShape(body) {
   )
     return `body: needs keys ${RETRO_EDIT_KEYS.join(", ")}`;
   if (body.schema !== "factory.retro-edit/1") return "schema: must be factory.retro-edit/1";
-  const run = body.run;
-  if (
-    typeof run !== "string" ||
-    run.length < 1 ||
-    run.length > 64 ||
-    [...run].some((c) => !RUN_CHARS.includes(c))
-  )
-    return "run: must be 1 to 64 of A-Z a-z 0-9 _ -";
+  const run = retroRunError(body.run);
+  if (run) return run;
   if (!Number.isInteger(body.base_version) || body.base_version < 0)
     return "base_version: must be a whole number";
   if (!RETRO_STAGES.includes(body.stage)) return `stage: must be one of ${RETRO_STAGES.join(", ")}`;
   if (typeof body.note !== "string") return "note: must be text";
+  if (typeof body.summary !== "string") return "summary: must be text";
+  return null;
+}
+
+// The shape error in a factory.retro-doc-edit/1 body, or null. Text rules run later, after the caps.
+function retroDocEditShape(body) {
+  const keys = ["schema", "run", "base_version", "find", "replace", "summary"];
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    Array.isArray(body) ||
+    Object.keys(body).length !== keys.length ||
+    !keys.every((key) => key in body)
+  )
+    return `body: needs keys ${keys.join(", ")}`;
+  if (body.schema !== "factory.retro-doc-edit/1") return "schema: must be factory.retro-doc-edit/1";
+  const run = retroRunError(body.run);
+  if (run) return run;
+  if (!Number.isInteger(body.base_version) || body.base_version < 0)
+    return "base_version: must be a whole number";
+  if (typeof body.find !== "string" || [...body.find].length < 1 || [...body.find].length > 600)
+    return "find: must be 1 to 600 characters";
+  if (typeof body.replace !== "string" || [...body.replace].length > 600)
+    return "replace: must be at most 600 characters";
   if (typeof body.summary !== "string") return "summary: must be text";
   return null;
 }
@@ -803,6 +838,67 @@ async function pipelineHistoryVersion(env, scope, version) {
   return current && pipelineVersion(current) === version
     ? pipelineReply(current, version)
     : notFound();
+}
+
+// retro admit's file write: a bound host splices one find-and-replace into a project file or
+// document, against the version it read, while autonomy runs, within the size and daily caps.
+// Saved as a "retro" version a person can restore from history. Retro never creates a missing
+// file: a find that cannot match the stored text is refused.
+async function projectRetroPut(request, env, principal, slug, name) {
+  const host = await boundHost(env, principal);
+  if (!host) return reply(RETRO_EDIT_HOST, 403);
+  const autonomy = await boardAutonomy(env);
+  if (!autonomy.projects.includes(slug)) return reply(RETRO_DOC_EDIT_SCOPE, 403);
+  if (!autonomy.running) return reply("autonomy is paused; no retro edit", 409);
+  const body = await readJson(request);
+  if (body instanceof Response) return body;
+  const shape = retroDocEditShape(body);
+  if (shape) return reply(shape, 400);
+  const key = projectFileKey(slug, name);
+  const current = await env.BUCKET.get(key);
+  if (body.base_version !== storedVersion(current)) return reply("precondition failed", 412);
+  const text = current ? await current.text() : "";
+  const start = text.indexOf(body.find);
+  if (start < 0 || text.indexOf(body.find, start + 1) >= 0)
+    return reply("find: must match the stored text exactly once", 409);
+  // A plain splice at the one match, never String.replace, so $& in replace stays literal.
+  const next = text.slice(0, start) + body.replace + text.slice(start + body.find.length);
+  if (changedChars(text, next) > RETRO_EDIT_CHANGE)
+    return reply(`retro edit changes more than ${RETRO_EDIT_CHANGE} characters`, 413);
+  if (
+    name === "project.md" &&
+    JSON.stringify(frontmatter(text)) !== JSON.stringify(frontmatter(next))
+  )
+    return reply("retro edits never change project frontmatter", 403);
+  const since = Date.now() - DAY_MS;
+  const recent = (await listVersions(env, `project-history/${slug}/${name}/`, key)).filter(
+    (v) => v.saved_by === "retro" && Date.parse(v.saved_at) > since,
+  );
+  if (recent.length >= RETRO_EDITS_PER_DAY)
+    return reply(`retro edit cap: ${RETRO_EDITS_PER_DAY} per file per day`, 429);
+  const error =
+    (name === "project.md" ? validateProjectDocument(next) : validateProjectMarkdown(next)) ??
+    checkOperatorText(next, "project document", "document") ??
+    checkSummary(body.summary);
+  if (error) return reply(error, 400);
+  const cond = new Headers(current ? { "If-Match": current.httpEtag } : { "If-None-Match": "*" });
+  const saved = await storeVersion(
+    env,
+    key,
+    (n) => projectHistoryKey(slug, name, n),
+    new TextEncoder().encode(next),
+    current,
+    cond,
+    "text/markdown; charset=utf-8",
+    { saved_by: "retro", summary: body.summary, run: body.run, host: host.id },
+    "project",
+  );
+  if (!saved) return reply("precondition failed", 412);
+  return reply("ok", 200, "text/plain", {
+    ETag: saved.obj.httpEtag,
+    "X-Project-Version": String(saved.version),
+    ...(saved.missing && { "X-Project-History": "missing" }),
+  });
 }
 
 const PIPELINE_INVALID =
@@ -1557,6 +1653,20 @@ function checkRowIds(storedJobs, jobs) {
   return null;
 }
 
+// An error message, or null. A new row's id must be one job folder name, as JOB_DIR reads it, and
+// not a bare number. Otherwise a client that patches "<project>/<id>", "592" or a stray "--help"
+// as a job id adds a projectless duplicate whose links go nowhere. Stored rows keep their ids.
+function checkNewIds(storedJobs, jobs) {
+  const ids = new Set(storedJobs.map((j) => j?.id));
+  for (const j of jobs) {
+    const id = j?.id;
+    if (ids.has(id) || (typeof id === "string" && /^\w[\w.-]*$/.test(id) && !/^\d+$/.test(id)))
+      continue;
+    return `a board write cannot add ${quoteIdCut(String(id), QUOTED_ID_MAX)}: a job id has no project prefix and is never a bare number, like 003-rate-limiting. Nothing was written. Upgrade the factory skill, or claim new ids with factory.py claim.`;
+  }
+  return null;
+}
+
 // An error message, or null. Only the archive pass writes `archived`, and a client that
 // ignores its id floor must not hand out an archived job's id again.
 function checkArchived(stored, data) {
@@ -1744,11 +1854,17 @@ async function api(request, env, path, principal) {
     if (method === "PUT") return casPut(request, env, key, type);
     return notFound();
   }
+  m = path.match(PROJECT_RETRO);
+  if (m) {
+    const [, slug, name] = m;
+    if (method !== "PUT" || !PROJECT_FILE_NAMES.includes(name)) return notFound();
+    if (!(await env.BUCKET.head(`projects/${slug}.md`))) return notFound();
+    return projectRetroPut(request, env, principal, slug, name);
+  }
   m = path.match(PROJECT_HISTORY);
   if (m) {
     const [, slug, name, n] = m;
-    if (method !== "GET" || !["project.md", ...PROJECT_DOCUMENT_NAMES].includes(name))
-      return notFound();
+    if (method !== "GET" || !PROJECT_FILE_NAMES.includes(name)) return notFound();
     if (!(await env.BUCKET.head(`projects/${slug}.md`))) return notFound();
     return n === undefined
       ? historyReply(env, principal, `project-history/${slug}/${name}/`, projectFileKey(slug, name))

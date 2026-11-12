@@ -2691,7 +2691,7 @@ def created_since(j, cutoff):
         stamp = datetime.strptime(j["origin"]["created"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except (KeyError, TypeError, ValueError):
         return False
-    return stamp > cutoff
+    return cutoff < stamp <= datetime.now(timezone.utc)
 
 
 def strings(value):
@@ -2819,7 +2819,7 @@ def retro_backlog_admit(cards):
         fp = fingerprint(slug, s)
         dup = next((j.get("id") for j, o in origins if o.get("fingerprint") == fp), None) or archived.get(fp)
         context = retro_backlog_context(s, cards["run"], fp, now())
-        why = backlog_context_error(context) or (len(RETRO_MARK.findall(context)) != 1 and "more than one Retro line")
+        why = backlog_context_error(context) or ("more than one Retro line" if len(RETRO_MARK.findall(context)) != 1 else None)
         if dup:
             reason = f"duplicate {dup}"
         elif any(m["fingerprint"] == fp for m in marks):
@@ -3888,11 +3888,18 @@ def pickup(*args):
     device, _, minutes = holder(home)
     started = now()
     failing = cached_status(home)[2]
+
+    def build_pass(home):
+        nonlocal data
+        if tracer_build_pass(home, data["jobs"] if data else None):
+            data = None
+
     try:
+        data = None if os.path.lexists(home / "tracer.json") else read_board(home)
         if not dry:
             for tracer_pass, stopped in (
                     (tracer_follow_pass, "Tracer follow pass stopped; followed jobs wait for the next pickup run"),
-                    (tracer_build_pass, "Tracer build pass stopped; Building in Tracer marks wait for the next pickup run")):
+                    (build_pass, "Tracer build pass stopped; Building in Tracer marks wait for the next pickup run")):
                 try:
                     tracer_pass(home)
                 except SystemExit as e:
@@ -3901,6 +3908,7 @@ def pickup(*args):
                     print(f"factory.py: {stopped}", file=sys.stderr)
             if "--triage-now" in flags or triage_sweep_due(home, started):
                 save_triage_sweep(home, started)
+                data = None
                 try:
                     backlog_triage_pass(home)
                     failing = None
@@ -3909,7 +3917,7 @@ def pickup(*args):
                         raise
                     failing = failing or started
                     print("factory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now", file=sys.stderr)
-        pickup_pass(home, device, minutes, dry, limit, cap)
+        pickup_pass(home, device, minutes, dry, limit, cap, data)
     finally:
         if not dry:
             report_status(home, PICKUP_SCHEDULER, started, failing, save=True)
@@ -4330,13 +4338,14 @@ PR_EVIDENCE = {"closed": "closed by pickup with a comment that links this page",
                "already closed": "already closed", "open": "still open"}
 
 
-def gh_pr(*args):
+def gh_pr(*args, stderr=False):
     """(returncode, stdout) of gh pr <args>: (1, "") when it cannot start,
-    ("timeout", "") past 60 seconds, None without gh."""
-    return gh_cli("pr", *args)
+    ("timeout", "") past 60 seconds, None without gh. With stderr, each tuple
+    gains gh's stderr, "" on failure."""
+    return gh_cli("pr", *args, stderr=stderr)
 
 
-def gh_cli(*args):
+def gh_cli(*args, stderr=False):
     """(returncode, stdout) of gh <args>, as gh_pr describes."""
     gh = shutil.which("gh")
     if gh is None:
@@ -4345,10 +4354,12 @@ def gh_cli(*args):
         r = subprocess.run([gh, *args], capture_output=True, encoding="utf-8",
                            errors="replace", timeout=60, stdin=subprocess.DEVNULL)
     except OSError:
-        return 1, ""
+        result = 1, "", ""
     except subprocess.TimeoutExpired:
-        return "timeout", ""
-    return r.returncode, r.stdout
+        result = "timeout", "", ""
+    else:
+        result = r.returncode, r.stdout, r.stderr
+    return result if stderr else result[:2]
 
 
 def close_pull_request(home, j, device):
@@ -4609,10 +4620,11 @@ def moved_here(j, device):
             and not any(x["from"] == device for x in queued_stops(m)))
 
 
-def pickup_pass(home, device, minutes, dry, limit, cap):
-    """One pickup run after flags and the holder are resolved."""
+def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
+    """One pickup run after flags and the holder are resolved. Reads the board unless given it."""
     paths = read_paths(home)
-    data = read_board(home)
+    if data is None:
+        data = read_board(home)
     stalls = read_stalls(home)
     settings = {}
     move_stop_pass(home, data, device, paths, settings, dry, stalls[0] if stalls else None)
@@ -5200,17 +5212,25 @@ def gh_pr_view(pr, *args):
 
 
 def pr_checks(pr):
-    """The PR's checks as gh pr checks lists them, or [] when gh lists none or prints something else."""
-    result = gh_pr("checks", pr, "--json", "name,bucket")
+    """(checks, problem): the PR's checks as gh pr checks lists them and None, or [] and why
+    the reply was unusable. gh's own no-checks reply is usable, as []."""
+    result = gh_pr("checks", pr, "--json", "name,bucket", stderr=True)
+    if result is None:
+        return [], "gh is not installed"
+    code, out, err = result
+    if code == "timeout":
+        return [], "timed out after 60 seconds"
     try:
-        checks = json.loads(result[1]) if result and result[0] != "timeout" else []
+        checks = json.loads(out)
     except ValueError:
-        checks = []
-    if not isinstance(checks, list) or not all(
+        checks = None
+    if isinstance(checks, list) and all(
             isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("bucket"), str)
             for c in checks):
-        checks = []
-    return checks
+        return checks, None
+    if code == 1 and not out.strip() and "no checks reported" in err:
+        return [], None
+    return [], f"exited {code} with no check list" if code else "printed no check list"
 
 
 def checks_cmd(target, *args):
@@ -5225,8 +5245,13 @@ def checks_cmd(target, *args):
     if state != "OPEN":
         fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
     start = time.monotonic()
+    usable = False
     while True:
-        checks = pr_checks(pr)
+        checks, problem = pr_checks(pr)
+        if problem:
+            print(f"factory.py: warning: gh pr checks gave no usable reply ({problem})", file=sys.stderr)
+        else:
+            usable = True
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
             for c in checks:
@@ -5236,6 +5261,8 @@ def checks_cmd(target, *args):
                 fail("failing checks: " + ", ".join(failing), 1)
             return
         elapsed = time.monotonic() - start
+        if not checks and not usable and elapsed >= min(CHECKS_REGISTER, timeout):
+            fail("gh pr checks never gave a usable reply", 5)
         if not checks and elapsed >= CHECKS_REGISTER:
             print("no checks reported")
             return
@@ -5260,7 +5287,7 @@ def pr_reading(pr):
         view = None
     if not isinstance(view, dict):
         fail("gh pr view printed no JSON object", 5)
-    listed = pr_checks(pr)
+    listed = pr_checks(pr)[0]
     if view.get("statusCheckRollup") and not listed:
         fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5)
     buckets = {c["bucket"] for c in listed}
@@ -7321,7 +7348,7 @@ def tracer_task_summary(feature):
     return summary
 
 
-def tracer_build_pass(home):
+def tracer_build_pass(home, jobs=None):
     """Mark each idea or in-flight job whose Tracer feature a Tracer build agent holds, and
     clear the mark when it stops. Save the feature's task summary once it builds and refresh it
     while the job stays checked; a 404 drops it. A Tracer failure costs one stderr warning and leaves
@@ -7333,7 +7360,8 @@ def tracer_build_pass(home):
     captured, found = io.StringIO(), {}
     try:
         with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
-            jobs = read_board(home)["jobs"]
+            if jobs is None:
+                jobs = read_board(home)["jobs"]
             if configured:
                 cfgs = read_tracer(home) if tracer_enabled(home) else {}
             elif any(tracer_building(j) for j in jobs) and not tracer_enabled(home):
@@ -7396,6 +7424,7 @@ def tracer_build_pass(home):
         data["updated"] = now()
         return dump_board(data), None
     cas(home, "/api/board", change)
+    return True
 
 
 def tracer_after_board(home, job, patch):
@@ -7505,10 +7534,12 @@ RETRO_SESSION_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[0-9a-f-]{8,36}
 RETRO_SESSION = re.compile(r"[0-9a-f-]{8,36}", re.ASCII)
 MAX_RETRO_BYTES = 131072
 RETRO_EDIT_SCHEMA = "factory.retro-edit/1"
+RETRO_DOC_EDIT_SCHEMA = "factory.retro-doc-edit/1"
 RETRO_EDIT_CHANGE = 600
 MAX_RETRO_EDITS = 2
 RETRO_EDITS_PER_DAY = 2
 RETRO_EDIT_SCOPE = "retro edits only allowlisted project scopes; global is person-only"
+RETRO_DOC_EDIT_SCOPE = "retro edits only allowlisted projects"
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
@@ -7816,12 +7847,28 @@ def retro_aggregate(days):
     if not rows:
         fail(f"no host pushed a retro digest from {dates[0]} to {dates[-1]}", 3)
     projects = sorted(registered(home))
+    allow = load_autonomy(load_board(api(home, "GET", "/api/board")[2]))["projects"]
     pipeline = {}
     for scope in ["global"] + [f"projects/{p}" for p in projects]:
         status, headers, text = api(home, "GET", f"/api/pipeline/{scope}", ok=(200, 404))
         notes = json.loads(text).get("stage_notes", {}) if status == 200 else {}
         pipeline[scope] = {"version": int(headers["X-Pipeline-Version"]) if status == 200 else 0,
                            "stage_notes": notes}
+    expected = set()
+    for p in projects:
+        enabled, pickup_hosts, _ = pickup_config(home, p)
+        if enabled:
+            expected.update(pickup_hosts)
+    documents = {}
+    for slug in allow:
+        for name in ("project.md", *DOCUMENT_NAMES):
+            status, _, text = api(home, "GET", f"/api/project-history/{slug}/{name}", ok=(200, 404))
+            versions = json.loads(text) if status == 200 else []
+            route = f"/api/projects/{slug}.md" if name == "project.md" else f"/api/project-documents/{slug}/{name}"
+            status, _, text = api(home, "GET", route, ok=(200, 404))
+            if status == 200:
+                documents[f"{slug}/{name}"] = {"version": versions[0]["version"] if versions else 0,
+                                               "text": text}
     run = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(3)
     folder = home / "retro" / run
     if is_link(folder.parent) or is_link(folder):
@@ -7875,12 +7922,13 @@ def retro_aggregate(days):
                    "patterns": retro_patterns(rows, lambda r: retro_dict(r.get("errors")).get("patterns"))},
         "repeated_cmds": retro_patterns(rows, lambda r: r.get("repeated_cmds")),
         "subagents": subagents, "review_rounds": rounds, "agent_prompts": summed("agent_prompts"),
-        "human_msgs": total("human_msgs"), "interrupts": total("interrupts"), "pipeline": pipeline}
+        "human_msgs": total("human_msgs"), "interrupts": total("interrupts"), "pipeline": pipeline,
+        "documents": documents}
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-    print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "sessions": len(rows),
-                      "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
+    print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "expected": sorted(expected),
+                      "sessions": len(rows), "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
                       "digest": str(folder / "digest.jsonl"), "transcripts": agg["transcripts"],
                       "out": str(folder / "reply.json"), "findings": str(folder / "findings.md")}, indent=2))
 
@@ -7922,8 +7970,10 @@ def retro_changed_chars(a, b):
 
 
 def check_edit(e, agg):
-    """The first violation of one retro stage-note edit as (field, problem), or None.
-    field is None for the whole edit."""
+    """The first violation of one retro edit as (field, problem), or None.
+    field is None for the whole edit. An edit with a file key edits a project file."""
+    if "file" in e:
+        return check_doc_edit(e, agg)
     err = check_keys(e, ("scope", "stage", "note", "summary"))
     if err:
         return None, err
@@ -7941,9 +7991,42 @@ def check_edit(e, agg):
     return None
 
 
+def check_doc_edit(e, agg):
+    """The first violation of one retro file edit as (field, problem), or None.
+    field is None for the whole edit."""
+    err = check_keys(e, ("file", "find", "replace", "summary"))
+    if err:
+        return None, err
+    documents = agg.get("documents", {})
+    if not isinstance(e["file"], str) or e["file"] not in documents:
+        return "file", "must be a file in aggregate.json"
+    found = next(((where, err) for where, err in (
+        ("find", check_text(e["find"], 1, 600, multiline=True)),
+        ("replace", check_text(e["replace"], 0, 600, multiline=True)),
+        ("summary", check_text(e["summary"], 1, 120))) if err), None)
+    if found:
+        return found
+    text = documents[e["file"]]["text"]
+    start = text.find(e["find"])
+    if start < 0 or text.find(e["find"], start + 1) >= 0:
+        return "find", "must match the stored text exactly once"
+    next_text = text[:start] + e["replace"] + text[start + len(e["find"]):]
+    if retro_changed_chars(text, next_text) > RETRO_EDIT_CHANGE:
+        return "find", f"changes more than {RETRO_EDIT_CHANGE} characters"
+    return None
+
+
 def retro_edits_today(home, scope):
     """How many retro versions scope has from the last 24 hours. Only retro saves carry run."""
     status, _, text = api(home, "GET", f"/api/pipeline/history/{scope}", ok=(200, 404))
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    return sum("run" in v and datetime.fromisoformat(v["saved_at"].replace("Z", "+00:00")) > cutoff
+               for v in (json.loads(text) if status == 200 else []))
+
+
+def retro_doc_edits_today(home, file):
+    """How many retro versions a project file (<slug>/<name>) has from the last 24 hours."""
+    status, _, text = api(home, "GET", f"/api/project-history/{file}", ok=(200, 404))
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     return sum("run" in v and datetime.fromisoformat(v["saved_at"].replace("Z", "+00:00")) > cutoff
                for v in (json.loads(text) if status == 200 else []))
@@ -7967,27 +8050,47 @@ def retro_apply_edits(home, run, edits, agg):
             results.append({"scope": f"edits[{i}]", "stage": "", "result": f"skipped: {where}: {bad[1]}",
                             "summary": ""})
             continue
-        row = {"scope": e["scope"], "stage": e["stage"], "summary": e["summary"]}
-        if e["scope"] == "global" or e["scope"][len("projects/"):] not in autonomy["projects"]:
-            print(f"skipped edits[{i}]: {RETRO_EDIT_SCOPE}")
-            results.append(dict(row, result=f"skipped: {RETRO_EDIT_SCOPE}"))
+        file = e.get("file")
+        row = {"scope": file or e["scope"], "stage": "" if file else e["stage"], "summary": e["summary"]}
+        if file:
+            listed, rule = file[:file.index("/")] in autonomy["projects"], RETRO_DOC_EDIT_SCOPE
+        else:
+            listed, rule = e["scope"] != "global" and e["scope"][len("projects/"):] in autonomy["projects"], RETRO_EDIT_SCOPE
+        if not listed:
+            print(f"skipped edits[{i}]: {rule}")
+            results.append(dict(row, result=f"skipped: {rule}"))
             continue
-        if retro_edits_today(home, e["scope"]) >= RETRO_EDITS_PER_DAY:
-            reason = f"retro edit cap: {RETRO_EDITS_PER_DAY} per scope per day"
+        today = retro_doc_edits_today(home, file) if file else retro_edits_today(home, e["scope"])
+        if today >= RETRO_EDITS_PER_DAY:
+            reason = f"retro edit cap: {RETRO_EDITS_PER_DAY} per {'file' if file else 'scope'} per day"
             print(f"skipped edits[{i}]: {reason}")
             results.append(dict(row, result=f"skipped: {reason}"))
             continue
-        body = {"schema": RETRO_EDIT_SCHEMA, "run": run, "base_version": agg["pipeline"][e["scope"]]["version"],
-                "stage": e["stage"], "note": e["note"], "summary": e["summary"]}
-        status, headers, text = api(home, "PUT", f"/api/pipeline/retro/{e['scope']}", json.dumps(body),
+        if file:
+            doc = agg["documents"][file]
+            body = {"schema": RETRO_DOC_EDIT_SCHEMA, "run": run, "base_version": doc["version"],
+                    "find": e["find"], "replace": e["replace"], "summary": e["summary"]}
+            route = f"/api/project-retro/{file}"
+        else:
+            body = {"schema": RETRO_EDIT_SCHEMA, "run": run, "base_version": agg["pipeline"][e["scope"]]["version"],
+                    "stage": e["stage"], "note": e["note"], "summary": e["summary"]}
+            route = f"/api/pipeline/retro/{e['scope']}"
+        status, headers, text = api(home, "PUT", route, json.dumps(body),
                                     ok=(200, 400, 403, 404, 409, 412, 413, 429),
                                     headers={"Content-Type": "application/json"})
         if status == 200:
-            version = headers["X-Pipeline-Version"]
-            scope = agg["pipeline"][e["scope"]]
-            scope["version"] = int(version)
-            scope["stage_notes"][e["stage"]] = e["note"]
-            print(f"edited {e['scope']} stage_notes.{e['stage']} to version {version}: {e['summary']}")
+            if file:
+                version = headers["X-Project-Version"]
+                start = doc["text"].index(e["find"])
+                doc["text"] = doc["text"][:start] + e["replace"] + doc["text"][start + len(e["find"]):]
+                doc["version"] = int(version)
+                print(f"edited {file} to version {version}: {e['summary']}")
+            else:
+                version = headers["X-Pipeline-Version"]
+                scope = agg["pipeline"][e["scope"]]
+                scope["version"] = int(version)
+                scope["stage_notes"][e["stage"]] = e["note"]
+                print(f"edited {e['scope']} stage_notes.{e['stage']} to version {version}: {e['summary']}")
             results.append(dict(row, result=f"version {version}"))
         else:
             reason = f"{status} {printable_line(text, 200)}".strip()
@@ -8180,12 +8283,27 @@ AGENT_RECORD_USAGE = "usage: agent record <project>/<id> <role> <harness> <via> 
 AGENT_COLUMNS = ("stage", "role", "harness", "via", "model", "effort")
 
 
+def agent_record_problem(role, harness, via, model, effort):
+    """The first bad field of an agent record, in argument order, or None."""
+    if role not in AGENT_ROLES:
+        return f'role "{role}" is not one of {", ".join(AGENT_ROLES)}'
+    if not SLUG.fullmatch(harness) or len(harness) > 64:
+        return f'harness "{harness}" must be 1 to 64 letters, digits, _ or -'
+    if via not in AGENT_VIAS:
+        return f'via "{via}" is not one of {", ".join(AGENT_VIAS)}'
+    if not ROUTE_MODEL.fullmatch(model):
+        return f'model "{model}" must be 1 to 200 letters, digits or _ . / : @ [ ] -'
+    if effort is not None and effort not in ROUTE_EFFORTS:
+        return f'effort "{effort}" is not one of {", ".join(ROUTE_EFFORTS)}'
+    return None
+
+
 def agent_cmd(sub, *args):
     if sub == "record" and len(args) in (5, 6):
         target, role, harness, via, model, *effort = args
-        if (role not in AGENT_ROLES or not SLUG.fullmatch(harness) or len(harness) > 64 or via not in AGENT_VIAS
-                or not ROUTE_MODEL.fullmatch(model) or effort and effort[0] not in ROUTE_EFFORTS):
-            fail(AGENT_RECORD_USAGE, 2)
+        problem = agent_record_problem(role, harness, via, model, effort[0] if effort else None)
+        if problem:
+            fail(f"{AGENT_RECORD_USAGE}: {problem}", 2)
         home, slug, job_id = r2_target(target, True)
         device, session, _ = holder(home)
         row = {"role": role, "harness": harness, "via": via, "model": model}
