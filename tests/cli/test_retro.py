@@ -401,7 +401,8 @@ class RetroAggregateTest(RetroWorkerCase):
         today, routes = datetime.now().date(), {
             "GET /projects.json": (200, [{"slug": "factory"}, {"slug": "sample-tools"}]),
             "GET /api/pipeline/projects/factory": (200, {"schema": 1, "stage_notes": {"spec": "Keep it short."}},
-                                                   {"X-Pipeline-Version": "7"})}
+                                                   {"X-Pipeline-Version": "7"}),
+            "GET /api/pipeline/effective/factory": (200, {"pickup": {"enabled": True, "hosts": ["host-a", "host-c"]}})}
         for back in range(days):
             date = (today - timedelta(days=back)).isoformat()
             hosts = pushed.get(back, {})
@@ -431,7 +432,8 @@ class RetroAggregateTest(RetroWorkerCase):
         today = datetime.now().date()
         self.assertEqual(printed, {
             "run": run, "from": (today - timedelta(days=6)).isoformat(), "to": today.isoformat(),
-            "hosts": ["host-a", "host-b"], "sessions": 3, "skipped": 3, "dir": str(folder),
+            "hosts": ["host-a", "host-b"], "expected": ["host-a", "host-c"], "sessions": 3, "skipped": 3,
+            "dir": str(folder),
             "aggregate": str(folder / "aggregate.json"), "digest": str(folder / "digest.jsonl"),
             "transcripts": str(self.projects), "out": str(folder / "reply.json"),
             "findings": str(folder / "findings.md")})

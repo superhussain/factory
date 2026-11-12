@@ -39,8 +39,8 @@ On a nonzero exit, note the exit code and continue.
 
 On exit 3, reply `retro: no digests` with the first stderr line and stop. On any
 other nonzero exit, name the exit code and stop. On exit 0, read `run`, `aggregate`,
-`digest`, `transcripts`, `out`, `findings` and `hosts` from the printed JSON, and `host`
-from the `aggregate` file.
+`digest`, `transcripts`, `out`, `findings`, `hosts` and `expected` from the printed
+JSON, and `host` from the `aggregate` file.
 
 5. Retro. Dispatch one `factory-retro` subagent with the picked model, giving it
 `run`, `aggregate`, `digest`, `transcripts` and `host`.
@@ -53,8 +53,9 @@ from the `aggregate` file.
 <python-launcher> <installed-skill>/runtime/factory.py retro admit <run>
 ```
 
-Report its output and the aggregated `hosts`, and name any expected host missing
-from them. On exit 3 or 2, still report its output; name `findings` only if admit
+Report its output and the aggregated `hosts`, and name each host in `expected` missing
+from `hosts`. `expected` lists the hosts that run pickup for any registered project,
+from each project's effective pipeline. On exit 3 or 2, still report its output; name `findings` only if admit
 printed a wrote line, otherwise report no findings file. On exit 0, report the
 `findings` path.
 

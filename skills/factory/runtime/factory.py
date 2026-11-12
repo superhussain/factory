@@ -7823,6 +7823,11 @@ def retro_aggregate(days):
         notes = json.loads(text).get("stage_notes", {}) if status == 200 else {}
         pipeline[scope] = {"version": int(headers["X-Pipeline-Version"]) if status == 200 else 0,
                            "stage_notes": notes}
+    expected = set()
+    for p in projects:
+        enabled, pickup_hosts, _ = pickup_config(home, p)
+        if enabled:
+            expected.update(pickup_hosts)
     run = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(3)
     folder = home / "retro" / run
     if is_link(folder.parent) or is_link(folder):
@@ -7880,8 +7885,8 @@ def retro_aggregate(days):
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-    print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "sessions": len(rows),
-                      "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
+    print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "expected": sorted(expected),
+                      "sessions": len(rows), "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
                       "digest": str(folder / "digest.jsonl"), "transcripts": agg["transcripts"],
                       "out": str(folder / "reply.json"), "findings": str(folder / "findings.md")}, indent=2))
 
