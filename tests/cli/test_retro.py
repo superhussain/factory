@@ -550,6 +550,12 @@ class RetroAdmitTest(RetroCase):
             (self.folder / "reply.json").write_bytes(raw)
         return invoke(factory, ["retro", "admit", run])
 
+    def test_session_refs_still_validate(self):
+        self.assertIsNone(factory.check_session_refs([REF]))
+        self.assertEqual(factory.check_session_refs(["host-a/not-hex"]), "must be host/session refs")
+        self.assertEqual(factory.check_finding(finding(sessions=["host-a/not-hex"]), ["sample-tools"]),
+                         ("sessions", "must be host/session refs"))
+
     def test_findings_ranked_by_count_times_cost(self):
         doc = reply(finding(title="Reviewers re-read files", category="navigation", count=40, cost=1000,
                             project="factory"),

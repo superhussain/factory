@@ -2188,7 +2188,7 @@ def check_suggestions(doc, by="explorer"):
                     ("note", check_text(e["note"], 1, 200)),
                     ("count", None if type(e["count"]) is int and e["count"] >= 1
                      else "must be a whole number of at least 1"),
-                    ("sessions", check_refs(e["sessions"])))
+                    ("sessions", check_session_refs(e["sessions"])))
             else:
                 found = first(
                     ("path", check_path(e["path"])),
@@ -7069,7 +7069,7 @@ def retro_aggregate(days):
                       "out": str(folder / "reply.json"), "findings": str(folder / "findings.md")}, indent=2))
 
 
-def check_refs(value):
+def check_session_refs(value):
     return check_list(value, 1, 5) or next(
         ("must be host/session refs" for r in value if not (isinstance(r, str) and RETRO_SESSION_REF.fullmatch(r))),
         None)
@@ -7105,7 +7105,7 @@ def check_finding(f, projects):
          else "must be a whole number from 1 to 10000000"),
         ("cost", None if type(f["cost"]) is int and 1 <= f["cost"] <= 1_000_000_000
          else "must be a whole number from 1 to 1000000000"),
-        ("sessions", check_refs(f["sessions"])),
+        ("sessions", check_session_refs(f["sessions"])),
         ("root_cause", check_text(f["root_cause"], 1, 300)),
         ("fix", check_text(f["fix"], 1, 300)),
         ("project", None if f["project"] in projects else "must be a project in aggregate.json")) if err), None)
