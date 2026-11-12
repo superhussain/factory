@@ -52,6 +52,7 @@ function measure(page, id) {
     const tags = wrap.querySelector(".card .tags");
     const idRow = wrap.querySelector(".card .id");
     const proj = idRow.querySelector(".proj");
+    const idText = idRow.querySelector(".id-text");
     const rect = (el) => {
       const { left, right, top, bottom } = el.getBoundingClientRect();
       return { left, right, top, bottom };
@@ -74,7 +75,10 @@ function measure(page, id) {
       })),
       row: tags ? box(tags) : null,
       idRow: box(idRow),
-      idText: { width: idRow.querySelector(".id-text").getBoundingClientRect().width },
+      idText: { width: idText.getBoundingClientRect().width },
+      projFirst: idText.previousElementSibling === proj,
+      projLeft: proj?.getBoundingClientRect().left,
+      idLeft: idText.getBoundingClientRect().left,
       proj: proj ? { text: proj.textContent, ...rect(proj) } : null,
       pr: rect(wrap.querySelector(".pr-link")),
       doc: {
@@ -119,6 +123,11 @@ async function checks(t, m, id, order) {
       m.proj.right <= m.pr.left,
       `project ends at ${m.proj.right}, PR link at ${m.pr.left}`,
     );
+  });
+  await t.test(`${id} project before id`, () => {
+    assert.ok(m.projFirst, ".proj is the sibling right before .id-text");
+    assert.ok(m.projLeft < m.idLeft, `project at ${m.projLeft}, id at ${m.idLeft}`);
+    assert.ok(m.proj.right <= m.idLeft, `project ends at ${m.proj.right}, id at ${m.idLeft}`);
   });
   await t.test(`${id} id kept`, () => {
     assert.equal(m.idRow.title, id);
