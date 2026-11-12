@@ -591,16 +591,16 @@ class RetroAdmitTest(RetroCase):
         self.assertIn(f"Sessions: `{REF}`, `pc/0123abcd`\n", text)
         self.assertTrue(text.endswith("\n") and not text.endswith("\n\n"))
 
-    def test_suggestions_go_through_suggest_admit(self):
+    def test_suggestions_go_to_the_backlog(self):
         seen = []
-        with patch.object(factory, "suggest_admit", side_effect=lambda *args: seen.append(args)):
+        with patch.object(factory, "retro_backlog_admit", side_effect=lambda *args: seen.append(args)), \
+                patch.object(factory, "suggest_admit", side_effect=AssertionError("no idea cards")):
             code, out, err = self.admit(reply(suggestions=[retro_suggestion()]))
         path = self.folder / "suggestions.json"
+        cards = {"schema": "factory.suggestions/1", "by": "retro", "run": RUN, "suggestions": [retro_suggestion()]}
         self.assertEqual((code, err, out), (0, "", f"wrote {self.folder / 'findings.md'}\n"))
-        self.assertEqual(seen, [(str(path), "retro")])
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
-                         {"schema": "factory.suggestions/1", "by": "retro", "run": RUN,
-                          "suggestions": [retro_suggestion()]})
+        self.assertEqual(seen, [(cards,)])
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), cards)
 
     def test_bad_reply_writes_nothing(self):
         bad = [b"x" * (factory.MAX_RETRO_BYTES + 1), b"not json", b'{"schema": "\xff"}', b"[]",
@@ -665,7 +665,7 @@ class RetroAdmitTest(RetroCase):
     def test_bad_card_keeps_findings(self):
         for cards in ([retro_suggestion(kind="rewrite")],
                       [retro_suggestion(evidence=[{"path": "a.py", "note": "n"}])]):
-            with self.subTest(cards=cards[0]["kind"]), patch.object(factory, "suggest_admit") as admit:
+            with self.subTest(cards=cards[0]["kind"]), patch.object(factory, "retro_backlog_admit") as admit:
                 code, out, err = self.admit(reply(suggestions=cards))
                 self.assertEqual((code, out), (2, f"wrote {self.folder / 'findings.md'}\n"))
                 self.assertTrue(err.endswith("; findings.md written, no cards admitted\n"), err)

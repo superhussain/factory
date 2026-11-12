@@ -612,6 +612,22 @@ async function offlineContext() {
     answers,
   });
   assert.equal(board.jobs[3].idea, "With context");
+
+  // The runtime's retro admit context parses into one form with the recommended option first.
+  const retro = clone(
+    api.parseBacklogContext(
+      fs.readFileSync(path.join(root, "tests/fixtures/retro-backlog-context.txt"), "utf8"),
+    ),
+  );
+  assert.equal(retro.recommend, "approved");
+  assert.equal(retro.questions.length, 1);
+  assert.deepEqual(
+    retro.questions[0].options.map((o) => [o.label, o.recommended]),
+    [
+      ["Interactive only", true],
+      ["Drop the alias", false],
+    ],
+  );
   console.log("PASS backlog offline context");
 }
 
