@@ -7509,7 +7509,7 @@ RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_c
 def retro_secret_pair(match):
     name, sep, value = match.group(1, 2, 3)
     if not RETRO_SECRET_WORD.search(name) or (
-            RETRO_COUNT.fullmatch(value) and not RETRO_SECRET_WORD.search(RETRO_COUNT_WORD.sub("", name))):
+            RETRO_COUNT.fullmatch(value) and not RETRO_SECRET_WORD.search(RETRO_COUNT_WORD.sub("s", name))):
         return match.group(0)
     return name + sep + "[redacted]"
 

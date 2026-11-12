@@ -122,7 +122,9 @@ class RetroRedactTest(RetroCase):
                           ('{"max_tokens": 4096}', '{"max_tokens": 4096}'),
                           ("--max-tokens 4096", "--max-tokens 4096"),
                           ("MAX_TOKENS=abc", "MAX_TOKENS=[redacted]"),
-                          ("api_token=4096", "api_token=[redacted]")):
+                          ("api_token=4096", "api_token=[redacted]"),
+                          ("TokenSecret=123456", "TokenSecret=[redacted]"),
+                          ("tokensecret: 42", "tokensecret: [redacted]")):
             with self.subTest(text=text[:20]):
                 self.assertEqual(factory.retro_redact(text), out)
 
