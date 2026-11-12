@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,8 +14,7 @@ factory = load_runtime()
 
 AGENT = "agent-1"
 
-FAKE_PASEO = """#!/usr/bin/env python3
-import json, os, sys
+FAKE_PASEO = """import json, os, sys
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 with open(os.path.join(root, "paseo-fixture.json"), encoding="utf-8") as f:
     conf = json.load(f)
@@ -57,8 +57,11 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         fake = self.bin / "paseo"
-        fake.write_text(FAKE_PASEO, encoding="utf-8")
+        fake.write_text(f"#!{sys.executable}\n" + FAKE_PASEO, encoding="utf-8")
         fake.chmod(0o755)
+        decoy = self.bin / "python3"
+        decoy.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+        decoy.chmod(0o755)
         self.paseo_home = self.root / "paseo-home"
         self.paseo_home.mkdir()
         (self.paseo_home / "server-id").write_text("srv_1\n")
