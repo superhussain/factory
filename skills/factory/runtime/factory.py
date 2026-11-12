@@ -7075,8 +7075,8 @@ def check_refs(value):
         None)
 
 
-def check_retro(doc, projects):
-    """The first violation of the factory.retro/1 reply as "<where>: <problem>", or None."""
+def check_retro(doc):
+    """The first reply-level violation of the factory.retro/1 reply as "<where>: <problem>", or None."""
     def first(*checks):
         return next(((where, err) for where, err in checks if err), None)
 
@@ -7089,34 +7089,31 @@ def check_retro(doc, projects):
          else "must match [A-Za-z0-9_-]{1,64}"),
         ("findings", check_list(doc["findings"], 1, 12)),
         ("suggestions", check_list(doc["suggestions"], 0, MAX_PER_RUN)))
-    if found:
-        return "%s: %s" % found
-    for i, f in enumerate(doc["findings"]):
-        err = check_keys(f, ("title", "category", "count", "cost", "sessions", "root_cause", "fix", "project"))
-        if err:
-            return f"findings[{i}]: {err}"
-        found = first(
-            ("title", check_text(f["title"], 1, 80)),
-            ("category", None if f["category"] in RETRO_CATEGORIES
-             else f"must be one of {', '.join(RETRO_CATEGORIES)}"),
-            ("count", None if type(f["count"]) is int and 1 <= f["count"] <= 10_000_000
-             else "must be a whole number from 1 to 10000000"),
-            ("cost", None if type(f["cost"]) is int and 1 <= f["cost"] <= 1_000_000_000
-             else "must be a whole number from 1 to 1000000000"),
-            ("sessions", check_refs(f["sessions"])),
-            ("root_cause", check_text(f["root_cause"], 1, 300)),
-            ("fix", check_text(f["fix"], 1, 300)),
-            ("project", None if f["project"] in projects else "must be a project in aggregate.json"))
-        if found:
-            return f"findings[{i}].%s: %s" % found
-    if doc["suggestions"]:
-        return check_suggestions({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": doc["run"],
-                                  "suggestions": doc["suggestions"]}, "retro")
-    return None
+    return "%s: %s" % found if found else None
 
 
-def render_findings(agg, doc):
-    """findings.md: the reply's findings ranked by count x cost, built from checked fields only."""
+def check_finding(f, projects):
+    """The first violation of one retro finding as (field, problem), or None. field is None for the whole finding."""
+    err = check_keys(f, ("title", "category", "count", "cost", "sessions", "root_cause", "fix", "project"))
+    if err:
+        return None, err
+    return next(((where, err) for where, err in (
+        ("title", check_text(f["title"], 1, 80)),
+        ("category", None if f["category"] in RETRO_CATEGORIES
+         else f"must be one of {', '.join(RETRO_CATEGORIES)}"),
+        ("count", None if type(f["count"]) is int and 1 <= f["count"] <= 10_000_000
+         else "must be a whole number from 1 to 10000000"),
+        ("cost", None if type(f["cost"]) is int and 1 <= f["cost"] <= 1_000_000_000
+         else "must be a whole number from 1 to 1000000000"),
+        ("sessions", check_refs(f["sessions"])),
+        ("root_cause", check_text(f["root_cause"], 1, 300)),
+        ("fix", check_text(f["fix"], 1, 300)),
+        ("project", None if f["project"] in projects else "must be a project in aggregate.json")) if err), None)
+
+
+def render_findings(agg, doc, rejected=()):
+    """findings.md: the reply's findings ranked by count x cost, built from checked fields only.
+    rejected holds (index, field, problem) for dropped findings, listed without their text."""
     def cell(text):
         return text.replace("|", "\\|")
 
@@ -7124,8 +7121,8 @@ def render_findings(agg, doc):
     sessions = sum(h["sessions"] for h in agg["hosts"].values())
     lines = [f"# Retro {doc['run']}", "",
              f"Window {agg['from']} to {agg['to']} · hosts {', '.join(sorted(agg['hosts']))} · "
-             f"{sessions} sessions · ranked by count x cost", "",
-             "| Rank | Finding | Category | Count | Cost each | Score | Target |",
+             f"{sessions} sessions · ranked by count x cost" + (f" · {len(rejected)} rejected" if rejected else ""),
+             "", "| Rank | Finding | Category | Count | Cost each | Score | Target |",
              "| --- | --- | --- | --- | --- | --- | --- |"]
     for n, f in enumerate(ranked, 1):
         lines.append(f"| {n} | {cell(f['title'])} | {f['category']} | {f['count']:,} | {f['cost']:,} | "
@@ -7133,11 +7130,17 @@ def render_findings(agg, doc):
     for n, f in enumerate(ranked, 1):
         lines += ["", f"## {n}. {f['title']}", "", "Root cause:", "", quote(f["root_cause"]), "", "Fix:", "",
                   quote(f["fix"]), "", "Sessions: " + ", ".join(f"`{r}`" for r in f["sessions"])]
+    if rejected:
+        lines += ["", "## Rejected findings", "",
+                  "Admission dropped these findings. Their text is not shown; read reply.json to see it.", "",
+                  "| Finding | Field | Problem |", "| --- | --- | --- |"]
+        lines += [f"| {i} | {field or 'whole finding'} | {cell(problem)} |" for i, field, problem in rejected]
     return "\n".join(lines) + "\n"
 
 
 def retro_admit(run):
-    """Check a retro run's reply, write its ranked findings.md and admit its cards through suggest admit."""
+    """Check a retro run's reply, write its ranked findings.md and admit its cards through suggest admit.
+    A bad finding is dropped and listed; a bad card admits no card."""
     home = factory_home()
     folder = home / "retro" / run
     path = folder / "reply.json"
@@ -7155,18 +7158,29 @@ def retro_admit(run):
     if doc == {"none": True}:
         fail("the retro agent found nothing", 3)
     agg = json.loads((folder / "aggregate.json").read_text(encoding="utf-8"))
-    err = check_retro(doc, agg["projects"]) or (doc["run"] != run and f"run: must be {run}")
+    err = check_retro(doc) or (doc["run"] != run and f"run: must be {run}")
     if err:
         fail(f"{path}: {err}; nothing written", 2)
+    checked = [(i, f, check_finding(f, agg["projects"])) for i, f in enumerate(doc["findings"])]
+    kept = [f for _, f, bad in checked if not bad]
+    rejected = [(i, *bad) for i, _, bad in checked if bad]
+    where = [f"findings[{i}]" + (f".{field}" if field else "") + f": {problem}" for i, field, problem in rejected]
+    if not kept:
+        fail(f"{path}: {where[0]}; nothing written", 2)
     findings = folder / "findings.md"
-    findings.write_text(render_findings(agg, doc), encoding="utf-8")
+    findings.write_text(render_findings(agg, dict(doc, findings=kept), rejected), encoding="utf-8")
     print(f"wrote {findings}")
+    for line in where:
+        print(f"rejected {line}")
     if not doc["suggestions"]:
         print("no suggestions")
         return
+    cards = {"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": doc["suggestions"]}
+    err = check_suggestions(cards, "retro")
+    if err:
+        fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
     suggestions = folder / "suggestions.json"
-    suggestions.write_text(json.dumps({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run,
-                                       "suggestions": doc["suggestions"]}, indent=2) + "\n", encoding="utf-8")
+    suggestions.write_text(json.dumps(cards, indent=2) + "\n", encoding="utf-8")
     suggest_admit(str(suggestions), "retro")
 
 
