@@ -68,6 +68,7 @@ test("archived jobs page under the terminal columns", { timeout: 180000 }, async
     const openPage = async () => {
       const page = await (await browser.createBrowserContext()).newPage();
       await page.setViewport({ width: 1280, height: 900 });
+      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
       page.on("pageerror", (error) => errors.push(String(error)));
       await page.setRequestInterception(true);
       page.on("request", (request) => {
