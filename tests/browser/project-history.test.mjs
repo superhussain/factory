@@ -118,6 +118,24 @@ test("project history", { timeout: 180000 }, async (t) => {
       assert.deepEqual(stored, ["3", V1]);
     });
 
+    await t.test("history H5 a tab switch clears the rows until the new list lands", async () => {
+      await page.evaluate(() => {
+        const real = window.fetch;
+        window.fetch = (url, options) =>
+          String(url).includes("/api/project-history/sample/decisions.md")
+            ? new Promise((resolve) => (window.releaseHistory = () => resolve(real(url, options))))
+            : real(url, options);
+      });
+      await page.click("#settings-tab-decisions");
+      await page.waitForFunction(() => typeof window.releaseHistory === "function", wait);
+      assert.equal(await page.$$eval("#settings-history li", (lis) => lis.length), 0);
+      await page.evaluate(() => window.releaseHistory());
+      await page.waitForFunction(
+        () => document.getElementById("settings-history").textContent === "No saved versions yet.",
+        wait,
+      );
+    });
+
     assert.deepEqual(errors, []);
   });
 });

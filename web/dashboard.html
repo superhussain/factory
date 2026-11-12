@@ -2151,6 +2151,7 @@ function selectSettingsDocument() {
   const extra = resource.name !== 'project';
   if (!resource.slug) return renderProjectSettings();
   $('settings-summary').value = '';
+  $('settings-history').replaceChildren();
   loadSettingsHistory(resource);
   if (!projectDocuments.has(resource.id)) {
     try {
@@ -2292,6 +2293,7 @@ $('settings-load').addEventListener('click', () => {
   const s = projectDocuments.get(resource.id);
   if ((settingsDirty(s) || s.phase === 'conflict' || s.blocked || malformedDrafts.has(resource.id)) && !confirm(resource.name === 'project' ? 'Discard this draft and load the latest project document?' : 'Discard this draft and load the latest document?')) return;
   loadProjectDocument(resource, true);
+  loadSettingsHistory(resource);
 });
 $('settings-save').addEventListener('click', saveProjectDocument);
 $('settings-copy').addEventListener('click', async () => {
