@@ -88,8 +88,9 @@ that line and stop. Otherwise act on `next`, then read again.
   session. A flake is a runner, network or timeout error in a step the diff does not
   change. Run `gh run rerun <run-id> --failed -R "$REPO"`. The `<run-id>` is the number
   after `/actions/runs/` in the check's `link` from
-  `gh pr checks <n> -R "$REPO" --json name,bucket,link`. A rerun is not a push, so the
-  3-push cap is unchanged.
+  `gh pr checks <n> -R "$REPO" --json name,bucket,link`. If the link has no
+  `/actions/runs/<digits>`, treat it as no flake and fix or hand back. A rerun is not a
+  push, so the 3-push cap is unchanged.
 - At most 3 pushes per session. When a fourth would be needed, patch
   `{"stage": "needs-human", "babysit": null, "note": "babysit: 3 fix pushes did not get PR #<n> to merge"}`
   and stop.
