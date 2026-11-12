@@ -519,7 +519,10 @@ async function focusAndViews(c) {
   await input(c, (await state(c, second, "notes.md")).draftText + "\nKeyboard reachability draft");
   const eligible = await p.$$eval(
     "#settings-projects select, #settings-projects textarea, #settings-projects button",
-    (els) => els.filter((e) => !e.disabled && e.getClientRects().length).map((e) => e.id),
+    (els) =>
+      els
+        .filter((e) => !e.disabled && e.getClientRects().length)
+        .map((e) => e.id || e.getAttribute("aria-label")),
   );
   assert.deepEqual(eligible, [
     "settings-project",
@@ -531,6 +534,7 @@ async function focusAndViews(c) {
     "settings-tab-decisions",
     "settings-tab-runbook",
     "settings-document",
+    ...[5, 4, 3, 2, 1].map((n) => `Restore version ${n} to draft`),
     "settings-copy",
     "settings-load",
     "settings-save",
