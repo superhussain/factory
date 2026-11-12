@@ -60,6 +60,8 @@ These harden admission so it can take real explorer output.
 - **Untrusted text.** Every explorer string passes admission rules 3 to 7 from
   [trust.md](trust.md) through `check_untrusted`, so invisible characters, the
   envelope tag, links, secret shapes and override phrases exit 2 with nothing written.
+- **Device secrets.** A file holding any `.env` value of 12 or more characters exits
+  2 with nothing admitted. The error names the key, never the value.
 - **Quoted prose.** The card renders the summary, question and recommendation reason
   as blockquotes. A heading or list inside them stays quoted, so explorer text cannot
   pose as the card's own instructions. A summary is one paragraph: a blank line exits
