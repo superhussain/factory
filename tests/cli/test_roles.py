@@ -43,7 +43,7 @@ class RolesTest(IsolatedTestCase):
         self.assertFalse(self.claude.exists())
         self.assertFalse(self.opencode.exists())
         self.install(("claude",))
-        self.assertEqual(len(list(self.claude.iterdir())), 8)
+        self.assertEqual(len(list(self.claude.iterdir())), 9)
         self.assertFalse(self.opencode.exists())
         self.install(("opencode",))
         for name in self.runtime.ROLE_NAMES:
@@ -54,8 +54,8 @@ class RolesTest(IsolatedTestCase):
         self.config.write_text("---\nclaude_agents_dir: " + str(self.root / "custom-claude") +
                                "\nopencode_agents_dir: " + str(self.root / "custom-opencode") + "\n---\n")
         self.install()
-        self.assertEqual(len(list((self.root / "custom-claude").iterdir())), 8)
-        self.assertEqual(len(list((self.root / "custom-opencode").iterdir())), 8)
+        self.assertEqual(len(list((self.root / "custom-claude").iterdir())), 9)
+        self.assertEqual(len(list((self.root / "custom-opencode").iterdir())), 9)
 
     def test_every_opaque_header_on_every_role_in_both_runtimes(self):
         self.install()
@@ -145,7 +145,7 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("is the question tool it names", " ".join(skill.split()))
         blocks = []
         for name in self.runtime.ROLE_NAMES:
-            if name == "factory-explorer.md":
+            if name in ("factory-explorer.md", "factory-retro.md"):
                 continue
             text = (SKILL / "agents" / name).read_text(encoding="utf-8")
             start = text.index("### Job files stay readable")
@@ -157,7 +157,7 @@ class RolesTest(IsolatedTestCase):
         self.assertEqual(len(set(blocks)), 1)
         visuals = []
         for name in self.runtime.ROLE_NAMES:
-            if name == "factory-explorer.md":
+            if name in ("factory-explorer.md", "factory-retro.md"):
                 continue
             text = (SKILL / "agents" / name).read_text(encoding="utf-8")
             start = text.index("\nThe dashboard renders markdown tables")
@@ -219,7 +219,8 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("references/visuals.md", block)
         self.assertIn("references/walkthrough.html", block)
         self.assertNotIn("stepthru", block)
-        self.assertNotIn("walkthrough", (SKILL / "agents/factory-explorer.md").read_text(encoding="utf-8"))
+        for name in ("factory-explorer.md", "factory-retro.md"):
+            self.assertNotIn("walkthrough", (SKILL / "agents" / name).read_text(encoding="utf-8"))
         skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("build.walkthrough.html", skill)
         self.assertIn("references/visuals.md", skill)
@@ -270,6 +271,23 @@ class RolesTest(IsolatedTestCase):
         approve = [line for line in schedule.splitlines() if "suggest approve" in line]
         self.assertEqual(len(approve), 1)
         self.assertTrue(approve[0].startswith("Never "))
+
+    def test_retro_role_and_command(self):
+        self.assertEqual(self.runtime.ROLE_NAMES[-1], "factory-retro.md")
+        role = (SKILL / "agents/factory-retro.md").read_text(encoding="utf-8")
+        self.assertEqual(self.runtime.frontmatter(SKILL / "agents/factory-retro.md")[0]["name"], "factory-retro")
+        self.assertIn("\ntools: Read, Grep, Glob\n", role.split("\n---\n")[0] + "\n")
+        self.assertIn('{"none": true}', role)
+        for value in (*self.runtime.RETRO_CATEGORIES, "160 characters", "`<host>/`", "tooling"):
+            self.assertIn(value, role)
+        command = (SKILL / "references/commands/retro.md").read_text(encoding="utf-8")
+        for value in ("retro push", "retro aggregate", "factory-retro", "byte for byte", "retro admit <run>"):
+            self.assertIn(value, command)
+        approve = [line for line in command.splitlines() if "suggest approve" in line]
+        self.assertEqual(len(approve), 1)
+        self.assertTrue(approve[0].startswith("Never "))
+        self.assertIn("| `/factory retro [--days N]` | [retro](references/commands/retro.md) |",
+                      (SKILL / "SKILL.md").read_text(encoding="utf-8"))
 
     def test_unattended_standing_instruction(self):
         line = self.runtime.UNATTENDED

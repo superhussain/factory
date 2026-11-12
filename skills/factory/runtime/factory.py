@@ -93,6 +93,8 @@
                                             from the last N days (default 1)
   factory.py retro push                     upload that digest (last day) to retro/<device>/<local date>.jsonl
   factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
+  factory.py retro aggregate [--days N]     pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
+  factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, admit its cards
   factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>]
                                             append one row to the job's agents, after checking this
                                             session holds the claim, and print it as JSON
@@ -131,6 +133,7 @@ import signal
 import socket
 import ssl
 import stat
+import statistics
 import subprocess
 import sys
 import tarfile
@@ -664,6 +667,9 @@ def forget_paseo_claim(home, job_id, agent):
         pass
 
 
+CLAIM_REFRESH_MINUTES = 10
+
+
 def new_claim(device, session, since=None):
     stamp = now()
     return {"device": device, "session": session, "since": since or stamp, "seen": stamp}
@@ -680,6 +686,17 @@ def blocking(job, device, session, minutes):
         return None
     seen = datetime.strptime(c["seen"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     return c if datetime.now(timezone.utc) - seen < timedelta(minutes=minutes) else None
+
+
+def fresh_hold(job, device, session, paseo, take):
+    """True when hold would only refresh this session's claim, seen within CLAIM_REFRESH_MINUTES."""
+    c = job.get("claim") or {}
+    if take or not c or not mine(c, device, session) or "started" not in job:
+        return False
+    if (job.get("handoff") or {}).get("state") == "ready" or job.get("paseo") != paseo:
+        return False
+    seen = datetime.strptime(c["seen"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - seen < timedelta(minutes=CLAIM_REFRESH_MINUTES)
 
 
 def earlier_moves(m):
@@ -912,6 +929,8 @@ def hold(target, take=None):
             held = job["claim"]
         if held and take != "take":
             return None, ("held", held, None)
+        if fresh_hold(job, device, session, paseo, take):
+            return None, ("ok", None, job["started"])
         c = dict(job.get("claim") or {})
         keep = bool(c) and mine(c, device, session)
         # Replace the claim whole rather than merging into the old one.
@@ -1948,7 +1967,7 @@ def ideas(*args):
 AUTONOMY_DEFAULT = {"paused": True, "projects": [], "self": []}
 SUGGESTION_SCHEMA = "factory.suggestions/1"
 SUGGEST_KINDS = ("bug-fix", "test-gap", "docs", "cleanup", "dependency-upgrade", "migration",
-                 "security", "product-idea")
+                 "security", "product-idea", "tooling")
 HUMAN_KINDS = ("dependency-upgrade", "migration", "security", "product-idea")
 SENSITIVE_PATHS = (
     ".github/*", "*/.github/*", "*.gitlab-ci*", "*.circleci/*", "*buildkite*", "*jenkinsfile*",
@@ -2112,21 +2131,27 @@ def check_list(value, lo, hi):
     return None
 
 
-def check_suggestions(doc):
-    """The first violation of the factory.suggestions/1 schema as "<where>: <problem>", or None."""
+def check_suggestions(doc, by="explorer"):
+    """The first violation of the factory.suggestions/1 schema as "<where>: <problem>", or None.
+    The caller sets by; a retro file must carry by: retro, and an explorer file no by key."""
     def first(*checks):
         return next(((where, err) for where, err in checks if err), None)
 
-    top = first(("file", check_keys(doc, ("schema", "project", "run", "commit", "suggestions"))))
+    def slug(value):
+        return None if isinstance(value, str) and SLUG.fullmatch(value) else "must be a project slug"
+
+    retro = by == "retro"
+    top = first(("file", check_keys(doc, ("schema", "by", "run", "suggestions") if retro
+                                    else ("schema", "project", "run", "commit", "suggestions"))))
     if top:
         return "%s: %s" % top
     found = first(
         ("schema", None if doc["schema"] == SUGGESTION_SCHEMA else f"must be {SUGGESTION_SCHEMA}"),
-        ("project", None if isinstance(doc["project"], str) and SLUG.fullmatch(doc["project"])
-         else "must be a project slug"),
+        ("by", None if not retro or doc["by"] == "retro" else "must be retro"),
+        ("project", None if retro else slug(doc["project"])),
         ("run", None if isinstance(doc["run"], str) and RUN_TAG.fullmatch(doc["run"])
          else "must match [A-Za-z0-9_-]{1,64}"),
-        ("commit", None if isinstance(doc["commit"], str) and COMMIT.fullmatch(doc["commit"])
+        ("commit", None if retro or isinstance(doc["commit"], str) and COMMIT.fullmatch(doc["commit"])
          else "must be 40 lowercase hex characters"),
         ("suggestions", check_list(doc["suggestions"], 1, MAX_PER_RUN)))
     if found:
@@ -2134,10 +2159,11 @@ def check_suggestions(doc):
     for i, s in enumerate(doc["suggestions"]):
         at = f"suggestions[{i}]"
         err = check_keys(s, ("kind", "title", "summary", "evidence", "paths", "size", "question",
-                             "options", "recommend", "reason"), ("diagram",))
+                             "options", "recommend", "reason") + (("project",) if retro else ()), ("diagram",))
         if err:
             return f"{at}: {err}"
         checks = [
+            ("project", slug(s["project"]) if retro else None),
             ("kind", None if s["kind"] in SUGGEST_KINDS else f"must be one of {', '.join(SUGGEST_KINDS)}"),
             ("title", check_text(s["title"], 1, 80)),
             ("summary", check_text(s["summary"], 1, 600, True)
@@ -2154,14 +2180,21 @@ def check_suggestions(doc):
         if found:
             return f"{at}.%s: %s" % found
         for j, e in enumerate(s["evidence"]):
-            err = check_keys(e, ("path", "note"), ("line",))
+            err = check_keys(e, ("note", "count", "sessions")) if retro else check_keys(e, ("path", "note"), ("line",))
             if err:
                 return f"{at}.evidence[{j}]: {err}"
-            found = first(
-                ("path", check_path(e["path"])),
-                ("line", "line" in e and not (type(e["line"]) is int and e["line"] >= 1)
-                 and "must be a whole number of at least 1"),
-                ("note", check_text(e["note"], 1, 200)))
+            if retro:
+                found = first(
+                    ("note", check_text(e["note"], 1, 200)),
+                    ("count", None if type(e["count"]) is int and e["count"] >= 1
+                     else "must be a whole number of at least 1"),
+                    ("sessions", check_refs(e["sessions"])))
+            else:
+                found = first(
+                    ("path", check_path(e["path"])),
+                    ("line", "line" in e and not (type(e["line"]) is int and e["line"] >= 1)
+                     and "must be a whole number of at least 1"),
+                    ("note", check_text(e["note"], 1, 200)))
             if found:
                 return f"{at}.evidence[{j}].%s: %s" % found
         bad = next(((j, check_path(p)) for j, p in enumerate(s["paths"]) if check_path(p)), None)
@@ -2206,7 +2239,7 @@ def classify(project, s, autonomy):
         reasons.append("no-paths")
     if len(s["paths"]) > 5:
         reasons.append(f"wide:{len(s['paths'])}")
-    for path in dict.fromkeys(s["paths"] + [e["path"] for e in s["evidence"]]):
+    for path in dict.fromkeys(s["paths"] + [e["path"] for e in s["evidence"] if "path" in e]):
         if any(fnmatch.fnmatchcase(path.lower(), pattern) for pattern in SENSITIVE_PATHS):
             reasons.append(f"path:{path}")
     return not reasons, reasons
@@ -2219,11 +2252,15 @@ def render_card(job_id, doc, s, reasons):
 
     keys = [o["key"] for o in s["options"]]
     gate = "Classifier reasons: " + ", ".join(reasons) if reasons else "Classifier: eligible"
-    lines = [f"## {s['title']}", "",
-             f"Explorer suggestion · kind {s['kind']} · project {doc['project']} · "
-             f"commit {doc['commit'][:12]} · run {doc['run']}", "",
+    header = (f"Retro suggestion · kind {s['kind']} · project {s['project']} · run {doc['run']}" if "by" in doc
+              else f"Explorer suggestion · kind {s['kind']} · project {doc['project']} · "
+                   f"commit {doc['commit'][:12]} · run {doc['run']}")
+    lines = [f"## {s['title']}", "", header, "",
              f"Gate: human. {gate}", "", "### Summary", "", quote(s["summary"]), "", "### Evidence", ""]
     for e in s["evidence"]:
+        if "sessions" in e:
+            lines.append(f"- {e['count']}x {e['note']} (sessions: {', '.join(f'`{r}`' for r in e['sessions'])})")
+            continue
         where = f"{e['path']}:{e['line']}" if "line" in e else e["path"]
         lines.append(f"- `{where}` {e['note']}")
     lines += ["", "### What is needed from you", "", quote(s["question"]), "",
@@ -2256,9 +2293,9 @@ def strings(value):
     return [s for item in items for s in strings(item)]
 
 
-def suggest_admit(path):
+def suggest_admit(path, by="explorer"):
     """Turn a checked suggestions file into gated idea cards. Requests only GET /projects.json
-    and GET/PUT /api/board, and never runs a process."""
+    and GET/PUT /api/board, and never runs a process. Only retro_admit passes by="retro"."""
     try:
         with open(path, "rb") as f:
             raw = f.read(MAX_SUGGESTION_BYTES + 1)
@@ -2270,7 +2307,7 @@ def suggest_admit(path):
         doc = json.loads(raw.decode("utf-8"))
     except ValueError as e:
         fail(f"{path} is not UTF-8 JSON: {e}; nothing admitted", 2)
-    err = check_suggestions(doc)
+    err = check_suggestions(doc, by)
     if err:
         fail(f"{path}: {err}; nothing admitted", 2)
     home = factory_home()
@@ -2279,9 +2316,14 @@ def suggest_admit(path):
     for key in ("FACTORY_ACCESS_CLIENT_ID", "FACTORY_ACCESS_CLIENT_SECRET"):
         if env.get(key) and env[key] in text:
             fail(f"{path} holds this device's {key}; nothing admitted", 2)
-    slug = doc["project"]
-    if slug not in registered(home):
-        fail(f"{path}: project: {slug} is not a registered factory project; nothing admitted", 2)
+    retro = by == "retro"
+    projects = registered(home)
+    if not retro and doc["project"] not in projects:
+        fail(f"{path}: project: {doc['project']} is not a registered factory project; nothing admitted", 2)
+    for i, s in enumerate(doc["suggestions"] if retro else []):
+        if s["project"] not in projects:
+            fail(f"{path}: suggestions[{i}].project: {s['project']} is not a registered factory project; "
+                 "nothing admitted", 2)
     device = holder(home)[0]
     jobs_dir = Path(home, "jobs")
     local = [p.name for p in jobs_dir.glob("*")] + [p.name for p in jobs_dir.glob("*/*")]
@@ -2291,12 +2333,13 @@ def suggest_admit(path):
         autonomy = load_autonomy(data)
         if autonomy["paused"] is not False:
             fail("autonomy is paused; nothing admitted", 3)
-        if slug not in autonomy["projects"]:
-            fail(f"{slug} is not on the autonomy allowlist", 3)
+        if not retro and doc["project"] not in autonomy["projects"]:
+            fail(f"{doc['project']} is not on the autonomy allowlist", 3)
         stamp = now()
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         admitted, skipped = [], []
         for s in doc["suggestions"]:
+            slug = s["project"] if retro else doc["project"]
             fp = fingerprint(slug, s)
             origins = [(j, j["origin"]) for j in data["jobs"] if isinstance(j.get("origin"), dict)]
             dup = next((j.get("id") for j, o in origins if o.get("fingerprint") == fp), None)
@@ -2320,9 +2363,10 @@ def suggest_admit(path):
             pick = ", ".join(keys[:-1]) + " or " + keys[-1]
             data["jobs"].append({
                 "id": job_id, "stage": IDEA, "title": f"{slug}: {s['title']}",
-                "needs": f"Explorer suggestion: pick {pick} (recommended {s['recommend']}), or discard",
-                "note": f"explorer: {s['kind']}", "idea": render_card(job_id, doc, s, reasons),
-                "origin": {"by": "explorer", "project": slug, "run": doc["run"], "commit": doc["commit"],
+                "needs": f"{by.capitalize()} suggestion: pick {pick} (recommended {s['recommend']}), or discard",
+                "note": f"{by}: {s['kind']}", "idea": render_card(job_id, doc, s, reasons),
+                "origin": {"by": by, "project": slug, "run": doc["run"],
+                           **({} if retro else {"commit": doc["commit"]}),
                            "kind": s["kind"], "fingerprint": fp, "gate": "human", "eligible": eligible,
                            "reasons": reasons, "options": keys, "recommend": s["recommend"],
                            "created": stamp, "admitted_by": device},
@@ -2359,7 +2403,10 @@ def suggest_approve(job_id, option):
         if option not in (origin.get("options") or []):
             fail(f"{job_id} has no option {option}; nothing was changed", 2)
         slug = origin.get("project")
-        if slug not in projects or slug not in load_autonomy(data)["projects"]:
+        if origin.get("by") == "retro":
+            if slug not in projects:
+                fail(f"{slug} is not a registered project; nothing was changed", 2)
+        elif slug not in projects or slug not in load_autonomy(data)["projects"]:
             fail(f"{slug} is not a registered project on the autonomy allowlist; nothing was changed", 2)
         stamp = now()
         origin["approved"] = {"option": option, "device": device, "at": stamp}
@@ -4911,7 +4958,8 @@ def native_header(path):
 
 
 ROLE_NAMES = tuple("factory-" + name + ".md" for name in (
-    "approver", "builder", "explorer", "review-code", "review-security", "review-ui", "review-ux", "spec-writer"))
+    "approver", "builder", "explorer", "review-code", "review-security", "review-ui", "review-ux", "spec-writer",
+    "retro"))
 
 
 def install_agents(skill, runtimes):
@@ -6640,6 +6688,11 @@ RETRO_FLAG = re.compile(
     r"[A-Za-z0-9_-]{0,64})(\s+)(?!-)\S+")
 RETRO_HOME = re.compile(r"^(?:[A-Za-z]-)?-(?:home|Users)-[A-Za-z0-9_]+")
 RETRO_WRITE_ONLY = "retro digests are written only by the host's bound service token"
+RETRO_REPLY_SCHEMA = "factory.retro/1"
+RETRO_CATEGORIES = ("navigation", "automated-checks", "reviewer-rules", "steering", "tool-economy",
+                    "information-access", "permissions")
+RETRO_SESSION_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[0-9a-f-]{8,36}", re.ASCII)
+MAX_RETRO_BYTES = 131072
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
@@ -6801,9 +6854,13 @@ def retro_host():
     return (frontmatter(config)[0] if config.is_file() else {}).get("device") or socket.gethostname()
 
 
+def retro_transcripts():
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+
+
 def retro_rows(days):
     """This host's clipped digest rows from the last days, oldest session first."""
-    root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+    root = retro_transcripts()
     if not root.is_dir():
         fail(f"no Claude Code transcripts at {root}", 4)
     host, cutoff, rows = retro_host(), time.time() - days * 86400, []
@@ -6872,15 +6929,238 @@ def retro_push():
     print(f"pushed {len(rows)} sessions to {key}")
 
 
-def retro_pull(date):
-    """Print every host's pushed digest for date, in the order the Worker lists the hosts."""
-    home = factory_home()
+def retro_fetch(home, date):
+    """[(host, text)] for every host's pushed digest for date, in the order the Worker lists the hosts."""
     hosts = [h for h in json.loads(api(home, "GET", f"/api/retro/{date}")[2])
              if isinstance(h, str) and HOST_NAME.fullmatch(h)]
-    if not hosts:
+    return [(host, api(home, "GET", f"/api/retro/{host}/{date}.jsonl")[2]) for host in hosts]
+
+
+def retro_pull(date):
+    """Print every host's pushed digest for date, in the order the Worker lists the hosts."""
+    pushed = retro_fetch(factory_home(), date)
+    if not pushed:
         print(f"no host pushed a retro digest for {date}", file=sys.stderr)
-    for host in hosts:
-        sys.stdout.write(api(home, "GET", f"/api/retro/{host}/{date}.jsonl")[2])
+    for _, text in pushed:
+        sys.stdout.write(text)
+
+
+def retro_int(value):
+    return value if type(value) is int else 0
+
+
+def retro_dict(value):
+    return value if isinstance(value, dict) else {}
+
+
+def retro_sum(total, counts):
+    """Add counts' whole-number values into total, key by key."""
+    for key, value in retro_dict(counts).items():
+        total[key] = total.get(key, 0) + retro_int(value)
+    return total
+
+
+def retro_median(values):
+    return int(statistics.median(values)) if values else 0
+
+
+def retro_patterns(rows, pick):
+    """The top 20 {"text", "count", "sessions"} entries merged from each row's pick(row) counts."""
+    merged = {}
+    for row in rows:
+        for text, count in retro_dict(pick(row)).items():
+            entry = merged.setdefault(text, {"text": text, "count": 0, "sessions": []})
+            entry["count"] += retro_int(count)
+            ref = f"{row['host']}/{row['session']}"
+            if len(entry["sessions"]) < 5 and ref not in entry["sessions"]:
+                entry["sessions"].append(ref)
+    return sorted(merged.values(), key=lambda e: (-e["count"], e["text"]))[:20]
+
+
+def retro_aggregate(days):
+    """Pull every host's digest for the last days into <home>/retro/<run>/ for the retro agent."""
+    home = factory_home()
+    today = datetime.now().date()
+    dates = [(today - timedelta(days=back)).isoformat() for back in range(days - 1, -1, -1)]
+    rows, skipped = [], 0
+    for date in dates:
+        for _, text in retro_fetch(home, date):
+            for line in text.splitlines():
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    row = None
+                if not isinstance(row, dict) or not isinstance(row.get("host"), str) \
+                        or not isinstance(row.get("session"), str):
+                    skipped += 1
+                    continue
+                if row.get("job") == "ad-hoc":
+                    row["project"] = "ad-hoc"
+                rows.append(row)
+    if not rows:
+        fail(f"no host pushed a retro digest from {dates[0]} to {dates[-1]}", 3)
+    run = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(3)
+    folder = home / "retro" / run
+    if is_link(folder.parent) or is_link(folder):
+        fail(f"{folder} or its parent is a link; nothing written", 2)
+    hosts, subagents, sub, attachments = {}, {}, {}, {}
+    for row in rows:
+        h = hosts.setdefault(row["host"], {"sessions": 0, "jobs": set(), "ad_hoc": 0})
+        h["sessions"] += 1
+        if row.get("job") == "ad-hoc":
+            h["ad_hoc"] += 1
+        else:
+            h["jobs"].add(str(row.get("job")))
+        for kind, t in retro_dict(retro_dict(row.get("subagents")).get("by_type")).items():
+            t = retro_dict(t)
+            s = subagents.setdefault(kind, {"count": 0, "turns": 0, "errors": 0, "denials": 0, "tokens": {}})
+            for key in ("count", "turns", "errors", "denials"):
+                s[key] += retro_int(t.get(key))
+            retro_sum(s["tokens"], t.get("tokens"))
+            retro_sum(sub, t.get("tokens"))
+        for kind, size in retro_dict(row.get("first_turn_attachments")).items():
+            attachments.setdefault(kind, []).append(retro_int(size))
+    for h in hosts.values():
+        h["jobs"] = len(h["jobs"])
+
+    def total(key, field=None):
+        return sum(retro_int(retro_dict(r.get(key)).get(field) if field else r.get(key)) for r in rows)
+
+    def summed(key):
+        out = {}
+        for r in rows:
+            retro_sum(out, r.get(key))
+        return out
+
+    rounds = {}
+    for row in rows:
+        if type(row.get("review_round_max")) is int:
+            retro_count(rounds, str(row["review_round_max"]))
+    agg = {
+        "schema": "factory.retro-aggregate/1", "run": run, "from": dates[0], "to": dates[-1],
+        "host": retro_host(), "transcripts": str(retro_transcripts()), "projects": sorted(registered(home)),
+        "hosts": hosts, "tokens": {"main": summed("tokens"), "subagents": sub},
+        "context": {"first_turn_median": retro_median([retro_int(retro_dict(r.get("context")).get("first_turn"))
+                                                       for r in rows]),
+                    "mean_per_turn_median": retro_median([retro_int(retro_dict(r.get("context")).get("mean_per_turn"))
+                                                          for r in rows])},
+        "attachments_median": {kind: retro_median(sizes) for kind, sizes in attachments.items()},
+        "env_noise": summed("env_noise"), "polls": summed("polls"),
+        "denials": {"count": total("denials", "count"), "blocked_sleep": total("denials", "blocked_sleep"),
+                    "patterns": retro_patterns(rows, lambda r: retro_dict(r.get("denials")).get("patterns"))},
+        "errors": {"count": total("errors", "count"), "benign": total("errors", "benign"),
+                   "patterns": retro_patterns(rows, lambda r: retro_dict(r.get("errors")).get("patterns"))},
+        "repeated_cmds": retro_patterns(rows, lambda r: r.get("repeated_cmds")),
+        "subagents": subagents, "review_rounds": rounds, "agent_prompts": summed("agent_prompts"),
+        "human_msgs": total("human_msgs"), "interrupts": total("interrupts")}
+    folder.mkdir(parents=True)
+    (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
+    (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "sessions": len(rows),
+                      "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
+                      "digest": str(folder / "digest.jsonl"), "transcripts": agg["transcripts"],
+                      "out": str(folder / "reply.json"), "findings": str(folder / "findings.md")}, indent=2))
+
+
+def check_refs(value):
+    return check_list(value, 1, 5) or next(
+        ("must be host/session refs" for r in value if not (isinstance(r, str) and RETRO_SESSION_REF.fullmatch(r))),
+        None)
+
+
+def check_retro(doc, projects):
+    """The first violation of the factory.retro/1 reply as "<where>: <problem>", or None."""
+    def first(*checks):
+        return next(((where, err) for where, err in checks if err), None)
+
+    err = check_keys(doc, ("schema", "run", "findings", "suggestions"))
+    if err:
+        return f"reply: {err}"
+    found = first(
+        ("schema", None if doc["schema"] == RETRO_REPLY_SCHEMA else f"must be {RETRO_REPLY_SCHEMA}"),
+        ("run", None if isinstance(doc["run"], str) and RUN_TAG.fullmatch(doc["run"])
+         else "must match [A-Za-z0-9_-]{1,64}"),
+        ("findings", check_list(doc["findings"], 1, 12)),
+        ("suggestions", check_list(doc["suggestions"], 0, MAX_PER_RUN)))
+    if found:
+        return "%s: %s" % found
+    for i, f in enumerate(doc["findings"]):
+        err = check_keys(f, ("title", "category", "count", "cost", "sessions", "root_cause", "fix", "project"))
+        if err:
+            return f"findings[{i}]: {err}"
+        found = first(
+            ("title", check_text(f["title"], 1, 80)),
+            ("category", None if f["category"] in RETRO_CATEGORIES
+             else f"must be one of {', '.join(RETRO_CATEGORIES)}"),
+            ("count", None if type(f["count"]) is int and 1 <= f["count"] <= 10_000_000
+             else "must be a whole number from 1 to 10000000"),
+            ("cost", None if type(f["cost"]) is int and 1 <= f["cost"] <= 1_000_000_000
+             else "must be a whole number from 1 to 1000000000"),
+            ("sessions", check_refs(f["sessions"])),
+            ("root_cause", check_text(f["root_cause"], 1, 300)),
+            ("fix", check_text(f["fix"], 1, 300)),
+            ("project", None if f["project"] in projects else "must be a project in aggregate.json"))
+        if found:
+            return f"findings[{i}].%s: %s" % found
+    if doc["suggestions"]:
+        return check_suggestions({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": doc["run"],
+                                  "suggestions": doc["suggestions"]}, "retro")
+    return None
+
+
+def render_findings(agg, doc):
+    """findings.md: the reply's findings ranked by count x cost, built from checked fields only."""
+    def cell(text):
+        return text.replace("|", "\\|")
+
+    ranked = sorted(doc["findings"], key=lambda f: (-f["count"] * f["cost"], f["title"]))
+    sessions = sum(h["sessions"] for h in agg["hosts"].values())
+    lines = [f"# Retro {doc['run']}", "",
+             f"Window {agg['from']} to {agg['to']} · hosts {', '.join(sorted(agg['hosts']))} · "
+             f"{sessions} sessions · ranked by count x cost", "",
+             "| Rank | Finding | Category | Count | Cost each | Score | Target |",
+             "| --- | --- | --- | --- | --- | --- | --- |"]
+    for n, f in enumerate(ranked, 1):
+        lines.append(f"| {n} | {cell(f['title'])} | {f['category']} | {f['count']:,} | {f['cost']:,} | "
+                     f"{f['count'] * f['cost']:,} | {f['project']} |")
+    for n, f in enumerate(ranked, 1):
+        lines += ["", f"## {n}. {f['title']}", "", "Root cause:", "", quote(f["root_cause"]), "", "Fix:", "",
+                  quote(f["fix"]), "", "Sessions: " + ", ".join(f"`{r}`" for r in f["sessions"])]
+    return "\n".join(lines) + "\n"
+
+
+def retro_admit(run):
+    """Check a retro run's reply, write its ranked findings.md and admit its cards through suggest admit."""
+    home = factory_home()
+    folder = home / "retro" / run
+    path = folder / "reply.json"
+    if is_link(folder.parent) or is_link(folder) or not path.is_file() \
+            or not (folder / "aggregate.json").is_file():
+        fail(f"no retro run {run}", 4)
+    with open(path, "rb") as f:
+        raw = f.read(MAX_RETRO_BYTES + 1)
+    if len(raw) > MAX_RETRO_BYTES:
+        fail(f"{path} is larger than {MAX_RETRO_BYTES} bytes; nothing written", 2)
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except ValueError as e:
+        fail(f"{path} is not UTF-8 JSON: {e}; nothing written", 2)
+    if doc == {"none": True}:
+        fail("the retro agent found nothing", 3)
+    agg = json.loads((folder / "aggregate.json").read_text(encoding="utf-8"))
+    err = check_retro(doc, agg["projects"]) or (doc["run"] != run and f"run: must be {run}")
+    if err:
+        fail(f"{path}: {err}; nothing written", 2)
+    findings = folder / "findings.md"
+    findings.write_text(render_findings(agg, doc), encoding="utf-8")
+    print(f"wrote {findings}")
+    if not doc["suggestions"]:
+        print("no suggestions")
+        return
+    suggestions = folder / "suggestions.json"
+    suggestions.write_text(json.dumps({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run,
+                                       "suggestions": doc["suggestions"]}, indent=2) + "\n", encoding="utf-8")
+    suggest_admit(str(suggestions), "retro")
 
 
 def retro_date(d):
@@ -6895,10 +7175,15 @@ def retro_cmd(action, *args):
         return retro_push()
     if action == "pull" and len(args) == 1 and retro_date(args[0]):
         return retro_pull(args[0])
-    days = args[1] if len(args) == 2 and args[0] == "--days" else "1" if not args else ""
-    if action != "digest" or not (days.isascii() and days.isdigit()) or not 1 <= int(days) <= 90:
-        fail("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD, N from 1 to 90", 2)
-    retro_digest(int(days))
+    if action == "admit" and len(args) == 1 and RUN_TAG.fullmatch(args[0]):
+        return retro_admit(args[0])
+    most = {"digest": 90, "aggregate": 30}.get(action, 0)
+    default = "7" if action == "aggregate" else "1"
+    days = default if not args else args[1] if len(args) == 2 and args[0] == "--days" else ""
+    if not (days.isascii() and days.isdigit()) or not 1 <= int(days) <= most:
+        fail("usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>, "
+             "N from 1 to 90 for digest and 1 to 30 for aggregate", 2)
+    (retro_digest if action == "digest" else retro_aggregate)(int(days))
 
 
 AGENT_ROLES = ("orchestrator",) + PROMPT_ROLES

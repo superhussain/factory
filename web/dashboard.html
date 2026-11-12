@@ -1428,6 +1428,34 @@ function selectJobResult(index) {
   if (selectedKey === null) $('job-search').removeAttribute('aria-activedescendant');
 }
 
+// A job's link rows in order: PR, then the configured agent app and web links.
+function jobLinkRows(j) {
+  const rows = [];
+  const link = (name, title, words, tab) => rows.push({ link: name, title, words: title + ' link ' + words, tab });
+  const pr = prLink(j);
+  if (pr) link('pr', 'Open PR #' + pr.n, 'pr github', true);
+  const paseo = paseoLinks(j);
+  if (paseo) {
+    if (paseo.app) link('paseo', 'Open in ' + factoryConfig.agent_links.app.label, factoryConfig.agent_links.app.label, false);
+    if (paseo.web) link('paseo-web', 'Open in ' + factoryConfig.agent_links.web.label, factoryConfig.agent_links.web.label, true);
+  }
+  return rows;
+}
+
+function jobLinkUrl(j, link) {
+  return link === 'pr' ? prLink(j)?.url : paseoLinks(j)?.[link === 'paseo' ? 'app' : 'web'];
+}
+
+// Custom-scheme links have no target, so the browser hands them to the OS.
+function openExternal(url) {
+  const a = document.createElement('a');
+  a.href = url;
+  if (url.startsWith('https:')) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
 // Page and link rows for the open job. Link rows hold a kind, not a URL; activation re-derives it.
 // Rows carry their owning job in `owner` and the key, so a drawer that changes under the open
 // picker (Back/Forward, close) can never activate another job's page or link.
@@ -1438,17 +1466,10 @@ function actionRows(query) {
     kind: 'page', owner: openId, key: 'page:' + openId + ':' + f.name, name: f.name, title: label(f.name),
     meta: 'Page of ' + j.id + ' · ' + f.name, words: label(f.name) + ' ' + f.name.replace(/[-_./]/g, ' ') + ' page',
   }));
-  const link = (name, title, words, tab) => rows.push({
-    kind: 'link', owner: openId, key: 'link:' + openId + ':' + name, link: name, title,
-    meta: 'Link of ' + j.id + (tab ? ' · opens in a new tab' : ''), words: title + ' link ' + words,
+  for (const { link, title, words, tab } of jobLinkRows(j)) rows.push({
+    kind: 'link', owner: openId, key: 'link:' + openId + ':' + link, link, title,
+    meta: 'Link of ' + j.id + (tab ? ' · opens in a new tab' : ''), words,
   });
-  const pr = prLink(j);
-  if (pr) link('pr', 'Open PR #' + pr.n, 'pr github', true);
-  const paseo = paseoLinks(j);
-  if (paseo) {
-    if (paseo.app) link('paseo', 'Open in ' + factoryConfig.agent_links.app.label, factoryConfig.agent_links.app.label, false);
-    if (paseo.web) link('paseo-web', 'Open in ' + factoryConfig.agent_links.web.label, factoryConfig.agent_links.web.label, true);
-  }
   const tokens = query.split(/\s+/).filter(Boolean);
   return rows.filter((r) => tokens.every((t) => r.words.toLowerCase().includes(t)));
 }
@@ -1656,18 +1677,12 @@ function activateJobResult() {
     $('d-tabs').querySelector('.tab.active')?.focus();
     return;
   }
-  if (row.kind === 'link') {
-    const j = row.owner === openId ? jobs.find((x) => x.id === openId) : null;
-    const url = j && (row.link === 'pr' ? prLink(j)?.url : paseoLinks(j)?.[row.link === 'paseo' ? 'app' : 'web']);
+  if (row.kind === 'link' || row.kind === 'job-link') {
+    const j = row.kind === 'link' ? (row.owner === openId ? jobs.find((x) => x.id === openId) : null) : jobs.find((x) => x.id === pickerActions.id);
+    const url = j && jobLinkUrl(j, row.link);
     if (!url) return renderJobResults();
     closeJobPicker();
-    // Custom-scheme links have no target, so the browser hands them to the OS.
-    const a = document.createElement('a');
-    a.href = url;
-    if (url.startsWith('https:')) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
-    document.body.append(a);
-    a.click();
-    a.remove();
+    openExternal(url);
     return;
   }
   if (row.kind === 'job-action') {
@@ -5914,11 +5929,18 @@ function openJobActionsPicker({ id, inNeeds, drawer = false }) {
 function renderJobActionResults() {
   const j = jobs.find((x) => x.id === pickerActions.id);
   const tokens = $('job-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  jobResults = (j ? jobActionsFor(j) : []).map((action) => ({
+  const actions = (j ? jobActionsFor(j) : []).map((action) => ({
     kind: 'job-action', key: 'job-action:' + action, action, title: $(action).textContent, meta: 'Action · ' + j.id,
   })).filter((r) => tokens.every((t) => r.title.toLowerCase().includes(t)));
-  $('job-count').textContent = jobResults.length + (jobResults.length === 1 ? ' action' : ' actions');
-  $('job-empty').textContent = j ? 'No matching actions' : 'This job is no longer on the board';
+  const linkRows = j ? jobLinkRows(j) : [];
+  const links = linkRows.map(({ link, title, words, tab }) => ({
+    kind: 'job-link', key: 'job-link:' + link, link, title, words, meta: 'Link · ' + j.id + (tab ? ' · opens in a new tab' : ''),
+  })).filter((r) => tokens.every((t) => r.words.toLowerCase().includes(t)));
+  jobResults = [...actions, ...links];
+  const A = actions.length, L = links.length;
+  $('job-count').textContent = A + (A === 1 ? ' action' : ' actions') + (L ? ' · ' + L + (L === 1 ? ' link' : ' links') : '');
+  $('job-search-label').textContent = linkRows.length ? 'Search actions and links' : 'Search actions';
+  $('job-empty').textContent = !j ? 'This job is no longer on the board' : linkRows.length ? 'No matching actions or links' : 'No matching actions';
   $('job-empty').hidden = jobResults.length !== 0;
   renderPickerRows();
 }
@@ -6376,11 +6398,13 @@ function schedulePoll() {
 }
 document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); syncLive(); schedulePoll(); });
 // Live board events: the Worker sends {"type":"changed","key":...} after each board or
-// backlog write, and the matching key re-reads at once. A dropped socket retries with backoff
+// backlog write, and the matching key re-reads once, 2 s after the first frame; frames during a read add one more read. A dropped socket retries with backoff
 // (1, 2, 4 ... 30 s), then every 30 s while a socket is wanted. An expired sign-in stops retries until a board read succeeds.
 const LIVE_PATH = '/events/board';
 const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000;
 let liveSocket = null, liveOpen = false, liveRetries = 0, liveRetryTimer = 0;
+const LIVE_READ_MS = 2000;
+const liveReads = { 'board.json': { timer: 0, busy: false, again: false }, 'backlog.md': { timer: 0, busy: false, again: false } };
 function liveWanted() { return pollStarted && navigator.onLine && connState !== 'signin' && (!document.hidden || notifyActive()); }
 function openLive() {
   clearTimeout(liveRetryTimer);
@@ -6399,9 +6423,8 @@ function openLive() {
     if (ws !== liveSocket) return;
     let key;
     try { key = JSON.parse(e.data).key; } catch {}
-    if (key === 'board.json') poll({ withBacklog: false });
-    else if (key === 'backlog.md') refreshBacklog();
-    else poll();
+    if (Object.hasOwn(liveReads, key)) queueLiveRead(key);
+    else { queueLiveRead('board.json'); queueLiveRead('backlog.md'); }
   });
   ws.addEventListener('close', () => {
     if (ws !== liveSocket) return;
@@ -6425,6 +6448,20 @@ function closeLive() {
 function syncLive() {
   if (!liveWanted()) closeLive();
   else if (!liveSocket && !liveRetryTimer) { liveRetries = 0; openLive(); }
+}
+function queueLiveRead(key) {
+  const r = liveReads[key];
+  if (r.busy) { r.again = true; return; }
+  if (!r.timer) r.timer = setTimeout(runLiveRead, LIVE_READ_MS, key);
+}
+function runLiveRead(key) {
+  const r = liveReads[key];
+  r.timer = 0;
+  r.busy = true;
+  return (key === 'board.json' ? poll({ withBacklog: false }) : refreshBacklog()).finally(() => {
+    r.busy = false;
+    if (r.again) { r.again = false; queueLiveRead(key); }
+  });
 }
 window.addEventListener('blur', () => setTimeout(schedulePoll, 0));
 window.addEventListener('focus', () => { if (pollStarted && !liveOpen && !document.hidden) pollTick(); syncLive(); schedulePoll(); });

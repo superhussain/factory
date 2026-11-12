@@ -23,3 +23,16 @@ For optional-project ideas, redeploy the Worker that bundles the dashboard first
 then reinstall the skill on devices to refresh the runtime and promotion guard.
 Existing assigned jobs need no data migration. Existing schedules need no prompt
 migration; their command and JSON output contract are unchanged.
+
+## Stage-change deep links
+
+| Event | Link to |
+| --- | --- |
+| Spec written | `#<id>/spec` |
+| Build done (first build, fix round, rework) | `#<id>/build` |
+| Waiting on his answers (`needs.md` written) | `#<id>/needs` |
+| Review round N done | the first `round-N/review-<r>` with CHANGES, else `round-N/review-security` |
+| PR open, merged, or escalated | `#<id>/decision`, plus the PR URL |
+| Closed without shipping | `#<id>/decision` |
+| Batched build triggered or landed | the run URLs and the jobs that rode it |
+| needs-human | the file that explains the hold: the latest CHANGES review at the round cap, or the failed agent's file. Use `#<id>` plus the note when only the note says why (a git conflict, say). |

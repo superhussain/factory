@@ -55,7 +55,7 @@ class PortabilityTest(IsolatedTestCase):
     def test_python_38_syntax_and_stdlib_only_imports(self):
         # shlex substitutes launcher argv; zoneinfo resolves usage-limit reset times but is
         # imported under try/except ImportError in factory.py, because Python 3.8 lacks it.
-        allowed = set("argparse ast concurrent contextlib datetime errno fnmatch hashlib http importlib io json os pathlib platform random re secrets shlex shutil signal socket ssl stat subprocess sys tarfile tempfile threading time types unicodedata unittest urllib uuid xml zoneinfo".split())
+        allowed = set("argparse ast concurrent contextlib datetime errno fnmatch hashlib http importlib io json os pathlib platform random re secrets shlex shutil signal socket ssl stat statistics subprocess sys tarfile tempfile threading time types unicodedata unittest urllib uuid xml zoneinfo".split())
         for path in owned_files():
             if path.suffix != ".py":
                 continue
@@ -76,7 +76,7 @@ class PortabilityTest(IsolatedTestCase):
         files, _ = installer.tree(SKILL, source=True)
         self.assertEqual(set(files), set(installer.REQUIRED))
         self.assertIn("runtime/pr_screenshots.py", files)
-        self.assertEqual(len(files), 37)
+        self.assertEqual(len(files), 39)
         for name, data in files.items():
             text = data.decode("utf-8")
             self.assertNotIn("file://", text)

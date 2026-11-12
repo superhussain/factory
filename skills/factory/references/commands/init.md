@@ -9,7 +9,7 @@ manually in that private file, never in chat or arguments. Import an endpoint wi
 without writes. `init <repo>` remains the only registration flow.
 
 No roles install by default. Explicit `--agents claude|opencode|both` refreshes
-eight role bodies after complete preflight, even offline. Both native runtimes
+nine role bodies after complete preflight, even offline. Both native runtimes
 retain complete existing headers byte-for-byte; invalid YAML remains opaque.
 Missing exact `---` delimiters or intervening `...` stops all role writes.
 Native diagnostics own YAML validation. No provider, permission, model or schedule
@@ -31,7 +31,7 @@ use `pull <slug>` to adopt an observed baseline before editing an existing
 project on an upgraded device.
 
 Before using the generated native OpenCode roles, verify role activation:
-run `opencode api get /api/agent` and confirm all eight `factory-*` role IDs are
+run `opencode api get /api/agent` and confirm all nine `factory-*` role IDs are
 registered. A missing or invalid installed role stops native-role dispatch; fix that role's
 frontmatter manually with the native diagnostics and rerun the check. Init
 itself never needs the OpenCode CLI, and Claude-only devices do not run this

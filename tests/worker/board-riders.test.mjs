@@ -83,3 +83,46 @@ test("rider status comes from either side", async () => {
   const fresh = setup([LEAD]);
   await refused(fresh, [LEAD, { ...RIDER, paused: CONTROLS.paused }], "paused");
 });
+
+test("rows without a string id are skipped", async () => {
+  const NO_ID = { project: "sample", stage: "build", refs: RIDER.refs };
+  const NUM_ID = { id: 1205, project: "sample", stage: "build", refs: RIDER.refs };
+  const s = setup([LEAD, RIDER, NO_ID, NUM_ID]);
+  const before = s.etag();
+  const response = await s.write([
+    LEAD,
+    RIDER,
+    { ...NO_ID, priority: CONTROLS.priority },
+    { ...NUM_ID, paused: CONTROLS.paused },
+    null,
+  ]);
+  assert.equal(response.status, 200);
+  assert.notEqual(s.etag(), before);
+});
+
+test("the refusal quotes long ids cut", async () => {
+  const lead = { ...LEAD, id: "1201-sync-retry-with-backoff-on-every-device-host" };
+  const rider = {
+    ...RIDER,
+    id: "1203-cache-headers-for-the-board-and-backlog-routes",
+    refs: [{ id: lead.id, kind: "batched-into" }],
+  };
+  let s = setup([lead, rider]);
+  let response = await s.write([lead, { ...rider, priority: CONTROLS.priority }]);
+  let body = await response.text();
+  assert.equal(response.status, 400);
+  assert.equal(
+    body,
+    'a board write cannot add priority to "1203-cache-headers-for-the-boar...": it is batched into "1201-sync-retry-with-backoff-on..." and follows its lead. Act on the lead instead. Nothing was written.',
+  );
+  assert.ok(body.length <= 200);
+
+  const accented = { ...RIDER, id: "1203-" + "é".repeat(40) };
+  s = setup([LEAD, accented]);
+  response = await s.write([LEAD, { ...accented, paused: CONTROLS.paused }]);
+  assert.equal(response.status, 400);
+  assert.equal(
+    await response.text(),
+    String.raw`a board write cannot add paused to "1203-\u00e9\u00e9\u00e9\u00e9...": it is batched into "1201-sync-retry" and follows its lead. Act on the lead instead. Nothing was written.`,
+  );
+});
