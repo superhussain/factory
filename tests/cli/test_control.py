@@ -55,10 +55,15 @@ class ControlTest(SuggestCase):
             {"id": "044-no-project", "stage": "idea"},
             {"id": "045-open", "stage": "pr-open", "project": "sample"}]
         before, puts = json.dumps(self.board), self.puts()
-        for job_id, want in (("099-missing", 4), ("043-rider", 2), ("044-no-project", 2), ("045-open", 2)):
+        for job_id, want, why in (
+                ("099-missing", 4, "no job 099-missing on the board. Nothing was written."),
+                ("043-rider", 2, "043-rider cannot be prioritized: it is a rider of 042-sample-export. Nothing was written."),
+                ("044-no-project", 2, "044-no-project cannot be prioritized: it has no project. Nothing was written."),
+                ("045-open", 2, "045-open cannot be prioritized: it is at pr-open. Nothing was written.")):
             with self.subTest(job=job_id):
                 code, err, _ = self.control(job_id, "prioritize", "--chat", MESSAGE)
                 self.assertEqual(code, want, err)
+                self.assertIn(why, err)
         self.assertEqual((json.dumps(self.board), self.puts()), (before, puts))
 
     def test_usage(self):

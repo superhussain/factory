@@ -2949,8 +2949,12 @@ def control_cmd(job_id, action, flag, value):
         if job is None:
             fail(f"no job {job_id} on the board. Nothing was written.", 4)
         if action == "prioritize":
-            if not job.get("project") or job.get("stage") not in PRIORITY_STAGES or lead_of(job):
-                fail(f"{job_id} can no longer be prioritized; nothing was changed", 2)
+            if not job.get("project"):
+                fail(f"{job_id} cannot be prioritized: it has no project. Nothing was written.", 2)
+            if job.get("stage") not in PRIORITY_STAGES:
+                fail(f"{job_id} cannot be prioritized: it is at {job.get('stage')}. Nothing was written.", 2)
+            if lead_of(job):
+                fail(f"{job_id} cannot be prioritized: it is a rider of {lead_of(job)}. Nothing was written.", 2)
             if job.get("priority"):
                 return None, "unchanged"
             stamp = now()
