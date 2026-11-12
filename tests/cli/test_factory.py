@@ -1495,6 +1495,24 @@ class MoveFenceTest(IsolatedTestCase):
         self.assertIn("only the dashboard sets paused", err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
+    def test_board_refuses_a_babysit_patch(self):
+        before = self.store["/api/board"]
+        err = io.StringIO()
+        with patch.object(factory.sys, "stdin", io.StringIO('{"babysit": {"at": "2026-01-02T12:00:00Z"}}')), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            factory.board(self.home, "001-test")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("only the dashboard sets babysit; a session clears it with null", err.getvalue())
+        self.assertEqual(self.store["/api/board"], before)
+
+    def test_board_clears_babysit_with_null(self):
+        self.save(dict(self.job, babysit={"at": "2026-01-02T12:00:00Z"}))
+        self.assertTrue(factory.babysitting(self.saved()))
+        with patch.object(factory.sys, "stdin", io.StringIO('{"babysit": null}')):
+            factory.board(self.home, "001-test")
+        self.assertNotIn("babysit", self.saved())
+        self.assertFalse(factory.babysitting(self.saved()))
+
     def test_board_refuses_a_stacked_patch(self):
         before = self.store["/api/board"]
         err = io.StringIO()

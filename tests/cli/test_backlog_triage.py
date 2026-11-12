@@ -168,6 +168,12 @@ class BacklogTriageTests(TriageFixture):
         self.assertEqual(self.module.idea_with_context("a", "x" * 4000, "b" * 3950), "a" + "b" * 3950)
         self.assertEqual(self.module.idea_with_context("a", None, "b"), "ab")
 
+    def test_idea_limit_counts_utf16_units(self):
+        idea = self.module.idea_with_context("a", "\U0001F600" * 2100, "b")
+        self.assertEqual(idea, "a\n\nContext from the backlog:\n" + "\U0001F600" * 1959
+                         + "\n[context cut to fit the 4000-character idea limit]b")
+        self.assertEqual(self.module.utf16_len(idea), 3999)
+
     def test_queue_skips_a_dotted_suffix_id(self):
         code, _, _ = self.add(ITEM + " (follow-up-of a..b)")
         self.assertEqual(code, 0)
