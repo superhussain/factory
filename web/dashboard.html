@@ -1154,6 +1154,8 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
   }
 }
 
+const REVIEW_STATE_WORDS = { PASS: 'passed', CHANGES: 'changes requested', SKIPPED: 'skipped', pending: 'pending' };
+
 function chips(rounds) {
   if (!Array.isArray(rounds) || !rounds.length) return '';
   return '<div class="rounds">' + rounds.map((r, i) =>
@@ -1161,7 +1163,7 @@ function chips(rounds) {
     REVIEWERS.map((k) => {
       const v = (r && r[k]) || 'pending';
       const cls = v === 'PASS' || v === 'CHANGES' || v === 'SKIPPED' ? v : 'pending';
-      return '<span class="chip ' + cls + '" title="' + esc(k + ': ' + v) + '">' + esc(k) + '</span>';
+      return '<span class="chip ' + cls + '" title="' + esc(k + ': ' + v) + '">' + esc(k) + '<span class="sr-only"> ' + REVIEW_STATE_WORDS[cls] + '</span></span>';
     }).join('') + '</div>'
   ).join('') + '</div>';
 }
