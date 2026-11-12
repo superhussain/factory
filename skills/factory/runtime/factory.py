@@ -7163,9 +7163,14 @@ def retro_admit(run):
     A bad finding is dropped and listed; a bad card admits no card."""
     home = factory_home()
     folder = home / "retro" / run
-    path = folder / "reply.json"
-    if is_link(folder.parent) or is_link(folder) or not path.is_file() \
-            or not (folder / "aggregate.json").is_file():
+    path, agg_path = folder / "reply.json", folder / "aggregate.json"
+    findings, suggestions = folder / "findings.md", folder / "suggestions.json"
+    if is_link(folder.parent) or is_link(folder) or not folder.is_dir():
+        fail(f"no retro run {run}", 4)
+    for p in (path, agg_path, findings, suggestions):
+        if is_link(p):
+            fail(f"{p} is a link; nothing written", 2)
+    if not path.is_file() or not agg_path.is_file():
         fail(f"no retro run {run}", 4)
     with open(path, "rb") as f:
         raw = f.read(MAX_RETRO_BYTES + 1)
@@ -7177,7 +7182,10 @@ def retro_admit(run):
         fail(f"{path} is not UTF-8 JSON: {e}; nothing written", 2)
     if doc == {"none": True}:
         fail("the retro agent found nothing", 3)
-    agg = json.loads((folder / "aggregate.json").read_text(encoding="utf-8"))
+    key = env_secret(home, "\n".join(strings(doc)))
+    if key:
+        fail(f"{path} holds this device's {key}; nothing written", 2)
+    agg = json.loads(agg_path.read_text(encoding="utf-8"))
     err = check_retro(doc) or (doc["run"] != run and f"run: must be {run}")
     if err:
         fail(f"{path}: {err}; nothing written", 2)
@@ -7187,8 +7195,7 @@ def retro_admit(run):
     where = [f"findings[{i}]" + (f".{field}" if field else "") + f": {problem}" for i, field, problem in rejected]
     if not kept:
         fail(f"{path}: {where[0]}; nothing written", 2)
-    findings = folder / "findings.md"
-    findings.write_text(render_findings(agg, dict(doc, findings=kept), rejected), encoding="utf-8")
+    write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected))
     print(f"wrote {findings}")
     for line in where:
         print(f"rejected {line}")
@@ -7199,8 +7206,7 @@ def retro_admit(run):
     err = check_suggestions(cards, "retro")
     if err:
         fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
-    suggestions = folder / "suggestions.json"
-    suggestions.write_text(json.dumps(cards, indent=2) + "\n", encoding="utf-8")
+    write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
     suggest_admit(str(suggestions), "retro")
 
 

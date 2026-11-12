@@ -688,6 +688,38 @@ class RetroAdmitTest(RetroCase):
         self.assertEqual(self.admit(None, "linked"), (4, "", "factory.py: no retro run linked\n"))
 
 
+    @unittest.skipIf(os.name == "nt", "symlinks")
+    def test_linked_run_files_refused(self):
+        target = self.root / "elsewhere"
+        (self.folder / "reply.json").write_text(json.dumps(reply()), encoding="utf-8")
+        for name in ("reply.json", "aggregate.json", "findings.md", "suggestions.json"):
+            with self.subTest(name=name):
+                path = self.folder / name
+                body = path.read_bytes() if path.exists() else b"keep\n"
+                target.write_bytes(body)
+                path.unlink(missing_ok=True)
+                path.symlink_to(target)
+                code, out, err = self.admit(None)
+                self.assertEqual((code, out, err), (2, "", f"factory.py: {path} is a link; nothing written\n"))
+                self.assertEqual(target.read_bytes(), body)
+                self.assertEqual(sorted(p.name for p in self.folder.iterdir()),
+                                 sorted({"aggregate.json", "reply.json", name}))
+                path.unlink()
+                if name in ("reply.json", "aggregate.json"):
+                    path.write_bytes(body)
+
+    def test_env_value_writes_nothing(self):
+        token = "cfsample0123456789abcdef"
+        (self.home / ".env").write_text(f"CLOUDFLARE_API_TOKEN={token}\nMODE=short\n")
+        code, out, err = self.admit(reply(finding(root_cause=f"The token {token} leaked.")))
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(err, f"factory.py: {self.folder / 'reply.json'} holds this device's CLOUDFLARE_API_TOKEN; "
+                              "nothing written\n")
+        self.assertEqual(sorted(p.name for p in self.folder.iterdir()), ["aggregate.json", "reply.json"])
+        code, _, err = self.admit(reply(finding(root_cause="The short alias needs a terminal size.")))
+        self.assertEqual((code, err), (0, ""))
+
+
 class RetroRoleCardTest(unittest.TestCase):
     def test_role_card_fields_pass_admission(self):
         role = (ROOT / "skills/factory/agents/factory-retro.md").read_text(encoding="utf-8")
