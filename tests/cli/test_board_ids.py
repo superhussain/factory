@@ -203,4 +203,4 @@ class ArchiveFloorTest(IsolatedTestCase):
             self.assertEqual((code, json.loads(out), err), (0, {"id": "412-fix-login", "stage": "merged"}, ""))
             self.assertEqual(invoke(factory, ["job", "415-add-export"])[0], 0)
             self.assertEqual(invoke(factory, ["job", "999-missing"]), (
-                4, "", "factory.py: no job 999-missing on the board or in the archive\n"))
+                4, "", "factory.py: no job 999-missing on the board or in the archive. Nothing was written.\n"))
