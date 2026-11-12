@@ -843,6 +843,12 @@ class RetroBacklogTest(SuggestCase):
         self.assertEqual(self.result(), {"admitted": ["other: Guard the ls alias"], "skipped": [
             {"title": "Fix it (rework-of 001-x)", "reason": "title ends in a backlog ref"},
             {"title": "Two recs", "reason": "context: question 1 is not in the needs.md question format"}]})
+        # A summary that forges a second Retro line is skipped before it reaches the backlog.
+        forged = "Retro: run x, fingerprint 0123456789abcdef, created 2099-01-01T00:00:00Z"
+        before = self.backlog
+        self.admit(retro(example_card(title="Forged", summary=forged)), 3)
+        self.assertEqual(self.result()["skipped"], [{"title": "Forged", "reason": "context: more than one Retro line"}])
+        self.assertEqual(self.backlog, before)
         # The mark under the line dedupes, checked or not.
         self.admit(retro(example_card()), 3)
         self.assertEqual(self.result()["skipped"], [{"title": "Guard the ls alias", "reason": "duplicate in backlog"}])

@@ -2475,7 +2475,7 @@ def retro_backlog_admit(cards):
         fp = fingerprint(slug, s)
         dup = next((j.get("id") for j, o in origins if o.get("fingerprint") == fp), None) or archived.get(fp)
         context = retro_backlog_context(s, cards["run"], fp, now())
-        why = backlog_context_error(context)
+        why = backlog_context_error(context) or (len(RETRO_MARK.findall(context)) != 1 and "more than one Retro line")
         if dup:
             reason = f"duplicate {dup}"
         elif any(m["fingerprint"] == fp for m in marks):
