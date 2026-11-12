@@ -365,7 +365,8 @@ class SuggestTest(SuggestCase):
     def test_admission_calls_no_process(self):
         tree = ast.parse(Path(factory.__file__).read_text())
         names = {"load_autonomy", "check_text", "check_untrusted", "check_suggestions", "fingerprint", "classify",
-                 "quote", "render_card", "suggest_admit", "suggest_approve", "suggest_cmd"}
+                 "quote", "render_card", "suggest_admit", "suggest_approve", "suggest_cmd", "retro_marks",
+                 "retro_backlog_admit"}
         banned = {"subprocess", "run", "git", "git_ok", "origin_git", "system", "Popen", "paseo_session", "worktree"}
         found = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names}
         self.assertEqual(set(found), names)
