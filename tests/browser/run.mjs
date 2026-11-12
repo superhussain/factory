@@ -780,6 +780,10 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("archive-settings", 1280, 900, "light", openArchiveSettings);
+    const waitLiveDot = (page) =>
+      page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
+        timeout: 30000,
+      });
     const openPollSettings = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/display";
@@ -787,9 +791,7 @@ async function capture(outdir, referencePath) {
       await page.waitForSelector("#settings-display:not([hidden])");
       // Pin the header dot to live on both sides, so the pair does not depend on socket timing.
       // view() grants loopback-network before navigation, so the first socket opens and the dot goes live.
-      await page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
-        timeout: 30000,
-      });
+      await waitLiveDot(page);
       await page.evaluate(() =>
         document.querySelector("#display-poll").scrollIntoView({ block: "center" }),
       );
@@ -868,6 +870,8 @@ async function capture(outdir, referencePath) {
     await view("archive-swap", 1280, 900, "light", openArchiveSwap);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
     const openArchivedLoadFailed = async (page) => {
+      // Pin the header dot to live on both sides. Without loopback-network, local network access blocks the intercepted before page's socket.
+      await waitLiveDot(page);
       // Both sides wait for the archive answer and then the toast text, so neither shot is taken mid-request.
       const answered = page.waitForResponse((response) => {
         const url = new URL(response.url());
@@ -885,7 +889,9 @@ async function capture(outdir, referencePath) {
           .textContent.startsWith("Could not load archived job"),
       );
     };
+    grantLoopback = true;
     await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
+    grantLoopback = false;
     const openArchivedLoadSignin = async (page, side) => {
       await page.evaluate(() => {
         location.hash = "#413-expired-link";
