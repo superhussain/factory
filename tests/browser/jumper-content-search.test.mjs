@@ -66,7 +66,7 @@ test("the jumper matches Jira key, PR link and idea", { timeout: 120000 }, async
       );
     const shown = () =>
       page.$$eval('#job-results [role="option"] .meta', (metas) =>
-        metas.map((m) => m.textContent.split(" · ")[0]),
+        metas.map((m) => m.textContent.split(" · ")[1]),
       );
     const count = () => page.$eval("#job-count", (el) => el.textContent);
 

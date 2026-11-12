@@ -128,9 +128,9 @@ function jobRowsFor(text) {
           title: j.title,
           kind: "job",
           meta:
-            j.id +
-            " · " +
             (PROJECT_NAMES[j.project] ?? (j.project || "No project yet")) +
+            " · " +
+            j.id +
             " · " +
             j.stage,
         })),
