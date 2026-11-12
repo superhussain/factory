@@ -39,6 +39,8 @@ import {
   TRIAGE_MODEL,
   TRIAGE_REASON,
   TRIAGE_REASON_NO_RULES,
+  backlogQuestions,
+  triageChoices,
   triageConfidence,
   triageInput,
 } from "./triage.js";
@@ -620,7 +622,7 @@ async function backlogTriageGet(request, env) {
   return getFile(env, await triageKey(item), "application/json");
 }
 
-// The stored hold record, or null, for each of up to 50 items, in input order. Read only.
+// The stored hold record, or null, for each of up to 50 items, in input order. A string that is not a backlog line gets null. Read only.
 async function backlogTriageVerdicts(request, env) {
   const body = await readJson(request, MAX_TRIAGE_READ);
   if (body instanceof Response) return body;
@@ -632,10 +634,11 @@ async function backlogTriageVerdicts(request, env) {
   if (!Array.isArray(items) || items.length < 1 || items.length > 50)
     return reply("items: must be a list of 1 to 50 backlog items", 400);
   for (const [i, item] of items.entries())
-    if (!backlogItemMatch(item))
+    if (typeof item !== "string")
       return reply(`items[${i}]: ${BAD_BACKLOG_ITEM.slice("item: ".length)}`, 400);
   const verdicts = await Promise.all(
     items.map(async (item) => {
+      if (!backlogItemMatch(item)) return null;
       const obj = await env.BUCKET.get(await triageKey(item));
       if (!obj) return null;
       try {
@@ -696,19 +699,39 @@ async function backlogTriage(request, env) {
     return json(verdict);
   };
   const lines = (context ?? "").split(/\r\n|\r|\n/);
-  const fixed =
-    lines[0] === "Recommend: deny"
-      ? "its author recommends deny"
-      : lines.some((line) => line.startsWith("## Question:"))
-        ? "it asks questions a person must answer"
-        : null;
-  if (fixed)
-    return finish({ decision: "hold", confidence: null, threshold, reason: fixed, model: null });
-  if (!env.AI)
-    return reply("backlog triage needs the Workers AI binding; deploy the current Worker", 503);
+  const held = (reason) => ({ decision: "hold", confidence: null, threshold, reason, model: null });
+  if (lines[0] === "Recommend: deny") return finish(held("its author recommends deny"));
   const source = project?.triage
     ? `pipeline:${slug}@${projectVersion}`
     : `pipeline:global@${globalVersion}`;
+  // A question item always holds. The model adds its pick and a reason per option when it can.
+  if (lines.some((line) => line.startsWith("## Question:"))) {
+    const reason = "it asks questions a person must answer";
+    const questions = backlogQuestions(context);
+    if (!questions || !env.AI) return finish(held(reason));
+    let result;
+    try {
+      result = await env.AI.run(
+        TRIAGE_MODEL,
+        triageInput(slug, source, triage.rules, item, context, questions),
+      );
+    } catch {
+      return finish(held(reason));
+    }
+    const confidence = triageConfidence(result);
+    const choices = triageChoices(result, questions, triage.rules);
+    if (confidence === null || !choices) return finish(held(reason));
+    return finish({
+      decision: "hold",
+      confidence,
+      threshold,
+      reason,
+      model: TRIAGE_MODEL,
+      choices,
+    });
+  }
+  if (!env.AI)
+    return reply("backlog triage needs the Workers AI binding; deploy the current Worker", 503);
   let result;
   try {
     result = await env.AI.run(TRIAGE_MODEL, triageInput(slug, source, triage.rules, item, context));

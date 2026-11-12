@@ -58,8 +58,10 @@ test(
         "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
       );
       await seedBoard(origin, [JOB]);
+      await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
       let { context, page, errors, drawer } = await openDrawer(browser, origin);
       try {
+        await page.waitForFunction(() => tracerOff === false);
         assert.deepEqual(await drawer(), {
           follow: false,
           link: true,
@@ -91,6 +93,7 @@ test(
       await seedBoard(origin, [{ ...JOB, tracer: { feature: "factory-42", url: LINK } }]);
       ({ context, page, errors, drawer } = await openDrawer(browser, origin));
       try {
+        await page.waitForFunction(() => tracerOff === false);
         assert.deepEqual(await drawer(), {
           follow: true,
           link: false,
@@ -108,6 +111,7 @@ test(
       ]);
       ({ context, page, errors, drawer } = await openDrawer(browser, origin));
       try {
+        await page.waitForFunction(() => tracerOff === false);
         assert.deepEqual(await drawer(), {
           follow: true,
           link: true,
@@ -144,12 +148,14 @@ test(
         },
         { id: "043-sample-plain", project: "sample", stage: "idea", title: "Plain" },
       ]);
+      await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
       const context = await browser.createBrowserContext();
       try {
         const page = await context.newPage();
         await page.setViewport({ width: 1440, height: 900 });
         await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
         await waitForBoard(page);
+        await page.waitForFunction(() => tracerOff === false);
         const label = (id) =>
           page.evaluate(
             (id) =>
@@ -180,8 +186,10 @@ test("The drawer lists Tracer task statuses", { timeout: 120000 }, async () => {
       { id: "t3", title: "Document export", status: "not_started" },
     ];
     await seedBoard(origin, [{ ...JOB, stage: "idea", tracer: { building: true, tasks } }]);
+    await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
     const { context, page, errors } = await openDrawer(browser, origin);
     try {
+      await page.waitForFunction(() => tracerOff === false);
       const list = () =>
         page.evaluate(() => {
           const box = document.getElementById("d-tracer-tasks");
@@ -254,12 +262,14 @@ test("The Tracer tasks summary gets a 44px tap target on touch", { timeout: 1200
       { id: "t3", title: "Document export", status: "not_started" },
     ];
     await seedBoard(origin, [{ ...JOB, stage: "idea", tracer: { building: true, tasks } }]);
+    await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
     const measure = async (viewport) => {
       const context = await browser.createBrowserContext();
       try {
         const page = await context.newPage();
         await page.setViewport(viewport);
         await page.goto(origin + "/#042-sample-export", { waitUntil: "domcontentloaded" });
+        await page.waitForFunction(() => tracerOff === false);
         await page.waitForSelector("#d-tracer-tasks:not([hidden])");
         return await page.evaluate(() => ({
           coarse: matchMedia("(pointer: coarse)").matches,
@@ -296,8 +306,10 @@ test(
         idea: "Export samples as CSV",
       };
       await seedBoard(origin, [idea]);
+      await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
       let { context, page, errors, drawer } = await openDrawer(browser, origin);
       try {
+        await page.waitForFunction(() => tracerOff === false);
         assert.equal((await drawer()).follow, false);
         await openJobActions(page);
         await page.click("#d-follow-tracer");
@@ -323,6 +335,7 @@ test(
       ]);
       ({ context, page, errors, drawer } = await openDrawer(browser, origin));
       try {
+        await page.waitForFunction(() => tracerOff === false);
         const shown = await drawer();
         assert.equal(shown.refs, "Tracer: gathering scope");
         assert.equal(shown.href, LINK);
@@ -387,7 +400,7 @@ test("Tracer off hides every Tracer control", { timeout: 120000 }, async () => {
           value: document.getElementById("pipeline-tracer-mode").value,
           text: document.getElementById("pipeline-tracer-mode").selectedOptions[0].textContent,
         })),
-        { hidden: false, value: "off", text: "Off" },
+        { hidden: false, value: "", text: "Off (default)" },
       );
       await page.select("#pipeline-scope", "projects/sample");
       await page.waitForFunction(() => document.getElementById("pipeline-tracer").hidden);
@@ -406,6 +419,7 @@ test("Tracer controls wait for the setting and follow a change", { timeout: 1200
       "sample",
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
+    await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
     await seedBoard(origin, [{ ...JOB, tracer: { building: true } }]);
     const context = await browser.createBrowserContext();
     try {
@@ -446,6 +460,74 @@ test("Tracer controls wait for the setting and follow a change", { timeout: 1200
         timeout: 10000,
       });
       assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+test("Tracer is off with no tracer key in the pipeline", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    await seedBoard(origin, [JOB]);
+    const { context, page, errors } = await openDrawer(browser, origin);
+    try {
+      await page.evaluate(() => loadTracerSetting());
+      await openJobActions(page);
+      assert.equal(await page.evaluate(() => tracerOff), true);
+      assert.equal(await page.$eval("#d-follow-tracer", (el) => el.hidden), true);
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+test("Picking On saves tracer.enabled true", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedBoard(origin, [JOB]);
+    const context = await browser.createBrowserContext();
+    try {
+      const page = await context.newPage();
+      await page.setViewport({ width: 1440, height: 900 });
+      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      await waitForBoard(page);
+      await page.click("#settings-link");
+      await page.click("#settings-nav-pipeline");
+      await page.waitForSelector("#settings-pipeline:not([hidden])");
+      await page.select("#pipeline-scope", "global");
+      await page.waitForFunction(() => !document.getElementById("pipeline-tracer-mode").disabled);
+      assert.deepEqual(
+        await page.$$eval("#pipeline-tracer-mode option", (options) =>
+          options.map((o) => [o.value, o.textContent]),
+        ),
+        [
+          ["", "Off (default)"],
+          ["on", "On"],
+        ],
+      );
+      await page.select("#pipeline-tracer-mode", "on");
+      await page.waitForFunction(() => !document.getElementById("pipeline-save").disabled);
+      await page.click("#pipeline-save");
+      await page.waitForFunction(
+        () => document.getElementById("pipeline-status").textContent === "Saved as version 1",
+      );
+      const saved = await (await fetch(origin + "/api/pipeline/global")).json();
+      assert.deepEqual(saved.tracer, { enabled: true });
+      await page.select("#pipeline-tracer-mode", "");
+      await page.waitForFunction(() => !document.getElementById("pipeline-save").disabled);
+      await page.click("#pipeline-save");
+      await page.waitForFunction(
+        () => document.getElementById("pipeline-status").textContent === "Saved as version 2",
+      );
+      const cleared = await (await fetch(origin + "/api/pipeline/global")).json();
+      assert.equal("tracer" in cleared, false);
     } finally {
       await context.close();
     }

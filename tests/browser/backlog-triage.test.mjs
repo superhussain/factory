@@ -11,6 +11,8 @@ const TRAILING_ITEM = "sample: Add a sidebar";
 const MISSING_ITEM = "sample: Add a footer";
 const MALFORMED_ITEM = "sample: Add a header";
 const LATE_ITEM = "sample: Add a changelog";
+const LONG_ITEM = "sample: " + "x".repeat(1993);
+const NEIGHBOR_ITEM = "sample: Add a status page";
 const MODEL_VERDICT = {
   item: MODEL_ITEM,
   decision: "hold",
@@ -21,6 +23,33 @@ const MODEL_VERDICT = {
   at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
 };
 const LATE_VERDICT = { ...MODEL_VERDICT, item: LATE_ITEM, confidence: 40 };
+const QUESTION_ITEM = "sample: Add CSV export to the report page";
+const BAD_CHOICES_ITEM = "sample: Add a print view";
+const QUESTION_VERDICT = {
+  item: QUESTION_ITEM,
+  decision: "hold",
+  confidence: 75,
+  threshold: 80,
+  reason: "it asks questions a person must answer",
+  model: "@cf/cloudflare/clef-flash",
+  choices: [
+    {
+      header: "Delimiter",
+      pick: "Comma",
+      confidence: 82,
+      options: [
+        { label: "Comma", chance: 82, reason: "It gives the item the most value." },
+        {
+          label: "Semicolon",
+          chance: 13,
+          reason: "It is the smallest change that solves the item.",
+        },
+        { label: "Tab", chance: 5, reason: "There is little reason to pick it." },
+      ],
+    },
+  ],
+  at: MODEL_VERDICT.at,
+};
 
 test("backlog triage section", { timeout: 180000 }, async (t) => {
   await prepareAssets();
@@ -60,7 +89,15 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
       JSON.stringify({ item: TRAILING_ITEM, context: "Recommend: deny\nSynthetic reason." }),
     );
     assert.equal(trailing.status, 200);
-    const lines = [MODEL_ITEM, FIXED_ITEM, TRAILING_ITEM + "   ", MISSING_ITEM, MALFORMED_ITEM];
+    const lines = [
+      MODEL_ITEM,
+      FIXED_ITEM,
+      TRAILING_ITEM + "   ",
+      MISSING_ITEM,
+      MALFORMED_ITEM,
+      QUESTION_ITEM,
+      BAD_CHOICES_ITEM,
+    ];
     assert.equal(
       (
         await send(
@@ -104,6 +141,9 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
         if (item === MODEL_ITEM) verdicts[i] = MODEL_VERDICT;
         if (item === MALFORMED_ITEM) verdicts[i] = { bad: 1 };
         if (item === LATE_ITEM) verdicts[i] = LATE_VERDICT;
+        if (item === QUESTION_ITEM) verdicts[i] = QUESTION_VERDICT;
+        if (item === BAD_CHOICES_ITEM)
+          verdicts[i] = { ...QUESTION_VERDICT, item, choices: [{ header: "Delimiter" }] };
       });
       if (items.includes(LATE_ITEM)) await late;
       return request.respond({
@@ -134,9 +174,17 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
       }));
 
     await t.test("the form does not move when the verdict is cached", async () => {
-      await page.waitForFunction(() => backlogTriageSeen.size === 5, wait);
+      await page.waitForFunction(() => backlogTriageSeen.size === 7, wait);
       assert.deepEqual(verdictReads, [
-        [MODEL_ITEM, FIXED_ITEM, TRAILING_ITEM, MISSING_ITEM, MALFORMED_ITEM],
+        [
+          MODEL_ITEM,
+          FIXED_ITEM,
+          TRAILING_ITEM,
+          MISSING_ITEM,
+          MALFORMED_ITEM,
+          QUESTION_ITEM,
+          BAD_CHOICES_ITEM,
+        ],
       ]);
       await page.evaluate(() => renderBoard());
       assert.equal(verdictReads.length, 1);
@@ -193,6 +241,32 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
       },
     );
 
+    await t.test("a question hold shows the model's pick and a reason per option", async () => {
+      await open(QUESTION_ITEM);
+      await page.waitForSelector("#backlog-triage:not([hidden])", wait);
+      assert.deepEqual((await section()).paragraphs, [
+        "Held because it asks questions a person must answer. Approval confidence 75% against the 80% threshold.",
+        "Delimiter: clef-flash picks Comma at 82%.",
+        "Checked 2h ago",
+      ]);
+      assert.deepEqual(
+        await page.$$eval("#backlog-triage ul.triage-picks li", (els) =>
+          els.map((li) => li.textContent),
+        ),
+        [
+          "Comma, 82%: It gives the item the most value.",
+          "Semicolon, 13%: It is the smallest change that solves the item.",
+          "Tab, 5%: There is little reason to pick it.",
+        ],
+      );
+    });
+
+    await t.test("malformed choices hide the section", async () => {
+      await open(BAD_CHOICES_ITEM);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal((await section()).hidden, true);
+    });
+
     await t.test("a missing verdict or a malformed record leaves the section hidden", async () => {
       assert.equal(verdictReads.length, 1);
       for (const line of [MISSING_ITEM, MALFORMED_ITEM]) {
@@ -227,7 +301,7 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
         renderBoard();
       });
       await page.waitForFunction(
-        () => document.querySelectorAll(".backlog-card").length === 6,
+        () => document.querySelectorAll(".backlog-card").length === 8,
         wait,
       );
       assert.equal(verdictReads.length, 3);
@@ -241,6 +315,49 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
         "Confidence 40% is below the 80% threshold. Rated by clef-flash against the project rules.",
       );
       assert.equal(verdictReads.length, 3);
+    });
+
+    await t.test("an over-long line does not blank the rest of its batch", async () => {
+      const neighbor = await send(
+        "POST",
+        "/api/backlog/triage",
+        JSON.stringify({ item: NEIGHBOR_ITEM, context: "Recommend: deny\nSynthetic reason." }),
+      );
+      assert.equal(neighbor.status, 200);
+      const etag = (await send("GET", "/api/backlog")).headers.get("etag");
+      const text =
+        "# Backlog\n\n" +
+        [...lines, LATE_ITEM, LONG_ITEM, NEIGHBOR_ITEM].map((l) => `- [ ] ${l}\n`).join("");
+      assert.equal(
+        (
+          await send("PUT", "/api/backlog", text, {
+            "If-Match": etag,
+            "Content-Type": "text/markdown",
+          })
+        ).status,
+        200,
+      );
+      await page.evaluate(async () => {
+        await loadBacklog();
+        renderBoard();
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll(".backlog-card").length === 10,
+        wait,
+      );
+      assert.deepEqual(verdictReads[3], [MISSING_ITEM, LONG_ITEM, NEIGHBOR_ITEM]);
+      await page.waitForFunction(
+        (line) => backlogTriageSeen.get("- [ ] " + line)?.decision === "hold",
+        wait,
+        NEIGHBOR_ITEM,
+      );
+      await open(NEIGHBOR_ITEM);
+      await page.waitForSelector("#backlog-triage:not([hidden])", wait);
+      assert.equal(
+        (await section()).paragraphs[0],
+        "Held without a model score because its author recommends deny.",
+      );
+      assert.equal(verdictReads.length, 4);
     });
 
     assert.equal(itemReads, 0);

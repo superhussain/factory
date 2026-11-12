@@ -3,7 +3,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import {
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+  seedPipeline,
+} from "../support/browser-server.mjs";
 
 const IDEA = {
   id: "100-sample-idea",
@@ -59,6 +64,7 @@ async function openDrawer(browser, origin, viewport, id, reject) {
     {},
     id,
   );
+  await page.waitForFunction(() => tracerOff === false);
   return { context, page, errors };
 }
 
@@ -99,6 +105,7 @@ test("Copy link copies the job's dashboard link", { timeout: 120000 }, async () 
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
     await seedBoard(origin, [IDEA, CLOSED]);
+    await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
     for (const viewport of VIEWPORTS) {
       const label = `${viewport.width}px`;
 

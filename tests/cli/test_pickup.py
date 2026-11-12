@@ -130,7 +130,7 @@ class PickupFixture(IsolatedTestCase):
             self.board = json.loads(body)
             return 200, {}, ""
         if path == "/api/pipeline/global":
-            return 404, {}, ""
+            return 200, {}, json.dumps({"schema": 1, "tracer": {"enabled": True}})
         if path == "/api/hosts":
             self.assertEqual((method, ok), ("GET", (200, 404)))
             if self.hosts is None:

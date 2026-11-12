@@ -692,7 +692,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           </select></label>
           <label for="pipeline-triage-threshold">Confidence threshold (%)<input type="number" id="pipeline-triage-threshold" min="1" max="100" step="1"></label>
           <label for="pipeline-triage-rules">Triage rules<textarea id="pipeline-triage-rules" spellcheck="false"></textarea></label>
-          <p id="pipeline-triage-help" class="muted">When on, factory.py backlog add asks Cloudflare's clef-flash model whether a new item should be built without your review under these rules. Its yes probability, as a percent, is the confidence. At or above the threshold, the item moves to the idea column for pickup. Below it, the item waits here for you. Items that ask questions or recommend deny always wait. Rules cannot contain links, secrets or instructions to skip review. A project value replaces the global one whole.</p>
+          <p id="pipeline-triage-help" class="muted">When on, factory.py backlog add asks Cloudflare's clef-flash model whether a new item should be built without your review under these rules. Its yes probability, as a percent, is the confidence. At or above the threshold, the item moves to the idea column for pickup. Below it, the item waits here for you. Items that recommend deny always wait. Items that ask questions also wait, with the model's pick and a reason for each answer. Rules cannot contain links, secrets or instructions to skip review. A project value replaces the global one whole.</p>
         </fieldset>
         <fieldset id="pipeline-archive">
           <legend>Archive old jobs</legend>
@@ -707,10 +707,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <fieldset id="pipeline-tracer">
           <legend>Tracer integration</legend>
           <label for="pipeline-tracer-mode">Tracer<select id="pipeline-tracer-mode" aria-describedby="pipeline-tracer-help">
-            <option value="">On (default)</option>
-            <option value="off">Off</option>
+            <option value="">Off (default)</option>
+            <option value="on">On</option>
           </select></label>
-          <p id="pipeline-tracer-help" class="muted">Off hides Follow in Tracer, Tracer links, task lists and Building in Tracer, and devices make no Tracer calls. Board fields and tracer.json stay as they are, so turning it back on resumes where it stopped. This setting applies to all projects.</p>
+          <p id="pipeline-tracer-help" class="muted">Off by default. On shows Follow in Tracer, Tracer links, task lists and Building in Tracer, and lets devices with tracer.json call Tracer. Turning it off keeps board fields and tracer.json as they are, so turning it back on resumes where it stopped. This setting applies to all projects.</p>
         </fieldset>
         <div class="settings-tabs" id="pipeline-note-tabs" role="tablist" aria-label="Stage notes">
           <button type="button" role="tab" id="pipeline-note-tab-spec" data-name="spec" aria-selected="true" tabindex="0">Spec</button>
@@ -2421,7 +2421,7 @@ function pipelineFormDoc(current) {
     gates:PIPELINE_GATES.filter(gate => $('pipeline-gate-' + gate).checked),
     pickup:pickupFromFields('pipeline-pickup', current.pickup), triage:triageFromFields(),
     archive:$('pipeline-scope').value === 'global' ? archiveFromFields() : undefined,
-    tracer:$('pipeline-scope').value === 'global' && $('pipeline-tracer-mode').value === 'off' ? {enabled:false} : undefined,
+    tracer:$('pipeline-scope').value === 'global' && $('pipeline-tracer-mode').value === 'on' ? {enabled:true} : undefined,
     stage_notes:Object.fromEntries(PIPELINE_STAGES.map(stage => [stage, $('pipeline-note-' + stage).value]))}));
 }
 const pipelineDirty = s => pipelineCanonical(s.draft) !== pipelineCanonical(s.base ?? {schema:1});
@@ -2535,7 +2535,7 @@ function renderPipelineSettings() {
   $('pipeline-archive-n').disabled = busy || !$('pipeline-archive-mode').value;
   $('pipeline-archive-n').setAttribute('aria-invalid', String(!!archiveError));
   $('pipeline-tracer').hidden = $('pipeline-scope').value !== 'global';
-  const tracerMode = d.tracer?.enabled === false ? 'off' : '';
+  const tracerMode = d.tracer?.enabled === true ? 'on' : '';
   if ($('pipeline-tracer-mode').value !== tracerMode) $('pipeline-tracer-mode').value = tracerMode;
   $('pipeline-tracer-mode').disabled = busy;
   $('pipeline-scope').disabled = s?.phase === 'saving';
@@ -2812,13 +2812,13 @@ function seenAgo(iso) {
   return minutes < 1 ? 'just now' : minutes < 60 ? minutes + ' min ago' : minutes < 48 * 60 ? Math.floor(minutes / 60) + ' h ago' : iso.slice(0, 10);
 }
 
-// Off only when the all-projects pipeline sets tracer.enabled to false. A failed read keeps the last value.
+// On only when the all-projects pipeline sets tracer.enabled to true. A failed read keeps the last value.
 async function loadTracerSetting() {
   let off = tracerOff;
   try {
     const r = await fetch('./api/pipeline/global', {cache:'no-store'});
-    if (r.status === 404) off = false;
-    else if (r.status === 200 && !r.redirected) off = (await r.json())?.tracer?.enabled === false;
+    if (r.status === 404) off = true;
+    else if (r.status === 200 && !r.redirected) off = (await r.json())?.tracer?.enabled !== true;
   } catch {}
   if (off === tracerOff) return;
   tracerOff = off;
@@ -4731,6 +4731,18 @@ function syncBacklogRoute() {
   if (key) openBacklogRoute(key);
 }
 
+// head, the backlog context block, then tail, in at most 4000 characters. A long context is cut
+// with a note; if even that does not fit, the block is left out. factory.py idea_with_context matches.
+function ideaWithContext(head, context, tail) {
+  if (!context) return head + tail;
+  const intro = '\n\nContext from the backlog:\n';
+  const cut = '\n[context cut to fit the 4000-character idea limit]';
+  const full = head + intro + context + tail;
+  if (full.length <= 4000) return full;
+  const room = 4000 - head.length - intro.length - cut.length - tail.length;
+  return room > 0 ? head + intro + context.slice(0, room) + cut + tail : head + tail;
+}
+
 // Adds the decided item as a job, or returns the id it already saved under captureId.
 function addBacklogJob(board, item, decision, notes, answers, captureId, now) {
   const prior = board.jobs.find((j) => j.capture_id === captureId);
@@ -4745,8 +4757,8 @@ function addBacklogJob(board, item, decision, notes, answers, captureId, now) {
   const answered = ans ? { answers: ans } : {};
   board.jobs.push(decision === 'approved'
     ? { id, project: item.project, title: ideaTitle(item.text), stage: 'idea', updated: now,
-        idea: (note ? item.text + '\n\nNotes from the backlog decision:\n' + note : item.text) +
-          (ans ? '\n\nAnswers from the backlog decision:\n' + ans : ''),
+        idea: ideaWithContext(item.text, item.context,
+          (note ? '\n\nNotes from the backlog decision:\n' + note : '') + (ans ? '\n\nAnswers from the backlog decision:\n' + ans : '')),
         capture_id: captureId, backlog: { line: item.raw, decision: 'approved', at: now, ...(note ? { notes: note } : {}), ...answered }, ...refs }
     : decision === 'rework'
     ? { id, project: item.project, title: ideaTitle(item.text), idea: item.text, stage: 'idea', updated: now,
@@ -6243,10 +6255,23 @@ async function fetchReworkHistory(item) {
   section.hidden = !history.length;
 }
 
+// A question item's verdict adds choices: the model's pick and a fixed reason for each option.
 function backlogTriageHtml(v) {
   if (typeof v?.reason !== 'string' || typeof v.at !== 'string' || !Number.isInteger(v.threshold) || !(v.confidence === null || Number.isInteger(v.confidence))) return '';
+  const checked = '<p class="muted">Checked ' + esc(ago(v.at)) + '</p>';
+  if (v.choices !== undefined) {
+    const str = (x) => typeof x === 'string';
+    const ok = Number.isInteger(v.confidence) && Array.isArray(v.choices) && v.choices.length && v.choices.every((c) =>
+      str(c?.header) && str(c.pick) && Number.isInteger(c.confidence) && Array.isArray(c.options) &&
+      c.options.every((o) => str(o?.label) && Number.isInteger(o.chance) && str(o.reason)));
+    if (!ok) return '';
+    return '<h3 id="backlog-triage-heading">Held by triage</h3><p>' +
+      esc('Held because ' + v.reason + '. Approval confidence ' + v.confidence + '% against the ' + v.threshold + '% threshold.') + '</p>' +
+      v.choices.map((c) => '<p>' + esc(c.header + ': clef-flash picks ' + c.pick + ' at ' + c.confidence + '%.') + '</p><ul class="triage-picks">' +
+        c.options.map((o) => '<li>' + esc(o.label + ', ' + o.chance + '%: ' + o.reason) + '</li>').join('') + '</ul>').join('') + checked;
+  }
   const why = v.confidence === null ? 'Held without a model score because ' + v.reason + '.' : 'Confidence ' + v.confidence + '% is below the ' + v.threshold + '% threshold. ' + v.reason;
-  return '<h3 id="backlog-triage-heading">Held by triage</h3><p>' + esc(why) + '</p><p class="muted">Checked ' + esc(ago(v.at)) + '</p>';
+  return '<h3 id="backlog-triage-heading">Held by triage</h3><p>' + esc(why) + '</p>' + checked;
 }
 
 // Reads triage for the visible backlog once per change in its lines: lines never read, and lines

@@ -132,7 +132,7 @@ class SuggestTest(SuggestCase):
             "**Recommendation: B.**", "", "> It fixes the cause.", "",
             "### Diagram", "", "```mermaid", "flowchart LR\n  A --> B", "```", "",
             "### How to answer", "",
-            "- Approve: run `suggest approve 008-fix-the-parser <A|B|C>` in a terminal",
+            "- Approve: run `suggest approve 008-fix-the-parser <A|B|C>` in a terminal, or answer in chat",
             "- Reject: Discard in the idea drawer", ""]))
         for key in ("project", "claim", "branch", "rounds"):
             self.assertNotIn(key, card)
@@ -365,7 +365,8 @@ class SuggestTest(SuggestCase):
     def test_admission_calls_no_process(self):
         tree = ast.parse(Path(factory.__file__).read_text())
         names = {"load_autonomy", "check_text", "check_untrusted", "check_suggestions", "fingerprint", "classify",
-                 "quote", "render_card", "suggest_admit", "suggest_approve", "suggest_cmd"}
+                 "quote", "render_card", "suggest_admit", "suggest_approve", "suggest_cmd", "chat_quote",
+                 "read_chat_file", "retro_marks", "retro_backlog_admit"}
         banned = {"subprocess", "run", "git", "git_ok", "origin_git", "system", "Popen", "paseo_session", "worktree"}
         found = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names}
         self.assertEqual(set(found), names)
@@ -542,6 +543,82 @@ class SuggestTest(SuggestCase):
         self.assertEqual(json.dumps(self.board["jobs"][:-1]), json.dumps(json.loads(before)["jobs"]))
         self.assertNotIn("approved", self.board["jobs"][-1]["origin"])
 
+    def test_chat_approve(self):
+        self.admit(suggestions())
+        card = self.board["jobs"][-1]["id"]
+        message = "  approve the ls alias item,\ninteractive only  "
+        code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat", message, tty=False)
+        self.assertEqual(code, 0, err)
+        asked.assert_not_called()
+        job = self.board["jobs"][-1]
+        approved = job["origin"]["approved"]
+        self.assertEqual(list(approved.items()), [
+            ("option", "A"), ("via", "chat"), ("quote", "approve the ls alias item,\ninteractive only"),
+            ("device", "device"), ("at", approved["at"])])
+        self.assertEqual(job["project"], "sample")
+        self.assertNotIn("needs", job)
+        self.assertTrue(job["idea"].endswith(f"\n\n---\nApproved option A in chat by device at {approved['at']}: "
+                                             '"approve the ls alias item, interactive only"'))
+        self.assertFalse(factory.gated(job))
+
+    def test_chat_approve_needs_a_quote(self):
+        self.admit(suggestions())
+        card = self.board["jobs"][-1]["id"]
+        before, puts = json.dumps(self.board), self.puts()
+        for extra in ((), ("--chat", ""), ("--chat", "   ")):
+            with self.subTest(extra=extra):
+                code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", *extra, tty=False)
+                self.assertEqual(code, 2)
+                self.assertIn("suggest approve needs an interactive terminal; a human runs it", err)
+                asked.assert_not_called()
+        for message, why in (("approve A, see https://example.test/x", "must not hold a code fence or a link"),
+                             ("a" * 501, "must be a string of 1-500 characters")):
+            with self.subTest(message=message[:20]):
+                code, err, _ = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat", message, tty=False)
+                self.assertEqual(code, 2)
+                self.assertIn(f"--chat {why}; nothing was changed", err)
+        for args in (("--chat",), ("--note", "approve A"), ("--chat", "approve A", "extra")):
+            with self.subTest(args=args):
+                self.assertEqual(self.run_human(factory.suggest_cmd, "approve", card, "A", *args, tty=False)[0], 2)
+        self.assertEqual(json.dumps(self.board), before)
+        self.assertEqual(self.puts(), puts)
+
+    def test_chat_file_approve(self):
+        self.admit(suggestions())
+        card = self.board["jobs"][-1]["id"]
+        message = "approve `008-guard-the-ls` A, not $(whoami) or $5"
+        path = self.home / "chat.txt"
+        path.write_bytes((message + "\r\n").encode("utf-8"))
+        link = self.home / "link.txt"
+        link.symlink_to(path)
+        before, puts = json.dumps(self.board), self.puts()
+        for args, code, err in ((("--chat-file", str(link)), 6, "is a symlink or junction; nothing was changed"),
+                                (("--chat-file", str(self.home / "missing.txt")), 2, "cannot read it as UTF-8 text"),
+                                (("--chat-file", str(path), "--chat", message), 2, "usage: suggest admit")):
+            with self.subTest(args=args):
+                result = self.run_human(factory.suggest_cmd, "approve", card, "A", *args, tty=False)
+                self.assertEqual(result[:1], (code,))
+                self.assertIn(err, result[1])
+        empty = self.home / "empty.txt"
+        empty.write_text("  \n", encoding="utf-8")
+        bad = self.home / "bad.txt"
+        bad.write_text("see https://example.test/x", encoding="utf-8")
+        for file, err in ((empty, f"--chat-file {empty} is empty; nothing was changed"),
+                          (bad, "--chat-file must not hold a code fence or a link; nothing was changed")):
+            with self.subTest(file=file.name):
+                code, out, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat-file", str(file),
+                                                  tty=True, typed=card)
+                self.assertEqual(code, 2)
+                self.assertIn(err, out)
+                asked.assert_not_called()
+        self.assertEqual((json.dumps(self.board), self.puts()), (before, puts))
+        code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat-file", str(path), tty=False)
+        self.assertEqual(code, 0, err)
+        asked.assert_not_called()
+        approved = self.board["jobs"][-1]["origin"]["approved"]
+        self.assertEqual((approved["via"], approved["quote"]), ("chat", message))
+        self.assertTrue(self.board["jobs"][-1]["idea"].endswith(f': "{message}"'))
+
     def test_ideas_skips_gated(self):
         self.admit(suggestions())
         self.board["jobs"][-1]["project"] = "sample"  # forged project, still unapproved
@@ -612,42 +689,6 @@ def retro(*items, **over):
 class RetroSuggestTest(SuggestCase):
     def admit(self, doc, code=0, by="retro"):
         return super().admit(doc, code, by)
-
-    def test_admit_retro_card(self):
-        run = "20261111T090000Z-a1b2c3"
-        folder = self.home / "retro" / run
-        folder.mkdir(parents=True)
-        (folder / "aggregate.json").write_text(json.dumps({
-            "run": run, "from": "2026-11-05", "to": "2026-11-11", "projects": ["sample", "other"],
-            "hosts": {"host-a": {"sessions": 40, "jobs": 12, "ad_hoc": 3}}}), encoding="utf-8")
-        finding = {"title": "ls alias crashes in non-interactive shells", "category": "tool-economy", "count": 253,
-                   "cost": 250, "sessions": [REF], "root_cause": "The alias needs a terminal size.",
-                   "fix": "Alias ls only in interactive shells.", "project": "other"}
-        (folder / "reply.json").write_text(json.dumps({"schema": "factory.retro/1", "run": run, "findings": [finding],
-                                                       "suggestions": [retro_suggestion()]}), encoding="utf-8")
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            factory.retro_admit(run)
-        self.assertEqual(err.getvalue(), "")
-        self.assertEqual(self.output.getvalue().split("\n", 1)[1].strip(),
-                         json.dumps({"admitted": ["008-guard-the-ls"], "skipped": []}, indent=2))
-        card = self.board["jobs"][-1]
-        origin = card.pop("origin")
-        idea = card.pop("idea")
-        self.assertEqual(card, {"id": "008-guard-the-ls", "stage": "idea", "title": "other: Guard the ls alias",
-                                "needs": "Retro suggestion: pick A, B or C (recommended B), or discard",
-                                "note": "retro: tooling", "updated": origin["created"]})
-        self.assertEqual(origin, {"by": "retro", "project": "other", "run": "20261111T090000Z-a1b2c3",
-                                  "kind": "tooling", "fingerprint": factory.fingerprint("other", retro_suggestion()),
-                                  "gate": "human", "eligible": True, "reasons": [], "options": ["A", "B", "C"],
-                                  "recommend": "B", "created": origin["created"], "admitted_by": "device"})
-        self.assertTrue(idea.startswith("\n".join([
-            "## Guard the ls alias", "",
-            "Retro suggestion · kind tooling · project other · run 20261111T090000Z-a1b2c3", "",
-            "Gate: human. Classifier: eligible", "",
-            "### Summary", "", "> The parser drops\n> the last token.", "",
-            "### Evidence", "", f"- 253x winsize_crash in tool results (sessions: `{REF}`, `pc/0123abcd`)", "",
-            "### What is needed from you", ""])), idea)
-        self.assertIn("`suggest approve 008-guard-the-ls <A|B|C>`", idea)
 
     def test_retro_cards_per_project(self):
         self.admit(retro(retro_suggestion(), retro_suggestion(project="sample", title="Other fix", kind="docs")))
@@ -728,3 +769,188 @@ class RetroSuggestTest(SuggestCase):
         second["origin"].update(by="explorer", project="other")
         self.assertEqual(self.run_human(factory.suggest_cmd, "approve", second["id"], "A", typed=second["id"])[0], 2)
         self.assertNotIn("approved", second["origin"])
+
+
+def example_card(**over):
+    s = retro_suggestion(summary="The ls alias crashes\nwithout a terminal.", question="How should the alias be guarded?",
+                         evidence=[{"note": "winsize_crash in tool results", "count": 253, "sessions": [REF]}],
+                         options=[{"key": "A", "label": "Interactive only", "detail": "Alias ls only in interactive shells",
+                                   "pros": ["Keeps colors"], "cons": []},
+                                  {"key": "B", "label": "Drop the alias", "detail": "Remove the ls alias",
+                                   "pros": ["Simplest fix"], "cons": ["Loses colors"]}],
+                         recommend="A", reason="It keeps colors for people.")
+    s.update(over)
+    return s
+
+
+CREATED = "2026-11-12T05:40:00Z"
+CONTEXT_FIXTURE = ROOT / "tests/fixtures/retro-backlog-context.txt"
+HELD = "held other: Guard the ls alias for review: retro items always wait for a person"
+
+
+class RetroBacklogTest(SuggestCase):
+    def setUp(self):
+        super().setUp()
+        self.backlog = "# Backlog\n"
+        self.triage_posts = []
+        patch.object(factory, "api_url", return_value="https://factory.example.test").start()
+        patch.object(factory, "now", return_value=CREATED).start()
+
+    def request(self, home, method, path, body=None, ok=(200,), headers=None):
+        if path == "/api/backlog":
+            if method == "GET":
+                return 200, {"ETag": '"backlog"'}, self.backlog
+            self.assertEqual((method, headers), ("PUT", {"If-Match": '"backlog"'}))
+            self.backlog = body
+            return 200, {}, ""
+        if path == "/api/backlog/triage":
+            self.triage_posts.append(json.loads(body))
+            return 200, {}, json.dumps({"decision": "queue", "confidence": 99, "threshold": 80, "reason": "r"})
+        return super().request(home, method, path, body, ok, headers)
+
+    def admit(self, doc, code=0):
+        self.output.seek(0)
+        self.output.truncate()
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            if code:
+                with self.assertRaises(SystemExit) as raised:
+                    factory.retro_backlog_admit(doc)
+                self.assertEqual(raised.exception.code, code, err.getvalue())
+            else:
+                factory.retro_backlog_admit(doc)
+        return err.getvalue()
+
+    def result(self):
+        return json.loads(self.output.getvalue()[self.output.getvalue().index("{"):])
+
+    def test_context_matches_fixture(self):
+        s = example_card()
+        fp = factory.fingerprint("other", s)
+        self.assertEqual(fp, "bac6f4150d124158")
+        context = factory.retro_backlog_context(s, "20261111T090000Z-a1b2c3", fp, CREATED)
+        self.assertIsNone(factory.backlog_context_error(context))
+        self.assertEqual(CONTEXT_FIXTURE.read_text(encoding="utf-8"), context + "\n")
+        self.assertEqual(context.split("\n"), [
+            "Recommend: approve", "",
+            "The ls alias crashes without a terminal.", "",
+            "Why Interactive only: It keeps colors for people.", "",
+            "Evidence:", "- 253x winsize_crash in tool results (1 session)", "",
+            "Retro: run 20261111T090000Z-a1b2c3, fingerprint bac6f4150d124158, created 2026-11-12T05:40:00Z", "",
+            "## Question: Guard the ls alias", "How should the alias be guarded?", "Pick: one",
+            "- Interactive only (recommended): Alias ls only in interactive shells. Pros: Keeps colors.",
+            "- Drop the alias: Remove the ls alias. Pros: Simplest fix. Cons: Loses colors."])
+        self.assertTrue(factory.RETRO_MARK.search(context))
+
+    def test_context_orders_cuts_and_counts(self):
+        s = retro_suggestion(title="T" * 70, evidence=[{"note": "n", "count": 2, "sessions": [REF, "pc/0123abcd"]}],
+                             options=[dict(o, detail=o["detail"] + "!") for o in retro_suggestion()["options"]])
+        lines = factory.retro_backlog_context(s, "r", factory.fingerprint("other", s), CREATED).split("\n")
+        self.assertIn("## Question: " + "T" * 57 + "...", lines)
+        self.assertIn("- 2x n (2 sessions)", lines)
+        rows = [line for line in lines if line.startswith("- P") or line.startswith("- L")]
+        self.assertEqual(rows, [
+            "- Patch and dedupe (recommended): Fix and delete the duplicate | helper! Pros: Removes the root cause. "
+            "Cons: Touches two files.",
+            "- Patch the parser: Fix the off-by-one in one file! Pros: Small; covered by tests. "
+            "Cons: Leaves the duplicate helper.",
+            "- Leave it: Discard! Pros: No risk. Cons: Bug stays."])
+
+    def test_retro_marks(self):
+        mark = "  Retro: run r1, fingerprint 0123456789abcdef, created 2026-11-12T05:40:00Z"
+        text = "\n".join(["# Backlog", "- [ ] other: Open one", "  Recommend: approve", "", mark,
+                          "- [x] sample: Done one (009-x)", mark.replace("0123", "4567"),
+                          "Retro: run r1, fingerprint 89abcdef01234567, created 2026-11-12T05:40:00Z",
+                          "- [ ] other: Plain", "  Retro: run r1, fingerprint short, created 2026-11-12T05:40:00Z", ""])
+        self.assertEqual(factory.retro_marks(text), [
+            {"fingerprint": "0123456789abcdef", "created": CREATED, "project": "other", "open": True},
+            {"fingerprint": "4567456789abcdef", "created": CREATED, "project": "sample", "open": False}])
+
+    def test_admit_writes_a_held_line(self):
+        run = "20261111T090000Z-a1b2c3"
+        folder = self.home / "retro" / run
+        folder.mkdir(parents=True)
+        (folder / "aggregate.json").write_text(json.dumps({
+            "run": run, "from": "2026-11-05", "to": "2026-11-11", "projects": ["sample", "other"],
+            "hosts": {"host-a": {"sessions": 40, "jobs": 12, "ad_hoc": 3}}}), encoding="utf-8")
+        finding = {"title": "ls alias crashes in non-interactive shells", "category": "tool-economy", "count": 253,
+                   "cost": 250, "sessions": [REF], "root_cause": "The alias needs a terminal size.",
+                   "fix": "Alias ls only in interactive shells.", "project": "other"}
+        (folder / "reply.json").write_text(json.dumps({"schema": "factory.retro/1", "run": run, "findings": [finding],
+                                                       "suggestions": [example_card()]}), encoding="utf-8")
+        board = json.dumps(self.board)
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            factory.retro_admit(run)
+        self.assertEqual(err.getvalue(), "")
+        context = CONTEXT_FIXTURE.read_text(encoding="utf-8")
+        self.assertEqual(self.backlog, "# Backlog\n- [ ] other: Guard the ls alias\n"
+                         + "".join(("  " + row).rstrip() + "\n" for row in context.rstrip("\n").split("\n")))
+        self.assertEqual((json.dumps(self.board), self.puts()), (board, 1))
+        out = self.output.getvalue()
+        self.assertIn("added other: Guard the ls alias with context\n", out)
+        self.assertIn(HELD + "\n", out)
+        self.assertEqual(self.result(), {"admitted": ["other: Guard the ls alias"], "skipped": []})
+
+    def test_admit_never_triages(self):
+        self.admit(retro(example_card(), example_card(project="sample", title="Other fix")))
+        self.assertEqual(self.triage_posts, [])
+        self.assertEqual(self.output.getvalue().count("for review: retro items always wait for a person"), 2)
+        self.assertFalse((self.home / "backlog-triage.json").exists())
+        self.assertEqual(sum(c.args[1:3] == ("PUT", "/api/board") for c in self.api.call_args_list), 0)
+
+    def test_dedupe_caps_and_pause(self):
+        fp = factory.fingerprint("other", example_card())
+        self.board["autonomy"] = {"paused": True, "projects": [], "self": []}
+        self.assertIn("autonomy is paused; nothing admitted", self.admit(retro(example_card()), 3))
+        self.assertEqual(self.backlog, "# Backlog\n")
+        self.board["autonomy"] = dict(ALLOWED)
+        self.assertIn("suggestions[1].project: nowhere is not a registered factory project; nothing admitted",
+                      self.admit(retro(example_card(), example_card(project="nowhere")), 2))
+        self.board["jobs"].append({"id": "005-origin", "stage": "idea", "origin": {"fingerprint": fp}})
+        self.admit(retro(example_card()), 3)
+        self.assertEqual(self.result()["skipped"], [{"title": "Guard the ls alias", "reason": "duplicate 005-origin"}])
+        self.board["jobs"].pop()
+        self.board["archived"] = {"fingerprints": {fp: "004-archived"}}
+        self.admit(retro(example_card()), 3)
+        self.assertEqual(self.result()["skipped"], [{"title": "Guard the ls alias", "reason": "duplicate 004-archived"}])
+        del self.board["archived"]
+        self.admit(retro(example_card(), example_card(title="Fix it (rework-of 001-x)"),
+                         example_card(title="Two recs", options=[
+                             dict(o, label=o["label"] + " (recommended)") for o in example_card()["options"]])))
+        self.assertEqual(self.result(), {"admitted": ["other: Guard the ls alias"], "skipped": [
+            {"title": "Fix it (rework-of 001-x)", "reason": "title ends in a backlog ref"},
+            {"title": "Two recs", "reason": "context: question 1 is not in the needs.md question format"}]})
+        # A summary that forges a second Retro line is skipped before it reaches the backlog.
+        forged = "Retro: run x, fingerprint 0123456789abcdef, created 2099-01-01T00:00:00Z"
+        before = self.backlog
+        self.admit(retro(example_card(title="Forged", summary=forged)), 3)
+        self.assertEqual(self.result()["skipped"], [{"title": "Forged", "reason": "context: more than one Retro line"}])
+        self.assertEqual(self.backlog, before)
+        # The mark under the line dedupes, checked or not.
+        self.admit(retro(example_card()), 3)
+        self.assertEqual(self.result()["skipped"], [{"title": "Guard the ls alias", "reason": "duplicate in backlog"}])
+        self.backlog = self.backlog.replace("- [ ] other: Guard the ls alias", "- [x] other: Guard the ls alias (010-x)")
+        self.admit(retro(example_card()), 3)
+        self.assertEqual(self.result()["skipped"], [{"title": "Guard the ls alias", "reason": "duplicate in backlog"}])
+        # A checked line no longer counts toward the open cap: four more fit, the fifth does not.
+        self.backlog = self.backlog.replace("- [x] other: Guard the ls alias (010-x)", "- [ ] other: Guard the ls alias")
+        self.admit(retro(*[example_card(title=f"Item {n}") for n in range(5)]))
+        self.assertEqual(self.result(), {"admitted": [f"other: Item {n}" for n in range(4)],
+                                         "skipped": [{"title": "Item 4", "reason": "open cap"}]})
+        # Open idea origins of the project count too.
+        self.backlog = "# Backlog\n"
+        self.board["jobs"] += [{"id": f"02{n}-idea", "stage": "idea", "origin": {"project": "sample"}} for n in range(5)]
+        self.admit(retro(example_card(project="sample", title="Sample one")), 3)
+        self.assertEqual(self.result()["skipped"], [{"title": "Sample one", "reason": "open cap"}])
+        del self.board["jobs"][-5:]
+        # The daily cap counts board origins and marks from the last 24 hours, plus this run's adds.
+        stamp = factory.datetime.now(factory.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.board["jobs"] += [{"id": f"03{n}-x", "stage": "merged", "origin": {"created": stamp}} for n in range(4)]
+        marks = "".join(f"- [x] sample: Old {n} (04{n}-x)\n  Retro: run r, fingerprint {n:016x}, created {stamp}\n"
+                        for n in range(4))
+        self.backlog = "# Backlog\n" + marks
+        self.admit(retro(*[example_card(project="sample", title=f"Day {n}") for n in range(3)]))
+        self.assertEqual(self.result(), {"admitted": ["sample: Day 0", "sample: Day 1"],
+                                         "skipped": [{"title": "Day 2", "reason": "daily cap"}]})
+        self.backlog = self.backlog.replace(stamp, "2026-01-01T00:00:00Z")
+        self.admit(retro(example_card(project="sample", title="Day 3")))
+        self.assertEqual(self.result()["admitted"], ["sample: Day 3"])

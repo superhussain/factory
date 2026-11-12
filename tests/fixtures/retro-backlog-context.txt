@@ -1,0 +1,16 @@
+Recommend: approve
+
+The ls alias crashes without a terminal.
+
+Why Interactive only: It keeps colors for people.
+
+Evidence:
+- 253x winsize_crash in tool results (1 session)
+
+Retro: run 20261111T090000Z-a1b2c3, fingerprint bac6f4150d124158, created 2026-11-12T05:40:00Z
+
+## Question: Guard the ls alias
+How should the alias be guarded?
+Pick: one
+- Interactive only (recommended): Alias ls only in interactive shells. Pros: Keeps colors.
+- Drop the alias: Remove the ls alias. Pros: Simplest fix. Cons: Loses colors.

@@ -13,6 +13,10 @@
                                             recommendation, and questions indented under it
   factory.py backlog rework <job-id>        read a reworded feature on stdin, append it as
                                             (rework-of <job-id>), and close that rework job
+  factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes <text>]
+                         --chat-file <file> | --chat "<message>"
+                                            make the dashboard's backlog decision from a person's chat
+                                            message, print the job as JSON
   factory.py ideas [--limit N] [--max-inflight N] [--project <slug>]
                                             claim the oldest ideas this device can run, print them as JSON
                                             (exit 3 when none are runnable or the cap is full)
@@ -86,15 +90,16 @@
                                             resume and allow need a human typing at a terminal
   factory.py suggest admit <file>           turn an explorer's suggestions file into idea cards that
                                             wait on a human (exit 3 when paused or none admitted)
-  factory.py suggest approve <job-id> <A|B|C>
-                                            a human at a terminal approves one option of such a card
+  factory.py suggest approve <job-id> <A|B|C> [--chat-file <file> | --chat "<message>"]
+                                            a human at a terminal approves one option of such a card,
+                                            or --chat-file records a person's chat message instead
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
   factory.py retro push                     upload that digest (last day) to retro/<device>/<local date>.jsonl
   factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
   factory.py retro aggregate [--days N]     pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
-  factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, admit its cards
+  factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, add its cards to the backlog
   factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>]
                                             append one row to the job's agents, after checking this
                                             session holds the claim, and print it as JSON
@@ -1153,9 +1158,40 @@ def next_item():
 BACKLOG_USAGE = 'usage: backlog add "<slug>: <feature>" [--context <file>] | backlog rework <job-id> (feature on stdin)'
 
 
+def backlog_context_error(text):
+    """Why a normalized backlog context does not fit: a Recommend line, the reasons, then up to
+    three needs.md questions. None when it fits."""
+    lines = text.split("\n")
+    if len(text) > 6000:
+        return "longer than 6000 characters"
+    if NOTE_INVISIBLE.search(text):
+        return "holds a control or invisible character"
+    if not lines or lines[0] not in ("Recommend: approve", "Recommend: deny"):
+        return 'the first line must be "Recommend: approve" or "Recommend: deny"'
+    marks = [i for i, line in enumerate(lines) if line.startswith("## Question:")]
+    reasons = lines[1:marks[0] if marks else len(lines)]
+    if not any(line.strip() for line in reasons):
+        return "write the reasons first, then only ## Question: sections"
+    if len(marks) > 3:
+        return "at most 3 questions"
+    for n, start in enumerate(marks, 1):
+        sect = lines[start:marks[n] if n < len(marks) else len(lines)]
+        picks = [i for i, line in enumerate(sect) if line.startswith("Pick:")]
+        header = sect[0][len("## Question:"):].strip()
+        ok = 0 < len(header) <= 60 and len(picks) == 1 and sect[picks[0]] in ("Pick: one", "Pick: many")
+        rows = [line for line in sect[picks[0] + 1:] if line.strip()] if ok else []
+        ok = ok and any(line.strip() for line in sect[1:picks[0]]) and 2 <= len(rows) <= 4
+        found = [re.fullmatch(r"- (.+?)(?::\s+(.+))?", row) for row in rows]
+        ok = ok and all(found)
+        recs = sum(bool(m and re.search(r" \(recommended\)$", m.group(1), re.I)) for m in found)
+        if not ok or (sect[picks[0]] == "Pick: one" and recs > 1):
+            return f"question {n} is not in the needs.md question format"
+    return None
+
+
 def backlog_context(path):
-    """The normalized text of a backlog context file: a Recommend line, the reasons, then up to
-    three needs.md questions. Exits 2 with one message when the file does not fit."""
+    """The normalized text of a backlog context file. Exits 2 with one message when the file does
+    not fit backlog_context_error."""
     def bad(why):
         fail(f"context file {path}: {why}", 2)
     try:
@@ -1170,30 +1206,9 @@ def backlog_context(path):
     while lines and not lines[-1].strip():
         lines.pop()
     text = "\n".join(lines)
-    if len(text) > 6000:
-        bad("longer than 6000 characters")
-    if NOTE_INVISIBLE.search(text):
-        bad("holds a control or invisible character")
-    if not lines or lines[0] not in ("Recommend: approve", "Recommend: deny"):
-        bad('the first line must be "Recommend: approve" or "Recommend: deny"')
-    marks = [i for i, line in enumerate(lines) if line.startswith("## Question:")]
-    reasons = lines[1:marks[0] if marks else len(lines)]
-    if not any(line.strip() for line in reasons):
-        bad("write the reasons first, then only ## Question: sections")
-    if len(marks) > 3:
-        bad("at most 3 questions")
-    for n, start in enumerate(marks, 1):
-        sect = lines[start:marks[n] if n < len(marks) else len(lines)]
-        picks = [i for i, line in enumerate(sect) if line.startswith("Pick:")]
-        header = sect[0][len("## Question:"):].strip()
-        ok = 0 < len(header) <= 60 and len(picks) == 1 and sect[picks[0]] in ("Pick: one", "Pick: many")
-        rows = [line for line in sect[picks[0] + 1:] if line.strip()] if ok else []
-        ok = ok and any(line.strip() for line in sect[1:picks[0]]) and 2 <= len(rows) <= 4
-        found = [re.fullmatch(r"- (.+?)(?::\s+(.+))?", row) for row in rows]
-        ok = ok and all(found)
-        recs = sum(bool(m and re.search(r" \(recommended\)$", m.group(1), re.I)) for m in found)
-        if not ok or (sect[picks[0]] == "Pick: one" and recs > 1):
-            bad(f"question {n} is not in the needs.md question format")
+    why = backlog_context_error(text)
+    if why:
+        bad(why)
     return text
 
 
@@ -1235,21 +1250,25 @@ def backlog_add(item, context=None):
     if added is not True:
         print(f"already in backlog: {item}" + (" (the --context file was not added)" if context else ""))
         print(f"link: {api_url(home)}/#{urllib.parse.quote(added, safe='')}" if added else f"link: {backlog_link(home, line)}")
-        return
+        return False
     print(f"added {item}" + (" with context" if context else ""))
     print(f"link: {backlog_link(home, line)}")
+    if context and RETRO_MARK.search(context):
+        print(f"held {item} for review: retro items always wait for a person")
+        return True
     verdict, final = backlog_triage(home, item, context)
-    left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict)
+    left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict, context)
     if final and (verdict is None or verdict["decision"] != "queue" or left):
         triaged = read_triaged(home)
         if line not in triaged:
             save_triaged(home, triaged + [line])
+    return True
 
 
-def report_verdict(home, slug, feature, item, verdict):
+def report_verdict(home, slug, feature, item, verdict, context=None):
     """Queue a line the Worker queued, or print why it holds. Returns what queue_backlog_item returns for a queue, else False."""
     if verdict["decision"] == "queue":
-        return queue_backlog_item(home, slug, feature, verdict)
+        return queue_backlog_item(home, slug, feature, verdict, context)
     if verdict["confidence"] is None:
         print(f"held {item} for review: {verdict['reason']}")
     else:
@@ -1378,7 +1397,8 @@ def backlog_triage_pass(home):
             raw, slug = line[0], line[1]
             if len(picked) == TRIAGE_SWEEP_LIMIT:
                 break
-            if raw in triaged or slug not in projects or any(raw == p[0] for p in picked):
+            if raw in triaged or slug not in projects or any(raw == p[0] for p in picked) \
+                    or RETRO_MARK.search(line[3]):
                 continue
             if slug not in enabled:
                 enabled[slug] = triage_enabled(home, slug)
@@ -1390,7 +1410,7 @@ def backlog_triage_pass(home):
                 triaged.append(raw)
                 continue
             verdict, final = backlog_triage(home, item, context or None)
-            left = verdict is not None and report_verdict(home, slug, feature, item, verdict)
+            left = verdict is not None and report_verdict(home, slug, feature, item, verdict, context or None)
             if final and (verdict is None or verdict["decision"] != "queue" or left):
                 triaged.append(raw)
             if verdict is None and not final:
@@ -1495,7 +1515,25 @@ def escalation_cmd(target, round_text):
     print(json.dumps(verdict))
 
 
-def queue_backlog_item(home, slug, feature, verdict):
+IDEA_LIMIT = 4000
+
+
+def idea_with_context(head, context, tail):
+    """head, the backlog context block, then tail, in at most IDEA_LIMIT characters. A long context
+    is cut with a note; if even that does not fit, the block is left out. The dashboard's
+    ideaWithContext matches."""
+    if not context:
+        return head + tail
+    intro = "\n\nContext from the backlog:\n"
+    cut = f"\n[context cut to fit the {IDEA_LIMIT}-character idea limit]"
+    full = head + intro + context + tail
+    if len(full) <= IDEA_LIMIT:
+        return full
+    room = IDEA_LIMIT - len(head) - len(intro) - len(cut) - len(tail)
+    return head + intro + context[:room] + cut + tail if room > 0 else head + tail
+
+
+def queue_backlog_item(home, slug, feature, verdict, context=None):
     """Queue a triaged line as an idea, as a dashboard Approve does: the board row first, so the
     id exists before the line names it. A line that changed meanwhile drops the unclaimed row.
     Returns True when it left the new idea row on the board beside an unchecked line."""
@@ -1513,7 +1551,7 @@ def queue_backlog_item(home, slug, feature, verdict):
                              archive_floor(data))
         at = data["updated"] = now()
         job = {"id": job_id, "project": slug, "title": text.strip()[:80], "stage": IDEA, "updated": at,
-               "idea": f"{text}\n\nQueued by backlog triage: {score}. {verdict['reason']}",
+               "idea": idea_with_context(text, context, f"\n\nQueued by backlog triage: {score}. {verdict['reason']}"),
                "backlog": {"line": raw, "decision": "approved", "at": at, "by": "triage",
                            "triage": {k: verdict[k] for k in ("model", "confidence", "threshold", "reason")}}}
         refs = suffix_refs(ref)
@@ -1663,10 +1701,221 @@ def backlog_rework(job_id):
         print(f"link: {backlog_link(home, line)}")
 
 
-def backlog_cmd(sub, item, flag=None, path=None):
-    if sub == "rework" and flag is None:
+BACKLOG_DECIDE_USAGE = ('usage: backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes <text>] '
+                        '--chat-file <file> | --chat "<message>"')
+BACKLOG_UNANSWERED = "answer every question to approve or deny; pass --answers with one line per question"
+
+
+def backlog_questions(context):
+    """The questions of a backlog context, as the dashboard's parseBacklogContext reads them,
+    or [] when the context does not parse."""
+    text = context.replace("\r\n", "\n").replace("\r", "\n")
+    lines = re.sub(r"\A(?:[ \t]*\n)+|(?:\n[ \t]*)+\Z", "", text).split("\n")
+    if lines[0] not in ("Recommend: approve", "Recommend: deny") or len("\n".join(lines)) > 6000:
+        return []
+    first = next((i for i, line in enumerate(lines) if line.startswith("## Question:")), len(lines))
+    if not "\n".join(lines[1:first]).strip():
+        return []
+    marks = [i for i, line in enumerate(lines) if i >= first and line.startswith("## ")]
+    questions = []
+    for n, start in enumerate(marks):
+        head, sect = lines[start], lines[start + 1:marks[n + 1] if n + 1 < len(marks) else len(lines)]
+        if not head.startswith("## Question:") or len(marks) > 3:
+            return []
+        header = head[len("## Question:"):].strip()
+        picks = [line for line in sect if line.startswith("Pick:")]
+        if not 0 < len(header) <= 60 or len(picks) != 1 or picks[0] not in ("Pick: one", "Pick: many"):
+            return []
+        at = sect.index(picks[0])
+        rows = [re.fullmatch(r"- (.+?)(?::\s+(.+))?", line) for line in sect[at + 1:] if line.strip()]
+        if not all(rows):
+            return []
+        labels = [re.sub(r" \(recommended\)$", "", m.group(1), flags=re.I) for m in rows]
+        recs = sum(label != m.group(1) for label, m in zip(labels, rows))
+        if not " ".join(line for line in sect[:at] if line.strip()).strip() or not 2 <= len(labels) <= 4 \
+                or picks[0] == "Pick: one" and recs > 1:
+            return []
+        questions.append({"header": header, "pick": picks[0][len("Pick: "):], "labels": labels})
+    return questions
+
+
+def backlog_answers(path, questions, decision):
+    """The answers text for backlog.answers, one "- <header>: <answer>" line per question,
+    or "" when none was answered. Exits 2 when the file does not fit the questions."""
+    if path is None:
+        if questions and decision != "rework":
+            fail(BACKLOG_UNANSWERED, 2)
+        return ""
+
+    def bad(why):
+        fail(f"--answers {path}: {why}", 2)
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            text = f.read().replace("\r\n", "\n")
+    except (OSError, UnicodeDecodeError):
+        bad("cannot read it as UTF-8 text")
+    if len(text) > 2000:
+        bad("longer than 2000 characters")
+    why = check_untrusted(text)
+    if why:
+        bad(why)
+    lines = [line.rstrip() for line in text.split("\n") if line.strip()]
+    shape = "write one line per question, as - <header>: <answer>, for: " \
+        + (", ".join(q["header"] for q in questions) or "no questions")
+    if len(lines) != len(questions):
+        bad(shape)
+    out, answered = [], 0
+    for q, line in zip(questions, lines):
+        prefix = f"- {q['header']}: "
+        answer = line[len(prefix):].strip() if line.startswith(prefix) else ""
+        if not answer:
+            bad(shape)
+        if answer == "no answer":
+            if decision != "rework":
+                fail(BACKLOG_UNANSWERED, 2)
+            out.append(prefix + answer)
+            continue
+        picked, _, other = answer.partition("Other: ") if answer.startswith("Other: ") else answer.partition(". Other: ")
+        picked = [label for label in picked.split(", ") if label]
+        other = " ".join(other.split())
+        for label in picked:
+            if label not in q["labels"]:
+                bad(f"{label} is not an option of {q['header']}; pick from {', '.join(q['labels'])}")
+        if len(set(picked)) != len(picked) or q["pick"] == "one" and len(picked) > 1:
+            bad(f"{q['header']} takes one pick" if q["pick"] == "one" else f"{q['header']} repeats a pick")
+        if not picked and not other:
+            bad(shape)
+        answered += 1
+        out.append(prefix + ". ".join(filter(None, [", ".join(picked), other and "Other: " + other])))
+    return "\n".join(out) if answered else ""
+
+
+def backlog_decide(key, decision, answers=None, notes=None, chat=None, chat_file=None):
+    """Approve, deny or rework a backlog item from a person's chat message, with the dashboard's
+    writes: the board job first, then the checked line. A line that changed meanwhile drops the job."""
+    stored = {"approve": "approved", "deny": "denied", "rework": "rework"}.get(decision)
+    if stored is None or not re.fullmatch(r"[0-9a-f]{12}", key):
+        fail(BACKLOG_DECIDE_USAGE, 2)
+    quote = chat_quote(read_chat_file(chat_file), "--chat-file") if chat_file else chat_quote(chat)
+    if quote is None:
+        fail(BACKLOG_DECIDE_USAGE, 2)
+    note = (notes or "").strip()
+    if note:
+        why = check_text(note, 1, 2000, multiline=True)
+        if why:
+            fail(f"--notes {why}; nothing was changed", 2)
+    elif stored == "rework":
+        fail("rework needs --notes that say what to change", 2)
+    home = factory_home()
+    status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
+    lines = [line.rstrip("\r") for line in (text if status == 200 else "").split("\n")]
+    found = next((i for i, line in enumerate(lines) if BACKLOG_LINE.match(line) and backlog_key(line) == key), None)
+    if found is None:
+        fail(f"no open backlog item {key}; it was decided, reworded or removed", 4)
+    raw = lines[found]
+    m = BACKLOG_LINE.match(raw)
+    slug, feature = m.group(1), m.group(2).rstrip()
+    held = []
+    for line in lines[found + 1:]:
+        if line and not line.startswith("  "):
+            break
+        held.append(line[2:])
+    answered = backlog_answers(answers, backlog_questions("\n".join(held)), stored)
+    if stored != "denied" and slug not in registered(home):
+        fail(f"register project {slug} before deciding this item", 4)
+    device = holder(home)[0]
+    ref = BACKLOG_SUFFIX.search(feature)
+    item = feature[:ref.start()] if ref else feature
+    jobs = Path(home, "jobs")
+    local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
+    verb = {"approved": "Approved", "denied": "Denied", "rework": "Rework requested"}[stored]
+
+    def quoted(j):
+        record = j.get("backlog")
+        return isinstance(record, dict) and record.get("line") == raw and record.get("via") == "chat" \
+            and record.get("quote") == quote
+
+    def mine(j):
+        return quoted(j) and j["backlog"].get("decision") == stored
+
+    def unstarted(j):
+        return j.get("stage") == IDEA and j.get("claim") is None \
+            or j.get("stage") == "closed" and j["backlog"].get("decision") == "denied"
+
+    def add(board):
+        data = load_board(board)
+        prior = next((j for j in data["jobs"] if mine(j)), None)
+        if prior:
+            return None, prior["id"]
+        # A run that saved another decision for this quote but never checked the line off.
+        stale = [j for j in data["jobs"] if quoted(j) and not mine(j)]
+        for j in stale:
+            if not unstarted(j):
+                fail(f"{j['id']} already holds another decision for this item and was picked up; "
+                     "nothing was changed", 6)
+        job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug(item),
+                             archive_floor(data))
+        data["jobs"] = [j for j in data["jobs"] if j not in stale]
+        at = data["updated"] = now()
+        footer = f'\n\n---\n{verb} in chat by {device} at {at}: "{" ".join(quote.split())}"'
+        record = {"line": raw, "decision": stored, "at": at, **({"notes": note} if note else {}),
+                  **({"answers": answered} if answered else {}), "via": "chat", "quote": quote, "by": device}
+        title = item.strip()[:80]
+        if stored == "approved":
+            idea = item + (f"\n\nNotes from the backlog decision:\n{note}" if note else "") \
+                + (f"\n\nAnswers from the backlog decision:\n{answered}" if answered else "")
+            job = {"id": job_id, "project": slug, "title": title, "stage": IDEA, "updated": at,
+                   "idea": idea + footer, "backlog": record}
+        elif stored == "rework":
+            job = {"id": job_id, "project": slug, "title": title, "idea": item + footer, "stage": IDEA,
+                   "updated": at, "note": "rework requested from the backlog", "backlog": record}
+        else:
+            job = {"id": job_id, "project": slug, "title": title, "idea": item + footer, "stage": "closed",
+                   "updated": at, "done": at, "note": "denied from the backlog", "backlog": record}
+        refs = suffix_refs(ref)
+        if refs:
+            job["refs"] = refs
+        data["jobs"].append(job)
+        return dump_board(data), job_id
+    job_id = cas(home, "/api/board", add)
+    done = f"- [x] {slug}: {feature} ({job_id})"
+
+    def mark(backlog):
+        rows = (backlog or "").split("\n")
+        for i, line in enumerate(rows):
+            if line.rstrip("\r") == raw:
+                rows[i] = done
+                return "\n".join(rows), True
+        return None, done in (line.rstrip("\r") for line in rows)
+
+    def drop(board):
+        data = load_board(board)
+        kept = [j for j in data["jobs"] if not (j.get("id") == job_id and mine(j) and unstarted(j))]
+        if len(kept) == len(data["jobs"]):
+            return None, False
+        data["jobs"], data["updated"] = kept, now()
+        return dump_board(data), True
+    if not cas(home, "/api/backlog", mark):
+        if cas(home, "/api/board", drop):
+            fail("this backlog item changed elsewhere, so nothing was changed", 6)
+        fail(f"{job_id} was saved, but its backlog line changed elsewhere. Check backlog.md.", 6)
+    print(json.dumps({"id": job_id, "project": slug, "decision": stored, "line": raw}, indent=2))
+
+
+def backlog_cmd(sub, item, *rest):
+    if sub == "rework" and not rest:
         return backlog_rework(item)
-    if sub != "add" or flag not in (None, "--context") or (flag is None) != (path is None) or path == "":
+    if sub == "decide" and rest:
+        flags = dict(zip(rest[1::2], rest[2::2]))
+        if len(rest) % 2 == 0 or len(flags) != len(rest) // 2 \
+                or not set(flags) <= {"--answers", "--notes", "--chat", "--chat-file"} \
+                or {"--chat", "--chat-file"} <= set(flags):
+            fail(BACKLOG_DECIDE_USAGE, 2)
+        return backlog_decide(item, rest[0], flags.get("--answers"), flags.get("--notes"), flags.get("--chat"),
+                              flags.get("--chat-file"))
+    flag, path = (rest + (None, None))[:2]
+    if sub != "add" or len(rest) > 2 or flag not in (None, "--context") or (flag is None) != (path is None) \
+            or path == "":
         fail(BACKLOG_USAGE, 2)
     backlog_add(item, None if path is None else backlog_context(path))
 
@@ -1962,8 +2211,9 @@ def ideas(*args):
 
 
 # Explorer suggestions become idea cards only through suggest admit, and a card reaches the
-# loop only after a human runs suggest approve. Loosening autonomy needs a human at a
-# terminal; tightening never does. Absent autonomy means paused.
+# loop only after a human runs suggest approve, or an orchestrator relays the person's chat
+# message. Loosening autonomy needs a human at a terminal; tightening never does. Absent
+# autonomy means paused.
 AUTONOMY_DEFAULT = {"paused": True, "projects": [], "self": []}
 SUGGESTION_SCHEMA = "factory.suggestions/1"
 SUGGEST_KINDS = ("bug-fix", "test-gap", "docs", "cleanup", "dependency-upgrade", "migration",
@@ -2273,9 +2523,58 @@ def render_card(job_id, doc, s, reasons):
     if "diagram" in s:
         lines += ["### Diagram", "", "```mermaid", s["diagram"], "```", ""]
     lines += ["### How to answer", "",
-              f"- Approve: run `suggest approve {job_id} <{'|'.join(keys)}>` in a terminal",
+              f"- Approve: run `suggest approve {job_id} <{'|'.join(keys)}>` in a terminal, or answer in chat",
               "- Reject: Discard in the idea drawer"]
     return "\n".join(lines) + "\n"
+
+
+RETRO_MARK = re.compile(r"^Retro: run [A-Za-z0-9_-]{1,64}, fingerprint [0-9a-f]{16}, "
+                        r"created \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", re.M)
+
+
+def retro_backlog_context(s, run, fp, created):
+    """The backlog context for a schema-checked retro card: a Recommend line, the summary, why the
+    recommended option, the evidence, the Retro provenance line and one needs.md question."""
+    def one_line(text):
+        return " ".join(text.split())
+
+    def sentence(text):
+        return text if text.endswith((".", "!", "?")) else text + "."
+
+    rec = next(o for o in s["options"] if o["key"] == s["recommend"])
+    header = s["title"] if len(s["title"]) <= 60 else s["title"][:57] + "..."
+    lines = ["Recommend: approve", "", one_line(s["summary"]), "",
+             f"Why {rec['label']}: {one_line(s['reason'])}", "", "Evidence:"]
+    for e in s["evidence"]:
+        n = len(e["sessions"])
+        lines.append(f"- {e['count']}x {e['note']} ({n} session{'' if n == 1 else 's'})")
+    lines += ["", f"Retro: run {run}, fingerprint {fp}, created {created}", "",
+              f"## Question: {header}", s["question"], "Pick: one"]
+    for o in [rec] + [o for o in s["options"] if o is not rec]:
+        row = f"- {o['label']}{' (recommended)' if o is rec else ''}: {sentence(o['detail'])}"
+        if o["pros"]:
+            row += f" Pros: {'; '.join(o['pros'])}."
+        if o["cons"]:
+            row += f" Cons: {'; '.join(o['cons'])}."
+        lines.append(row)
+    return "\n".join(lines)
+
+
+def retro_marks(text):
+    """{"fingerprint", "created", "project", "open"} for each Retro provenance line indented under a
+    backlog line, checked or not."""
+    marks, under = [], None
+    for line in text.split("\n"):
+        line = line.rstrip("\r")
+        m = re.match(r"- \[([ x])\] ([\w-]+): \S", line)
+        if m:
+            under = (m.group(2), m.group(1) == " ")
+        elif under and line.startswith("  ") and RETRO_MARK.fullmatch(line[2:]):
+            _, fp, created = (part.rsplit(" ", 1)[1] for part in line[2:].split(", "))
+            marks.append({"fingerprint": fp, "created": created, "project": under[0], "open": under[1]})
+        elif line and not line.startswith("  "):
+            under = None
+    return marks
 
 
 def created_since(j, cutoff):
@@ -2386,12 +2685,94 @@ def suggest_admit(path, by="explorer"):
         sys.exit(3)
 
 
-def suggest_approve(job_id, option):
-    """A human at a terminal approves one option of a gated explorer card, so the ideas
-    schedule may promote it."""
+def retro_backlog_admit(cards):
+    """Add each checked retro card as a held backlog line with a decision form. Skips duplicates
+    and cards over a cap, and exits 3 when autonomy is paused or nothing was added."""
+    home = factory_home()
+    projects = registered(home)
+    for i, s in enumerate(cards["suggestions"]):
+        if s["project"] not in projects:
+            fail(f"suggestions[{i}].project: {s['project']} is not a registered factory project; nothing admitted", 2)
+    data = load_board(api(home, "GET", "/api/board")[2])
+    if load_autonomy(data)["paused"] is not False:
+        fail("autonomy is paused; nothing admitted", 3)
+    status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
+    marks = retro_marks(text if status == 200 else "")
+    origins = [(j, j["origin"]) for j in data["jobs"] if isinstance(j.get("origin"), dict)]
+    archived = data.get("archived")
+    archived = archived.get("fingerprints") if isinstance(archived, dict) else None
+    archived = archived if isinstance(archived, dict) else {}
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    daily = sum(created_since(j, cutoff) for j, _ in origins) + sum(created_since({"origin": m}, cutoff) for m in marks)
+    admitted, added, skipped = [], [], []
+    for s in cards["suggestions"]:
+        slug = s["project"]
+        fp = fingerprint(slug, s)
+        dup = next((j.get("id") for j, o in origins if o.get("fingerprint") == fp), None) or archived.get(fp)
+        context = retro_backlog_context(s, cards["run"], fp, now())
+        why = backlog_context_error(context) or (len(RETRO_MARK.findall(context)) != 1 and "more than one Retro line")
+        if dup:
+            reason = f"duplicate {dup}"
+        elif any(m["fingerprint"] == fp for m in marks):
+            reason = "duplicate in backlog"
+        elif daily + len(added) >= MAX_PER_DAY:
+            reason = "daily cap"
+        elif sum(j.get("stage") == IDEA and o.get("project") == slug for j, o in origins) \
+                + sum(m["open"] and m["project"] == slug for m in marks) + added.count(slug) >= MAX_OPEN_PER_PROJECT:
+            reason = "open cap"
+        elif BACKLOG_SUFFIX.search(s["title"]):
+            reason = "title ends in a backlog ref"
+        elif why:
+            reason = f"context: {why}"
+        elif not backlog_add(f"{slug}: {s['title']}", context):
+            reason = "already in backlog"
+        else:
+            admitted.append(f"{slug}: {s['title']}")
+            added.append(slug)
+            continue
+        skipped.append({"title": s["title"], "reason": reason})
+    print(json.dumps({"admitted": admitted, "skipped": skipped}, indent=2))
+    if not admitted:
+        sys.exit(3)
+
+
+CHAT_QUOTE_MAX = 500
+SUGGEST_APPROVE_USAGE = 'usage: suggest approve <job-id> <A|B|C> [--chat-file <file> | --chat "<message>"]'
+
+
+def chat_quote(text, flag="--chat"):
+    """The stripped --chat message, None when it is missing or blank, or exit 2 when it breaks a text rule."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    why = check_text(text, 1, CHAT_QUOTE_MAX, multiline=True)
+    if why:
+        fail(f"{flag} {why}; nothing was changed", 2)
+    return text
+
+
+def read_chat_file(path):
+    """The text of a --chat-file, refused when it is a link, empty or not UTF-8."""
+    if is_link(path):
+        fail(f"--chat-file {path} is a symlink or junction; nothing was changed", 6)
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            text = f.read().replace("\r\n", "\n")
+    except (OSError, UnicodeDecodeError):
+        fail(f"--chat-file {path}: cannot read it as UTF-8 text; nothing was changed", 2)
+    if not text.strip():
+        fail(f"--chat-file {path} is empty; nothing was changed", 2)
+    return text
+
+
+def suggest_approve(job_id, option, chat=None, chat_file=None):
+    """A human at a terminal approves one option of a gated explorer card, or an orchestrator
+    relays a person's chat message, so the ideas schedule may promote it."""
     if not JOB_ID.fullmatch(job_id) or ".." in job_id or option not in ("A", "B", "C"):
-        fail("usage: suggest approve <job-id> <A|B|C>", 2)
-    human_confirm(job_id, f"Type {job_id} to approve option {option}: ", "suggest approve")
+        fail(SUGGEST_APPROVE_USAGE, 2)
+    quote = chat_quote(read_chat_file(chat_file), "--chat-file") if chat_file else chat_quote(chat)
+    if quote is None:
+        human_confirm(job_id, f"Type {job_id} to approve option {option}: ", "suggest approve")
     home = factory_home()
     projects = registered(home)
     device = holder(home)[0]
@@ -2414,10 +2795,15 @@ def suggest_approve(job_id, option):
         elif slug not in projects or slug not in load_autonomy(data)["projects"]:
             fail(f"{slug} is not a registered project on the autonomy allowlist; nothing was changed", 2)
         stamp = now()
-        origin["approved"] = {"option": option, "device": device, "at": stamp}
+        if quote is None:
+            origin["approved"] = {"option": option, "device": device, "at": stamp}
+            footer = f"Approved option {option} by {device} at {stamp}."
+        else:
+            origin["approved"] = {"option": option, "via": "chat", "quote": quote, "device": device, "at": stamp}
+            footer = f'Approved option {option} in chat by {device} at {stamp}: "{" ".join(quote.split())}"'
         job["project"] = slug
         job.pop("needs", None)
-        job["idea"] = f"{job.get('idea') or ''}\n\n---\nApproved option {option} by {device} at {stamp}."
+        job["idea"] = f"{job.get('idea') or ''}\n\n---\n{footer}"
         job["updated"] = data["updated"] = stamp
         return dump_board(data), job
     print(json.dumps(cas(home, "/api/board", change), indent=2))
@@ -2428,8 +2814,12 @@ def suggest_cmd(sub, *args):
         suggest_admit(args[0])
     elif sub == "approve" and len(args) == 2:
         suggest_approve(*args)
+    elif sub == "approve" and len(args) == 4 and args[2] == "--chat":
+        suggest_approve(args[0], args[1], chat=args[3])
+    elif sub == "approve" and len(args) == 4 and args[2] == "--chat-file":
+        suggest_approve(args[0], args[1], chat_file=args[3])
     else:
-        fail("usage: suggest admit <file> | suggest approve <job-id> <A|B|C>", 2)
+        fail("usage: suggest admit <file> | " + SUGGEST_APPROVE_USAGE[len("usage: "):], 2)
 
 
 def snapshot(repo, commit, dest):
@@ -6087,15 +6477,15 @@ TRACER_BIDI = re.compile("[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
 
 def tracer_enabled(home):
-    """False only when the all-projects pipeline document sets tracer.enabled to false."""
+    """True only when the all-projects pipeline document sets tracer.enabled to true."""
     status, _, text = api(home, "GET", "/api/pipeline/global", ok=(200, 404))
     if status == 404:
-        return True
+        return False
     try:
         doc = json.loads(text)
     except ValueError:
         fail("malformed all-projects pipeline document", 5)
-    return (doc.get("tracer") or {}).get("enabled") is not False
+    return (doc.get("tracer") or {}).get("enabled") is True
 
 
 def read_tracer(home, only=None):
@@ -7165,7 +7555,7 @@ def render_findings(agg, doc, rejected=()):
 
 
 def retro_admit(run):
-    """Check a retro run's reply, write its ranked findings.md and admit its cards through suggest admit.
+    """Check a retro run's reply, write its ranked findings.md and add its cards to the backlog.
     A bad finding is dropped and listed; a bad card admits no card."""
     home = factory_home()
     folder = home / "retro" / run
@@ -7213,7 +7603,7 @@ def retro_admit(run):
     if err:
         fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
     write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
-    suggest_admit(str(suggestions), "retro")
+    retro_backlog_admit(cards)
 
 
 def retro_date(d):
@@ -7326,7 +7716,7 @@ def agent_cmd(sub, *args):
 
 
 COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3),
-            "board": (board, 2, 2), "next": (next_item, 0, 0), "backlog": (backlog_cmd, 2, 4),
+            "board": (board, 2, 2), "next": (next_item, 0, 0), "backlog": (backlog_cmd, 2, 9),
             "stop": (stop, 1, 1), "push": (push, 1, 1), "pull": (pull, 1, 1), "sync": (sync, 0, 1),
              "hold": (hold, 1, 2), "worktree": (worktree, 1, 1), "job": (job, 1, 1),
              "handoff": (handoff, 1, 1),
@@ -7335,7 +7725,7 @@ COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3)
 COMMANDS["adopt-home"] = (adopt_home_cmd, 1, 1)
 COMMANDS["doctor"] = (doctor_cmd, 0, 0)
 COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
-COMMANDS["suggest"] = (suggest_cmd, 2, 3)
+COMMANDS["suggest"] = (suggest_cmd, 2, 5)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
 COMMANDS["experiment"] = (experiment_cmd, 2, 2)
 COMMANDS["unclaim"] = (unclaim, 1, 1)

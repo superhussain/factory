@@ -18,13 +18,14 @@ All of these run through `factory.py` on a device.
 | `autonomy deny <slug>` | anyone | Removes a project from the allowlist. |
 | `autonomy self <slug>` | anyone | Marks a project as part of the factory itself, so the classifier flags its cards. |
 | `suggest admit <file>` | trusted launcher | Checks a `factory.suggestions/1` file and adds one gated idea card per new suggestion. |
-| `suggest approve <job-id> <A\|B\|C>` | human at a terminal | Approves one option after you type the job id, which lets `factory.py pickup` promote the card. |
+| `suggest approve <job-id> <A\|B\|C>` | human at a terminal, or an orchestrator relaying the person's chat message (`--chat-file`) | Approves one option after you type the job id, or records the chat quote with `--chat-file`, which lets `factory.py pickup` promote the card. |
 | `explore <slug>` | explorer schedule | Snapshots an allowlisted project's base for the explorer and prints the run's paths. Exits 3 when paused or not allowlisted. |
 | `explore <slug> done <run>` | explorer schedule | Removes that run's snapshot and keeps its suggestions file. |
 
 Loosening (`resume`, `allow`, `approve`) needs an interactive terminal and a typed
-confirmation. Tightening never does. A missing `autonomy` record means paused, with an
-empty allowlist.
+confirmation, or for `approve` a relayed chat message (`suggest approve --chat-file`), as
+[chat decisions](../skills/factory/references/chat-decisions.md) says. Tightening never does.
+A missing `autonomy` record means paused, with an empty allowlist.
 
 ## What admission checks
 
@@ -129,6 +130,7 @@ flowchart LR
   F -->|schema, caps, allowlist, dedupe, classifier| A[factory.py suggest admit]
   A -->|CAS PUT, idea + needs, no project| B[(board.json)]
   H[human at terminal] -->|typed confirm| P[suggest approve]
+  O[orchestrator] -.->|chat quote| P
   P -->|sets project, clears needs| B
   B --> L[existing loop: spec, build, 4 reviews, approver, PR]
 ```
@@ -142,33 +144,61 @@ flowchart LR
   explorer card to any stage but `idea` or `closed`.
 - Honest limit: the Worker cannot yet tell a human from a service token, so a token
   holder could forge an approval with a raw PUT. The runtime guards stop automation,
-  not abuse. A Worker-side human-only approval gate must land before stage 2.
+  except an agent that runs `--chat-file` or `--chat`, which only the chat-decisions
+  rule holds back. They do not stop abuse. A Worker-side human-only approval gate must land before stage 2.
 - Upgrade every host that runs `factory.py pickup` before the first `autonomy resume`.
   Older runtimes skip cards without a `project`, so unapproved cards stay put there too.
 
 ## Retro cards
 
-`retro admit` admits the retro agent's cards through the same admission code, in
-retro mode. The caller sets the mode, never the file. A retro file has the keys
-`schema`, `by: "retro"`, `run` and `suggestions`, with no `project` or `commit`. The
-`suggest admit` command always runs in explorer mode, so a file carrying `by` exits 2
-there with nothing admitted, and explorer files behave exactly as before.
+`retro admit` adds each retro card to the backlog as one held line, not as an idea
+card. The line is `- [ ] <project>: <title>`, and its indented context renders on the
+dashboard Backlog decision page as a one-pick form. A person answers it there with
+Approve or Deny.
 
-- **Per-card project.** Each suggestion carries its own registered `project`. An
-  unregistered one exits 2 with nothing admitted. The title, fingerprint and open cap
-  use that project.
-- **No allowlist.** Admission skips the one-project allowlist for a retro file, and
-  `suggest approve` skips it for a card whose `origin.by` is `retro`, which only
-  `retro admit` writes. Approval still
-  needs a registered project and a human typing at a terminal.
-- **Unchanged gates.** The kill switch, the daily and open caps, fingerprint dedupe,
-  the field limits and the untrusted-text checks apply as they do to explorer files.
+```
+- [ ] other: Guard the ls alias
+  Recommend: approve
+
+  The ls alias crashes without a terminal.
+
+  Why Interactive only: It keeps colors for people.
+
+  Evidence:
+  - 253x winsize_crash in tool results (1 session)
+
+  Retro: run 20261111T090000Z-a1b2c3, fingerprint bac6f4150d124158, created 2026-11-12T05:40:00Z
+
+  ## Question: Guard the ls alias
+  How should the alias be guarded?
+  Pick: one
+  - Interactive only (recommended): Alias ls only in interactive shells. Pros: Keeps colors.
+  - Drop the alias: Remove the ls alias. Pros: Simplest fix. Cons: Loses colors.
+```
+
+- **Per-card project.** Each card carries its own registered `project`. An
+  unregistered one exits 2 with nothing added. The line, fingerprint and open cap use
+  that project. The one-project allowlist does not apply.
+- **Gates.** A paused kill switch exits 3 with nothing added. A card is skipped as
+  `duplicate <id>` when a board origin or the archive holds its fingerprint, and as
+  `duplicate in backlog` when a `Retro:` line under any backlog line, checked or not,
+  does. The daily cap counts board origins and `Retro:` lines created in the last 24
+  hours plus this run's adds. The open cap counts the project's idea origins, its
+  unchecked `Retro:` lines and this run's adds. Other skips are
+  `title ends in a backlog ref`, `context: <why>` and `already in backlog`. It prints
+  `{"admitted": [...], "skipped": [...]}` and exits 3 when nothing was added.
+- **Never triaged.** `backlog add` and the pickup triage sweep skip any line whose
+  context has a `Retro:` line, so the Worker never queues one. An older runtime's
+  sweep still rates them, so upgrade every pickup host before the first `retro admit`.
+- **Checks.** The field limits, the untrusted-text checks and the `.env` value check
+  apply as they do to explorer files. The summary and reason are collapsed to one line.
 - **Evidence.** Each evidence item is `{"note", "count", "sessions"}` with 1 to 5
-  `host/session` refs, so the classifier checks only `paths` for sensitive files.
-- **Kind.** `tooling` joins the suggestion kinds. It is not one of the kinds the
-  classifier flags.
+  `host/session` refs.
+- **Kind.** `tooling` joins the suggestion kinds.
 
-A retro card's `origin` holds `by: "retro"`, its project and run, and no `commit`.
+Retro idea cards admitted before this change keep `origin.by: "retro"` and still
+take `suggest approve`, which skips the allowlist for them but needs a registered
+project and a human typing at a terminal, or a relayed chat message.
 
 ## Stages
 
@@ -222,15 +252,17 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 | --- | --- | --- |
 | triage off or not set | no | `off` |
 | context line 1 is `Recommend: deny` (LF or CRLF) | no | `hold` |
-| context has a `## Question:` line | no | `hold` |
+| context has a `## Question:` line | yes | `hold`, with `choices` |
 | confidence at or above the threshold | yes | `queue` |
 | confidence below the threshold | yes | `hold` |
 
 - **Queue.** `factory.py` adds an `idea` row with `backlog.by: "triage"` and the verdict,
   then checks the line off with the new id, as a dashboard Approve does. If the line
-  changed meanwhile, it drops the row while the row is still an unclaimed idea.
+  changed meanwhile, it drops the row while the row is still an unclaimed idea. The idea
+  carries the line's context under `Context from the backlog:`, cut so the idea stays within
+  4000 characters, as a dashboard Approve does.
 - **Hold.** The line waits in the backlog for a person, as before.
-  The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board reads the stored verdicts of the lines it lists in one `POST /api/backlog/triage/verdicts` call per 50 lines. It reads again only when the listed lines change, and only for lines with no verdict yet. Opening a line with no verdict reads that line again.
+  The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board reads the stored verdicts of the lines it lists in one `POST /api/backlog/triage/verdicts` call per 50 lines. It reads again only when the listed lines change, and only for lines with no verdict yet. Opening a line with no verdict reads that line again. A line the Worker would refuse, such as one over 2000 characters, reads as no verdict and leaves the other lines' verdicts intact.
 - **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
   verdict from `backlog_triage_pass`. `factory.py pickup` runs it before it claims ideas, never with `--dry-run`, and at most once every 30 minutes per host. The host's `backlog-triage-sweep.json` holds the start of the last sweep, and `factory.py pickup --triage-now` runs a sweep at once. Each sweep takes up to 20 unchecked lines in projects whose effective `triage.enabled` is true and reads their stored verdicts in one `POST /api/backlog/triage/verdicts`. A line another host already held is recorded without a post. The rest are posted one at a time, with the indented block under each as context. Held lines, and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this host never sends them again. `backlog add` records its held line there too. A 404, 409, 502 or 503 reply, or a network failure, warns and ends the sweep. That line and the rest are retried on the next sweep. Deleting the file
   only causes rescoring. A line whose new idea row could not be checked off or removed goes
@@ -256,13 +288,22 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   score but write no text. An item or context holding either tag, including fullwidth,
   Cyrillic, Greek or other lookalike forms, or a letter that reads as either l or I, is
   refused with a 400.
+  For an item whose context has `## Question:` sections, the same call adds one `choice`
+  question `q<i>` per backlog question, over its options, and one `choice` question
+  `q<i>.o<k>` per option, over fixed reasons such as `It gives the item the most value.`
+  (`It follows the project rules.` only when rules are set). The hold verdict then carries
+  `choices`: for each question its header, the model's pick and its percent, and each option's
+  percent and reason. The drawer shows them under Held by triage. If the questions do not parse,
+  the binding is missing, or the call fails or gives an unusable reply, the item gets the fixed
+  hold with no `choices`.
 - **Floors.** A queued idea still goes through the spec, the reviews F2 requires, the
   approver, merge rules and any `spec-approval` gate.
 - **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
   Workers AI usage bills against the account. Without the binding the route answers 503,
   and lines wait. In a 36-call live run, a call sent a median of 292 input tokens, which costs about
   $0.000011, or about 1 neuron. The free tier of 10,000 neurons a day covers about 9,900
-  calls.
+  calls. A question item with 3 questions of 4 options is an estimated 2000 to 2500 input
+  tokens, about 8 neurons. That is a guess until a live run measures it.
 
 To stop triage, set it to Off in Settings, Pipeline. Ideas it already queued stay
 ordinary ideas, and a person can discard them.

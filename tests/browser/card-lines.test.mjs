@@ -9,6 +9,7 @@ import {
   withBrowserFixture,
   seedProject,
   seedBoard,
+  seedPipeline,
   serveHostList,
   blockLiveEvents,
 } from "../support/browser-server.mjs";
@@ -142,6 +143,7 @@ test("card lines", { timeout: 240000 }, async (t) => {
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
     await seedBoard(origin, JOBS);
+    await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
     const errors = [];
     for (const [width, height, scheme, suffix] of [
       [1440, 900, "light", "-desktop"],
@@ -154,6 +156,7 @@ test("card lines", { timeout: 240000 }, async (t) => {
       await blockLiveEvents(page);
       await serveHostList(page, FIXTURE_HOSTS);
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => tracerOff === false);
       await hostLabelShown(page);
       await settle(page);
       const clip = await page.evaluate((s) => {
@@ -319,6 +322,7 @@ test("card lines", { timeout: 240000 }, async (t) => {
         await page.evaluate(() => localStorage.setItem("factory-hidden-card-fields", "meta"));
         try {
           await page.reload({ waitUntil: "domcontentloaded" });
+          await page.waitForFunction(() => tracerOff === false);
           await hostLabelShown(page);
           assert.deepEqual(
             await cardLines(page, "042-sample-export"),
