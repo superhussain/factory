@@ -983,12 +983,12 @@ let jobs = [];
 let openId = null;
 // The backlog line open in the drawer's decision page, or null. Never set together with openId.
 let openBacklogRaw = null;
-// item.raw -> triage verdict object, or null when the API answers 404.
+// item.raw -> triage verdict object, or null when the Worker has none stored.
 const backlogTriageSeen = new Map();
-// item.raw values fetched at least once, so a board render does not prefetch them again.
-const backlogTriageAsked = new Set();
-// item.raw values with a fetch in flight, so a second call for the same line returns early.
+// item.raw values with a read in flight, so a second call for the same line skips it.
 const backlogTriageLoading = new Set();
+// The visible backlog lines syncBacklogTriage last saw, joined, so a render with the same lines reads nothing.
+let backlogTriageShown = null;
 const backlogDrafts = new Map(); // item.raw -> { pick, notes, answers }
 let backlogSaving = false;
 let drawerVersion = 0;
@@ -3043,7 +3043,7 @@ function renderBoard() {
   const noneShown = !shownProjectKeys().length;
   const shown = jobs.filter((j) => isShown(j.project));
   renderedBacklog = backlog;
-  for (const b of visibleBacklog()) if (!backlogTriageAsked.has(b.raw)) fetchBacklogTriage(b);
+  syncBacklogTriage();
   const lists = COLUMNS.map((s) => s === 'backlog'
     ? visibleBacklog()
     : shown.filter((j) => (waitsOnYou(j) ? 'needs-you' : j.stage) === s));
@@ -6143,7 +6143,7 @@ function openBacklogItem(item) {
   renderBoard();
   refreshPicker();
   $('d-doc').querySelector('input[type=radio]').focus();
-  fetchBacklogTriage(item);
+  if (backlogTriageSeen.get(item.raw) == null) fetchBacklogTriage([item]);
   fetchReworkHistory(item);
 }
 
@@ -6177,22 +6177,43 @@ function backlogTriageHtml(v) {
   return '<h3 id="backlog-triage-heading">Held by triage</h3><p>' + esc(why) + '</p><p class="muted">Checked ' + esc(ago(v.at)) + '</p>';
 }
 
-async function fetchBacklogTriage(item) {
-  const raw = item.raw;
-  if (backlogTriageLoading.has(raw)) return;
-  backlogTriageAsked.add(raw);
-  backlogTriageLoading.add(raw);
-  try {
-    const r = await fetch('./api/backlog/triage?item=' + encodeURIComponent(item.project + ': ' + item.feature), { cache: 'no-store' });
-    if (r.status === 404) backlogTriageSeen.set(raw, null);
-    else if (r.ok) backlogTriageSeen.set(raw, await r.json());
-  } catch {}
-  backlogTriageLoading.delete(raw);
-  const html = backlogTriageHtml(backlogTriageSeen.get(raw));
-  const section = $('backlog-triage');
-  if (!html || !section || !section.hidden || raw !== openBacklogRaw) return;
-  section.innerHTML = html;
-  section.hidden = false;
+// Reads triage for the visible backlog once per change in its lines: lines never read, and lines
+// with no stored verdict yet, which a host sweep may have rated since.
+function syncBacklogTriage() {
+  const shown = visibleBacklog();
+  const key = shown.map((b) => b.raw).join('\n');
+  if (key === backlogTriageShown) return;
+  backlogTriageShown = key;
+  const ask = shown.filter((b) => backlogTriageSeen.get(b.raw) == null);
+  if (ask.length) fetchBacklogTriage(ask);
+}
+
+// One POST per 50 lines. A 404 from an older Worker means no verdicts; a malformed reply leaves them unread.
+async function fetchBacklogTriage(items) {
+  const ask = items.filter((b) => !backlogTriageLoading.has(b.raw));
+  for (const b of ask) backlogTriageLoading.add(b.raw);
+  for (let i = 0; i < ask.length; i += 50) {
+    const chunk = ask.slice(i, i + 50);
+    try {
+      const r = await fetch('./api/backlog/triage/verdicts', {
+        method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: chunk.map((b) => b.project + ': ' + b.feature) }),
+      });
+      if (r.status === 404) for (const b of chunk) backlogTriageSeen.set(b.raw, null);
+      else if (r.ok) {
+        const verdicts = (await r.json())?.verdicts;
+        if (Array.isArray(verdicts) && verdicts.length === chunk.length) chunk.forEach((b, k) => backlogTriageSeen.set(b.raw, verdicts[k] ?? null));
+      }
+    } catch {}
+    for (const b of chunk) backlogTriageLoading.delete(b.raw);
+    const open = chunk.find((b) => b.raw === openBacklogRaw);
+    const html = open ? backlogTriageHtml(backlogTriageSeen.get(open.raw)) : '';
+    const section = $('backlog-triage');
+    if (html && section && section.hidden) {
+      section.innerHTML = html;
+      section.hidden = false;
+    }
+  }
 }
 
 function renderBacklogDecision(item, triageHtml) {

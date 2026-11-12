@@ -165,6 +165,30 @@ class PickupTest(PickupFixture):
         self.assert_silent(self.pickup())
         self.sweep.assert_called_once_with(self.home)
 
+    def test_triage_runs_at_most_every_30_minutes(self):
+        self.assert_silent(self.pickup())
+        self.assert_silent(self.pickup())
+        self.sweep.assert_called_once_with(self.home)
+        at = (datetime.now(timezone.utc) - timedelta(minutes=31)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        factory.save_triage_sweep(self.home, at)
+        self.assert_silent(self.pickup())
+        self.assertEqual(self.sweep.call_count, 2)
+
+    def test_a_bad_or_future_sweep_stamp_runs_the_pass(self):
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for text in ("not json", json.dumps({"version": 2, "at": factory.now()}),
+                     json.dumps({"version": 1, "at": future})):
+            with self.subTest(text=text):
+                self.sweep.reset_mock()
+                (self.home / "backlog-triage-sweep.json").write_text(text, encoding="utf-8")
+                self.assert_silent(self.pickup())
+                self.sweep.assert_called_once_with(self.home)
+
+    def test_triage_now_runs_the_pass_inside_the_interval(self):
+        self.assert_silent(self.pickup())
+        self.assert_silent(self.pickup("--triage-now"))
+        self.assertEqual(self.sweep.call_count, 2)
+
     def test_a_worker_error_in_the_triage_pass_still_launches_ideas(self):
         cause = "factory.py: GET https://factory.example.test/api/backlog returned 500: boom"
         self.sweep.side_effect = lambda home: factory.fail(cause[len("factory.py: "):], 5)
@@ -172,7 +196,7 @@ class PickupTest(PickupFixture):
         self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
         code, out, err = self.pickup()
         self.assertEqual(code, 0)
-        self.assertEqual(err, cause + "\nfactory.py: backlog triage stopped; unsent lines wait for the next pickup run\n")
+        self.assertEqual(err, cause + "\nfactory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now\n")
         self.assertRegex(out, r"^launched 001-alpha alpha on primary session [0-9a-f]{6}\n$")
         self.assertEqual(len(self.launched()), 1)
 
@@ -636,12 +660,16 @@ class PickupTest(PickupFixture):
     def test_usage(self):
         for args in (("--limit", "0"), ("--limit", "6"), ("--limit",), ("--limit", "x"), ("--max-inflight", "0"),
                      ("--max-inflight", "-1"), ("--max-inflight",), ("--dry-run", "--dry-run"), ("--bogus",),
-                     ("extra",), ("--limit", "1", "--limit", "1"), ("--session",)):
+                     ("extra",), ("--limit", "1", "--limit", "1"), ("--session",),
+                     ("--triage-now", "--dry-run"), ("--triage-now", "--triage-now")):
             with self.subTest(args=args):
                 code, out, err = self.pickup(*args)
                 self.assertEqual((code, out), (2, ""))
+                usage = "factory.py: usage: pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]"
+                if args == ("--triage-now", "--dry-run"):
+                    usage += "; --triage-now cannot run with --dry-run"
                 if args != ("--session",):
-                    self.assertEqual(err, "factory.py: usage: pickup [--dry-run] [--limit N] [--max-inflight N]\n")
+                    self.assertEqual(err, usage + "\n")
         self.assertEqual(self.calls, [])
 
 
