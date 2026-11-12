@@ -61,7 +61,11 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       const respond = () => {
         if (q === "boom") return request.respond({ status: 500, body: "boom" });
         const jobs = [ARCHIVED].filter((j) =>
-          [j.id, j.title, j.project].some((f) => f.toLowerCase().includes(q.toLowerCase())),
+          [j.id, j.title, j.project, j.jira, j.pr, j.idea].some((f) =>
+            String(f ?? "")
+              .toLowerCase()
+              .includes(q.toLowerCase()),
+          ),
         );
         return request.respond({
           status: 200,
