@@ -928,14 +928,42 @@
         },
         "storage": [
           {
+            "op": "head",
+            "key": "projects/fresh.md"
+          },
+          {
             "op": "put",
             "key": "projects/fresh.md",
             "options": {
-              "onlyIf": {
-                "if-none-match": "*"
-              },
               "httpMetadata": {
                 "contentType": "text/markdown; charset=utf-8"
+              },
+              "customMetadata": {
+                "version": "1",
+                "saved_at": "2026-01-01T00:00:00.000Z",
+                "sha256": "f6f09492816391819677c289d06e1135bd45a2d4510846942a90c01b61c9efee",
+                "saved_by": "device"
+              },
+              "onlyIf": {
+                "if-none-match": "*"
+              }
+            }
+          },
+          {
+            "op": "put",
+            "key": "project-history/fresh/project.md/000001.md",
+            "options": {
+              "httpMetadata": {
+                "contentType": "text/markdown; charset=utf-8"
+              },
+              "customMetadata": {
+                "version": "1",
+                "saved_at": "2026-01-01T00:00:00.000Z",
+                "sha256": "f6f09492816391819677c289d06e1135bd45a2d4510846942a90c01b61c9efee",
+                "saved_by": "device"
+              },
+              "onlyIf": {
+                "if-none-match": "*"
               }
             }
           }
@@ -1097,14 +1125,42 @@
             "key": "projects/sample.md"
           },
           {
+            "op": "head",
+            "key": "project-documents/sample/runbook.md"
+          },
+          {
             "op": "put",
             "key": "project-documents/sample/runbook.md",
             "options": {
-              "onlyIf": {
-                "if-none-match": "*"
-              },
               "httpMetadata": {
                 "contentType": "text/markdown; charset=utf-8"
+              },
+              "customMetadata": {
+                "version": "1",
+                "saved_at": "2026-01-01T00:00:00.000Z",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "saved_by": "device"
+              },
+              "onlyIf": {
+                "if-none-match": "*"
+              }
+            }
+          },
+          {
+            "op": "put",
+            "key": "project-history/sample/runbook.md/000001.md",
+            "options": {
+              "httpMetadata": {
+                "contentType": "text/markdown; charset=utf-8"
+              },
+              "customMetadata": {
+                "version": "1",
+                "saved_at": "2026-01-01T00:00:00.000Z",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "saved_by": "device"
+              },
+              "onlyIf": {
+                "if-none-match": "*"
               }
             }
           }

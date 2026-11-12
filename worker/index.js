@@ -60,6 +60,8 @@ const PROJECT = /^\/api\/projects\/([\w-]+)\.md$/;
 const PROJECT_DOCUMENT_NAMES = ["notes.md", "decisions.md", "runbook.md"];
 const PROJECT_DOCUMENTS = /^\/api\/project-documents\/([A-Za-z0-9_-]+)$/;
 const PROJECT_DOCUMENT = /^\/api\/project-documents\/([A-Za-z0-9_-]+)\/([^/]+)$/;
+// History of a project file (project.md) or document: the list, or one version's bytes.
+const PROJECT_HISTORY = /^\/api\/project-history\/([\w-]+)\/([\w.-]+)(?:\/([1-9]\d*))?$/;
 const REPO = /^[\w.-]+\/[\w.-]+$/;
 const BASE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 // Pipeline scopes are "global" or "projects/<slug>"; history keeps every saved version.
@@ -361,7 +363,53 @@ function strictCondition(request, label) {
   return cond;
 }
 
-async function projectPut(request, env, key) {
+const projectFileKey = (slug, name) =>
+  name === "project.md" ? `projects/${slug}.md` : `project-documents/${slug}/${name}`;
+const projectHistoryKey = (slug, name, n) =>
+  `project-history/${slug}/${name}/${String(n).padStart(6, "0")}.md`;
+
+// Saves a project file or document as its next version against the exact version the writer
+// read, and keeps a create-only copy under project-history/.
+async function projectStore(request, env, principal, slug, name, bytes, cond) {
+  const summary = readSummary(request, "X-Project-Summary");
+  if (summary instanceof Response) return summary;
+  const key = projectFileKey(slug, name);
+  const current = await env.BUCKET.head(key);
+  if (cond.has("If-Match") ? current?.httpEtag !== cond.get("If-Match") : current)
+    return reply("precondition failed", 412);
+  const saved = await storeVersion(
+    env,
+    key,
+    (n) => projectHistoryKey(slug, name, n),
+    bytes,
+    current,
+    cond,
+    "text/markdown; charset=utf-8",
+    { saved_by: principal.kind === "user" ? principal.email : "device", summary },
+    "project",
+  );
+  if (!saved) return reply("precondition failed", 412);
+  return reply("ok", 200, "text/plain", {
+    ETag: saved.obj.httpEtag,
+    "X-Project-Version": String(saved.version),
+    ...(saved.missing && { "X-Project-History": "missing" }),
+  });
+}
+
+async function projectHistoryVersion(env, slug, name, version) {
+  let obj = await env.BUCKET.get(projectHistoryKey(slug, name, version));
+  if (!obj) {
+    const current = await env.BUCKET.get(projectFileKey(slug, name));
+    if (current && storedVersion(current) === version) obj = current;
+  }
+  return obj
+    ? reply(obj.body, 200, "text/markdown", {
+        "X-Project-Version": String(version),
+      })
+    : notFound();
+}
+
+async function projectPut(request, env, principal, slug) {
   const cond = strictCondition(request, "project");
   if (cond instanceof Response) return cond;
   if (
@@ -381,13 +429,7 @@ async function projectPut(request, env, key) {
   const error =
     validateProjectDocument(body) ?? checkOperatorText(body, "project document", "document");
   if (error) return reply(error, 400);
-  const obj = await env.BUCKET.put(key, bytes, {
-    onlyIf: cond,
-    httpMetadata: { contentType: "text/markdown; charset=utf-8" },
-  });
-  return obj
-    ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
-    : reply("precondition failed", 412);
+  return projectStore(request, env, principal, slug, "project.md", bytes, cond);
 }
 
 function validateProjectMarkdown(text) {
@@ -407,7 +449,7 @@ async function projectDocumentList(env, slug) {
   return reply(JSON.stringify(out), 200, "application/json");
 }
 
-async function projectDocumentPut(request, env, key) {
+async function projectDocumentPut(request, env, principal, slug, name) {
   const cond = strictCondition(request, "document");
   if (cond instanceof Response) return cond;
   if (
@@ -427,13 +469,7 @@ async function projectDocumentPut(request, env, key) {
   const error =
     validateProjectMarkdown(body) ?? checkOperatorText(body, "project document", "document");
   if (error) return reply(error, 400);
-  const obj = await env.BUCKET.put(key, bytes, {
-    onlyIf: cond,
-    httpMetadata: { contentType: "text/markdown; charset=utf-8" },
-  });
-  return obj
-    ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
-    : reply("precondition failed", 412);
+  return projectStore(request, env, principal, slug, name, bytes, cond);
 }
 
 const pipelineKey = (scope) => `pipeline/${scope}.json`;
@@ -452,6 +488,108 @@ function checkSummary(text) {
   if (!length || length > SUMMARY_MAX || text.includes("\n") || text.includes("\r"))
     return `summary: must be one line of 1 to ${SUMMARY_MAX} characters`;
   return checkOperatorText(text, "summary");
+}
+
+// The summary header, percent-decoded and checked, or the 400 reply. Absent means "".
+function readSummary(request, header) {
+  let summary = request.headers.get(header) || "";
+  try {
+    summary = decodeURIComponent(summary);
+  } catch {
+    return reply("summary: must be percent-encoded UTF-8", 400);
+  }
+  const error = summary && checkSummary(summary);
+  return error ? reply(error, 400) : summary;
+}
+
+// An object written before versioning has no version metadata and counts as version 1.
+const storedVersion = (obj) => (obj ? pipelineVersion(obj) || 1 : 0);
+const definedEntries = (meta) =>
+  Object.fromEntries(Object.entries(meta).filter(([, value]) => value));
+
+// Writes bytes at key as the next version, conditional on cond, and copies it create-only to
+// historyKey(version). meta's empty values are left out. Returns {obj, version, missing}, or
+// null when cond fails.
+async function storeVersion(env, key, historyKey, bytes, current, cond, contentType, meta, label) {
+  const cur = storedVersion(current);
+  // Heal a history copy an earlier save failed to write, before this save replaces it.
+  if (cur > 0 && !(await env.BUCKET.head(historyKey(cur)))) {
+    const old = await env.BUCKET.get(key);
+    if (old) {
+      const data = await old.arrayBuffer();
+      await env.BUCKET.put(historyKey(storedVersion(old)), data, {
+        onlyIf: new Headers({ "If-None-Match": "*" }),
+        httpMetadata: { contentType },
+        customMetadata: old.customMetadata?.version
+          ? old.customMetadata
+          : definedEntries({
+              version: "1",
+              saved_at: old.uploaded?.toISOString(),
+              sha256: await sha256(data),
+            }),
+      });
+    }
+  }
+  const version = cur + 1;
+  const options = {
+    httpMetadata: { contentType },
+    customMetadata: {
+      version: String(version),
+      saved_at: new Date().toISOString(),
+      sha256: await sha256(bytes),
+      ...definedEntries(meta),
+    },
+  };
+  const obj = await env.BUCKET.put(key, bytes, { ...options, onlyIf: cond });
+  if (!obj) return null;
+  let missing = false;
+  try {
+    await env.BUCKET.put(historyKey(version), bytes, {
+      ...options,
+      onlyIf: new Headers({ "If-None-Match": "*" }),
+    });
+  } catch {
+    // The next save heals the missing copy. Log only the key, never the body.
+    console.warn(`${label} history copy failed: ${historyKey(version)}`);
+    missing = true;
+  }
+  return { obj, version, missing };
+}
+
+// Every version under prefix, newest first: the history copies plus the current object at key,
+// whose own history copy may still be missing.
+async function listVersions(env, prefix, key) {
+  const versions = new Map();
+  const add = (obj, copy) => {
+    const {
+      version = "1",
+      saved_by,
+      saved_at = obj.uploaded?.toISOString(),
+      sha256,
+      summary = "",
+      run,
+      host,
+    } = obj.customMetadata ?? {};
+    versions.set(Number(version), {
+      version: Number(version),
+      saved_by,
+      saved_at,
+      sha256,
+      summary,
+      ...(run && { run }),
+      ...(host && { host }),
+      history_copy: copy,
+    });
+  };
+  let cursor;
+  do {
+    const page = await env.BUCKET.list({ prefix, include: ["customMetadata"], cursor });
+    for (const obj of page.objects) add(obj, true);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  const current = await env.BUCKET.head(key);
+  if (current && !versions.has(storedVersion(current))) add(current, false);
+  return [...versions.values()].sort((a, b) => b.version - a.version);
 }
 
 function pipelineReply(obj, version) {
@@ -493,14 +631,8 @@ async function pipelinePut(request, env, principal, scope) {
   for (const key of ["archive", "tracer"])
     if (scope !== "global" && key in doc)
       return reply(`${key}: set only in the all-projects scope`, 400);
-  let summary = request.headers.get("X-Pipeline-Summary") || "";
-  try {
-    summary = decodeURIComponent(summary);
-  } catch {
-    return reply("summary: must be percent-encoded UTF-8", 400);
-  }
-  const summaryError = summary && checkSummary(summary);
-  if (summaryError) return reply(summaryError, 400);
+  const summary = readSummary(request, "X-Pipeline-Summary");
+  if (summary instanceof Response) return summary;
   const current = await env.BUCKET.head(pipelineKey(scope));
   if (cond.has("If-Match") ? current?.httpEtag !== cond.get("If-Match") : current)
     return reply("precondition failed", 412);
@@ -510,49 +642,23 @@ async function pipelinePut(request, env, principal, scope) {
 // Writes bytes as the next version of scope, conditional on cond, and copies it create-only
 // under pipeline-history/. meta is {saved_by, summary, run?, host?}; empty values are left out.
 async function pipelineStore(env, scope, bytes, current, cond, meta) {
-  const key = pipelineKey(scope);
-  const cur = pipelineVersion(current);
-  // Heal a history copy an earlier save failed to write, before this save replaces it.
-  if (cur > 0 && !(await env.BUCKET.head(pipelineHistoryKey(scope, cur)))) {
-    const old = await env.BUCKET.get(key);
-    if (old) {
-      await env.BUCKET.put(
-        pipelineHistoryKey(scope, pipelineVersion(old)),
-        await old.arrayBuffer(),
-        {
-          onlyIf: new Headers({ "If-None-Match": "*" }),
-          httpMetadata: old.httpMetadata,
-          customMetadata: old.customMetadata,
-        },
-      );
-    }
-  }
-  const options = {
-    httpMetadata: { contentType: "application/json" },
-    customMetadata: {
-      version: String(cur + 1),
-      saved_at: new Date().toISOString(),
-      sha256: await sha256(bytes),
-      ...Object.fromEntries(Object.entries(meta).filter(([, value]) => value)),
-    },
-  };
-  const obj = await env.BUCKET.put(key, bytes, { ...options, onlyIf: cond });
-  if (!obj) return reply("precondition failed", 412);
-  let missing = false;
-  try {
-    await env.BUCKET.put(pipelineHistoryKey(scope, cur + 1), bytes, {
-      ...options,
-      onlyIf: new Headers({ "If-None-Match": "*" }),
-    });
-  } catch {
-    // The next save heals the missing copy. Log only the key, never the body.
-    console.warn(`pipeline history copy failed: ${pipelineHistoryKey(scope, cur + 1)}`);
-    missing = true;
-  }
+  const saved = await storeVersion(
+    env,
+    pipelineKey(scope),
+    (n) => pipelineHistoryKey(scope, n),
+    bytes,
+    // A pipeline object without a version saves as version 1 with no heal copy, as before.
+    pipelineVersion(current) ? current : null,
+    cond,
+    "application/json",
+    meta,
+    "pipeline",
+  );
+  if (!saved) return reply("precondition failed", 412);
   return reply("ok", 200, "text/plain", {
-    ETag: obj.httpEtag,
-    "X-Pipeline-Version": String(cur + 1),
-    ...(missing && { "X-Pipeline-History": "missing" }),
+    ETag: saved.obj.httpEtag,
+    "X-Pipeline-Version": String(saved.version),
+    ...(saved.missing && { "X-Pipeline-History": "missing" }),
   });
 }
 
@@ -561,40 +667,8 @@ async function pipelineGet(env, scope) {
   return obj ? pipelineReply(obj, pipelineVersion(obj)) : notFound();
 }
 
-// Every version, newest first: the history copies plus the current object, whose own
-// history copy may still be missing.
-async function pipelineVersions(env, scope) {
-  const versions = new Map();
-  const add = (obj, copy) => {
-    const { version, saved_by, saved_at, sha256, summary = "", run, host } = obj.customMetadata;
-    versions.set(Number(version), {
-      version: Number(version),
-      saved_by,
-      saved_at,
-      sha256,
-      summary,
-      ...(run && { run }),
-      ...(host && { host }),
-      history_copy: copy,
-    });
-  };
-  let cursor;
-  do {
-    const page = await env.BUCKET.list({
-      prefix: `pipeline-history/${scope}/`,
-      include: ["customMetadata"],
-      cursor,
-    });
-    for (const obj of page.objects) add(obj, true);
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
-  const current = await env.BUCKET.head(pipelineKey(scope));
-  if (current && !versions.has(pipelineVersion(current))) add(current, false);
-  return [...versions.values()].sort((a, b) => b.version - a.version);
-}
-
-async function pipelineHistory(env, scope, principal) {
-  const versions = await pipelineVersions(env, scope);
+async function historyReply(env, principal, prefix, key) {
+  const versions = await listVersions(env, prefix, key);
   if (principal.kind !== "user") for (const entry of versions) delete entry.saved_by;
   return reply(JSON.stringify(versions), 200, "application/json");
 }
@@ -703,7 +777,7 @@ async function pipelineRetroPut(request, env, principal, scope) {
   if (changedChars(doc.stage_notes?.[body.stage] ?? "", body.note) > RETRO_EDIT_CHANGE)
     return reply(`retro edit changes more than ${RETRO_EDIT_CHANGE} characters`, 413);
   const since = Date.now() - DAY_MS;
-  const recent = (await pipelineVersions(env, scope)).filter(
+  const recent = (await listVersions(env, `pipeline-history/${scope}/`, pipelineKey(scope))).filter(
     (v) => v.saved_by === "retro" && Date.parse(v.saved_at) > since,
   );
   if (recent.length >= RETRO_EDITS_PER_DAY)
@@ -1612,7 +1686,7 @@ async function api(request, env, path, principal) {
     if (effective) return pipelineEffective(env, slug);
     if (history)
       return p[3] === undefined
-        ? pipelineHistory(env, p[1], principal)
+        ? historyReply(env, principal, `pipeline-history/${p[1]}/`, pipelineKey(p[1]))
         : pipelineHistoryVersion(env, p[1], Number(p[3]));
     return method === "GET" ? pipelineGet(env, p[1]) : pipelinePut(request, env, principal, p[1]);
   }
@@ -1670,6 +1744,16 @@ async function api(request, env, path, principal) {
     if (method === "PUT") return casPut(request, env, key, type);
     return notFound();
   }
+  m = path.match(PROJECT_HISTORY);
+  if (m) {
+    const [, slug, name, n] = m;
+    if (method !== "GET" || !["project.md", ...PROJECT_DOCUMENT_NAMES].includes(name))
+      return notFound();
+    if (!(await env.BUCKET.head(`projects/${slug}.md`))) return notFound();
+    return n === undefined
+      ? historyReply(env, principal, `project-history/${slug}/${name}/`, projectFileKey(slug, name))
+      : projectHistoryVersion(env, slug, name, Number(n));
+  }
   m = path.match(PROJECT_DOCUMENTS) || path.match(PROJECT_DOCUMENT);
   if (m) {
     if (
@@ -1680,16 +1764,14 @@ async function api(request, env, path, principal) {
       return notFound();
     if (!(await env.BUCKET.head(`projects/${m[1]}.md`))) return notFound();
     if (m[2] === undefined) return projectDocumentList(env, m[1]);
-    const key = `project-documents/${m[1]}/${m[2]}`;
     return method === "GET"
-      ? getFile(env, key, "text/markdown")
-      : projectDocumentPut(request, env, key);
+      ? getFile(env, projectFileKey(m[1], m[2]), "text/markdown")
+      : projectDocumentPut(request, env, principal, m[1], m[2]);
   }
   m = path.match(PROJECT);
   if (m) {
-    const key = `projects/${m[1]}.md`;
-    if (method === "GET") return getFile(env, key, "text/markdown");
-    if (method === "PUT") return projectPut(request, env, key);
+    if (method === "GET") return getFile(env, projectFileKey(m[1], "project.md"), "text/markdown");
+    if (method === "PUT") return projectPut(request, env, principal, m[1]);
     return notFound();
   }
   m = path.match(JOB_DIR);

@@ -42,7 +42,12 @@ function setup(fetch, records = [], sessionRecords = []) {
     calls = [],
     elements = new Map(),
     windowEvents = new Map();
-  const document = { activeElement: null, querySelector: () => null, addEventListener() {} };
+  const document = {
+    activeElement: null,
+    querySelector: () => null,
+    addEventListener() {},
+    createElement: () => ({ append() {}, setAttribute() {}, addEventListener() {} }),
+  };
   const $ = (id) => {
     if (!elements.has(id))
       elements.set(id, {
@@ -140,6 +145,8 @@ function setup(fetch, records = [], sessionRecords = []) {
     denyCopy: false,
     confirm: () => true,
     fetch: async (url, options = {}) => {
+      // History reads are not part of these draft contracts.
+      if (url.includes("/api/project-history/")) return response(404);
       calls.push({ url, options });
       return fetch(url, options);
     },

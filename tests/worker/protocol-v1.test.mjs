@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { loadProduction, memoryBucket, serverEnv } from "../support/worker.mjs";
@@ -104,7 +104,10 @@ function calls(bucket) {
 }
 
 for (const item of fixture.cases) {
-  test(item.id, async () => {
+  test(item.id, async (t) => {
+    // Saved project versions carry saved_at; a frozen clock keeps the fixture exact.
+    mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-01-01T00:00:00Z") });
+    t.after(() => mock.timers.reset());
     const s = await setup();
     const before = snapshot(s.bucket);
     const body = item.body?.fixture ? fixtureBody(item.body.fixture) : (item.body ?? undefined);

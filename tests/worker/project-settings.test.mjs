@@ -26,8 +26,12 @@ function setup() {
         const bytes = Buffer.from(data);
         const obj = { httpEtag: etag(bytes), bytes, options };
         objects.set(key, obj);
-        puts++;
+        if (!key.startsWith("project-history/")) puts++;
         return obj;
+      },
+      async head(key) {
+        const obj = objects.get(key);
+        return obj && { httpEtag: obj.httpEtag, customMetadata: obj.options.customMetadata };
       },
       async get(key) {
         const obj = objects.get(key);

@@ -55,6 +55,7 @@ device data. Locked integrity for the reviewed hook-bearing packages:
 | Hosted Worker/dashboard/assets | `worker/`, `web/`, imported text, fixed asset allowlist, v1 R2 keys and browser storage. |
 | Pipeline configuration | Hosted Worker: R2 `pipeline/` (current global and per-project documents) and `pipeline-history/` (create-only copy of every saved version). `worker/admission.js` holds the schema, text admission and security floors; see [trust.md](trust.md). Nothing is deleted; recovery is a forward save of an old version. |
 | Archived jobs | Hosted Worker only: `worker/archive.js` runs hourly (cron `17 * * * *`) when the global pipeline sets `archive`. It writes R2 `board-archive.json` first, then removes the moved rows from `board.json` and updates the board's top-level `archived` field (`max_id`, `fingerprints`). Clients round-trip `archived` unchanged; a board write that changes it, or adds an id up to `max_id`, gets a 400. `GET /api/board/archive` reads it by `id`, `page` or `q`. Job files stay where they are. A refused write makes the pass return `conflict` and log a `console.warn` that starts `archive pass conflict:` and names the key, visible in `wrangler tail`. The dashboard's "Show archived jobs" button under the merged and closed columns, and on the "No jobs yet" board once `archived` is set, pages it 50 rows at a time. A failed page shows its error under the clicked column and announces it once in the board status. |
+| Project files and documents | Hosted Worker: R2 `projects/<slug>.md` and `project-documents/<slug>/<name>` (current), and `project-history/<slug>/<name>/` (create-only copy of every saved version, `<name>` being `project.md`, `notes.md`, `decisions.md` or `runbook.md`). An object saved before history existed counts as version 1. Nothing is deleted; recovery is a forward save of an old version. |
 | Deployment tooling | `tools/deploy.py`, `tools/assets.mjs`, `tools/local.mjs`, private profile and generated production config/connection descriptor. |
 | Verification | `tests/worker/`, `tests/browser/`, hosted `tests/support/`, hosted fixtures, `tests/tools/`. |
 | Documentation | `README.md`, `docs/architecture.md`, `docs/cloudflare.md`, `docs/device.md`, `docs/integrations.md`, `THIRD_PARTY_NOTICES.md`. |
@@ -100,6 +101,15 @@ carries `summary` (`""` when none), and a retro version also carries `run` and
 `history_copy` says whether its create-only copy exists. A PUT whose copy failed
 answers `X-Pipeline-History: missing`. Devices read only the effective view,
 through `factory.py pipeline <slug>`.
+
+Project file and document PUTs keep every saved version the same way. Each save
+answers `X-Project-Version` and may send `X-Project-Summary`, percent-encoded; a
+device save is recorded as `saved_by: "device"`. `GET /api/project-history/<slug>/<name>`
+lists the versions newest first and `GET /api/project-history/<slug>/<name>/<n>`
+returns one version's exact bytes. Both are GET only and return 404 for an
+unregistered slug or unknown name. A PUT whose copy failed answers
+`X-Project-History: missing`. Settings, Projects lists that history and restores an
+old version to the draft.
 
 The dashboard's Settings page (`#/settings/pipeline`) edits these documents per scope, lists
 history and restores an old version as a forward save. The local test entry

@@ -139,7 +139,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     #settings-document { min-height: 45dvh; }
   }
   #pipeline-effective { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--code-bg); padding: 10px 12px; border-radius: 6px; }
-  #pipeline-history { height: 160px; overflow-y: auto; padding-right: 4px; padding-bottom: 4px; scroll-padding-block: 4px; }
+  #pipeline-history, #settings-history { height: 160px; overflow-y: auto; padding-right: 4px; padding-bottom: 4px; scroll-padding-block: 4px; }
   #pipeline-gates, #pipeline-pickup, #pipeline-triage, #pipeline-archive, #pipeline-tracer, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
   #pipeline-gates legend, #pipeline-pickup legend, #pipeline-triage legend, #pipeline-archive legend, #pipeline-tracer legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #pipeline-gates label { display: flex; gap: 8px; align-items: baseline; margin: 0; color: var(--fg); }
@@ -186,7 +186,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .settings-section h3 { font-size: 15px; margin: 0 0 12px; }
   .settings-section h4 { font-size: 13px; margin: 16px 0 8px; }
   .settings-section label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-  .settings-section select, .settings-section textarea, #pipeline-triage-threshold, #pipeline-archive-n, #pipeline-summary { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .settings-section select, .settings-section textarea, #pipeline-triage-threshold, #pipeline-archive-n, #pipeline-summary, #settings-summary { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .settings-section textarea { resize: vertical; min-height: 140px; }
   .settings-section .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
   .project-list { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; margin-bottom: 12px; }
@@ -639,8 +639,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           <p id="settings-resource-help" class="muted">Shared project configuration and Markdown used by factory agents. Device paths and credentials are not available here. Keep the agent section headings. Do not put secrets in this document.</p>
           <label for="settings-document"><span id="settings-document-label">Project document (Markdown)</span><textarea id="settings-document" spellcheck="false" aria-describedby="settings-resource-help" disabled></textarea></label>
         </div>
+        <h4 id="settings-history-heading">History</h4>
+        <ol id="settings-history"></ol>
         <p id="settings-status" role="status"></p>
         <p id="settings-hint" class="muted" role="status"></p>
+        <label for="settings-summary">Change summary (optional)<input id="settings-summary" maxlength="120"></label>
         <div class="actions">
           <button class="btn" id="settings-copy">Copy draft</button>
           <button class="btn" id="settings-load">Load latest</button>
@@ -1395,7 +1398,7 @@ function card(j, inNeeds, archived = false) {
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
       (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
       (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
-      (j.babysit?.at ? '<span class="chip">Babysitting</span>' : '') + '</div>' +
+      (j.babysit?.at ? '<span class="chip" title="' + esc(prLink(j) ? 'An agent is fixing and merging PR #' + prLink(j).n : 'An agent is fixing and merging this PR') + '">Babysitting</span>' : '') + '</div>' +
     line('proj', projectName(j)) +
     '<div class="title">' + esc(j.title || j.id) + '</div>' +
     (j.stage === 'idea' && !j.project ? '<div class="idea-text">Assign a project before starting.</div>' : '') +
@@ -1951,7 +1954,8 @@ function selectSettingsTab(name) {
 function settingsResource(slug, name = 'project') {
   return {id:name === 'project' ? slug : slug + '/' + name, slug, name,
     url:name === 'project' ? './api/projects/' + slug + '.md' : './api/project-documents/' + slug + '/' + name,
-    storageKey:name === 'project' ? settingsKey(slug) : 'factory-project-document-draft:' + slug + ':' + name};
+    storageKey:name === 'project' ? settingsKey(slug) : 'factory-project-document-draft:' + slug + ':' + name,
+    historyUrl:'./api/project-history/' + slug + '/' + (name === 'project' ? 'project.md' : name)};
 }
 const settingsDirty = s => s.draftText !== s.baseText;
 const settingsEtag = tag => typeof tag === 'string' && /^(W\/)?"[\x21\x23-\x7e\x80-\xff]+"$/.test(tag) ? tag.replace(/^W\//, '') : null;
@@ -1999,6 +2003,7 @@ function renderProjectSettings() {
     ? 'Could not load projects. Refresh the page to retry.'
     : 'No registered projects. Run /factory init in a checkout, then refresh this page.';
   $('settings-fields').hidden = $('settings-resource').hidden = $('settings-project').parentElement.hidden = empty;
+  $('settings-history-heading').hidden = $('settings-history').hidden = $('settings-summary').parentElement.hidden = empty;
   const saving = s?.phase === 'saving', loading = s?.phase === 'loading';
   $('settings-project').disabled = saving;
   for (const name of SETTINGS_TABS) $(settingsTabId(name)).disabled = saving;
@@ -2090,10 +2095,64 @@ async function loadProjectDocumentList(slug) {
   }
 }
 
+async function loadSettingsHistory(resource) {
+  const key = 'history:' + resource.id, generation = ++settingsGeneration;
+  settingsLoads.set(key, generation);
+  const row = text => Object.assign(document.createElement('li'), {textContent:text});
+  let rows;
+  try {
+    const r = await fetch(resource.historyUrl, {cache:'no-store'});
+    if (!r.ok || r.redirected) throw new Error('history');
+    const versions = await r.json();
+    if (!Array.isArray(versions)) throw new Error('history');
+    rows = versions.length ? versions.map((v, i) => {
+      const li = row('Version ' + v.version + (i === 0 ? ' (current)' : '') + (v.saved_by ? ' · ' + v.saved_by : '') + ' · ' + v.saved_at + (v.summary ? ' · ' + v.summary : ''));
+      if (i > 0) {
+        const button = Object.assign(document.createElement('button'), {className:'btn', textContent:'Restore to draft'});
+        button.setAttribute('aria-label', 'Restore version ' + v.version + ' to draft');
+        button.addEventListener('click', () => restoreProjectVersion(resource, v.version));
+        li.append(' ', button);
+      }
+      return li;
+    }) : [row('No saved versions yet.')];
+  } catch {
+    rows = [row('Could not load history.')];
+  }
+  if (generation !== settingsLoads.get(key) || settingsResource($('settings-project').value, settingsResourceName()).id !== resource.id) return;
+  $('settings-history').replaceChildren(...rows);
+  $('settings-history').scrollTop = 0;
+}
+
+async function restoreProjectVersion(resource, n) {
+  const s = projectDocuments.get(resource.id);
+  if (!s) return;
+  if (['loading','saving'].includes(s.phase)) {
+    s.message = 'Wait for the current load or save to finish, then restore.';
+    return renderProjectSettings();
+  }
+  if (settingsDirty(s) && !confirm('Discard this draft and restore version ' + n + '?')) return;
+  try {
+    const r = await fetch(resource.historyUrl + '/' + n, {cache:'no-store'});
+    if (!r.ok || r.redirected) throw new Error('restore');
+    const text = (await r.text()).replace(/\r\n/g, '\n');
+    if (projectDocuments.get(resource.id) !== s || ['loading','saving'].includes(s.phase)) return;
+    s.draftText = text;
+    // A conflict keeps its own message: Save stays disabled until Load latest.
+    if (s.phase !== 'conflict' && !s.blocked) s.message = settingsDirty(s) ? 'Version ' + n + ' is in the draft. Save to keep it as a new version.' : 'No unsaved changes';
+  } catch {
+    s.message = 'Could not load version ' + n + '. Try again.';
+  }
+  persistProjectDraft(resource);
+  renderProjectSettings();
+}
+
 function selectSettingsDocument() {
   const resource = settingsResource($('settings-project').value, settingsResourceName());
   const extra = resource.name !== 'project';
   if (!resource.slug) return renderProjectSettings();
+  $('settings-summary').value = '';
+  $('settings-history').replaceChildren();
+  loadSettingsHistory(resource);
   if (!projectDocuments.has(resource.id)) {
     try {
       let record = localStorage.getItem(resource.storageKey);
@@ -2156,7 +2215,7 @@ async function saveProjectDocument() {
   if ($('settings-save').disabled) return;
   const resource = settingsResource($('settings-project').value, settingsResourceName());
   const s = projectDocuments.get(resource.id), extra = resource.name !== 'project';
-  const draft = s.draftText, tag = s.baseEtag;
+  const draft = s.draftText, tag = s.baseEtag, summary = $('settings-summary').value;
   const creating = extra && s.mode === 'create';
   const generation = ++settingsGeneration;
   settingsLoads.set(resource.id, generation);
@@ -2166,7 +2225,7 @@ async function saveProjectDocument() {
   persistProjectDraft(resource);
   renderProjectSettings();
   try {
-    const r = await fetch(resource.url, {method:'PUT', headers:{...(creating ? {'If-None-Match':'*'} : {'If-Match':tag}), 'Content-Type':'text/markdown; charset=utf-8'}, body:draft});
+    const r = await fetch(resource.url, {method:'PUT', headers:{...(creating ? {'If-None-Match':'*'} : {'If-Match':tag}), 'Content-Type':'text/markdown; charset=utf-8', ...(summary && {'X-Project-Summary':encodeURIComponent(summary)})}, body:draft});
     if (generation !== settingsLoads.get(resource.id) || projectDocuments.get(resource.id) !== s) return;
     if (r.redirected || [401,403].includes(r.status)) throw new Error(settingsAccess);
     if (r.status === 412) {
@@ -2178,6 +2237,8 @@ async function saveProjectDocument() {
     } else if (r.status === 200 && settingsEtag(r.headers.get('ETag'))) {
       Object.assign(s, {baseText:draft, baseEtag:settingsEtag(r.headers.get('ETag')), phase:'ready', message:'Saved', ...(extra && {mode:'edit', blocked:null})});
       persistProjectDraft(resource, true);
+      $('settings-summary').value = '';
+      loadSettingsHistory(resource);
       if (extra) {
         if (creating && $('settings-project').value === resource.slug && !await loadProjectDocumentList(resource.slug)) s.message = 'Saved. Reopen settings to refresh the document list.';
       } else {
@@ -2197,10 +2258,10 @@ async function saveProjectDocument() {
         const text = await r.text();
         s.blocked = null;
         s.phase = 'error';
-        s.message = allowed.includes(text) ? 'Could not save: ' + text : 'Could not save. Your draft is kept. Try again.';
+        s.message = allowed.includes(text) || text.startsWith('summary: ') ? 'Could not save: ' + text : 'Could not save. Your draft is kept. Try again.';
       } else {
         const text = !extra && [400,413].includes(r.status) ? await r.text() : '';
-        throw new Error(allowed.includes(text) ? 'Could not save: ' + text : 'Could not save. Your draft is kept. Try again.');
+        throw new Error(allowed.includes(text) || text.startsWith('summary: ') ? 'Could not save: ' + text : 'Could not save. Your draft is kept. Try again.');
       }
     }
   } catch (e) {
@@ -2232,6 +2293,7 @@ $('settings-load').addEventListener('click', () => {
   const s = projectDocuments.get(resource.id);
   if ((settingsDirty(s) || s.phase === 'conflict' || s.blocked || malformedDrafts.has(resource.id)) && !confirm(resource.name === 'project' ? 'Discard this draft and load the latest project document?' : 'Discard this draft and load the latest document?')) return;
   loadProjectDocument(resource, true);
+  loadSettingsHistory(resource);
 });
 $('settings-save').addEventListener('click', saveProjectDocument);
 $('settings-copy').addEventListener('click', async () => {
@@ -2661,7 +2723,9 @@ async function restorePipelineVersion(scope, n) {
 async function savePipelineScope(scope = $('pipeline-scope').value) {
   const s = pipelineScopes.get(scope);
   if (!pipelineCanSave(s)) return;
-  const body = pipelineCanonical(s.draft), tag = s.baseEtag, summary = $('pipeline-summary').value;
+  // Only a save of the Pipeline page's selected scope carries that page's summary.
+  const fromPage = scope === $('pipeline-scope').value;
+  const body = pipelineCanonical(s.draft), tag = s.baseEtag, summary = fromPage ? $('pipeline-summary').value : '';
   pipelineLoads.set(scope, ++pipelineGeneration);
   s.phase = 'saving';
   s.message = 'Saving…';
@@ -2676,7 +2740,7 @@ async function savePipelineScope(scope = $('pipeline-scope').value) {
     } else if (r.status === 200 && settingsEtag(r.headers.get('ETag'))) {
       const version = Number(r.headers.get('X-Pipeline-Version')) || s.version + 1;
       Object.assign(s, {base:JSON.parse(body), baseEtag:settingsEtag(r.headers.get('ETag')), version, phase:'ready', message:'Saved as version ' + version});
-      $('pipeline-summary').value = '';
+      if (fromPage) $('pipeline-summary').value = '';
       loadPipelineHistory(scope);
       loadPipelineEffective(scope);
       if (scope === 'global') loadTracerSetting();

@@ -128,6 +128,10 @@ test("babysit", { timeout: 240000 }, async (t) => {
           "Fix review comments and CI, then merge this PR",
         );
         assert.deepEqual(await chipsOf(page, "049-sample-babysat"), ["Babysitting"]);
+        assert.equal(
+          await page.$eval('.card[data-id="049-sample-babysat"] .chip', (el) => el.title),
+          "An agent is fixing and merging PR #49",
+        );
       });
 
       await t.test(`a dismissed confirm writes nothing ${width}`, async () => {
