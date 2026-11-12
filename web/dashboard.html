@@ -654,7 +654,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <div class="settings-main">
         <h3 id="pipeline-settings-heading">Pipeline settings</h3>
         <label for="pipeline-scope">Scope<select id="pipeline-scope"></select></label>
-        <p id="pipeline-help" class="muted">Preferences for factory agents. Settings can only tighten the security floors, except review rounds: the all-projects scope can raise them to 5, and a project can only lower them. A gate switched on for all projects applies to every project. Stage notes cannot contain links, secrets or instructions to skip review. Only a signed-in person can save.</p>
+        <p id="pipeline-help" class="muted">Preferences for factory agents. Settings can only tighten the security floors, except review rounds: the all-projects scope can raise them to 5, and a project can only lower them. A gate switched on for all projects applies to every project. Stage notes cannot contain links, secrets or instructions to skip review. Only a signed-in person can save, except retro admit, which may edit stage notes.</p>
         <label for="pipeline-merge">Merge<select id="pipeline-merge">
           <option value="">Not set (merge after green checks)</option>
           <option value="auto">Merge APPROVE PRs after green checks</option>
@@ -2680,6 +2680,7 @@ async function savePipelineScope(scope = $('pipeline-scope').value) {
 function selectPipelineScope() {
   const scope = $('pipeline-scope').value;
   ensurePipelineScope(scope);
+  $('pipeline-summary').value = '';
   loadPipelineHistory(scope);
   loadPipelineEffective(scope);
   renderPipelineSettings();

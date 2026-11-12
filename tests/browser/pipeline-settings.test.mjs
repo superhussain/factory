@@ -805,6 +805,14 @@ test("pipeline settings page", { timeout: 180000 }, async (t) => {
         wait,
       );
       assert.equal(await page.$eval("#pipeline-summary", (el) => el.value), "");
+      await page.type("#pipeline-summary", "Meant for this scope only");
+      await page.select("#pipeline-scope", "global");
+      assert.equal(await page.$eval("#pipeline-summary", (el) => el.value), "");
+      await page.select("#pipeline-scope", "projects/sample");
+      assert.match(
+        await page.$eval("#pipeline-help", (el) => el.textContent),
+        /Only a signed-in person can save, except retro admit, which may edit stage notes\.$/,
+      );
       const [latest] = await (await fetch(origin + "/api/pipeline/history/projects/sample")).json();
       assert.equal(latest.summary, "Turn triage off · for now");
       const lines = await page.evaluate(async () => {
