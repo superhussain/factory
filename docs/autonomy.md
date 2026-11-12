@@ -213,7 +213,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   and the line waits. If a board or backlog write fails while
   queueing, it prints what is left (the line, or the new id to check off or remove by hand).
   `backlog add` still exits 0. A Worker error inside the sweep, such as a 500 on GET /api/backlog,
-  prints the error and "backlog triage stopped; unsent lines wait for the next pickup run". The sweep
+  prints the error and "backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now". The sweep
   keeps the holds it recorded, and pickup still claims and launches ideas. While the sweep keeps
   failing, pickup's host status carries `triage_failed_since`, the start of the first failing run.
   Settings, Hosts shows "Backlog triage failing since <time>" in red with a warning sign on the

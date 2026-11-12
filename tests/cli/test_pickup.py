@@ -196,7 +196,7 @@ class PickupTest(PickupFixture):
         self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
         code, out, err = self.pickup()
         self.assertEqual(code, 0)
-        self.assertEqual(err, cause + "\nfactory.py: backlog triage stopped; unsent lines wait for the next pickup run\n")
+        self.assertEqual(err, cause + "\nfactory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now\n")
         self.assertRegex(out, r"^launched 001-alpha alpha on primary session [0-9a-f]{6}\n$")
         self.assertEqual(len(self.launched()), 1)
 
@@ -665,8 +665,11 @@ class PickupTest(PickupFixture):
             with self.subTest(args=args):
                 code, out, err = self.pickup(*args)
                 self.assertEqual((code, out), (2, ""))
+                usage = "factory.py: usage: pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]"
+                if args == ("--triage-now", "--dry-run"):
+                    usage += "; --triage-now cannot run with --dry-run"
                 if args != ("--session",):
-                    self.assertEqual(err, "factory.py: usage: pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]\n")
+                    self.assertEqual(err, usage + "\n")
         self.assertEqual(self.calls, [])
 
 

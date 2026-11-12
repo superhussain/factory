@@ -1268,7 +1268,7 @@ def stored_verdicts(home, items):
     if not items:
         return []
     status, _, text = api(home, "POST", "/api/backlog/triage/verdicts",
-                          json.dumps({"items": items}, ensure_ascii=False), ok=(200, 404),
+                          json.dumps({"items": items}, ensure_ascii=False), ok=(200, 400, 404),
                           headers={"Content-Type": "application/json"})
     try:
         verdicts = json.loads(text).get("verdicts") if status == 200 else None
@@ -3326,7 +3326,7 @@ def pickup(*args):
         flags[flag] = int(value)
         i += 2
     if "--dry-run" in flags and "--triage-now" in flags:
-        fail(USAGE_PICKUP, 2)
+        fail(USAGE_PICKUP + "; --triage-now cannot run with --dry-run", 2)
     dry, limit, cap = "--dry-run" in flags, flags.get("--limit", 1), flags.get("--max-inflight")
     home = factory_home()
     device, _, minutes = holder(home)
@@ -3352,7 +3352,7 @@ def pickup(*args):
                     if e.code != 5:
                         raise
                     failing = failing or started
-                    print("factory.py: backlog triage stopped; unsent lines wait for the next pickup run", file=sys.stderr)
+                    print("factory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now", file=sys.stderr)
         pickup_pass(home, device, minutes, dry, limit, cap)
     finally:
         if not dry:

@@ -48,9 +48,11 @@ class TriageFixture(IsolatedTestCase):
                     self.module.fail(f"GET {path} returned {status}", 5)
                 return status, {}, view if isinstance(view, str) else json.dumps(view)
             if (method, path) == ("POST", "/api/backlog/triage/verdicts"):
-                self.assertEqual(ok, (200, 404))
+                self.assertEqual(ok, (200, 400, 404))
                 items = json.loads(body)["items"]
                 self.reads.append(items)
+                if any(len(item) > 2000 for item in items):
+                    return 400, {}, "items[2]: must be one line of at most 2000 characters"
                 if self.read_status == 404:
                     return 404, {}, ""
                 return 200, {}, json.dumps({"verdicts": [self.stored.get(item) for item in items]})
@@ -307,6 +309,14 @@ class BacklogTriagePassTests(TriageFixture):
         self.assertNotIn("held", out)
         self.assertEqual([p["item"] for p in self.posts], ["sample: Add PDF export to reports"])
         self.assertEqual(self.cached(), [RENAME])
+
+    def test_a_line_the_verdict_read_rejects_does_not_stall_the_sweep(self):
+        long = "sample: " + "x" * 2000
+        self.files["/api/backlog"] = EXAMPLE + f"- [ ] {long}\n"
+        self.triage = lambda item: (400, "item: bad") if len(item) > 2000 else (200, json.dumps(HOLD))
+        out, err = self.sweep()
+        self.assertEqual(len(self.posts), 3)
+        self.assertEqual(self.cached(), [PDF, RENAME, f"- [ ] {long}"])
 
     def test_an_older_worker_404_on_the_verdict_read_rates_every_line(self):
         self.read_status = 404
