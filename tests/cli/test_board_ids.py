@@ -100,6 +100,13 @@ class BoardIdTest(IsolatedTestCase):
         code, out, _ = self.patch_board("412-fix-login", json.dumps({"refs": refs}))
         self.assertEqual((code, json.loads(out)["refs"], self.puts), (0, refs, 1))
 
+    def test_refuses_a_bad_refs_kind(self):
+        code, out, err = self.patch_board(
+            "412-fix-login", json.dumps({"refs": [{"id": "411-sample-lead", "kind": "javascript:"}]}))
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("refs must be a list", err)
+        self.assertEqual((self.ids(), self.puts), (["412-fix-login"], 0))
+
     def test_adds_a_well_formed_new_id(self):
         for job_id in ("413-add-export", "414-a", "1000-a1-b2"):
             with self.subTest(job_id=job_id):
