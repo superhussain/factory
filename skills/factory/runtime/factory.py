@@ -8154,12 +8154,27 @@ AGENT_RECORD_USAGE = "usage: agent record <project>/<id> <role> <harness> <via> 
 AGENT_COLUMNS = ("stage", "role", "harness", "via", "model", "effort")
 
 
+def agent_record_problem(role, harness, via, model, effort):
+    """The first bad field of an agent record, in argument order, or None."""
+    if role not in AGENT_ROLES:
+        return f'role "{role}" is not one of {", ".join(AGENT_ROLES)}'
+    if not SLUG.fullmatch(harness) or len(harness) > 64:
+        return f'harness "{harness}" must be 1 to 64 letters, digits, _ or -'
+    if via not in AGENT_VIAS:
+        return f'via "{via}" is not one of {", ".join(AGENT_VIAS)}'
+    if not ROUTE_MODEL.fullmatch(model):
+        return f'model "{model}" must be 1 to 200 letters, digits or _ . / : @ [ ] -'
+    if effort is not None and effort not in ROUTE_EFFORTS:
+        return f'effort "{effort}" is not one of {", ".join(ROUTE_EFFORTS)}'
+    return None
+
+
 def agent_cmd(sub, *args):
     if sub == "record" and len(args) in (5, 6):
         target, role, harness, via, model, *effort = args
-        if (role not in AGENT_ROLES or not SLUG.fullmatch(harness) or len(harness) > 64 or via not in AGENT_VIAS
-                or not ROUTE_MODEL.fullmatch(model) or effort and effort[0] not in ROUTE_EFFORTS):
-            fail(AGENT_RECORD_USAGE, 2)
+        problem = agent_record_problem(role, harness, via, model, effort[0] if effort else None)
+        if problem:
+            fail(f"{AGENT_RECORD_USAGE}: {problem}", 2)
         home, slug, job_id = r2_target(target, True)
         device, session, _ = holder(home)
         row = {"role": role, "harness": harness, "via": via, "model": model}
