@@ -1400,7 +1400,7 @@ function card(j, inNeeds, archived = false) {
     (j.babysit?.at ? '<span class="chip" title="' + esc(prLink(j) ? 'An agent is fixing and merging PR #' + prLink(j).n : 'An agent is fixing and merging this PR') + '">Babysitting</span>' : '');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
-    '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span><span class="proj line" title="' + esc(projectName(j)) + '">' + esc(projectName(j)) + '</span></div>' +
+    '<div class="id line" title="' + esc(j.id) + '"><span class="proj line" title="' + esc(projectName(j)) + '">' + esc(projectName(j)) + '</span><span class="id-text">' + esc(j.id) + '</span></div>' +
     (tags ? '<div class="tags">' + tags + '</div>' : '') +
     '<div class="title">' + esc(j.title || j.id) + '</div>' +
     (j.stage === 'idea' && !j.project ? '<div class="idea-text">Assign a project before starting.</div>' : '') +
@@ -1539,6 +1539,12 @@ async function searchArchive(query) {
   renderJobResults();
 }
 
+// The text the jumper matches: id, title, project, Jira key, PR link and idea, one field per line.
+function jobSearchText(j) {
+  return [j.id, j.title, j.project, projectName(j), j.jira, j.pr, j.idea]
+    .filter((f) => typeof f === 'string').join('\n').toLowerCase();
+}
+
 function renderJobResults() {
   const projectMode = pickerMode === 'project';
   const actionsMode = pickerMode === 'actions';
@@ -1550,8 +1556,7 @@ function renderJobResults() {
   if (actionsMode) return renderJobActionResults();
   const query = $('job-search').value.trim().toLowerCase();
   const actions = actionRows(query);
-  const matched = jobs.filter((j) => [j.id, j.title, j.project, projectName(j)]
-    .some((field) => String(field ?? '').toLowerCase().includes(query)))
+  const matched = jobs.filter((j) => jobSearchText(j).includes(query))
     // Newest first: factory.py next_id makes the leading id digits grow, so a bigger prefix is newer.
     // Unprefixed ids sort last; the sort is stable, so ties keep board order.
     .sort((a, b) => (/^(\d+)/.exec(b.id)?.[1] ?? 0) - (/^(\d+)/.exec(a.id)?.[1] ?? 0));

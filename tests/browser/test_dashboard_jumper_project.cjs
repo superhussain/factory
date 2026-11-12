@@ -103,11 +103,18 @@ function jobRowsFor(text) {
   const q = text.trim().toLowerCase();
   const matched = fixtureJobs
     .filter((j) =>
-      [j.id, j.title, j.project, PROJECT_NAMES[j.project] ?? (j.project || "No project yet")].some(
-        (f) =>
-          String(f ?? "")
-            .toLowerCase()
-            .includes(q),
+      [
+        j.id,
+        j.title,
+        j.project,
+        PROJECT_NAMES[j.project] ?? (j.project || "No project yet"),
+        j.jira,
+        j.pr,
+        j.idea,
+      ].some((f) =>
+        String(f ?? "")
+          .toLowerCase()
+          .includes(q),
       ),
     )
     .sort((a, b) => (/^(\d+)/.exec(b.id)?.[1] ?? 0) - (/^(\d+)/.exec(a.id)?.[1] ?? 0));

@@ -169,6 +169,7 @@
   "tests/browser/archive-empty-board.test.mjs",
   "tests/browser/jumper-archive-search.test.mjs",
   "tests/browser/card-actions.test.mjs",
-  "tests/browser/card-actions-shortcut.test.mjs"
+  "tests/browser/card-actions-shortcut.test.mjs",
+  "tests/browser/jumper-content-search.test.mjs"
  ]
 }

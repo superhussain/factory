@@ -78,7 +78,7 @@ function expectedRows(text, withDrawer) {
   const q = text.trim().toLowerCase();
   const matched = fixtureJobs
     .filter((j) =>
-      [j.id, j.title, j.project, "Synthetic sample"].some((f) =>
+      [j.id, j.title, j.project, "Synthetic sample", j.jira, j.pr, j.idea].some((f) =>
         String(f ?? "")
           .toLowerCase()
           .includes(q),
