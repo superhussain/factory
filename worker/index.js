@@ -1233,7 +1233,7 @@ function checkArchived(stored, data) {
   return null;
 }
 
-const RIDER_CONTROLS = ["move", "priority", "paused", "close"];
+const RIDER_CONTROLS = ["move", "priority", "paused", "close", "babysit"];
 const leadOfRow = (j) =>
   Array.isArray(j?.refs)
     ? (j.refs.find((r) => r?.kind === "batched-into" && typeof r.id === "string")?.id ?? null)
