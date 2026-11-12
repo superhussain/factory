@@ -133,7 +133,7 @@ class TracerCase(IsolatedTestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.addCleanup(patch.stopall)
-        self.home = Path(temp.name) / "home"
+        self.home = Path(temp.name).resolve() / "home"
         self.home.mkdir()
         self.token_file = Path(temp.name) / "token"
         self.token_file.write_text(TOKEN + "\n")

@@ -38,7 +38,7 @@ class RetroCase(IsolatedTestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name)
+        self.root = Path(temp.name).resolve()
         shutil.copytree(FIXTURE, self.root / "claude")
         self.projects = self.root / "claude/projects"
         for path in self.projects.rglob("*.jsonl"):
