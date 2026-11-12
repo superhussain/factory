@@ -1284,6 +1284,7 @@ def report_verdict(home, slug, feature, item, verdict, context=None):
 
 
 TRIAGE_SWEEP_LIMIT = 20
+TRIAGE_BATCH_LIMIT = 8
 TRIAGE_SWEEP_MINUTES = 30
 
 
@@ -1388,6 +1389,7 @@ def triage_enabled(home, slug):
 def backlog_triage_pass(home):
     """Rate up to TRIAGE_SWEEP_LIMIT unchecked backlog lines this host has no final verdict for, in
     projects with triage on. One verdicts read first records the lines another host already held.
+    Plain lines go TRIAGE_BATCH_LIMIT per batch call per project, then question lines post alone.
     Queued lines become ideas. The first retryable failure ends the sweep. A Worker error still
     saves the verdicts recorded so far."""
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
@@ -1411,16 +1413,41 @@ def backlog_triage_pass(home):
             if enabled[slug]:
                 picked.append(line)
         items = [f"{slug}: {feature.rstrip()}" for _, slug, feature, _ in picked]
-        for (raw, slug, feature, context), item, stored in zip(picked, items, stored_verdicts(home, items)):
+        rate = []
+        for line, item, stored in zip(picked, items, stored_verdicts(home, items)):
             if isinstance(stored, dict) and stored.get("decision") == "hold":
-                triaged.append(raw)
-                continue
-            verdict, final = backlog_triage(home, item, context or None)
+                triaged.append(line[0])
+            else:
+                rate.append((line, item))
+
+        def settle(line, item, verdict, final):
+            raw, slug, feature, context = line
             left = verdict is not None and report_verdict(home, slug, feature, item, verdict, context or None)
             if final and (verdict is None or verdict["decision"] != "queue" or left):
                 triaged.append(raw)
-            if verdict is None and not final:
-                break
+
+        def single(line, item):
+            verdict, final = backlog_triage(home, item, line[3] or None)
+            settle(line, item, verdict, final)
+            return verdict is None and not final
+
+        plain = [entry for entry in rate if not asks_questions(entry[0][3])]
+        chunks = []
+        for slug in dict.fromkeys(line[1] for line, _ in plain):
+            same = [entry for entry in plain if entry[0][1] == slug]
+            chunks += [same[i:i + TRIAGE_BATCH_LIMIT] for i in range(0, len(same), TRIAGE_BATCH_LIMIT)]
+        for chunk in chunks:
+            results, stopped = backlog_triage_batch(home, [(item, line[3] or None) for line, item in chunk])
+            if results is None:
+                stopped = any(single(line, item) for line, item in chunk)
+            else:
+                for (line, item), (verdict, final) in zip(chunk, results):
+                    settle(line, item, verdict, final)
+            if stopped:
+                return
+        for line, item in rate:
+            if asks_questions(line[3]) and single(line, item):
+                return
     finally:
         if triaged != cached:
             save_triaged(home, triaged)
@@ -1429,9 +1456,13 @@ def backlog_triage_pass(home):
 def triage_verdict(text):
     """The Worker's triage reply, or None when it is not one."""
     try:
-        reply = json.loads(text)
+        return triage_reply(json.loads(text))
     except ValueError:
         return None
+
+
+def triage_reply(reply):
+    """A parsed triage reply, or None when it is not one."""
     if not isinstance(reply, dict) or reply.get("decision") not in ("off", "queue", "hold"):
         return None
     if reply["decision"] == "off":
@@ -1464,6 +1495,54 @@ def backlog_triage(home, item, context):
               file=sys.stderr)
         return None, status == 400
     return (None, False) if verdict["decision"] == "off" else (verdict, True)
+
+
+def asks_questions(context):
+    """True when a backlog context has a `## Question:` row, so it goes to the single route."""
+    return any(row.startswith("## Question:") for row in re.split(r"\r\n|\r|\n", context or ""))
+
+
+def backlog_triage_batch(home, entries):
+    """(results, stopped) for up to TRIAGE_BATCH_LIMIT (item, context) lines of one project.
+    results holds (verdict, final) per entry, as backlog_triage does, or is None on a 400 or 404,
+    so the caller posts each line alone. A whole failure, off or a malformed reply sets stopped."""
+    body = json.dumps({"items": [{"item": item, **({"context": context} if context else {})}
+                                 for item, context in entries]}, ensure_ascii=False)
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(captured):
+            status, _, text = api(home, "POST", "/api/backlog/triage/batch", body,
+                                  ok=(200, 400, 404, 409, 502, 503),
+                                  headers={"Content-Type": "application/json"})
+    except SystemExit:
+        status, text = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error", ""
+    if status in (400, 404):
+        return None, False
+    waiting = [(None, False)] * len(entries)
+    try:
+        reply = json.loads(text) if status == 200 else None
+    except ValueError:
+        reply = None
+    if isinstance(reply, dict) and reply == {"decision": "off"}:
+        return waiting, True
+    verdicts = reply.get("verdicts") if isinstance(reply, dict) else None
+    if not isinstance(verdicts, list) or len(verdicts) != len(entries):
+        why = "malformed reply" if status == 200 else status
+        print(f"factory.py: backlog triage failed ({why}); {len(entries)} items wait in the backlog for review",
+              file=sys.stderr)
+        return waiting, True
+    results = []
+    for (item, _), entry in zip(entries, verdicts):
+        verdict = triage_reply(entry)
+        if verdict is not None and verdict["decision"] != "off":
+            results.append((verdict, True))
+            continue
+        error = isinstance(entry, dict) and isinstance(entry.get("error"), str) and type(entry.get("status")) is int
+        why = entry["status"] if error else "malformed reply"
+        print(f"factory.py: backlog triage failed for {item} ({why}); the item waits in the backlog for review",
+              file=sys.stderr)
+        results.append((None, error and why == 400))
+    return results, False
 
 
 ESCALATION_TEXT_LIMIT = 8000
