@@ -249,6 +249,15 @@ class SuggestTest(SuggestCase):
         self.admit(suggestions())
         self.assertEqual(self.puts(), 1)
 
+    def test_admit_rejects_any_env_value(self):
+        (self.home / ".env").write_text("CLOUDFLARE_API_TOKEN=cfsample0123456789abcdef\nMODE=short\n")
+        err = self.admit(suggestions(suggestion(summary="Found cfsample0123456789abcdef here.")), 2)
+        self.assertIn("holds this device's CLOUDFLARE_API_TOKEN; nothing admitted", err)
+        self.assertNotIn("cfsample0123456789abcdef", err)
+        self.assertEqual(self.puts(), 0)
+        self.admit(suggestions(suggestion(summary="The short form is fine.")))
+        self.assertEqual(self.puts(), 1)
+
     def test_untrusted_rules_match_worker(self):
         source = (ROOT / "worker" / "admission.js").read_text()
         self.assertEqual(len(factory.NOTE_SECRETS), 8)

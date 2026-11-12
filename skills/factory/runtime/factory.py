@@ -1978,6 +1978,7 @@ SENSITIVE_PATHS = (
     "*uv.lock", "*go.mod", "*go.sum", "*cargo.toml", "*cargo.lock", "*gemfile*", "mise.toml",
     ".node-version", ".npmrc")
 MAX_SUGGESTION_BYTES = 65536
+ENV_SECRET_MIN = 12
 MAX_PER_RUN = 5
 MAX_PER_DAY = 10
 MAX_OPEN_PER_PROJECT = 5
@@ -2293,6 +2294,12 @@ def strings(value):
     return [s for item in items for s in strings(item)]
 
 
+def env_secret(home, text):
+    """The first key in home/.env whose value, ENV_SECRET_MIN or more characters long, appears in text, or None."""
+    env = read_conf(home / ".env") if (home / ".env").exists() else {}
+    return next((key for key, value in env.items() if len(value) >= ENV_SECRET_MIN and value in text), None)
+
+
 def suggest_admit(path, by="explorer"):
     """Turn a checked suggestions file into gated idea cards. Requests only GET /projects.json
     and GET/PUT /api/board, and never runs a process. Only retro_admit passes by="retro"."""
@@ -2311,11 +2318,9 @@ def suggest_admit(path, by="explorer"):
     if err:
         fail(f"{path}: {err}; nothing admitted", 2)
     home = factory_home()
-    env = read_conf(home / ".env") if (home / ".env").exists() else {}
-    text = "\n".join(strings(doc))
-    for key in ("FACTORY_ACCESS_CLIENT_ID", "FACTORY_ACCESS_CLIENT_SECRET"):
-        if env.get(key) and env[key] in text:
-            fail(f"{path} holds this device's {key}; nothing admitted", 2)
+    key = env_secret(home, "\n".join(strings(doc)))
+    if key:
+        fail(f"{path} holds this device's {key}; nothing admitted", 2)
     retro = by == "retro"
     projects = registered(home)
     if not retro and doc["project"] not in projects:
@@ -6714,6 +6719,7 @@ RETRO_REPLY_SCHEMA = "factory.retro/1"
 RETRO_CATEGORIES = ("navigation", "automated-checks", "reviewer-rules", "steering", "tool-economy",
                     "information-access", "permissions")
 RETRO_SESSION_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[0-9a-f-]{8,36}", re.ASCII)
+RETRO_SESSION = re.compile(r"[0-9a-f-]{8,36}", re.ASCII)
 MAX_RETRO_BYTES = 131072
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
@@ -7006,14 +7012,14 @@ def retro_aggregate(days):
     dates = [(today - timedelta(days=back)).isoformat() for back in range(days - 1, -1, -1)]
     rows, skipped = [], 0
     for date in dates:
-        for _, text in retro_fetch(home, date):
+        for host, text in retro_fetch(home, date):
             for line in text.splitlines():
                 try:
                     row = json.loads(line)
                 except ValueError:
                     row = None
-                if not isinstance(row, dict) or not isinstance(row.get("host"), str) \
-                        or not isinstance(row.get("session"), str):
+                if not isinstance(row, dict) or row.get("host") != host or not isinstance(row.get("session"), str) \
+                        or not RETRO_SESSION.fullmatch(row["session"]):
                     skipped += 1
                     continue
                 if row.get("job") == "ad-hoc":
@@ -7158,9 +7164,14 @@ def retro_admit(run):
     A bad finding is dropped and listed; a bad card admits no card."""
     home = factory_home()
     folder = home / "retro" / run
-    path = folder / "reply.json"
-    if is_link(folder.parent) or is_link(folder) or not path.is_file() \
-            or not (folder / "aggregate.json").is_file():
+    path, agg_path = folder / "reply.json", folder / "aggregate.json"
+    findings, suggestions = folder / "findings.md", folder / "suggestions.json"
+    if is_link(folder.parent) or is_link(folder) or not folder.is_dir():
+        fail(f"no retro run {run}", 4)
+    for p in (path, agg_path, findings, suggestions):
+        if is_link(p):
+            fail(f"{p} is a link; nothing written", 2)
+    if not path.is_file() or not agg_path.is_file():
         fail(f"no retro run {run}", 4)
     with open(path, "rb") as f:
         raw = f.read(MAX_RETRO_BYTES + 1)
@@ -7172,7 +7183,10 @@ def retro_admit(run):
         fail(f"{path} is not UTF-8 JSON: {e}; nothing written", 2)
     if doc == {"none": True}:
         fail("the retro agent found nothing", 3)
-    agg = json.loads((folder / "aggregate.json").read_text(encoding="utf-8"))
+    key = env_secret(home, "\n".join(strings(doc)))
+    if key:
+        fail(f"{path} holds this device's {key}; nothing written", 2)
+    agg = json.loads(agg_path.read_text(encoding="utf-8"))
     err = check_retro(doc) or (doc["run"] != run and f"run: must be {run}")
     if err:
         fail(f"{path}: {err}; nothing written", 2)
@@ -7182,8 +7196,7 @@ def retro_admit(run):
     where = [f"findings[{i}]" + (f".{field}" if field else "") + f": {problem}" for i, field, problem in rejected]
     if not kept:
         fail(f"{path}: {where[0]}; nothing written", 2)
-    findings = folder / "findings.md"
-    findings.write_text(render_findings(agg, dict(doc, findings=kept), rejected), encoding="utf-8")
+    write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected))
     print(f"wrote {findings}")
     for line in where:
         print(f"rejected {line}")
@@ -7194,8 +7207,7 @@ def retro_admit(run):
     err = check_suggestions(cards, "retro")
     if err:
         fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
-    suggestions = folder / "suggestions.json"
-    suggestions.write_text(json.dumps(cards, indent=2) + "\n", encoding="utf-8")
+    write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
     suggest_admit(str(suggestions), "retro")
 
 

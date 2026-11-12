@@ -200,10 +200,11 @@ tag is the UTC time plus 6 random hex digits. It writes `digest.jsonl`, the rows
 and `aggregate.json`: token sums, context medians, error, denial and command
 patterns with counts and up to 5 `host/session` refs, and the registered
 projects. Every ad-hoc row's `project` becomes `ad-hoc` in both files, so neither
-names that work. Lines that are not digest rows count as `skipped`. It prints the
-run, the file paths, this host's transcripts root, and the `out` and `findings`
-paths for `/factory retro`. A window no host pushed exits 3 and writes nothing. A
-linked `retro` or run folder exits 2.
+names that work. Lines that are not digest rows count as `skipped`. So do rows
+whose `host` is not the host that pushed them or whose `session` is not a
+transcript id. It prints the run, the file paths, this host's transcripts root, and
+the `out` and `findings` paths for `/factory retro`. A window no host pushed exits
+3 and writes nothing. A linked `retro` or run folder exits 2.
 
 `retro admit <run>` checks the retro agent's `reply.json` in that folder against
 `factory.retro/1`. A bad reply, or one whose findings all fail, exits 2 with
@@ -213,8 +214,10 @@ exits 2 after `findings.md` is written, with no cards admitted. `{"none": true}`
 exits 3. It writes `findings.md`, ranked by count times cost per occurrence, then
 writes the reply's cards to `suggestions.json` and runs `suggest admit` on it (see
 [Retro cards](autonomy.md#retro-cards)). A missing run, reply or `aggregate.json`
-exits 4. Admitted cards go to the board like any card; the run folder's files stay
-on this host.
+exits 4. A linked `reply.json`, `aggregate.json`, `findings.md` or
+`suggestions.json` exits 2 with `is a link; nothing written`. A reply holding any
+`.env` value of 12 or more characters exits 2 with nothing written. Admitted cards
+go to the board like any card; the run folder's files stay on this host.
 
 ## Exit recovery
 
