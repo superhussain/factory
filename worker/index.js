@@ -4,7 +4,7 @@ import { authenticate } from "./access.ts";
 import {
   checkOperatorText,
   effectivePipeline,
-  STAGES,
+  RETRO_STAGES,
   hasReservedTag,
   HOST_NAME,
   validatePipeline,
@@ -743,7 +743,7 @@ function retroEditShape(body) {
     return "run: must be 1 to 64 of A-Z a-z 0-9 _ -";
   if (!Number.isInteger(body.base_version) || body.base_version < 0)
     return "base_version: must be a whole number";
-  if (!STAGES.includes(body.stage)) return `stage: must be one of ${STAGES.join(", ")}`;
+  if (!RETRO_STAGES.includes(body.stage)) return `stage: must be one of ${RETRO_STAGES.join(", ")}`;
   if (typeof body.note !== "string") return "note: must be text";
   if (typeof body.summary !== "string") return "summary: must be text";
   return null;

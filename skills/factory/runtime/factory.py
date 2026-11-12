@@ -204,7 +204,8 @@ IDEA = "idea"
 IN_FLIGHT = ("spec", "build", "review", "approve")
 # Pipeline stage notes reach agents only as wrapped data. The Worker admits them by the same
 # rules 1-5; checking again here means a note stored under older rules never reaches a role.
-PIPELINE_STAGES = ("spec", "build", "review", "approve")
+RETRO_STAGES = ("spec", "build", "review", "approve")
+PIPELINE_STAGES = RETRO_STAGES + ("babysit",)
 PIPELINE_GATES = ("spec-approval",)
 NOTE_INVISIBLE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f\xad\u115f\u1160\u180e\u200b-\u200f\u2028\u2029"
                             r"\u202a-\u202e\u2060-\u2064\u2066-\u2069\u3164\ufe00-\ufe0f\ufeff\uffa0"
@@ -7914,7 +7915,7 @@ def check_edit(e, agg):
     if not isinstance(e["scope"], str) or e["scope"] not in pipeline:
         return "scope", "must be a scope in aggregate.json"
     found = next(((where, err) for where, err in (
-        ("stage", None if e["stage"] in PIPELINE_STAGES else f"must be one of {', '.join(PIPELINE_STAGES)}"),
+        ("stage", None if e["stage"] in RETRO_STAGES else f"must be one of {', '.join(RETRO_STAGES)}"),
         ("note", check_text(e["note"], 1, 2000, multiline=True)),
         ("summary", check_text(e["summary"], 1, 120))) if err), None)
     if found:

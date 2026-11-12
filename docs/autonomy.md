@@ -208,6 +208,7 @@ A retro reply may carry up to 2 `edits`, each `{"scope", "stage", "note", "summa
 `{"schema": "factory.retro-edit/1", "run", "base_version", "stage", "note", "summary"}`.
 The Worker replaces only `stage_notes[stage]` and saves the next version with
 `saved_by: "retro"`, `summary`, `run` and `host`.
+Retro edits never change the Babysit note.
 
 | Gate | Refusal |
 | --- | --- |
