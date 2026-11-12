@@ -1400,7 +1400,7 @@ function card(j, inNeeds, archived = false) {
     (j.babysit?.at ? '<span class="chip" title="' + esc(prLink(j) ? 'An agent is fixing and merging PR #' + prLink(j).n : 'An agent is fixing and merging this PR') + '">Babysitting</span>' : '');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
-    '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span><span class="proj line" title="' + esc(projectName(j)) + '">' + esc(projectName(j)) + '</span></div>' +
+    '<div class="id line" title="' + esc(j.id) + '"><span class="proj line" title="' + esc(projectName(j)) + '">' + esc(projectName(j)) + '</span><span class="id-text">' + esc(j.id) + '</span></div>' +
     (tags ? '<div class="tags">' + tags + '</div>' : '') +
     '<div class="title">' + esc(j.title || j.id) + '</div>' +
     (j.stage === 'idea' && !j.project ? '<div class="idea-text">Assign a project before starting.</div>' : '') +
