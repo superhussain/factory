@@ -2,6 +2,8 @@
 // waiting line until a device saves the Tracer link, and only an http(s) link renders.
 // At idea the button also asks Tracer to gather, and the drawer shows the scope line.
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import {
@@ -19,6 +21,7 @@ const JOB = {
   stage: "build",
   updated: "2026-01-01T00:00:00Z",
 };
+const captureDir = process.env.FACTORY_CAPTURE_DIR;
 const WAITING = "Tracer: waiting for a device with tracer.json";
 const LINK = "https://tracer.example.invalid/#/f/factory-42";
 
@@ -401,6 +404,65 @@ test("Tracer off hides every Tracer control", { timeout: 120000 }, async () => {
       );
       await page.select("#pipeline-scope", "projects/sample");
       await page.waitForFunction(() => document.getElementById("pipeline-tracer").hidden);
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+test("Tracer controls wait for the setting and follow a change", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
+    await seedBoard(origin, [{ ...JOB, tracer: { building: true } }]);
+    const context = await browser.createBrowserContext();
+    try {
+      const page = await context.newPage();
+      await page.setViewport({ width: 1280, height: 900 });
+      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await page.setBypassServiceWorker(true);
+      await page.setRequestInterception(true);
+      // The live socket opens a second poll, and each poll starts its own read, so hold them all.
+      let holding = true;
+      const held = [];
+      page.on("request", (request) => {
+        if (holding && new URL(request.url()).pathname === "/api/pipeline/global") {
+          held.push(request);
+          return;
+        }
+        request.continue();
+      });
+      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      const card = await page.waitForSelector('.card[data-id="042-sample-export"]', {
+        polling: 50,
+        timeout: 10000,
+      });
+      if (captureDir) {
+        await mkdir(captureDir, { recursive: true });
+        await card.screenshot({ path: join(captureDir, "tracer-card-held.png") });
+      }
+      assert.equal(await page.$(".tracer-building"), null);
+      holding = false;
+      await Promise.all(held.map((request) => request.continue()));
+      await page.waitForSelector(".tracer-building", { polling: 50, timeout: 10000 });
+      await seedPipeline(origin, { schema: 1, tracer: { enabled: false } });
+      await page.evaluate("refreshBacklog()");
+      await page.waitForFunction(() => !document.querySelector(".tracer-building"), {
+        polling: 50,
+        timeout: 10000,
+      });
+      if (captureDir) {
+        const after = await page.$('.card[data-id="042-sample-export"]');
+        await after.screenshot({ path: join(captureDir, "tracer-card-off-after-refresh.png") });
+      }
       assert.deepEqual(errors, []);
     } finally {
       await context.close();

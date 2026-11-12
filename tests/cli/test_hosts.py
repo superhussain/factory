@@ -262,7 +262,7 @@ class PickupHeartbeatTest(HostFixture):
                     beat = self.pickup("--triage-now")
                 self.assertEqual(beat, plain)
                 self.assertEqual(beat[0], exit_code)
-                self.assertEqual(self.keys(server), ["GET /api/backlog", "GET /api/board", "GET /projects.json",
+                self.assertEqual(self.keys(server), ["GET /api/board", "GET /api/backlog", "GET /api/board", "GET /projects.json",
                                                      "GET /api/board", STATUS])
                 body = json.loads(server.requests[-1][3])
                 cache = json.loads((self.home / "host-status.json").read_text())

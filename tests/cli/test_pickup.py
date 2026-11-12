@@ -129,6 +129,8 @@ class PickupFixture(IsolatedTestCase):
             self.assertEqual((method, headers), ("PUT", {"If-Match": '"board"'}))
             self.board = json.loads(body)
             return 200, {}, ""
+        if path == "/api/pipeline/global":
+            return 200, {}, json.dumps({"schema": 1, "tracer": {"enabled": True}})
         if path == "/api/hosts":
             self.assertEqual((method, ok), ("GET", (200, 404)))
             if self.hosts is None:
@@ -260,7 +262,7 @@ class PickupTest(PickupFixture):
                               {"id": "003-empty", "stage": "idea", "project": ""},
                               {"id": "004-spec", "stage": "spec", "project": "alpha"}]
         self.assert_silent(self.pickup())
-        self.assertEqual(self.calls, [("GET", "/api/board")] * 2)
+        self.assertEqual(self.calls, [("GET", "/api/board")] * 4)
 
     def test_off_absent_or_other_host_is_silent(self):
         self.board["jobs"] = [idea("001-alpha", "alpha")]
@@ -273,7 +275,7 @@ class PickupTest(PickupFixture):
                 self.calls.clear()
                 self.views["alpha"] = (200, view)
                 self.assert_silent(self.pickup())
-                self.assertEqual(self.calls, [("GET", "/api/board"), ("GET", "/api/pipeline/effective/alpha")])
+                self.assertEqual(self.calls, [("GET", "/api/board")] * 2 + [("GET", "/api/pipeline/effective/alpha")])
 
     def test_skips_gated_unclaimable_and_no_checkout(self):
         self.views = {slug: (200, effective(slug, {"pickup": ON})) for slug in ("alpha", "missing", "gamma")}
@@ -290,7 +292,7 @@ class PickupTest(PickupFixture):
                 self.calls.clear()
                 self.board["jobs"] = [job]
                 self.assert_silent(self.pickup())
-                self.assertEqual(self.calls, [("GET", "/api/board")])
+                self.assertEqual(self.calls, [("GET", "/api/board")] * 2)
 
     def test_skips_tracer_building(self):
         self.views["alpha"] = (200, effective("alpha", {"pickup": ON}))
@@ -2177,7 +2179,7 @@ class DenyNotesTest(PickupFixture):
                 self.calls.clear()
                 self.board["jobs"] = [job]
                 self.assert_silent(self.pickup())
-                self.assertEqual(self.calls, [("GET", "/api/board")])
+                self.assertEqual(self.calls, [("GET", "/api/board")] * 2)
 
     def test_bad_notes_skip_in_dry_run(self):
         for field, text, reason in (
@@ -2199,7 +2201,7 @@ class DenyNotesTest(PickupFixture):
                        f"host {DEVICE}: would launch 0\n", ""))
                 self.calls.clear()
                 self.assert_silent(self.pickup())
-                self.assertEqual(self.calls, [("GET", "/api/board")])
+                self.assertEqual(self.calls, [("GET", "/api/board")] * 2)
                 if field == "line":
                     self.assertEqual(invoke(factory, ["deny-notes", "007-csv-export"]), (
                         5, "", f"factory.py: deny notes on 007-csv-export {reason}; they stay unread\n"))
