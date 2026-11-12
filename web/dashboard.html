@@ -5960,6 +5960,7 @@ function renderJobActionResults() {
   const A = actions.length, L = links.length;
   $('job-count').textContent = A + (A === 1 ? ' action' : ' actions') + (L ? ' · ' + L + (L === 1 ? ' link' : ' links') : '');
   $('job-search-label').textContent = linkRows.length ? 'Search actions and links' : 'Search actions';
+  $('job-results').setAttribute('aria-label', linkRows.length ? 'Actions and links' : 'Actions');
   $('job-empty').textContent = !j ? 'This job is no longer on the board' : linkRows.length ? 'No matching actions or links' : 'No matching actions';
   $('job-empty').hidden = jobResults.length !== 0;
   renderPickerRows();

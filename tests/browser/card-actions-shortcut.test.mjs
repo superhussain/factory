@@ -79,6 +79,7 @@ const picker = (page) =>
     open: document.getElementById("job-picker").open,
     heading: document.getElementById("job-picker-heading").textContent,
     label: document.getElementById("job-search-label").textContent,
+    list: document.getElementById("job-results").getAttribute("aria-label"),
     count: document.getElementById("job-count").textContent,
     options: [...document.querySelectorAll('#job-results [role="option"] .title')].map(
       (el) => el.textContent,
@@ -119,6 +120,7 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
       const state = await picker(page);
       assert.equal(state.heading, `Actions for ${ID}`);
       assert.equal(state.label, "Search actions and links");
+      assert.equal(state.list, "Actions and links");
       assert.deepEqual(state.options, [
         ...labels,
         "Open PR #46",
@@ -154,7 +156,9 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
       await page.focus(CARD(IDEA));
       await page.keyboard.press("a");
       await page.waitForFunction(() => document.getElementById("job-picker").open);
-      assert.equal((await picker(page)).heading, `Actions for ${IDEA}`);
+      const idea = await picker(page);
+      assert.equal(idea.heading, `Actions for ${IDEA}`);
+      assert.equal(idea.list, "Actions");
       await page.keyboard.press("Escape");
       await page.waitForFunction(() => !document.getElementById("job-picker").open);
       assert.equal(await focused(page, IDEA), true);
