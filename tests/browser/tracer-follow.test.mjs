@@ -459,6 +459,10 @@ test("Tracer controls wait for the setting and follow a change", { timeout: 1200
         polling: 50,
         timeout: 10000,
       });
+      if (captureDir) {
+        const after = await page.$('.card[data-id="042-sample-export"]');
+        await after.screenshot({ path: join(captureDir, "tracer-card-off-after-refresh.png") });
+      }
       assert.deepEqual(errors, []);
     } finally {
       await context.close();
