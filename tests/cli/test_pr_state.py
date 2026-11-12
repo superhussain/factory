@@ -9,14 +9,15 @@ factory = load_runtime()
 JOB = "042-sample-export"
 PR = "https://github.com/example/sample/pull/44"
 HEAD = "2026-01-02T10:00:00Z"
+PARENT = "factory/041-sample-api"
 
 
 def review(state, at="2026-01-02T11:00:00Z", login="reviewer-a", association="MEMBER"):
     return {"author": {"login": login}, "authorAssociation": association, "state": state, "submittedAt": at}
 
 
-def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", auto=None, rollup=()):
-    return 0, json.dumps({"state": state, "reviewDecision": decision, "latestReviews": list(reviews),
+def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", auto=None, rollup=(), base="main"):
+    return 0, json.dumps({"state": state, "baseRefName": base, "reviewDecision": decision, "latestReviews": list(reviews),
                           "mergeStateStatus": merge, "autoMergeRequest": auto, "author": {"login": "pr-owner"},
                           "statusCheckRollup": list(rollup),
                           "commits": [{"committedDate": "2026-01-01T09:00:00Z"}, {"committedDate": HEAD}]})
@@ -68,8 +69,9 @@ class PrStateTest(IsolatedTestCase):
         code, out, err, calls = self.state([(view(), checks("pass", "skipping"))])
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(json.loads(out), {"pr": 44, "state": "open", "review": "approved", "checks": "pass",
-                                           "queued": False, "conflict": False, "next": "merge"})
+                                           "queued": False, "conflict": False, "stacked": False, "next": "merge"})
         self.assertEqual(calls[0][:3], ("view", PR, "--json"))
+        self.assertIn("baseRefName", calls[0][3])
         self.assertNotIn("isInMergeQueue", calls[0][3])
         self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket"))
         self.assertEqual(calls[2][0], "graphql")
@@ -162,6 +164,21 @@ class PrStateTest(IsolatedTestCase):
         code, out, err, calls = self.state([pending, pending, (view(), checks("pass"))], "--wait", "540")
         self.assertEqual((code, err, json.loads(out)["next"]), (0, "", "merge"))
         self.assertEqual(out.count("\n"), 1)
+        self.assertEqual(self.now, 60)
+        self.assertEqual(sum(c[0] == "view" for c in calls), 3)
+
+    def test_a_stacked_pr_waits_for_its_parent(self):
+        code, out, err, _ = self.state([(view(base=PARENT), checks("pass"))])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((json.loads(out)["stacked"], json.loads(out)["next"]), (True, "wait-base"))
+        self.assertEqual(self.next_of((view(base=PARENT), checks("fail"))), "fix-ci")
+        self.assertEqual(self.next_of((view(base=PARENT, merge="DIRTY"), checks("pass"))), "rebase")
+
+    def test_wait_rereads_a_stacked_pr_until_it_is_retargeted(self):
+        stacked = (view(base=PARENT), checks("pass"))
+        code, out, err, calls = self.state([stacked, stacked, (view(), checks("pass"))], "--wait", "540")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((json.loads(out)["stacked"], json.loads(out)["next"]), (False, "merge"))
         self.assertEqual(self.now, 60)
         self.assertEqual(sum(c[0] == "view" for c in calls), 3)
 
