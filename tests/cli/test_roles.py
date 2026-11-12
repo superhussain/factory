@@ -289,14 +289,30 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("| `/factory retro [--days N]` | [retro](references/commands/retro.md) |",
                       (SKILL / "SKILL.md").read_text(encoding="utf-8"))
 
+    def test_retro_schedule(self):
+        schedule = (SKILL / "schedules/retro.md").read_text(encoding="utf-8")
+        for value in ("<installed-skill>", "<python-launcher>", "retro: autonomy paused", "no claude route",
+                      "byte for byte"):
+            self.assertIn(value, schedule)
+        steps = ("routes pick", "autonomy status", "retro push", "retro aggregate --days 3", "factory-retro",
+                 "retro admit <run>")
+        positions = [schedule.index(step) for step in steps]
+        self.assertEqual(positions, sorted(positions))
+        for banned in ("autonomy pause", "autonomy resume", "autonomy allow", "autonomy deny", "autonomy self"):
+            self.assertNotIn(banned, schedule)
+        approve = [line for line in schedule.splitlines() if "suggest approve" in line]
+        self.assertEqual(len(approve), 1)
+        self.assertTrue(approve[0].startswith("Never "))
+
     def test_unattended_standing_instruction(self):
         line = self.runtime.UNATTENDED
         self.assertNotIn("\n", line)
         text = {name: (SKILL / name).read_text(encoding="utf-8") for name in
-                ("SKILL.md", "references/pickup.md", "schedules/resume.md", "schedules/explore.md")}
+                ("SKILL.md", "references/pickup.md", "schedules/resume.md", "schedules/explore.md",
+                 "schedules/retro.md")}
         self.assertIn(line, text["references/pickup.md"])
         self.assertIn(line, (ROOT / "web/dashboard.html").read_text(encoding="utf-8"))
-        for name in ("schedules/resume.md", "schedules/explore.md"):
+        for name in ("schedules/resume.md", "schedules/explore.md", "schedules/retro.md"):
             self.assertEqual(text[name].rstrip().splitlines()[-1], line, name)
         skill = " ".join(text["SKILL.md"].split())
         self.assertIn("is a report, not the end of the run", skill)
