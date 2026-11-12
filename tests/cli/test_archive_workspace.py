@@ -59,6 +59,9 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
         fake = self.bin / "paseo"
         fake.write_text(f"#!{sys.executable}\n" + FAKE_PASEO, encoding="utf-8")
         fake.chmod(0o755)
+        decoy = self.bin / "python3"
+        decoy.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+        decoy.chmod(0o755)
         self.paseo_home = self.root / "paseo-home"
         self.paseo_home.mkdir()
         (self.paseo_home / "server-id").write_text("srv_1\n")
