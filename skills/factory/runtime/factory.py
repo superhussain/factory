@@ -5149,7 +5149,8 @@ def checks_cmd(target, *args):
 
 
 PR_STATE_USAGE = "usage: pr-state <project-slug>/<job-id> [--wait S]"
-PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits"
+PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup"
+PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has no isInMergeQueue field, so it comes from GraphQL.
 PR_QUEUE_QUERY = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isInMergeQueue}}}"
 PR_STATE_INTERVAL = 30
@@ -5163,15 +5164,30 @@ def pr_reading(pr):
         view = None
     if not isinstance(view, dict):
         fail("gh pr view printed no JSON object", 5)
-    buckets = {c["bucket"] for c in pr_checks(pr)}
+    listed = pr_checks(pr)
+    if view.get("statusCheckRollup") and not listed:
+        fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5)
+    buckets = {c["bucket"] for c in listed}
     checks = "fail" if buckets & {"fail", "cancel"} else "pending" if "pending" in buckets \
         else "pass" if buckets else "none"
     commits = view.get("commits") or [{}]
     head = str(commits[-1].get("committedDate") or "") if isinstance(commits[-1], dict) else ""
-    human = [r for r in view.get("latestReviews") or [] if isinstance(r, dict)
-             and not str((r.get("author") or {}).get("login") or "").endswith("[bot]")]
-    unanswered = any(r.get("state") in ("CHANGES_REQUESTED", "COMMENTED") and str(r.get("submittedAt") or "") > head
-                     for r in human)
+    try:
+        new = time.time() - datetime.strptime(head, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp() \
+            < CHECKS_REGISTER
+    except ValueError:
+        new = False
+
+    def login(item):
+        return str((item.get("author") or {}).get("login") or "")
+
+    author = login(view)
+    reviews = [r for r in view.get("latestReviews") or [] if isinstance(r, dict)]
+    replied = max([head] + [str(r.get("submittedAt") or "") for r in reviews if login(r) == author])
+    human = [r for r in reviews if r.get("authorAssociation") in PR_REVIEWERS
+             and login(r) != author and not login(r).endswith("[bot]")]
+    unanswered = any(r.get("state") in ("CHANGES_REQUESTED", "COMMENTED")
+                     and str(r.get("submittedAt") or "") > replied for r in human)
     decision = view.get("reviewDecision") or ""
     approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
     state = str(view.get("state") or "").lower()
@@ -5191,7 +5207,7 @@ def pr_reading(pr):
         step = "rebase"
     elif checks == "fail":
         step = "fix-ci"
-    elif checks == "pending" or queued:
+    elif checks == "pending" or queued or (checks == "none" and new):
         step = "wait"
     else:
         step = "merge"

@@ -11,13 +11,14 @@ PR = "https://github.com/example/sample/pull/44"
 HEAD = "2026-01-02T10:00:00Z"
 
 
-def review(state, at="2026-01-02T11:00:00Z", login="reviewer-a"):
-    return {"author": {"login": login}, "state": state, "submittedAt": at}
+def review(state, at="2026-01-02T11:00:00Z", login="reviewer-a", association="MEMBER"):
+    return {"author": {"login": login}, "authorAssociation": association, "state": state, "submittedAt": at}
 
 
-def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", auto=None):
+def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", auto=None, rollup=()):
     return 0, json.dumps({"state": state, "reviewDecision": decision, "latestReviews": list(reviews),
-                          "mergeStateStatus": merge, "autoMergeRequest": auto,
+                          "mergeStateStatus": merge, "autoMergeRequest": auto, "author": {"login": "pr-owner"},
+                          "statusCheckRollup": list(rollup),
                           "commits": [{"committedDate": "2026-01-01T09:00:00Z"}, {"committedDate": HEAD}]})
 
 
@@ -116,11 +117,45 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual(self.next_of((view(), checks("pass"), (0, "true\n"))), "wait")
         self.assertEqual(self.next_of((view(auto={"enabledAt": HEAD}), checks("pass"))), "wait")
 
-    def test_unreadable_checks_read_as_none(self):
+    def test_unreadable_checks_read_as_none_when_the_pr_lists_none(self):
         for listing in ((1, ""), ("timeout", ""), (0, "not json"), (0, '[{"name": "x"}]')):
             with self.subTest(listing):
                 code, out, _, _ = self.state([(view(), listing)])
                 self.assertEqual((code, json.loads(out)["checks"], json.loads(out)["next"]), (0, "none", "merge"))
+
+    def test_unreadable_checks_exit_5_when_the_pr_lists_some(self):
+        for listing in ((1, ""), ("timeout", ""), (0, "not json")):
+            with self.subTest(listing):
+                code, out, err, _ = self.state([(view(rollup=[{"name": "ci"}]), listing)])
+                self.assertEqual((code, out), (5, ""))
+                self.assertIn("gh pr checks", err)
+
+    def test_no_checks_waits_while_the_head_commit_is_new(self):
+        head = factory.datetime(2026, 1, 2, 10, tzinfo=factory.timezone.utc).timestamp()
+        for age, step in ((60, "wait"), (120, "merge")):
+            with self.subTest(age), patch.object(factory.time, "time", lambda: head + age):
+                self.assertEqual(self.next_of((view(), checks())), step)
+
+    def test_only_owner_member_and_collaborator_reviews_count(self):
+        for association in ("CONTRIBUTOR", "NONE", "FIRST_TIME_CONTRIBUTOR"):
+            with self.subTest(association):
+                approve = review("APPROVED", association=association)
+                comment = review("COMMENTED", login="reviewer-b", association=association)
+                self.assertEqual(self.next_of((view(decision="", reviews=[approve]), checks("pass"))),
+                                 "needs-review")
+                self.assertEqual(self.next_of((view(reviews=[comment]), checks("pass"))), "merge")
+        for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+            with self.subTest(association):
+                approve = review("APPROVED", association=association)
+                self.assertEqual(self.next_of((view(decision="", reviews=[approve]), checks("pass"))), "merge")
+
+    def test_a_reply_from_the_pr_author_answers_earlier_reviews(self):
+        comment = review("COMMENTED")
+        reply = review("COMMENTED", at="2026-01-02T12:00:00Z", login="pr-owner", association="OWNER")
+        self.assertEqual(self.next_of((view(reviews=[comment, reply]), checks("pass"))), "merge")
+        self.assertEqual(self.next_of((view(reviews=[reply]), checks("pass"))), "merge")
+        later = review("COMMENTED", at="2026-01-02T13:00:00Z", login="reviewer-b")
+        self.assertEqual(self.next_of((view(reviews=[comment, reply, later]), checks("pass"))), "fix-reviews")
 
     def test_wait_rereads_every_30_seconds_until_next_changes(self):
         pending = (view(), checks("pending"))
