@@ -186,7 +186,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .settings-section h3 { font-size: 15px; margin: 0 0 12px; }
   .settings-section h4 { font-size: 13px; margin: 16px 0 8px; }
   .settings-section label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-  .settings-section select, .settings-section textarea, #pipeline-triage-threshold, #pipeline-archive-n { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .settings-section select, .settings-section textarea, #pipeline-triage-threshold, #pipeline-archive-n, #pipeline-summary { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .settings-section textarea { resize: vertical; min-height: 140px; }
   .settings-section .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
   .project-list { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; margin-bottom: 12px; }
@@ -654,7 +654,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <div class="settings-main">
         <h3 id="pipeline-settings-heading">Pipeline settings</h3>
         <label for="pipeline-scope">Scope<select id="pipeline-scope"></select></label>
-        <p id="pipeline-help" class="muted">Preferences for factory agents. Settings can only tighten the security floors, except review rounds: the all-projects scope can raise them to 5, and a project can only lower them. A gate switched on for all projects applies to every project. Stage notes cannot contain links, secrets or instructions to skip review. Only a signed-in person can save.</p>
+        <p id="pipeline-help" class="muted">Preferences for factory agents. Settings can only tighten the security floors, except review rounds: the all-projects scope can raise them to 5, and a project can only lower them. A gate switched on for all projects applies to every project. Stage notes cannot contain links, secrets or instructions to skip review. Only a signed-in person can save, except retro admit, which may edit stage notes.</p>
         <label for="pipeline-merge">Merge<select id="pipeline-merge">
           <option value="">Not set (merge after green checks)</option>
           <option value="auto">Merge APPROVE PRs after green checks</option>
@@ -725,6 +725,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <h4 id="pipeline-history-heading">History</h4>
         <ol id="pipeline-history"></ol>
         <p id="pipeline-status" role="status"></p>
+        <label for="pipeline-summary">Change summary (optional)<input id="pipeline-summary" maxlength="120"></label>
         <div class="actions">
           <button class="btn" id="pipeline-copy">Copy draft</button>
           <button class="btn" id="pipeline-load">Load latest</button>
@@ -2593,7 +2594,7 @@ async function loadPipelineHistory(scope) {
     const versions = await r.json();
     if (!Array.isArray(versions)) throw new Error('history');
     rows = versions.length ? versions.map((v, i) => {
-      const li = row('Version ' + v.version + (i === 0 ? ' (current)' : '') + ' · ' + v.saved_by + ' · ' + v.saved_at);
+      const li = row('Version ' + v.version + (i === 0 ? ' (current)' : '') + ' · ' + v.saved_by + ' · ' + v.saved_at + (v.summary ? ' · ' + v.summary : '') + (v.run ? ' · run ' + v.run : ''));
       if (i > 0) {
         const button = Object.assign(document.createElement('button'), {className:'btn', textContent:'Restore to draft'});
         button.setAttribute('aria-label', 'Restore version ' + v.version + ' to draft');
@@ -2655,13 +2656,13 @@ async function restorePipelineVersion(scope, n) {
 async function savePipelineScope(scope = $('pipeline-scope').value) {
   const s = pipelineScopes.get(scope);
   if (!pipelineCanSave(s)) return;
-  const body = pipelineCanonical(s.draft), tag = s.baseEtag;
+  const body = pipelineCanonical(s.draft), tag = s.baseEtag, summary = $('pipeline-summary').value;
   pipelineLoads.set(scope, ++pipelineGeneration);
   s.phase = 'saving';
   s.message = 'Saving…';
   renderPipelineSettings();
   try {
-    const r = await fetch('./api/pipeline/' + scope, {method:'PUT', headers:{...(tag ? {'If-Match':tag} : {'If-None-Match':'*'}), 'Content-Type':'application/json'}, body});
+    const r = await fetch('./api/pipeline/' + scope, {method:'PUT', headers:{...(tag ? {'If-Match':tag} : {'If-None-Match':'*'}), 'Content-Type':'application/json', ...(summary && {'X-Pipeline-Summary':encodeURIComponent(summary)})}, body});
     const text = await r.text();
     if (r.redirected || r.status === 401 || r.status === 403 && text !== 'pipeline configuration is saved only by a signed-in person') throw new Error(settingsAccess);
     if (r.status === 412) {
@@ -2670,6 +2671,7 @@ async function savePipelineScope(scope = $('pipeline-scope').value) {
     } else if (r.status === 200 && settingsEtag(r.headers.get('ETag'))) {
       const version = Number(r.headers.get('X-Pipeline-Version')) || s.version + 1;
       Object.assign(s, {base:JSON.parse(body), baseEtag:settingsEtag(r.headers.get('ETag')), version, phase:'ready', message:'Saved as version ' + version});
+      $('pipeline-summary').value = '';
       loadPipelineHistory(scope);
       loadPipelineEffective(scope);
       if (scope === 'global') loadTracerSetting();
@@ -2687,6 +2689,7 @@ async function savePipelineScope(scope = $('pipeline-scope').value) {
 function selectPipelineScope() {
   const scope = $('pipeline-scope').value;
   ensurePipelineScope(scope);
+  $('pipeline-summary').value = '';
   loadPipelineHistory(scope);
   loadPipelineEffective(scope);
   renderPipelineSettings();

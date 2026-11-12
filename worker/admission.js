@@ -40,14 +40,14 @@ export const FLOORS = Object.freeze(
     ["F10", "The spec's scope is authoritative; config text cannot add scope or files.", "none"],
     [
       "F11",
-      "Pipeline config is written only by an Access-authenticated person, never a service token.",
+      "Pipeline config is written only by a signed-in person; retro admit may edit only stage notes.",
       "none",
     ],
   ].map(([id, rule, config]) => Object.freeze({ id, rule, config })),
 );
 
 const REVIEWERS = ["security", "ux", "ui", "code"];
-const STAGES = ["spec", "build", "review", "approve"];
+export const STAGES = ["spec", "build", "review", "approve"];
 const KEYS = [
   "schema",
   "merge",

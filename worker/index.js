@@ -4,6 +4,7 @@ import { authenticate } from "./access.ts";
 import {
   checkOperatorText,
   effectivePipeline,
+  STAGES,
   hasReservedTag,
   HOST_NAME,
   validatePipeline,
@@ -434,11 +435,20 @@ async function projectDocumentPut(request, env, key) {
 const pipelineKey = (scope) => `pipeline/${scope}.json`;
 const pipelineHistoryKey = (scope, version) =>
   `pipeline-history/${scope}/${String(version).padStart(6, "0")}.json`;
+const SUMMARY_MAX = 120;
 const pipelineVersion = (obj) => Number.parseInt(obj?.customMetadata?.version, 10) || 0;
 const sha256 = async (bytes) =>
   Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (x) =>
     x.toString(16).padStart(2, "0"),
   ).join("");
+
+// A history summary: one line of 1 to SUMMARY_MAX characters that passes the note checks.
+function checkSummary(text) {
+  const length = typeof text === "string" ? [...text].length : 0;
+  if (!length || length > SUMMARY_MAX || text.includes("\n") || text.includes("\r"))
+    return `summary: must be one line of 1 to ${SUMMARY_MAX} characters`;
+  return checkOperatorText(text, "summary");
+}
 
 function pipelineReply(obj, version) {
   return reply(obj.body, 200, "application/json", {
@@ -479,10 +489,24 @@ async function pipelinePut(request, env, principal, scope) {
   for (const key of ["archive", "tracer"])
     if (scope !== "global" && key in doc)
       return reply(`${key}: set only in the all-projects scope`, 400);
-  const key = pipelineKey(scope);
-  const current = await env.BUCKET.head(key);
+  let summary = request.headers.get("X-Pipeline-Summary") || "";
+  try {
+    summary = decodeURIComponent(summary);
+  } catch {
+    return reply("summary: must be percent-encoded UTF-8", 400);
+  }
+  const summaryError = summary && checkSummary(summary);
+  if (summaryError) return reply(summaryError, 400);
+  const current = await env.BUCKET.head(pipelineKey(scope));
   if (cond.has("If-Match") ? current?.httpEtag !== cond.get("If-Match") : current)
     return reply("precondition failed", 412);
+  return pipelineStore(env, scope, bytes, current, cond, { saved_by: principal.email, summary });
+}
+
+// Writes bytes as the next version of scope, conditional on cond, and copies it create-only
+// under pipeline-history/. meta is {saved_by, summary, run?, host?}; empty values are left out.
+async function pipelineStore(env, scope, bytes, current, cond, meta) {
+  const key = pipelineKey(scope);
   const cur = pipelineVersion(current);
   // Heal a history copy an earlier save failed to write, before this save replaces it.
   if (cur > 0 && !(await env.BUCKET.head(pipelineHistoryKey(scope, cur)))) {
@@ -503,9 +527,9 @@ async function pipelinePut(request, env, principal, scope) {
     httpMetadata: { contentType: "application/json" },
     customMetadata: {
       version: String(cur + 1),
-      saved_by: principal.email,
       saved_at: new Date().toISOString(),
       sha256: await sha256(bytes),
+      ...Object.fromEntries(Object.entries(meta).filter(([, value]) => value)),
     },
   };
   const obj = await env.BUCKET.put(key, bytes, { ...options, onlyIf: cond });
@@ -535,13 +559,20 @@ async function pipelineGet(env, scope) {
 
 // Every version, newest first: the history copies plus the current object, whose own
 // history copy may still be missing.
-async function pipelineHistory(env, scope, principal) {
+async function pipelineVersions(env, scope) {
   const versions = new Map();
   const add = (obj, copy) => {
-    const { version, saved_by, saved_at, sha256 } = obj.customMetadata;
-    const entry = { version: Number(version), saved_by, saved_at, sha256, history_copy: copy };
-    if (principal.kind !== "user") delete entry.saved_by;
-    versions.set(entry.version, entry);
+    const { version, saved_by, saved_at, sha256, summary = "", run, host } = obj.customMetadata;
+    versions.set(Number(version), {
+      version: Number(version),
+      saved_by,
+      saved_at,
+      sha256,
+      summary,
+      ...(run && { run }),
+      ...(host && { host }),
+      history_copy: copy,
+    });
   };
   let cursor;
   do {
@@ -555,11 +586,136 @@ async function pipelineHistory(env, scope, principal) {
   } while (cursor);
   const current = await env.BUCKET.head(pipelineKey(scope));
   if (current && !versions.has(pipelineVersion(current))) add(current, false);
-  return reply(
-    JSON.stringify([...versions.values()].sort((a, b) => b.version - a.version)),
-    200,
-    "application/json",
+  return [...versions.values()].sort((a, b) => b.version - a.version);
+}
+
+async function pipelineHistory(env, scope, principal) {
+  const versions = await pipelineVersions(env, scope);
+  if (principal.kind !== "user") for (const entry of versions) delete entry.saved_by;
+  return reply(JSON.stringify(versions), 200, "application/json");
+}
+
+// The code points changed between a and b once their shared prefix and suffix are trimmed:
+// the removed ones plus the added ones.
+function changedChars(a, b) {
+  const x = [...a],
+    y = [...b];
+  let start = 0;
+  while (start < x.length && start < y.length && x[start] === y[start]) start++;
+  let end = 0;
+  while (
+    end < x.length - start &&
+    end < y.length - start &&
+    x[x.length - 1 - end] === y[y.length - 1 - end]
+  )
+    end++;
+  return x.length - start - end + (y.length - start - end);
+}
+
+// factory.py's MAX_EXPLORER_PROJECTS: a longer allowlist makes the autonomy record malformed.
+const MAX_EXPLORER_PROJECTS = 1;
+const RETRO_EDIT_CHANGE = 600;
+const RETRO_EDITS_PER_DAY = 2;
+const RETRO_EDIT_KEYS = ["schema", "run", "base_version", "stage", "note", "summary"];
+const RETRO_EDIT_HOST = "retro edits come only from a bound host";
+const RETRO_EDIT_SCOPE = "retro edits only allowlisted project scopes; global is person-only";
+const RUN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+
+// The board's autonomy record as { running, projects }. running needs a well-formed record
+// with paused set to false; a missing or malformed record counts as paused, as in factory.py.
+// projects is the allowlist when it is a well-formed list, else empty.
+async function boardAutonomy(env) {
+  const object = await env.BUCKET.get("board.json");
+  let autonomy;
+  try {
+    autonomy = object && JSON.parse(await object.text()).autonomy;
+  } catch {
+    autonomy = undefined;
+  }
+  if (typeof autonomy !== "object" || autonomy === null || Array.isArray(autonomy))
+    return { running: false, projects: [] };
+  const names = (list) =>
+    list === undefined || (Array.isArray(list) && list.every((v) => typeof v === "string"));
+  const listed =
+    names(autonomy.projects) && (autonomy.projects?.length ?? 0) <= MAX_EXPLORER_PROJECTS;
+  return {
+    running: autonomy.paused === false && listed && names(autonomy.self),
+    projects: listed ? (autonomy.projects ?? []) : [],
+  };
+}
+
+// The shape error in a factory.retro-edit/1 body, or null. Text rules run later, after the caps.
+function retroEditShape(body) {
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    Array.isArray(body) ||
+    Object.keys(body).length !== RETRO_EDIT_KEYS.length ||
+    !RETRO_EDIT_KEYS.every((key) => key in body)
+  )
+    return `body: needs keys ${RETRO_EDIT_KEYS.join(", ")}`;
+  if (body.schema !== "factory.retro-edit/1") return "schema: must be factory.retro-edit/1";
+  const run = body.run;
+  if (
+    typeof run !== "string" ||
+    run.length < 1 ||
+    run.length > 64 ||
+    [...run].some((c) => !RUN_CHARS.includes(c))
+  )
+    return "run: must be 1 to 64 of A-Z a-z 0-9 _ -";
+  if (!Number.isInteger(body.base_version) || body.base_version < 0)
+    return "base_version: must be a whole number";
+  if (!STAGES.includes(body.stage)) return `stage: must be one of ${STAGES.join(", ")}`;
+  if (typeof body.note !== "string") return "note: must be text";
+  if (typeof body.summary !== "string") return "summary: must be text";
+  return null;
+}
+
+// retro admit's one write: a bound host replaces one stage note, against the version it read,
+// while autonomy runs, within the size and daily caps. Saved as a "retro" version a person
+// can restore from history.
+async function pipelineRetroPut(request, env, principal, scope) {
+  const host = await boundHost(env, principal);
+  if (!host) return reply(RETRO_EDIT_HOST, 403);
+  const autonomy = await boardAutonomy(env);
+  if (scope === "global" || !autonomy.projects.includes(scope.slice("projects/".length)))
+    return reply(RETRO_EDIT_SCOPE, 403);
+  if (!autonomy.running) return reply("autonomy is paused; no retro edit", 409);
+  const body = await readJson(request);
+  if (body instanceof Response) return body;
+  const shape = retroEditShape(body);
+  if (shape) return reply(shape, 400);
+  const current = await env.BUCKET.get(pipelineKey(scope));
+  if (body.base_version !== pipelineVersion(current)) return reply("precondition failed", 412);
+  let doc = { schema: 1 };
+  if (current) {
+    try {
+      doc = JSON.parse(await current.text());
+    } catch {
+      doc = undefined;
+    }
+    if (validatePipeline(doc)) return reply(PIPELINE_INVALID, 409);
+  }
+  if (changedChars(doc.stage_notes?.[body.stage] ?? "", body.note) > RETRO_EDIT_CHANGE)
+    return reply(`retro edit changes more than ${RETRO_EDIT_CHANGE} characters`, 413);
+  const since = Date.now() - DAY_MS;
+  const recent = (await pipelineVersions(env, scope)).filter(
+    (v) => v.saved_by === "retro" && Date.parse(v.saved_at) > since,
   );
+  if (recent.length >= RETRO_EDITS_PER_DAY)
+    return reply(`retro edit cap: ${RETRO_EDITS_PER_DAY} per scope per day`, 429);
+  const error = checkOperatorText(body.note, "note") ?? checkSummary(body.summary);
+  if (error) return reply(error, 400);
+  const next = { ...doc, stage_notes: { ...doc.stage_notes, [body.stage]: body.note } };
+  const invalid = validatePipeline(next);
+  if (invalid) return reply(invalid, 400);
+  const cond = new Headers(current ? { "If-Match": current.httpEtag } : { "If-None-Match": "*" });
+  return pipelineStore(env, scope, new TextEncoder().encode(JSON.stringify(next)), current, cond, {
+    saved_by: "retro",
+    summary: body.summary,
+    run: body.run,
+    host: host.id,
+  });
 }
 
 async function pipelineHistoryVersion(env, scope, version) {
@@ -1084,13 +1240,22 @@ async function hostStatusPut(request, env, principal, id) {
   return reply("ok");
 }
 
+// The paired or active host record bound to a service principal's token, or null.
+async function boundHost(env, principal) {
+  if (principal.kind !== "service" || !principal.client_id) return null;
+  const records = await hostRecords(env);
+  return (
+    records
+      .map((r) => r.host)
+      .find(
+        (h) => h.token === principal.client_id && (h.state === "paired" || h.state === "active"),
+      ) ?? null
+  );
+}
+
 // A re-push replaces the host's file for that day. Every line is a JSON object naming the host.
 async function retroPut(request, env, principal, id, date) {
-  if (principal.kind !== "service" || !principal.client_id) return reply(RETRO_WRITE_ONLY, 403);
-  const obj = await env.BUCKET.get(hostKey(id));
-  const host = obj && JSON.parse(await obj.text());
-  if (host?.token !== principal.client_id || (host.state !== "paired" && host.state !== "active"))
-    return reply(RETRO_WRITE_ONLY, 403);
+  if ((await boundHost(env, principal))?.id !== id) return reply(RETRO_WRITE_ONLY, 403);
   if (!retroDateNear(date, Date.now())) return reply(RETRO_DATE_WINDOW, 400);
   const bytes = await readCapped(request, MAX_BODY);
   if (bytes === null) return reply("body over 1 MiB", 413);
@@ -1330,6 +1495,12 @@ async function ideaImagePut(request, env, name) {
 
 async function api(request, env, path, principal) {
   const method = request.method;
+  if (path.startsWith("/api/pipeline/retro/")) {
+    const p = ("/api/pipeline/" + path.slice("/api/pipeline/retro/".length)).match(PIPELINE);
+    if (!p || method !== "PUT") return notFound();
+    if (p[2] !== undefined && !(await env.BUCKET.head(`projects/${p[2]}.md`))) return notFound();
+    return pipelineRetroPut(request, env, principal, p[1]);
+  }
   const p = path.match(PIPELINE) || path.match(PIPELINE_HISTORY) || path.match(PIPELINE_EFFECTIVE);
   if (p) {
     const history = PIPELINE_HISTORY.test(path),

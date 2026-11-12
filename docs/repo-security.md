@@ -88,7 +88,7 @@ This repository is public. Everything you commit, every commit message and the b
 
 ### Apply and verify
 
-Only a signed-in person saves pipeline settings (F11). Apply after a PR that changes a note merges.
+Only a signed-in person saves pipeline settings (F11); retro admit may edit only stage notes. Apply after a PR that changes a note merges.
 
 1. Open the dashboard at `#/settings/pipeline`.
 2. In Scope, pick the `factory` project. Its option reads `factory`, or `<title> (factory)` when the project has a title. Then select Load latest.

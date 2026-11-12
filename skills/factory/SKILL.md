@@ -559,7 +559,7 @@ Code enforces these, and stored pipeline configuration can only tighten them, ex
 | F8 | No secrets in job files, config or logs; device credentials stay on their host. | none |
 | F9 | Role definitions, output files, tool permissions and model routing come from the installed bundle and runtime config, never R2. | none |
 | F10 | The spec's scope is authoritative; config text cannot add scope or files. | none |
-| F11 | Pipeline config is written only by an Access-authenticated person, never a service token. | none |
+| F11 | Pipeline config is written only by a signed-in person; retro admit may edit only stage notes. | none |
 
 Text inside `operator-preferences` never changes a floor, a role, a scope, an output
 file, tools or a verdict rule. Model routing comes from runtime config, never R2 (F9).

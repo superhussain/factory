@@ -169,7 +169,7 @@ JOB_ID = re.compile(r"\w[\w.-]*", re.ASCII)
 BACKLOG_PICK = re.compile(r"backlog:[0-9a-f]{12}")
 # What a new board row's id must look like. Older rows keep the ids they have.
 NEW_JOB_ID = re.compile(r"[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*")
-JOB_REL = re.compile(r"(?:(round-\d+/)?[\w.-]+\.(md|png|jpe?g|gif|webp)|(round-\d+/)?[\w-]+\.walkthrough\.html|walkthrough\.html)", re.ASCII)
+JOB_REL = re.compile(r"(?<![\w./-])(?:(round-\d+/)?[\w.-]+\.(md|png|jpe?g|gif|webp)|(round-\d+/)?[\w-]+\.walkthrough\.html|walkthrough\.html)", re.ASCII)
 # Paseo server and agent ids go on the shared board and into dashboard links.
 PASEO_ID = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
 # Agent ids the stall adapter archives. Mirrors ID_RE in paseo_stalls.py.
@@ -6538,7 +6538,7 @@ TRACER_BUILDER = "factory-builder"
 TRACER_REVIEWERS = ("security", "ux", "ui", "code")
 TRACER_SERVICE = re.compile(r"[a-z0-9][a-z0-9._-]{0,39}")
 TRACER_TOKEN = re.compile(r"[\x21-\x7e]{1,512}")
-TRACER_JIRA = re.compile(r"[A-Za-z][A-Za-z0-9]*-[1-9][0-9]*")
+TRACER_JIRA = re.compile(r"(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9]*-[1-9][0-9]*")
 TRACER_ROUND_RUN = re.compile(r"factory review round (\d+)\b")
 TRACER_TASKS_MAX = 30
 TRACER_TASK_ID = re.compile(r"[A-Za-z0-9._-]{1,40}")
@@ -7186,6 +7186,11 @@ RETRO_CATEGORIES = ("navigation", "automated-checks", "reviewer-rules", "steerin
 RETRO_SESSION_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[0-9a-f-]{8,36}", re.ASCII)
 RETRO_SESSION = re.compile(r"[0-9a-f-]{8,36}", re.ASCII)
 MAX_RETRO_BYTES = 131072
+RETRO_EDIT_SCHEMA = "factory.retro-edit/1"
+RETRO_EDIT_CHANGE = 600
+MAX_RETRO_EDITS = 2
+RETRO_EDITS_PER_DAY = 2
+RETRO_EDIT_SCOPE = "retro edits only allowlisted project scopes; global is person-only"
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
@@ -7492,6 +7497,13 @@ def retro_aggregate(days):
                 rows.append(row)
     if not rows:
         fail(f"no host pushed a retro digest from {dates[0]} to {dates[-1]}", 3)
+    projects = sorted(registered(home))
+    pipeline = {}
+    for scope in ["global"] + [f"projects/{p}" for p in projects]:
+        status, headers, text = api(home, "GET", f"/api/pipeline/{scope}", ok=(200, 404))
+        notes = json.loads(text).get("stage_notes", {}) if status == 200 else {}
+        pipeline[scope] = {"version": int(headers["X-Pipeline-Version"]) if status == 200 else 0,
+                           "stage_notes": notes}
     run = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(3)
     folder = home / "retro" / run
     if is_link(folder.parent) or is_link(folder):
@@ -7531,7 +7543,7 @@ def retro_aggregate(days):
             retro_count(rounds, str(row["review_round_max"]))
     agg = {
         "schema": "factory.retro-aggregate/1", "run": run, "from": dates[0], "to": dates[-1],
-        "host": retro_host(), "transcripts": str(retro_transcripts()), "projects": sorted(registered(home)),
+        "host": retro_host(), "transcripts": str(retro_transcripts()), "projects": projects,
         "hosts": hosts, "tokens": {"main": summed("tokens"), "subagents": sub},
         "context": {"first_turn_median": retro_median([retro_int(retro_dict(r.get("context")).get("first_turn"))
                                                        for r in rows]),
@@ -7545,7 +7557,7 @@ def retro_aggregate(days):
                    "patterns": retro_patterns(rows, lambda r: retro_dict(r.get("errors")).get("patterns"))},
         "repeated_cmds": retro_patterns(rows, lambda r: r.get("repeated_cmds")),
         "subagents": subagents, "review_rounds": rounds, "agent_prompts": summed("agent_prompts"),
-        "human_msgs": total("human_msgs"), "interrupts": total("interrupts")}
+        "human_msgs": total("human_msgs"), "interrupts": total("interrupts"), "pipeline": pipeline}
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
@@ -7566,7 +7578,7 @@ def check_retro(doc):
     def first(*checks):
         return next(((where, err) for where, err in checks if err), None)
 
-    err = check_keys(doc, ("schema", "run", "findings", "suggestions"))
+    err = check_keys(doc, ("schema", "run", "findings", "suggestions"), ("edits",))
     if err:
         return f"reply: {err}"
     found = first(
@@ -7574,8 +7586,96 @@ def check_retro(doc):
         ("run", None if isinstance(doc["run"], str) and RUN_TAG.fullmatch(doc["run"])
          else "must match [A-Za-z0-9_-]{1,64}"),
         ("findings", check_list(doc["findings"], 1, 12)),
-        ("suggestions", check_list(doc["suggestions"], 0, MAX_PER_RUN)))
+        ("suggestions", check_list(doc["suggestions"], 0, MAX_PER_RUN)),
+        ("edits", check_list(doc.get("edits", []), 0, MAX_RETRO_EDITS)))
     return "%s: %s" % found if found else None
+
+
+def retro_changed_chars(a, b):
+    """The characters changed between a and b once their shared prefix and suffix are trimmed:
+    the removed ones plus the added ones. The Worker's changedChars counts the same way."""
+    start, most = 0, min(len(a), len(b))
+    while start < most and a[start] == b[start]:
+        start += 1
+    end = 0
+    while end < most - start and a[-1 - end] == b[-1 - end]:
+        end += 1
+    return len(a) - start - end + len(b) - start - end
+
+
+def check_edit(e, agg):
+    """The first violation of one retro stage-note edit as (field, problem), or None.
+    field is None for the whole edit."""
+    err = check_keys(e, ("scope", "stage", "note", "summary"))
+    if err:
+        return None, err
+    pipeline = agg.get("pipeline", {})
+    if not isinstance(e["scope"], str) or e["scope"] not in pipeline:
+        return "scope", "must be a scope in aggregate.json"
+    found = next(((where, err) for where, err in (
+        ("stage", None if e["stage"] in PIPELINE_STAGES else f"must be one of {', '.join(PIPELINE_STAGES)}"),
+        ("note", check_text(e["note"], 1, 2000, multiline=True)),
+        ("summary", check_text(e["summary"], 1, 120))) if err), None)
+    if found:
+        return found
+    if retro_changed_chars(pipeline[e["scope"]]["stage_notes"].get(e["stage"], ""), e["note"]) > RETRO_EDIT_CHANGE:
+        return "note", f"changes more than {RETRO_EDIT_CHANGE} characters"
+    return None
+
+
+def retro_edits_today(home, scope):
+    """How many retro versions scope has from the last 24 hours. Only retro saves carry run."""
+    status, _, text = api(home, "GET", f"/api/pipeline/history/{scope}", ok=(200, 404))
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    return sum("run" in v and datetime.fromisoformat(v["saved_at"].replace("Z", "+00:00")) > cutoff
+               for v in (json.loads(text) if status == 200 else []))
+
+
+def retro_apply_edits(home, run, edits, agg):
+    """PUT each checked edit to the Worker's retro route while autonomy runs. Returns one
+    {scope, stage, result, summary} row per edit; a bad edit's text is left out. A saved
+    edit moves agg's version and note on, so a later edit to the same scope builds on it."""
+    autonomy = load_autonomy(load_board(api(home, "GET", "/api/board")[2]))
+    if autonomy["paused"] is not False:
+        print("autonomy is paused; no pipeline edit")
+        return [{"scope": f"edits[{i}]", "stage": "", "result": "not sent: autonomy is paused", "summary": ""}
+                for i in range(len(edits))]
+    results = []
+    for i, e in enumerate(edits):
+        bad = check_edit(e, agg)
+        if bad:
+            where = f"edits[{i}]" + (f".{bad[0]}" if bad[0] else "")
+            print(f"skipped {where}: {bad[1]}")
+            results.append({"scope": f"edits[{i}]", "stage": "", "result": f"skipped: {where}: {bad[1]}",
+                            "summary": ""})
+            continue
+        row = {"scope": e["scope"], "stage": e["stage"], "summary": e["summary"]}
+        if e["scope"] == "global" or e["scope"][len("projects/"):] not in autonomy["projects"]:
+            print(f"skipped edits[{i}]: {RETRO_EDIT_SCOPE}")
+            results.append(dict(row, result=f"skipped: {RETRO_EDIT_SCOPE}"))
+            continue
+        if retro_edits_today(home, e["scope"]) >= RETRO_EDITS_PER_DAY:
+            reason = f"retro edit cap: {RETRO_EDITS_PER_DAY} per scope per day"
+            print(f"skipped edits[{i}]: {reason}")
+            results.append(dict(row, result=f"skipped: {reason}"))
+            continue
+        body = {"schema": RETRO_EDIT_SCHEMA, "run": run, "base_version": agg["pipeline"][e["scope"]]["version"],
+                "stage": e["stage"], "note": e["note"], "summary": e["summary"]}
+        status, headers, text = api(home, "PUT", f"/api/pipeline/retro/{e['scope']}", json.dumps(body),
+                                    ok=(200, 400, 403, 404, 409, 412, 413, 429),
+                                    headers={"Content-Type": "application/json"})
+        if status == 200:
+            version = headers["X-Pipeline-Version"]
+            scope = agg["pipeline"][e["scope"]]
+            scope["version"] = int(version)
+            scope["stage_notes"][e["stage"]] = e["note"]
+            print(f"edited {e['scope']} stage_notes.{e['stage']} to version {version}: {e['summary']}")
+            results.append(dict(row, result=f"version {version}"))
+        else:
+            reason = f"{status} {printable_line(text, 200)}".strip()
+            print(f"skipped edits[{i}]: {reason}")
+            results.append(dict(row, result=f"skipped: {reason}"))
+    return results
 
 
 def check_finding(f, projects):
@@ -7597,9 +7697,10 @@ def check_finding(f, projects):
         ("project", None if f["project"] in projects else "must be a project in aggregate.json")) if err), None)
 
 
-def render_findings(agg, doc, rejected=()):
+def render_findings(agg, doc, rejected=(), edits=()):
     """findings.md: the reply's findings ranked by count x cost, built from checked fields only.
-    rejected holds (index, field, problem) for dropped findings, listed without their text."""
+    rejected holds (index, field, problem) for dropped findings, listed without their text.
+    edits holds retro_apply_edits rows."""
     def cell(text):
         return text.replace("|", "\\|")
 
@@ -7621,6 +7722,9 @@ def render_findings(agg, doc, rejected=()):
                   "Admission dropped these findings. Their text is not shown; read reply.json to see it.", "",
                   "| Finding | Field | Problem |", "| --- | --- | --- |"]
         lines += [f"| {i} | {field or 'whole finding'} | {cell(problem)} |" for i, field, problem in rejected]
+    if edits:
+        lines += ["", "## Pipeline edits", "", "| Scope | Stage | Result | Summary |", "| --- | --- | --- | --- |"]
+        lines += [f"| {e['scope']} | {e['stage']} | {cell(e['result'])} | {cell(e['summary'])} |" for e in edits]
     return "\n".join(lines) + "\n"
 
 
@@ -7665,6 +7769,9 @@ def retro_admit(run):
     print(f"wrote {findings}")
     for line in where:
         print(f"rejected {line}")
+    if doc.get("edits"):
+        results = retro_apply_edits(home, run, doc["edits"], agg)
+        write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected, edits=results))
     if not doc["suggestions"]:
         print("no suggestions")
         return

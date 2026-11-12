@@ -784,6 +784,75 @@ test("pipeline settings page", { timeout: 180000 }, async (t) => {
       assert.equal("archive" in project, false);
     });
 
+    await t.test("pipeline P16 change summary and run on history lines", async () => {
+      await waitStatus(page, "Unsaved changes");
+      assert.equal(
+        await page.$eval('label[for="pipeline-summary"]', (el) => el.firstChild.textContent),
+        "Change summary (optional)",
+      );
+      assert.equal(await page.$eval("#pipeline-summary", (el) => el.maxLength), 120);
+      await page.type("#pipeline-summary", "Turn triage off · for now");
+      await clickSave(page);
+      await page.waitForFunction(
+        () => document.getElementById("pipeline-status").textContent.startsWith("Saved as version"),
+        wait,
+      );
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector("#pipeline-history li")
+            ?.textContent.includes(" · Turn triage off · for now"),
+        wait,
+      );
+      assert.equal(await page.$eval("#pipeline-summary", (el) => el.value), "");
+      await page.type("#pipeline-summary", "Meant for this scope only");
+      await page.select("#pipeline-scope", "global");
+      assert.equal(await page.$eval("#pipeline-summary", (el) => el.value), "");
+      await page.select("#pipeline-scope", "projects/sample");
+      assert.match(
+        await page.$eval("#pipeline-help", (el) => el.textContent),
+        /Only a signed-in person can save, except retro admit, which may edit stage notes\.$/,
+      );
+      const [latest] = await (await fetch(origin + "/api/pipeline/history/projects/sample")).json();
+      assert.equal(latest.summary, "Turn triage off · for now");
+      const lines = await page.evaluate(async () => {
+        const real = window.fetch;
+        window.fetch = async (url, init) =>
+          String(url).includes("/api/pipeline/history/")
+            ? new Response(
+                JSON.stringify([
+                  {
+                    version: 3,
+                    saved_by: "retro",
+                    saved_at: "2026-11-12T09:01:00Z",
+                    summary: "Spec note: name the test file for each criterion",
+                    run: "20261112T090000Z-a1b2c3",
+                    host: "wsl",
+                  },
+                  {
+                    version: 2,
+                    saved_by: "person@example.test",
+                    saved_at: "2026-11-11T15:30:00Z",
+                    summary: "",
+                  },
+                ]),
+              )
+            : real(url, init);
+        try {
+          await loadPipelineHistory("projects/sample");
+        } finally {
+          window.fetch = real;
+        }
+        return [...document.querySelectorAll("#pipeline-history li")].map(
+          (li) => li.firstChild.textContent,
+        );
+      });
+      assert.deepEqual(lines, [
+        "Version 3 (current) · retro · 2026-11-12T09:01:00Z · Spec note: name the test file for each criterion · run 20261112T090000Z-a1b2c3",
+        "Version 2 · person@example.test · 2026-11-11T15:30:00Z",
+      ]);
+    });
+
     assert.deepEqual(errors, []);
     await context.close();
   });
