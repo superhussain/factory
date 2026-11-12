@@ -821,6 +821,8 @@ def board(factory, job_id):
         fail("only the dashboard and factory.py pickup set priority", 2)
     if "paused" in patch:
         fail("only the dashboard sets paused", 2)
+    if patch.get("babysit") is not None:
+        fail("only the dashboard sets babysit; a session clears it with null", 2)
     if "close" in patch:
         fail("only the dashboard and factory.py pickup set close", 2)
     if "id" in patch:
@@ -4089,6 +4091,12 @@ def prioritized(j):
     """True when the dashboard asked pickup to take this job first."""
     p = j.get("priority")
     return isinstance(p, dict) and isinstance(p.get("at"), str)
+
+
+def babysitting(j):
+    """True when the dashboard handed this job's PR to a babysit session."""
+    b = j.get("babysit")
+    return isinstance(b, dict) and isinstance(b.get("at"), str)
 
 
 def paused(j):
