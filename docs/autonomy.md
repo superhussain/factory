@@ -228,7 +228,9 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 
 - **Queue.** `factory.py` adds an `idea` row with `backlog.by: "triage"` and the verdict,
   then checks the line off with the new id, as a dashboard Approve does. If the line
-  changed meanwhile, it drops the row while the row is still an unclaimed idea.
+  changed meanwhile, it drops the row while the row is still an unclaimed idea. The idea
+  carries the line's context under `Context from the backlog:`, cut so the idea stays within
+  4000 characters, as a dashboard Approve does.
 - **Hold.** The line waits in the backlog for a person, as before.
   The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board reads the stored verdicts of the lines it lists in one `POST /api/backlog/triage/verdicts` call per 50 lines. It reads again only when the listed lines change, and only for lines with no verdict yet. Opening a line with no verdict reads that line again. A line the Worker would refuse, such as one over 2000 characters, reads as no verdict and leaves the other lines' verdicts intact.
 - **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
