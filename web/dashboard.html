@@ -702,7 +702,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
             <option value="count">By count: keep the N most recent finished jobs</option>
           </select></label>
           <label for="pipeline-archive-n"><span id="pipeline-archive-n-text">Days</span><input type="number" id="pipeline-archive-n" aria-describedby="pipeline-archive-help" min="1" max="10000" step="1"></label>
-          <p id="pipeline-archive-help" class="muted">The Worker checks once an hour. Only merged and closed jobs move: never one with a claim, a question for you, an escalation, automerge, a queued or running build, unread deny notes or a pending Tracer mirror. Archived jobs keep their files and open read-only from links. This setting applies to all projects.</p>
+          <p id="pipeline-archive-help" class="muted">The Worker checks once an hour. Only merged and closed jobs move: never one with a claim, a question for you, an escalation, automerge, a queued or running build, unread deny notes or a pending Tracer mirror, unless Tracer is off. Archived jobs keep their files and open read-only from links. This setting applies to all projects.</p>
         </fieldset>
         <fieldset id="pipeline-tracer">
           <legend>Tracer integration</legend>
