@@ -238,6 +238,31 @@ test("each gate refuses with its exact status and text and stores nothing", asyn
   }
 });
 
+test("a retired or pending host still holding the token gets 403 on both retro routes", async () => {
+  for (const state of ["retired", "pending"]) {
+    const s = await setup();
+    const record = s.bucket.objects.get("hosts/wsl.json");
+    const host = JSON.parse(record.bytes);
+    assert.equal(host.token, "client-wsl");
+    await s.bucket.put("hosts/wsl.json", JSON.stringify({ ...host, state }));
+    const before = s.puts();
+    const r = await s.edit();
+    assert.deepEqual([r.status, r.text], [403, "retro edits come only from a bound host"], state);
+    assert.equal(s.puts(), before, state);
+    assert.deepEqual(s.stored1(), STORED, state);
+    const digest = await s.send("PUT", "/api/retro/wsl/2026-11-12.jsonl", {
+      body: '{"host":"wsl"}\n',
+      principal: wsl,
+      headers: { "Content-Type": "application/x-ndjson" },
+    });
+    assert.deepEqual(
+      [digest.status, digest.text],
+      [403, "retro digests are written only by the host's bound service token"],
+      state,
+    );
+  }
+});
+
 test("exactly 600 changed characters passes", async () => {
   const s = await setup();
   const r = await s.edit({ note: NOTE.slice(0, 10) + "y".repeat(600 - (NOTE.length - 10)) });

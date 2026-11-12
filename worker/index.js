@@ -612,6 +612,8 @@ function changedChars(a, b) {
   return x.length - start - end + (y.length - start - end);
 }
 
+// factory.py's MAX_EXPLORER_PROJECTS: a longer allowlist makes the autonomy record malformed.
+const MAX_EXPLORER_PROJECTS = 1;
 const RETRO_EDIT_CHANGE = 600;
 const RETRO_EDITS_PER_DAY = 2;
 const RETRO_EDIT_KEYS = ["schema", "run", "base_version", "stage", "note", "summary"];
@@ -637,7 +639,7 @@ async function autonomyRunning(env) {
     autonomy.paused === false &&
     names(autonomy.projects) &&
     names(autonomy.self) &&
-    (autonomy.projects?.length ?? 0) <= 1
+    (autonomy.projects?.length ?? 0) <= MAX_EXPLORER_PROJECTS
   );
 }
 
