@@ -245,11 +245,13 @@ class PickupHeartbeatTest(HostFixture):
 
     def test_one_status_put_after_every_other_request(self):
         def launches(home, *args):
-            factory.read_board(home)
+            if args[-1] is None:
+                factory.read_board(home)
             print("launched alpha-1 alpha on primary session abc")
 
         def fails(home, *args):
-            factory.read_board(home)
+            if args[-1] is None:
+                factory.read_board(home)
             factory.fail("launch of alpha-1 on primary failed: exit 1; see log", 1)
 
         for name, side_effect, exit_code in (("nothing to do", None, 0), ("launches", launches, 0),
@@ -262,8 +264,8 @@ class PickupHeartbeatTest(HostFixture):
                     beat = self.pickup("--triage-now")
                 self.assertEqual(beat, plain)
                 self.assertEqual(beat[0], exit_code)
-                self.assertEqual(self.keys(server), ["GET /api/board", "GET /api/backlog", "GET /api/board", "GET /projects.json",
-                                                     "GET /api/board", STATUS])
+                self.assertEqual(self.keys(server), ["GET /api/board", "GET /api/backlog", "GET /projects.json", "GET /api/board",
+                                                     STATUS])
                 body = json.loads(server.requests[-1][3])
                 cache = json.loads((self.home / "host-status.json").read_text())
                 self.assertEqual(cache, body)
