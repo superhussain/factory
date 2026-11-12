@@ -780,10 +780,6 @@ async function capture(outdir, referencePath) {
         location.hash = "#/settings/display";
       });
       await page.waitForSelector("#settings-display:not([hidden])");
-      // Pin the header dot to live on both sides, so the pair does not depend on socket timing.
-      await page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
-        timeout: 30000,
-      });
       await page.evaluate(() =>
         document.querySelector("#display-poll").scrollIntoView({ block: "center" }),
       );
