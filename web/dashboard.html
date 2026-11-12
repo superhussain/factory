@@ -1386,6 +1386,14 @@ function waitsOnYou(j) {
 // Prioritized jobs first, as factory.py pickup takes them. The sort is stable, so ties keep board order.
 function prioritizedFirst(list) { return list.sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at)); }
 
+// Mirrors batch_hold in factory.py, plus no claim: a follow-up or triage-queued idea that no
+// person added, approved or prioritized. Change both together.
+function batchHeld(j) {
+  return j.stage === 'idea' && !('capture_id' in j) && typeof j.priority?.at !== 'string' && !j.claim &&
+    ((Array.isArray(j.refs) && j.refs.some((r) => r?.kind === 'follow-up-of')) || j.backlog?.by === 'triage');
+}
+const HELD_TITLE = 'Pickup holds this idea until the project has enough follow-ups or the oldest has waited long enough. Then one session builds them together. Settings, Pipeline, Batch follow-ups sets the numbers.';
+
 // One fact on one row, with the full text in its tooltip.
 function line(cls, text) {
   return '<div class="' + cls + ' line" title="' + esc(text) + '">' + esc(text) + '</div>';
@@ -1410,6 +1418,7 @@ function card(j, inNeeds, archived = false) {
     (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
     (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
     (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
+    (batchHeld(j) ? '<span class="chip" title="' + esc(HELD_TITLE) + '">Held for batching</span>' : '') +
     (j.babysit?.at ? '<span class="chip" title="' + esc(prLink(j) ? 'An agent is fixing and merging PR #' + prLink(j).n : 'An agent is fixing and merging this PR') + '">Babysitting</span>' : '');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
