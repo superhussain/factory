@@ -357,7 +357,9 @@ only `factory.py deny-notes` writes it.
   `<file>-evidence.md` beside it instead of dropping it.
 - Run the agents in the background and act on each completion notification. Then
   read the agent's file. Only when a notification arrived without a valid file, run
-  `python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...` once. Never poll for job files
+  `python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...` once. Pass `--hold` to refresh
+  this session's claim first, so a re-run during a long build needs no separate
+  `hold`. Never poll for job files
   with `until` or `while` loops, `sleep`, file mtimes, quiet windows, Monitor or a
   task's output file.
   Spawn every reviewer `review-plan` lists in one message. A turn that ends on text alone is a
@@ -435,10 +437,11 @@ only `factory.py deny-notes` writes it.
   out and ends with `Stacked: #<rider PR number>`.
 - Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
   at `pr-open` until its parent merges and the child is retargeted to `$BASE`, then
-  merges the same way. Checks can take a minute to register, so poll
-  `gh pr checks <n> -R "$REPO"` for up to about 2 minutes until it lists any.
-  "No checks reported" in that window is not a failure, and a repo with no checks at
-  all counts as passing. Then wait with `gh pr checks <n> -R "$REPO" --watch`.
+  merges the same way. Wait for checks with
+  `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0 means they passed,
+  or the repo has none. Exit 3 means they are still pending, so run it again. Exit 1
+  names the failing checks. Never poll `gh pr
+  checks` in a loop or with `--watch`.
   Immediately before every `gh pr merge`, run `factory.py pipeline "$SLUG"` again
   and use that fresh `$PIPELINE`. A non-zero exit moves the job to `needs-human` as
   Pipeline configuration describes, and nothing merges. When `$PIPELINE.merge` is

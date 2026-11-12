@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from support import IsolatedTestCase, http_fixture, invoke, load_runtime
+from support import SKILL, IsolatedTestCase, http_fixture, invoke, load_runtime
 
 factory = load_runtime()
 JOB = "042-sample-export"
@@ -107,3 +107,10 @@ class ChecksTest(IsolatedTestCase):
                 code, out, _, calls = self.checks(OPEN, [listed(("pass", "test"))], *args)
                 self.assertEqual((code, out, calls), (2, "", []))
 
+    def test_skill_uses_checks(self):
+        skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn('Wait for checks with `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0 means '
+                      "they passed, or the repo has none. Exit 3 means they are still pending, so run it again. "
+                      "Exit 1 names the failing checks. Never poll `gh pr checks` in a loop or with `--watch`.", skill)
+        self.assertIn("Pass `--hold` to refresh this session's claim first, so a re-run during a long build needs "
+                      "no separate `hold`.", skill)
