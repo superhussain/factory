@@ -886,20 +886,18 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
-    const openArchivedLoadSignin = async (page, side) => {
+    const openArchivedLoadSignin = async (page) => {
       await page.evaluate(() => {
         location.hash = "#413-expired-link";
       });
-      if (side === "after")
-        await page.waitForFunction(() => !document.getElementById("conn-banner").hidden);
-      else
-        await page.waitForFunction(() =>
-          document
-            .getElementById("board-status")
-            .textContent.startsWith("Could not load archived job"),
-        );
+      await page.waitForFunction(
+        () =>
+          !document.getElementById("conn-banner").hidden &&
+          document.getElementById("conn-text").textContent === "Your sign-in has expired.",
+      );
     };
     await view("archived-load-signin", 1280, 900, "light", openArchivedLoadSignin);
+    await view("archived-load-signin-mobile", 390, 844, "dark", openArchivedLoadSignin);
     await view("archive-list", 1280, 900, "light", openArchiveList);
     await view("archive-list-mobile", 390, 844, "dark", openArchiveList);
     const openArchiveListError = async (page, side) => {
