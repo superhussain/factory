@@ -200,6 +200,37 @@ Retro idea cards admitted before this change keep `origin.by: "retro"` and still
 take `suggest approve`, which skips the allowlist for them but needs a registered
 project and a human typing at a terminal, or a relayed chat message.
 
+## Retro pipeline edits
+
+A retro reply may carry up to 2 `edits`, each `{"scope", "stage", "note", "summary"}`.
+`retro aggregate` records each scope's `version` and `stage_notes` under `pipeline`.
+`retro admit` checks each edit, then sends it to `PUT /api/pipeline/retro/<scope>` as
+`{"schema": "factory.retro-edit/1", "run", "base_version", "stage", "note", "summary"}`.
+The Worker replaces only `stage_notes[stage]` and saves the next version with
+`saved_by: "retro"`, `summary`, `run` and `host`.
+
+| Gate | Refusal |
+| --- | --- |
+| a paired or active host's bound service token | 403 `retro edits come only from a bound host` |
+| autonomy `paused` is `false`; a missing or malformed record counts as paused | 409 `autonomy is paused; no retro edit` |
+| `base_version` is the stored version | 412 `precondition failed` |
+| at most 600 characters changed, counted after trimming the shared prefix and suffix | 413 `retro edit changes more than 600 characters` |
+| at most 2 retro versions per scope in 24 hours | 429 `retro edit cap: 2 per scope per day` |
+| note and summary pass the stage-note checks; the summary is one line of 1 to 120 characters | 400 `<field>: <reason>` |
+
+- **Device first.** Before any PUT, `retro admit` repeats the text checks, the `.env`
+  value check, the 600-character cap and the pause. While paused it prints
+  `autonomy is paused; no pipeline edit` and sends nothing.
+- **Output.** Each edit prints `edited <scope> stage_notes.<stage> to version N: <summary>`
+  or `skipped edits[i]...`, and `findings.md` lists it under Pipeline edits. Edits never
+  change the exit code. An older Worker answers 404.
+- **Kill switch.** `factory.py autonomy pause` stops every retro edit, on the device and
+  in the Worker.
+- **Restore.** Settings, Pipeline lists each retro version as
+  `Version 8 · retro · <time> · <summary> · run <run>`. Click Restore to draft on the
+  version before it, type a Change summary such as `Undo retro run a1b2c3`, and Save.
+  That writes a new version; history keeps every one.
+
 ## Stages
 
 ```mermaid
@@ -277,7 +308,8 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   Settings, Hosts shows "Backlog triage failing since <time>" in red with a warning sign on the
   host's card until a sweep succeeds.
 - **Person only.** Pipeline documents are saved only by a signed-in person (F11), so a
-  service token cannot switch triage on or move the threshold. The Worker compares the
+  service token cannot switch triage on or move the threshold. The one exception, retro
+  admit, may edit only stage notes. The Worker compares the
   score with the threshold itself.
 - **Prompt.** The Worker sends `@cf/cloudflare/clef-flash` a `state` text and one `build`
   question of type `noul`. In `state` the rules travel in an `operator-preferences` envelope and

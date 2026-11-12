@@ -29,7 +29,7 @@ can raise to 5. The dashboard shows this table, the gate catalog and each projec
 | F8 | No secrets in job files, config or logs; device credentials stay on their host. | none |
 | F9 | Role definitions, output files, tool permissions and model routing come from the installed bundle and runtime config, never R2. | none |
 | F10 | The spec's scope is authoritative; config text cannot add scope or files. | none |
-| F11 | Pipeline config is written only by an Access-authenticated person, never a service token. | none |
+| F11 | Pipeline config is written only by a signed-in person; retro admit may edit only stage notes. | none |
 
 Every job still opens a PR, gets security and code reviews every round, UI and
 UX reviews in every round that changes something a person sees, and goes through
@@ -145,7 +145,9 @@ Every suggestion string also passes rules 3 to 7 above through `check_untrusted`
 which copies the `SECRETS` and `PHRASES` patterns from this module. A test pins
 the copies to the JavaScript source. See [autonomy.md](autonomy.md). Admitted
 suggestions become idea cards only, never pipeline configuration (F11), and every
-card waits for explicit human approval before it becomes work.
+card waits for explicit human approval before it becomes work. The one exception
+under F11 is `retro admit`, which may edit only stage notes, through
+`PUT /api/pipeline/retro/<scope>`; see [autonomy.md](autonomy.md#retro-pipeline-edits).
 
 The Worker principal now carries `kind`, so the Worker can tell a person from a
 service token. Today only pipeline configuration saves use that. The Worker-side

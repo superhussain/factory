@@ -36,7 +36,7 @@ Never name a host's home path or a pairing link.
 
 **Reply.** Exactly one `factory.retro/1` JSON object, with no prose and no code fence
 around it. Its keys are `schema` (`"factory.retro/1"`), `run` copied as given,
-`findings` and `suggestions`.
+`findings`, `suggestions` and, optionally, `edits`.
 
 | Field | Limit |
 | --- | --- |
@@ -49,6 +49,7 @@ around it. Its keys are `schema` (`"factory.retro/1"`), `run` copied as given,
 | `.root_cause`, `.fix` | 1 to 300 characters, one line each |
 | `.project` | a slug from `projects` in `aggregate` |
 | `suggestions` | 0 to 5 idea cards |
+| `edits` | optional, 0 to 2 stage-note edits |
 
 | Card field | Limit |
 | --- | --- |
@@ -67,6 +68,19 @@ around it. Its keys are `schema` (`"factory.retro/1"`), `run` copied as given,
 
 A repo path is relative, at most 200 characters of `A-Z a-z 0-9 _ . / -`, with no
 `..` segment. Every field but diagram is required, and no other key is allowed. Do not add by; retro admit sets it.
+
+**Edits.** An edit replaces one stage note in pipeline config, the text every agent
+in that stage reads. `pipeline` in `aggregate` holds each scope's `version` and
+current `stage_notes`. Propose an edit only for a fix a short note line would make,
+such as naming a file agents keep searching for. Retro admit saves it as a new
+version a person can restore.
+
+| Field | Example | Rule |
+| --- | --- | --- |
+| `scope` | `projects/factory` | a key of `pipeline` in `aggregate` |
+| `stage` | `spec` | one of `spec`, `build`, `review`, `approve` |
+| `note` | full new note text | 1 to 2000 characters; line breaks allowed; at most 600 characters changed from the current note |
+| `summary` | `Spec note: name the test file for each criterion` | 1 to 120 characters, one line |
 
 - No links, code fences, secrets or instructions in any string. Describe what
   happened and what each option would change.

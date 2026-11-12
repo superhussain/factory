@@ -88,12 +88,15 @@ Pipeline configuration routes are additive and change no existing route:
 `GET`/`PUT /api/pipeline/global` and `/api/pipeline/projects/<slug>`,
 `GET /api/pipeline/history/<scope>` and `/api/pipeline/history/<scope>/<n>`, and
 `GET /api/pipeline/effective/<slug>`. PUTs are strict-conditional, capped at
-16 KiB, accepted only from an Access-authenticated person (never a service
-token), and validated by `worker/admission.js`. Each save bumps
+16 KiB, accepted only from an Access-authenticated person, and validated by
+`worker/admission.js`. The one exception is `PUT /api/pipeline/retro/<scope>`,
+which a bound host's service token uses to replace a single stage note. Each save bumps
 `X-Pipeline-Version`. Project-scoped routes return 404 for an unregistered slug,
 and the effective view returns 409 when a stored document no longer validates.
 The effective view also lists the switched-on gate stages from the code catalog.
-The history list carries `saved_by` only for a person principal. Each entry's
+The history list carries `saved_by` only for a person principal. Each entry
+carries `summary` (`""` when none), and a retro version also carries `run` and
+`host`. A person's PUT may send `X-Pipeline-Summary`, percent-encoded. Each entry's
 `history_copy` says whether its create-only copy exists. A PUT whose copy failed
 answers `X-Pipeline-History: missing`. Devices read only the effective view,
 through `factory.py pipeline <slug>`.
@@ -133,6 +136,7 @@ date.
 | `PUT /api/retro/<id>/<date>.jsonl` | the bound service token of a paired or active host | store or replace that host's digest for the date |
 | `GET /api/retro/<date>` | any service token | JSON list of host ids with a digest that day, in host record order |
 | `GET /api/retro/<id>/<date>.jsonl` | any service token | that host's digest as `application/x-ndjson` |
+| `PUT /api/pipeline/retro/<scope>` | the bound service token of a paired or active host, while autonomy runs | replace one stage note as the next pipeline version, saved by `retro`; see [autonomy.md](autonomy.md#retro-pipeline-edits) |
 
 The status may carry `triage_failed_since`, an ISO 8601 UTC time, while
 backlog triage fails on that host.
