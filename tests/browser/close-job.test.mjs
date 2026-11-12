@@ -89,7 +89,7 @@ const boardJob = async (origin, id) =>
   JSON.parse(await boardText(origin)).jobs.find((j) => j.id === id);
 const shown = (page, selector) => page.$eval(selector, (el) => !el.hidden);
 const chip = (page) =>
-  page.$eval(CARD + " .id", (el) => [...el.querySelectorAll(".chip")].map((c) => c.textContent));
+  page.$eval(CARD, (el) => [...el.querySelectorAll(".tags .chip")].map((c) => c.textContent));
 const errText = (page) => page.$eval("#close-job-err", (el) => (el.hidden ? null : el.textContent));
 // The drawer head plus the open menu, which hangs below it.
 const headAndMenu = (page) =>

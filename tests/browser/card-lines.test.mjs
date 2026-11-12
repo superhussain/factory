@@ -78,8 +78,7 @@ const JOBS = [
   },
 ];
 const LINES_042 = [
-  ["id line", "042-sample-export"],
-  ["proj line", "Synthetic sample"],
+  ["id line", "042-sample-exportSynthetic sample"],
   ["title", "Export the sample report as CSV for every project"],
   ["meta branch line", "factory/042-sample-export"],
   ["meta round line", "round 1 · build running"],

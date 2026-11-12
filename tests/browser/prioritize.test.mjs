@@ -82,7 +82,7 @@ const openDrawer = async (page, id) => {
   );
 };
 const badges = (page, id) =>
-  page.$$eval(`.card[data-id="${id}"] .id .chip`, (els) => els.map((e) => e.textContent));
+  page.$$eval(`.card[data-id="${id}"] .tags .chip`, (els) => els.map((e) => e.textContent));
 const ideaOrder = (page) =>
   page.$$eval("#column-cards-idea .card", (els) => els.map((e) => e.dataset.id));
 const closeDrawer = async (page) => {
@@ -194,7 +194,7 @@ test("prioritize", { timeout: 240000 }, async (t) => {
           });
         await closeDrawer(page);
         await page.waitForFunction(
-          () => document.querySelector('.card[data-id="042-sample-export"] .id .chip'),
+          () => document.querySelector('.card[data-id="042-sample-export"] .tags .chip'),
           wait,
         );
         assert.deepEqual(await badges(page, "042-sample-export"), ["Prioritized"]);
@@ -232,7 +232,7 @@ test("prioritize", { timeout: 240000 }, async (t) => {
           });
         await closeDrawer(page);
         await page.waitForFunction(
-          () => !document.querySelector('.card[data-id="042-sample-export"] .id .chip'),
+          () => !document.querySelector('.card[data-id="042-sample-export"] .tags .chip'),
           wait,
         );
         assert.deepEqual(await badges(page, "042-sample-export"), []);
@@ -260,7 +260,7 @@ test("prioritize", { timeout: 240000 }, async (t) => {
         );
         await closeDrawer(page);
         await page.waitForFunction(
-          () => document.querySelector('.card[data-id="101-sample-urgent"] .id .chip'),
+          () => document.querySelector('.card[data-id="101-sample-urgent"] .tags .chip'),
           wait,
         );
         if (width === 1280)
