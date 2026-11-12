@@ -47,6 +47,11 @@
                                             print each finished job file's first line, checking once a
                                             second for up to S seconds (default 60); exit 3 while one is
                                             missing, 5 while one has no valid first line
+  factory.py checks <project-slug>/<job-id> [--timeout S]
+                                            print the job PR's checks as <bucket> <name> once none is
+                                            pending, checking every 10 seconds for up to S seconds
+                                            (default 300); no checks after 120 seconds exits 0, a failing
+                                            check 1, pending at the deadline 3, a bad pr 4, a gh problem 5
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
@@ -4942,6 +4947,61 @@ def wait_cmd(target, *args):
         time.sleep(1)
 
 
+CHECKS_USAGE = "usage: checks <project-slug>/<job-id> [--timeout S]"
+CHECKS_INTERVAL = 10
+CHECKS_REGISTER = 120
+
+
+def checks_cmd(target, *args):
+    """Print each PR check as `<bucket> <name>` once none is pending, checking every 10 seconds until --timeout."""
+    home, slug, job_id = r2_target(target, True)
+    if args and (args[0] != "--timeout" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
+                 or int(args[1]) > 600):
+        fail("--timeout takes one value from 0 to 600 seconds. " + CHECKS_USAGE, 2)
+    timeout = int(args[1]) if args else 300
+    job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
+    pr = (job or {}).get("pr")
+    if not isinstance(pr, str) or not pr:
+        fail(f"{job_id} has no pr on the board", 4)
+    repo = frontmatter(project_files(home, slug)[0])[0].get("repo", "")
+    m = GH_PR.fullmatch(pr)
+    if not (repo and m and m[1].lower() == repo.lower()):
+        fail(f"{pr} is not a pull request in {repo or 'the project file repo'}", 4)
+    view = gh_pr("view", pr, "--json", "state", "--jq", ".state")
+    if view is None:
+        fail("gh is not installed", 5)
+    if view[0] == "timeout":
+        fail("gh pr view timed out after 60 seconds", 5)
+    if view[0]:
+        fail(f"gh pr view exited {view[0]} (check gh auth status)", 5)
+    if view[1].strip() != "OPEN":
+        fail(f"{pr} is {view[1].strip() or 'in no state'}, not OPEN", 4)
+    start = time.monotonic()
+    while True:
+        result = gh_pr("checks", pr, "--json", "name,bucket")
+        try:
+            checks = json.loads(result[1]) if result and result[0] != "timeout" else []
+        except ValueError:
+            checks = []
+        if not isinstance(checks, list):
+            checks = []
+        pending = [c["name"] for c in checks if c["bucket"] == "pending"]
+        if checks and not pending:
+            for c in checks:
+                print(f"{c['bucket']} {c['name']}")
+            failing = [c["name"] for c in checks if c["bucket"] not in ("pass", "skipping")]
+            if failing:
+                fail("failing checks: " + ", ".join(failing), 1)
+            return
+        elapsed = time.monotonic() - start
+        if not checks and elapsed >= CHECKS_REGISTER:
+            print("no checks reported")
+            return
+        if elapsed >= timeout:
+            fail("still pending: " + ", ".join(pending) if pending else "no checks listed yet", 3)
+        time.sleep(CHECKS_INTERVAL)
+
+
 def tracer_start(j):
     """True when Tracer scope approval moved this job to build and no session has started it."""
     return j.get("stage") == "build" and j.get("note") == TRACER_APPROVED_NOTE
@@ -7728,6 +7788,7 @@ COMMANDS["pipeline"] = (pipeline_cmd, 1, 1)
 COMMANDS["documents"] = (documents_cmd, 1, 1)
 COMMANDS["prompt"] = (prompt_cmd, 2, 8)
 COMMANDS["wait"] = (wait_cmd, 2, 22)
+COMMANDS["checks"] = (checks_cmd, 1, 3)
 COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
 COMMANDS["host"] = (host_cmd, 3, 3)
