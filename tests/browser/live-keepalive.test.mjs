@@ -106,7 +106,7 @@ test("live keepalive", { timeout: 120000 }, async (t) => {
       await page.evaluate("liveSocket.dispatchEvent(new CloseEvent('close', { code: 1006 }))");
       assert.match(
         await title(page),
-        /\. Last live connection closed with code 1006 after \d+ seconds open$/,
+        /\. Last live connection closed with code 1006 after \d+ seconds? open$/,
       );
       await page.waitForFunction("liveOpen", wait);
       assert.equal(await page.evaluate("liveNote"), "");
