@@ -3129,9 +3129,14 @@ def arm_metrics(arm_jobs, follow_ups, jobs_root):
     skipped = {"missing_round_review": [], "missing_decision": [], "pr_before_approve": []}
     coverage_unknown = 0
     for job_id, j in sorted(arm_jobs.items()):
-        folder = jobs_root / (j.get("project") or "") / job_id
-        if not isinstance(j.get("project"), str) or not JOB_ID.fullmatch(job_id) or ".." in job_id \
-                or not folder.is_dir() or not (folder / "spec.md").is_file():
+        if not (isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"])
+                and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and all(k in TRACER_REVIEWERS for entry in j.get("rounds") or [] if isinstance(entry, dict)
+                        for k in entry)):
+            coverage_unknown += 1
+            continue
+        folder = jobs_root / j["project"] / job_id
+        if not folder.is_dir() or not (folder / "spec.md").is_file():
             coverage_unknown += 1
             continue
         missed = False
