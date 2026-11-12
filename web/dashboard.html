@@ -990,7 +990,10 @@ const BASE_TITLE = document.title;
 
 let jobs = [];
 let openId = null;
-let tracerOff = false;
+// Hidden until the first read of the all-projects pipeline says Tracer is on.
+let tracerOff = true;
+const TRACER_WAIT_MS = 3000;
+let tracerSettingRead = null;
 // The backlog line open in the drawer's decision page, or null. Never set together with openId.
 let openBacklogRaw = null;
 // item.raw -> triage verdict object, or null when the Worker has none stored.
@@ -1115,6 +1118,7 @@ function drawUpdated() {
 
 function refreshBacklog() {
   backlogReadAt = Date.now();
+  tracerSettingRead = loadTracerSetting();
   const version = boardReadVersion;
   // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
   const seen = backlog.map((b) => b.raw).join('\n');
@@ -1142,6 +1146,10 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     if (ifChanged && loaded && etag && etag === boardEtag) {
       syncDetail();
       return true;
+    }
+    if (!loaded) {
+      await Promise.race([tracerSettingRead, new Promise((res) => setTimeout(res, TRACER_WAIT_MS))]);
+      if (version !== boardReadVersion) return false;
     }
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
     boardArchived = Number.isInteger(data.archived?.max_id);
@@ -6458,7 +6466,7 @@ loadProjects().then(() => {
   if (settingsShown === 'display') enterDisplaySection();
   if (settingsShown === 'notifications') enterNotificationsSection();
   referenceReady = true; if (settingsShown === 'reference') loadReferenceEffective();
-  pollStarted = true; loadHosts(); loadTracerSetting(); poll(); syncLive(); schedulePoll();
+  pollStarted = true; loadHosts(); poll(); syncLive(); schedulePoll();
 });
 
 // Display settings live only in this browser. Each value is read against a fixed list,
