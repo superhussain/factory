@@ -4240,11 +4240,16 @@ PR_EVIDENCE = {"closed": "closed by pickup with a comment that links this page",
 def gh_pr(*args):
     """(returncode, stdout) of gh pr <args>: (1, "") when it cannot start,
     ("timeout", "") past 60 seconds, None without gh."""
+    return gh_cli("pr", *args)
+
+
+def gh_cli(*args):
+    """(returncode, stdout) of gh <args>, as gh_pr describes."""
     gh = shutil.which("gh")
     if gh is None:
         return None
     try:
-        r = subprocess.run([gh, "pr", *args], capture_output=True, encoding="utf-8",
+        r = subprocess.run([gh, *args], capture_output=True, encoding="utf-8",
                            errors="replace", timeout=60, stdin=subprocess.DEVNULL)
     except OSError:
         return 1, ""
@@ -5082,16 +5087,20 @@ def board_pr(home, slug, job_id):
     return pr
 
 
+def gh_answer(result, what):
+    """stdout of a gh_cli result, failing with exit 5 when gh cannot answer."""
+    if result is None:
+        fail("gh is not installed", 5)
+    if result[0] == "timeout":
+        fail(f"{what} timed out after 60 seconds", 5)
+    if result[0]:
+        fail(f"{what} exited {result[0]} (check gh auth status)", 5)
+    return result[1]
+
+
 def gh_pr_view(pr, *args):
     """stdout of gh pr view <pr> <args>, failing with exit 5 when gh cannot answer."""
-    view = gh_pr("view", pr, *args)
-    if view is None:
-        fail("gh is not installed", 5)
-    if view[0] == "timeout":
-        fail("gh pr view timed out after 60 seconds", 5)
-    if view[0]:
-        fail(f"gh pr view exited {view[0]} (check gh auth status)", 5)
-    return view[1]
+    return gh_answer(gh_pr("view", pr, *args), "gh pr view")
 
 
 def pr_checks(pr):
@@ -5140,7 +5149,9 @@ def checks_cmd(target, *args):
 
 
 PR_STATE_USAGE = "usage: pr-state <project-slug>/<job-id> [--wait S]"
-PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,isInMergeQueue,autoMergeRequest,commits"
+PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits"
+# gh pr view --json has no isInMergeQueue field, so it comes from GraphQL.
+PR_QUEUE_QUERY = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isInMergeQueue}}}"
 PR_STATE_INTERVAL = 30
 
 
@@ -5164,7 +5175,11 @@ def pr_reading(pr):
     decision = view.get("reviewDecision") or ""
     approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
     state = str(view.get("state") or "").lower()
-    queued = bool(view.get("isInMergeQueue") or view.get("autoMergeRequest"))
+    owner, name, _, number = pr.split("/")[3:7]
+    in_queue = gh_answer(gh_cli("api", "graphql", "-f", PR_QUEUE_QUERY, "-f", f"o={owner}", "-f", f"r={name}",
+                                "-F", f"n={number}", "--jq", ".data.repository.pullRequest.isInMergeQueue"),
+                         "gh api graphql").strip() == "true"
+    queued = in_queue or bool(view.get("autoMergeRequest"))
     conflict = view.get("mergeStateStatus") == "DIRTY"
     if state in ("merged", "closed"):
         step = state

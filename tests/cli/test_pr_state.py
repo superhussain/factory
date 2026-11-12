@@ -15,9 +15,9 @@ def review(state, at="2026-01-02T11:00:00Z", login="reviewer-a"):
     return {"author": {"login": login}, "state": state, "submittedAt": at}
 
 
-def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", queue=False, auto=None):
+def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", auto=None):
     return 0, json.dumps({"state": state, "reviewDecision": decision, "latestReviews": list(reviews),
-                          "mergeStateStatus": merge, "isInMergeQueue": queue, "autoMergeRequest": auto,
+                          "mergeStateStatus": merge, "autoMergeRequest": auto,
                           "commits": [{"committedDate": "2026-01-01T09:00:00Z"}, {"committedDate": HEAD}]})
 
 
@@ -38,7 +38,7 @@ class PrStateTest(IsolatedTestCase):
         self.now += seconds
 
     def state(self, readings, *args, pr=PR):
-        """Run pr-state with gh answering each (view, checks) reading in turn, repeating the last."""
+        """Run pr-state with gh answering each (view, checks[, queue]) reading in turn, repeating the last."""
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open"}
         if pr is not None:
             job["pr"] = pr
@@ -47,11 +47,12 @@ class PrStateTest(IsolatedTestCase):
         def gh(*gh_args):
             calls.append(gh_args)
             reading = readings[min(sum(c[0] == "view" for c in calls) - 1, len(readings) - 1)]
-            return reading[0] if gh_args[0] == "view" else reading[1]
+            return {"view": reading[0], "checks": reading[1]}.get(gh_args[0], (reading + ((0, "false\n"),))[2])
 
         with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job]})}) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
-            with patch.object(factory, "gh_pr", gh), patch.object(factory.time, "sleep", self.sleep), \
+            with patch.object(factory, "gh_pr", gh), patch.object(factory, "gh_cli", lambda *a: gh(*a[1:])), \
+                    patch.object(factory.time, "sleep", self.sleep), \
                     patch.object(factory.time, "monotonic", lambda: self.now):
                 result = invoke(factory, ["--home", str(self.home), "pr-state", f"sample/{JOB}", *args])
         return result + (calls,)
@@ -68,8 +69,12 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual(json.loads(out), {"pr": 44, "state": "open", "review": "approved", "checks": "pass",
                                            "queued": False, "conflict": False, "next": "merge"})
         self.assertEqual(calls[0][:3], ("view", PR, "--json"))
-        self.assertIn("isInMergeQueue", calls[0][3])
+        self.assertNotIn("isInMergeQueue", calls[0][3])
         self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket"))
+        self.assertEqual(calls[2][0], "graphql")
+        self.assertIn("pullRequest(number:$n){isInMergeQueue}", calls[2][2])
+        self.assertEqual(calls[2][3:], ("-f", "o=example", "-f", "r=sample", "-F", "n=44",
+                                        "--jq", ".data.repository.pullRequest.isInMergeQueue"))
 
     def test_merged_and_closed(self):
         self.assertEqual(self.next_of((view("MERGED"), checks("pass"))), "merged")
@@ -108,7 +113,7 @@ class PrStateTest(IsolatedTestCase):
             with self.subTest(bucket):
                 self.assertEqual(self.next_of((view(), checks("pass", bucket, "pending"))), "fix-ci")
         self.assertEqual(self.next_of((view(), checks("pass", "pending"))), "wait")
-        self.assertEqual(self.next_of((view(queue=True), checks("pass"))), "wait")
+        self.assertEqual(self.next_of((view(), checks("pass"), (0, "true\n"))), "wait")
         self.assertEqual(self.next_of((view(auto={"enabledAt": HEAD}), checks("pass"))), "wait")
 
     def test_unreadable_checks_read_as_none(self):
@@ -132,7 +137,7 @@ class PrStateTest(IsolatedTestCase):
 
     def test_without_wait_a_wait_reading_prints_at_once(self):
         code, out, _, calls = self.state([(view(), checks("pending"))])
-        self.assertEqual((code, json.loads(out)["next"], self.now, len(calls)), (0, "wait", 0, 2))
+        self.assertEqual((code, json.loads(out)["next"], self.now, len(calls)), (0, "wait", 0, 3))
 
     def test_bad_pr_exits_4(self):
         for pr, why in ((None, "no pr"), ("https://github.com/example/other/pull/44", "example/sample"),
@@ -147,6 +152,12 @@ class PrStateTest(IsolatedTestCase):
                              ((0, "not json"), "no JSON")):
             with self.subTest(reading=reading):
                 code, out, err, _ = self.state([(reading, checks("pass"))])
+                self.assertEqual((code, out), (5, ""))
+                self.assertIn(why, err)
+        for reading, why in ((None, "not installed"), (("timeout", ""), "gh api graphql timed out"),
+                             ((1, ""), "gh api graphql exited 1")):
+            with self.subTest(queue=reading):
+                code, out, err, _ = self.state([(view(), checks("pass"), reading)])
                 self.assertEqual((code, out), (5, ""))
                 self.assertIn(why, err)
 
