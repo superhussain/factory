@@ -7,6 +7,7 @@ import {
   withBrowserFixture,
   seedProject,
   seedBoard,
+  seedPipeline,
   controlBoardPolling,
 } from "../support/browser-server.mjs";
 
@@ -46,6 +47,7 @@ async function openDrawer(browser, origin, viewport, id) {
     {},
     id,
   );
+  await page.waitForFunction(() => tracerOff === false);
   return { context, page, errors };
 }
 
@@ -72,6 +74,7 @@ test("The job actions menu works by keyboard, pointer and touch", { timeout: 120
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
     await seedBoard(origin, [IDEA, CLOSED]);
+    await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
     for (const viewport of VIEWPORTS) {
       const label = `${viewport.width}px`;
       const { context, page, errors } = await openDrawer(browser, origin, viewport, IDEA.id);

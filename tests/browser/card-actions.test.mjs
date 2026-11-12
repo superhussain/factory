@@ -11,6 +11,7 @@ import {
   withBrowserFixture,
   seedProject,
   seedBoard,
+  seedPipeline,
   controlBoardPolling,
 } from "../support/browser-server.mjs";
 
@@ -77,6 +78,7 @@ async function openBoard(browser, origin, viewport) {
   });
   await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
   await page.waitForSelector(TRIGGER);
+  await page.waitForFunction(() => tracerOff === false);
   return { context, page, errors };
 }
 
@@ -148,6 +150,7 @@ test("card actions", { timeout: 180000 }, async (t) => {
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
     await seedBoard(origin, JOBS);
+    await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
     const { context, page, errors } = await openBoard(browser, origin, {
       width: 1440,
       height: 900,
