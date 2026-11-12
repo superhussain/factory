@@ -1,5 +1,6 @@
-// Board writes cannot add a dashboard job control to a batch rider. Rows are the made-up
-// running example: lead 1201 owns PR #88 and rider 1203 is batched into it.
+// Board writes cannot add a dashboard job control to a batch rider, nor add or drop a
+// batched-into ref outside factory.py batch and the lead's close or merge. Rows are the made-up
+// running example: lead 1201 owns PR #88, rider 1203 is batched into it, 1204 is an idea.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
@@ -16,6 +17,7 @@ const RIDER = {
   pr: "#88",
   refs: [{ id: "1201-sync-retry", kind: "batched-into" }],
 };
+const IDEA = { id: "1204-etag-board", project: "sample", stage: "idea" };
 const CONTROLS = {
   move: { from: "build", to: "spec", at: "2026-11-10T09:00:00Z" },
   priority: { at: "2026-11-10T09:00:00Z" },
@@ -30,6 +32,12 @@ const RIDER_CONTROLS = JSON.parse(
 );
 const refusal = (field) =>
   `a board write cannot add ${field} to "1203-cache-headers": it is batched into "1201-sync-retry" and follows its lead. Act on the lead instead. Nothing was written.`;
+
+const batchRefusal = (row, lead) =>
+  `a board write cannot batch "${row}" into "${lead}": factory.py batch does that, while the lead is at spec. Nothing was written.`;
+const unbatchRefusal = (row, lead) =>
+  `a board write cannot unbatch "${row}": its lead "${lead}" is still open. Only the lead's close or merge drops the ref. Nothing was written.`;
+const { refs: _riderRefs, ...UNBATCHED } = RIDER;
 
 function setup(jobs = [LEAD, RIDER]) {
   const bucket = memoryBucket();
@@ -151,5 +159,82 @@ test("the refusal fits 200 characters for every rider control", async () => {
     assert.equal(response.status, 400, field);
     assert.ok(body.startsWith("a board write cannot add " + field + " to "), body);
     assert.ok(body.length <= 200, field + ": " + body.length);
+  }
+});
+
+async function refusedWith(s, rows, message) {
+  const before = s.etag();
+  const response = await s.write(rows);
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), message);
+  assert.equal(s.etag(), before);
+}
+
+test("refuses adding a batched-into ref outside factory.py batch", async () => {
+  const ref = { refs: [{ id: LEAD.id, kind: "batched-into" }] };
+  const message = batchRefusal(IDEA.id, LEAD.id);
+  await refusedWith(setup([LEAD, IDEA]), [LEAD, { ...IDEA, ...ref, stage: "spec" }], message);
+  const atSpec = { ...LEAD, stage: "spec" };
+  const s = setup([atSpec, IDEA]);
+  await refusedWith(s, [atSpec, { ...IDEA, ...ref }], message);
+  await refusedWith(s, [atSpec, { ...IDEA, ...ref, stage: "build" }], message);
+  const built = { ...IDEA, stage: "build" };
+  await refusedWith(setup([atSpec, built]), [atSpec, { ...built, ...ref, stage: "spec" }], message);
+  const other = { ...LEAD, id: "1202-other-lead", stage: "spec" };
+  await refusedWith(
+    setup([atSpec, other, { ...RIDER, stage: "spec" }]),
+    [
+      atSpec,
+      other,
+      { ...RIDER, stage: "spec", refs: [...RIDER.refs, { id: other.id, kind: "batched-into" }] },
+    ],
+    batchRefusal(RIDER.id, other.id),
+  );
+});
+
+test("allows the factory.py batch shape", async () => {
+  const atSpec = { ...LEAD, stage: "spec" };
+  const ref = { stage: "spec", refs: [{ id: LEAD.id, kind: "batched-into" }] };
+  const s = setup([atSpec, IDEA]);
+  assert.equal((await s.write([atSpec, { ...IDEA, ...ref }])).status, 200);
+  const fresh = { id: "1205-backlog-line", project: "sample", ...ref };
+  assert.equal((await setup([atSpec]).write([atSpec, fresh])).status, 200);
+});
+
+test("refuses dropping a rider's ref while its lead is open", async () => {
+  const s = setup();
+  await refusedWith(s, [LEAD, UNBATCHED], unbatchRefusal(RIDER.id, LEAD.id));
+  await refused(s, [LEAD, { ...UNBATCHED, close: CONTROLS.close }], "close");
+});
+
+test("drops the ref once the lead closes, merges, or is gone", async () => {
+  const idle = { ...UNBATCHED, stage: "idea" };
+  for (const stage of ["closed", "merged"])
+    assert.equal((await setup().write([{ ...LEAD, stage }, idle])).status, 200, stage);
+  assert.equal((await setup().write([idle])).status, 200);
+});
+
+test("batch refusals fit 200 characters", async () => {
+  const lead = { ...LEAD, id: "1201-" + "a".repeat(60) };
+  const rider = {
+    ...RIDER,
+    id: "1203-" + "b".repeat(60),
+    refs: [{ id: lead.id, kind: "batched-into" }],
+  };
+  const { refs: _, ...bare } = rider;
+  const idea = { ...IDEA, id: "1204-" + "c".repeat(60) };
+  for (const [stored, rows, start] of [
+    [[lead, rider], [lead, bare], "a board write cannot unbatch "],
+    [
+      [lead, idea],
+      [lead, { ...idea, stage: "spec", refs: rider.refs }],
+      "a board write cannot batch ",
+    ],
+  ]) {
+    const response = await setup(stored).write(rows);
+    const body = await response.text();
+    assert.equal(response.status, 400);
+    assert.ok(body.startsWith(start), body);
+    assert.ok(body.length <= 200, body.length + ": " + body);
   }
 });
