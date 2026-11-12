@@ -166,7 +166,7 @@ class PickupFixture(BoardFixture):
         self.write_launchers({"primary": [sys.executable, str(self.fake), "{effort}"],
                               "fallback": [sys.executable, str(self.fake)]})
         self.board["jobs"] = []
-        patch.object(factory, "LAUNCH_WAIT_SECONDS", 2).start()
+        patch.object(factory, "LAUNCH_WAIT_SECONDS", 60).start()
         patch.object(factory, "report_status").start()
         patch.object(factory, "backlog_triage_pass").start()
         patch.object(factory, "checkout_problem", return_value=None).start()

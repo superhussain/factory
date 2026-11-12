@@ -947,7 +947,7 @@ def hold(target, take=None):
         return dump_board(data), ("ok", None if keep else c, job["started"])
     result, other, started = cas(home, "/api/board", change)
     if result == "missing":
-        fail(f"no job {job_id} on the board", 4)
+        fail(f"no job {job_id} on the board. Nothing was written.", 4)
     if result == "held":
         fail(f"{held_by(job_id, other)}. Take it over only if the user says so, with hold {target} take", 6)
     print(f"held {target} as {device} session {session}")
@@ -1624,7 +1624,7 @@ def backlog_rework(job_id):
     home = factory_home()
     job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
     if job is None:
-        fail(f"no job {job_id} on the board", 4)
+        fail(f"no job {job_id} on the board. Nothing was written.", 4)
     if job.get("stage") != IDEA or (job.get("backlog") or {}).get("decision") != "rework" or not job.get("project"):
         fail(f"{job_id} is not a backlog rework waiting at idea", 2)
     if not isinstance(job["project"], str) or not SLUG.fullmatch(job["project"]):
@@ -2395,7 +2395,7 @@ def suggest_approve(job_id, option):
         data = load_board(text)
         job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
         if job is None:
-            fail(f"no job {job_id} on the board", 4)
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
         origin = job.get("origin")
         if job.get("stage") != IDEA or not isinstance(origin, dict) or origin.get("gate") != "human" \
                 or origin.get("approved"):
@@ -4328,7 +4328,7 @@ def prompt_cmd(target, role, *flags):
     data = read_board(home)
     job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
     if job is None:
-        fail(f"no job {job_id} on the board", 4)
+        fail(f"no job {job_id} on the board. Nothing was written.", 4)
     project_file = project_files(home, slug)[0]
     documents = project_file.parent / f"{slug}.documents.md"
     if not documents.is_file():
@@ -4455,7 +4455,7 @@ def review_plan_cmd(target, round_text):
         fail("round must be a positive integer. " + REVIEW_PLAN_USAGE, 2)
     data = read_board(home)
     if not any(j.get("id") == job_id for j in data["jobs"]):
-        fail(f"no job {job_id} on the board", 4)
+        fail(f"no job {job_id} on the board. Nothing was written.", 4)
     project_file = project_files(home, slug)[0]
     base = frontmatter(project_file)[0].get("base") or "main"
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
@@ -5503,7 +5503,7 @@ def idea_images(target):
     jobs = read_board(home)["jobs"]
     job = next((j for j in jobs if j.get("id") == job_id), None)
     if job is None:
-        fail(f"no job {target} on the board", 4)
+        fail(f"no job {target} on the board. Nothing was written.", 4)
     if job.get("project") != slug:
         fail(f"{job_id} is not assigned to {slug}; project-less ideas have no job artifacts "
              "to import into", 2)
@@ -5583,7 +5583,7 @@ def deny_notes_cmd(job_id, sub=None):
     def due(data):
         j = next((j for j in data["jobs"] if j.get("id") == job_id), None)
         if j is None:
-            fail(f"no job {job_id} on the board", 4)
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
         if not deny_notes_due(j):
             fail(f"{job_id} has no unread deny notes", 2)
         return j
@@ -5617,7 +5617,7 @@ def job(job_id):
     if found is None:
         status, _, text = api(home, "GET", f"/api/board/archive?id={urllib.parse.quote(job_id)}", ok=(200, 404))
         if status == 404:
-            fail(f"no job {job_id} on the board or in the archive", 4)
+            fail(f"no job {job_id} on the board or in the archive. Nothing was written.", 4)
         found = json.loads(text)["jobs"][0]
     print(json.dumps(found, indent=2))
 
@@ -5730,7 +5730,7 @@ def archive_workspace(target, *flags):
         return
     found = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
     if found is None:
-        fail(f"no job {job_id} on the board", 4)
+        fail(f"no job {job_id} on the board. Nothing was written.", 4)
     if found.get("stage") not in ("merged", "closed"):
         fail(f"{job_id} is at {found.get('stage')}, not merged or closed", 2)
     code, out = paseo_run(["inspect", session["agent"], "--json"])
@@ -6665,7 +6665,7 @@ def tracer_cmd(sub, target=None):
         fail(f"{slug} is not listed in {home / 'tracer.json'}", 2)
     jobs = read_board(home)["jobs"]
     if job_id and not any(j.get("id") == job_id and j.get("project") == slug for j in jobs):
-        fail(f"no job {job_id} on the board for {slug}", 4)
+        fail(f"no job {job_id} on the board for {slug}. Nothing was written.", 4)
     skip = ("idea", "closed") if job_id else ("idea", "closed", "merged")
     mirrored = 0
     for j in jobs:
@@ -7283,7 +7283,7 @@ def agent_cmd(sub, *args):
         row["session"] = session
         saved = record_agent(home, job_id, row, (device, session), slug)
         if saved is None:
-            fail(f"no job {job_id} on the board", 4)
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
         print(json.dumps(saved))
         return
     if sub != "report" or len(args) > 1 or args and not SLUG.fullmatch(args[0]):

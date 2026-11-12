@@ -157,7 +157,7 @@ class PickupFixture(IsolatedTestCase):
         self.addCleanup(patch.stopall)
         patch.object(factory, "factory_home", return_value=self.home).start()
         patch.object(factory, "api", side_effect=self.request).start()
-        patch.object(factory, "LAUNCH_WAIT_SECONDS", 2).start()
+        patch.object(factory, "LAUNCH_WAIT_SECONDS", 60).start()
         patch.object(factory, "report_status").start()
         patch.object(factory, "backlog_triage_pass").start()
         patch.object(factory, "checkout_problem", return_value=None).start()

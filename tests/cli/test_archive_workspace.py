@@ -119,7 +119,7 @@ class ArchiveWorkspaceTest(IsolatedTestCase):
     def test_job_not_on_board(self):
         code, out, err = self.run_verb("sample/044-missing")
         self.assertEqual((code, out), (4, None))
-        self.assertIn("no job 044-missing on the board", err)
+        self.assertIn("no job 044-missing on the board. Nothing was written.", err)
         self.assertEqual(self.calls(), [])
 
     def test_job_not_merged(self):

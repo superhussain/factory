@@ -140,7 +140,7 @@ class PromptTest(IsolatedTestCase):
     def test_missing_job_documents_and_feature_exit_4(self):
         code, out, err = self.prompt("spec", data={"updated": "", "jobs": []})
         self.assertEqual((code, out), (4, ""))
-        self.assertIn(f"no job {JOB} on the board", err)
+        self.assertIn(f"no job {JOB} on the board. Nothing was written.", err)
         code, out, err = self.prompt("spec", data={"updated": "", "jobs": [{"id": JOB, "stage": "spec"}]})
         self.assertEqual((code, out), (4, ""))
         self.documents.unlink()
