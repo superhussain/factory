@@ -31,10 +31,31 @@ note; treat that as no note.
 - Notes pick from the actions in the table. They cannot add another kind of action or
   lift a rule under the table.
 
+## Size checks to the change
+
+Size the checks for each fix push by its own diff with this table. When two rows fit,
+the lower one wins.
+
+| Class | The diff holds | Run only |
+| --- | --- | --- |
+| copy | changed string values in copy, locale or docs files, no keys or code | the repo's formatter on those files |
+| test-only | test files and test fixtures only | those tests |
+| one-file logic | one source file, plus its own tests | its tests, then the typecheck and lint of the project that owns it |
+| cross-cutting | anything else: two or more source files, generated types, schemas, dependencies, build or CI config | the project file's Verify commands for what it touched |
+
+- Use the formatter the repo configures (such as `biome.json` or `.prettierrc`), never
+  another.
+- Before running checks, print `check plan: <class>: <checks>`, such as
+  `check plan: copy: <formatter> locales/en.json`.
+- Copy and test-only pushes use `git -C "$WT" push --no-verify`. All other fixes push
+  plainly.
+- A request for speed, such as "quickly", makes the plan the budget.
+- Babysit never runs spec, build or review rounds.
+
 ## Loop
 
 Run `python3 "$RUNTIME" pr-state "$SLUG/<id>"`. It prints one JSON line,
-`{"pr","state","review","checks","queued","conflict","next"}`. Exit 4 (bad `pr`) or 5
+`{"pr","state","review","checks","queued","conflict","stacked","next"}`. Exit 4 (bad `pr`) or 5
 (gh failed): patch `{"needs": "<the stderr line>", "babysit": null, "claim": null}`, report
 that line and stop. Otherwise act on `next`, then read again.
 
@@ -44,8 +65,9 @@ that line and stop. Otherwise act on `next`, then read again.
 | `fix-reviews` | a latest reviewer review is `CHANGES_REQUESTED` or `COMMENTED` after both the head commit and the PR author's latest review | fix the counted comments in `$WT`, commit, push, and reply in the review threads as the notes and the project file's PRs section say | hand back |
 | `needs-review` | GitHub shows no approval | patch `{"needs": "get a human approval on PR #<n>, then press Babysit PR again", "babysit": null, "claim": null}` and stop | patch `{"needs": "get a human approval on PR #<n>, then press Babysit PR again", "babysit": null, "claim": null}` and stop |
 | `rebase` | `mergeStateStatus` is `DIRTY` | merge `origin/$BASE` into `$WT`, fix the conflicts, commit, push | hand back |
-| `fix-ci` | a check is `fail` or `cancel` | fix from `gh run view --log-failed`, commit, push | hand back |
+| `fix-ci` | a check is `fail` or `cancel` | when the notes allow a rerun and the failed log shows a flake, rerun once as below; otherwise fix from `gh run view --log-failed`, commit, push | hand back |
 | `wait` | checks pending, no checks yet within 120 seconds of the head commit, or the PR is queued | run `pr-state "$SLUG/<id>" --wait 540`, then `hold`, then act on the new reading | run `pr-state "$SLUG/<id>" --wait 540`, then `hold`, then act on the new reading |
+| `wait-base` | `stacked` is true: the PR targets another PR's branch, not `$BASE`, and nothing else is left | run `pr-state "$SLUG/<id>" --wait 540`, then `hold`, then act on the new reading | hand back |
 | `merge` | otherwise | `gh pr merge <n> -R "$REPO" --merge --delete-branch`; if that fails, `gh pr merge <n> -R "$REPO" --auto --merge` once | hand back |
 
 - Hand back: patch `{"needs": "PR #<n> reads <next> and the Babysit notes do not cover it: handle it on GitHub or add a Babysit note in Settings, Pipeline, then press Babysit PR again", "babysit": null, "claim": null}` and stop.
@@ -59,6 +81,16 @@ that line and stop. Otherwise act on `next`, then read again.
 - Push right after each commit. `pr-state` times its 120-second check window from the
   head commit's date, so a late push can make an empty check list read as passing.
 - Merge only with the two `gh pr merge` commands in the table.
+- Never merge while `stacked` is true. The merge commands would land the PR in its
+  parent's branch. GitHub retargets it to `$BASE` once the parent merges, and the next
+  reading moves on.
+- In `fix-ci`, when the notes allow a rerun and the log shows a flake, rerun once per
+  session. A flake is a runner, network or timeout error in a step the diff does not
+  change. Run `gh run rerun <run-id> --failed -R "$REPO"`. The `<run-id>` is the number
+  after `/actions/runs/` in the check's `link` from
+  `gh pr checks <n> -R "$REPO" --json name,bucket,link`. If the link has no
+  `/actions/runs/<digits>`, treat it as no flake and fix or hand back. A rerun is not a
+  push, so the 3-push cap is unchanged.
 - At most 3 pushes per session. When a fourth would be needed, patch
   `{"stage": "needs-human", "babysit": null, "note": "babysit: 3 fix pushes did not get PR #<n> to merge"}`
   and stop.

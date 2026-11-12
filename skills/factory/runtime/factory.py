@@ -5256,14 +5256,14 @@ def checks_cmd(target, *args):
 
 
 PR_STATE_USAGE = "usage: pr-state <project-slug>/<job-id> [--wait S]"
-PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup"
+PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName"
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has no isInMergeQueue field, so it comes from GraphQL.
 PR_QUEUE_QUERY = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isInMergeQueue}}}"
 PR_STATE_INTERVAL = 30
 
 
-def pr_reading(pr):
+def pr_reading(pr, base):
     """One reading of the PR for a babysit session, with the next step it calls for."""
     try:
         view = json.loads(gh_pr_view(pr, "--json", PR_STATE_FIELDS))
@@ -5304,6 +5304,7 @@ def pr_reading(pr):
                          "gh api graphql").strip() == "true"
     queued = in_queue or bool(view.get("autoMergeRequest"))
     conflict = view.get("mergeStateStatus") == "DIRTY"
+    stacked = bool(view.get("baseRefName")) and view.get("baseRefName") != base
     if state in ("merged", "closed"):
         step = state
     elif unanswered:
@@ -5316,26 +5317,30 @@ def pr_reading(pr):
         step = "fix-ci"
     elif checks == "pending" or queued or (checks == "none" and new):
         step = "wait"
+    elif stacked:
+        step = "wait-base"
     else:
         step = "merge"
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none",
-            "checks": checks, "queued": queued, "conflict": conflict, "next": step}
+            "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
+            "next": step}
 
 
 def pr_state_cmd(target, *args):
-    """Print one JSON reading of the job's PR. --wait S re-reads every 30 seconds while next is wait."""
+    """Print one JSON reading of the job's PR. --wait S re-reads every 30 seconds while next is wait or wait-base."""
     home, slug, job_id = r2_target(target, True)
     if args and (args[0] != "--wait" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
                  or not 1 <= int(args[1]) <= 600):
         fail("--wait takes one value from 1 to 600 seconds. " + PR_STATE_USAGE, 2)
     wait = int(args[1]) if args else 0
     pr = board_pr(home, slug, job_id)
+    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
     start = time.monotonic()
     while True:
-        reading = pr_reading(pr)
+        reading = pr_reading(pr, base)
         elapsed = time.monotonic() - start
-        if reading["next"] != "wait" or elapsed >= wait:
+        if reading["next"] not in ("wait", "wait-base") or elapsed >= wait:
             print(json.dumps(reading))
             return
         time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
