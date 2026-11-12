@@ -2232,12 +2232,14 @@ def batch_cmd(target, *idea_ids):
         try:
             missing = cas(home, "/api/backlog", mark)
         except SystemExit:
+            riders = ", ".join(made.values())
             try:
                 drop(set(made.values()))
             except SystemExit:
-                pass
-            print(f"factory.py: batch removed {', '.join(made.values())}; their backlog lines stay unchecked",
-                  file=sys.stderr)
+                print(f"factory.py: batch could not remove {riders}; they stay on the board at spec, "
+                      f"batched into {lead_id}, and their backlog lines stay unchecked", file=sys.stderr)
+            else:
+                print(f"factory.py: batch removed {riders}; their backlog lines stay unchecked", file=sys.stderr)
             raise
         for pick, rider_id in missing.items():
             drop({rider_id})
