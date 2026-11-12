@@ -92,7 +92,7 @@ test("deploy reload", { timeout: 120000 }, async (t) => {
     await t.test("backlog draft waits", async () => {
       const { context, page, state } = await open();
       await page.evaluate(
-        "backlogDrafts.set('item', { pick: '', notes: 'needs a smaller scope', answers: [] })",
+        "backlogBusy.add('item'); backlogDrafts.set('item', { pick: '', notes: 'needs a smaller scope', answers: [] })",
       );
       state.version = "0000beef";
       await page.evaluate("poll()");
@@ -100,6 +100,36 @@ test("deploy reload", { timeout: 120000 }, async (t) => {
       assert.equal(await page.evaluate("window.reloadMarker"), 1);
       await page.evaluate("backlogDrafts.clear()");
       await reloaded(page);
+      await context.close();
+    });
+
+    await t.test("writes and memory-only answers hold", async () => {
+      const { context, page } = await open();
+      assert.equal(await page.evaluate("unsavedWork()"), false);
+      assert.equal(await page.evaluate("needsSaving = true; unsavedWork()"), true);
+      await page.evaluate("needsSaving = false");
+      assert.deepEqual(
+        await page.evaluate(
+          "casBoard(() => { window.during = unsavedWork(); return BOARD_UNCHANGED; }).then(() => [window.during, unsavedWork()])",
+        ),
+        [true, false],
+      );
+      await page.evaluate(
+        "needsStorageFailed = true; needsMemory.set('k', [{ picked: [], other: 'kept answer' }])",
+      );
+      assert.equal(await page.evaluate("unsavedWork()"), true);
+      await page.evaluate("needsMemory.set('k', [{ picked: [], other: ' ' }])");
+      assert.equal(await page.evaluate("unsavedWork()"), false);
+      await context.close();
+    });
+
+    await t.test("orphaned backlog draft is pruned", async () => {
+      const { context, page } = await open();
+      await page.evaluate(
+        "backlogDrafts.set('- [ ] sample: gone item', { pick: '', notes: 'needs a smaller scope', answers: [] })",
+      );
+      await page.evaluate("refreshBacklog()");
+      await page.waitForFunction("backlogDrafts.size === 0", wait);
       await context.close();
     });
 
