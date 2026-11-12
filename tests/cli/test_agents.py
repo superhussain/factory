@@ -100,13 +100,20 @@ class AgentRecordTest(BoardFixture):
         self.assertEqual(row, {k: v for k, v in ROWS[4].items() if k != "at"})
 
     def test_refuses(self):
-        for args in (("reviewer", "opencode", "native", "gpt-6.1-sol"),
-                     ("build", "open code", "native", "gpt-6.1-sol"),
-                     ("build", "h" * 65, "native", "gpt-6.1-sol"),
-                     ("build", "opencode", "subagent", "gpt-6.1-sol"),
-                     ("build", "opencode", "native", "gpt 6.1"),
-                     ("build", "opencode", "native", "gpt-6.1-sol", "huge")):
-            self.assertEqual(self.record(*args), (2, "", USAGE), args)
+        roles = "orchestrator, spec, build, review-security, review-ux, review-ui, review-code, approve"
+        for args, problem in (
+                (("reviewer", "opencode", "native", "gpt-6.1-sol"), f'role "reviewer" is not one of {roles}'),
+                (("build", "open code", "native", "gpt-6.1-sol"),
+                 'harness "open code" must be 1 to 64 letters, digits, _ or -'),
+                (("build", "h" * 65, "native", "gpt-6.1-sol"),
+                 f'harness "{"h" * 65}" must be 1 to 64 letters, digits, _ or -'),
+                (("build", "opencode", "subagent", "gpt-6.1-sol"),
+                 'via "subagent" is not one of native, paseo, launcher, general, direct'),
+                (("build", "opencode", "native", "gpt 6.1"),
+                 'model "gpt 6.1" must be 1 to 200 letters, digits or _ . / : @ [ ] -'),
+                (("build", "opencode", "native", "gpt-6.1-sol", "huge"),
+                 'effort "huge" is not one of low, medium, high, xhigh, max')):
+            self.assertEqual(self.record(*args), (2, "", USAGE[:-1] + ": " + problem + "\n"), args)
         code, out, err = self.record("build", "opencode", "native", "gpt-6.1-sol", session="other1")
         self.assertEqual((code, out), (6, ""))
         self.assertTrue(err.startswith(f"factory.py: {JOB} is held by {DEVICE} session d4e5f6 since "), err)

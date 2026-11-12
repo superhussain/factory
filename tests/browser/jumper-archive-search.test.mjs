@@ -161,7 +161,7 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       assert.deepEqual(await options(), [
         {
           title: "Fix login",
-          meta: "412-fix-login · Synthetic sample · merged · archived",
+          meta: "Synthetic sample · 412-fix-login · merged · archived",
           selected: "true",
         },
       ]);
@@ -175,7 +175,7 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       await waitMeta('Command · Search the archive for "logins"');
       assert.equal(asked.length, 1);
       await page.keyboard.press("Backspace");
-      await waitMeta("412-fix-login · Synthetic sample · merged · archived");
+      await waitMeta("Synthetic sample · 412-fix-login · merged · archived");
       assert.equal(asked.length, 1);
     });
 
@@ -262,7 +262,7 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
         await setQuery("login");
         assert.equal((await archiveOption())?.selected, "true");
         await page.keyboard.press("Enter");
-        await waitMeta("412-fix-login · Synthetic sample · merged · archived");
+        await waitMeta("Synthetic sample · 412-fix-login · merged · archived");
         assert.equal(await count(), "0 jobs · 1 archived of 3");
         assert.equal(asked.at(-1), "login");
       } finally {

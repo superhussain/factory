@@ -1031,7 +1031,7 @@ class BuildPassTest(TracerCase):
             self.assertEqual(self.stored["tracer"], {"follow": True})
             self.assertEqual(self.board_writes, 2)
             self.stored["tracer"] = {"building": True}
-            self.run_pass(fake)
+            self.assertTrue(factory.tracer_build_pass(self.home))
             self.assertNotIn("tracer", self.stored)
 
     def test_build_pass_without_tracer_json_keeps_mark_while_on(self):
@@ -1039,7 +1039,7 @@ class BuildPassTest(TracerCase):
         with FakeTracer() as fake:
             self.configure(fake)
             (self.home / "tracer.json").unlink()
-            factory.tracer_build_pass(self.home)
+            self.assertIsNone(factory.tracer_build_pass(self.home))
             self.assertEqual(self.stored["tracer"], {"follow": True, "building": True})
             self.assertEqual(self.board_writes, 0)
             self.assertEqual(fake.requests, [])
@@ -1235,7 +1235,7 @@ class OffTest(TracerCase):
         with FakeTracer() as fake:
             self.configure(fake)
             (self.home / "tracer.json").unlink()
-            factory.tracer_build_pass(self.home)
+            self.assertTrue(factory.tracer_build_pass(self.home))
             self.assertEqual(self.board["jobs"][0]["tracer"], {"follow": True})
             self.assertEqual(self.board_writes, 1)
             self.assertEqual(fake.requests, [])

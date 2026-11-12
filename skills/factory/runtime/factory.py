@@ -3875,11 +3875,18 @@ def pickup(*args):
     device, _, minutes = holder(home)
     started = now()
     failing = cached_status(home)[2]
+
+    def build_pass(home):
+        nonlocal data
+        if tracer_build_pass(home, data["jobs"] if data else None):
+            data = None
+
     try:
+        data = None if os.path.lexists(home / "tracer.json") else read_board(home)
         if not dry:
             for tracer_pass, stopped in (
                     (tracer_follow_pass, "Tracer follow pass stopped; followed jobs wait for the next pickup run"),
-                    (tracer_build_pass, "Tracer build pass stopped; Building in Tracer marks wait for the next pickup run")):
+                    (build_pass, "Tracer build pass stopped; Building in Tracer marks wait for the next pickup run")):
                 try:
                     tracer_pass(home)
                 except SystemExit as e:
@@ -3888,6 +3895,7 @@ def pickup(*args):
                     print(f"factory.py: {stopped}", file=sys.stderr)
             if "--triage-now" in flags or triage_sweep_due(home, started):
                 save_triage_sweep(home, started)
+                data = None
                 try:
                     backlog_triage_pass(home)
                     failing = None
@@ -3896,7 +3904,7 @@ def pickup(*args):
                         raise
                     failing = failing or started
                     print("factory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now", file=sys.stderr)
-        pickup_pass(home, device, minutes, dry, limit, cap)
+        pickup_pass(home, device, minutes, dry, limit, cap, data)
     finally:
         if not dry:
             report_status(home, PICKUP_SCHEDULER, started, failing, save=True)
@@ -4317,13 +4325,14 @@ PR_EVIDENCE = {"closed": "closed by pickup with a comment that links this page",
                "already closed": "already closed", "open": "still open"}
 
 
-def gh_pr(*args):
+def gh_pr(*args, stderr=False):
     """(returncode, stdout) of gh pr <args>: (1, "") when it cannot start,
-    ("timeout", "") past 60 seconds, None without gh."""
-    return gh_cli("pr", *args)
+    ("timeout", "") past 60 seconds, None without gh. With stderr, each tuple
+    gains gh's stderr, "" on failure."""
+    return gh_cli("pr", *args, stderr=stderr)
 
 
-def gh_cli(*args):
+def gh_cli(*args, stderr=False):
     """(returncode, stdout) of gh <args>, as gh_pr describes."""
     gh = shutil.which("gh")
     if gh is None:
@@ -4332,10 +4341,12 @@ def gh_cli(*args):
         r = subprocess.run([gh, *args], capture_output=True, encoding="utf-8",
                            errors="replace", timeout=60, stdin=subprocess.DEVNULL)
     except OSError:
-        return 1, ""
+        result = 1, "", ""
     except subprocess.TimeoutExpired:
-        return "timeout", ""
-    return r.returncode, r.stdout
+        result = "timeout", "", ""
+    else:
+        result = r.returncode, r.stdout, r.stderr
+    return result if stderr else result[:2]
 
 
 def close_pull_request(home, j, device):
@@ -4596,10 +4607,11 @@ def moved_here(j, device):
             and not any(x["from"] == device for x in queued_stops(m)))
 
 
-def pickup_pass(home, device, minutes, dry, limit, cap):
-    """One pickup run after flags and the holder are resolved."""
+def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
+    """One pickup run after flags and the holder are resolved. Reads the board unless given it."""
     paths = read_paths(home)
-    data = read_board(home)
+    if data is None:
+        data = read_board(home)
     stalls = read_stalls(home)
     settings = {}
     move_stop_pass(home, data, device, paths, settings, dry, stalls[0] if stalls else None)
@@ -5184,17 +5196,25 @@ def gh_pr_view(pr, *args):
 
 
 def pr_checks(pr):
-    """The PR's checks as gh pr checks lists them, or [] when gh lists none or prints something else."""
-    result = gh_pr("checks", pr, "--json", "name,bucket")
+    """(checks, problem): the PR's checks as gh pr checks lists them and None, or [] and why
+    the reply was unusable. gh's own no-checks reply is usable, as []."""
+    result = gh_pr("checks", pr, "--json", "name,bucket", stderr=True)
+    if result is None:
+        return [], "gh is not installed"
+    code, out, err = result
+    if code == "timeout":
+        return [], "timed out after 60 seconds"
     try:
-        checks = json.loads(result[1]) if result and result[0] != "timeout" else []
+        checks = json.loads(out)
     except ValueError:
-        checks = []
-    if not isinstance(checks, list) or not all(
+        checks = None
+    if isinstance(checks, list) and all(
             isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("bucket"), str)
             for c in checks):
-        checks = []
-    return checks
+        return checks, None
+    if code == 1 and not out.strip() and "no checks reported" in err:
+        return [], None
+    return [], f"exited {code} with no check list" if code else "printed no check list"
 
 
 def checks_cmd(target, *args):
@@ -5209,8 +5229,13 @@ def checks_cmd(target, *args):
     if state != "OPEN":
         fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
     start = time.monotonic()
+    usable = False
     while True:
-        checks = pr_checks(pr)
+        checks, problem = pr_checks(pr)
+        if problem:
+            print(f"factory.py: warning: gh pr checks gave no usable reply ({problem})", file=sys.stderr)
+        else:
+            usable = True
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
             for c in checks:
@@ -5220,6 +5245,8 @@ def checks_cmd(target, *args):
                 fail("failing checks: " + ", ".join(failing), 1)
             return
         elapsed = time.monotonic() - start
+        if not checks and not usable and elapsed >= min(CHECKS_REGISTER, timeout):
+            fail("gh pr checks never gave a usable reply", 5)
         if not checks and elapsed >= CHECKS_REGISTER:
             print("no checks reported")
             return
@@ -5244,7 +5271,7 @@ def pr_reading(pr):
         view = None
     if not isinstance(view, dict):
         fail("gh pr view printed no JSON object", 5)
-    listed = pr_checks(pr)
+    listed = pr_checks(pr)[0]
     if view.get("statusCheckRollup") and not listed:
         fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5)
     buckets = {c["bucket"] for c in listed}
@@ -7305,7 +7332,7 @@ def tracer_task_summary(feature):
     return summary
 
 
-def tracer_build_pass(home):
+def tracer_build_pass(home, jobs=None):
     """Mark each idea or in-flight job whose Tracer feature a Tracer build agent holds, and
     clear the mark when it stops. Save the feature's task summary once it builds and refresh it
     while the job stays checked; a 404 drops it. A Tracer failure costs one stderr warning and leaves
@@ -7317,7 +7344,8 @@ def tracer_build_pass(home):
     captured, found = io.StringIO(), {}
     try:
         with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
-            jobs = read_board(home)["jobs"]
+            if jobs is None:
+                jobs = read_board(home)["jobs"]
             if configured:
                 cfgs = read_tracer(home) if tracer_enabled(home) else {}
             elif any(tracer_building(j) for j in jobs) and not tracer_enabled(home):
@@ -7380,6 +7408,7 @@ def tracer_build_pass(home):
         data["updated"] = now()
         return dump_board(data), None
     cas(home, "/api/board", change)
+    return True
 
 
 def tracer_after_board(home, job, patch):
@@ -7470,16 +7499,23 @@ RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+"
 RETRO_HEADERS = re.compile(
     r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))"
     r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)[^\r\n'\"\\]+")
-RETRO_URL_CREDS = re.compile(r"(?i)(?<![a-z0-9+.-])\b([a-z][a-z0-9+.-]{0,31}://)[^/\s@]+@")
+RETRO_URL_CREDS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{0,31}://)[^/\s@]+@")
 RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
 RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)[^\s:]*:\S+")
+RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential"
+RETRO_SECRET_WORD = re.compile(r"(?i)(?:" + RETRO_SECRET_WORDS + ")")
+RETRO_COUNT_WORD = re.compile(r"(?i)tokens")
+RETRO_COUNT = re.compile(r"\d{1,7}[,;)}\]]*")
 RETRO_KEYVALUE = re.compile(
-    r"(?i)(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{0,64}?(?:token|secret|password|passwd|api[_-]?key|credential)"
+    r"(?i)(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{0,64}?(?:" + RETRO_SECRET_WORDS + ")"
     r"[A-Za-z0-9_-]{0,64})(\\?[\"']?\s*[=:]\s*)"
-    r"(?:\"[^\"]*\"|'[^']*'|\S+)")
+    r"(\"[^\"]*\"|'[^']*'|\S+)")
 RETRO_FLAG = re.compile(
-    r"(?i)(?<![A-Za-z0-9_-])(--[A-Za-z0-9_-]{0,64}?(?:token|secret|password|passwd|api[_-]?key|credential)"
-    r"[A-Za-z0-9_-]{0,64})(\s+)(?!-)\S+")
+    r"(?i)(?<![A-Za-z0-9_-])(--[A-Za-z0-9_-]{0,64}?(?:" + RETRO_SECRET_WORDS + ")"
+    r"[A-Za-z0-9_-]{0,64})(\s+)(?!-)(\S+)")
+RETRO_LONG_KEYVALUE = re.compile(
+    r"(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{65,})(\\?[\"']?\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|\S+)")
+RETRO_LONG_FLAG = re.compile(r"(?<![A-Za-z0-9_-])(--[A-Za-z0-9_-]{65,})(\s+)(?!-)(\S+)")
 RETRO_HOME = re.compile(r"^(?:[A-Za-z]-)?-(?:home|Users)-[A-Za-z0-9_]+")
 RETRO_WRITE_ONLY = "retro digests are written only by the host's bound service token"
 RETRO_REPLY_SCHEMA = "factory.retro/1"
@@ -7499,13 +7535,21 @@ RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_c
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
 
+def retro_secret_pair(match):
+    name, sep, value = match.group(1, 2, 3)
+    if not RETRO_SECRET_WORD.search(name) or (
+            RETRO_COUNT.fullmatch(value) and not RETRO_SECRET_WORD.search(RETRO_COUNT_WORD.sub("s", name))):
+        return match.group(0)
+    return name + sep + "[redacted]"
+
+
 def retro_redact(text):
     text = RETRO_HEADERS.sub(r"\1\2[redacted]", text)
     text = RETRO_URL_CREDS.sub(r"\1[redacted]@", text)
     text = RETRO_BEARER.sub(r"\1[redacted]", text)
     text = RETRO_USER_PASS.sub(r"\1[redacted]", text)
-    text = RETRO_KEYVALUE.sub(r"\1\2[redacted]", text)
-    text = RETRO_FLAG.sub(r"\1\2[redacted]", text)
+    for pattern in (RETRO_KEYVALUE, RETRO_FLAG, RETRO_LONG_KEYVALUE, RETRO_LONG_FLAG):
+        text = pattern.sub(retro_secret_pair, text)
     for pattern in NOTE_SECRETS:
         text = pattern.sub("[redacted]", text)
     return text
@@ -7809,6 +7853,11 @@ def retro_aggregate(days):
         notes = json.loads(text).get("stage_notes", {}) if status == 200 else {}
         pipeline[scope] = {"version": int(headers["X-Pipeline-Version"]) if status == 200 else 0,
                            "stage_notes": notes}
+    expected = set()
+    for p in projects:
+        enabled, pickup_hosts, _ = pickup_config(home, p)
+        if enabled:
+            expected.update(pickup_hosts)
     documents = {}
     for slug in allow:
         for name in ("project.md", *DOCUMENT_NAMES):
@@ -7877,8 +7926,8 @@ def retro_aggregate(days):
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-    print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "sessions": len(rows),
-                      "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
+    print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "expected": sorted(expected),
+                      "sessions": len(rows), "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
                       "digest": str(folder / "digest.jsonl"), "transcripts": agg["transcripts"],
                       "out": str(folder / "reply.json"), "findings": str(folder / "findings.md")}, indent=2))
 
@@ -8224,12 +8273,27 @@ AGENT_RECORD_USAGE = "usage: agent record <project>/<id> <role> <harness> <via> 
 AGENT_COLUMNS = ("stage", "role", "harness", "via", "model", "effort")
 
 
+def agent_record_problem(role, harness, via, model, effort):
+    """The first bad field of an agent record, in argument order, or None."""
+    if role not in AGENT_ROLES:
+        return f'role "{role}" is not one of {", ".join(AGENT_ROLES)}'
+    if not SLUG.fullmatch(harness) or len(harness) > 64:
+        return f'harness "{harness}" must be 1 to 64 letters, digits, _ or -'
+    if via not in AGENT_VIAS:
+        return f'via "{via}" is not one of {", ".join(AGENT_VIAS)}'
+    if not ROUTE_MODEL.fullmatch(model):
+        return f'model "{model}" must be 1 to 200 letters, digits or _ . / : @ [ ] -'
+    if effort is not None and effort not in ROUTE_EFFORTS:
+        return f'effort "{effort}" is not one of {", ".join(ROUTE_EFFORTS)}'
+    return None
+
+
 def agent_cmd(sub, *args):
     if sub == "record" and len(args) in (5, 6):
         target, role, harness, via, model, *effort = args
-        if (role not in AGENT_ROLES or not SLUG.fullmatch(harness) or len(harness) > 64 or via not in AGENT_VIAS
-                or not ROUTE_MODEL.fullmatch(model) or effort and effort[0] not in ROUTE_EFFORTS):
-            fail(AGENT_RECORD_USAGE, 2)
+        problem = agent_record_problem(role, harness, via, model, effort[0] if effort else None)
+        if problem:
+            fail(f"{AGENT_RECORD_USAGE}: {problem}", 2)
         home, slug, job_id = r2_target(target, True)
         device, session, _ = holder(home)
         row = {"role": role, "harness": harness, "via": via, "model": model}
