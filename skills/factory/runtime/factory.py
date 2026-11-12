@@ -1978,6 +1978,7 @@ SENSITIVE_PATHS = (
     "*uv.lock", "*go.mod", "*go.sum", "*cargo.toml", "*cargo.lock", "*gemfile*", "mise.toml",
     ".node-version", ".npmrc")
 MAX_SUGGESTION_BYTES = 65536
+ENV_SECRET_MIN = 12
 MAX_PER_RUN = 5
 MAX_PER_DAY = 10
 MAX_OPEN_PER_PROJECT = 5
@@ -2293,6 +2294,12 @@ def strings(value):
     return [s for item in items for s in strings(item)]
 
 
+def env_secret(home, text):
+    """The first key in home/.env whose value, ENV_SECRET_MIN or more characters long, appears in text, or None."""
+    env = read_conf(home / ".env") if (home / ".env").exists() else {}
+    return next((key for key, value in env.items() if len(value) >= ENV_SECRET_MIN and value in text), None)
+
+
 def suggest_admit(path, by="explorer"):
     """Turn a checked suggestions file into gated idea cards. Requests only GET /projects.json
     and GET/PUT /api/board, and never runs a process. Only retro_admit passes by="retro"."""
@@ -2311,11 +2318,9 @@ def suggest_admit(path, by="explorer"):
     if err:
         fail(f"{path}: {err}; nothing admitted", 2)
     home = factory_home()
-    env = read_conf(home / ".env") if (home / ".env").exists() else {}
-    text = "\n".join(strings(doc))
-    for key in ("FACTORY_ACCESS_CLIENT_ID", "FACTORY_ACCESS_CLIENT_SECRET"):
-        if env.get(key) and env[key] in text:
-            fail(f"{path} holds this device's {key}; nothing admitted", 2)
+    key = env_secret(home, "\n".join(strings(doc)))
+    if key:
+        fail(f"{path} holds this device's {key}; nothing admitted", 2)
     retro = by == "retro"
     projects = registered(home)
     if not retro and doc["project"] not in projects:
