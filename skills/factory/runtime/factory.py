@@ -1817,12 +1817,12 @@ def batch_cmd(target, *idea_ids):
         data = load_board(text)
         lead = next((j for j in data["jobs"] if j.get("id") == lead_id), None)
         if lead is None:
-            fail(f"no job {lead_id} on the board", 4)
+            fail(f"no job {lead_id} on the board. Nothing was written.", 4)
         if idea_ids:
             if not mine(lead.get("claim") or {}, device, session):
                 fail(f"{lead_id} is not held by this session. Nothing was written.", 6)
             if lead.get("stage") != "spec":
-                fail(f"batch runs while {lead_id} is at spec, not {lead.get('stage')}", 2)
+                fail(f"batch runs while {lead_id} is at spec, not {lead.get('stage')}. Nothing was written.", 2)
             if "tracer" in lead:
                 fail(f"cannot batch into {lead_id}: follows Tracer", 2)
             if len(riders_of(data, lead_id)) + len(idea_ids) > MAX_RIDERS:
@@ -1831,7 +1831,7 @@ def batch_cmd(target, *idea_ids):
             for idea_id in job_picks:
                 j = next((x for x in data["jobs"] if x.get("id") == idea_id), None)
                 if j is None:
-                    fail(f"no job {idea_id} on the board", 4)
+                    fail(f"no job {idea_id} on the board. Nothing was written.", 4)
                 problem = batch_problem(data, j, slug, device, session, minutes)
                 if problem:
                     fail(f"cannot batch {idea_id}: {problem}. Nothing was written.", 2)
@@ -1908,14 +1908,14 @@ def stack_cmd(target, rider_id):
         data = load_board(text)
         lead = next((j for j in data["jobs"] if j.get("id") == lead_id), None)
         if lead is None:
-            fail(f"no job {lead_id} on the board", 4)
+            fail(f"no job {lead_id} on the board. Nothing was written.", 4)
         rider = next((j for j in data["jobs"] if j.get("id") == rider_id), None)
         if rider is None:
-            fail(f"no job {rider_id} on the board", 4)
+            fail(f"no job {rider_id} on the board. Nothing was written.", 4)
         if not mine(lead.get("claim") or {}, device, session):
             fail(f"{lead_id} is not held by this session. Nothing was written.", 6)
         if lead.get("stage") != "spec":
-            fail(f"stack runs while {lead_id} is at spec, not {lead.get('stage')}", 2)
+            fail(f"stack runs while {lead_id} is at spec, not {lead.get('stage')}. Nothing was written.", 2)
         if lead_of(rider) != lead_id:
             fail(f"cannot stack {rider_id}: not batched into {lead_id}. Nothing was written.", 2)
         if rider.get("stage") in TERMINAL:
