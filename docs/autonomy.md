@@ -286,11 +286,11 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   should be built now without a person reviewing it, and its yes probability times 100, rounded,
   is the confidence. A batch call puts each item in its own `backlog-item id="<n>"` envelope,
   where `<n>` is the item's position in the request, and asks one `build.<n>` question per item
-  that judges only item `<n>`, under the same rules envelope. The verdict's `reason` is fixed text: `Rated by clef-flash against the
-  project rules.`, or `Rated by clef-flash.` when the rules are empty, so an item can move the
-  score but write no text. An item or context holding either tag, including fullwidth,
-  Cyrillic, Greek or other lookalike forms, or a letter that reads as either l or I, is
-  refused with a 400.
+  that judges only item `<n>`, under the same rules envelope. The verdict's `reason` is fixed
+  text: `Rated by clef-flash against the project rules.`, or `Rated by clef-flash.` when the rules
+  are empty, so an item can move the score but write no text. An item or context holding either
+  tag, including fullwidth, Cyrillic, Greek or other lookalike forms, or a letter that reads as
+  either l or I, is refused with a 400.
   For an item whose context has `## Question:` sections, the same call adds one `choice`
   question `q<i>` per backlog question, over its options, and one `choice` question
   `q<i>.o<k>` per option, over fixed reasons such as `It gives the item the most value.`

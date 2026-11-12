@@ -1523,7 +1523,7 @@ def backlog_triage_batch(home, entries):
         reply = json.loads(text) if status == 200 else None
     except ValueError:
         reply = None
-    if isinstance(reply, dict) and reply == {"decision": "off"}:
+    if reply == {"decision": "off"}:
         return waiting, True
     verdicts = reply.get("verdicts") if isinstance(reply, dict) else None
     if not isinstance(verdicts, list) or len(verdicts) != len(entries):
