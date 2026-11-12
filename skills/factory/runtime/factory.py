@@ -13,6 +13,9 @@
                                             recommendation, and questions indented under it
   factory.py backlog rework <job-id>        read a reworded feature on stdin, append it as
                                             (rework-of <job-id>), and close that rework job
+  factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes <text>] --chat "<message>"
+                                            make the dashboard's backlog decision from a person's chat
+                                            message, print the job as JSON
   factory.py ideas [--limit N] [--max-inflight N] [--project <slug>]
                                             claim the oldest ideas this device can run, print them as JSON
                                             (exit 3 when none are runnable or the cap is full)
@@ -1664,10 +1667,204 @@ def backlog_rework(job_id):
         print(f"link: {backlog_link(home, line)}")
 
 
-def backlog_cmd(sub, item, flag=None, path=None):
-    if sub == "rework" and flag is None:
+BACKLOG_DECIDE_USAGE = ('usage: backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes <text>] '
+                        '--chat "<message>"')
+BACKLOG_UNANSWERED = "answer every question to approve or deny; pass --answers with one line per question"
+
+
+def backlog_questions(context):
+    """The questions of a backlog context, as the dashboard's parseBacklogContext reads them,
+    or [] when the context does not parse."""
+    text = context.replace("\r\n", "\n").replace("\r", "\n")
+    lines = re.sub(r"\A(?:[ \t]*\n)+|(?:\n[ \t]*)+\Z", "", text).split("\n")
+    if lines[0] not in ("Recommend: approve", "Recommend: deny") or len("\n".join(lines)) > 6000:
+        return []
+    first = next((i for i, line in enumerate(lines) if line.startswith("## Question:")), len(lines))
+    if not "\n".join(lines[1:first]).strip():
+        return []
+    marks = [i for i, line in enumerate(lines) if i >= first and line.startswith("## ")]
+    questions = []
+    for n, start in enumerate(marks):
+        head, sect = lines[start], lines[start + 1:marks[n + 1] if n + 1 < len(marks) else len(lines)]
+        if not head.startswith("## Question:") or len(marks) > 3:
+            return []
+        header = head[len("## Question:"):].strip()
+        picks = [line for line in sect if line.startswith("Pick:")]
+        if not 0 < len(header) <= 60 or len(picks) != 1 or picks[0] not in ("Pick: one", "Pick: many"):
+            return []
+        at = sect.index(picks[0])
+        rows = [re.fullmatch(r"- (.+?)(?::\s+(.+))?", line) for line in sect[at + 1:] if line.strip()]
+        if not all(rows):
+            return []
+        labels = [re.sub(r" \(recommended\)$", "", m.group(1), flags=re.I) for m in rows]
+        recs = sum(label != m.group(1) for label, m in zip(labels, rows))
+        if not " ".join(line for line in sect[:at] if line.strip()).strip() or not 2 <= len(labels) <= 4 \
+                or picks[0] == "Pick: one" and recs > 1:
+            return []
+        questions.append({"header": header, "pick": picks[0][len("Pick: "):], "labels": labels})
+    return questions
+
+
+def backlog_answers(path, questions, decision):
+    """The answers text for backlog.answers, one "- <header>: <answer>" line per question,
+    or "" when none was answered. Exits 2 when the file does not fit the questions."""
+    if path is None:
+        if questions and decision != "rework":
+            fail(BACKLOG_UNANSWERED, 2)
+        return ""
+
+    def bad(why):
+        fail(f"--answers {path}: {why}", 2)
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            text = f.read().replace("\r\n", "\n")
+    except (OSError, UnicodeDecodeError):
+        bad("cannot read it as UTF-8 text")
+    if len(text) > 2000:
+        bad("longer than 2000 characters")
+    why = check_untrusted(text)
+    if why:
+        bad(why)
+    lines = [line.rstrip() for line in text.split("\n") if line.strip()]
+    if len(lines) != len(questions):
+        bad("write one line per question, as - <header>: <answer>")
+    out, answered = [], 0
+    for q, line in zip(questions, lines):
+        prefix = f"- {q['header']}: "
+        answer = line[len(prefix):].strip() if line.startswith(prefix) else ""
+        if not answer:
+            bad("write one line per question, as - <header>: <answer>")
+        if answer == "no answer":
+            if decision != "rework":
+                fail(BACKLOG_UNANSWERED, 2)
+            out.append(prefix + answer)
+            continue
+        picked, _, other = answer.partition("Other: ") if answer.startswith("Other: ") else answer.partition(". Other: ")
+        picked = [label for label in picked.split(", ") if label]
+        other = " ".join(other.split())
+        for label in picked:
+            if label not in q["labels"]:
+                bad(f"{label} is not an option of {q['header']}")
+        if len(set(picked)) != len(picked) or q["pick"] == "one" and len(picked) > 1:
+            bad(f"{q['header']} takes one pick" if q["pick"] == "one" else f"{q['header']} repeats a pick")
+        if not picked and not other:
+            bad("write one line per question, as - <header>: <answer>")
+        answered += 1
+        out.append(prefix + ". ".join(filter(None, [", ".join(picked), other and "Other: " + other])))
+    return "\n".join(out) if answered else ""
+
+
+def backlog_decide(key, decision, answers=None, notes=None, chat=None):
+    """Approve, deny or rework a backlog item from a person's chat message, with the dashboard's
+    writes: the board job first, then the checked line. A line that changed meanwhile drops the job."""
+    stored = {"approve": "approved", "deny": "denied", "rework": "rework"}.get(decision)
+    if stored is None or not re.fullmatch(r"[0-9a-f]{12}", key):
+        fail(BACKLOG_DECIDE_USAGE, 2)
+    quote = chat_quote(chat)
+    if quote is None:
+        fail(BACKLOG_DECIDE_USAGE, 2)
+    note = (notes or "").strip()
+    if note:
+        why = check_text(note, 1, 2000, multiline=True)
+        if why:
+            fail(f"--notes {why}; nothing was changed", 2)
+    elif stored == "rework":
+        fail("rework needs --notes that say what to change", 2)
+    home = factory_home()
+    status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
+    lines = [line.rstrip("\r") for line in (text if status == 200 else "").split("\n")]
+    found = next((i for i, line in enumerate(lines) if BACKLOG_LINE.match(line) and backlog_key(line) == key), None)
+    if found is None:
+        fail(f"no open backlog item {key}; it was decided, reworded or removed", 4)
+    raw = lines[found]
+    m = BACKLOG_LINE.match(raw)
+    slug, feature = m.group(1), m.group(2).rstrip()
+    held = []
+    for line in lines[found + 1:]:
+        if line and not line.startswith("  "):
+            break
+        held.append(line[2:])
+    answered = backlog_answers(answers, backlog_questions("\n".join(held)), stored)
+    if stored != "denied" and slug not in registered(home):
+        fail(f"register project {slug} before deciding this item", 4)
+    device = holder(home)[0]
+    ref = BACKLOG_SUFFIX.search(feature)
+    item = feature[:ref.start()] if ref else feature
+    jobs = Path(home, "jobs")
+    local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
+    verb = {"approved": "Approved", "denied": "Denied", "rework": "Rework requested"}[stored]
+
+    def mine(j):
+        record = j.get("backlog")
+        return isinstance(record, dict) and record.get("line") == raw and record.get("via") == "chat" \
+            and record.get("quote") == quote
+
+    def add(board):
+        data = load_board(board)
+        prior = next((j for j in data["jobs"] if mine(j)), None)
+        if prior:
+            return None, prior["id"]
+        job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug(item),
+                             archive_floor(data))
+        at = data["updated"] = now()
+        footer = f'\n\n---\n{verb} in chat by {device} at {at}: "{" ".join(quote.split())}"'
+        record = {"line": raw, "decision": stored, "at": at, **({"notes": note} if note else {}),
+                  **({"answers": answered} if answered else {}), "via": "chat", "quote": quote, "by": device}
+        title = item.strip()[:80]
+        if stored == "approved":
+            idea = item + (f"\n\nNotes from the backlog decision:\n{note}" if note else "") \
+                + (f"\n\nAnswers from the backlog decision:\n{answered}" if answered else "")
+            job = {"id": job_id, "project": slug, "title": title, "stage": IDEA, "updated": at,
+                   "idea": idea + footer, "backlog": record}
+        elif stored == "rework":
+            job = {"id": job_id, "project": slug, "title": title, "idea": item + footer, "stage": IDEA,
+                   "updated": at, "note": "rework requested from the backlog", "backlog": record}
+        else:
+            job = {"id": job_id, "project": slug, "title": title, "idea": item + footer, "stage": "closed",
+                   "updated": at, "done": at, "note": "denied from the backlog", "backlog": record}
+        refs = suffix_refs(ref)
+        if refs:
+            job["refs"] = refs
+        data["jobs"].append(job)
+        return dump_board(data), job_id
+    job_id = cas(home, "/api/board", add)
+    done = f"- [x] {slug}: {feature} ({job_id})"
+
+    def mark(backlog):
+        rows = (backlog or "").split("\n")
+        for i, line in enumerate(rows):
+            if line.rstrip("\r") == raw:
+                rows[i] = done
+                return "\n".join(rows), True
+        return None, done in (line.rstrip("\r") for line in rows)
+
+    def drop(board):
+        data = load_board(board)
+        kept = [j for j in data["jobs"] if not (j.get("id") == job_id and mine(j) and (
+            j.get("stage") == IDEA and j.get("claim") is None
+            or j.get("stage") == "closed" and j["backlog"].get("decision") == "denied"))]
+        if len(kept) == len(data["jobs"]):
+            return None, False
+        data["jobs"], data["updated"] = kept, now()
+        return dump_board(data), True
+    if not cas(home, "/api/backlog", mark):
+        if cas(home, "/api/board", drop):
+            fail("this backlog item changed elsewhere, so nothing was changed", 6)
+        fail(f"{job_id} was saved, but its backlog line changed elsewhere. Check backlog.md.", 6)
+    print(json.dumps({"id": job_id, "project": slug, "decision": stored, "line": raw}, indent=2))
+
+
+def backlog_cmd(sub, item, *rest):
+    if sub == "rework" and not rest:
         return backlog_rework(item)
-    if sub != "add" or flag not in (None, "--context") or (flag is None) != (path is None) or path == "":
+    if sub == "decide" and rest:
+        flags = dict(zip(rest[1::2], rest[2::2]))
+        if len(rest) % 2 == 0 or len(flags) != len(rest) // 2 or not set(flags) <= {"--answers", "--notes", "--chat"}:
+            fail(BACKLOG_DECIDE_USAGE, 2)
+        return backlog_decide(item, rest[0], flags.get("--answers"), flags.get("--notes"), flags.get("--chat"))
+    flag, path = (rest + (None, None))[:2]
+    if sub != "add" or len(rest) > 2 or flag not in (None, "--context") or (flag is None) != (path is None) \
+            or path == "":
         fail(BACKLOG_USAGE, 2)
     backlog_add(item, None if path is None else backlog_context(path))
 
@@ -7345,7 +7542,7 @@ def agent_cmd(sub, *args):
 
 
 COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3),
-            "board": (board, 2, 2), "next": (next_item, 0, 0), "backlog": (backlog_cmd, 2, 4),
+            "board": (board, 2, 2), "next": (next_item, 0, 0), "backlog": (backlog_cmd, 2, 9),
             "stop": (stop, 1, 1), "push": (push, 1, 1), "pull": (pull, 1, 1), "sync": (sync, 0, 1),
              "hold": (hold, 1, 2), "worktree": (worktree, 1, 1), "job": (job, 1, 1),
              "handoff": (handoff, 1, 1),
