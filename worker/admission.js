@@ -47,7 +47,8 @@ export const FLOORS = Object.freeze(
 );
 
 const REVIEWERS = ["security", "ux", "ui", "code"];
-export const STAGES = ["spec", "build", "review", "approve"];
+export const STAGES = ["spec", "build", "review", "approve", "babysit"];
+export const RETRO_STAGES = STAGES.filter((s) => s !== "babysit");
 const KEYS = [
   "schema",
   "merge",
