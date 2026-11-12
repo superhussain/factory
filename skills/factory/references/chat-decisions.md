@@ -30,7 +30,8 @@ factory.py control <job-id> <prioritize|unprioritize> --chat-file <file>
 - Never edit, trim or summarize the message.
 - When the message is ambiguous, such as no option or two items, stop and ask.
 - When the message is refused, such as for a link, ask the person to answer at the
-  terminal or on the dashboard.
+  terminal or on the dashboard. `control` has no terminal mode, so for it point the
+  person to the dashboard only.
 
 ## Backlog answers
 
@@ -45,13 +46,13 @@ factory.py control <job-id> <prioritize|unprioritize> --chat-file <file>
 
 | Dashboard action | Agent path today | Slice |
 | --- | --- | --- |
-| Prioritize, Remove priority | refused by `board` | this job |
-| Pause, Resume | refused | sub-job |
-| Babysit PR | refused | sub-job |
-| Close job with a reason | refused | sub-job |
-| Move to host, Rerun | refused (`move`) | sub-job |
-| Answer a needs-you form | none | sub-job |
+| Prioritize, Remove priority | `factory.py control` | exists |
+| Pause, Resume | refused | planned |
+| Babysit PR | refused | planned |
+| Close job with a reason | refused | planned |
+| Move to host, Rerun | refused (`move`) | planned |
+| Answer a needs-you form | none | planned |
 | Edit idea, Discard idea, Assign project, Follow in Tracer | `board` patch | exists |
 | Backlog decision, explorer approval | `backlog decide`, `suggest approve` | exists |
-| Pipeline settings save | Worker 403 for services | sub-job, owner decision |
-| Hosts: add, retire, pairing code | Worker 403 (`PERSON_ONLY`) | sub-job, owner decision |
+| Pipeline settings save | Worker 403 for services | planned, owner decision |
+| Hosts: add, retire, pairing code | Worker 403 (`PERSON_ONLY`) | planned, owner decision |
