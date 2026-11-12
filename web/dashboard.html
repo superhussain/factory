@@ -1398,7 +1398,7 @@ function card(j, inNeeds, archived = false) {
       (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
       (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
       (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
-      (j.babysit?.at ? '<span class="chip">Babysitting</span>' : '') + '</div>' +
+      (j.babysit?.at ? '<span class="chip" title="' + esc(prLink(j) ? 'An agent is fixing and merging PR #' + prLink(j).n : 'An agent is fixing and merging this PR') + '">Babysitting</span>' : '') + '</div>' +
     line('proj', projectName(j)) +
     '<div class="title">' + esc(j.title || j.id) + '</div>' +
     (j.stage === 'idea' && !j.project ? '<div class="idea-text">Assign a project before starting.</div>' : '') +
