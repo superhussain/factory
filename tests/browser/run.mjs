@@ -947,13 +947,12 @@ async function capture(outdir, referencePath) {
     };
     await view("empty-archive", 1280, 900, "light", openEmptyArchive);
     await view("empty-archive-loaded-mobile", 390, 844, "dark", openEmptyArchiveLoaded);
-    const openArchiveJumper = async (page, side) => {
+    const openArchiveJumper = async (page) => {
       archivedBoard = true;
       try {
         await page.evaluate(() => poll());
         await openJumper(page);
         await page.type("#job-search", "login");
-        if (side !== "after") return;
         await clickArchiveSearch(page);
         await page.waitForFunction(() =>
           [...document.querySelectorAll("#job-results .title")].some(
