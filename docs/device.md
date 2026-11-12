@@ -187,8 +187,10 @@ nothing and exits 0. A missing projects directory exits 4.
 where the date is this host's local date, and prints
 `pushed N sessions to retro/<device>/<date>.jsonl`. It needs `device:` in
 `config.md` and this host's paired service token, else it exits 2 with the pair
-hint. A re-push the same day replaces that file. `retro pull YYYY-MM-DD` reads
-`GET /api/retro/<date>` and prints each listed host's lines in list order. A day
+hint. A re-push the same day replaces that file. A host clock more than a day off
+makes the push fail with exit 5. The Worker keeps digests for 35 days.
+`retro pull YYYY-MM-DD` reads `GET /api/retro/<date>` and prints each listed
+host's lines in list order. A day
 no host pushed prints a note on stderr and exits 0. Raw transcripts never leave
 the host.
 

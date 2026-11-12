@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
 import { loadProduction, memoryBucket } from "../support/worker.mjs";
+
+mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-11T12:00:00Z") });
 
 const { serveFactory } = await loadProduction();
 const person = { verified: true, kind: "user", email: "person@example.test" };
@@ -129,4 +131,47 @@ test("refused writes and reads store nothing", async () => {
     404,
   );
   assert.deepEqual(s.retroKeys(), []);
+});
+
+test("writes outside yesterday, today and tomorrow in UTC are refused", async () => {
+  const s = await setup();
+  for (const date of ["2026-11-10", "2026-11-11", "2026-11-12"])
+    assert.equal((await s.put("mac", `${row("mac")}\n`, mac, date)).status, 200, date);
+  const kept = s.retroKeys();
+  for (const date of ["2026-11-09", "2026-11-13"]) {
+    const r = await s.put("mac", `${row("mac")}\n`, mac, date);
+    assert.deepEqual(
+      [r.status, r.text],
+      [400, "retro digests are written only for yesterday, today or tomorrow in UTC"],
+    );
+  }
+  assert.deepEqual(s.retroKeys(), kept);
+  assert.equal((await s.put("mac", `${row("mac")}\n`, unbound, "2026-11-13")).status, 403);
+});
+
+test("the scheduled pass deletes retro digests older than 35 days", async () => {
+  const bucket = memoryBucket();
+  const keys = [
+    "retro/mac/2026-10-01.jsonl",
+    "retro/pc/2026-10-06.jsonl",
+    "retro/mac/2026-10-07.jsonl",
+    "retro/mac/2026-11-11.jsonl",
+    "retro/notes.txt",
+  ];
+  for (const key of keys) await bucket.put(key, `${row("mac")}\n`);
+  const pending = [];
+  (await loadProduction()).default.scheduled(
+    { scheduledTime: Date.parse("2026-11-11T12:00:00Z") },
+    { BUCKET: bucket },
+    { waitUntil: (p) => pending.push(p) },
+  );
+  assert.deepEqual(await pending[1], {
+    status: "pruned",
+    deleted: ["retro/mac/2026-10-01.jsonl", "retro/pc/2026-10-06.jsonl"],
+  });
+  assert.deepEqual([...bucket.objects.keys()].filter((k) => k.startsWith("retro/")).sort(), [
+    "retro/mac/2026-10-07.jsonl",
+    "retro/mac/2026-11-11.jsonl",
+    "retro/notes.txt",
+  ]);
 });
