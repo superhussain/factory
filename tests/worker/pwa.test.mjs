@@ -82,6 +82,22 @@ test("icons are PNGs with the declared IHDR size", async (t) => {
   }
 });
 
+test("dashboard and board.json carry the same deployed version", async (t) => {
+  const f = jwksFixture(t, [key]);
+  const bucket = memoryBucket();
+  await bucket.put("board.json", '{"jobs":[]}');
+  const env = { ...serverEnv, ACCESS_ISSUER: f.config.issuer, BUCKET: bucket };
+  const headers = { "Cf-Access-Jwt-Assertion": await sign(key, f.claims()) };
+  const get = (path) =>
+    worker.fetch(new Request(serverEnv.FACTORY_ORIGIN + path, { headers }), env);
+  const page = await get("/");
+  const meta = (await page.text()).match(/<meta name="factory-version" content="([0-9a-f]{8})">/);
+  assert.ok(meta);
+  const board = await get("/board.json");
+  assert.equal(board.status, 200);
+  assert.equal(board.headers.get("X-Factory-Version"), meta[1]);
+});
+
 test("service worker leaves walkthrough.html to the network", async (t) => {
   const saved = Object.fromEntries(
     ["self", "location", "caches", "fetch"].map((k) => [k, globalThis[k]]),

@@ -9,7 +9,13 @@ import {
   validatePipeline,
 } from "./admission.js";
 import { archiveGet, runArchive } from "./archive.js";
-import { escapeHtml, readServerConfig, renderDashboard, serveAsset } from "./assets.js";
+import {
+  DASHBOARD_VERSION,
+  escapeHtml,
+  readServerConfig,
+  renderDashboard,
+  serveAsset,
+} from "./assets.js";
 import {
   cleanReview,
   ESCALATION_MODEL,
@@ -1393,7 +1399,10 @@ export async function serveFactory(request, env, principal) {
   if (path === "/dashboard.html")
     return reply(null, 302, "text/plain", { Location: "/" + new URL(request.url).search });
   if (path.startsWith("/assets/") || path === "/sw.js") return serveAsset(request, env.config);
-  if (path === "/board.json") return getFile(env, "board.json", "application/json");
+  if (path === "/board.json")
+    return getFile(env, "board.json", "application/json", {
+      "X-Factory-Version": DASHBOARD_VERSION,
+    });
   if (path === "/projects.json") return projects(env);
   if (JOB_FILE.test(path)) return getJobFile(request, env, principal, path.slice(1));
   return notFound();
