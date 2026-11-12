@@ -2292,6 +2292,96 @@ class DenyNotesTest(PickupFixture):
         self.assertEqual(self.calls, [])
 
 
+def babysat(job_id, project, **extra):
+    """A pr-open job after a dashboard Babysit PR click."""
+    return dict({"id": job_id, "project": project, "title": "Export the sample report", "stage": "pr-open",
+                 "pr": "https://github.com/example/sample/pull/44", "updated": "2026-01-01T00:00:00Z",
+                 "note": "babysitting PR #44", "babysit": {"at": "2026-01-02T12:00:00Z"},
+                 "priority": {"at": "2026-01-02T12:00:00Z"}}, **extra)
+
+
+class BabysitTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        self.views["alpha"] = (200, effective("alpha", {"pickup": ON}))
+
+    def argv(self, job_id, prompt):
+        return shlex.join([sys.executable, str(self.fake), job_id, "alpha", str(self.repo_a), "<session>",
+                           "provider-a", "model-a", "high", prompt + " --session <session>\n\n"
+                           + factory.UNATTENDED, "{unknown}", f"x-{job_id}-y"])
+
+    def test_babysit_launches_ahead_of_ideas_and_beside_the_limit(self):
+        self.hosts = [host(DEVICE, 1)]
+        self.board["jobs"] = [idea("009-alpha", "alpha"), babysat("042-sample-export", "alpha"),
+                              babysat("043-sample-export", "alpha")]
+        expected = [
+            "would launch babysit 042-sample-export alpha on primary: "
+            + self.argv("042-sample-export", "/factory babysit 042-sample-export"),
+            "wait babysit 043-sample-export alpha: one babysit launch per run",
+            "would launch 009-alpha alpha on primary: " + self.argv("009-alpha", "/factory idea 009-alpha"),
+            f"host {DEVICE}: would launch 1"]
+        self.assertEqual(self.pickup("--dry-run", "--limit", "1"), (0, "\n".join(expected) + "\n", ""))
+        self.assertEqual(self.puts(), [])
+        code, out, err = self.pickup("--limit", "1")
+        self.assertEqual((code, err), (0, ""))
+        job = self.job("042-sample-export")
+        first, second = job["claim"]["session"], self.job("009-alpha")["claim"]["session"]
+        self.assertEqual(out, f"launched babysit 042-sample-export alpha on primary session {first}\n"
+                              f"launched 009-alpha alpha on primary session {second}\n")
+        self.assertEqual(job["claim"]["device"], DEVICE)
+        self.assertEqual((job["stage"], job["babysit"]), ("pr-open", {"at": "2026-01-02T12:00:00Z"}))
+        self.assertNotIn("claim", self.job("043-sample-export"))
+        records = self.launched()
+        self.assertEqual(records[0]["argv"][7], f"/factory babysit 042-sample-export --session {first}\n\n"
+                         + factory.UNATTENDED)
+        self.assertEqual(len(records), 2)
+
+    def test_skips_jobs_not_ready(self):
+        self.views["beta"] = (200, effective("beta", {"pickup": {"enabled": True, "hosts": ["other-host"]}}))
+        self.board["jobs"] = [
+            babysat("040-sample-export", None),
+            babysat("041-sample-export", "alpha", needs="get a human approval on PR #44"),
+            babysat("042-sample-export", "alpha", paused={"at": "2026-01-02T12:00:00Z"}),
+            babysat("043-sample-export", "alpha", close={"reason": "x", "at": "2026-01-02T12:00:00Z"}),
+            babysat("044-sample-export", "alpha", claim=held("other-host")),
+            babysat("045-sample-export", "beta"),
+            babysat("046-sample-export", "missing"),
+            babysat("047-sample-export", "alpha", babysit=None),
+            babysat("048-sample-export", "alpha", stage="merged")]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        lines = [line for line in out.splitlines() if "babysit" in line]
+        self.assertEqual(lines, [
+            "skip babysit 040-sample-export: no project",
+            "skip babysit 041-sample-export alpha: waiting on a human",
+            "skip babysit 042-sample-export alpha: paused",
+            "skip babysit 043-sample-export alpha: closing",
+            "skip babysit 044-sample-export alpha: claimed by other-host session s1",
+            f"skip babysit 045-sample-export beta: pickup does not list host {DEVICE}",
+            "skip babysit 046-sample-export missing: no checkout on this host"])
+        self.assertNotIn("047-sample-export", out)
+        self.assertNotIn("048-sample-export", out)
+        self.assertEqual(self.puts(), [])
+
+    def test_launch_failure_releases_the_claim_and_ideas_still_launch(self):
+        self.board["jobs"] = [babysat("042-sample-export", "alpha"), idea("009-alpha", "alpha")]
+        real = factory.launch_idea
+
+        def launch(home, entry, route, argv, env):
+            if entry["id"] == "042-sample-export":
+                argv = [sys.executable, "-c", "print('boom'); raise SystemExit(1)"]
+            return real(home, entry, route, argv, env)
+        with patch.object(factory, "launch_idea", launch):
+            code, out, err = self.pickup()
+        [log] = (self.home / "logs" / "pickup").glob("042-sample-export-*.log")
+        tag = self.job("009-alpha")["claim"]["session"]
+        self.assertEqual(code, 0)
+        self.assertEqual(out, f"released 042-sample-export\nlaunched 009-alpha alpha on primary session {tag}\n")
+        self.assertEqual(err, f"factory.py: launch of 042-sample-export on primary failed: exit 1; see {log}\n")
+        self.assertNotIn("claim", self.job("042-sample-export"))
+        self.assertTrue(factory.babysitting(self.job("042-sample-export")))
+
+
 FOLLOW = [{"id": "090-alpha-old", "kind": "follow-up-of"}]
 HELD = ["101-wrap-doc-line", "102-move-comment", "103-drop-double-period", "104-fix-typo", "105-rename-flag"]
 

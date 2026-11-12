@@ -1942,7 +1942,8 @@ def backlog_cmd(sub, item, *rest):
 
 def inflight_count(data, project, minutes, device=None):
     """Fresh in-flight jobs on the board: of one project, or of all when project is None,
-    and only this device's claims when device is set. A job waiting on a human never counts."""
+    and only this device's claims when device is set. A job waiting on a human, or handed to a
+    babysit session, never counts."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     count = 0
     for j in data["jobs"]:
@@ -1950,7 +1951,7 @@ def inflight_count(data, project, minutes, device=None):
             continue
         if device and (j.get("claim") or {}).get("device") != device:
             continue
-        if gated(j) or lead_of(j):
+        if gated(j) or lead_of(j) or babysitting(j):
             continue
         stage = j.get("stage")
         if stage == IDEA or tracer_start(j):
@@ -3900,8 +3901,8 @@ def claim_deny_notes(home, job_id, device, minutes, paths):
     return cas(home, "/api/board", change)
 
 
-def release_deny_notes(home, job_id, device, session):
-    """Drop this session's claim on a denied job, so the next pickup may try again."""
+def release_pickup_claim(home, job_id, device, session):
+    """Drop this session's claim on a job after a failed launch, so the next pickup may try again."""
     def change(text):
         data = load_board(text)
         j = next((j for j in data["jobs"] if j.get("id") == job_id), None)
@@ -3984,7 +3985,94 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
                         print(f"launched deny notes {j['id']} {j['project']} on {route[0]} session {tag}")
                     else:
                         launch_failed(home, route[0], j["id"], detail, log_path,
-                                      lambda: release_deny_notes(home, j["id"], device, tag), fatal=False)
+                                      lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)
+                    return
+        if dry:
+            print(line)
+
+
+def babysit_due(j):
+    """True when a pr-open job carries a dashboard Babysit PR click."""
+    return j.get("stage") == "pr-open" and babysitting(j) and isinstance(j.get("id"), str) \
+        and bool(JOB_ID.fullmatch(j["id"])) and ".." not in j["id"]
+
+
+def claim_babysit(home, job_id, device, minutes, paths):
+    """Claim a babysit job in one board write, and return the new session tag, else None. Only the claim changes."""
+    tag = secrets.token_hex(3)
+
+    def change(text):
+        data = load_board(text)
+        j = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        project = (j or {}).get("project")
+        if (j is None or not babysit_due(j) or gated(j) or paused(j) or closing(j)
+                or project not in paths or not os.path.isdir(paths[project])
+                or blocking(j, device, "", minutes)):
+            return None, None
+        j["claim"] = new_claim(device, tag)
+        j["updated"] = data["updated"] = now()
+        return dump_board(data), tag
+    return cas(home, "/api/board", change)
+
+
+def babysit_pass(home, data, device, minutes, paths, settings, dry):
+    """Launch at most one /factory babysit session for a job the dashboard handed to one."""
+    def skip(j):
+        """Why this job is not ready, or None."""
+        project = j.get("project")
+        if not project:
+            return f"skip babysit {j['id']}: no project"
+        head = f"skip babysit {j['id']} {project}"
+        if gated(j):
+            return f"{head}: waiting on a human"
+        if paused(j):
+            return f"{head}: paused"
+        if closing(j):
+            return f"{head}: closing"
+        c = blocking(j, device, "", minutes)
+        if c:
+            return f"{head}: claimed by {c['device']} session {c.get('session')}"
+        reason = pickup_reason(home, project, paths, settings, device, dry)
+        return f"{head}: {reason}" if reason else None
+
+    def values(j, session, route):
+        _, provider, model, effort = route
+        return {"id": j["id"], "project": j["project"], "repo_path": paths[j["project"]], "session": session,
+                "provider": provider, "model": model, "effort": effort or "",
+                "prompt": launch_prompt(f"/factory babysit {j['id']} --session {session}")}
+
+    ready = False
+    for j in (j for j in data["jobs"] if babysit_due(j)):
+        line = skip(j)
+        if line is None and ready:
+            line = f"wait babysit {j['id']} {j['project']}: one babysit launch per run"
+        elif line is None:
+            ready = True
+            route = pick_route(home)
+            if route is None and not dry:
+                return
+            if route is None:
+                stamp = now()
+                active = {n: until for n, until in read_limits(home).items() if until > stamp}
+                line = "no route: no available route: " + ", ".join(
+                    f"{r[0]} until {active[r[0]]}" for r in read_routes(home))
+            else:
+                template = route_launcher(home, route)
+                if dry:
+                    line = f"would launch babysit {j['id']} {j['project']} on {route[0]}: " \
+                        + shlex.join(launcher_argv(template, values(j, "<session>", route)))
+                else:
+                    tag = claim_babysit(home, j["id"], device, minutes, paths)
+                    if tag is None:
+                        return
+                    given = values(j, tag, route)
+                    ok, detail, log_path = launch_idea(home, given, route[0], launcher_argv(template, given),
+                                                       launch_env(given, route[1], route[2]))
+                    if ok:
+                        print(f"launched babysit {j['id']} {j['project']} on {route[0]} session {tag}")
+                    else:
+                        launch_failed(home, route[0], j["id"], detail, log_path,
+                                      lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)
                     return
         if dry:
             print(line)
@@ -4433,6 +4521,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     close_pass(home, data, device, minutes, dry)
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
+    babysit_pass(home, data, device, minutes, paths, settings, dry)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
     if not dry and taken >= limit:
