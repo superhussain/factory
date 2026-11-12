@@ -11,9 +11,9 @@ feature.
    `git -C "$REPO_PATH" worktree add "$WT" -b factory/<id> "$BASE"`.
    Then batch related work into this job as `/factory idea` step 5 describes.
    `/factory idea` step 4 skips this sentence, since its own step 5 batches.
-2. Spawn `factory-spec-writer` with the feature text, job folder, worktree, and
-   project file, so the spec describes the same `$BASE` the builder starts from. It
-   writes `spec.md`.
+2. Spawn `factory-spec-writer` with the pointer to its `prompt "$SLUG/<id>" spec --out`
+   file, built as SKILL.md Rules describes, so the spec describes the same `$BASE` the
+   builder starts from. It writes `spec.md`.
    When step 1 attached riders, build the feature text as `/factory idea` step 6
    describes, with this job's feature in place of its `idea`.
 3. Apply the spec-approval gate as Gate stages describes.
@@ -33,8 +33,8 @@ feature.
    `python3 "$RUNTIME" review-plan "$SLUG/<id>" <N>` and patch the board entry with
    `"SKIPPED"` for each reviewer in its `skipped` list. Spawn only the reviewers in its
    `run` list, from `factory-review-security`, `factory-review-ux`,
-   `factory-review-ui`, and `factory-review-code`, with the job folder, round folder,
-   worktree, branch, and project file. A non-zero exit spawns all four and puts its
+   `factory-review-ui`, and `factory-review-code`, each with the pointer to its own
+   `prompt "$SLUG/<id>" review-<r> --round <N> --out` file. A non-zero exit spawns all four and puts its
    stderr line in the board `note`.
    With a stacked rider, every reviewer and the approver get `$WORKTREES/<rider-id>`
    and `factory/<rider-id>` in place of the job's worktree and branch, since that

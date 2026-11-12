@@ -398,9 +398,9 @@ sets it, and a `/factory babysit` session clears it with `null`; `board` refuses
   round. Only an explicitly assigned stronger builder may resolve an in-scope
   design gap, and it records the decision. It never overrides scope, permissions,
   or human gates.
-- A model change always stops the old writer and starts a fresh builder against the
-  same files, with the job folder, worktree, project file, and latest round or
-  rework file. Resume with SendMessage (or the runtime's prompt tool) only when the
+- A model change always stops the old writer and starts a fresh builder from a new
+  `prompt "$SLUG/<id>" build --out` file, as the agent-prompt rule above describes,
+  with the latest round or rework file on a short line after the pointer. Resume with SendMessage (or the runtime's prompt tool) only when the
   actual model need not change. If the old builder is unreachable, a fresh agent
   reading the same files is equivalent. Keep `note` model-neutral: patch it with
   the reason for the tier, not a fixed model name.
