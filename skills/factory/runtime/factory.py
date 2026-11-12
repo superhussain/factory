@@ -3700,7 +3700,7 @@ def takeover(home, data, device, minutes, paths, settings, dry):
         ok, why, log_path = launch_idea(home, entry, live[0], argv, env)
         if ok:
             print(f"took over {job_id} {slug} from {session} on {live[0]} session {tag}")
-            record_agent(home, job_id, launch_row(given, argv, tag))
+            record_launch(home, job_id, launch_row(given, argv, tag))
             return 1
         with open(log_path, "rb") as log:
             log.seek(max(0, os.path.getsize(log_path) - 4096))
@@ -4771,7 +4771,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
                                            launch_env(given, given["provider"], given["model"]))
         if ok:
             print(f"launched {entry['id']} {entry['project']} on {name} session {entry['session']}")
-            record_agent(home, entry["id"], launch_row(given, argv, entry["session"]))
+            record_launch(home, entry["id"], launch_row(given, argv, entry["session"]))
             launches += 1
             continue
         limit_name = experiment["name"] if arm == "b" and experiment else name
@@ -8158,6 +8158,15 @@ def record_agent(home, job_id, row, claimant=None, project=None):
         patch_job(data, job_id, {"agents": (rows + [full])[-AGENT_ROWS_MAX:]})
         return dump_board(data), full
     return cas(home, "/api/board", change)
+
+
+def record_launch(home, job_id, row):
+    """record_agent for a launch that already happened: a failed write warns instead of ending the pass."""
+    try:
+        record_agent(home, job_id, row)
+    except SystemExit:
+        print(f"factory.py: {job_id} launched, but its agent row was not recorded; the pass goes on",
+              file=sys.stderr)
 
 
 AGENT_STAGES = ("idea",) + IN_FLIGHT + ("needs-human", "pr-open") + TERMINAL
