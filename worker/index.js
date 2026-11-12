@@ -790,11 +790,17 @@ const TOKEN_TAKEN = "this service token is already bound to another host";
 const STATUS_ONLY = "status is written only by the host's bound service token";
 const RETRO_WRITE_ONLY = "retro digests are written only by the host's bound service token";
 const RETRO_READ_ONLY = "retro digests are read only by a device service token";
+const RETRO_DATE_WINDOW = "retro digests are written only for yesterday, today or tomorrow in UTC";
+const DAY_MS = 86400000;
+const RETRO_KEEP_DAYS = 35;
 const retroKey = (id, date) => `retro/${id}/${date}.jsonl`;
 const isCalendarDate = (date) => {
   const time = Date.parse(`${date}T00:00:00Z`);
   return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === date;
 };
+const utcDay = (time) => Math.floor(time / DAY_MS) * DAY_MS;
+const retroDateNear = (date, now) =>
+  Math.abs(Date.parse(date + "T00:00:00Z") - utcDay(now)) <= DAY_MS;
 
 // A JSON body under the cap, or the error reply.
 async function readJson(request, max = MAX_PIPELINE) {
@@ -1061,6 +1067,7 @@ async function retroPut(request, env, principal, id, date) {
   const host = obj && JSON.parse(await obj.text());
   if (host?.token !== principal.client_id || (host.state !== "paired" && host.state !== "active"))
     return reply(RETRO_WRITE_ONLY, 403);
+  if (!retroDateNear(date, Date.now())) return reply(RETRO_DATE_WINDOW, 400);
   const bytes = await readCapped(request, MAX_BODY);
   if (bytes === null) return reply("body over 1 MiB", 413);
   let text;
