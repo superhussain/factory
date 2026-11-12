@@ -140,8 +140,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   #pipeline-effective { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--code-bg); padding: 10px 12px; border-radius: 6px; }
   #pipeline-history, #settings-history { height: 160px; overflow-y: auto; padding-right: 4px; padding-bottom: 4px; scroll-padding-block: 4px; }
-  #pipeline-gates, #pipeline-pickup, #pipeline-triage, #pipeline-archive, #pipeline-tracer, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
-  #pipeline-gates legend, #pipeline-pickup legend, #pipeline-triage legend, #pipeline-archive legend, #pipeline-tracer legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+  #pipeline-gates, #pipeline-pickup, #pipeline-triage, #pipeline-hold, #pipeline-archive, #pipeline-tracer, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
+  #pipeline-gates legend, #pipeline-pickup legend, #pipeline-triage legend, #pipeline-hold legend, #pipeline-archive legend, #pipeline-tracer legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #pipeline-gates label { display: flex; gap: 8px; align-items: baseline; margin: 0; color: var(--fg); }
   a.btn { display: inline-block; text-decoration: none; }
   a.btn[aria-current="page"] { border-color: var(--accent); }
@@ -186,7 +186,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .settings-section h3 { font-size: 15px; margin: 0 0 12px; }
   .settings-section h4 { font-size: 13px; margin: 16px 0 8px; }
   .settings-section label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-  .settings-section select, .settings-section textarea, #pipeline-triage-threshold, #pipeline-archive-n, #pipeline-summary, #settings-summary { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .settings-section select, .settings-section textarea, #pipeline-triage-threshold, #pipeline-hold-min, #pipeline-hold-hours, #pipeline-archive-n, #pipeline-summary, #settings-summary { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .settings-section textarea { resize: vertical; min-height: 140px; }
   .settings-section .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
   .project-list { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; margin-bottom: 12px; }
@@ -702,6 +702,16 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           <label for="pipeline-triage-threshold">Confidence threshold (%)<input type="number" id="pipeline-triage-threshold" min="1" max="100" step="1"></label>
           <label for="pipeline-triage-rules">Triage rules<textarea id="pipeline-triage-rules" spellcheck="false"></textarea></label>
           <p id="pipeline-triage-help" class="muted">When on, factory.py backlog add asks Cloudflare's clef-flash model whether a new item should be built without your review under these rules. Its yes probability, as a percent, is the confidence. At or above the threshold, the item moves to the idea column for pickup. Below it, the item waits here for you. Items that recommend deny always wait. Items that ask questions also wait, with the model's pick and a reason for each answer. Rules cannot contain links, secrets or instructions to skip review. A project value replaces the global one whole.</p>
+        </fieldset>
+        <fieldset id="pipeline-hold">
+          <legend>Batch follow-ups</legend>
+          <label for="pipeline-hold-mode">Batch hold<select id="pipeline-hold-mode" aria-describedby="pipeline-hold-help">
+            <option value="">Not set (use the global value, else 5 ideas or 12 hours)</option>
+            <option value="on">Set: use the numbers below</option>
+          </select></label>
+          <label for="pipeline-hold-min">Ideas before a batch starts<input type="number" id="pipeline-hold-min" min="1" max="20" step="1"></label>
+          <label for="pipeline-hold-hours">Hours the oldest idea waits<input type="number" id="pipeline-hold-hours" min="1" max="168" step="1"></label>
+          <p id="pipeline-hold-help" class="muted">Pickup holds follow-ups and ideas backlog triage queued until a project has this many of them, or the oldest has waited this many hours without an update. Then one session builds them together. Ideas a person adds, approves or prioritizes never wait. A project value replaces the global one whole.</p>
         </fieldset>
         <fieldset id="pipeline-archive">
           <legend>Archive old jobs</legend>
@@ -2461,6 +2471,18 @@ function pipelineArchiveError(archive) {
     return 'archive.n: must be a whole number from 1 to 10000';
   return null;
 }
+// Same messages as holdError in worker/admission.js.
+function pipelineHoldError(hold) {
+  if (hold === undefined) return null;
+  if (!pipelineObject(hold)) return 'hold: must be an object';
+  for (const key of Object.keys(hold))
+    if (key !== 'min_ideas' && key !== 'max_wait_hours') return 'hold.' + key + ': unknown field';
+  if (!(Number.isInteger(hold.min_ideas) && hold.min_ideas >= 1 && hold.min_ideas <= 20))
+    return 'hold.min_ideas: must be a whole number from 1 to 20';
+  if (!(Number.isInteger(hold.max_wait_hours) && hold.max_wait_hours >= 1 && hold.max_wait_hours <= 168))
+    return 'hold.max_wait_hours: must be a whole number from 1 to 168';
+  return null;
+}
 function pipelineCanonical(doc) {
   const out = {schema:1};
   if (doc.merge) out.merge = doc.merge;
@@ -2469,6 +2491,7 @@ function pipelineCanonical(doc) {
   if (gates.length) out.gates = gates;
   if (pipelineObject(doc.pickup)) out.pickup = {enabled:doc.pickup.enabled, hosts:doc.pickup.hosts};
   if (pipelineObject(doc.triage)) out.triage = {enabled:doc.triage.enabled, threshold:doc.triage.threshold, rules:doc.triage.rules};
+  if (pipelineObject(doc.hold)) out.hold = {min_ideas:doc.hold.min_ideas, max_wait_hours:doc.hold.max_wait_hours};
   if (pipelineObject(doc.archive)) out.archive = {mode:doc.archive.mode, n:doc.archive.n};
   if (pipelineObject(doc.tracer)) out.tracer = {enabled:doc.tracer.enabled};
   const notes = {};
@@ -2487,7 +2510,10 @@ const triageFromFields = () => $('pipeline-triage-mode').value
   ? {enabled:$('pipeline-triage-mode').value === 'on', threshold:$('pipeline-triage-threshold').value === '' ? 90 : Number($('pipeline-triage-threshold').value), rules:$('pipeline-triage-rules').value} : undefined;
 const archiveFromFields = () => $('pipeline-archive-mode').value
   ? {mode:$('pipeline-archive-mode').value, n:$('pipeline-archive-n').value === '' ? null : Number($('pipeline-archive-n').value)} : undefined;
+const holdFromFields = () => $('pipeline-hold-mode').value
+  ? {min_ideas:$('pipeline-hold-min').value === '' ? null : Number($('pipeline-hold-min').value), max_wait_hours:$('pipeline-hold-hours').value === '' ? null : Number($('pipeline-hold-hours').value)} : undefined;
 const ARCHIVE_DEFAULT_N = {age:30, count:200};
+const HOLD_DEFAULTS = {min:5, hours:12};
 // Client-side only: the Worker accepts any valid name and its effective filter drops unregistered ones.
 function pickupRegistryError(pickup) {
   if (!hostRegistry?.length || !Array.isArray(pickup?.hosts)) return null;
@@ -2497,13 +2523,13 @@ function pickupRegistryError(pickup) {
 function pipelineFormDoc(current) {
   return JSON.parse(pipelineCanonical({merge:$('pipeline-merge').value, review_rounds:Number($('pipeline-rounds').value),
     gates:PIPELINE_GATES.filter(gate => $('pipeline-gate-' + gate).checked),
-    pickup:pickupFromFields('pipeline-pickup', current.pickup), triage:triageFromFields(),
+    pickup:pickupFromFields('pipeline-pickup', current.pickup), triage:triageFromFields(), hold:holdFromFields(),
     archive:$('pipeline-scope').value === 'global' ? archiveFromFields() : undefined,
     tracer:$('pipeline-scope').value === 'global' && $('pipeline-tracer-mode').value === 'on' ? {enabled:true} : undefined,
     stage_notes:Object.fromEntries(PIPELINE_STAGES.map(stage => [stage, $('pipeline-note-' + stage).value]))}));
 }
 const pipelineDirty = s => pipelineCanonical(s.draft) !== pipelineCanonical(s.base ?? {schema:1});
-const pipelineCanSave = s => !!s?.loaded && ['ready','error'].includes(s.phase) && (pipelineDirty(s) || s.base === null) && !pipelinePickupError(s.draft.pickup) && !pickupRegistryError(s.draft.pickup) && !pipelineTriageError(s.draft.triage) && !pipelineArchiveError(s.draft.archive);
+const pipelineCanSave = s => !!s?.loaded && ['ready','error'].includes(s.phase) && (pipelineDirty(s) || s.base === null) && !pipelinePickupError(s.draft.pickup) && !pickupRegistryError(s.draft.pickup) && !pipelineTriageError(s.draft.triage) && !pipelineArchiveError(s.draft.archive) && !pipelineHoldError(s.draft.hold);
 const pipelineDraftKey = scope => 'factory-pipeline-draft:' + scope;
 const pipelineMalformed = new Set(), pipelineMemory = new Set();
 const pipelineConflict = 'These pipeline settings changed elsewhere. Your draft is kept. Copy it before loading the latest version, then reapply your changes.';
@@ -2602,6 +2628,16 @@ function renderPipelineSettings() {
   if ($('pipeline-triage-rules').value !== rules) $('pipeline-triage-rules').value = rules;
   $('pipeline-triage-threshold').disabled = $('pipeline-triage-rules').disabled = busy || !triageMode;
   $('pipeline-triage-threshold').setAttribute('aria-invalid', String(!!triageError));
+  const holdMode = pipelineObject(d.hold) ? 'on' : '';
+  const holdError = pipelineHoldError(d.hold);
+  if ($('pipeline-hold-mode').value !== holdMode) $('pipeline-hold-mode').value = holdMode;
+  $('pipeline-hold-mode').disabled = busy;
+  for (const [id, key] of [['pipeline-hold-min', 'min_ideas'], ['pipeline-hold-hours', 'max_wait_hours']]) {
+    const value = String(d.hold?.[key] ?? '');
+    if ($(id).value !== value && document.activeElement !== $(id)) $(id).value = value;
+    $(id).disabled = busy || !holdMode;
+    $(id).setAttribute('aria-invalid', String(!!holdError));
+  }
   $('pipeline-archive').hidden = $('pipeline-scope').value !== 'global';
   const archiveMode = d.archive?.mode ?? '';
   const archiveError = pipelineArchiveError(d.archive);
@@ -2622,7 +2658,7 @@ function renderPipelineSettings() {
   $('pipeline-save').disabled = !pipelineCanSave(s);
   const scope = $('pipeline-scope').value;
   $('pipeline-status').textContent = pipelineStatusText(scope, s);
-  $('pipeline-status').setAttribute('role', pipelineStatusAlert(scope, s) || !!pickupError || !!triageError || !!archiveError ? 'alert' : 'status');
+  $('pipeline-status').setAttribute('role', pipelineStatusAlert(scope, s) || !!pickupError || !!triageError || !!archiveError || !!holdError ? 'alert' : 'status');
   renderProjectPickup();
 }
 
@@ -2830,14 +2866,19 @@ $('pipeline-archive-mode').addEventListener('input', () => {
   const n = ARCHIVE_DEFAULT_N[$('pipeline-archive-mode').value], field = $('pipeline-archive-n');
   if (n && (field.value === '' || Object.values(ARCHIVE_DEFAULT_N).map(String).includes(field.value))) field.value = String(n);
 });
+$('pipeline-hold-mode').addEventListener('input', () => {
+  if (!$('pipeline-hold-mode').value) return;
+  if ($('pipeline-hold-min').value === '') $('pipeline-hold-min').value = String(HOLD_DEFAULTS.min);
+  if ($('pipeline-hold-hours').value === '') $('pipeline-hold-hours').value = String(HOLD_DEFAULTS.hours);
+});
 for (const id of ['pipeline-merge', 'pipeline-rounds', ...PIPELINE_GATES.map(gate => 'pipeline-gate-' + gate),
-    'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules', 'pipeline-archive-mode', 'pipeline-archive-n', 'pipeline-tracer-mode',
+    'pipeline-pickup-mode', 'pipeline-pickup-hosts', 'pipeline-triage-mode', 'pipeline-triage-threshold', 'pipeline-triage-rules', 'pipeline-hold-mode', 'pipeline-hold-min', 'pipeline-hold-hours', 'pipeline-archive-mode', 'pipeline-archive-n', 'pipeline-tracer-mode',
     ...PIPELINE_STAGES.map(stage => 'pipeline-note-' + stage)]) {
   $(id).addEventListener('input', () => {
     const s = pipelineScopes.get($('pipeline-scope').value);
     if (!s || $(id).disabled) return;
     s.draft = pipelineFormDoc(s.draft);
-    const error = pipelinePickupError(s.draft.pickup) ?? pickupRegistryError(s.draft.pickup) ?? pipelineTriageError(s.draft.triage) ?? pipelineArchiveError(s.draft.archive);
+    const error = pipelinePickupError(s.draft.pickup) ?? pickupRegistryError(s.draft.pickup) ?? pipelineTriageError(s.draft.triage) ?? pipelineArchiveError(s.draft.archive) ?? pipelineHoldError(s.draft.hold);
     if (s.phase !== 'conflict') s.message = error ? 'Fix before saving: ' + error : pipelineDirty(s) ? 'Unsaved changes' : 'No unsaved changes';
     persistPipelineDraft($('pipeline-scope').value);
     renderPipelineSettings();

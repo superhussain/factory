@@ -682,6 +682,75 @@ test("pipeline settings page", { timeout: 180000 }, async (t) => {
       await waitStatus(page, "Unsaved changes");
     });
 
+    await t.test("pipeline P18 hold fields save", async () => {
+      const fill = (id, value) =>
+        page.$eval(
+          id,
+          (el, v) => {
+            el.value = v;
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+          },
+          value,
+        );
+      const fields = () =>
+        page.$$eval(["#pipeline-hold-min", "#pipeline-hold-hours"].join(","), (els) =>
+          els.map((el) => [el.value, el.disabled]),
+        );
+      await page.select("#pipeline-scope", "global");
+      await page.waitForFunction(
+        () => !document.getElementById("pipeline-hold-mode").disabled,
+        wait,
+      );
+      assert.equal(
+        await page.$eval("#pipeline-hold legend", (el) => el.textContent),
+        "Batch follow-ups",
+      );
+      assert.equal(await page.$eval("#pipeline-hold-mode", (el) => el.value), "");
+      assert.deepEqual(await fields(), [
+        ["", true],
+        ["", true],
+      ]);
+      await page.select("#pipeline-hold-mode", "on");
+      assert.deepEqual(await fields(), [
+        ["5", false],
+        ["12", false],
+      ]);
+      for (const bad of ["0", "21"]) {
+        await fill("#pipeline-hold-min", bad);
+        await waitStatus(
+          page,
+          "Fix before saving: hold.min_ideas: must be a whole number from 1 to 20",
+        );
+        assert.equal(await page.$eval("#pipeline-save", (el) => el.disabled), true);
+        assert.equal(
+          await page.$eval("#pipeline-hold-min", (el) => el.getAttribute("aria-invalid")),
+          "true",
+        );
+      }
+      await fill("#pipeline-hold-min", "3");
+      await fill("#pipeline-hold-hours", "169");
+      await waitStatus(
+        page,
+        "Fix before saving: hold.max_wait_hours: must be a whole number from 1 to 168",
+      );
+      assert.equal(await page.$eval("#pipeline-save", (el) => el.disabled), true);
+      await fill("#pipeline-hold-hours", "6");
+      await waitStatus(page, "Unsaved changes");
+      await clickSave(page);
+      await page.waitForFunction(
+        () => document.getElementById("pipeline-status").textContent.startsWith("Saved as version"),
+        wait,
+      );
+      const stored = JSON.parse(await (await fetch(origin + "/api/pipeline/global")).text());
+      assert.equal(validatePipeline(stored), null);
+      assert.deepEqual(stored.hold, { min_ideas: 3, max_wait_hours: 6 });
+      await page.select("#pipeline-scope", "projects/sample");
+      await page.waitForFunction(
+        () => document.getElementById("pipeline-effective").textContent.includes('"min_ideas": 3'),
+        wait,
+      );
+    });
+
     await t.test("pipeline P10 archive setting", async () => {
       const fill = (value) =>
         page.$eval(
