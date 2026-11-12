@@ -1810,7 +1810,13 @@ def backlog_questions(context):
     """The questions of a backlog context, as the dashboard's parseBacklogContext reads them,
     or [] when the context does not parse."""
     text = context.replace("\r\n", "\n").replace("\r", "\n")
-    lines = re.sub(r"\A(?:[ \t]*\n)+|(?:\n[ \t]*)+\Z", "", text).split("\n")
+    lines = text.split("\n")
+    top, end = 0, len(lines) - 1
+    while top < end and not lines[top].strip(" \t"):
+        top += 1
+    while end > top and not lines[end].strip(" \t"):
+        end -= 1
+    lines = lines[top:end + 1]
     if lines[0] not in ("Recommend: approve", "Recommend: deny") or len("\n".join(lines)) > 6000:
         return []
     first = next((i for i, line in enumerate(lines) if line.startswith("## Question:")), len(lines))
