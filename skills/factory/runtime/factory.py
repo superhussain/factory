@@ -4106,8 +4106,10 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
     if dry:
         would, no_route = {}, False
         for j in jobs:
-            line, slug = skip(j), j.get("project")
+            line, slug = base_skip(j), j.get("project")
             if line is None:
+                if slug not in settings:
+                    settings[slug] = pickup_settings(home, slug, paths[slug], device)
                 enabled, hosts, reason = settings[slug]
                 if by_host:
                     count = inflight_count(data, None, minutes, device) + sum(would.values())
@@ -4119,6 +4121,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap):
                     line = f"skip {j['id']} {slug}: pickup off"
                 elif device not in hosts:
                     line = f"skip {j['id']} {slug}: pickup does not list host {device}"
+                elif j["id"] in holds:
+                    line = holds[j["id"]]
                 elif by_host and cap == 0:
                     line = f"skip {j['id']} {slug}: host {device} paused (max in flight 0)"
                 elif count >= cap and by_host:

@@ -2358,6 +2358,18 @@ class BatchHoldTest(PickupFixture):
         self.assertEqual(self.dry(), self.waits(HELD[:3], "3 of 5 held, oldest 0h of 12h")
                          + [f"host {DEVICE}: would launch 0"])
 
+    def test_pickup_off_beats_hold(self):
+        self.board["jobs"] = self.held_ideas(3)
+        self.views["alpha"] = (200, effective("alpha"))
+        self.assertEqual(self.dry(), [f"skip {job_id} alpha: pickup off" for job_id in HELD[:3]]
+                         + [f"host {DEVICE}: would launch 0"])
+
+    def test_unlisted_host_beats_hold(self):
+        self.board["jobs"] = self.held_ideas(3)
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": {"enabled": True, "hosts": ["other-host"]}}))
+        self.assertEqual(self.dry(), [f"skip {job_id} alpha: pickup does not list host {DEVICE}" for job_id in HELD[:3]]
+                         + [f"host {DEVICE}: would launch 0"])
+
     def test_real_run_claims_lead_only(self):
         self.board["jobs"] = self.held_ideas(5)
         code, out, err = self.pickup("--limit", "5", "--max-inflight", "5")

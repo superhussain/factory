@@ -26,7 +26,8 @@ Each run, in order:
   That session's `batch` step picks them up, since `batch` marks them
   `"hold": true`. When the effective pipeline carries `hold` (`min_ideas` 1 to 20,
   `max_wait_hours` 1 to 168), it replaces 5 and 12. `factory.py ideas` does not
-  hold.
+  hold. A dry run prints a project's pickup off, host or pipeline skip line for
+  its held ideas instead of the batch line.
 - Skips a project whose checkout fails the `unsafe checkout` check, when pickup
   is on and lists this host. It fetches `origin/<base>` (with
   `GIT_TERMINAL_PROMPT=0` and a 60 s limit, so a remote that asks for
