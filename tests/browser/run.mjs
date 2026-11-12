@@ -780,6 +780,16 @@ async function capture(outdir, referencePath) {
         location.hash = "#/settings/display";
       });
       await page.waitForSelector("#settings-display:not([hidden])");
+      // Pin the header dot to live on both sides, so the pair does not depend on socket timing.
+      // Request interception answers the before page, so Chrome's local network access checks
+      // block its socket to loopback until the context holds loopback-network. The dashboard's
+      // next socket retry, at most 30 s away, then opens.
+      await page
+        .browserContext()
+        .setPermission(origin, { permission: { name: "loopback-network" }, state: "granted" });
+      await page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
+        timeout: 30000,
+      });
       await page.evaluate(() =>
         document.querySelector("#display-poll").scrollIntoView({ block: "center" }),
       );
