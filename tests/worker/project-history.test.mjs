@@ -275,3 +275,26 @@ test("unregistered slugs, unknown names, versions and methods are 404", async ()
     assert.equal((await s.send(history, { method, body: "x" })).status, 404, method);
   assert.equal(s.puts().length, 0);
 });
+
+test("a pipeline object without a version still saves as version 1, as before", async () => {
+  const s = setup();
+  const legacy = JSON.stringify({ schema: 1 });
+  s.bucket.objects.set("pipeline/global.json", {
+    key: "pipeline/global.json",
+    bytes: Buffer.from(legacy),
+    httpEtag: `"${hex(legacy)}"`,
+    uploaded,
+  });
+  const body = JSON.stringify({ schema: 1, merge: "human" });
+  const saved = await s.send("/api/pipeline/global", {
+    method: "PUT",
+    body,
+    headers: { "Content-Type": "application/json", "If-Match": `"${hex(legacy)}"` },
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.headers.get("X-Pipeline-Version"), "1");
+  assert.deepEqual(
+    s.puts().map(([, key]) => key),
+    ["pipeline/global.json", "pipeline-history/global/000001.json"],
+  );
+});

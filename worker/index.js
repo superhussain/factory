@@ -396,16 +396,6 @@ async function projectStore(request, env, principal, slug, name, bytes, cond) {
   });
 }
 
-async function projectHistory(env, principal, slug, name) {
-  const versions = await listVersions(
-    env,
-    `project-history/${slug}/${name}/`,
-    projectFileKey(slug, name),
-  );
-  if (principal.kind !== "user") for (const entry of versions) delete entry.saved_by;
-  return reply(JSON.stringify(versions), 200, "application/json");
-}
-
 async function projectHistoryVersion(env, slug, name, version) {
   let obj = await env.BUCKET.get(projectHistoryKey(slug, name, version));
   if (!obj) {
@@ -657,7 +647,8 @@ async function pipelineStore(env, scope, bytes, current, cond, meta) {
     pipelineKey(scope),
     (n) => pipelineHistoryKey(scope, n),
     bytes,
-    current,
+    // A pipeline object without a version saves as version 1 with no heal copy, as before.
+    pipelineVersion(current) ? current : null,
     cond,
     "application/json",
     meta,
@@ -676,8 +667,8 @@ async function pipelineGet(env, scope) {
   return obj ? pipelineReply(obj, pipelineVersion(obj)) : notFound();
 }
 
-async function pipelineHistory(env, scope, principal) {
-  const versions = await listVersions(env, `pipeline-history/${scope}/`, pipelineKey(scope));
+async function historyReply(env, principal, prefix, key) {
+  const versions = await listVersions(env, prefix, key);
   if (principal.kind !== "user") for (const entry of versions) delete entry.saved_by;
   return reply(JSON.stringify(versions), 200, "application/json");
 }
@@ -1695,7 +1686,7 @@ async function api(request, env, path, principal) {
     if (effective) return pipelineEffective(env, slug);
     if (history)
       return p[3] === undefined
-        ? pipelineHistory(env, p[1], principal)
+        ? historyReply(env, principal, `pipeline-history/${p[1]}/`, pipelineKey(p[1]))
         : pipelineHistoryVersion(env, p[1], Number(p[3]));
     return method === "GET" ? pipelineGet(env, p[1]) : pipelinePut(request, env, principal, p[1]);
   }
@@ -1760,7 +1751,7 @@ async function api(request, env, path, principal) {
       return notFound();
     if (!(await env.BUCKET.head(`projects/${slug}.md`))) return notFound();
     return n === undefined
-      ? projectHistory(env, principal, slug, name)
+      ? historyReply(env, principal, `project-history/${slug}/${name}/`, projectFileKey(slug, name))
       : projectHistoryVersion(env, slug, name, Number(n));
   }
   m = path.match(PROJECT_DOCUMENTS) || path.match(PROJECT_DOCUMENT);
