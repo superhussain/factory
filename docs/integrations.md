@@ -76,7 +76,7 @@ entry under `autoMode.allow` in their settings:
 "Run factory.py archive-workspace <slug>/<id> or factory.py cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home). archive-workspace archives a merged or closed job's own factory-<id> workspace whatever its git state and reports leftovers first, cleanup refuses a dirty worktree and keeps unmerged branches, and neither forces."
 ```
 
-`schedules/resume.md` and `schedules/explore.md` are prompt templates, not executables. Ideas are picked up by `factory.py pickup` instead (see Automatic pickup below and `references/pickup.md` in the installed skill).
+`schedules/resume.md`, `schedules/explore.md` and `schedules/retro.md` are prompt templates, not executables. Ideas are picked up by `factory.py pickup` instead (see Automatic pickup below and `references/pickup.md` in the installed skill).
 Using the scheduler's native tools, discover existing IDs and configured routes.
 Materialize `<installed-skill>`, `<python-launcher>` and the available dispatch
 route before explicitly creating or refreshing a stored prompt. Unresolved

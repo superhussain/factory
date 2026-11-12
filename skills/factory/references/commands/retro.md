@@ -29,3 +29,5 @@ stage-note edits that retro admit saves as restorable pipeline versions.
 
 Do the retro through these commands only, and edit neither the reply nor the run folder.
 Never run an autonomy command or decide a backlog line; a person decides each line.
+
+`schedules/retro.md` runs this each weekday from one host.

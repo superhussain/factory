@@ -298,8 +298,8 @@ class RolesTest(IsolatedTestCase):
                  "retro admit <run>")
         positions = [schedule.index(step) for step in steps]
         self.assertEqual(positions, sorted(positions))
-        for banned in ("autonomy pause", "autonomy resume", "autonomy allow", "autonomy deny", "autonomy self"):
-            self.assertNotIn(banned, schedule)
+        for banned in ("pause", "resume", "allow", "deny", "self"):
+            self.assertIsNone(re.search(rf"autonomy {banned}\b", schedule), banned)
         approve = [line for line in schedule.splitlines() if "suggest approve" in line]
         self.assertEqual(len(approve), 1)
         self.assertTrue(approve[0].startswith("Never "))
