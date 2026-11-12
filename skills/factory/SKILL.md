@@ -202,7 +202,7 @@ does the same. Pass `--session <tag>` to every later `claim`, `next`, `hold`, an
 
 - Run `hold` again before spawning each agent and when each one finishes, so a long
   build keeps the claim fresh. A claim goes stale after `claim_stale_minutes` in
-  `config.md` (default 120).
+  `config.md` (default 120). When this session's own claim was refreshed in the last 10 minutes and nothing else would change, `hold` skips the board write and prints the same lines.
 - `hold` prints `elapsed <N>s`, the seconds since the job's first claim. Time matters here: do not spend time that can be avoided, and the earlier a correct result is obtained, the better. Use the line to pace the job and to run independent agents in parallel. It never cuts a review round, skips a reviewer, shortens WAIT FOR ALL, or relaxes a security floor.
 - Moving a job to `needs-human`, `pr-open`, `merged`, or `closed` releases the claim.
 - Claims prevent accidents between sessions, not abuse. Anyone with the Access
@@ -273,6 +273,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "pipeline": { "global": 3, "project": 2 },
   "backlog": { "line": "- [ ] <slug>: <feature>", "decision": "approved | denied | rework", "at": "...", "notes": "optional", "answers": "optional", "notes_read": "..." },
   "experiment": { "name": "pilot", "arm": "a | b", "provider": "provider-b", "model": "model-b", "effort": "high" },
+  "agents": [{ "at": "...", "stage": "spec", "role": "spec", "harness": "claude", "via": "native", "model": "...", "effort": "medium", "session": "a1b2c3" }],
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
   "started": "2026-10-15T11:40:00Z",
   "updated": "2026-10-15T12:00:00Z",
@@ -305,15 +306,17 @@ Approve also appends the notes to `idea`.
 
 How the dashboard's idea column, Assign project and backlog decision page behave is in [dashboard](references/dashboard.md).
 
-`experiment` is set only by pickup, at first claim, when `routes.md` sets an owner-model
-experiment: the arm the job launched on and the provider, model and effort it launched
-with. Pickup never rewrites it, and a relaunch of an arm `b` job launches on the recorded
-triple. `factory.py experiment report <name>` attributes outcomes by it.
+`experiment` is set only by pickup, at first claim, for an owner-model experiment; see
+[pickup](references/pickup.md#owner-model-experiment).
+Only pickup and `agent record` append `agents` rows, newest 32 kept;
+`agent report` counts them.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
 
 ## Rules
 
+- Before each role dispatch, run `python3 "$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`.
+  After hold, record the orchestrator once when no orchestrator row carries this session.
 - Agents get context from files, not the conversation. Build every agent prompt with
   `python3 "$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] --out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`
   (`<role>-round-<N>.txt` when you pass `--round`), after `pipeline` and `documents`,
@@ -499,17 +502,8 @@ only `factory.py deny-notes` writes it.
 - At each stage change, send one line with the event and a deep link to the file
   that explains it, as in
   `merged: <PR URL> · $DASHBOARD#<id>/decision`.
-
-  | Event | Link to |
-  | --- | --- |
-  | Spec written | `#<id>/spec` |
-  | Build done (first build, fix round, rework) | `#<id>/build` |
-  | Waiting on his answers (`needs.md` written) | `#<id>/needs` |
-  | Review round N done | the first `round-N/review-<r>` with CHANGES, else `round-N/review-security` |
-  | PR open, merged, or escalated | `#<id>/decision`, plus the PR URL |
-  | Closed without shipping | `#<id>/decision` |
-  | Batched build triggered or landed | the run URLs and the jobs that rode it |
-  | needs-human | the file that explains the hold: the latest CHANGES review at the round cap, or the failed agent's file. Use `#<id>` plus the note when only the note says why (a git conflict, say). |
+  Pick the link from the event table in
+  [dashboard](references/dashboard.md#stage-change-deep-links).
 - Follow the project file's Orchestrator section for load: how many builders may run
   dev servers at once, which ports to hand out and which to avoid. Wrap long
   commands in `timeout`.
@@ -623,3 +617,4 @@ Read a command's file before you run it.
 | `/factory init` | [init](references/commands/init.md) | You set up a device or register a project. |
 | `/factory handoff <id>` | [handoff](references/commands/handoff.md) | You hand a job to another runtime. |
 | `/factory resume <id>` | [resume](references/commands/resume.md) | You continue a handed-off job. |
+| `/factory retro [--days N]` | [retro](references/commands/retro.md) | A person asks for a cross-host session retro. |

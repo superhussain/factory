@@ -1102,6 +1102,18 @@ const quoteId = (id) =>
     (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
   );
 
+// The dashboard keeps 200 characters of a refusal; two ids at this cap fit beside the rider text.
+const QUOTED_ID_MAX = 36;
+
+// quoteId, cut on the raw id so the result is at most max characters, ending in ...
+function quoteIdCut(id, max) {
+  const full = quoteId(id);
+  if (full.length <= max) return full;
+  let n = Math.min(id.length, max - 5);
+  while (quoteId(id.slice(0, n)).length + 3 > max) n--;
+  return quoteId(id.slice(0, n)).slice(0, -1) + '..."';
+}
+
 // An error message, or null. A row has no identity but its id, so a write that drops a
 // stored id and adds a row in the same write is changing that row's id.
 function checkRowIds(storedJobs, jobs) {
@@ -1155,7 +1167,7 @@ function checkRiderControls(storedJobs, jobs) {
     if (lead === null) continue;
     const added = RIDER_CONTROLS.find((f) => f in row && !(storedRow && f in storedRow));
     if (added)
-      return `a board write cannot add ${added} to ${quoteId(row.id)}: it is batched into ${quoteId(lead)} and follows its lead. Act on the lead instead. Nothing was written.`;
+      return `a board write cannot add ${added} to ${quoteIdCut(row.id, QUOTED_ID_MAX)}: it is batched into ${quoteIdCut(lead, QUOTED_ID_MAX)} and follows its lead. Act on the lead instead. Nothing was written.`;
   }
   return null;
 }
