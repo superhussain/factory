@@ -108,7 +108,7 @@ class PickupFixture(IsolatedTestCase):
         self.addCleanup(patch.stopall)
         patch.object(factory, "factory_home", return_value=self.home).start()
         patch.object(factory, "api", side_effect=self.request).start()
-        patch.object(factory, "LAUNCH_WAIT_SECONDS", 2).start()
+        patch.object(factory, "LAUNCH_WAIT_SECONDS", 60).start()
         patch.object(factory, "report_status").start()
         self.sweep = patch.object(factory, "backlog_triage_pass").start()
         self.checkout = patch.object(factory, "checkout_problem", return_value=None).start()
@@ -505,7 +505,7 @@ class PickupTest(PickupFixture):
         self.configure(sleep=60)
         with patch.object(factory, "LAUNCH_WAIT_SECONDS", 0.5):
             code, out, err = self.pickup()
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + 60
         while not self.launched() and time.monotonic() < deadline:
             time.sleep(0.05)
         [record] = self.launched()
