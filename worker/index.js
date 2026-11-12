@@ -60,6 +60,8 @@ const PROJECT = /^\/api\/projects\/([\w-]+)\.md$/;
 const PROJECT_DOCUMENT_NAMES = ["notes.md", "decisions.md", "runbook.md"];
 const PROJECT_DOCUMENTS = /^\/api\/project-documents\/([A-Za-z0-9_-]+)$/;
 const PROJECT_DOCUMENT = /^\/api\/project-documents\/([A-Za-z0-9_-]+)\/([^/]+)$/;
+// History of a project file (project.md) or document: the list, or one version's bytes.
+const PROJECT_HISTORY = /^\/api\/project-history\/([\w-]+)\/([\w.-]+)(?:\/([1-9]\d*))?$/;
 const REPO = /^[\w.-]+\/[\w.-]+$/;
 const BASE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 // Pipeline scopes are "global" or "projects/<slug>"; history keeps every saved version.
@@ -361,7 +363,63 @@ function strictCondition(request, label) {
   return cond;
 }
 
-async function projectPut(request, env, key) {
+const projectFileKey = (slug, name) =>
+  name === "project.md" ? `projects/${slug}.md` : `project-documents/${slug}/${name}`;
+const projectHistoryKey = (slug, name, n) =>
+  `project-history/${slug}/${name}/${String(n).padStart(6, "0")}.md`;
+
+// Saves a project file or document as its next version against the exact version the writer
+// read, and keeps a create-only copy under project-history/.
+async function projectStore(request, env, principal, slug, name, bytes, cond) {
+  const summary = readSummary(request, "X-Project-Summary");
+  if (summary instanceof Response) return summary;
+  const key = projectFileKey(slug, name);
+  const current = await env.BUCKET.head(key);
+  if (cond.has("If-Match") ? current?.httpEtag !== cond.get("If-Match") : current)
+    return reply("precondition failed", 412);
+  const saved = await storeVersion(
+    env,
+    key,
+    (n) => projectHistoryKey(slug, name, n),
+    bytes,
+    current,
+    cond,
+    "text/markdown; charset=utf-8",
+    { saved_by: principal.kind === "user" ? principal.email : "device", summary },
+    "project",
+  );
+  if (!saved) return reply("precondition failed", 412);
+  return reply("ok", 200, "text/plain", {
+    ETag: saved.obj.httpEtag,
+    "X-Project-Version": String(saved.version),
+    ...(saved.missing && { "X-Project-History": "missing" }),
+  });
+}
+
+async function projectHistory(env, principal, slug, name) {
+  const versions = await listVersions(
+    env,
+    `project-history/${slug}/${name}/`,
+    projectFileKey(slug, name),
+  );
+  if (principal.kind !== "user") for (const entry of versions) delete entry.saved_by;
+  return reply(JSON.stringify(versions), 200, "application/json");
+}
+
+async function projectHistoryVersion(env, slug, name, version) {
+  let obj = await env.BUCKET.get(projectHistoryKey(slug, name, version));
+  if (!obj) {
+    const current = await env.BUCKET.get(projectFileKey(slug, name));
+    if (current && storedVersion(current) === version) obj = current;
+  }
+  return obj
+    ? reply(obj.body, 200, "text/markdown", {
+        "X-Project-Version": String(version),
+      })
+    : notFound();
+}
+
+async function projectPut(request, env, principal, slug) {
   const cond = strictCondition(request, "project");
   if (cond instanceof Response) return cond;
   if (
@@ -381,13 +439,7 @@ async function projectPut(request, env, key) {
   const error =
     validateProjectDocument(body) ?? checkOperatorText(body, "project document", "document");
   if (error) return reply(error, 400);
-  const obj = await env.BUCKET.put(key, bytes, {
-    onlyIf: cond,
-    httpMetadata: { contentType: "text/markdown; charset=utf-8" },
-  });
-  return obj
-    ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
-    : reply("precondition failed", 412);
+  return projectStore(request, env, principal, slug, "project.md", bytes, cond);
 }
 
 function validateProjectMarkdown(text) {
@@ -407,7 +459,7 @@ async function projectDocumentList(env, slug) {
   return reply(JSON.stringify(out), 200, "application/json");
 }
 
-async function projectDocumentPut(request, env, key) {
+async function projectDocumentPut(request, env, principal, slug, name) {
   const cond = strictCondition(request, "document");
   if (cond instanceof Response) return cond;
   if (
@@ -427,13 +479,7 @@ async function projectDocumentPut(request, env, key) {
   const error =
     validateProjectMarkdown(body) ?? checkOperatorText(body, "project document", "document");
   if (error) return reply(error, 400);
-  const obj = await env.BUCKET.put(key, bytes, {
-    onlyIf: cond,
-    httpMetadata: { contentType: "text/markdown; charset=utf-8" },
-  });
-  return obj
-    ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
-    : reply("precondition failed", 412);
+  return projectStore(request, env, principal, slug, name, bytes, cond);
 }
 
 const pipelineKey = (scope) => `pipeline/${scope}.json`;
@@ -1707,6 +1753,16 @@ async function api(request, env, path, principal) {
     if (method === "PUT") return casPut(request, env, key, type);
     return notFound();
   }
+  m = path.match(PROJECT_HISTORY);
+  if (m) {
+    const [, slug, name, n] = m;
+    if (method !== "GET" || !["project.md", ...PROJECT_DOCUMENT_NAMES].includes(name))
+      return notFound();
+    if (!(await env.BUCKET.head(`projects/${slug}.md`))) return notFound();
+    return n === undefined
+      ? projectHistory(env, principal, slug, name)
+      : projectHistoryVersion(env, slug, name, Number(n));
+  }
   m = path.match(PROJECT_DOCUMENTS) || path.match(PROJECT_DOCUMENT);
   if (m) {
     if (
@@ -1717,16 +1773,14 @@ async function api(request, env, path, principal) {
       return notFound();
     if (!(await env.BUCKET.head(`projects/${m[1]}.md`))) return notFound();
     if (m[2] === undefined) return projectDocumentList(env, m[1]);
-    const key = `project-documents/${m[1]}/${m[2]}`;
     return method === "GET"
-      ? getFile(env, key, "text/markdown")
-      : projectDocumentPut(request, env, key);
+      ? getFile(env, projectFileKey(m[1], m[2]), "text/markdown")
+      : projectDocumentPut(request, env, principal, m[1], m[2]);
   }
   m = path.match(PROJECT);
   if (m) {
-    const key = `projects/${m[1]}.md`;
-    if (method === "GET") return getFile(env, key, "text/markdown");
-    if (method === "PUT") return projectPut(request, env, key);
+    if (method === "GET") return getFile(env, projectFileKey(m[1], "project.md"), "text/markdown");
+    if (method === "PUT") return projectPut(request, env, principal, m[1]);
     return notFound();
   }
   m = path.match(JOB_DIR);
