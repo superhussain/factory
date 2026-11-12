@@ -47,7 +47,7 @@ export const FLOORS = Object.freeze(
 );
 
 const REVIEWERS = ["security", "ux", "ui", "code"];
-const STAGES = ["spec", "build", "review", "approve"];
+export const STAGES = ["spec", "build", "review", "approve"];
 const KEYS = [
   "schema",
   "merge",
