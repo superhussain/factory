@@ -462,6 +462,14 @@ test("Picking On saves tracer.enabled true", { timeout: 120000 }, async () => {
       );
       const saved = await (await fetch(origin + "/api/pipeline/global")).json();
       assert.deepEqual(saved.tracer, { enabled: true });
+      await page.select("#pipeline-tracer-mode", "");
+      await page.waitForFunction(() => !document.getElementById("pipeline-save").disabled);
+      await page.click("#pipeline-save");
+      await page.waitForFunction(
+        () => document.getElementById("pipeline-status").textContent === "Saved as version 2",
+      );
+      const cleared = await (await fetch(origin + "/api/pipeline/global")).json();
+      assert.equal("tracer" in cleared, false);
     } finally {
       await context.close();
     }
