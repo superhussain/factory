@@ -3874,7 +3874,6 @@ def pickup(*args):
     device, _, minutes = holder(home)
     started = now()
     failing = cached_status(home)[2]
-    data = None if os.path.lexists(home / "tracer.json") else read_board(home)
 
     def build_pass(home):
         nonlocal data
@@ -3882,6 +3881,7 @@ def pickup(*args):
             data = None
 
     try:
+        data = None if os.path.lexists(home / "tracer.json") else read_board(home)
         if not dry:
             for tracer_pass, stopped in (
                     (tracer_follow_pass, "Tracer follow pass stopped; followed jobs wait for the next pickup run"),

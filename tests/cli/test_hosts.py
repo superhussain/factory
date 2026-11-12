@@ -273,6 +273,13 @@ class PickupHeartbeatTest(HostFixture):
                 self.assertRegex(body["last_pickup"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
                 (self.home / "host-status.json").unlink()
 
+    def test_a_failed_board_read_still_sends_status(self):
+        with http_fixture({STATUS: (200, b""), **DOCTOR}) as server:
+            self.write_config(server.origin)
+            with patch.object(factory, "read_board", side_effect=lambda home: factory.fail("boom", 5)):
+                self.assertEqual(self.pickup()[0], 5)
+            self.assertEqual(self.keys(server)[-1], STATUS)
+
     def test_dry_run_and_no_device_send_no_status(self):
         for args, device in ((("--dry-run",), f"device: {HOST}\n"), ((), "")):
             with self.subTest(args=args), http_fixture({STATUS: (200, b""), **DOCTOR}) as server:
