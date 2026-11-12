@@ -96,7 +96,7 @@ flowchart LR
 - **Claude only.** The `factory-explorer` role has Read, Grep and Glob only: no
   shell, write or web tool. OpenCode's installed copy carries no tool limit, so the
   schedule stops with `no claude route` unless the picked route's provider is
-  `claude`.
+  `claude` or starts with `claude-`.
 - **Human gate.** The schedule never runs `suggest approve` or an `autonomy`
   command. Every admitted card still waits on a human.
 
