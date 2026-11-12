@@ -206,7 +206,10 @@ paths for `/factory retro`. A window no host pushed exits 3 and writes nothing. 
 linked `retro` or run folder exits 2.
 
 `retro admit <run>` checks the retro agent's `reply.json` in that folder against
-`factory.retro/1`. A bad reply exits 2 with nothing written, and `{"none": true}`
+`factory.retro/1`. A bad reply, or one whose findings all fail, exits 2 with
+nothing written. A bad finding is dropped, printed as a `rejected findings[N]` line
+and listed under Rejected findings in `findings.md` without its text. A bad card
+exits 2 after `findings.md` is written, with no cards admitted. `{"none": true}`
 exits 3. It writes `findings.md`, ranked by count times cost per occurrence, then
 writes the reply's cards to `suggestions.json` and runs `suggest admit` on it (see
 [Retro cards](autonomy.md#retro-cards)). A missing run, reply or `aggregate.json`

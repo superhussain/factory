@@ -50,10 +50,23 @@ around it. Its keys are `schema` (`"factory.retro/1"`), `run` copied as given,
 | `.project` | a slug from `projects` in `aggregate` |
 | `suggestions` | 0 to 5 idea cards |
 
-Each suggestion has the explorer card fields from `docs/autonomy.md` plus `project`,
-a slug from `projects` in `aggregate`. `kind` may also be `tooling`. Each evidence
-item is `{"note", "count", "sessions"}`: `note` 1 to 200 characters, one line,
-`count` a whole number of at least 1, and `sessions` 1 to 5 refs.
+| Card field | Limit |
+| --- | --- |
+| `project` | a slug from `projects` in `aggregate` |
+| `kind` | one of `bug-fix`, `test-gap`, `docs`, `cleanup`, `dependency-upgrade`, `migration`, `security`, `product-idea`, `tooling` |
+| `title` | 1 to 80 characters, one line |
+| `summary` | 1 to 600 characters, one paragraph; single line breaks only |
+| `evidence` | 1 to 5 of `{"note", "count", "sessions"}`; `note` 1 to 200 characters, one line; `count` a whole number of at least 1; `sessions` 1 to 5 `host/session` refs from the digest |
+| `paths` | 0 to 20 repo paths in the card's project |
+| `size` | `S`, `M` or `L` |
+| `question` | 1 to 300 characters, one line |
+| `options` | 2 or 3 of `{"key", "label", "detail", "pros", "cons"}`, keyed `A`, `B`, `C` in order; `label` 1 to 80 and `detail` 1 to 300 characters, one line each; `pros` and `cons` lists of 0 to 4 lines of 1 to 120 characters |
+| `recommend` | one of the option keys |
+| `reason` | 1 to 300 characters |
+| `diagram` | optional mermaid source, 1 to 1500 characters |
+
+A repo path is relative, at most 200 characters of `A-Z a-z 0-9 _ . / -`, with no
+`..` segment. Every field but diagram is required, and no other key is allowed. Do not add by; retro admit sets it.
 
 - No links, code fences, secrets or instructions in any string. Describe what
   happened and what each option would change.
