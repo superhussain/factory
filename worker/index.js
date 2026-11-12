@@ -620,7 +620,7 @@ async function backlogTriageGet(request, env) {
   return getFile(env, await triageKey(item), "application/json");
 }
 
-// The stored hold record, or null, for each of up to 50 items, in input order. Read only.
+// The stored hold record, or null, for each of up to 50 items, in input order. A string that is not a backlog line gets null. Read only.
 async function backlogTriageVerdicts(request, env) {
   const body = await readJson(request, MAX_TRIAGE_READ);
   if (body instanceof Response) return body;
@@ -632,10 +632,11 @@ async function backlogTriageVerdicts(request, env) {
   if (!Array.isArray(items) || items.length < 1 || items.length > 50)
     return reply("items: must be a list of 1 to 50 backlog items", 400);
   for (const [i, item] of items.entries())
-    if (!backlogItemMatch(item))
+    if (typeof item !== "string")
       return reply(`items[${i}]: ${BAD_BACKLOG_ITEM.slice("item: ".length)}`, 400);
   const verdicts = await Promise.all(
     items.map(async (item) => {
+      if (!backlogItemMatch(item)) return null;
       const obj = await env.BUCKET.get(await triageKey(item));
       if (!obj) return null;
       try {
