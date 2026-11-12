@@ -143,7 +143,7 @@ worktree, so the token only runs merged code.
 
 ## Tracer mirror
 
-An optional, one-way mirror shows a job's tasks, progress and review outcomes in a Tracer instance. It is off until `<home>/tracer.json` lists the project. Delete the entry to turn it off.
+An optional, one-way mirror shows a job's tasks, progress and review outcomes in a Tracer instance. It is off until Settings, Pipeline, Tracer integration is On and `<home>/tracer.json` lists the project. Delete the entry to turn it off.
 
 ```json
 {"version": 1, "projects": {"sample": {"url": "http://127.0.0.1:8000",
@@ -157,9 +157,9 @@ An optional, one-way mirror shows a job's tasks, progress and review outcomes in
 | `service` | Required Tracer service name, `[a-z0-9][a-z0-9._-]{0,39}` |
 | `language` | Optional, at most 40 characters |
 
-### Turn Tracer off
+### Turn Tracer on
 
-To turn the whole integration off without editing `tracer.json` on each device, open Settings, Pipeline, pick the all-projects scope, and set **Tracer integration** to `Off`. It saves `"tracer": {"enabled": false}` in the all-projects pipeline document, and a project scope refuses the key. Absent means on.
+Tracer is off until a person opens Settings, Pipeline, picks the all-projects scope, and sets **Tracer integration** to `On`. It saves `"tracer": {"enabled": true}` in the all-projects pipeline document, and a project scope refuses the key. A missing key or `false` means off.
 
 | Reader | Off behavior |
 | --- | --- |
@@ -169,7 +169,7 @@ To turn the whole integration off without editing `tracer.json` on each device, 
 | `tracer sync` | prints `nothing to mirror: Tracer is off in Settings, Pipeline`, exit 0 |
 | Archive pass | a pending Tracer mirror no longer keeps a job on the board |
 
-Board fields and `tracer.json` stay as they are, so setting it back to `On (default)` resumes where it stopped. When a device cannot read the setting, pickup and board patches print their usual Tracer warning and `tracer sync` exits 5. Devices on an older bundle ignore the key and keep mirroring until they upgrade.
+Board fields and `tracer.json` stay as they are, so setting it back to `On` resumes where it stopped. When a device cannot read the setting, pickup and board patches print their usual Tracer warning and `tracer sync` exits 5. Devices on an older bundle treat a missing key as on and keep mirroring until they upgrade.
 
 ### Where the token file is
 
