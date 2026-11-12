@@ -2,6 +2,7 @@
 // running example: lead 1201 owns PR #88 and rider 1203 is batched into it.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { loadProduction, memoryBucket } from "../support/worker.mjs";
 
 const { serveFactory } = await loadProduction();
@@ -21,6 +22,11 @@ const CONTROLS = {
   paused: { at: "2026-11-10T09:00:00Z" },
   close: { reason: "not needed", at: "2026-11-10T09:00:00Z" },
 };
+const RIDER_CONTROLS = JSON.parse(
+  /const RIDER_CONTROLS = (\[[^\]]*\]);/.exec(
+    readFileSync(new URL("../../worker/index.js", import.meta.url), "utf8"),
+  )[1],
+);
 const refusal = (field) =>
   `a board write cannot add ${field} to "1203-cache-headers": it is batched into "1201-sync-retry" and follows its lead. Act on the lead instead. Nothing was written.`;
 
@@ -125,4 +131,24 @@ test("the refusal quotes long ids cut", async () => {
     await response.text(),
     String.raw`a board write cannot add paused to "1203-\u00e9\u00e9\u00e9\u00e9...": it is batched into "1201-sync-retry" and follows its lead. Act on the lead instead. Nothing was written.`,
   );
+});
+
+test("the refusal fits 200 characters for every rider control", async () => {
+  assert.deepEqual(RIDER_CONTROLS, Object.keys(CONTROLS));
+  const lead = { ...LEAD, id: "1201-" + "a".repeat(60) };
+  const rider = {
+    ...RIDER,
+    id: "1203-" + "b".repeat(60),
+    refs: [{ id: lead.id, kind: "batched-into" }],
+  };
+  for (const field of RIDER_CONTROLS) {
+    const response = await setup([lead, rider]).write([
+      lead,
+      { ...rider, [field]: CONTROLS[field] },
+    ]);
+    const body = await response.text();
+    assert.equal(response.status, 400, field);
+    assert.ok(body.startsWith("a board write cannot add " + field + " to "), body);
+    assert.ok(body.length <= 200, field + ": " + body.length);
+  }
 });

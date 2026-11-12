@@ -17,7 +17,6 @@ import { clickNow } from "../support/board-ready.cjs";
 import { retryCapture } from "./capture-retry.mjs";
 import { selectShard } from "./shard.mjs";
 
-const root = new URL("../", import.meta.url);
 const CASES = selectShard(
   JSON.parse(await readFile(new URL("../fixtures/browser-cases.json", import.meta.url), "utf8")),
   process.env.FACTORY_BROWSER_SHARD,
@@ -239,9 +238,9 @@ async function put(origin, route, body, type) {
   const current = await fetch(origin + route, { redirect: "manual" });
   if (!current.ok && current.status !== 404)
     throw new Error(`capture seed read ${route}: ${current.status}`);
-  const headers = {
-    ...(current.ok ? { "If-Match": current.headers.get("ETag") } : { "If-None-Match": "*" }),
-  };
+  const headers = current.ok
+    ? { "If-Match": current.headers.get("ETag") }
+    : { "If-None-Match": "*" };
   if (type) headers["Content-Type"] = type;
   const response = await fetch(origin + route, { method: "PUT", headers, body });
   if (response.status !== 200) throw new Error(`capture seed ${route}: ${response.status}`);
@@ -780,8 +779,28 @@ async function capture(outdir, referencePath) {
         location.hash = "#/settings/display";
       });
       await page.waitForSelector("#settings-display:not([hidden])");
+      // Pin the header dot to live on both sides, so the pair does not depend on socket timing.
+      // Request interception answers the before page, so Chrome's local network access checks
+      // block its socket to loopback until the context holds loopback-network. The dashboard's
+      // next socket retry, at most 30 s away, then opens.
+      await page
+        .browserContext()
+        .setPermission(origin, { permission: { name: "loopback-network" }, state: "granted" });
+      await page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
+        timeout: 30000,
+      });
       await page.evaluate(() =>
         document.querySelector("#display-poll").scrollIntoView({ block: "center" }),
+      );
+      // The gear's aria-current border fades in over 0.15 s. A side whose dot is already live
+      // would otherwise catch it mid-transition.
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getElementById("settings-link")
+            .getAnimations()
+            .map((animation) => animation.finished),
+        ),
       );
     };
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
