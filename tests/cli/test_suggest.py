@@ -954,3 +954,22 @@ class RetroBacklogTest(SuggestCase):
         self.backlog = self.backlog.replace(stamp, "2026-01-01T00:00:00Z")
         self.admit(retro(example_card(project="sample", title="Day 3")))
         self.assertEqual(self.result()["admitted"], ["sample: Day 3"])
+
+    def test_future_mark_holds_no_cap_slot(self):
+        # A mark stamped in the future never falls out of the 24-hour daily-cap window.
+        stamp = factory.datetime.now(factory.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.board["jobs"] += [{"id": f"03{n}-x", "stage": "merged", "origin": {"created": stamp}} for n in range(9)]
+        self.backlog = ("# Backlog\n- [x] other: Old one (040-x)\n"
+                        "  Retro: run r, fingerprint 0123456789abcdef, created 2099-01-01T00:00:00Z\n")
+        self.admit(retro(example_card()))
+        self.assertEqual(self.result()["admitted"], ["other: Guard the ls alias"])
+
+    def test_context_why_is_none(self):
+        # The same why computation retro_backlog_admit runs: one Retro line leaves None.
+        context = factory.retro_backlog_context(example_card(), "20261111T090000Z-a1b2c3",
+                                                factory.fingerprint("other", example_card()), CREATED)
+        self.assertIsNone(factory.backlog_context_error(context))
+        self.assertEqual(len(factory.RETRO_MARK.findall(context)), 1)
+        why = factory.backlog_context_error(context) or \
+            ("more than one Retro line" if len(factory.RETRO_MARK.findall(context)) != 1 else None)
+        self.assertIsNone(why)

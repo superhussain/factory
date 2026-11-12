@@ -2682,7 +2682,7 @@ def created_since(j, cutoff):
         stamp = datetime.strptime(j["origin"]["created"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except (KeyError, TypeError, ValueError):
         return False
-    return stamp > cutoff
+    return cutoff < stamp <= datetime.now(timezone.utc)
 
 
 def strings(value):
@@ -2810,7 +2810,7 @@ def retro_backlog_admit(cards):
         fp = fingerprint(slug, s)
         dup = next((j.get("id") for j, o in origins if o.get("fingerprint") == fp), None) or archived.get(fp)
         context = retro_backlog_context(s, cards["run"], fp, now())
-        why = backlog_context_error(context) or (len(RETRO_MARK.findall(context)) != 1 and "more than one Retro line")
+        why = backlog_context_error(context) or ("more than one Retro line" if len(RETRO_MARK.findall(context)) != 1 else None)
         if dup:
             reason = f"duplicate {dup}"
         elif any(m["fingerprint"] == fp for m in marks):
