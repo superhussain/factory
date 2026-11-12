@@ -494,6 +494,15 @@ class RetroAggregateTest(RetroWorkerCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["from"], (today - timedelta(days=29)).isoformat())
 
+    def test_rows_need_their_host_and_a_session_id(self):
+        rows = [digest_row("host-a", S1), digest_row("host-z", S1), digest_row("host-a", "../x")]
+        code, out, err = self.aggregate(self.window(1, {0: {"host-a": rows}}), "--days", "1")
+        self.assertEqual((code, err), (0, ""))
+        printed = json.loads(out)
+        self.assertEqual((printed["sessions"], printed["skipped"]), (1, 2))
+        kept = [json.loads(line) for line in Path(printed["digest"]).read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(kept, [digest_row("host-a", S1)])
+
     @unittest.skipIf(os.name == "nt", "symlinks")
     def test_linked_retro_folder_refused(self):
         target = self.root / "elsewhere"

@@ -6719,6 +6719,7 @@ RETRO_REPLY_SCHEMA = "factory.retro/1"
 RETRO_CATEGORIES = ("navigation", "automated-checks", "reviewer-rules", "steering", "tool-economy",
                     "information-access", "permissions")
 RETRO_SESSION_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[0-9a-f-]{8,36}", re.ASCII)
+RETRO_SESSION = re.compile(r"[0-9a-f-]{8,36}", re.ASCII)
 MAX_RETRO_BYTES = 131072
 RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_creation_input_tokens",
                 "uncached_input": "input_tokens", "output": "output_tokens"}
@@ -7011,14 +7012,14 @@ def retro_aggregate(days):
     dates = [(today - timedelta(days=back)).isoformat() for back in range(days - 1, -1, -1)]
     rows, skipped = [], 0
     for date in dates:
-        for _, text in retro_fetch(home, date):
+        for host, text in retro_fetch(home, date):
             for line in text.splitlines():
                 try:
                     row = json.loads(line)
                 except ValueError:
                     row = None
-                if not isinstance(row, dict) or not isinstance(row.get("host"), str) \
-                        or not isinstance(row.get("session"), str):
+                if not isinstance(row, dict) or row.get("host") != host or not isinstance(row.get("session"), str) \
+                        or not RETRO_SESSION.fullmatch(row["session"]):
                     skipped += 1
                     continue
                 if row.get("job") == "ad-hoc":
