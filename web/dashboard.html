@@ -330,6 +330,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .line:has(.ref-focused) { text-overflow: clip; }
   .card .id { display: flex; gap: 6px; align-items: center; }
   .card .id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .card .id .proj { flex: none; max-width: 50%; margin-top: 0; font-family: var(--font-sans); overflow-wrap: normal; contain: none; }
+  .card .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .card .title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
   .card .meta.branch { color: var(--info); }
   .card .meta.refs { color: var(--ref-fg); }
@@ -363,7 +365,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   /* A needs-you ask wraps to two rows, so a touch user can read it without the tooltip. */
   .card.needs-you .note.line { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
   .card-wrap { position: relative; }
-  .card-wrap .card .id, .card-wrap .card .proj { padding-right: 28px; }
+  .card-wrap .card .id, .card-wrap .card .tags { padding-right: 28px; }
   .card-wrap.has-pr .card .id { padding-right: 96px; }
   .card-actions { position: absolute; top: 7px; right: 8px; width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
   .card-actions:focus-visible { background: var(--line); outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -379,7 +381,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   /* The text is ~15px tall; this invisible box makes a ~41px tap target without moving the layout. */
   .pr-link::after { content: ""; position: absolute; inset: -13px -8px; }
   .card-wrap > .pr-link { position: absolute; top: 13px; right: 48px; }
-  .card-wrap .card.archived .id, .card-wrap .card.archived .proj { padding-right: 0; }
+  .card-wrap .card.archived .id, .card-wrap .card.archived .tags { padding-right: 0; }
   .card-wrap.has-pr .card.archived .id { padding-right: 64px; }
   .card-wrap > .card.archived ~ .pr-link { right: 16px; }
   body.compact .card-wrap > .card.archived ~ .pr-link { right: 8px; }
@@ -1391,15 +1393,15 @@ function card(j, inNeeds, archived = false) {
   const riders = archived ? [] : ridersOf(j.id);
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
+  const tags = (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
+    (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
+    (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
+    (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
+    (j.babysit?.at ? '<span class="chip" title="' + esc(prLink(j) ? 'An agent is fixing and merging PR #' + prLink(j).n : 'An agent is fixing and merging this PR') + '">Babysitting</span>' : '');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
-    '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span>' +
-      (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
-      (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
-      (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
-      (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
-      (j.babysit?.at ? '<span class="chip" title="' + esc(prLink(j) ? 'An agent is fixing and merging PR #' + prLink(j).n : 'An agent is fixing and merging this PR') + '">Babysitting</span>' : '') + '</div>' +
-    line('proj', projectName(j)) +
+    '<div class="id line" title="' + esc(j.id) + '"><span class="id-text">' + esc(j.id) + '</span><span class="proj line" title="' + esc(projectName(j)) + '">' + esc(projectName(j)) + '</span></div>' +
+    (tags ? '<div class="tags">' + tags + '</div>' : '') +
     '<div class="title">' + esc(j.title || j.id) + '</div>' +
     (j.stage === 'idea' && !j.project ? '<div class="idea-text">Assign a project before starting.</div>' : '') +
     (ideaOnly(j) ? (ideaBody(j) ? '<div class="idea-text">' + esc(ideaBody(j)) + '</div>' : '') : hiddenCardFields.has('meta') ? '' :
@@ -2957,26 +2959,29 @@ function hostCard(h) {
     const alertLine = (cls, text) => make('p', {className:cls + ' host-alert'}, make('span', {className:'host-alert-icon', ariaHidden:'true', textContent:'⚠︎'}), make('span', {className:'sr-only', textContent:'Warning: '}), text);
     if (st.doctor !== 'ok') li.append(alertLine('host-doctor', 'Doctor failed: ' + st.doctor.join(', ') + '.'));
     if (st.triage_failed_since) li.append(alertLine('host-triage', 'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'));
-    const heads = ['Route', 'Provider', 'Model', 'Effort', 'Limited until'];
-    const cells = (tag, values) => {
-      const row = make('tr', {}, ...values.map((value, i) => {
-        const cell = make(tag, {textContent:value});
-        cell.setAttribute('role', tag === 'th' ? 'columnheader' : 'cell');
-        cell.dataset.label = heads[i];
-        return cell;
-      }));
-      row.setAttribute('role', 'row');
-      return row;
-    };
-    const caption = make('caption', {id:'host-' + h.id + '-routes-caption', textContent:'Routes (set on the device)'});
-    const thead = make('thead', {}, cells('th', heads));
-    const tbody = make('tbody', {}, ...st.routes.map(r => cells('td', [r.name, r.provider, r.model, r.effort ?? 'none', r.limited_until ? hostUtc(r.limited_until) : 'none'])));
-    thead.setAttribute('role', 'rowgroup');
-    tbody.setAttribute('role', 'rowgroup');
-    const table = make('table', {className:'host-routes'}, caption, thead, tbody);
-    table.setAttribute('role', 'table');
-    table.setAttribute('aria-labelledby', caption.id);
-    li.append(table);
+    if (st.routes.length === 0) li.append(make('p', {className:'muted host-routes-empty', textContent:'No routes reported.'}));
+    else {
+      const heads = ['Route', 'Provider', 'Model', 'Effort', 'Limited until'];
+      const cells = (tag, values) => {
+        const row = make('tr', {}, ...values.map((value, i) => {
+          const cell = make(tag, {textContent:value});
+          cell.setAttribute('role', tag === 'th' ? 'columnheader' : 'cell');
+          cell.dataset.label = heads[i];
+          return cell;
+        }));
+        row.setAttribute('role', 'row');
+        return row;
+      };
+      const caption = make('caption', {id:'host-' + h.id + '-routes-caption', textContent:'Routes (set on the device)'});
+      const thead = make('thead', {}, cells('th', heads));
+      const tbody = make('tbody', {}, ...st.routes.map(r => cells('td', [r.name, r.provider, r.model, r.effort ?? 'none', r.limited_until ? hostUtc(r.limited_until) : 'none'])));
+      thead.setAttribute('role', 'rowgroup');
+      tbody.setAttribute('role', 'rowgroup');
+      const table = make('table', {className:'host-routes'}, caption, thead, tbody);
+      table.setAttribute('role', 'table');
+      table.setAttribute('aria-labelledby', caption.id);
+      li.append(table);
+    }
   }
   const picks = hostProjects.get(h.id);
   li.append(make('p', {textContent:'Picks up: ' + (hostProjectsFailed ? 'could not load' : h.max_inflight === 0 ? 'nothing while paused. Max in flight is 0.' : picks ? picks.join(', ') : 'no projects')}));

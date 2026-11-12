@@ -78,7 +78,7 @@ const columnOf = (page, id) =>
     els.map((e) => e.closest("section.col").className.split(" ")[1]),
   );
 const chipsOf = (page, id) =>
-  page.$$eval(`.card[data-id="${id}"] .id .chip`, (els) => els.map((e) => e.textContent));
+  page.$$eval(`.card[data-id="${id}"] .tags .chip`, (els) => els.map((e) => e.textContent));
 
 test("babysit", { timeout: 240000 }, async (t) => {
   await prepareAssets();

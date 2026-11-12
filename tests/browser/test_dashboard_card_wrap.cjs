@@ -189,7 +189,7 @@ function checkCards(actual, expected, width) {
     assert.ok(card, job.id);
     assert.equal(card.injected, 0);
     const expectedFields = {
-      "id line": job.id + (needsYou ? job.stage : ""),
+      "id line": job.id + "Wrap fixtures",
       "proj line": "Wrap fixtures",
       title: job.title,
       ...(job.stage === "idea"

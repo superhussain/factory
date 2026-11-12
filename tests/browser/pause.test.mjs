@@ -67,7 +67,7 @@ const openDrawer = async (page, id) => {
 const boardJob = async (origin, id) =>
   (await (await fetch(origin + "/api/board")).json()).jobs.find((j) => j.id === id);
 const shown = (page, selector) => page.$eval(selector, (el) => !el.hidden);
-const chip = (page) => page.$eval(CARD + " .id", (el) => el.querySelector(".chip")?.textContent);
+const chip = (page) => page.$eval(CARD, (el) => el.querySelector(".tags .chip")?.textContent);
 // The drawer head plus the open menu, which hangs below it.
 const headAndMenu = (page) =>
   page.evaluate(() => {

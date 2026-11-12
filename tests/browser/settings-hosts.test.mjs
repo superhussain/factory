@@ -310,6 +310,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           actions: [...li.querySelectorAll(".actions button")].map((b) => b.textContent),
           routes: li.querySelector(".host-routes")?.querySelectorAll("tbody tr").length ?? null,
           routeInputs: li.querySelectorAll(".host-routes input").length,
+          noRoutes: li.querySelector(".host-routes-empty")?.textContent ?? null,
           picks: [...li.querySelectorAll("p")].find((p) => p.textContent.startsWith("Picks up"))
             ?.textContent,
         })),
@@ -320,8 +321,9 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           heading: "Lab Linux",
           seen: "Offline, last seen 13 h ago",
           actions: ["Save", "Retire"],
-          routes: 0,
+          routes: null,
           routeInputs: 0,
+          noRoutes: "No routes reported.",
           picks: "Picks up: no projects",
         },
         {
@@ -331,6 +333,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           actions: ["Save", "Confirm", "Retire"],
           routes: null,
           routeInputs: 0,
+          noRoutes: null,
           picks: "Picks up: no projects",
         },
         {
@@ -340,6 +343,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           actions: ["Save", "New code"],
           routes: null,
           routeInputs: 0,
+          noRoutes: null,
           picks: "Picks up: no projects",
         },
         {
@@ -349,6 +353,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           actions: ["Save", "Retire", "New code"],
           routes: null,
           routeInputs: 0,
+          noRoutes: null,
           picks: "Picks up: no projects",
         },
         {
@@ -358,6 +363,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
           actions: ["Save", "Retire"],
           routes: 2,
           routeInputs: 0,
+          noRoutes: null,
           picks: "Picks up: sample",
         },
       ]);
