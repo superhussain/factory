@@ -309,6 +309,33 @@ test("settings page", { timeout: 180000 }, async (t) => {
       );
     });
 
+    await t.test("settings S12 Save pickup leaves the pipeline summary alone", async () => {
+      await page.select("#pipeline-scope", "global");
+      await page.type("#pipeline-summary", "Typed on the pipeline page");
+      await page.click("#settings-nav-projects");
+      await page.waitForSelector("#settings-projects:not([hidden])", wait);
+      await page.select("#project-pickup-mode", "off");
+      await page.click("#project-pickup-save");
+      await page.waitForFunction(
+        () => document.getElementById("project-pickup-status").textContent === "Saved as version 2",
+        wait,
+      );
+      const latest = await page.evaluate(
+        async () =>
+          (
+            await (
+              await fetch("./api/pipeline/history/projects/sample", { cache: "no-store" })
+            ).json()
+          )[0],
+      );
+      assert.equal(latest.version, 2);
+      assert.equal(latest.summary, "");
+      assert.equal(
+        await page.$eval("#pipeline-summary", (el) => el.value),
+        "Typed on the pipeline page",
+      );
+    });
+
     assert.deepEqual(errors, []);
   });
 });

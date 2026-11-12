@@ -2721,7 +2721,9 @@ async function restorePipelineVersion(scope, n) {
 async function savePipelineScope(scope = $('pipeline-scope').value) {
   const s = pipelineScopes.get(scope);
   if (!pipelineCanSave(s)) return;
-  const body = pipelineCanonical(s.draft), tag = s.baseEtag, summary = $('pipeline-summary').value;
+  // Only a save of the Pipeline page's selected scope carries that page's summary.
+  const fromPage = scope === $('pipeline-scope').value;
+  const body = pipelineCanonical(s.draft), tag = s.baseEtag, summary = fromPage ? $('pipeline-summary').value : '';
   pipelineLoads.set(scope, ++pipelineGeneration);
   s.phase = 'saving';
   s.message = 'Saving…';
@@ -2736,7 +2738,7 @@ async function savePipelineScope(scope = $('pipeline-scope').value) {
     } else if (r.status === 200 && settingsEtag(r.headers.get('ETag'))) {
       const version = Number(r.headers.get('X-Pipeline-Version')) || s.version + 1;
       Object.assign(s, {base:JSON.parse(body), baseEtag:settingsEtag(r.headers.get('ETag')), version, phase:'ready', message:'Saved as version ' + version});
-      $('pipeline-summary').value = '';
+      if (fromPage) $('pipeline-summary').value = '';
       loadPipelineHistory(scope);
       loadPipelineEffective(scope);
       if (scope === 'global') loadTracerSetting();
