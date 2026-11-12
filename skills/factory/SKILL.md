@@ -611,7 +611,7 @@ Read a command's file before you run it.
 | `/factory idea <id>` | [idea](references/commands/idea.md) | Pickup or a person starts an idea. |
 | `/factory next` | [next](references/commands/next.md) | You take the next backlog line or queue work. |
 | `/factory deny-notes <id>` | [deny-notes](references/commands/deny-notes.md) | Pickup hands you a denied job's notes. |
-| `/factory babysit <id>` | [babysit](references/commands/babysit.md) | Pickup hands you a PR a person asked to babysit to merge. |
+| `/factory babysit <id>` | [babysit](references/commands/babysit.md) | Pickup hands you a PR a person asked to babysit; work it as the Babysit note asks. |
 | `/factory approve <id>` | [approve](references/commands/approve.md) | A person approves a `needs-human` job. |
 | `/factory approve-spec <id>` | [approve-spec](references/commands/approve-spec.md) | A person passes the spec-approval gate. |
 | `/factory rework <id> <note>` | [rework](references/commands/rework.md) | A person asks for rework, or a job is stuck after a dead session. |

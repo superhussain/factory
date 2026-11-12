@@ -71,14 +71,34 @@ export async function seedProject(origin, slug, document) {
 }
 
 export async function seedBoard(origin, jobs, updated = "2026-01-01T00:00:00Z") {
-  // The Worker refuses one write that drops an id and adds a row, so drop first.
+  const write = (rows) => put(origin, "/api/board", JSON.stringify({ updated, jobs: rows }));
+  const isBatchRef = (ref) => ref?.kind === "batched-into";
+  const riders = new Set(jobs.filter((job) => job.refs?.some(isBatchRef)).map((job) => job.id));
+  const leads = new Set(
+    jobs.flatMap((job) => (job.refs ?? []).filter(isBatchRef).map((r) => r.id)),
+  );
+  // The Worker refuses one write that drops an id and adds a row, so drop first. Riders go too,
+  // so their refs are added again below rather than dropped while the lead is open.
   const current = await fetch(origin + "/api/board", { redirect: "manual" });
   if (current.ok) {
     const ids = new Set(jobs.map((job) => job.id));
-    const kept = (await current.json()).jobs.filter((job) => ids.has(job.id));
-    await put(origin, "/api/board", JSON.stringify({ updated, jobs: kept }));
+    const kept = (await current.json()).jobs.filter(
+      (job) => ids.has(job.id) && !riders.has(job.id),
+    );
+    await write(kept);
   }
-  return put(origin, "/api/board", JSON.stringify({ updated, jobs }));
+  if (riders.size) {
+    // Add each batched-into ref the way factory.py batch does: rider idea to spec, lead at spec.
+    const staged = (rider) =>
+      jobs.map((job) =>
+        riders.has(job.id) ? rider(job) : leads.has(job.id) ? { ...job, stage: "spec" } : job,
+      );
+    await write(
+      staged((job) => ({ ...job, stage: "idea", refs: job.refs.filter((r) => !isBatchRef(r)) })),
+    );
+    await write(staged((job) => ({ ...job, stage: "spec" })));
+  }
+  return write(jobs);
 }
 
 export async function seedPipeline(origin, doc) {

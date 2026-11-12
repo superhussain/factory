@@ -48,7 +48,7 @@ const VIEWPORTS = [
   { width: 1280, height: 900, theme: "light" },
 ];
 const CONFIRM =
-  "Babysit PR #44 of 042-sample-export? An agent fixes review comments, CI failures and conflicts, then merges the PR once GitHub shows an approval.";
+  "Babysit PR #44 of 042-sample-export? An agent works the PR as the Babysit note asks. With no note, it hands the PR back.";
 
 const freezeClock = (page) =>
   page.evaluateOnNewDocument((now) => {
@@ -125,12 +125,12 @@ test("babysit", { timeout: 240000 }, async (t) => {
         assert.deepEqual(item, expected);
         assert.equal(
           await page.$eval("#d-babysit-bar", (el) => el.title),
-          "Fix review comments and CI, then merge this PR",
+          "Work this PR as the Babysit note asks, or hand it back",
         );
         assert.deepEqual(await chipsOf(page, "049-sample-babysat"), ["Babysitting"]);
         assert.equal(
           await page.$eval('.card[data-id="049-sample-babysat"] .chip', (el) => el.title),
-          "An agent is fixing and merging PR #49",
+          "An agent is working PR #49 as the Babysit note asks",
         );
       });
 
