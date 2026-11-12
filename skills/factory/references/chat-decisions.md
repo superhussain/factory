@@ -6,6 +6,7 @@ then records that answer with one of these commands.
 ```text
 factory.py suggest approve <job-id> <A|B|C> --chat-file <file>
 factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes <text>] --chat-file <file>
+factory.py control <job-id> <prioritize|unprioritize> --chat-file <file>
 ```
 
 ## Who counts
@@ -39,3 +40,18 @@ factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--note
   `. Other: <text>`, or be only `Other: <text>`.
 - Rework needs `--notes` and accepts `no answer` for a question.
 - After it succeeds, tell the person the printed job id and decision.
+
+## Dashboard actions
+
+| Dashboard action | Agent path today | Slice |
+| --- | --- | --- |
+| Prioritize, Remove priority | refused by `board` | this job |
+| Pause, Resume | refused | sub-job |
+| Babysit PR | refused | sub-job |
+| Close job with a reason | refused | sub-job |
+| Move to host, Rerun | refused (`move`) | sub-job |
+| Answer a needs-you form | none | sub-job |
+| Edit idea, Discard idea, Assign project, Follow in Tracer | `board` patch | exists |
+| Backlog decision, explorer approval | `backlog decide`, `suggest approve` | exists |
+| Pipeline settings save | Worker 403 for services | sub-job, owner decision |
+| Hosts: add, retire, pairing code | Worker 403 (`PERSON_ONLY`) | sub-job, owner decision |
