@@ -133,6 +133,8 @@ An optional, one-way mirror shows a job's tasks, progress and review outcomes in
 
 Tracer is off until a person opens Settings, Pipeline, picks the all-projects scope, and sets **Tracer integration** to `On`. It saves `"tracer": {"enabled": true}` in the all-projects pipeline document, and a project scope refuses the key. A missing key or `false` means off.
 
+While it is off:
+
 | Reader | Off behavior |
 | --- | --- |
 | Dashboard | hides Follow in Tracer, the Tracer link, the task list, the scope and waiting lines, and `Building in Tracer` |
