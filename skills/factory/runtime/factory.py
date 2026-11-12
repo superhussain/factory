@@ -827,7 +827,8 @@ def board(factory, job_id):
     if "move" in patch:
         fail("only the dashboard and factory.py pickup set move", 2)
     if "priority" in patch:
-        fail("only the dashboard and factory.py pickup set priority", 2)
+        fail("only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's chat, "
+             "run factory.py control <job-id> prioritize --chat-file <file>", 2)
     if "paused" in patch:
         fail("only the dashboard sets paused", 2)
     if patch.get("babysit") is not None:
@@ -4564,7 +4565,7 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
             print(f"cleaned up {job_id} {project}" + (f", left: {'; '.join(left)}" if left else ""))
 
 
-PRIORITY_NUDGE = ("The owner prioritized factory job {id} from the dashboard. If your turn ended while work "
+PRIORITY_NUDGE = ("The owner prioritized factory job {id}. If your turn ended while work "
                   "on it is still owed, continue with the next step now.")
 
 
