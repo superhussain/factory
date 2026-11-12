@@ -400,10 +400,11 @@ sets it, and a `/factory babysit` session clears it with `null`; `board` refuses
   or human gates.
 - A model change always stops the old writer and starts a fresh builder from a new
   `prompt "$SLUG/<id>" build --out` file, as the agent-prompt rule above describes,
-  with the latest round or rework file on a short line after the pointer. Resume with SendMessage (or the runtime's prompt tool) only when the
-  actual model need not change. If the old builder is unreachable, a fresh agent
-  reading the same files is equivalent. Keep `note` model-neutral: patch it with
-  the reason for the tier, not a fixed model name.
+  with the latest round or rework file on a short line after the pointer. Resume
+  with SendMessage (or the runtime's prompt tool) only when the actual model need
+  not change. If the old builder is unreachable, a fresh agent reading the same
+  files is equivalent. Keep `note` model-neutral: patch it with the reason for the
+  tier, not a fixed model name.
 - After every build stage (first build, each fix round, each rework), push the
   branch with `git -C "$WT" push -u origin factory/<id>`, so another device can pick
   the job up. A rejected push means another device moved the branch, so move the job
