@@ -232,6 +232,38 @@ The Worker replaces only `stage_notes[stage]` and saves the next version with
   version before it, type a Change summary such as `Undo retro run a1b2c3`, and Save.
   That writes a new version; history keeps every one.
 
+## Retro file edits
+
+A retro reply may also carry file edits, each `{"file", "find", "replace", "summary"}`.
+`retro aggregate` records each allowlisted project's `project.md`, `notes.md`,
+`decisions.md` and `runbook.md` under `documents`, with the current version and text.
+`retro admit` checks each edit, then sends it to `PUT /api/project-retro/<slug>/<name>`
+as `{"schema": "factory.retro-doc-edit/1", "run", "base_version", "find", "replace",
+"summary"}`. The Worker splices `find` at its one match in the stored text and saves
+the next version with `saved_by: "retro"`, `summary`, `run` and `host`. Retro never
+creates a missing file and never touches `global`.
+
+| Gate | Refusal |
+| --- | --- |
+| a paired or active host's bound service token | 403 `retro edits come only from a bound host` |
+| the project is on the autonomy allowlist | 403 `retro edits only allowlisted projects` |
+| autonomy `paused` is `false`; a missing or malformed record counts as paused | 409 `autonomy is paused; no retro edit` |
+| the body shape and schema | 400 `<field>: <reason>` |
+| `base_version` is the stored version | 412 `precondition failed` |
+| `find` occurs exactly once in the stored text | 409 `find: must match the stored text exactly once` |
+| at most 600 characters changed, counted after trimming the shared prefix and suffix | 413 `retro edit changes more than 600 characters` |
+| `project.md` frontmatter is unchanged | 403 `retro edits never change project frontmatter` |
+| at most 2 retro versions per file in 24 hours | 429 `retro edit cap: 2 per file per day` |
+| the saved text and summary pass the project document checks | 400 `<field>: <reason>` |
+
+- **Device first.** Before any PUT, `retro admit` repeats the text checks, the
+  exactly-once match, the 600-character cap, the file rule, the daily cap and the pause.
+- **Output.** A saved edit prints `edited <slug>/<name> to version N: <summary>`, and
+  `findings.md` lists it under Pipeline edits. Edits never change the exit code. An
+  older Worker answers 404.
+- **Restore.** Settings, Projects lists each retro version the same way as Pipeline;
+  a person undoes a file edit with Restore to draft on the version before it, then Save.
+
 ## Stages
 
 ```mermaid
