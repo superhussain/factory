@@ -4,7 +4,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import {
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+  seedPipeline,
+} from "../support/browser-server.mjs";
 import { waitForBoard, clickNow, openJobActions } from "../support/board-ready.cjs";
 
 const JOB = {
@@ -325,3 +330,57 @@ test(
     });
   },
 );
+
+test("Tracer off hides every Tracer control", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    const tasks = [
+      { id: "t1", title: "Add export button", status: "done" },
+      { id: "t2", title: "Write CSV encoder", status: "in_progress" },
+      { id: "t3", title: "Document export", status: "not_started" },
+    ];
+    await seedBoard(origin, [
+      {
+        ...JOB,
+        tracer: { follow: true, url: LINK, building: true, scope: "approved", tasks },
+      },
+    ]);
+    await seedPipeline(origin, { schema: 1, tracer: { enabled: false } });
+    const { context, page, errors, drawer } = await openDrawer(browser, origin);
+    try {
+      await page.waitForFunction(() => tracerOff === true);
+      assert.equal(await page.$('.card[data-id="042-sample-export"] .tracer-building'), null);
+      assert.deepEqual(await drawer(), {
+        follow: true,
+        link: true,
+        href: null,
+        label: null,
+        refs: "",
+      });
+      assert.equal(await page.$eval("#d-tracer-tasks", (el) => el.hidden), true);
+      await page.click("#settings-link");
+      await page.click("#settings-nav-pipeline");
+      await page.waitForSelector("#settings-pipeline:not([hidden])");
+      await page.select("#pipeline-scope", "global");
+      await page.waitForFunction(() => !document.getElementById("pipeline-tracer-mode").disabled);
+      assert.deepEqual(
+        await page.evaluate(() => ({
+          hidden: document.getElementById("pipeline-tracer").hidden,
+          value: document.getElementById("pipeline-tracer-mode").value,
+          text: document.getElementById("pipeline-tracer-mode").selectedOptions[0].textContent,
+        })),
+        { hidden: false, value: "off", text: "Off" },
+      );
+      await page.select("#pipeline-scope", "projects/sample");
+      await page.waitForFunction(() => document.getElementById("pipeline-tracer").hidden);
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  });
+});
