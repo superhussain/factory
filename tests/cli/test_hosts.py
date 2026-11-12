@@ -257,9 +257,9 @@ class PickupHeartbeatTest(HostFixture):
             with self.subTest(name), http_fixture({STATUS: (200, b""), **DOCTOR}) as server:
                 self.write_config(server.origin)
                 with patch.object(factory, "pickup_pass", side_effect=side_effect) if side_effect else nullcontext():
-                    plain = self.pickup(heartbeat=False)
+                    plain = self.pickup("--triage-now", heartbeat=False)
                     del server.requests[:]
-                    beat = self.pickup()
+                    beat = self.pickup("--triage-now")
                 self.assertEqual(beat, plain)
                 self.assertEqual(beat[0], exit_code)
                 self.assertEqual(self.keys(server), ["GET /api/backlog", "GET /api/board", "GET /projects.json",
@@ -312,19 +312,19 @@ class PickupHeartbeatTest(HostFixture):
             with patch.object(factory, "backlog_triage_pass", side_effect=failing):
                 cache.write_text(json.dumps({"scheduler": factory.PICKUP_SCHEDULER, "last_pickup": None,
                                              "triage_failed_since": "2026-01-01T09:00:00Z"}))
-                code, _, err = self.pickup()
+                code, _, err = self.pickup("--triage-now")
                 self.assertEqual(code, 0)
                 self.assertIn("backlog triage stopped", err)
                 self.assertEqual(sent()["triage_failed_since"], "2026-01-01T09:00:00Z")
                 self.assertEqual(json.loads(cache.read_text())["triage_failed_since"], "2026-01-01T09:00:00Z")
                 cache.unlink()
-                self.assertEqual(self.pickup()[0], 0)
+                self.assertEqual(self.pickup("--triage-now")[0], 0)
                 body = sent()
                 self.assertEqual(body["triage_failed_since"], body["last_pickup"])
             self.run_cli("doctor")
             self.assertEqual(sent()["triage_failed_since"], body["last_pickup"])
             with patch.object(factory, "backlog_triage_pass", return_value=None):
-                self.assertEqual(self.pickup()[0], 0)
+                self.assertEqual(self.pickup("--triage-now")[0], 0)
             self.assertNotIn("triage_failed_since", sent())
             self.assertNotIn("triage_failed_since", json.loads(cache.read_text()))
 
