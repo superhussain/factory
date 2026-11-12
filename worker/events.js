@@ -8,14 +8,14 @@ export class BoardEvents {
   constructor(ctx, env) {
     this.ctx = ctx;
     this.env = env;
+    // Keepalive pings are answered by the runtime, so the room stays hibernated.
+    this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
   fetch(request) {
     if (request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
       if (this.ctx.getWebSockets().length >= MAX_SOCKETS)
         return new Response("room full", { status: 503 });
-      // Keepalive pings are answered by the runtime, so the room stays hibernated.
-      this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
       const [client, server] = Object.values(new WebSocketPair());
       this.ctx.acceptWebSocket(server);
       return new Response(null, { status: 101, webSocket: client });

@@ -5,6 +5,11 @@ import test from "node:test";
 import { loadProduction, memoryBucket } from "../support/worker.mjs";
 
 const { serveFactory, BoardEvents } = await loadProduction();
+globalThis.WebSocketRequestResponsePair = class {
+  constructor(request, response) {
+    Object.assign(this, { request, response });
+  }
+};
 const person = { verified: true, kind: "user", email: "person@example.test" };
 const device = { verified: true, kind: "service", client_id: "client-aaaa" };
 const ORIGIN = "https://factory.example.test";
@@ -183,7 +188,7 @@ test("the room sends a valid notify to every socket and skips one that fails", a
     },
   };
   const sockets = [first, broken, second];
-  const room = new BoardEvents({ getWebSockets: () => sockets }, {});
+  const room = new BoardEvents({ getWebSockets: () => sockets, setWebSocketAutoResponse() {} }, {});
   const response = await room.fetch(new Request(NOTIFY + "board.json", { method: "POST" }));
   assert.equal(response.status, 204);
   const frame = JSON.stringify({ type: "changed", key: "board.json" });
@@ -197,7 +202,10 @@ for (const [name, url, method] of [
 ]) {
   test(`the room answers ${name} with 404 and sends nothing`, async () => {
     const socket = recordingSocket();
-    const room = new BoardEvents({ getWebSockets: () => [socket] }, {});
+    const room = new BoardEvents(
+      { getWebSockets: () => [socket], setWebSocketAutoResponse() {} },
+      {},
+    );
     const response = await room.fetch(new Request(url, { method }));
     assert.equal(response.status, 404);
     assert.deepEqual(socket.sent, []);
@@ -210,10 +218,26 @@ test("a full room answers an upgrade with 503 and accepts no socket", async () =
     {
       getWebSockets: () => Array.from({ length: 100 }, recordingSocket),
       acceptWebSocket: (socket) => accepted.push(socket),
+      setWebSocketAutoResponse() {},
     },
     {},
   );
   const response = await room.fetch(new Request(EVENTS, { headers: { Upgrade: "websocket" } }));
   assert.equal(response.status, 503);
   assert.deepEqual(accepted, []);
+});
+
+test("the room sets the ping auto-response once", async () => {
+  const calls = [];
+  const room = new BoardEvents(
+    {
+      getWebSockets: () => Array.from({ length: 100 }, recordingSocket),
+      acceptWebSocket() {},
+      setWebSocketAutoResponse: (pair) => calls.push({ ...pair }),
+    },
+    {},
+  );
+  const response = await room.fetch(new Request(EVENTS, { headers: { Upgrade: "websocket" } }));
+  assert.equal(response.status, 503);
+  assert.deepEqual(calls, [{ request: "ping", response: "pong" }]);
 });
