@@ -220,6 +220,13 @@ test("each gate refuses with its exact status and text and stores nothing", asyn
       400,
       "stage: must be one of spec, build, review, approve",
     ],
+    [
+      "babysit stage",
+      { stage: "babysit" },
+      {},
+      400,
+      "stage: must be one of spec, build, review, approve",
+    ],
     ["bad run", { run: "a/b" }, {}, 400, "run: must be 1 to 64 of A-Z a-z 0-9 _ -"],
     [
       "wrong schema",

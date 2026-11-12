@@ -726,11 +726,13 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           <button type="button" role="tab" id="pipeline-note-tab-build" data-name="build" aria-selected="false" tabindex="-1">Build</button>
           <button type="button" role="tab" id="pipeline-note-tab-review" data-name="review" aria-selected="false" tabindex="-1">Review</button>
           <button type="button" role="tab" id="pipeline-note-tab-approve" data-name="approve" aria-selected="false" tabindex="-1">Approve</button>
+          <button type="button" role="tab" id="pipeline-note-tab-babysit" data-name="babysit" aria-selected="false" tabindex="-1">Babysit</button>
         </div>
         <label for="pipeline-note-spec" id="pipeline-note-panel-spec" role="tabpanel" aria-labelledby="pipeline-note-tab-spec">Spec stage note<textarea id="pipeline-note-spec" spellcheck="false"></textarea></label>
         <label for="pipeline-note-build" id="pipeline-note-panel-build" role="tabpanel" aria-labelledby="pipeline-note-tab-build" hidden>Build stage note<textarea id="pipeline-note-build" spellcheck="false"></textarea></label>
         <label for="pipeline-note-review" id="pipeline-note-panel-review" role="tabpanel" aria-labelledby="pipeline-note-tab-review" hidden>Review stage note<textarea id="pipeline-note-review" spellcheck="false"></textarea></label>
         <label for="pipeline-note-approve" id="pipeline-note-panel-approve" role="tabpanel" aria-labelledby="pipeline-note-tab-approve" hidden>Approve stage note<textarea id="pipeline-note-approve" spellcheck="false"></textarea></label>
+        <label for="pipeline-note-babysit" id="pipeline-note-panel-babysit" role="tabpanel" aria-labelledby="pipeline-note-tab-babysit" hidden>Babysit stage note<textarea id="pipeline-note-babysit" spellcheck="false" placeholder="Name the readings to act on (fix-ci, fix-reviews, rebase, merge), how to reply in review threads, and the skills to load. With no note, Babysit PR waits and hands the PR back."></textarea></label>
         <h4 id="pipeline-history-heading">History</h4>
         <ol id="pipeline-history"></ol>
         <p id="pipeline-status" role="status"></p>
@@ -2416,7 +2418,7 @@ $('board-link').addEventListener('click', e => { e.preventDefault(); leaveSettin
 const pipelineScopes = new Map();
 const pipelineLoads = new Map();
 let pipelineGeneration = 0;
-const PIPELINE_STAGES = ['spec', 'build', 'review', 'approve'];
+const PIPELINE_STAGES = ['spec', 'build', 'review', 'approve', 'babysit'];
 const PIPELINE_GATES = ['spec-approval'];
 const pipelineObject = doc => !!doc && typeof doc === 'object' && !Array.isArray(doc);
 // Same pattern and messages as the pickup block of validatePipeline in worker/admission.js.
@@ -6847,7 +6849,7 @@ $('settings-scheduler').addEventListener('click', async e => {
 // Reference is read-only. Floors and gates come from worker/admission.js through the page,
 // deploy values from factory-config, and each project's effective pipeline from its GET.
 const factoryReference = JSON.parse($('factory-reference').textContent);
-const REFERENCE_STAGES = { spec:'Spec', build:'Build', review:'Review', approve:'Approve' };
+const REFERENCE_STAGES = { spec:'Spec', build:'Build', review:'Review', approve:'Approve', babysit:'Babysit' };
 let referenceReady = false, referenceGeneration = 0;
 // The last cell spans the remaining columns, so a one-cell row is a message row.
 function referenceRows(id, rows) {

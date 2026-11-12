@@ -63,6 +63,19 @@ class PipelineTest(IsolatedTestCase):
                     "versions": {"global": 3, "project": 2}, "prompts": {"build": build}}
         self.assertEqual(out, json.dumps(expected, indent=2) + "\n")
 
+    def test_wraps_a_babysit_note(self):
+        view = view_with(lambda v: v["stage_notes"].update(babysit=[
+            {"source": "pipeline:global@3", "text": "On fix-ci, fix the failing check and push."},
+            {"source": "pipeline:sample@2", "text": "On merge, queue the PR."}]))
+        code, out, err = self.serve(200, view)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out)["prompts"]["babysit"], (
+            factory.PREFERENCES_SENTENCE + "\n\n"
+            '<operator-preferences source="pipeline:global@3" stage="babysit" trust="data">\n'
+            "On fix-ci, fix the failing check and push.\n</operator-preferences>\n\n"
+            '<operator-preferences source="pipeline:sample@2" stage="babysit" trust="data">\n'
+            "On merge, queue the PR.\n</operator-preferences>"))
+
     def test_missing_view_exits_4(self):
         code, out, err = self.serve(404, b"not found")
         self.assertEqual((code, out), (4, ""))
