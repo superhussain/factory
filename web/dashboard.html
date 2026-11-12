@@ -707,10 +707,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <fieldset id="pipeline-tracer">
           <legend>Tracer integration</legend>
           <label for="pipeline-tracer-mode">Tracer<select id="pipeline-tracer-mode" aria-describedby="pipeline-tracer-help">
-            <option value="">On (default)</option>
-            <option value="off">Off</option>
+            <option value="">Off (default)</option>
+            <option value="on">On</option>
           </select></label>
-          <p id="pipeline-tracer-help" class="muted">Off hides Follow in Tracer, Tracer links, task lists and Building in Tracer, and devices make no Tracer calls. Board fields and tracer.json stay as they are, so turning it back on resumes where it stopped. This setting applies to all projects.</p>
+          <p id="pipeline-tracer-help" class="muted">Off by default. On shows Follow in Tracer, Tracer links, task lists and Building in Tracer, and lets devices with tracer.json call Tracer. Turning it off keeps board fields and tracer.json as they are, so turning it back on resumes where it stopped. This setting applies to all projects.</p>
         </fieldset>
         <div class="settings-tabs" id="pipeline-note-tabs" role="tablist" aria-label="Stage notes">
           <button type="button" role="tab" id="pipeline-note-tab-spec" data-name="spec" aria-selected="true" tabindex="0">Spec</button>
@@ -990,7 +990,7 @@ const BASE_TITLE = document.title;
 
 let jobs = [];
 let openId = null;
-let tracerOff = false;
+let tracerOff = true;
 // The backlog line open in the drawer's decision page, or null. Never set together with openId.
 let openBacklogRaw = null;
 // item.raw -> triage verdict object, or null when the Worker has none stored.
@@ -2412,7 +2412,7 @@ function pipelineFormDoc(current) {
     gates:PIPELINE_GATES.filter(gate => $('pipeline-gate-' + gate).checked),
     pickup:pickupFromFields('pipeline-pickup', current.pickup), triage:triageFromFields(),
     archive:$('pipeline-scope').value === 'global' ? archiveFromFields() : undefined,
-    tracer:$('pipeline-scope').value === 'global' && $('pipeline-tracer-mode').value === 'off' ? {enabled:false} : undefined,
+    tracer:$('pipeline-scope').value === 'global' && $('pipeline-tracer-mode').value === 'on' ? {enabled:true} : undefined,
     stage_notes:Object.fromEntries(PIPELINE_STAGES.map(stage => [stage, $('pipeline-note-' + stage).value]))}));
 }
 const pipelineDirty = s => pipelineCanonical(s.draft) !== pipelineCanonical(s.base ?? {schema:1});
@@ -2526,7 +2526,7 @@ function renderPipelineSettings() {
   $('pipeline-archive-n').disabled = busy || !$('pipeline-archive-mode').value;
   $('pipeline-archive-n').setAttribute('aria-invalid', String(!!archiveError));
   $('pipeline-tracer').hidden = $('pipeline-scope').value !== 'global';
-  const tracerMode = d.tracer?.enabled === false ? 'off' : '';
+  const tracerMode = d.tracer?.enabled === true ? 'on' : '';
   if ($('pipeline-tracer-mode').value !== tracerMode) $('pipeline-tracer-mode').value = tracerMode;
   $('pipeline-tracer-mode').disabled = busy;
   $('pipeline-scope').disabled = s?.phase === 'saving';
@@ -2803,13 +2803,13 @@ function seenAgo(iso) {
   return minutes < 1 ? 'just now' : minutes < 60 ? minutes + ' min ago' : minutes < 48 * 60 ? Math.floor(minutes / 60) + ' h ago' : iso.slice(0, 10);
 }
 
-// Off only when the all-projects pipeline sets tracer.enabled to false. A failed read keeps the last value.
+// On only when the all-projects pipeline sets tracer.enabled to true. A failed read keeps the last value.
 async function loadTracerSetting() {
   let off = tracerOff;
   try {
     const r = await fetch('./api/pipeline/global', {cache:'no-store'});
-    if (r.status === 404) off = false;
-    else if (r.status === 200 && !r.redirected) off = (await r.json())?.tracer?.enabled === false;
+    if (r.status === 404) off = true;
+    else if (r.status === 200 && !r.redirected) off = (await r.json())?.tracer?.enabled !== true;
   } catch {}
   if (off === tracerOff) return;
   tracerOff = off;
