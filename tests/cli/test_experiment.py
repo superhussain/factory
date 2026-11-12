@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import shlex
 import sys
 import tempfile
@@ -469,6 +470,39 @@ class ReportTest(ReportFixture):
     def test_the_report_rejects_bad_usage(self):
         for args in (["pick", "pilot"], ["report", "al pha"], ["report"]):
             self.assertEqual(invoke(factory, ["experiment", *args])[0], 2)
+
+
+class ReportBoundaryTest(ReportFixture):
+    def setUp(self):
+        super().setUp()
+        arm_a = {"name": "pilot", "arm": "a", "provider": "provider-a", "model": "model-a", "effort": "high"}
+        spec = {"spec.md": "# spec\n"}
+        planted = self.home / "outside" / "030-up" / "spec.md"
+        planted.parent.mkdir(parents=True)
+        planted.write_text("# spec\n", encoding="utf-8")
+        self.folder("031-reviewer", spec)
+        self.folder("032-ok", spec)
+        self.board["jobs"] = [
+            idea("030-up", project="../outside", stage="review", experiment=arm_a),
+            idea("031-reviewer", stage="review", rounds=[{"../../x": "PASS"}], experiment=arm_a),
+            idea("032-ok", stage="review", experiment=arm_a),
+        ]
+
+    def test_traversal_keys_count_as_coverage_unknown_without_a_probe(self):
+        probed = []
+
+        def spy(original):
+            def probe(path):
+                probed.append(os.path.normpath(path))
+                return original(path)
+            return probe
+        with patch.object(Path, "is_dir", spy(Path.is_dir)), patch.object(Path, "is_file", spy(Path.is_file)):
+            code, out, err = self.report()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out)["a"]["coverage_unknown"], 2)
+        root = os.path.join(self.home, "jobs", "alpha") + os.sep
+        self.assertTrue(probed)
+        self.assertEqual([p for p in probed if not p.startswith(root)], [])
 
 
 if __name__ == "__main__":

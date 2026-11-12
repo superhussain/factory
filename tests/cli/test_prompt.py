@@ -134,6 +134,10 @@ class PromptTest(IsolatedTestCase):
             with self.subTest(args):
                 code, out, _ = self.prompt(*args)
                 self.assertEqual((code, out), (2, ""))
+        self.assertEqual(self.prompt("build", "--color", "red"),
+                         (2, "", f"factory.py: unknown flag '--color'. {factory.PROMPT_USAGE}\n"))
+        self.assertEqual(self.prompt("build", "--round", "1", "--round", "2"),
+                         (2, "", f"factory.py: --round given twice. {factory.PROMPT_USAGE}\n"))
         (self.home / "config.md").unlink()
         self.assertEqual(snapshot(self.home), before)
 
@@ -159,12 +163,12 @@ class PromptTest(IsolatedTestCase):
             self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
             self.assertEqual(stat.S_IMODE((self.home / "prompts").stat().st_mode), 0o700)
 
-    def test_out_refuses_job_folder(self):
-        for path in (self.folder / "prompt.txt", self.home / "jobs", self.home / "prompts" / ".." / "jobs" / "x.txt"):
+    def test_out_refuses_paths_outside_prompts(self):
+        for path in (self.folder / "prompt.txt", self.home / "jobs", self.home / "prompts" / ".." / "jobs" / "x.txt",
+                     self.home / "Jobs" / "sample" / JOB / "p.txt", self.home / "elsewhere" / "p.txt"):
             with self.subTest(str(path)):
-                code, out, err = self.prompt("spec", "--out", str(path))
-                self.assertEqual((code, out), (2, ""))
-                self.assertIn("--out must be an absolute path outside", err)
+                self.assertEqual(self.prompt("spec", "--out", str(path)),
+                                 (2, "", f"factory.py: --out must be an absolute path under {self.home / 'prompts'}\n"))
         self.assertFalse((self.home / "jobs").exists())
 
     def test_out_refuses_links(self):
@@ -185,5 +189,8 @@ class PromptTest(IsolatedTestCase):
         self.assertIn("`Your full prompt is in <printed path>. Read it first and follow it exactly.`", skill)
         self.assertIn("`prompt` ends each prompt with `$PIPELINE.prompts.<stage>` verbatim.", skill)
         self.assertIn("the absolute path in `$DOCUMENTS`", skill)
+        self.assertNotIn("same files, with the job folder", skill)
         feature = " ".join((SKILL / "references/commands/feature.md").read_text(encoding="utf-8").split())
         self.assertIn("`project`, and `idea` (the feature text)", feature)
+        self.assertNotIn("with the job folder, round folder", feature)
+        self.assertNotIn("Spawn `factory-spec-writer` with the feature text", feature)
