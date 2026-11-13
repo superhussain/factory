@@ -282,7 +282,8 @@ class RolesTest(IsolatedTestCase):
         for value in (*self.runtime.RETRO_CATEGORIES, "160 characters", "`<host>/`", "tooling"):
             self.assertIn(value, role)
         command = (SKILL / "references/commands/retro.md").read_text(encoding="utf-8")
-        for value in ("retro push", "retro aggregate", "factory-retro", "byte for byte", "retro admit <run>"):
+        for value in ("retro push", "retro aggregate", "factory-retro", "byte for byte", "retro admit <run>", "`stale`",
+                      "stale: <host>, latest digest <latest>"):
             self.assertIn(value, command)
         self.assertNotIn("suggest approve", command)
         self.assertIn("\nNever run an autonomy command or decide a backlog line; a person decides each line.\n",

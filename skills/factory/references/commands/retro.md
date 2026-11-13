@@ -14,8 +14,10 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    `transcripts` and `host`.
 4. Write its reply byte for byte to `out`.
 5. Run `python3 "$RUNTIME" retro admit <run>`. Report its output and the `findings`
-   path. Exit 3 means the agent found nothing, autonomy is paused, or every card was a
-   duplicate, over a cap or unusable. In the last two cases `findings.md` is written,
+   path. Then name each host in `stale` as `stale: <host>, latest digest <latest>`,
+   with `latest` from that host's entry in the `aggregate` file's `hosts`. Exit 3
+   means the agent found nothing, autonomy is paused, or every card was a duplicate,
+   over a cap or unusable. In the last two cases `findings.md` is written,
    so still report its path. A rejected findings[N] line means admission dropped that finding;
    findings.md lists it under Rejected findings without its text. Exit 2 after a wrote
    line means the cards failed: findings.md is written and no card was admitted.
@@ -28,8 +30,6 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    An `edited <file> to version N: <summary>` line means a file edit is saved through
    `PUT /api/project-retro/<file>`; a person undoes it with Restore to draft in Settings, Projects.
    A person decides each line on the dashboard Backlog decision page.
-   Then name each host in `stale` as `stale: <host>, latest digest <latest>`, with
-   `latest` from that host's entry in the `aggregate` file's `hosts`.
 
 Do the retro through these commands only, and edit neither the reply nor the run folder.
 Never run an autonomy command or decide a backlog line; a person decides each line.
