@@ -110,6 +110,11 @@ class NeedsAnswerTest(SuggestCase):
         del self.job()["needs"]
         self.assertIn(f"{JOB} is not waiting on you", self.refuse(2))
 
+    def test_bad_project_on_the_board(self):
+        self.job()["project"] = "../x"
+        self.assertIn(f"{JOB} has a bad project on the board", self.refuse(2))
+        self.assertEqual([c.args[2] for c in self.api.call_args_list], ["/api/board"])
+
     def test_no_needs_file(self):
         del self.files["needs.md"]
         self.assertIn("has no needs.md", self.refuse(4))

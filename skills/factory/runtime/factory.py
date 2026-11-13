@@ -3094,6 +3094,8 @@ def needs_answer(job_id, answers, chat_file):
         fail(f"no job {job_id} on the board. Nothing was written.", 4)
     if not waits_on_you(job):
         fail(f"{job_id} is not waiting on you. Nothing was written.", 2)
+    if job.get("project") and not re.fullmatch(r"[\w-]+", str(job["project"]), re.ASCII):
+        fail(f"{job_id} has a bad project on the board. Nothing was written.", 2)
     base = "/api/jobs/" + (f"{job['project']}/" if job.get("project") else "") + f"{job_id}/"
     status, _, text = api(home, "GET", base + "needs.md", ok=(200, 404))
     if status == 404:
@@ -3122,6 +3124,7 @@ def needs_cmd(sub, *args):
     if sub != "answer" or set(flags) != {"--answers", "--chat-file"}:
         fail(NEEDS_ANSWER_USAGE, 2)
     needs_answer(job_id, flags["--answers"], flags["--chat-file"])
+
 
 def snapshot(repo, commit, dest):
     """Write commit's regular files and directories into dest, with no .git and no links."""
