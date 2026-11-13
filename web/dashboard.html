@@ -190,6 +190,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .retro-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
   .retro-share { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .retro-share-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .retro-chip-ref { font-weight: 400; }
   .retro-chip-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .retro-share-bar { display: block; height: 4px; margin-top: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
   .retro-share-bar > span { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--accent); }
@@ -2742,11 +2743,11 @@ function retroMarks(text) {
 
 function retroJobStatus(id) {
   const j = jobs.find((x) => x.id === id);
-  if (!j) return { text: 'Archived', href: null };
+  if (!j) return { text: 'Archived', href: null, job: id };
   const text = j.stage === 'merged' ? 'Merged'
     : j.stage === 'closed' ? (j.backlog?.decision === 'denied' ? 'Denied' : 'Closed')
     : 'Open \u00b7 ' + j.stage;
-  return { text, href: '#' + encodeURIComponent(id) };
+  return { text, href: '#' + encodeURIComponent(id), job: id };
 }
 
 function retroCardStatus(card, marks) {
@@ -2755,12 +2756,12 @@ function retroCardStatus(card, marks) {
   const mark = marks.find((m) => m.fingerprint === card.fingerprint);
   if (mark?.open) {
     const item = backlog.find((b) => b.raw === mark.line);
-    return { text: 'Waiting', href: item ? '#/backlog/' + item.key : null };
+    return { text: 'Waiting', href: item ? '#/backlog/' + item.key : null, job: null };
   }
   if (mark?.job) return retroJobStatus(mark.job);
   const dup = /^duplicate (\S+)$/.exec(card.result);
   if (dup) return retroJobStatus(dup[1]);
-  return { text: 'Not logged: ' + card.result, href: null };
+  return { text: 'Not logged: ' + card.result, href: null, job: null };
 }
 
 async function loadRetros() {
@@ -2791,6 +2792,8 @@ function retroShares(findings) {
 }
 // The summary word and chip class for a status text.
 const retroWord = (text) => text.startsWith('Open') ? 'open' : text.startsWith('Not logged') ? 'not logged' : text.toLowerCase();
+const retroRef = (id) => /^\d+/.exec(id)?.[0] ?? id;
+const retroShort = (title) => title.length > 24 ? title.slice(0, 23) + '…' : title;
 const RETRO_CHEVRON = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"/></svg>';
 
 function renderRetrosPage() {
@@ -2808,7 +2811,9 @@ function renderRetrosPage() {
   const marks = retroMarks(backlogText);
   const chip = (card, status, named = true) => {
     const cls = 'chip retro-chip is-' + retroWord(status.text).replace(' ', '-');
-    const text = (named ? '<span class="retro-chip-name">' + esc(card.title) + ': </span>' : '') + esc(status.text);
+    const ref = status.job ? '<span class="retro-chip-ref">' + esc(retroRef(status.job)) + ' · </span>'
+      : named ? '<span class="retro-chip-ref" aria-hidden="true">' + esc(retroShort(card.title)) + ' · </span>' : '';
+    const text = (named ? '<span class="retro-chip-name">' + esc(card.title) + ': </span>' : '') + ref + esc(status.text);
     const title = named ? ' title="' + esc(card.title) + '"' : '';
     return status.href ? '<a class="' + cls + '" href="' + esc(status.href) + '"' + title + '>' + text + '</a>'
       : '<span class="' + cls + '"' + title + '>' + text + '</span>';

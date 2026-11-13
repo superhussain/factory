@@ -234,15 +234,21 @@ test("retros page", { timeout: 180000 }, async (t) => {
       );
       const unlinked = await page.$eval("#retros-list .retro-unlinked", (el) => el.textContent);
       assert.match(unlinked, /^Not linked to a finding/);
-      assert.match(unlinked, /Loose card\s*Merged/);
+      assert.match(unlinked, /Loose card\s*1490 · Merged/);
       assert.equal(await page.$("#retros-list h4"), null);
       assert.equal(
         await page.$eval(
           "#retro-20261105T090000Z-d4e5f6-3 .retro-cards > :first-child",
           (el) => el.textContent,
         ),
-        "Gone card: Archived",
+        "Gone card: 1400 · Archived",
       );
+      const refs = (rank) =>
+        page.$$eval(`#retro-20261105T090000Z-d4e5f6-${rank} .retro-chip-ref`, (els) =>
+          els.map((el) => el.textContent),
+        );
+      assert.deepEqual(await refs(2), ["1494 · ", "Waiting card · ", "1490 · "]);
+      assert.deepEqual(await refs(3), ["1400 · ", "Capped card · "]);
       assert.equal(await page.$("#retros-list .retro-unlinked .retro-chip-name"), null);
       const summary = await page.$("#retros-list .retro-why summary");
       assert.equal(await summary.evaluate((el) => el.textContent), "Root cause and fix");
