@@ -4717,6 +4717,7 @@ function syncDetail() {
   if (!openId) return;
   const j = jobs.find((x) => x.id === openId);
   if (!j) return;
+  renderDrawerStatus(j);
   const pending = pendingTab();
   if (stamp(j) !== openStamp ||
       (pending && candidates(j).includes(pending))) openJob(openId);
@@ -6614,7 +6615,6 @@ function openBacklogItem(item) {
   $('detail').hidden = false;
   $('d-title').textContent = 'Backlog item';
   $('d-meta').textContent = projectName({ project: item.project }) + ' · backlog';
-  $('d-chat').hidden = true; $('d-held').hidden = true;
   const head = $('d-refs');
   head.replaceChildren();
   for (const r of item.refs) {
@@ -6625,7 +6625,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-chat', 'd-held', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
