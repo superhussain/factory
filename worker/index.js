@@ -1594,6 +1594,8 @@ const RETRO_CATEGORIES = [
   "information-access",
   "permissions",
 ];
+const RETRO_RUN_KEYS = "schema run host from to sessions rejected findings cards".split(" ");
+const RETRO_RUN_DATES = "from to".split(" ");
 const retroRunKey = (run) => `retro-runs/${run}.json`;
 
 // The shape error in a factory.retro-run/1 body, or null. Every string is one line.
@@ -1633,24 +1635,12 @@ function retroRunShape(body, run, hostId) {
     text(f.root_cause, 1, 300) &&
     text(f.fix, 1, 300) &&
     cards(f.cards, 5);
-  if (
-    !exact(body, [
-      "schema",
-      "run",
-      "host",
-      "from",
-      "to",
-      "sessions",
-      "rejected",
-      "findings",
-      "cards",
-    ])
-  )
+  if (!exact(body, RETRO_RUN_KEYS))
     return "body: needs keys schema, run, host, from, to, sessions, rejected, findings, cards";
   if (body.schema !== "factory.retro-run/1") return "schema: must be factory.retro-run/1";
   if (body.run !== run) return `run: must be ${run}`;
   if (body.host !== hostId) return `host: must be ${hostId}`;
-  for (const key of ["from", "to"])
+  for (const key of RETRO_RUN_DATES)
     if (typeof body[key] !== "string" || !isCalendarDate(body[key]))
       return `${key}: must be a calendar date`;
   for (const key of ["sessions", "rejected"])
