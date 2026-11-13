@@ -38,19 +38,36 @@ const fixtures = [
   updated: "",
   refs: [{ kind: "follow-up-of", id: "source-" + "r".repeat(48) }],
 }));
+// Every fixture is an unprioritized follow-up, so an unclaimed one at idea is held for a batch and
+// shows Run batch now and Start alone in place of Prioritize.
 const expectedItems = {
   unassigned: ["d-edit-idea", "d-discard", "d-copy-link"],
   assigned: [
     "d-edit-idea",
     "d-discard",
     "d-follow-tracer",
-    "d-prioritize",
+    "d-run-batch",
+    "d-start-alone",
     "d-pause",
     "d-copy-link",
   ],
   claimed: ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause", "d-copy-link"],
-  "missing-text": ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause", "d-copy-link"],
-  "number-text": ["d-discard", "d-follow-tracer", "d-prioritize", "d-pause", "d-copy-link"],
+  "missing-text": [
+    "d-discard",
+    "d-follow-tracer",
+    "d-run-batch",
+    "d-start-alone",
+    "d-pause",
+    "d-copy-link",
+  ],
+  "number-text": [
+    "d-discard",
+    "d-follow-tracer",
+    "d-run-batch",
+    "d-start-alone",
+    "d-pause",
+    "d-copy-link",
+  ],
   "non-idea": [
     "d-follow-tracer",
     "d-move-host",
@@ -139,6 +156,8 @@ async function geometry(page) {
       "d-move-host",
       "d-babysit",
       "d-prioritize",
+      "d-run-batch",
+      "d-start-alone",
       "d-pause",
       "d-copy-link",
       "d-follow-up",
