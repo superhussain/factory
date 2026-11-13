@@ -4432,6 +4432,45 @@ def timer_installed(scheduler, home):
     return True, "scheduled task factory-pickup exists"
 
 
+def cron_argv(line):
+    """The command a crontab line runs: fields after the schedule, minus VAR= prefixes and redirects."""
+    try:
+        words = shlex.split(line)[5:]
+    except ValueError:
+        return None
+    while words and ENV_ASSIGN.match(words[0]):
+        words.pop(0)
+    end = next((i for i, w in enumerate(words) if w.startswith(">") or w.startswith("2>")), len(words))
+    return words[:end]
+
+
+def timer_drift(scheduler, values):
+    """None when the installed timer runs what --install would write, else what differs."""
+    want = values["argv"]
+    if scheduler == "launchd":
+        plist = timer_path(scheduler)
+        try:
+            have = plistlib.loads(plist.read_bytes()).get("ProgramArguments")
+        except (OSError, ValueError):
+            return f"could not read {plist}"
+    elif scheduler == "cron":
+        lines = [l for l in setup_run(["crontab", "-l"])[1].splitlines() if CRON_PICKUP.search(l)]
+        argvs = [cron_argv(l) for l in lines]
+        if want in argvs:
+            return None
+        have = argvs[0] if argvs and argvs[0] else None
+        if have is None:
+            return f"could not read the crontab line {lines[0] if lines else ''}".rstrip()
+    else:
+        cmd = timer_path(scheduler)
+        if cmd.exists() and cmd.read_bytes() == timer_text(scheduler, values).encode():
+            return None
+        return f"{cmd} differs from what --install would write"
+    if have == want:
+        return None
+    return f"the timer runs {shlex.join(have)}, but --install would write {shlex.join(want)}"
+
+
 def install_timer(home, scheduler):
     """Write and load the 5 minute pickup timer; one line saying what changed."""
     Path(home, "logs").mkdir(parents=True, exist_ok=True)
@@ -4482,7 +4521,7 @@ def timer_fix(scheduler, home):
 
 
 def setup_checks(home, device):
-    """[(name, ok, detail, fix lines)] for the 7 pieces pickup needs on this host, in order.
+    """[(name, ok, detail, fix lines, note)] for the 7 pieces pickup needs on this host, in order.
     ok is None when an earlier check it depends on failed."""
     run = f"{sys.executable} {Path(HERE, 'factory.py')}"
     if _HOME_OVERRIDE:
@@ -4494,7 +4533,7 @@ def setup_checks(home, device):
     checks.append(("home", not failing, f"failing: {', '.join(failing)}" if failing
                    else "config, credentials, projects and board pass",
                    [f"Run: {run} doctor",
-                    "Then fix each failing check; see docs/troubleshooting.md in the factory repository."]))
+                    "Then fix each failing check; see docs/troubleshooting.md in the factory repository."], None))
 
     config = Path(home, "config.md")
     named = (frontmatter(config)[0] if config.exists() else {}).get("device", "")
@@ -4504,17 +4543,17 @@ def setup_checks(home, device):
                    else f"config.md device: {named!r} is not a valid host name" if named
                    else f"config.md sets no device:, so this host is {device}",
                    [f"Add this line inside the frontmatter of {config}:",
-                    f"device: {short if HOST_NAME.fullmatch(short) else '<host-name>'}"]))
+                    f"device: {short if HOST_NAME.fullmatch(short) else '<host-name>'}"], None))
 
     paths = read_paths(home)
     slugs = [slug for slug, path in paths.items() if os.path.isdir(path)]
     checks.append(("checkout", bool(slugs), ", ".join(slugs) if slugs
                    else "paths.md lists no checkout that exists on this host",
-                   [f"Run: {run} init <repo-path>"]))
+                   [f"Run: {run} init <repo-path>"], None))
 
     routes, why = setup_try(read_routes, home)
     checks.append(("routes", routes is not None, ", ".join(r[0] for r in routes) if routes else why,
-                   [f"Write {Path(home, 'routes.md')}:", "---", "primary: <provider> <model> <effort>", "---"]))
+                   [f"Write {Path(home, 'routes.md')}:", "---", "primary: <provider> <model> <effort>", "---"], None))
 
     if routes is None:
         launchers, why = None, "not checked: fix check 4 first"
@@ -4525,7 +4564,7 @@ def setup_checks(home, device):
     example = {"version": 1, "launchers": {r[0]: ["<program>", "<arg>", "..."] for r in routes or []}}
     checks.append(("launchers", launchers, why or "every route has a launcher",
                    [f"Write {Path(home, 'launchers.json')}:", json.dumps(example),
-                    f"Launcher examples: {skill / 'references' / 'pickup.md'}"]))
+                    f"Launcher examples: {skill / 'references' / 'pickup.md'}"], None))
 
     if failing or not slugs:
         listed, detail = None, "not checked: fix checks 1 and 3 first"
@@ -4547,11 +4586,14 @@ def setup_checks(home, device):
     checks.append(("pipeline", listed, detail,
                    ["Fix check 2 first if this host name is wrong.",
                     "Otherwise, in the dashboard, Settings, Pipeline (or Settings, Projects, <project>), "
-                    f"turn pickup on and add host {device} exactly as written."]))
+                    f"turn pickup on and add host {device} exactly as written."], None))
 
     installed, detail = timer_installed(PICKUP_SCHEDULER, home)
+    note = timer_drift(PICKUP_SCHEDULER, timer_values(home)) if installed else None
+    if note:
+        note += f". To update it, run: {run} pickup setup --install"
     checks.append(("timer", installed, detail,
-                   timer_fix(PICKUP_SCHEDULER, home) + [f"Or run: {run} pickup setup --install"]))
+                   timer_fix(PICKUP_SCHEDULER, home) + [f"Or run: {run} pickup setup --install"], note))
     return checks
 
 
@@ -4568,8 +4610,10 @@ def pickup_setup(*args):
     values = timer_values(home)
     print(f"skill {Path(HERE).parent}  timer python {values['python']} ({values['why']})  home {home}")
     checks = setup_checks(home, device)
-    for n, (name, ok, detail, fix) in enumerate(checks, 1):
+    for n, (name, ok, detail, fix, note) in enumerate(checks, 1):
         print(f"{n}. {'ok' if ok else 'missing':<8} {name}: {detail}")
+        if note:
+            print(f"    note: {note}")
         if not ok:
             for line in fix:
                 print(f"    {line}")
