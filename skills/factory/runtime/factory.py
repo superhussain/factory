@@ -9498,7 +9498,7 @@ def retro_upload(home, run, agg, kept, cards, links, outcomes):
               "sessions": sum(h["sessions"] for h in agg["hosts"].values()), "rejected": kept.count(None),
               "findings": findings, "cards": loose}
     try:
-        status, _, text = api(home, "PUT", f"/api/retros/{run}", json.dumps(record), ok=(200, 400, 403, 404, 413),
+        status, _, text = api(home, "PUT", f"/api/retros/{run}", json.dumps(record), ok=(200, 400, 403, 404, 409, 413),
                               headers={"Content-Type": "application/json"})
     except SystemExit:
         return
