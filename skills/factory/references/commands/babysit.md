@@ -47,8 +47,7 @@ the lower one wins.
   another.
 - Before running checks, print `check plan: <class>: <checks>`, such as
   `check plan: copy: <formatter> locales/en.json`.
-- Copy and test-only pushes use `git -C "$WT" push --no-verify`. All other fixes push
-  plainly.
+- Copy and test-only pushes use `git -C "$WT" push --no-verify`, unless the project file's Verify section has the line `Babysit pushes run hooks.`; then they push plainly. All other fixes push plainly.
 - A request for speed, such as "quickly", makes the plan the budget.
 - Babysit never runs spec, build or review rounds.
 
