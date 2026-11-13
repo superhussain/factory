@@ -138,6 +138,15 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
       );
       await page.click("#scheduler-mode-tab-agent");
       assert.equal(await page.$eval("#scheduler-agent-prompt", (el) => el.textContent), prompt);
+      assert.equal(
+        await page.$eval('button[data-copy="scheduler-agent-prompt"]', (el) =>
+          Boolean(
+            el.compareDocumentPosition(document.getElementById("scheduler-agent-prompt")) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        ),
+        true,
+      );
       await page.click('button[data-copy="scheduler-agent-prompt"]');
       assert.equal((await page.evaluate(() => window.copied)).at(-1), prompt);
       await page.focus("#scheduler-mode-tab-agent");

@@ -818,7 +818,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       </div>
       <div id="scheduler-mode-panel-agent" role="tabpanel" aria-labelledby="scheduler-mode-tab-agent">
         <p class="muted">Paste this prompt into a coding agent running on the host, such as Paseo, Claude Code or OpenCode. The agent runs pickup setup and fixes each missing check in order. It asks before it installs the timer, and tells you what to click when a fix is a dashboard setting.</p>
-        <div class="snippet"><pre class="wrap"><code id="scheduler-agent-prompt">Set up automatic factory pickup on this host. You are a coding agent on the machine that should pick up ideas. Work through these steps in order.
+        <div class="snippet"><div class="actions"><button class="btn" type="button" data-copy="scheduler-agent-prompt" aria-label="Copy agent setup prompt">Copy</button></div><pre class="wrap"><code id="scheduler-agent-prompt">Set up automatic factory pickup on this host. You are a coding agent on the machine that should pick up ideas. Work through these steps in order.
 
 1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory.py, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: python3 SKILL/runtime/factory.py pickup setup
    If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with python3 tools/install.py --destination &lt;skills folder&gt; --replace from a clone of the factory repo, then start again.
@@ -833,7 +833,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
 4. Check 7 is the timer. Show me the command python3 SKILL/runtime/factory.py pickup setup --install and say that it writes and loads a 5 minute timer for this host. Run it only after I answer yes. Otherwise I run it myself.
 5. Run pickup setup again until it prints 7 of 7 ok. Then tell me which python the timer runs and any note it printed.
 
-A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-agent-prompt" aria-label="Copy agent setup prompt">Copy</button></div></div>
+A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.</code></pre></div>
       </div>
       <div id="scheduler-mode-panel-human" role="tabpanel" aria-labelledby="scheduler-mode-tab-human" hidden>
       <p class="muted">Nothing here is saved. Copy a snippet, then replace each placeholder with this host's values.</p>
