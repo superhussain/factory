@@ -1646,6 +1646,9 @@ def queue_backlog_item(home, slug, feature, verdict, context=None):
     ref = BACKLOG_SUFFIX.search(feature)
     text = feature[:ref.start()] if ref else feature
     score = f"confidence {verdict['confidence']}% (threshold {verdict['threshold']}%)"
+    duplicate = verdict.get("duplicate")
+    if not (isinstance(duplicate, str) and JOB_ID.fullmatch(duplicate)):
+        duplicate = None
     jobs = Path(home, "jobs")
     local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
 
@@ -1658,6 +1661,8 @@ def queue_backlog_item(home, slug, feature, verdict, context=None):
                "idea": idea_with_context(text, context, f"\n\nQueued by backlog triage: {score}. {verdict['reason']}"),
                "backlog": {"line": raw, "decision": "approved", "at": at, "by": "triage",
                            "triage": {k: verdict[k] for k in ("model", "confidence", "threshold", "reason")}}}
+        if duplicate:
+            job["backlog"]["triage"]["duplicate"] = duplicate
         refs = suffix_refs(ref)
         if refs:
             job["refs"] = refs
@@ -1701,7 +1706,7 @@ def queue_backlog_item(home, slug, feature, verdict, context=None):
               f"check off the line or remove {job_id} by hand", file=sys.stderr)
         return True
     if marked:
-        print(f"queued {item} as {job_id}: {score}")
+        print(f"queued {item} as {job_id}: {score}" + (f"; possible duplicate of {duplicate}" if duplicate else ""))
         return False
     try:
         cas(home, "/api/board", drop)
