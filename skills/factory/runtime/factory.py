@@ -2241,9 +2241,12 @@ def batch_cmd(target, *idea_ids):
         lead = next((j for j in data["jobs"] if j.get("id") == lead_id), None)
         if lead is None:
             fail(f"no job {lead_id} on the board. Nothing was written.", 4)
+        alone = isinstance(lead.get("priority"), dict) and lead["priority"].get("alone") is True
         if idea_ids:
             if not mine(lead.get("claim") or {}, device, session):
                 fail(f"{lead_id} is not held by this session. Nothing was written.", 6)
+            if alone:
+                fail(f"{lead_id} was started alone from the dashboard, so it takes no riders. Nothing was written.", 2)
             if lead.get("stage") != "spec":
                 fail(f"batch runs while {lead_id} is at spec, not {lead.get('stage')}. Nothing was written.", 2)
             if "tracer" in lead:
@@ -2276,6 +2279,8 @@ def batch_cmd(target, *idea_ids):
                       if j.get("id") != lead_id and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
                       and batch_problem(data, j, slug, device, session, minutes) is None]
         candidates += [v[3] for k, v in lines.items() if k not in line_picks]
+        if alone:
+            candidates = []
         result = {"lead": lead_id, "riders": [entry(j) for j in riders_of(data, lead_id)],
                   "candidates": candidates[:MAX_CANDIDATES]}
         return (dump_board(data) if idea_ids else None), (result, made)
