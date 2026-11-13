@@ -827,7 +827,8 @@ def board(factory, job_id):
     if "agents" in patch:
         fail("only factory.py agent and pickup set agents", 2)
     if "move" in patch:
-        fail("only the dashboard and factory.py pickup set move", 2)
+        fail("only the dashboard, factory.py pickup and factory.py control set move. To relay a person's chat, "
+             "run factory.py control <job-id> move <host>|rerun --chat-file <file>", 2)
     if "priority" in patch:
         fail("only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's chat, "
              "run factory.py control <job-id> prioritize --chat-file <file>", 2)
@@ -835,7 +836,8 @@ def board(factory, job_id):
         fail("only the dashboard and factory.py control set paused. To relay a person's chat, "
              "run factory.py control <job-id> pause|resume --chat-file <file>", 2)
     if patch.get("babysit") is not None:
-        fail("only the dashboard sets babysit; a session clears it with null", 2)
+        fail("only the dashboard and factory.py control set babysit; a session clears it with null. To relay a "
+             "person's chat, run factory.py control <job-id> babysit --chat-file <file>", 2)
     if "close" in patch:
         fail("only the dashboard, factory.py pickup and factory.py control set close. To relay a person's chat, "
              "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
