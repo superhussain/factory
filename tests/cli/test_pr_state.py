@@ -1,5 +1,6 @@
 import json
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 
@@ -40,6 +41,22 @@ def checks(*buckets):
     return 0, json.dumps([{"bucket": b, "name": f"check-{i}"} for i, b in enumerate(buckets)])
 
 
+TOKEN = "bk-synthetic-token-0001"
+BUILD = "/v2/organizations/example-org/pipelines/sample-web/builds/812"
+JOB_ID = "0190a1b2-0000-4000-8000-000000000001"
+LINK = "https://buildkite.com/example-org/sample-web/builds/812"
+
+
+def buildkite(link=LINK + "#" + JOB_ID, bucket="fail"):
+    return 0, json.dumps([{"bucket": "pass", "name": "lint", "link": "https://github.com/example/sample/actions/runs/1"},
+                          {"bucket": bucket, "name": "buildkite/sample-web", "link": link}])
+
+
+def build_jobs(*jobs):
+    return 200, {"jobs": [{"id": f"0190a1b2-0000-4000-8000-00000000000{i}", "type": kind, "state": state, "name": name}
+                          for i, (kind, state, name) in enumerate(jobs, 1)]}
+
+
 class PrStateTest(IsolatedTestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -52,7 +69,7 @@ class PrStateTest(IsolatedTestCase):
     def sleep(self, seconds):
         self.now += seconds
 
-    def state(self, readings, *args, pr=PR):
+    def state(self, readings, *args, pr=PR, routes=None):
         """Run pr-state with gh answering each (view, checks[, queue]) reading in turn, repeating the last."""
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open"}
         if pr is not None:
@@ -65,9 +82,11 @@ class PrStateTest(IsolatedTestCase):
             answer = {"view": reading[0], "checks": reading[1]}.get(gh_args[0], (reading + (graph(),))[2])
             return answer + ("",) if stderr and answer else answer
 
-        with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job]})}) as server:
+        with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job]}), **(routes or {})}) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
+            self.server = server
             with patch.object(factory, "gh_pr", gh), patch.object(factory, "gh_cli", lambda *a: gh(*a[1:])), \
+                    patch.object(factory, "BUILDKITE_API", server.origin + "/v2"), \
                     patch.object(factory.time, "sleep", self.sleep), \
                     patch.object(factory.time, "monotonic", lambda: self.now):
                 result = invoke(factory, ["--home", str(self.home), "pr-state", f"sample/{JOB}", *args])
@@ -84,11 +103,11 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(json.loads(out), {"pr": 44, "state": "open", "review": "approved", "bots": 0, "checks": "pass",
                                            "queued": False, "conflict": False, "stacked": False, "base": "main",
-                                           "next": "merge"})
+                                           "next": "merge", "ci_log": None})
         self.assertEqual(calls[0][:3], ("view", PR, "--json"))
         self.assertIn("baseRefName", calls[0][3])
         self.assertNotIn("isInMergeQueue", calls[0][3])
-        self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket"))
+        self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket,link"))
         self.assertEqual(calls[2][0], "graphql")
         self.assertIn("pullRequest(number:$n){isInMergeQueue reviewThreads(last:100){nodes{isResolved "
                       "comments(first:100){nodes{author{__typename login}}}}}}", calls[2][2])
@@ -260,6 +279,90 @@ class PrStateTest(IsolatedTestCase):
                 code, out, err, _ = self.state([(view(base=base), checks("pass"))])
                 self.assertEqual((code, out), (5, ""))
                 self.assertIn("gh printed an unusable baseRefName", err)
+
+    def buildkite_requests(self):
+        return [r for r in self.server.requests if r[1].startswith("/v2/")]
+
+    def test_fix_ci_reads_the_failed_buildkite_job_log_tail(self):
+        (self.home / ".env").write_text(f"BUILDKITE_API_TOKEN={TOKEN}\nSAMPLE_SECRET=sample-secret-value-0002\n")
+        lines = [f"\x1b_bk;t=17000000{i:02}000\x07\x1b[32mstep {i}\x1b[0m" for i in range(100)]
+        log = "\r\n".join(lines + ["progress 10%\rprogress 100%", f"using {TOKEN} and sample-secret-value-0002",
+                                    "error  'unused' is defined but never used"]) + "\r\n"
+        routes = {BUILD: build_jobs(("script", "failed", "Lint frontend")),
+                  f"{BUILD}/jobs/{JOB_ID}/log": (200, {"url": "", "content": log, "size": len(log)})}
+        code, out, err, _ = self.state([(view(), buildkite())], routes=routes)
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        tail = "\n".join([f"step {i}" for i in range(23, 100)] + [
+            "progress 100%", "using [redacted] and [redacted]", "error  'unused' is defined but never used"])
+        self.assertEqual((reading["next"], reading["ci_log"]), ("fix-ci", {
+            "check": "buildkite/sample-web", "job": "Lint frontend", "tail": tail, "problem": ""}))
+        sent = self.buildkite_requests()
+        self.assertEqual([r[1] for r in sent], [BUILD, f"{BUILD}/jobs/{JOB_ID}/log"])
+        for request in sent:
+            self.assertEqual((request[2]["Authorization"], request[2]["Accept"], request[2]["User-Agent"]),
+                             (f"Bearer {TOKEN}", "application/json", "factory"))
+        self.assertNotIn(TOKEN, out)
+
+    def test_fix_ci_picks_the_first_failed_buildkite_job(self):
+        (self.home / ".env").write_text(f"BUILDKITE_API_TOKEN={TOKEN}\n")
+        second = "0190a1b2-0000-4000-8000-000000000003"
+        routes = {BUILD: build_jobs(("waiter", "failed", ""), ("script", "passed", "Unit tests"),
+                                    ("script", "timed_out", "Lint frontend"), ("script", "failed", "Type check")),
+                  f"{BUILD}/jobs/{second}/log": (200, {"content": "x" * 9000 + "\n"})}
+        code, out, err, _ = self.state([(view(), buildkite(LINK))], routes=routes)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out)["ci_log"], {"check": "buildkite/sample-web", "job": "Lint frontend",
+                                                     "tail": "x" * 8000, "problem": ""})
+        self.assertEqual([r[1] for r in self.buildkite_requests()], [BUILD, f"{BUILD}/jobs/{second}/log"])
+        routes = {BUILD: build_jobs(("script", "passed", "Unit tests"))}
+        code, out, _, _ = self.state([(view(), buildkite(LINK))], routes=routes)
+        self.assertEqual((code, json.loads(out)["ci_log"]["problem"]), (0, "no failed job in build 812"))
+
+    def test_buildkite_problems_still_print_the_reading(self):
+        real_open = factory.urllib.request.OpenerDirector.open
+
+        def refuse(opener, request, *args, **kwargs):
+            if "/v2/" in request.full_url:
+                raise OSError(f"refused for {TOKEN}")
+            return real_open(opener, request, *args, **kwargs)
+
+        def problem(env, routes, down=False):
+            if env:
+                (self.home / ".env").write_text(env)
+            with patch.object(factory.urllib.request.OpenerDirector, "open", refuse) if down else nullcontext():
+                code, out, err, _ = self.state([(view(), buildkite())], routes=routes)
+            self.assertEqual((code, err), (0, ""))
+            self.assertNotIn(TOKEN, out)
+            reading = json.loads(out)
+            self.assertEqual((reading["next"], reading["ci_log"]["job"], reading["ci_log"]["tail"]), ("fix-ci", "", ""))
+            return reading["ci_log"]["problem"]
+
+        self.assertEqual(problem("", {BUILD: build_jobs()}),
+                         "set BUILDKITE_API_TOKEN in the factory .env to read Buildkite logs")
+        self.assertEqual(self.buildkite_requests(), [])
+        env = f"BUILDKITE_API_TOKEN={TOKEN}\n"
+        self.assertEqual(problem(env, {BUILD: (401, {})}),
+                         "Buildkite answered 401 (the token needs read_builds and read_build_logs)")
+        self.assertEqual(problem(env, {BUILD: (302, {})}), "Buildkite answered 302")
+        self.assertEqual(problem(env, {BUILD: (200, b"not json")}), "Buildkite sent no usable log")
+        self.assertEqual(problem(env, {BUILD: build_jobs(("script", "failed", "Lint frontend")),
+                                       f"{BUILD}/jobs/{JOB_ID}/log": (200, {"size": 0})}),
+                         "Buildkite sent no usable log")
+        self.assertEqual(problem(env, {}, down=True), "can't reach Buildkite: refused for [token]")
+
+    def test_ci_log_is_null_without_a_buildkite_failure(self):
+        (self.home / ".env").write_text(f"BUILDKITE_API_TOKEN={TOKEN}\n")
+        actions = (0, json.dumps([{"bucket": "fail", "name": "test",
+                                   "link": "https://github.com/example/sample/actions/runs/1/job/2"}]))
+        for reading, step in (((view(), buildkite(bucket="pass")), "merge"), ((view(), actions), "fix-ci"),
+                              ((view(merge="DIRTY"), buildkite()), "rebase"),
+                              ((view(), buildkite("https://buildkite.com/example-org/sample-web/builds/812/x")),
+                               "fix-ci")):
+            with self.subTest(reading=reading):
+                code, out, err, _ = self.state([reading], routes={BUILD: build_jobs()})
+                self.assertEqual((code, err, json.loads(out)["next"], json.loads(out)["ci_log"]), (0, "", step, None))
+                self.assertEqual(self.buildkite_requests(), [])
 
     def test_bad_wait_exits_2(self):
         for args in (["--wait", "0"], ["--wait", "601"], ["--wait"], ["--wait", "x"], ["--timeout", "5"]):
