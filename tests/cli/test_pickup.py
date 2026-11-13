@@ -2458,6 +2458,65 @@ class BabysitTest(PickupFixture):
         self.assertNotIn("claim", self.job("042-sample-export"))
         self.assertTrue(factory.babysitting(self.job("042-sample-export")))
 
+    def linked(self, status, send=True):
+        """A babysat job linked to synthetic-agent, with paseo answering status and send returning send."""
+        self.board["jobs"] = [babysat("042-sample-export", "alpha",
+                                      paseo={"server": "synthetic-server", "agent": "synthetic-agent"})]
+        self.sent = []
+
+        def paseo_send(agent, message):
+            self.sent.append((agent, message))
+            return send
+        for name, value in (("paseo_server", "synthetic-server"), ("paseo_statuses", {"synthetic-agent": status})):
+            patcher = patch.object(factory, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch.object(factory, "paseo_send", side_effect=paseo_send)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_an_idle_linked_agent_gets_the_babysit_command(self):
+        self.linked("idle")
+        self.assertEqual(self.pickup("--dry-run"), (0, "would send babysit 042-sample-export alpha to agent "
+                                                    f"synthetic-agent\nhost {DEVICE}: would launch 0\n", ""))
+        self.assertEqual(self.sent, [])
+        code, out, err = self.pickup()
+        tag = self.job("042-sample-export")["claim"]["session"]
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"sent babysit 042-sample-export alpha to agent synthetic-agent session {tag}\n")
+        self.assertEqual(self.sent, [("synthetic-agent", f"/factory babysit 042-sample-export --session {tag}"
+                                                         f"\n\n{factory.UNATTENDED}")])
+        self.assertEqual(self.launched(), [])
+
+    def test_a_running_linked_agent_skips_the_babysit(self):
+        self.linked("running")
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("skip babysit 042-sample-export alpha: agent synthetic-agent is running\n", out)
+        self.assertEqual(self.pickup()[1], "")
+        self.assertNotIn("claim", self.job("042-sample-export"))
+        self.assertEqual((self.sent, self.launched()), ([], []))
+
+    def test_a_closed_linked_agent_launches_a_new_session(self):
+        self.linked("closed")
+        code, out, err = self.pickup()
+        tag = self.job("042-sample-export")["claim"]["session"]
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"launched babysit 042-sample-export alpha on primary session {tag}\n")
+        self.assertEqual((self.sent, len(self.launched())), ([], 1))
+
+    def test_a_failed_send_launches_a_new_session_with_the_same_tag(self):
+        self.linked("idle", send=False)
+        code, out, err = self.pickup()
+        tag = self.job("042-sample-export")["claim"]["session"]
+        self.assertEqual(code, 0)
+        self.assertEqual(out, f"launched babysit 042-sample-export alpha on primary session {tag}\n")
+        self.assertEqual(err, "factory.py: pickup could not send babysit 042-sample-export to agent synthetic-agent: "
+                              "paseo send failed; launching a new session\n")
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.launched()[0]["argv"][7], f"/factory babysit 042-sample-export --session {tag}\n\n"
+                         + factory.UNATTENDED)
+
 
 FOLLOW = [{"id": "090-alpha-old", "kind": "follow-up-of"}]
 HELD = ["101-wrap-doc-line", "102-move-comment", "103-drop-double-period", "104-fix-typo", "105-rename-flag"]

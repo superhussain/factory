@@ -50,6 +50,13 @@ Each run, in order:
   `would launch babysit ...` and `skip babysit <id> <project>: <reason>`. A failed launch
   releases the claim. This launch and babysat jobs do not count against `--limit` or the
   in-flight cap. The session follows [babysit](commands/babysit.md).
+  When the job's `paseo` link names an agent on this host's Paseo server, pickup reuses it.
+  An `idle` agent gets the command with `paseo send`: a dry run prints
+  `would send babysit <id> <project> to agent <agent>`, and a send prints
+  `sent babysit <id> <project> to agent <agent> session <tag>`. A `running` agent skips the
+  job this run (`skip babysit <id> <project>: agent <agent> is running`). A `closed` or
+  missing agent, another server, or no answer from paseo launches a new session. A failed
+  send prints a stderr line and launches a new session with the same tag.
 - Picks the first route in `routes.md` that is not marked limited, then resolves
   the launcher for it. A config error exits 2 before anything is claimed.
 - Claims one idea at a time — the board compare-and-swap stops two hosts taking

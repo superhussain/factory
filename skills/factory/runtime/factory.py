@@ -4498,7 +4498,21 @@ def claim_babysit(home, job_id, device, minutes, paths):
 
 
 def babysit_pass(home, data, device, minutes, paths, settings, dry):
-    """Launch at most one /factory babysit session for a job the dashboard handed to one."""
+    """Run at most one /factory babysit for a job the dashboard handed to one: in the job's own idle Paseo agent when it has one on this host, else in a new session."""
+    statuses = None
+
+    def job_agent(j):
+        """(agent, status) of the job's Paseo agent on this host, else (None, None)."""
+        nonlocal statuses
+        link, server = j.get("paseo"), paseo_server()
+        agent = link.get("agent") if isinstance(link, dict) else None
+        if not (server and link.get("server") == server and isinstance(agent, str)
+                and PASEO_ID.fullmatch(agent) and not agent.startswith("-")):
+            return None, None
+        if statuses is None:
+            statuses = paseo_statuses() or {}
+        return agent, statuses.get(agent)
+
     def skip(j):
         """Why this job is not ready, or None."""
         project = j.get("project")
@@ -4514,6 +4528,9 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
         c = blocking(j, device, "", minutes)
         if c:
             return f"{head}: claimed by {c['device']} session {c.get('session')}"
+        agent, status = job_agent(j)
+        if status == "running":
+            return f"{head}: agent {agent} is running"
         reason = pickup_reason(home, project, paths, settings, device, dry)
         return f"{head}: {reason}" if reason else None
 
@@ -4523,6 +4540,20 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
                 "provider": provider, "model": model, "effort": effort or "",
                 "prompt": launch_prompt(f"/factory babysit {j['id']} --session {session}")}
 
+    def launch(j, tag, route):
+        if route is None:
+            release_pickup_claim(home, j["id"], device, tag)
+            return
+        template = route_launcher(home, route)
+        given = values(j, tag, route)
+        ok, detail, log_path = launch_idea(home, given, route[0], launcher_argv(template, given),
+                                           launch_env(given, route[1], route[2]))
+        if ok:
+            print(f"launched babysit {j['id']} {j['project']} on {route[0]} session {tag}")
+        else:
+            launch_failed(home, route[0], j["id"], detail, log_path,
+                          lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)
+
     ready = False
     for j in (j for j in data["jobs"] if babysit_due(j)):
         line = skip(j)
@@ -4530,32 +4561,38 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
             line = f"wait babysit {j['id']} {j['project']}: one babysit launch per run"
         elif line is None:
             ready = True
+            agent, status = job_agent(j)
             route = pick_route(home)
-            if route is None and not dry:
-                return
-            if route is None:
-                stamp = now()
-                active = {n: until for n, until in read_limits(home).items() if until > stamp}
-                line = "no route: no available route: " + ", ".join(
-                    f"{r[0]} until {active[r[0]]}" for r in read_routes(home))
-            else:
-                template = route_launcher(home, route)
+            if status == "idle":
                 if dry:
-                    line = f"would launch babysit {j['id']} {j['project']} on {route[0]}: " \
-                        + shlex.join(launcher_argv(template, values(j, "<session>", route)))
+                    line = f"would send babysit {j['id']} {j['project']} to agent {agent}"
                 else:
                     tag = claim_babysit(home, j["id"], device, minutes, paths)
                     if tag is None:
                         return
-                    given = values(j, tag, route)
-                    ok, detail, log_path = launch_idea(home, given, route[0], launcher_argv(template, given),
-                                                       launch_env(given, route[1], route[2]))
-                    if ok:
-                        print(f"launched babysit {j['id']} {j['project']} on {route[0]} session {tag}")
-                    else:
-                        launch_failed(home, route[0], j["id"], detail, log_path,
-                                      lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)
+                    if paseo_send(agent, launch_prompt(f"/factory babysit {j['id']} --session {tag}")):
+                        print(f"sent babysit {j['id']} {j['project']} to agent {agent} session {tag}")
+                        return
+                    print(f"factory.py: pickup could not send babysit {j['id']} to agent {agent}: "
+                          "paseo send failed; launching a new session", file=sys.stderr)
+                    launch(j, tag, route)
                     return
+            elif route is None and not dry:
+                return
+            elif route is None:
+                stamp = now()
+                active = {n: until for n, until in read_limits(home).items() if until > stamp}
+                line = "no route: no available route: " + ", ".join(
+                    f"{r[0]} until {active[r[0]]}" for r in read_routes(home))
+            elif dry:
+                line = f"would launch babysit {j['id']} {j['project']} on {route[0]}: " \
+                    + shlex.join(launcher_argv(route_launcher(home, route), values(j, "<session>", route)))
+            else:
+                tag = claim_babysit(home, j["id"], device, minutes, paths)
+                if tag is None:
+                    return
+                launch(j, tag, route)
+                return
         if dry:
             print(line)
 
