@@ -170,13 +170,63 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .header-actions { display: flex; gap: inherit; }
   body[data-view="settings"] #board, body[data-view="settings"] #detail,
   body[data-view="retros"] #board, body[data-view="retros"] #detail { display: none; }
-  #retros-list { display: grid; gap: 16px; }
-  .retro-run h3 .muted { font-weight: 400; margin-left: 8px; }
-  .retro-run tr[aria-current="true"] { background: var(--accent-soft); }
-  .retro-run details { margin-top: 4px; font-size: 12px; }
-  .retro-run a { color: var(--accent); }
-  .retro-run .reference-table { min-width: 640px; }
-  .retro-run ul { margin: 0; padding-left: 16px; }
+  #retros-page { max-width: 1040px; }
+  #retros-list { display: grid; gap: 20px; }
+  .settings-section.retro-run { padding: 20px 20px 12px; }
+  .retro-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; margin-bottom: 14px; }
+  .settings-section .retro-head h3 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+  .retro-run-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .retro-run-meta code { font-family: var(--font-mono); font-size: 11px; }
+  .retro-summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .retro-findings-head, .retro-finding { display: grid; grid-template-columns: 28px minmax(0, 1fr) 150px 180px; column-gap: 16px; }
+  .retro-findings-head { padding: 0 10px 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); }
+  .retro-findings { list-style: none; margin: 0; padding: 0; }
+  .retro-finding { align-items: start; padding: 12px 10px; border-bottom: 1px solid var(--line); }
+  .retro-finding:last-child { border-bottom: 0; }
+  .retro-finding[aria-current="true"] { background: var(--accent-soft); border-radius: 10px; }
+  .retro-rank { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .retro-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+  .retro-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+  .retro-share { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .retro-share-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .retro-share-bar { display: block; height: 4px; margin-top: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+  .retro-share-bar > span { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--accent); }
+  .retro-cards { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip.retro-chip { display: inline-flex; align-items: center; font-size: 11px; line-height: 16px; padding: 2px 8px; font-weight: 600; text-decoration: none; }
+  .retro-chip.is-merged { background: var(--pass-bg); color: var(--pass-fg); }
+  .retro-chip.is-open { background: var(--accent-soft); color: var(--accent); }
+  .retro-chip.is-waiting { background: var(--changes-bg); color: var(--changes-fg); }
+  .retro-chip.is-denied { background: var(--alert-bg); color: var(--alert); }
+  .retro-chip.is-none { background: transparent; color: var(--pending-fg); outline: 1px dashed var(--pending-fg); outline-offset: -1px; font-weight: 400; }
+  @media (hover: hover) { a.retro-chip:hover { box-shadow: inset 0 0 0 1px currentColor; } }
+  .retro-why { grid-column: 2 / -1; margin-top: 8px; }
+  .retro-why > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; margin-left: -6px; padding: 4px 8px 4px 6px; border-radius: 6px; font-size: 12px; font-weight: 500; color: var(--muted); cursor: pointer; transition: background-color .15s, color .15s; }
+  .retro-why > summary::-webkit-details-marker { display: none; }
+  .retro-why > summary svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s; }
+  .retro-why[open] > summary { color: var(--fg); }
+  .retro-why[open] > summary svg { transform: rotate(90deg); }
+  @media (hover: hover) { .retro-why > summary:hover { background: var(--accent-soft); color: var(--fg); } }
+  .retro-why-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 6px; padding: 12px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+  .retro-why-label { margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  .retro-why-label.is-cause { color: var(--changes-fg); }
+  .retro-why-label.is-fix { color: var(--pass-fg); }
+  .retro-why-block p:last-child { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  .retro-unlinked { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0; padding: 12px 10px 4px; border-top: 1px solid var(--line); font-size: 12px; }
+  .retro-unlinked-label { color: var(--muted); font-weight: 600; }
+  .retro-unlinked-card { display: inline-flex; align-items: center; gap: 6px; }
+  @media (pointer: coarse) { .retro-why > summary { min-height: 44px; } }
+  @media (prefers-reduced-motion: reduce) { .retro-why > summary, .retro-why > summary svg { transition: none; } }
+  @media (max-width: 760px) {
+    .settings-section.retro-run { padding: 16px 14px 8px; }
+    .retro-findings-head { display: none; }
+    .retro-finding { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding: 12px 4px; }
+    .retro-share, .retro-cards, .retro-why { grid-column: 2; }
+    .retro-share { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .retro-share-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; margin-left: -4px; font-weight: 400; color: var(--muted); }
+    .retro-share-bar { flex: none; width: 64px; margin-top: 0; }
+    .retro-cards { margin-top: 8px; }
+    .retro-why-body { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  }
   .settings-page { max-width: 1440px; margin: 0 auto; padding: 28px; }
   .settings-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
   .settings-head h2 { font-size: 16px; margin: 0; }
@@ -2686,6 +2736,26 @@ async function loadRetros() {
   renderRetrosPage();
 }
 
+const RETRO_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// "Nov 13, 2026, 22:43 UTC" from a run id that starts with its UTC timestamp, else the id.
+function retroWhen(run) {
+  const m = /^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)/.exec(run);
+  const month = m && RETRO_MONTHS[Number(m[2]) - 1];
+  return month ? month + ' ' + Number(m[3]) + ', ' + m[1] + ', ' + m[4] + ':' + m[5] + ' UTC' : run;
+}
+const retroDay = (date) => RETRO_MONTHS[Number(date.slice(5, 7)) - 1] + ' ' + Number(date.slice(8, 10));
+// Each finding's share of the run's count x cost: display text and bar width.
+function retroShares(findings) {
+  const total = findings.reduce((sum, f) => sum + f.count * f.cost, 0);
+  return findings.map((f) => {
+    const pct = total ? (f.count * f.cost) / total * 100 : 0;
+    return { text: pct >= 1 ? Math.round(pct) + '%' : '<1%', width: pct.toFixed(1) + '%' };
+  });
+}
+// The summary word and chip class for a status text.
+const retroWord = (text) => text.startsWith('Open') ? 'open' : text.startsWith('Not logged') ? 'not logged' : text.toLowerCase();
+const RETRO_CHEVRON = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"/></svg>';
+
 function renderRetrosPage() {
   const route = retrosRoute();
   if (!route) return;
@@ -2699,32 +2769,44 @@ function renderRetrosPage() {
     return;
   }
   const marks = retroMarks(backlogText);
-  const label = (status) => status.href ? '<a href="' + esc(status.href) + '">' + esc(status.text) + '</a>' : esc(status.text);
-  const cardLine = (card, status) => esc(card.title) + ' \u00b7 ' + label(status);
+  const chip = (card, status) => {
+    const cls = 'chip retro-chip is-' + retroWord(status.text).replace(' ', '-');
+    const name = ' aria-label="' + esc(card.title + ': ' + status.text) + '" title="' + esc(card.title) + '"';
+    return status.href ? '<a class="' + cls + '" href="' + esc(status.href) + '"' + name + '>' + esc(status.text) + '</a>'
+      : '<span class="' + cls + '"' + name + '>' + esc(status.text) + '</span>';
+  };
   const html = retros.map((run) => {
-    const statuses = run.findings.flatMap((f) => f.cards).concat(run.cards).map((c) => retroCardStatus(c, marks));
+    const seen = new Map();
+    for (const c of run.findings.flatMap((f) => f.cards).concat(run.cards))
+      if (!seen.has(c.fingerprint)) seen.set(c.fingerprint, retroCardStatus(c, marks));
     const counts = new Map();
-    for (const { text } of statuses) {
-      const word = text.startsWith('Open') ? 'open' : text.startsWith('Not logged') ? 'not logged' : text.toLowerCase();
-      counts.set(word, (counts.get(word) ?? 0) + 1);
-    }
+    for (const { text } of seen.values()) counts.set(retroWord(text), (counts.get(retroWord(text)) ?? 0) + 1);
     const summary = ['merged', 'open', 'waiting', 'denied', 'closed', 'archived', 'not logged']
-      .filter((word) => counts.has(word)).map((word) => counts.get(word) + ' ' + word).join(', ');
-    const rows = run.findings.map((f) => {
+      .filter((w) => counts.has(w)).map((w) => '<span class="chip retro-chip is-' + w.replace(' ', '-') + '">' + counts.get(w) + ' ' + w + '</span>').join('');
+    const shares = retroShares(run.findings);
+    const items = run.findings.map((f, i) => {
       const open = route.run === run.run && route.rank === f.rank;
-      const logged = f.cards.map((c) => '<li>' + cardLine(c, retroCardStatus(c, marks)) + '</li>').join('');
-      return '<tr id="retro-' + esc(run.run) + '-' + f.rank + '"' + (open ? ' aria-current="true"' : '') + '><td>' + f.rank + '</td><td>' + esc(f.title) +
-        '<details' + (open ? ' open' : '') + '><summary>Root cause and fix</summary><p>' + esc(f.root_cause) + '</p><p>' + esc(f.fix) + '</p></details></td><td>' +
-        esc(f.category) + '</td><td>' + esc(f.project) + '</td><td>' + (f.count * f.cost).toLocaleString('en-US') + '</td><td>' +
-        (logged ? '<ul>' + logged + '</ul>' : '<span class="muted">No card</span>') + '</td></tr>';
+      const cards = f.cards.length ? f.cards.map((c) => chip(c, retroCardStatus(c, marks))).join('')
+        : '<span class="chip retro-chip is-none">No card</span>';
+      return '<li class="retro-finding" id="retro-' + esc(run.run) + '-' + f.rank + '"' + (open ? ' aria-current="true"' : '') + '>' +
+        '<span class="retro-rank">' + f.rank + '</span>' +
+        '<div class="retro-main"><p class="retro-title">' + esc(f.title) + '</p><p class="retro-meta">' + esc(f.category) + ' · ' + esc(f.project) + '</p></div>' +
+        '<div class="retro-share"><span class="retro-share-value">' + esc(shares[i].text) + '</span><span class="retro-share-label"> of estimated cost</span>' +
+        '<span class="retro-share-bar" aria-hidden="true"><span style="width:' + shares[i].width + '"></span></span></div>' +
+        '<div class="retro-cards">' + cards + '</div>' +
+        '<details class="retro-why"' + (open ? ' open' : '') + '><summary>' + RETRO_CHEVRON + 'Root cause and fix</summary><div class="retro-why-body">' +
+        '<div class="retro-why-block"><p class="retro-why-label is-cause">Root cause</p><p>' + esc(f.root_cause) + '</p></div>' +
+        '<div class="retro-why-block"><p class="retro-why-label is-fix">Fix</p><p>' + esc(f.fix) + '</p></div></div></details></li>';
     }).join('');
-    const loose = run.cards.length
-      ? '<h4>Cards without a finding</h4><ul>' + run.cards.map((c) => '<li>' + cardLine(c, retroCardStatus(c, marks)) + '</li>').join('') + '</ul>' : '';
-    return '<section class="settings-section retro-run" id="retro-run-' + esc(run.run) + '" aria-labelledby="retro-h-' + esc(run.run) + '"><h3 id="retro-h-' + esc(run.run) + '">' +
-      esc(run.run) + '<span class="muted">' + esc(run.host) + ' \u00b7 ' + esc(run.from) + ' to ' + esc(run.to) + ' \u00b7 ' + run.sessions + ' sessions \u00b7 ' + run.rejected + ' rejected</span></h3>' +
-      '<p class="muted retro-summary">' + esc(summary) + '</p>' +
-      '<div class="reference-scroll"><table class="reference-table"><thead><tr><th scope="col">Rank</th><th scope="col">Finding</th><th scope="col">Category</th><th scope="col">Project</th><th scope="col">Score</th><th scope="col">Logged as</th></tr></thead><tbody>' +
-      rows + '</tbody></table></div>' + loose + '</section>';
+    const loose = run.cards.length ? '<p class="retro-unlinked"><span class="retro-unlinked-label">Not linked to a finding</span>' +
+      run.cards.map((c) => '<span class="retro-unlinked-card">' + esc(c.title) + ' ' + chip(c, retroCardStatus(c, marks)) + '</span>').join('') + '</p>' : '';
+    const meta = [esc(run.host), esc(retroDay(run.from)) + ' to ' + esc(retroDay(run.to)), run.sessions + (run.sessions === 1 ? ' session' : ' sessions')]
+      .concat(run.rejected ? [run.rejected + ' rejected'] : []).concat('<code>' + esc(run.run) + '</code>').join(' · ');
+    return '<section class="settings-section retro-run" id="retro-run-' + esc(run.run) + '" aria-labelledby="retro-h-' + esc(run.run) + '">' +
+      '<div class="retro-head"><div><h3 id="retro-h-' + esc(run.run) + '">' + esc(retroWhen(run.run)) + '</h3><p class="retro-run-meta">' + meta + '</p></div>' +
+      '<p class="retro-summary">' + summary + '</p></div>' +
+      '<div class="retro-findings-head" aria-hidden="true"><span>#</span><span>Finding</span><span>Share of estimated cost</span><span>Card</span></div>' +
+      '<ol class="retro-findings">' + items + '</ol>' + loose + '</section>';
   }).join('');
   if (html !== retrosHtml) { retrosHtml = html; $('retros-list').innerHTML = html; }
   const target = route.run && (route.rank ? 'retro-' + route.run + '-' + route.rank : 'retro-run-' + route.run);
