@@ -3593,7 +3593,7 @@ async function loadArchivedJob(id) {
   try {
     const r = await fetch('./api/board/archive?id=' + encodeURIComponent(id), { cache: 'no-store' });
     // An expired Access session answers 401 or 403. The banner offers sign-in, and the id is not cached as a miss.
-    if (r.status === 401 || r.status === 403) { setConnection('signin'); return { job: null }; }
+    if (r.status === 401 || r.status === 403) { setConnection('signin'); return { job: null, signin: true }; }
     if (r.status === 404) {
       archiveMisses.add(id);
       return { job: null };
@@ -3638,6 +3638,7 @@ async function openJob(id) {
     const got = await loadArchivedJob(id);
     if (parseHash().id !== id) return;
     j = got.job;
+    if (got.signin && !$('detail').hidden) closeDetail(true);
     if (got.failed && archiveFailNoted !== id) {
       archiveFailNoted = id;
       showBoardStatus(`Could not load archived job ${id}. Retrying while the link stays open.`);
@@ -4359,7 +4360,7 @@ function refreshPicker() {
   if ($('job-picker').open) renderJobResults();
 }
 
-function closeDetail() {
+function closeDetail(keepHash = false) {
   const raw = openBacklogRaw;
   drawerVersion++;
   openId = null;
@@ -4370,9 +4371,9 @@ function closeDetail() {
   renderBoard();
   if (raw !== null) focusBacklogControl(raw);
   refreshPicker();
-  if (settingsRoute() === null) history.replaceState(null, '', location.pathname + location.search);
+  if (!keepHash && settingsRoute() === null) history.replaceState(null, '', location.pathname + location.search);
 }
-$('d-close').addEventListener('click', closeDetail);
+$('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && openBacklogRaw !== null && !document.querySelector('dialog[open]')) closeDetail();
 });
