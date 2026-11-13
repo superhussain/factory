@@ -12,8 +12,8 @@ This is a prompt template, not an executable or an automatically enabled schedul
 ```
 
 On any nonzero exit, name the exit code and first stderr line, then stop. On exit 0,
-read `provider` and `model`. If `provider` is neither `claude` nor starts with
-`claude-`, reply `no claude route` and stop.
+read `provider`, `runtime` and `model`.
+If `runtime` is not `claude`, reply `no claude route` and stop.
 
 2. Check autonomy. Run:
 
