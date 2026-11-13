@@ -6339,7 +6339,7 @@ def install_agents(skill, runtimes):
                 raise ValueError()
             directories.append(directory)
             if directory.exists():
-                with os.scandir(current) as entries:
+                with os.scandir(directory) as entries:
                     list(entries)
             for name, source_header, body, description in sources:
                 current = directory / name
