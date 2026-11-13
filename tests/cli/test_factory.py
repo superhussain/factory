@@ -285,6 +285,7 @@ class FactoryTest(IsolatedTestCase):
                     "rounds": [{"code": "CHANGES"}], "claim": factory.new_claim("test", "sender")}
         self.store = {"/api/board": factory.dump_board({"jobs": [self.job]}).encode()}
         self.fail_upload = False
+        self.fail_board = False
         self.change_on_upload = False
         self.race = False
         self.put_paths = []
@@ -315,6 +316,8 @@ class FactoryTest(IsolatedTestCase):
         if method == "PUT":
             self.put_paths.append(path)
             if path != "/api/board" and self.fail_upload:
+                raise SystemExit(5)
+            if path == "/api/board" and self.fail_board:
                 raise SystemExit(5)
             if path == "/api/board" and self.race:
                 self.race = False
@@ -374,6 +377,23 @@ class FactoryTest(IsolatedTestCase):
         self.put_paths.clear()
         factory.push(self.target)
         self.assertNotIn("/api/board", self.put_paths)
+
+    def test_push_retries_goal_after_board_failure(self):
+        self.write_spec("Sample exports stay under one megabyte.\n")
+        marker = self.folder / ".goal-pending"
+        self.fail_board = True
+        with self.assertRaises(SystemExit) as raised:
+            factory.push(self.target)
+        self.assertEqual(raised.exception.code, 5)
+        self.assertTrue(marker.exists())
+        self.assertNotIn("goal", self.saved())
+        self.fail_board = False
+        factory.push(self.target)
+        self.assertEqual(self.saved()["goal"], "Sample exports stay under one megabyte.")
+        self.assertFalse(marker.exists())
+        with patch.object(factory, "cas", wraps=factory.cas) as cas:
+            factory.push(self.target)
+        self.assertEqual(cas.call_count, 0)
 
     def test_push_clears_goal_when_spec_drops_it(self):
         self.write_spec("Sample exports stay under one megabyte.\n")

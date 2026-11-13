@@ -6904,10 +6904,15 @@ def push(target):
         manifest[rel] = {"etag": strong(headers["ETag"]), "sha256": sha(data)}
         pushed += 1
         spec_pushed = spec_pushed or rel == "spec.md"
+    pending = folder / ".goal-pending"
+    if spec_pushed:
+        write_atomic(pending, "")
+    goal_due = spec_pushed or pending.exists()
     save_manifest(folder, manifest)
     print(f"pushed {pushed} files")
-    if spec_pushed:
+    if goal_due and (folder / "spec.md").exists() and "spec.md" not in conflicts:
         record_goal(home, slug, job_id, spec_goal((folder / "spec.md").read_text(encoding="utf-8")))
+        pending.unlink(missing_ok=True)
     if conflicts:
         conflict_exit(conflicts)
 
