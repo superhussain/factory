@@ -936,6 +936,10 @@ async function capture(outdir, referencePath) {
     };
     await view("scheduler-settings", 1280, 900, "light", openSchedulerSettings);
     await view("scheduler-settings-mobile", 390, 844, "light", openSchedulerSettings);
+    await view("scheduler-settings-human", 1280, 900, "light", async (page) => {
+      await openSchedulerSettings(page);
+      await page.evaluate(() => document.getElementById("scheduler-mode-tab-human")?.click());
+    });
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
