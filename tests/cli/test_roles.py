@@ -306,6 +306,10 @@ class RolesTest(IsolatedTestCase):
         self.assertEqual(len(approve), 1)
         self.assertTrue(approve[0].startswith("Never "))
 
+    def test_retro_push_launchd_times(self):
+        schedules = (SKILL / "references/schedules.md").read_text(encoding="utf-8")
+        self.assertIn("`Hour` 6, 7 and 8, each `Minute` 30", schedules)
+
     def test_unattended_standing_instruction(self):
         line = self.runtime.UNATTENDED
         self.assertNotIn("\n", line)
