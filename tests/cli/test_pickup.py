@@ -2782,6 +2782,18 @@ class BatchHoldTest(PickupFixture):
         self.assertEqual(lines[1:], [f"skip {job_id} alpha: batches behind 110-add-csv-export" for job_id in HELD[:3]]
                          + [f"host {DEVICE}: would launch 1"])
 
+    def test_paused_or_gated_starter_holds_nothing(self):
+        for extra in ({"paused": {"at": stamp(minutes=-1)}}, {"close": {"at": stamp(minutes=-1), "reason": "Synthetic duplicate"}},
+                      {"needs": "Pick a format"}, {"origin": {"gate": "human"}}):
+            with self.subTest(extra=extra):
+                self.board["jobs"] = self.held_ideas(3) + [
+                    idea("110-add-csv-export", "alpha", refs=FOLLOW, updated=stamp(minutes=-10),
+                         priority={"at": stamp(minutes=-1), "batch": True}, **extra)]
+                lines = self.dry()
+                self.assertCountEqual([line for line in lines if "batch" in line],
+                                      self.waits(HELD[:3], "3 of 5 held, oldest 0h of 12h"))
+                self.assertTrue(any(line.startswith("skip 110-add-csv-export alpha: ") for line in lines), lines)
+
     def test_view_hold_settings(self):
         self.board["jobs"] = self.held_ideas(3)
         view = effective("alpha", None, {"pickup": ON})

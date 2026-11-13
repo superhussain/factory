@@ -1527,14 +1527,18 @@ async function loadHoldConfigs() {
 }
 
 // A held idea pickup would group: not paused, closing, waiting on you, gated or in Tracer.
-function batchRunnable(j) {
-  return batchHeld(j) && !j.paused?.at && !j.close?.at && !waitsOnYou(j) &&
+function pickupCanLaunch(j) {
+  return !j.paused?.at && !j.close?.at && !waitsOnYou(j) &&
     !(j.origin?.gate === 'human' && !j.origin?.approved) && j.tracer?.building !== true;
 }
+function batchRunnable(j) {
+  return batchHeld(j) && pickupCanLaunch(j);
+}
 
-// A job that started its project's held batch from the dashboard. Mirrors the starters in batch_holds.
+// A job that started its project's held batch from the dashboard and that pickup can launch, so a
+// paused, closing or gated starter does not hold the rest forever. Mirrors the starters in batch_holds.
 function batchStarter(x, project) {
-  return x.stage === 'idea' && x.project === project && x.priority?.batch === true;
+  return x.stage === 'idea' && x.project === project && x.priority?.batch === true && pickupCanLaunch(x);
 }
 
 // The held chip as { text, title }, or null when the idea is not held. Mirrors batch_holds in factory.py.

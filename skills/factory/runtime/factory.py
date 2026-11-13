@@ -3750,10 +3750,12 @@ def batch_holds(home, jobs, runnable):
     """{id: skip line} for the held ideas pickup does not launch this run. A project's held ideas
     wait until it has min_ideas of them or the oldest has gone max_wait_hours without an update.
     Then the first in board order launches and the rest batch behind it. A batch starter, an idea
-    prioritized with priority.batch from the dashboard, releases its project's held ideas behind it at once."""
+    prioritized with priority.batch from the dashboard, releases its project's held ideas behind it at once.
+    A paused, closing or gated starter does not count, so the rest never wait behind an idea pickup skips."""
     groups, starters = {}, {}
     for j in jobs:
-        if j["stage"] == IDEA and prioritized(j) and j["priority"].get("batch") is True:
+        if j["stage"] == IDEA and prioritized(j) and j["priority"].get("batch") is True \
+                and not (gated(j) or paused(j) or closing(j) or tracer_building(j)):
             starters.setdefault(j["project"], j["id"])
         if batch_hold(j) and runnable(j):
             groups.setdefault(j["project"], []).append(j)

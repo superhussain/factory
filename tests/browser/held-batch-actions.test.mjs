@@ -1,6 +1,7 @@
 // Run batch now and Start alone on a held idea's card and drawer menus, against one owned local
 // Worker. Each writes priority with its mode, and the other held idea's chip shows what pickup
-// will do next. Synthetic running example: other holds 201-wait-a and 202-wait-b.
+// will do next, and a paused starter holds nothing. Synthetic running example: other holds
+// 201-wait-a and 202-wait-b.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -130,6 +131,24 @@ test("held batch actions", { timeout: 180000 }, async () => {
     assert.deepEqual(Object.keys(alone), ["at", "alone"]);
     assert.equal(alone.alone, true);
     assert.equal(await chip("201-wait-a"), "Waits for a batch (1 of 3, 3h of 24h)");
+
+    // Pickup skips a paused starter, so 201-wait-a goes back to waiting and can run its own batch.
+    const starter = { at: RECENT, batch: true };
+    await seedBoard(origin, [
+      idea("201-wait-a"),
+      { ...idea("202-wait-b"), priority: starter, paused: { at: RECENT } },
+    ]);
+    await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() =>
+      document
+        .querySelector('.card[data-id="201-wait-a"] .chip.held')
+        ?.textContent.includes("of 3,"),
+    );
+    assert.equal(await chip("201-wait-a"), "Waits for a batch (1 of 3, 3h of 24h)");
+    await page.click('.card-actions[data-actions="201-wait-a"]');
+    await page.waitForSelector(`${MENU}:not([hidden])`);
+    assert.equal(await page.$eval(`${MENU} [data-action="d-run-batch"]`, (b) => b.hidden), false);
+    await page.keyboard.press("Escape");
     assert.deepEqual(errors, []);
   });
 });
