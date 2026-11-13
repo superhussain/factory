@@ -55,7 +55,7 @@ factory.py needs answer <job-id> --answers <file> --chat-file <file>
 - `needs answer` takes `--answers` in the same line format as Backlog answers.
 - Answer every question. It refuses `no answer`.
 - After it succeeds, tell the person the printed `answers` and `needs`. `needs` is
-  `kept` at `needs-human`, where the job waits for the When you are done command.
+  `kept` at `needs-human`, or when the job's needs text no longer points at its form.
 
 ## Dashboard actions
 

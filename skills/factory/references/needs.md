@@ -5,13 +5,13 @@ folder, `push` it, and set `needs` to `answer the questions at $DASHBOARD#<id>/n
 Submitting the form saves `answers.md` and clears needs when it names `#<id>/needs`
 and the job is not at `needs-human`, so the resume schedule picks the job up. At
 `needs-human`, `needs` stays until the human runs the When you are done command.
-An orchestrator may submit a person's chat answers with `factory.py needs answer`, as
-[chat decisions](chat-decisions.md) says; its answers.md says `from chat by <device>`.
 The dashboard renders it as a form, or as numbered steps when it has no questions.
 Keep secrets out of it: the Worker serves it to anyone past Access. Use 1 to 4
 questions, 2 to 4 options each, the recommended option first, and `Pick: one` or
 `Pick: many`. Add a numbered `## Steps` section for action asks and a
 `## When you are done` section with the exact command that lets you continue.
+An orchestrator may submit a person's chat answers with `factory.py needs answer`, as
+[chat decisions](chat-decisions.md) says; its answers.md says `from chat by <device>`.
 
 ```text
 # <one-line ask>
