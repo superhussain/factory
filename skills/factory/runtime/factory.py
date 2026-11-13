@@ -5397,7 +5397,8 @@ PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
 PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
                     "{isInMergeQueue reviewThreads(last:100){nodes{isResolved"
-                    " comments(first:100){nodes{author{__typename login}}}}}}}}")
+                    " comments(first:100){nodes{author{__typename login}}}}}"
+                    " latestReviews(first:100){nodes{author{__typename login}}}}}}")
 PR_STATE_INTERVAL = 30
 BUILDKITE_API = "https://api.buildkite.com/v2"
 BUILDKITE_BUILD = re.compile(r"https://buildkite\.com/([A-Za-z0-9-]{1,100})/([A-Za-z0-9_.-]{1,100})/builds/([0-9]{1,12})"
@@ -5486,16 +5487,6 @@ def pr_reading(home, pr, base):
     def login(item):
         return str((item.get("author") or {}).get("login") or "")
 
-    author = login(view)
-    reviews = [r for r in view.get("latestReviews") or [] if isinstance(r, dict)]
-    replied = max([head] + [str(r.get("submittedAt") or "") for r in reviews if login(r) == author])
-    human = [r for r in reviews if r.get("authorAssociation") in PR_REVIEWERS
-             and login(r) != author and not login(r).endswith("[bot]")]
-    unanswered = any(r.get("state") in ("CHANGES_REQUESTED", "COMMENTED")
-                     and str(r.get("submittedAt") or "") > replied for r in human)
-    decision = view.get("reviewDecision") or ""
-    approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
-    state = str(view.get("state") or "").lower()
     owner, name, _, number = pr.split("/")[3:7]
     try:
         pull = json.loads(gh_answer(gh_cli("api", "graphql", "-f", PR_GRAPHQL_QUERY, "-f", f"o={owner}",
@@ -5505,6 +5496,18 @@ def pr_reading(home, pr, base):
         pull = None
     if not isinstance(pull, dict):
         fail("gh api graphql printed no JSON object", 5)
+    bot_logins = {login(r) for r in (pull.get("latestReviews") or {}).get("nodes") or []
+                  if isinstance(r, dict) and (r.get("author") or {}).get("__typename") == "Bot"}
+    author = login(view)
+    reviews = [r for r in view.get("latestReviews") or [] if isinstance(r, dict)]
+    replied = max([head] + [str(r.get("submittedAt") or "") for r in reviews if login(r) == author])
+    human = [r for r in reviews if r.get("authorAssociation") in PR_REVIEWERS
+             and login(r) != author and login(r) not in bot_logins]
+    unanswered = any(r.get("state") in ("CHANGES_REQUESTED", "COMMENTED")
+                     and str(r.get("submittedAt") or "") > replied for r in human)
+    decision = view.get("reviewDecision") or ""
+    approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
+    state = str(view.get("state") or "").lower()
     in_queue = pull.get("isInMergeQueue") is True
     bots = 0
     for thread in (pull.get("reviewThreads") or {}).get("nodes") or []:

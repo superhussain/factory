@@ -24,17 +24,21 @@ def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", auto=None
                           "commits": [{"committedDate": "2026-01-01T09:00:00Z"}, {"committedDate": HEAD}]})
 
 
-def graph(queue=False, threads=()):
-    return 0, json.dumps({"isInMergeQueue": queue, "reviewThreads": {"nodes": list(threads)}})
+def graph(queue=False, threads=(), reviews=()):
+    return 0, json.dumps({"isInMergeQueue": queue, "reviewThreads": {"nodes": list(threads)},
+                          "latestReviews": {"nodes": [author(login) for login in reviews]}})
 
 
 # GraphQL names a GitHub App by its bare slug and marks it with __typename Bot; only REST adds "[bot]".
 BOTS = ("ci-helper", "lint-helper")
 
 
+def author(login):
+    return {"author": {"__typename": "Bot" if login in BOTS else "User", "login": login}}
+
+
 def thread(*logins, resolved=False):
-    return {"isResolved": resolved, "comments": {"nodes": [
-        {"author": {"__typename": "Bot" if login in BOTS else "User", "login": login}} for login in logins]}}
+    return {"isResolved": resolved, "comments": {"nodes": [author(login) for login in logins]}}
 
 
 def checks(*buckets):
@@ -110,7 +114,8 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket,link"))
         self.assertEqual(calls[2][0], "graphql")
         self.assertIn("pullRequest(number:$n){isInMergeQueue reviewThreads(last:100){nodes{isResolved "
-                      "comments(first:100){nodes{author{__typename login}}}}}}", calls[2][2])
+                      "comments(first:100){nodes{author{__typename login}}}}} "
+                      "latestReviews(first:100){nodes{author{__typename login}}}}}}", calls[2][2])
         self.assertEqual(calls[2][3:], ("-f", "o=example", "-f", "r=sample", "-F", "n=44",
                                         "--jq", ".data.repository.pullRequest"))
 
@@ -129,8 +134,8 @@ class PrStateTest(IsolatedTestCase):
         code, out, err, _ = self.state([(view(), checks("pass"), graph(threads=threads))])
         self.assertEqual((code, err), (0, ""))
         self.assertEqual((json.loads(out)["bots"], json.loads(out)["next"]), (0, "merge"))
-        bot = review("COMMENTED", login="ci-helper[bot]")
-        self.assertEqual(self.next_of((view(reviews=[bot]), checks("pass"), graph())), "merge")
+        bot = review("COMMENTED", login="ci-helper")
+        self.assertEqual(self.next_of((view(reviews=[bot]), checks("pass"), graph(reviews=["ci-helper"]))), "merge")
 
     def test_merged_and_closed(self):
         self.assertEqual(self.next_of((view("MERGED"), checks("pass"))), "merged")
@@ -147,17 +152,30 @@ class PrStateTest(IsolatedTestCase):
 
     def test_older_and_bot_reviews_do_not_ask_for_fixes(self):
         old = review("CHANGES_REQUESTED", at="2026-01-02T09:00:00Z")
-        bot = review("COMMENTED", login="ci-helper[bot]")
-        self.assertEqual(self.next_of((view(reviews=[old, bot]), checks("pass"))), "merge")
+        bot = review("COMMENTED", login="ci-helper")
+        self.assertEqual(self.next_of((view(reviews=[old, bot]), checks("pass"), graph(reviews=["ci-helper"]))),
+                         "merge")
 
     def test_needs_review_without_a_human_approval(self):
         for reading in ((view(decision="REVIEW_REQUIRED"), checks("pass")),
                         (view(decision=""), checks("pass")),
-                        (view(decision="", reviews=[review("APPROVED", login="ci-helper[bot]")]), checks("pass"))):
+                        (view(decision="", reviews=[review("APPROVED", login="ci-helper")]), checks("pass"),
+                         graph(reviews=["ci-helper"]))):
             with self.subTest(reading):
                 self.assertEqual(self.next_of(reading), "needs-review")
         code, out, _, _ = self.state([(view(decision=""), checks("pass"))])
         self.assertEqual(json.loads(out)["review"], "none")
+
+    def test_graphql_bot_reviews_never_count(self):
+        bots = graph(reviews=["ci-helper", "reviewer-a"])
+        approve = review("APPROVED", login="ci-helper")
+        self.assertEqual(self.next_of((view(decision="", reviews=[approve]), checks("pass"), bots)), "needs-review")
+        comment = review("COMMENTED", login="ci-helper")
+        self.assertEqual(self.next_of((view(reviews=[comment]), checks("pass"), bots)), "merge")
+        human = review("APPROVED")
+        self.assertEqual(self.next_of((view(decision="", reviews=[approve, human]), checks("pass"), bots)), "merge")
+        self.assertEqual(self.next_of((view(reviews=[comment, review("COMMENTED")]), checks("pass"), bots)),
+                         "fix-reviews")
 
     def test_an_approving_latest_review_counts_when_no_decision(self):
         reading = (view(decision="", reviews=[review("APPROVED")]), checks("pass"))
