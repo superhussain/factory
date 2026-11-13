@@ -97,6 +97,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .doc .backlog-context > h3, .doc .backlog-triage > h3 { font-size: 13px; margin: 0 0 4px; }
   .ask-rec { background: var(--accent-soft); color: var(--accent); border-radius: 999px; font-size: 11px; padding: 1px 8px; }
   .ask-desc { display: block; color: var(--muted); font-size: 13px; }
+  .ask-model { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+  .ask-why { display: block; color: var(--muted); font-size: 12px; }
   .backlog-tap-hint { display: none; }
   /* Phones see the tap hint. Mouse and keyboard see the A/D hint. Width matches swipeMedia. */
   @media (pointer: coarse) and (max-width: 760px) { .backlog-tap-hint { display: block; } .backlog-key-hint { display: none; } }
@@ -3489,12 +3491,15 @@ function renderNeeds(j, f) {
     if (p.kind === 'md') return md(p.text);
     const a = draft[p.index];
     const type = p.pick === 'one' ? 'radio' : 'checkbox';
+    const c = needsPick(f.triage, p);
     return '<fieldset class="ask"><legend>' + esc(p.header) + '</legend><p>' + esc(p.prompt) + '</p>' +
       '<p class="muted">' + (p.pick === 'one' ? 'Choose one.' : 'Choose any that apply.') + '</p>' +
+      (c ? '<p class="ask-model">' + esc('clef-flash picks ' + c.pick + ' at ' + c.confidence + '%.') + '</p>' : '') +
       p.options.map((o, k) => '<label class="ask-option"><input type="' + type + '" name="q' + p.index + '" value="' + k + '"' +
         (a.picked.includes(k) ? ' checked' : '') + off + '><span><strong>' + esc(o.label) + '</strong>' +
         (o.recommended ? ' <span class="ask-rec">Recommended</span>' : '') +
-        (o.desc ? '<span class="ask-desc">' + esc(o.desc) + '</span>' : '') + '</span></label>').join('') +
+        (o.desc ? '<span class="ask-desc">' + esc(o.desc) + '</span>' : '') +
+        (c ? '<span class="ask-why">' + esc(c.options[k].chance + '%: ' + c.options[k].reason) + '</span>' : '') + '</span></label>').join('') +
       '<label class="ask-other-label">Other, or more detail<textarea class="ask-other" maxlength="4000" rows="3"' + off +
       ' placeholder="Write your own answer, or expand on an option without choosing it.">' + esc(a.other) + '</textarea></label></fieldset>';
   }).join('');
@@ -3503,6 +3508,25 @@ function renderNeeds(j, f) {
     '<p class="muted" id="ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
     '<div class="ask-bar"><button class="btn primary" id="ask-submit" type="submit"' + off + '>Submit answers</button>' +
     '<span id="ask-status" role="status"></span></div></form>';
+}
+
+// clef-flash's choices for this needs.md, or null. A failed read or an older file's record gives null.
+async function loadNeedsTriage(j, sha) {
+  try {
+    const r = await fetch(jobBase(j).replace('./jobs/', './api/jobs/') + 'needs-triage.json', { cache: 'no-store' });
+    if (!r.ok) return null;
+    const v = await r.json();
+    return typeof v?.sha256 === 'string' && v.sha256.slice(0, 12) === sha && Array.isArray(v.choices) ? v.choices : null;
+  } catch { return null; }
+}
+
+// The stored choice for question p, or null unless its header and every label match.
+function needsPick(triage, p) {
+  const c = Array.isArray(triage) ? triage[p.index] : null;
+  const str = (x) => typeof x === 'string';
+  return c && c.header === p.header && str(c.pick) && Number.isInteger(c.confidence) && Array.isArray(c.options) &&
+    c.options.length === p.options.length &&
+    c.options.every((o, k) => o?.label === p.options[k].label && Number.isInteger(o.chance) && str(o.reason)) ? c : null;
 }
 
 async function submitNeeds() {
@@ -3733,6 +3757,7 @@ async function openJob(id) {
   if (typeof j.idea === 'string' && j.idea) got.unshift({ name: 'idea.md', text: j.idea });
   const needsFile = got.find((f) => f.name === 'needs.md');
   if (needsFile) needsFile.sha = await sha12(needsFile.text);
+  if (needsFile) needsFile.triage = await loadNeedsTriage(j, needsFile.sha);
   if (openId !== id) return;
   files = got;
   filesLoading = false;

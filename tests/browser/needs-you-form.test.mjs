@@ -337,6 +337,62 @@ test("needs you form", { timeout: 180000 }, async (t) => {
       );
     });
 
+    await t.test("clef-flash picks", async () => {
+      const record = (sha256) => ({
+        sha256,
+        model: "@cf/cloudflare/clef-flash",
+        at: "2026-01-01T00:00:00.000Z",
+        choices: [
+          {
+            header: "Release path",
+            pick: "Fast",
+            confidence: 71,
+            options: [
+              {
+                label: "Fast",
+                chance: 71,
+                reason: "It is the smallest change that solves the item.",
+              },
+              { label: "Careful", chance: 29, reason: "It avoids auth, data or deploy risk." },
+            ],
+          },
+        ],
+      });
+      let served;
+      await page.setRequestInterception(true);
+      const serve = (request) =>
+        request.method() === "GET" &&
+        new URL(request.url()).pathname === "/api/jobs/sample/001-needs/needs-triage.json"
+          ? request.respond({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify(served),
+            })
+          : request.continue();
+      page.on("request", serve);
+      try {
+        served = record(createHash("sha256").update(NEEDS).digest("hex"));
+        await open("001-needs/needs");
+        await page.waitForSelector("#needs-form", wait);
+        assert.equal(
+          await page.$eval(".ask-model", (el) => el.textContent),
+          "clef-flash picks Fast at 71%.",
+        );
+        assert.equal(
+          await page.$eval(".ask-why", (el) => el.textContent),
+          "71%: It is the smallest change that solves the item.",
+        );
+        served = record("0".repeat(64));
+        await open("001-needs/needs");
+        await page.waitForSelector("#needs-form", wait);
+        assert.equal(await page.$(".ask-model"), null);
+        assert.equal(await page.$(".ask-why"), null);
+      } finally {
+        page.off("request", serve);
+        await page.setRequestInterception(false);
+      }
+    });
+
     assert.deepEqual(errors, []);
     await context.close();
   });
