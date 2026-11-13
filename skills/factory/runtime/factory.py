@@ -104,6 +104,9 @@
   factory.py suggest approve <job-id> <A|B|C> [--chat-file <file> | --chat "<message>"]
                                             a human at a terminal approves one option of such a card,
                                             or --chat-file records a person's chat message instead
+  factory.py control <job-id> <prioritize|unprioritize> --chat-file <file> | --chat "<message>"
+                                            make the dashboard's Prioritize or Remove priority from a
+                                            person's chat message, print the result as JSON
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
@@ -824,7 +827,8 @@ def board(factory, job_id):
     if "move" in patch:
         fail("only the dashboard and factory.py pickup set move", 2)
     if "priority" in patch:
-        fail("only the dashboard and factory.py pickup set priority", 2)
+        fail("only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's chat, "
+             "run factory.py control <job-id> prioritize --chat-file <file>", 2)
     if "paused" in patch:
         fail("only the dashboard sets paused", 2)
     if patch.get("babysit") is not None:
@@ -1810,7 +1814,13 @@ def backlog_questions(context):
     """The questions of a backlog context, as the dashboard's parseBacklogContext reads them,
     or [] when the context does not parse."""
     text = context.replace("\r\n", "\n").replace("\r", "\n")
-    lines = re.sub(r"\A(?:[ \t]*\n)+|(?:\n[ \t]*)+\Z", "", text).split("\n")
+    lines = text.split("\n")
+    top, end = 0, len(lines) - 1
+    while top < end and not lines[top].strip(" \t"):
+        top += 1
+    while end > top and not lines[end].strip(" \t"):
+        end -= 1
+    lines = lines[top:end + 1]
     if lines[0] not in ("Recommend: approve", "Recommend: deny") or len("\n".join(lines)) > 6000:
         return []
     first = next((i for i, line in enumerate(lines) if line.startswith("## Question:")), len(lines))
@@ -2232,12 +2242,14 @@ def batch_cmd(target, *idea_ids):
         try:
             missing = cas(home, "/api/backlog", mark)
         except SystemExit:
+            riders = ", ".join(made.values())
             try:
                 drop(set(made.values()))
             except SystemExit:
-                pass
-            print(f"factory.py: batch removed {', '.join(made.values())}; their backlog lines stay unchecked",
-                  file=sys.stderr)
+                print(f"factory.py: batch could not remove {riders}; they stay on the board at spec, "
+                      f"batched into {lead_id}, and their backlog lines stay unchecked", file=sys.stderr)
+            else:
+                print(f"factory.py: batch removed {riders}; their backlog lines stay unchecked", file=sys.stderr)
             raise
         for pick, rider_id in missing.items():
             drop({rider_id})
@@ -2923,6 +2935,48 @@ def suggest_cmd(sub, *args):
         fail("usage: suggest admit <file> | " + SUGGEST_APPROVE_USAGE[len("usage: "):], 2)
 
 
+CONTROL_ACTIONS = ("prioritize", "unprioritize")
+PRIORITY_STAGES = (IDEA,) + IN_FLIGHT
+CONTROL_USAGE = 'usage: control <job-id> <prioritize|unprioritize> --chat-file <file> | --chat "<message>"'
+
+
+def control_cmd(job_id, action, flag, value):
+    """Make the dashboard's Prioritize or Remove priority from a person's chat message."""
+    if not JOB_ID.fullmatch(job_id) or ".." in job_id or action not in CONTROL_ACTIONS \
+            or flag not in ("--chat", "--chat-file"):
+        fail(CONTROL_USAGE, 2)
+    quote = chat_quote(read_chat_file(value), "--chat-file") if flag == "--chat-file" else chat_quote(value)
+    if quote is None:
+        fail(CONTROL_USAGE, 2)
+    home = factory_home()
+    device = holder(home)[0]
+
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None:
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
+        if action == "prioritize":
+            if not job.get("project"):
+                fail(f"{job_id} cannot be prioritized: it has no project. Nothing was written.", 2)
+            if job.get("stage") not in PRIORITY_STAGES:
+                fail(f"{job_id} cannot be prioritized: it is at {job.get('stage')}. Nothing was written.", 2)
+            if lead_of(job):
+                fail(f"{job_id} cannot be prioritized: it is a rider of {lead_of(job)}. Nothing was written.", 2)
+            if job.get("priority"):
+                return None, "unchanged"
+            stamp = now()
+            job["priority"] = {"at": stamp, "via": "chat", "quote": quote, "by": device}
+        else:
+            if not job.get("priority"):
+                return None, "unchanged"
+            stamp = now()
+            del job["priority"]
+        job["updated"] = data["updated"] = stamp
+        return dump_board(data), action + "d"
+    print(json.dumps({"id": job_id, "action": action, "result": cas(home, "/api/board", change)}))
+
+
 def snapshot(repo, commit, dest):
     """Write commit's regular files and directories into dest, with no .git and no links."""
     r = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", commit], capture_output=True)
@@ -3127,9 +3181,14 @@ def arm_metrics(arm_jobs, follow_ups, jobs_root):
     skipped = {"missing_round_review": [], "missing_decision": [], "pr_before_approve": []}
     coverage_unknown = 0
     for job_id, j in sorted(arm_jobs.items()):
-        folder = jobs_root / (j.get("project") or "") / job_id
-        if not isinstance(j.get("project"), str) or not JOB_ID.fullmatch(job_id) or ".." in job_id \
-                or not folder.is_dir() or not (folder / "spec.md").is_file():
+        if not (isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"])
+                and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and all(k in TRACER_REVIEWERS for entry in j.get("rounds") or [] if isinstance(entry, dict)
+                        for k in entry)):
+            coverage_unknown += 1
+            continue
+        folder = jobs_root / j["project"] / job_id
+        if not folder.is_dir() or not (folder / "spec.md").is_file():
             coverage_unknown += 1
             continue
         missed = False
@@ -3693,7 +3752,7 @@ def takeover(home, data, device, minutes, paths, settings, dry):
         ok, why, log_path = launch_idea(home, entry, live[0], argv, env)
         if ok:
             print(f"took over {job_id} {slug} from {session} on {live[0]} session {tag}")
-            record_agent(home, job_id, launch_row(given, argv, tag))
+            record_launch(home, job_id, launch_row(given, argv, tag))
             return 1
         with open(log_path, "rb") as log:
             log.seek(max(0, os.path.getsize(log_path) - 4096))
@@ -4534,7 +4593,7 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
             print(f"cleaned up {job_id} {project}" + (f", left: {'; '.join(left)}" if left else ""))
 
 
-PRIORITY_NUDGE = ("The owner prioritized factory job {id} from the dashboard. If your turn ended while work "
+PRIORITY_NUDGE = ("The owner prioritized factory job {id}. If your turn ended while work "
                   "on it is still owed, continue with the next step now.")
 
 
@@ -4778,7 +4837,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
                                            launch_env(given, given["provider"], given["model"]))
         if ok:
             print(f"launched {entry['id']} {entry['project']} on {name} session {entry['session']}")
-            record_agent(home, entry["id"], launch_row(given, argv, entry["session"]))
+            record_launch(home, entry["id"], launch_row(given, argv, entry["session"]))
             launches += 1
             continue
         limit_name = experiment["name"] if arm == "b" and experiment else name
@@ -4912,8 +4971,10 @@ def prompt_cmd(target, role, *flags):
         fail(PROMPT_USAGE, 2)
     options = {}
     for flag, value in zip(flags[::2], flags[1::2]):
-        if flag not in ("--round", "--port", "--out") or flag in options:
-            fail(PROMPT_USAGE, 2)
+        if flag not in ("--round", "--port", "--out"):
+            fail(f"unknown flag {flag!r}. " + PROMPT_USAGE, 2)
+        if flag in options:
+            fail(f"{flag} given twice. " + PROMPT_USAGE, 2)
         options[flag] = value
     review = role.startswith("review-")
     if "--round" in options and not (role == "build" or review):
@@ -4930,9 +4991,9 @@ def prompt_cmd(target, role, *flags):
     out = options.get("--out")
     if out is not None:
         out = Path(os.path.normpath(out))
-        jobs = home / "jobs"
-        if not out.is_absolute() or out == jobs or jobs in out.parents:
-            fail(f"--out must be an absolute path outside {jobs}", 2)
+        prompts = home / "prompts"
+        if not (out.is_absolute() and prompts in out.parents):
+            fail(f"--out must be an absolute path under {prompts}", 2)
 
     data = read_board(home)
     job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
@@ -5159,7 +5220,8 @@ def wait_cmd(target, *args):
         if time.monotonic() >= deadline:
             if missing:
                 fail("still missing: " + ", ".join(missing), 3)
-            fail("no valid first line: " + ", ".join(malformed), 5)
+            fail("no valid first line: "
+                 + ", ".join(f'{a} reads "{printable_line(lines[a], 60)}"' for a in malformed), 5)
         time.sleep(1)
 
 
@@ -5258,14 +5320,14 @@ def checks_cmd(target, *args):
 
 
 PR_STATE_USAGE = "usage: pr-state <project-slug>/<job-id> [--wait S]"
-PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup"
+PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName"
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has no isInMergeQueue field, so it comes from GraphQL.
 PR_QUEUE_QUERY = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isInMergeQueue}}}"
 PR_STATE_INTERVAL = 30
 
 
-def pr_reading(pr):
+def pr_reading(pr, base):
     """One reading of the PR for a babysit session, with the next step it calls for."""
     try:
         view = json.loads(gh_pr_view(pr, "--json", PR_STATE_FIELDS))
@@ -5306,6 +5368,7 @@ def pr_reading(pr):
                          "gh api graphql").strip() == "true"
     queued = in_queue or bool(view.get("autoMergeRequest"))
     conflict = view.get("mergeStateStatus") == "DIRTY"
+    stacked = bool(view.get("baseRefName")) and view.get("baseRefName") != base
     if state in ("merged", "closed"):
         step = state
     elif unanswered:
@@ -5318,26 +5381,30 @@ def pr_reading(pr):
         step = "fix-ci"
     elif checks == "pending" or queued or (checks == "none" and new):
         step = "wait"
+    elif stacked:
+        step = "wait-base"
     else:
         step = "merge"
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none",
-            "checks": checks, "queued": queued, "conflict": conflict, "next": step}
+            "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
+            "next": step}
 
 
 def pr_state_cmd(target, *args):
-    """Print one JSON reading of the job's PR. --wait S re-reads every 30 seconds while next is wait."""
+    """Print one JSON reading of the job's PR. --wait S re-reads every 30 seconds while next is wait or wait-base."""
     home, slug, job_id = r2_target(target, True)
     if args and (args[0] != "--wait" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
                  or not 1 <= int(args[1]) <= 600):
         fail("--wait takes one value from 1 to 600 seconds. " + PR_STATE_USAGE, 2)
     wait = int(args[1]) if args else 0
     pr = board_pr(home, slug, job_id)
+    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
     start = time.monotonic()
     while True:
-        reading = pr_reading(pr)
+        reading = pr_reading(pr, base)
         elapsed = time.monotonic() - start
-        if reading["next"] != "wait" or elapsed >= wait:
+        if reading["next"] not in ("wait", "wait-base") or elapsed >= wait:
             print(json.dumps(reading))
             return
         time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
@@ -8270,6 +8337,15 @@ def record_agent(home, job_id, row, claimant=None, project=None):
     return cas(home, "/api/board", change)
 
 
+def record_launch(home, job_id, row):
+    """record_agent for a launch that already happened: a failed write warns instead of ending the pass."""
+    try:
+        record_agent(home, job_id, row)
+    except SystemExit:
+        print(f"factory.py: {job_id} launched, but its agent row was not recorded; the pass goes on",
+              file=sys.stderr)
+
+
 AGENT_STAGES = ("idea",) + IN_FLIGHT + ("needs-human", "pr-open") + TERMINAL
 AGENT_RECORD_USAGE = "usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>]"
 AGENT_COLUMNS = ("stage", "role", "harness", "via", "model", "effort")
@@ -8340,6 +8416,7 @@ COMMANDS["adopt-home"] = (adopt_home_cmd, 1, 1)
 COMMANDS["doctor"] = (doctor_cmd, 0, 0)
 COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
 COMMANDS["suggest"] = (suggest_cmd, 2, 5)
+COMMANDS["control"] = (control_cmd, 4, 4)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
 COMMANDS["experiment"] = (experiment_cmd, 2, 2)
 COMMANDS["unclaim"] = (unclaim, 1, 1)

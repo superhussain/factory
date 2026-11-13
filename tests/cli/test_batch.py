@@ -37,6 +37,8 @@ class BatchTest(IsolatedTestCase):
         self.puts = 0
         self.backlog = "# Backlog\n"
         self.backlog_puts = 0
+        self.backlog_put_status = 200
+        self.board_put_status = 200
         self.on_board_put = None
         self.set_jobs(jobs())
         api = patch.object(factory, "api", side_effect=self.api)
@@ -50,10 +52,14 @@ class BatchTest(IsolatedTestCase):
         if path == "/api/backlog":
             if method == "PUT":
                 self.backlog_puts += 1
+                if self.backlog_put_status == 412:
+                    return 412, {}, ""
                 self.backlog = body
             return 200, {"ETag": '"synthetic"'}, self.backlog
         if method == "PUT":
             self.puts += 1
+            if self.board_put_status == 412:
+                return 412, {}, ""
             self.text = body
             hook, self.on_board_put = self.on_board_put, None
             if hook:
@@ -213,6 +219,32 @@ class BatchTest(IsolatedTestCase):
                               "removed 094-name-the-weekly\n")
         self.assertNotIn("094-name-the-weekly", [j["id"] for j in json.loads(self.text)["jobs"]])
         self.assertEqual((json.loads(out)["riders"], self.backlog_puts), ([], 0))
+
+    def test_backlog_412_rolls_back_riders_and_exits_5(self):
+        key = self.set_backlog()
+        self.backlog_put_status = 412
+        with patch.object(factory.time, "sleep"):
+            code, _, err = self.batch(TARGET, key)
+        self.assertEqual(code, 5)
+        self.assertEqual(err, "factory.py: /api/backlog kept changing under us; gave up after 20 tries\n"
+                              "factory.py: batch removed 094-name-the-weekly; their backlog lines stay unchecked\n")
+        self.assertNotIn("094-name-the-weekly", [j["id"] for j in json.loads(self.text)["jobs"]])
+        self.assertEqual(self.backlog_puts, 20)
+
+    def test_failed_rollback_names_riders_left(self):
+        key = self.set_backlog()
+        self.backlog_put_status = 412
+
+        def lock():
+            self.board_put_status = 412
+        self.on_board_put = lock
+        with patch.object(factory.time, "sleep"):
+            code, _, err = self.batch(TARGET, key)
+        self.assertEqual(code, 5)
+        self.assertTrue(err.endswith(
+            "factory.py: batch could not remove 094-name-the-weekly; they stay on the board at spec, "
+            f"batched into {LEAD}, and their backlog lines stay unchecked\n"), err)
+        self.assertEqual(self.job("094-name-the-weekly")["stage"], "spec")
 
     def test_attach_refusals_write_nothing(self):
         self.refuse(4, "no job 999-sample-none on the board. Nothing was written.", "sample/999-sample-none")

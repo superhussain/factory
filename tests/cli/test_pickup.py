@@ -418,6 +418,21 @@ class PickupTest(PickupFixture):
         self.assertEqual([line.split()[:2] for line in lines], [["launched", "001-alpha"], ["launched", "002-alpha"]])
         self.assertEqual(len(self.launched()), 3)
 
+    def test_a_failed_agent_row_keeps_the_pass_going(self):
+        self.views["alpha"] = (200, effective("alpha", {"pickup": ON}))
+        self.board["jobs"] = [idea("001-alpha", "alpha"), idea("002-alpha", "alpha")]
+        give_up = "/api/board kept changing under us; gave up after 20 tries"
+        with patch.object(factory, "record_agent", lambda *a, **k: factory.fail(give_up, 5)):
+            code, out, err = self.pickup("--limit", "2", "--max-inflight", "2")
+        self.assertEqual(code, 0)
+        self.assertEqual([line.split()[:2] for line in out.splitlines()],
+                         [["launched", "001-alpha"], ["launched", "002-alpha"]])
+        self.assertEqual(len(self.launched()), 2)
+        for job_id in ("001-alpha", "002-alpha"):
+            self.assertEqual(err.count(f"factory.py: {job_id} launched, but its agent row was not recorded; "
+                                       "the pass goes on\n"), 1)
+        self.assertIn(f"factory.py: {give_up}\n", err)
+
     def test_no_route_claims_nothing(self):
         self.board["jobs"] = [idea("001-alpha", "alpha")]
         self.views["alpha"] = (200, effective("alpha", {"pickup": ON}))
@@ -1521,7 +1536,7 @@ class MoveArchiveTest(MoveHostTest):
 
 class PriorityTest(PickupFixture):
     AT = "2026-01-02T12:00:00Z"
-    NUDGE = ("The owner prioritized factory job 042-sample-export from the dashboard. If your turn ended "
+    NUDGE = ("The owner prioritized factory job 042-sample-export. If your turn ended "
              "while work on it is still owed, continue with the next step now.")
 
     def setUp(self):

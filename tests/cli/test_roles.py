@@ -347,3 +347,17 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("the `### Fix now` nits are worth one more review round", approver)
         self.assertNotIn("absorb bar", approver)
         self.assertIn("rather than Sub-jobs", flat("agents/factory-spec-writer.md"))
+
+    def test_checks_are_sized_to_the_change(self):
+        builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
+        babysit = " ".join((SKILL / "references/commands/babysit.md").read_text(encoding="utf-8").split())
+        for text in (builder, babysit):
+            for phrase in ("| copy |", "| test-only |", "| one-file logic |", "| cross-cutting |",
+                           "When two rows fit, the lower one wins.", "never another"):
+                self.assertIn(phrase, text)
+        self.assertIn("Change size: <class>; checks: <commands>", builder)
+        for phrase in ("check plan: <class>: <checks>", 'git -C "$WT" push --no-verify',
+                       "Babysit never runs spec, build or review rounds.", "| `wait-base` |",
+                       "rerun once per session", 'gh run rerun <run-id> --failed -R "$REPO"',
+                       "Never merge while `stacked` is true."):
+            self.assertIn(phrase, babysit)

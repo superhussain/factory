@@ -398,12 +398,13 @@ sets it, and a `/factory babysit` session clears it with `null`; `board` refuses
   round. Only an explicitly assigned stronger builder may resolve an in-scope
   design gap, and it records the decision. It never overrides scope, permissions,
   or human gates.
-- A model change always stops the old writer and starts a fresh builder against the
-  same files, with the job folder, worktree, project file, and latest round or
-  rework file. Resume with SendMessage (or the runtime's prompt tool) only when the
-  actual model need not change. If the old builder is unreachable, a fresh agent
-  reading the same files is equivalent. Keep `note` model-neutral: patch it with
-  the reason for the tier, not a fixed model name.
+- A model change always stops the old writer and starts a fresh builder from a new
+  `prompt "$SLUG/<id>" build --out` file, per the agent-prompt rule above, with
+  the latest round or rework file on a short line after the pointer. Resume with
+  SendMessage (or the runtime's prompt tool) only when the actual model need not
+  change. If the old builder is unreachable, a fresh agent reading the same files
+  is equivalent. Keep `note` model-neutral: patch it with the reason for the tier,
+  not a fixed model name.
 - After every build stage (first build, each fix round, each rework), push the
   branch with `git -C "$WT" push -u origin factory/<id>`, so another device can pick
   the job up. A rejected push means another device moved the branch, so move the job
@@ -534,8 +535,8 @@ sets it, and a `/factory babysit` session clears it with `null`; `board` refuses
   use never adds it.
 - Commands use `python3`, or `py -3` on Windows. No command needs bash: every
   command is `python3`, `git`, or `gh`.
-- Orchestrators run `suggest approve` and `backlog decide` only with `--chat-file`, as
-  [chat decisions](references/chat-decisions.md) says. They never run `autonomy
+- Orchestrators run `suggest approve`, `backlog decide` and `factory.py control` only with
+  `--chat-file`, as [chat decisions](references/chat-decisions.md) says. They never run `autonomy
   resume`, `autonomy allow` or `/factory approve-spec`, or approve scope in Tracer;
   a human does.
 
@@ -610,7 +611,7 @@ Read a command's file before you run it.
 | `/factory idea <id>` | [idea](references/commands/idea.md) | Pickup or a person starts an idea. |
 | `/factory next` | [next](references/commands/next.md) | You take the next backlog line or queue work. |
 | `/factory deny-notes <id>` | [deny-notes](references/commands/deny-notes.md) | Pickup hands you a denied job's notes. |
-| `/factory babysit <id>` | [babysit](references/commands/babysit.md) | Pickup hands you a PR a person asked to babysit to merge. |
+| `/factory babysit <id>` | [babysit](references/commands/babysit.md) | Pickup hands you a PR a person asked to babysit; work it as the Babysit note asks. |
 | `/factory approve <id>` | [approve](references/commands/approve.md) | A person approves a `needs-human` job. |
 | `/factory approve-spec <id>` | [approve-spec](references/commands/approve-spec.md) | A person passes the spec-approval gate. |
 | `/factory rework <id> <note>` | [rework](references/commands/rework.md) | A person asks for rework, or a job is stuck after a dead session. |

@@ -340,7 +340,8 @@ async function casPut(request, env, key, type) {
         ? (checkRowIds(stored.jobs, data.jobs) ??
           checkArchived(stored, data) ??
           checkNewIds(stored.jobs, data.jobs) ??
-          checkRiderControls(stored.jobs, data.jobs))
+          checkRiderControls(stored.jobs, data.jobs) ??
+          checkBatchRefs(stored.jobs, data.jobs))
         : null);
     if (bad) return reply(bad, 400);
   }
@@ -1688,6 +1689,10 @@ const leadOfRow = (j) =>
   Array.isArray(j?.refs)
     ? (j.refs.find((r) => r?.kind === "batched-into" && typeof r.id === "string")?.id ?? null)
     : null;
+const batchLeads = (j) =>
+  Array.isArray(j?.refs)
+    ? j.refs.filter((r) => r?.kind === "batched-into" && typeof r.id === "string").map((r) => r.id)
+    : [];
 
 // A rider follows its lead, so a write cannot add these dashboard controls to it.
 // An error message, or null.
@@ -1703,6 +1708,43 @@ function checkRiderControls(storedJobs, jobs) {
     const added = RIDER_CONTROLS.find((f) => f in row && !(storedRow && f in storedRow));
     if (added)
       return `a board write cannot add ${added} to ${quoteIdCut(row.id, QUOTED_ID_MAX)}: it is batched into ${quoteIdCut(lead, QUOTED_ID_MAX)} and follows its lead. Act on the lead instead. Nothing was written.`;
+  }
+  return null;
+}
+
+// Only factory.py batch adds a batched-into ref, and only the lead's close or merge drops one.
+// An error message, or null.
+function checkBatchRefs(storedJobs, jobs) {
+  const firstById = (rows) => {
+    const byId = new Map();
+    for (const j of rows) if (typeof j?.id === "string" && !byId.has(j.id)) byId.set(j.id, j);
+    return byId;
+  };
+  const stored = firstById(storedJobs);
+  const written = firstById(jobs);
+  for (const row of jobs) {
+    if (typeof row?.id !== "string") continue;
+    const storedRow = stored.get(row.id);
+    const before = batchLeads(storedRow);
+    const after = batchLeads(row);
+    const dropped = before.find((id) => !after.includes(id));
+    if (dropped !== undefined) {
+      const lead = written.get(dropped);
+      if (lead && lead.stage !== "closed" && lead.stage !== "merged")
+        return `a board write cannot unbatch ${quoteIdCut(row.id, QUOTED_ID_MAX)}: its lead ${quoteIdCut(dropped, QUOTED_ID_MAX)} is still open. Only the lead's close or merge drops the ref. Nothing was written.`;
+    }
+    const added = after.find((id) => !before.includes(id));
+    if (
+      added !== undefined &&
+      !(
+        before.length === 0 &&
+        after.length === 1 &&
+        row.stage === "spec" &&
+        (!storedRow || storedRow.stage === "idea") &&
+        written.get(added)?.stage === "spec"
+      )
+    )
+      return `a board write cannot batch ${quoteIdCut(row.id, QUOTED_ID_MAX)} into ${quoteIdCut(added, QUOTED_ID_MAX)}: factory.py batch does that, while the lead is at spec. Nothing was written.`;
   }
   return null;
 }
