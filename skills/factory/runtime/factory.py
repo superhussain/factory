@@ -5338,11 +5338,17 @@ def documents_cmd(slug):
 
 
 PROMPT_ROLES = ("spec", "build", "review-security", "review-ux", "review-ui", "review-code", "approve")
+ROLE_ALIASES = {"builder": "build", "factory-builder": "build",
+                "spec-writer": "spec", "factory-spec-writer": "spec",
+                "approver": "approve", "factory-approver": "approve",
+                "factory-review-security": "review-security", "factory-review-ux": "review-ux",
+                "factory-review-ui": "review-ui", "factory-review-code": "review-code"}
 PROMPT_USAGE = "usage: prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]"
 
 
 def prompt_cmd(target, role, *flags):
     """Print one role's full agent prompt, or with --out write it to a private file and print its path."""
+    role = ROLE_ALIASES.get(role, role)
     home, slug, job_id = r2_target(target, True)
     if role not in PROMPT_ROLES:
         fail(f"bad role {role!r}: use one of {', '.join(PROMPT_ROLES)}", 2)
@@ -6904,10 +6910,15 @@ def push(target):
         manifest[rel] = {"etag": strong(headers["ETag"]), "sha256": sha(data)}
         pushed += 1
         spec_pushed = spec_pushed or rel == "spec.md"
+    pending = folder / ".goal-pending"
+    if spec_pushed:
+        write_atomic(pending, "")
+    goal_due = spec_pushed or pending.exists()
     save_manifest(folder, manifest)
     print(f"pushed {pushed} files")
-    if spec_pushed:
+    if goal_due and (folder / "spec.md").exists() and "spec.md" not in conflicts:
         record_goal(home, slug, job_id, spec_goal((folder / "spec.md").read_text(encoding="utf-8")))
+        pending.unlink(missing_ok=True)
     if conflicts:
         conflict_exit(conflicts)
 
@@ -8991,6 +9002,7 @@ def agent_record_problem(role, harness, via, model, effort):
 def agent_cmd(sub, *args):
     if sub == "record" and len(args) in (5, 6):
         target, role, harness, via, model, *effort = args
+        role = ROLE_ALIASES.get(role, role)
         problem = agent_record_problem(role, harness, via, model, effort[0] if effort else None)
         if problem:
             fail(f"{AGENT_RECORD_USAGE}: {problem}", 2)

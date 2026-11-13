@@ -95,6 +95,11 @@ class PromptTest(IsolatedTestCase):
         self.assertPrompt(["approve"], self.head() + f"Your file: {self.folder / 'decision.md'}\n\n"
                           + envelope("approve"))
 
+    def test_subagent_names_alias_roles(self):
+        for alias, role in (("builder", "build"), ("factory-spec-writer", "spec"), ("approver", "approve")):
+            with self.subTest(alias):
+                self.assertEqual(self.prompt(alias), self.prompt(role))
+
     def test_no_stage_note_ends_after_role_lines(self):
         view = dict(VIEW, stage_notes={})
         self.assertPrompt(["approve"], self.head() + f"Your file: {self.folder / 'decision.md'}\n", view=view)

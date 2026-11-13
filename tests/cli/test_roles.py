@@ -347,6 +347,7 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("Rounds left", approver)
         self.assertIn("the `### Fix now` nits are worth one more review round", approver)
         self.assertNotIn("absorb bar", approver)
+        self.assertIn("never a glob. Round one has no rework file", approver)
         self.assertIn("rather than Sub-jobs", flat("agents/factory-spec-writer.md"))
 
     def test_checks_are_sized_to_the_change(self):

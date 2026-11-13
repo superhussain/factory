@@ -99,6 +99,11 @@ class AgentRecordTest(BoardFixture):
         self.assertRegex(row.pop("at"), r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         self.assertEqual(row, {k: v for k, v in ROWS[4].items() if k != "at"})
 
+    def test_accepts_subagent_names(self):
+        self.assertEqual(self.record("builder", "claude", "native", "claude-opus-5-5", "medium")[0], 0)
+        self.assertEqual(self.record("factory-review-code", "claude", "native", "claude-opus-5-5")[0], 0)
+        self.assertEqual([row["role"] for row in self.job()["agents"]], ["build", "review-code"])
+
     def test_refuses(self):
         roles = "orchestrator, spec, build, review-security, review-ux, review-ui, review-code, approve"
         for args, problem in (
