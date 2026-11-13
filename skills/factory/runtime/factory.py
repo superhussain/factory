@@ -4327,6 +4327,8 @@ def pickup(*args):
 
 USAGE_PICKUP_SETUP = "usage: pickup setup [--install]"
 CRON_PICKUP = re.compile(r"factory\.py.*\bpickup\b")
+ENV_ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+SYSTEM_PYTHON = "/usr/bin/python3"
 
 
 def setup_run(argv, stdin=None):
@@ -4349,6 +4351,32 @@ def setup_try(call, *args):
             return None, err.getvalue().strip()[len("factory.py: "):]
 
 
+def timer_python():
+    """(path, why) of the python the pickup timer runs: SYSTEM_PYTHON when it runs this runtime,
+    else this command's python, which a version manager may move on upgrade."""
+    if WINDOWS:
+        return sys.executable, "this command's python"
+    if not os.path.isfile(SYSTEM_PYTHON):
+        return sys.executable, f"this command's python; {SYSTEM_PYTHON} is missing"
+    if sys.platform == "darwin" and setup_run(["xcode-select", "-p"])[0]:
+        return sys.executable, f"this command's python; {SYSTEM_PYTHON} needs the Xcode command line tools"
+    code, out = setup_run([SYSTEM_PYTHON, "-I", "-B", str(Path(HERE, "factory.py"))])
+    if code == 2 and out.lstrip().startswith("factory.py: usage:"):
+        return SYSTEM_PYTHON, "system python3"
+    return sys.executable, f"this command's python; {SYSTEM_PYTHON} cannot run the runtime"
+
+
+def launcher_folders(template):
+    """Folders the timer PATH needs for a resolved launcher: its program's, and for env the command env runs."""
+    folders = [os.path.dirname(template[0])]
+    if os.path.basename(template[0]) == "env":
+        command = next((a for a in template[1:] if not a.startswith("-") and not ENV_ASSIGN.match(a)), None)
+        found = command and shutil.which(command)
+        if found:
+            folders.append(os.path.dirname(found))
+    return folders
+
+
 def timer_path(scheduler):
     """The file the timer for scheduler lives in; cron's lives in the crontab."""
     if scheduler == "launchd":
@@ -4357,17 +4385,19 @@ def timer_path(scheduler):
 
 
 def timer_values(home):
-    """{argv, path, log} the pickup timer runs with."""
+    """{argv, path, log, python, why} the pickup timer runs with."""
+    python, why = timer_python()
     folders = []
     for route in setup_try(read_routes, home)[0] or []:
         template = setup_try(route_launcher, home, route)[0]
         if template:
-            folders.append(os.path.dirname(template[0]))
-    folders.append(os.path.dirname(sys.executable))
+            folders += launcher_folders(template)
+    folders.append(os.path.dirname(python))
     if not WINDOWS:
         folders += ["/usr/bin", "/bin"]
-    return {"argv": [sys.executable, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
-            "path": os.pathsep.join(dict.fromkeys(folders)), "log": str(Path(home, "logs", "pickup.log"))}
+    return {"argv": [python, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
+            "path": os.pathsep.join(dict.fromkeys(folders)), "log": str(Path(home, "logs", "pickup.log")),
+            "python": python, "why": why}
 
 
 def timer_text(scheduler, values):
@@ -4535,7 +4565,8 @@ def pickup_setup(*args):
     if args:
         print(install_timer(home, PICKUP_SCHEDULER))
     print(f"pickup setup on host {device} ({host_os()}, {PICKUP_SCHEDULER})")
-    print(f"skill {Path(HERE).parent}  python {sys.executable}  home {home}")
+    values = timer_values(home)
+    print(f"skill {Path(HERE).parent}  timer python {values['python']} ({values['why']})  home {home}")
     checks = setup_checks(home, device)
     for n, (name, ok, detail, fix) in enumerate(checks, 1):
         print(f"{n}. {'ok' if ok else 'missing':<8} {name}: {detail}")
