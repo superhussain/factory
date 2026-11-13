@@ -1865,7 +1865,17 @@ def backlog_answers(path, questions, decision):
         if questions and decision != "rework":
             fail(BACKLOG_UNANSWERED, 2)
         return ""
+    parsed = parse_answers(path, questions, None if decision == "rework" else BACKLOG_UNANSWERED)
+    out = [f"- {q['header']}: " + ("no answer" if a is None else
+                                   ". ".join(filter(None, [", ".join(a[0]), a[1] and "Other: " + a[1]])))
+           for q, a in zip(questions, parsed)]
+    return "\n".join(out) if any(a is not None for a in parsed) else ""
 
+
+def parse_answers(path, questions, skip_error):
+    """One (picked labels, other text) per question from an answers file of "- <header>: <answer>"
+    lines, or None for a "no answer" line. Exits 2 when the file does not fit the questions, and
+    with skip_error on a "no answer" line when skip_error is a string."""
     def bad(why):
         fail(f"--answers {path}: {why}", 2)
     try:
@@ -1883,16 +1893,16 @@ def backlog_answers(path, questions, decision):
         + (", ".join(q["header"] for q in questions) or "no questions")
     if len(lines) != len(questions):
         bad(shape)
-    out, answered = [], 0
+    out = []
     for q, line in zip(questions, lines):
         prefix = f"- {q['header']}: "
         answer = line[len(prefix):].strip() if line.startswith(prefix) else ""
         if not answer:
             bad(shape)
         if answer == "no answer":
-            if decision != "rework":
-                fail(BACKLOG_UNANSWERED, 2)
-            out.append(prefix + answer)
+            if isinstance(skip_error, str):
+                fail(skip_error, 2)
+            out.append(None)
             continue
         picked, _, other = answer.partition("Other: ") if answer.startswith("Other: ") else answer.partition(". Other: ")
         picked = [label for label in picked.split(", ") if label]
@@ -1904,9 +1914,8 @@ def backlog_answers(path, questions, decision):
             bad(f"{q['header']} takes one pick" if q["pick"] == "one" else f"{q['header']} repeats a pick")
         if not picked and not other:
             bad(shape)
-        answered += 1
-        out.append(prefix + ". ".join(filter(None, [", ".join(picked), other and "Other: " + other])))
-    return "\n".join(out) if answered else ""
+        out.append((picked, other))
+    return out
 
 
 def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None):
