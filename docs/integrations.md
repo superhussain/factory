@@ -112,6 +112,15 @@ reusable for the next refresh. Run results are read in the scheduler's run histo
 matched to dispatched sessions by the tags printed in each prompt. When a run finds
 nothing to do it exits 3 (`no ideas`) without retrying, as specified above.
 
+### Buildkite logs in pr-state
+
+When a PR's CI runs on Buildkite, `factory.py pr-state` can add the failed job's log tail
+to a `fix-ci` reading as `ci_log`, so a babysit session can fix CI without the Buildkite MCP.
+The token is optional. Create a Buildkite API access token with the `read_builds` and
+`read_build_logs` scopes and store it as `BUILDKITE_API_TOKEN` in `<home>/.env`, never in
+`config.md`, argv or the environment. It is sent only to `https://api.buildkite.com`.
+Without it, `ci_log.problem` says what to set and the reading is otherwise unchanged.
+
 ## Private evidence and images
 
 Private build-tab evidence is the default for reviews and PRs. Relative job images

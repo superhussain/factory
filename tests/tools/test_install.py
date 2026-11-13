@@ -202,6 +202,31 @@ class InstallTest(IsolatedTestCase):
         self.refused(self.install)
         self.assertTrue(folder.is_symlink())
 
+    def test_legacy_link_removal_failure_exits_2(self):
+        old = self.root / "old/huss-factory"
+        old.mkdir(parents=True)
+        self.destination.mkdir()
+        link = self.destination / "huss-factory"
+        link.symlink_to(old, target_is_directory=True)
+        real_unlink, real_rmdir = os.unlink, os.rmdir
+
+        def refuse(real):
+            def call(path, *args, **kwargs):
+                if os.fspath(path) == str(link):
+                    raise PermissionError(path)
+                return real(path, *args, **kwargs)
+            return call
+
+        with patch.object(self.installer.os, "unlink", refuse(real_unlink)), \
+                patch.object(self.installer.os, "rmdir", refuse(real_rmdir)), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err, \
+                self.assertRaises(SystemExit) as error:
+            self.installer.install(SKILL, self.destination)
+        self.assertEqual(error.exception.code, 2)
+        self.assertEqual(err.getvalue(), f"install.py: {link}: cannot safely install factory\n")
+        self.assertTrue(link.is_symlink())
+        self.assertFalse((self.destination / ".factory-install.lock").exists())
+
     def test_installed_only_offline_setup_adoption_roles_and_http_conflict(self):
         distribution = self.root / "distribution"
         (distribution / "tools").mkdir(parents=True)

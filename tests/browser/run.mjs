@@ -306,6 +306,7 @@ async function capture(outdir, referencePath) {
   ) {
     throw new Error("capture mode needs --capture <outdir> --reference-html <absolute .html path>");
   }
+  await mkdir(outdir, { recursive: true });
   const reference = await readFile(referencePath, "utf8");
   const candidate = await readFile(new URL("../../web/dashboard.html", import.meta.url), "utf8");
   const sha = (s) => createHash("sha256").update(s).digest("hex");

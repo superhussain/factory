@@ -55,7 +55,7 @@ class ChecksTest(IsolatedTestCase):
                                                                    {"bucket": "pass", "name": "lint"}]))])
         self.assertEqual((code, out, err), (0, "pass test\npass lint\n", WARN.format("exited 1 with no check list")))
         self.assertEqual(calls[0][:2], ("view", PR))
-        self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket"))
+        self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket,link"))
         self.assertEqual(self.now, 20)
 
     def test_skipping_counts_as_passing(self):
