@@ -2854,6 +2854,21 @@ class PickupSetupTest(PickupFixture):
         self.assertIn("7. ok       timer:", out)
         self.assertIn("note: the timer runs /old/python3 /old/factory.py pickup", out)
 
+    @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
+    def test_launchd_without_program_arguments_notes(self):
+        patch.object(factory, "PICKUP_SCHEDULER", "launchd").start()
+        plist = Path.home() / "Library" / "LaunchAgents" / "factory.pickup.plist"
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        plist.write_bytes(plistlib.dumps({"Label": "factory.pickup", "Program": "/old/python3"}))
+        self.loaded = True
+        code, out, _ = self.setup()
+        self.assertEqual(code, 0)
+        self.assertIn(f"    note: could not read ProgramArguments in {plist}", out)
+        plist.write_bytes(plistlib.dumps(["not", "a", "dict"]))
+        code, out, _ = self.setup()
+        self.assertEqual(code, 0)
+        self.assertIn(f"    note: could not read {plist}.", out)
+
     @unittest.skipIf(sys.platform == "win32", "env launchers are POSIX")
     def test_env_launcher_adds_program_folder(self):
         bin_dir = self.root / "bin"

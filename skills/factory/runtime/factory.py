@@ -4464,8 +4464,10 @@ def timer_drift(scheduler, values):
         plist = timer_path(scheduler)
         try:
             have = plistlib.loads(plist.read_bytes()).get("ProgramArguments")
-        except (OSError, ValueError):
+        except (OSError, ValueError, AttributeError):
             return f"could not read {plist}"
+        if not isinstance(have, list) or not all(isinstance(a, str) for a in have):
+            return f"could not read ProgramArguments in {plist}"
     elif scheduler == "cron":
         lines = [l for l in setup_run(["crontab", "-l"])[1].splitlines() if CRON_PICKUP.search(l)]
         argvs = [cron_argv(l) for l in lines]
