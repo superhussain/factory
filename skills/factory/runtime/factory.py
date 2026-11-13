@@ -109,6 +109,9 @@
                                             make the dashboard's Prioritize, Remove priority, Pause,
                                             Resume or Close from a person's chat message, print the
                                             result as JSON
+  factory.py needs answer <job-id> --answers <file> --chat-file <file>
+                                            submit a person's chat answers to a job's needs.md form
+                                            with the dashboard's writes, print the result as JSON
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
@@ -1865,7 +1868,17 @@ def backlog_answers(path, questions, decision):
         if questions and decision != "rework":
             fail(BACKLOG_UNANSWERED, 2)
         return ""
+    parsed = parse_answers(path, questions, None if decision == "rework" else BACKLOG_UNANSWERED)
+    out = [f"- {q['header']}: " + ("no answer" if a is None else
+                                   ". ".join(filter(None, [", ".join(a[0]), a[1] and "Other: " + a[1]])))
+           for q, a in zip(questions, parsed)]
+    return "\n".join(out) if any(a is not None for a in parsed) else ""
 
+
+def parse_answers(path, questions, skip_error):
+    """One (picked labels, other text) per question from an answers file of "- <header>: <answer>"
+    lines, or None for a "no answer" line. Exits 2 when the file does not fit the questions, and
+    with skip_error on a "no answer" line when skip_error is a string."""
     def bad(why):
         fail(f"--answers {path}: {why}", 2)
     try:
@@ -1883,16 +1896,16 @@ def backlog_answers(path, questions, decision):
         + (", ".join(q["header"] for q in questions) or "no questions")
     if len(lines) != len(questions):
         bad(shape)
-    out, answered = [], 0
+    out = []
     for q, line in zip(questions, lines):
         prefix = f"- {q['header']}: "
         answer = line[len(prefix):].strip() if line.startswith(prefix) else ""
         if not answer:
             bad(shape)
         if answer == "no answer":
-            if decision != "rework":
-                fail(BACKLOG_UNANSWERED, 2)
-            out.append(prefix + answer)
+            if isinstance(skip_error, str):
+                fail(skip_error, 2)
+            out.append(None)
             continue
         picked, _, other = answer.partition("Other: ") if answer.startswith("Other: ") else answer.partition(". Other: ")
         picked = [label for label in picked.split(", ") if label]
@@ -1904,9 +1917,8 @@ def backlog_answers(path, questions, decision):
             bad(f"{q['header']} takes one pick" if q["pick"] == "one" else f"{q['header']} repeats a pick")
         if not picked and not other:
             bad(shape)
-        answered += 1
-        out.append(prefix + ". ".join(filter(None, [", ".join(picked), other and "Other: " + other])))
-    return "\n".join(out) if answered else ""
+        out.append((picked, other))
+    return out
 
 
 def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None):
@@ -3006,6 +3018,112 @@ def control_cmd(job_id, action, *flags):
     if action == "close":
         out["reason"] = stored.get("reason") if isinstance(stored, dict) else None
     print(json.dumps(out))
+
+
+NEEDS_ANSWER_USAGE = "usage: needs answer <job-id> --answers <file> --chat-file <file>"
+NEEDS_SKIPPED = "answer every question; needs answer takes one line per question"
+
+
+def needs_questions(text):
+    """The questions of a needs.md, as the dashboard's parseNeeds reads them, or [] when it has
+    no question form."""
+    sections = [(None, [])]
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if line.startswith("## "):
+            sections.append((line, []))
+        else:
+            sections[-1][1].append(line)
+    questions = []
+    for head, lines in sections:
+        if not (head or "").startswith("## Question:"):
+            continue
+        header = head[len("## Question:"):].strip()
+        picks = [line for line in lines if line.startswith("Pick:")]
+        if len(questions) == 4 or not header or utf16_len(header) > 60 or len(picks) != 1 \
+                or picks[0] not in ("Pick: one", "Pick: many"):
+            return []
+        at = lines.index(picks[0])
+        prompt = " ".join(line for line in lines[:at] if line.strip()).strip()
+        options = []
+        for row in (line for line in lines[at + 1:] if line.strip()):
+            m = re.fullmatch(r"- (.+?)(?::\s+(.+))?", row)
+            if not m:
+                return []
+            rec = re.fullmatch(r"(.*) \(recommended\)", m.group(1), re.I)
+            options.append({"label": rec.group(1) if rec else m.group(1), "desc": m.group(2) or "",
+                            "recommended": bool(rec)})
+        pick = picks[0][len("Pick: "):]
+        if not prompt or not 2 <= len(options) <= 4 \
+                or pick == "one" and sum(o["recommended"] for o in options) > 1:
+            return []
+        questions.append({"header": header, "prompt": prompt, "pick": pick, "options": options,
+                          "labels": [o["label"] for o in options]})
+    return questions
+
+
+def waits_on_you(j):
+    """A job waiting on a person, as the dashboard's waitsOnYou reads it."""
+    if j.get("stage") in TERMINAL:
+        return False
+    return j.get("stage") == "needs-human" or isinstance(j.get("needs"), str) and bool(j["needs"].strip()) \
+        or j.get("stage") == "pr-open" and escalated(j)
+
+
+def needs_answers_markdown(questions, picks, sha12, stamp, device, quote):
+    """answers.md as the dashboard's answersMarkdown writes it, naming the chat message as its source."""
+    blocks = ["# Answers", f"For needs.md sha256 {sha12}, submitted {stamp} from chat by {device}.",
+              f'Chat message: "{" ".join(quote.split())}"']
+    for i, (q, (picked, other)) in enumerate(zip(questions, picks), 1):
+        blocks += [f"## Question {i}: {q['header']}", q["prompt"], f"Pick: {q['pick']}",
+                   "\n".join(f"- [{'x' if o['label'] in picked else ' '}] {o['label']}"
+                             + (" (recommended)" if o["recommended"] else "") + (f": {o['desc']}" if o["desc"] else "")
+                             for o in q["options"]),
+                   f"Other:\n> {other}" if other else "Other: none"]
+    return "\n\n".join(blocks) + "\n"
+
+
+def needs_answer(job_id, answers, chat_file):
+    """Submit a person's chat answers to a job's needs.md form with the dashboard's writes:
+    answers.md first, then the board's needs cleared unless the job is at needs-human."""
+    if not JOB_ID.fullmatch(job_id) or ".." in job_id:
+        fail(NEEDS_ANSWER_USAGE, 2)
+    quote = chat_quote(read_chat_file(chat_file))
+    home = factory_home()
+    job = next((j for j in load_board(api(home, "GET", "/api/board")[2])["jobs"] if j.get("id") == job_id), None)
+    if job is None:
+        fail(f"no job {job_id} on the board. Nothing was written.", 4)
+    if not waits_on_you(job):
+        fail(f"{job_id} is not waiting on you. Nothing was written.", 2)
+    if job.get("project") and not re.fullmatch(r"[\w-]+", str(job["project"]), re.ASCII):
+        fail(f"{job_id} has a bad project on the board. Nothing was written.", 2)
+    base = "/api/jobs/" + (f"{job['project']}/" if job.get("project") else "") + f"{job_id}/"
+    status, _, text = api(home, "GET", base + "needs.md", ok=(200, 404))
+    if status == 404:
+        fail(f"{job_id} has no needs.md. Nothing was written.", 4)
+    questions = needs_questions(text)
+    if not questions:
+        fail(f"{job_id}'s needs.md has no question form. Nothing was written.", 2)
+    picks = parse_answers(answers, questions, NEEDS_SKIPPED)
+    sha12 = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    body = needs_answers_markdown(questions, picks, sha12, now(), holder(home)[0], quote)
+    cas(home, base + "answers.md", lambda _: (body, None))
+
+    def clear(board):
+        data = load_board(board)
+        j = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if j is None or j.get("stage") == "needs-human" or f"#{job_id}/needs" not in str(j.get("needs") or ""):
+            return None, "kept"
+        del j["needs"]
+        j["updated"] = data["updated"] = now()
+        return dump_board(data), "cleared"
+    print(json.dumps({"id": job_id, "answers": "saved", "needs": cas(home, "/api/board", clear)}))
+
+
+def needs_cmd(sub, *args):
+    job_id, flags = args[0], dict(zip(args[1::2], args[2::2]))
+    if sub != "answer" or set(flags) != {"--answers", "--chat-file"}:
+        fail(NEEDS_ANSWER_USAGE, 2)
+    needs_answer(job_id, flags["--answers"], flags["--chat-file"])
 
 
 def snapshot(repo, commit, dest):
@@ -5189,6 +5307,30 @@ def changed_files(wt, base):
     return [p for p in diff.stdout.split("\0") if p]
 
 
+def round_changed_files(wt, head):
+    """The paths changed since an earlier round's head, or None when that head is not an ancestor of HEAD
+    or git fails."""
+    if subprocess.run(["git", "-C", str(wt), "merge-base", "--is-ancestor", head, "HEAD"],
+                      capture_output=True).returncode:
+        return None
+    diff = subprocess.run(["git", "-C", str(wt), "diff", "--name-only", "--no-renames", "-z", head, "HEAD"],
+                          capture_output=True, text=True)
+    return None if diff.returncode else [p for p in diff.stdout.split("\0") if p]
+
+
+def previous_head(folder, n):
+    """(K, head) from the newest round-K/review-plan.json with K below n, or None."""
+    for k in range(n - 1, 0, -1):
+        path = folder / f"round-{k}" / "review-plan.json"
+        if path.is_file() and not is_link(path) and not is_link(path.parent):
+            try:
+                head = json.loads(path.read_text(encoding="utf-8")).get("head")
+            except (ValueError, AttributeError):
+                return None
+            return (k, head) if isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}", head) else None
+    return None
+
+
 def review_plan_cmd(target, round_text):
     """Write SKIPPED ux and ui reviews for a round that changes nothing a person sees, and print one JSON plan.
     Any doubt (no worktree, a git failure, no Acceptance criteria section) runs all four reviewers."""
@@ -5205,29 +5347,56 @@ def review_plan_cmd(target, round_text):
     folder = home / "jobs" / slug / job_id
     round_folder = folder / f"round-{round_text}"
     targets = [round_folder / f"review-{name}.md" for name in SKIPPABLE_REVIEWERS]
-    for node in (folder, round_folder, *targets):
+    plan_file = round_folder / "review-plan.json"
+    for node in (folder, round_folder, *targets, plan_file):
         if is_link(node):
             fail(f"{node} is a symlink or junction; nothing was written", 6)
     if not (folder / "spec.md").is_file():
         fail(f"{folder / 'spec.md'} is missing", 4)
     decision = folder / "decision.md"
-    changed = changed_files(wt, base) if wt.is_dir() else None
-    if changed is None:
-        visible, reason = True, f"the diff against origin/{base} could not be read"
+    decision_text = decision.read_text(encoding="utf-8") if decision.is_file() else ""
+    n = int(round_text)
+    rev = subprocess.run(["git", "-C", str(wt), "rev-parse", "HEAD"], capture_output=True, text=True) \
+        if wt.is_dir() else None
+    head = rev.stdout.strip() if rev and not rev.returncode else None
+    # A fix round reads its own diff when the last round's ux and ui did not ask for changes.
+    prev = previous_head(folder, n) if head else None
+    last = folder / f"round-{n - 1}"
+    passed = prev is not None and all(
+        (last / f"review-{name}.md").is_file()
+        and (last / f"review-{name}.md").read_text(encoding="utf-8").startswith(("VERDICT: PASS", "VERDICT: SKIPPED"))
+        for name in SKIPPABLE_REVIEWERS)
+    fixed = round_changed_files(wt, prev[1]) if passed else None
+    globs = visible_globs(project_file)
+    if fixed is not None:
+        hit = next(((path, g) for path in fixed for g in globs if fnmatch.fnmatchcase(path, g)), None)
+        if re.search(r"^## Visible change[ \t]*$", decision_text, re.M):
+            visible, reason = True, "decision.md names a visible change"
+        elif hit:
+            visible, reason = True, f"{hit[0]} matches {hit[1]}"
+        else:
+            visible, reason = False, (f"none of the {len(fixed)} files changed since round {prev[0]} matches a "
+                                      f"visible-file glob, and round {n - 1} ux and ui did not ask for changes")
     else:
-        visible, reason = plan_reason((folder / "spec.md").read_text(encoding="utf-8"),
-                                      decision.read_text(encoding="utf-8") if decision.is_file() else "",
-                                      changed, visible_globs(project_file))
+        changed = changed_files(wt, base) if wt.is_dir() else None
+        if changed is None:
+            visible, reason = True, f"the diff against origin/{base} could not be read"
+        else:
+            visible, reason = plan_reason((folder / "spec.md").read_text(encoding="utf-8"), decision_text,
+                                          changed, globs)
+    if not visible:
+        for path in targets:
+            if path.exists():
+                fail(f"{path} already exists; nothing was written", 6)
+    if head:
+        round_folder.mkdir(exist_ok=True)
+        write_atomic(str(plan_file), json.dumps({"round": n, "head": head}) + "\n")
     if visible:
-        print(json.dumps({"round": int(round_text), "run": list(TRACER_REVIEWERS), "skipped": [], "reason": reason}))
+        print(json.dumps({"round": n, "run": list(TRACER_REVIEWERS), "skipped": [], "reason": reason}))
         return
     for path in targets:
-        if path.exists():
-            fail(f"{path} already exists; nothing was written", 6)
-    round_folder.mkdir(exist_ok=True)
-    for path in targets:
         write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
-    print(json.dumps({"round": int(round_text), "run": ["security", "code"], "skipped": list(SKIPPABLE_REVIEWERS),
+    print(json.dumps({"round": n, "run": ["security", "code"], "skipped": list(SKIPPABLE_REVIEWERS),
                       "reason": reason}))
 
 
@@ -8543,6 +8712,7 @@ COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
 COMMANDS["agent"] = (agent_cmd, 1, 7)
+COMMANDS["needs"] = (needs_cmd, 6, 6)
 
 def main(argv=None):
     global _HOME_OVERRIDE, _LOCATED

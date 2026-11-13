@@ -116,6 +116,19 @@ test("an age pass moves 412, 413 and 416, archive first, and leaves a floor", as
   assert.equal(s.bucket.calls.slice(before).filter(([op]) => op === "put").length, 0);
 });
 
+test("an archive pass deletes the triage record of each moved row only", async () => {
+  const s = setup();
+  s.seed("needs-triage/sample/412-fix-login.json", { done: true });
+  s.seed("needs-triage/sample/415-add-export.json", { done: true });
+  assert.deepEqual((await s.run()).moved, [
+    "412-fix-login",
+    "413-old-suggestion",
+    "416-rate-limit",
+  ]);
+  assert.equal(s.bucket.objects.has("needs-triage/sample/412-fix-login.json"), false);
+  assert.equal(s.bucket.objects.has("needs-triage/sample/415-add-export.json"), true);
+});
+
 test("Off, an invalid setting and every keep rule leave the board alone", async (t) => {
   const warn = t.mock.method(console, "warn", () => {});
   for (const archive of [null, { mode: "age" }, { mode: "weeks", n: 3 }]) {

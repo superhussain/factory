@@ -148,3 +148,48 @@ class ReviewPlanTest(IsolatedTestCase):
         code, out, err = self.plan()
         self.assertIn("spec.md is missing", err)
         self.assertNothingWritten("1", code, out, 4)
+
+    def head(self):
+        return subprocess.run(["git", "-C", str(self.wt), "rev-parse", "HEAD"], check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def fix_round(self, ux="VERDICT: PASS\n"):
+        """Round 1 of a dashboard change with ux and ui verdicts, then a test-only fix commit."""
+        self.worktree("web/dashboard.html")
+        self.assertRunsAll("1")
+        recorded = json.loads((self.folder / "round-1" / "review-plan.json").read_text())
+        self.assertEqual(recorded, {"round": 1, "head": self.head()})
+        (self.folder / "round-1" / "review-ux.md").write_text(ux)
+        (self.folder / "round-1" / "review-ui.md").write_text("VERDICT: PASS\n")
+
+    def test_fix_round_reads_its_own_diff(self):
+        self.fix_round()
+        self.commit("tests/cli/test_export.py")
+        self.assertEqual(self.assertSkipped("2")["reason"],
+                         "none of the 1 files changed since round 1 matches a visible-file glob, "
+                         "and round 1 ux and ui did not ask for changes")
+        self.assertEqual(json.loads((self.folder / "round-2" / "review-plan.json").read_text()),
+                         {"round": 2, "head": self.head()})
+
+    def test_fix_round_after_ux_changes_runs_all(self):
+        self.fix_round(ux="VERDICT: CHANGES\n")
+        self.commit("tests/cli/test_export.py")
+        self.assertEqual(self.assertRunsAll("2")["reason"], "web/dashboard.html matches *.html")
+
+    def test_fix_round_without_plan_file_runs_all(self):
+        self.fix_round()
+        (self.folder / "round-1" / "review-plan.json").unlink()
+        self.commit("tests/cli/test_export.py")
+        self.assertEqual(self.assertRunsAll("2")["reason"], "web/dashboard.html matches *.html")
+
+    def test_fix_round_after_rewrite_runs_all(self):
+        self.fix_round()
+        self.git("commit", "-q", "--amend", "-m", "rewritten")
+        self.commit("tests/cli/test_export.py")
+        self.assertEqual(self.assertRunsAll("2")["reason"], "web/dashboard.html matches *.html")
+
+    def test_fix_round_visible_change_decision_runs_all(self):
+        self.fix_round()
+        (self.folder / "decision.md").write_text("CHANGES\n\n## Visible change\n\nThe CLI prints new copy.\n")
+        self.commit("tests/cli/test_export.py")
+        self.assertEqual(self.assertRunsAll("2")["reason"], "decision.md names a visible change")
