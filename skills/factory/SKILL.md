@@ -425,8 +425,9 @@ only `factory.py deny-notes` writes it.
   `pr-open`, `pr` to the PR URL, and `automerge` true for an APPROVE PR, in one
   patch. When `$PIPELINE.merge` is `human`, an APPROVE PR ships with `automerge`
   false and `needs` set to `review and merge PR #<n>: this project's pipeline holds
-  every PR for a person`. The orchestrator never merges it. Move the job to `merged`
-  when you see it merged. Then run `cleanup` as Rules describes.
+  every PR for a person`. The orchestrator never merges it. Pickup, or an agent
+  seeing it first, moves it to `merged` or `closed` ([sync](references/pickup.md#syncing-pr-state)).
+  An agent that moves it runs `cleanup`.
   When `batch <project>/<id>` prints any `riders`, the description also has a
   `Batched ideas` list with one `- <id>: <title>` line per rider.
   With a stacked rider, open the job's PR first, then push `factory/<rider-id>` and run
@@ -456,11 +457,11 @@ only `factory.py deny-notes` writes it.
   closes the rider's open PR with a disclosed comment, the same guards as a dashboard
   close, and the rider goes back to `idea`.
 - Jobs at `pr-open` from before auto-merge stay as they are and never auto-merge.
-  A human merges or closes them, and the orchestrator moves the job when it sees that.
+  A human merges or closes them.
 - An ESCALATE PR is held. Put a `> [!WARNING]` callout at the top of the description
   listing the approver's sign-off items, set `escalated` to true, and start the board
   note with "escalated:".
-  A human reviews and merges it. Move the job to `merged` when you see it merged.
+  A human reviews and merges it.
 - `needs` is the human's queue. Set it only when the next step requires
   the user: a decision, a device check or screenshots, a credential, an ESCALATE
   sign-off, a PR the pipeline holds for a person (`merge` `human`), a gate

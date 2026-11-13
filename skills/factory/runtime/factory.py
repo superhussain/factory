@@ -862,6 +862,8 @@ def board(factory, job_id):
     if "close" in patch:
         fail("only the dashboard, factory.py pickup and factory.py control set close. To relay a person's chat, "
              "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
+    if "github" in patch:
+        fail("only factory.py pickup sets github. Nothing was written.", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -4952,6 +4954,11 @@ def closing_message(job_id):
 
 
 GH_PR = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/\d+", re.ASCII)
+GH_PR_PARTS = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})", re.ASCII)
+SYNC_STAGES = ("pr-open", "needs-human")
+PR_SYNC_LIMIT = 100
+GITHUB_CLOSE_REASON = "PR closed on GitHub"
+MERGED_NOTE = "merged on GitHub"
 PR_CLOSE_COMMENT = (
     "> \U0001f916 **Agent-authored report** \u2014 written by factory.py pickup on the owner's behalf, "
     "posted automatically. Tests not run.\n\n"
@@ -4990,6 +4997,29 @@ def gh_cli(*args, stderr=False):
     else:
         result = r.returncode, r.stdout, r.stderr
     return result if stderr else result[:2]
+
+
+def pr_states(repo, numbers, device):
+    """The states of repo's pull requests from one gh api graphql call: ({number: state}, None),
+    or (None, why). A pull request GitHub returns null for is left out."""
+    owner, name = repo.split("/")
+    q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
+         + "".join(f"p{n}: pullRequest(number: {n}) {{ state }} " for n in numbers) + "} }")
+    r = gh_cli("api", "graphql", "-f", "query=" + q)
+    if r is None:
+        return None, f"gh is not installed on {device}"
+    if r[0] == "timeout":
+        return None, f"gh api graphql timed out after 60 seconds on {device}"
+    if r[0]:
+        return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
+    try:
+        found = json.loads(r[1])["data"]["repository"]
+    except (ValueError, KeyError, TypeError):
+        found = None
+    if not isinstance(found, dict):
+        return None, ("gh api graphql returned no repository "
+                      f"(check the project file's repo and gh auth status on {device})")
+    return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
 def close_pull_request(home, j, device, comment=None):
@@ -5092,17 +5122,26 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
                   + ("is off" if enabled is False else f"does not list {them}") + ".\n")
     else:
         manual = ""
+    if j["close"].get("by") == "github":
+        summary = (f"GitHub reported pull request {pr} closed without merging, so factory.py pickup closed the job "
+                   f"at {at} while at stage `{stage}`.")
+        requested = f"GitHub reported the pull request closed. Pickup queued the close at {at}."
+        unreviewed = ("No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` "
+                      "ref if the work is still wanted.")
+    else:
+        summary = f"Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: {reason}."
+        requested = f"Close requested from the dashboard at {at}."
+        unreviewed = "No agent reviewed this close. The reason is the owner's own words."
     text = (f"CLOSED: {reason}\n\n"
-            f"**Summary.** Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: "
-            f"{reason}. Nothing else is owed unless Left out says so.\n\n"
+            f"**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n"
             "## Evidence\n\n"
-            f"- Close requested from the dashboard at {at}.\n"
+            f"- {requested}\n"
             f"- Stage when closed: `{stage}`, round {j.get('round', 0)}.\n"
             f"- Branch: `{j.get('branch') or 'none'}`.\n"
             f"- Pull request: {f'{pr}, {PR_EVIDENCE[state]}' if outcome else 'none'}.\n"
             f"- Written by factory.py pickup on {device}.\n\n"
             "## Left out\n\n"
-            "- No agent reviewed this close. The reason is the owner's own words.\n"
+            f"- {unreviewed}\n"
             f"{open_pr}"
             "- The next pickup run on each host that holds the worktree or branch runs "
             f"`factory.py cleanup {j['project']}/{j['id']}` there when the project's pickup is on "
@@ -5111,6 +5150,78 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
             "origin holds the same commit.\n"
             f"{manual}")
     return text + "\n## Earlier decision\n\n" + earlier if earlier else text
+
+
+def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
+    """Move each pr-open or needs-human job whose pull request GitHub reports merged to merged, and queue
+    a close for each whose pull request GitHub reports closed. One gh api graphql call per repo."""
+    def match(j):
+        job_id, project, pr = j.get("id"), j.get("project"), j.get("pr")
+        if not (j.get("stage") in SYNC_STAGES and isinstance(pr, str) and not closing(j) and lead_of(j) is None
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(project, str) and SLUG.fullmatch(project)):
+            return None
+        return GH_PR_PARTS.fullmatch(pr)
+
+    repos, groups = {}, {}
+    for j in data["jobs"]:
+        m = match(j)
+        if not m:
+            continue
+        job_id, project = j["id"], j["project"]
+        c = blocking(j, device, "", minutes)
+        if c:
+            if dry:
+                print(f"skip sync {job_id} {project}: claimed by {c['device']} session {c.get('session')}")
+            continue
+        if project not in repos:
+            md = project_files(home, project)[0]
+            repos[project] = frontmatter(md)[0].get("repo", "") if md.exists() else ""
+        repo = f"{m[1]}/{m[2]}".lower()
+        if repos[project].lower() != repo:
+            continue
+        reason = pickup_reason(home, project, paths, settings, device, dry)
+        if reason:
+            if dry:
+                print(f"skip sync {job_id} {project}: {reason}")
+            continue
+        groups.setdefault(repo, []).append((j, int(m[3])))
+
+    for repo, jobs in groups.items():
+        if len(jobs) > PR_SYNC_LIMIT:
+            print(f"factory.py: pickup syncs the first {PR_SYNC_LIMIT} of {len(jobs)} pull requests in {repo}",
+                  file=sys.stderr)
+            jobs = jobs[:PR_SYNC_LIMIT]
+        states, why = pr_states(repo, [n for _, n in jobs], device)
+        if states is None:
+            print(f"factory.py: pickup skips the PR sync for {repo}: {why}", file=sys.stderr)
+            continue
+        for j, n in jobs:
+            state = states.get(n)
+            if state not in ("MERGED", "CLOSED"):
+                continue
+            line = f"{j['id']} {j['project']}: " + (MERGED_NOTE if state == "MERGED" else GITHUB_CLOSE_REASON)
+            if dry:
+                print(f"would sync {line}")
+                continue
+            if state == "MERGED":
+                patch = {"stage": "merged", "needs": None, "automerge": None, "babysit": None, "claim": None,
+                         "note": MERGED_NOTE, "github": {"merged": now()}}
+            else:
+                patch = {"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "by": "github"}, "babysit": None}
+
+            def change(text, j=j, patch=patch):
+                board = load_board(text)
+                found = next((x for x in board["jobs"] if x.get("id") == j["id"]), None)
+                if (found is None or not match(found) or found["pr"] != j["pr"]
+                        or found["project"] != j["project"] or blocking(found, device, "", minutes)):
+                    return None, None
+                row = patch_job(board, j["id"], patch)
+                return dump_board(board), row
+            row = cas(home, "/api/board", change)
+            if row:
+                data["jobs"][data["jobs"].index(j)] = row
+                print(f"synced {line}")
 
 
 def close_pass(home, data, device, minutes, dry):
@@ -5138,7 +5249,10 @@ def close_pass(home, data, device, minutes, dry):
             print(f"would close {job_id} {project}" + (f" and pull request {pr}" if pr else "")
                   + "".join(f" and stacked pull request {r['pr']}" for r in open_stacked(data, job_id)))
             continue
-        outcome = close_pull_request(home, j, device) if pr else None
+        if j["close"].get("by") == "github":
+            outcome = ("already closed", "")
+        else:
+            outcome = close_pull_request(home, j, device) if pr else None
         if outcome and outcome[0] == "closed":
             print(f"closed pull request {pr} for {job_id}")
         elif outcome and outcome[0] == "open":
@@ -5170,22 +5284,25 @@ def close_pass(home, data, device, minutes, dry):
             close_stacked_prs(home, job_id, stacked, device)
 
 
-def cleaned_here(j, device):
-    """True when this host already recorded its cleanup of a dashboard-closed job."""
-    done = j["close"].get("cleanup")
+def cleaned_here(j, device, key="close"):
+    """True when this host already recorded its cleanup of a job under j[key]: close for a dashboard-closed
+    job, github for one pickup synced as merged."""
+    done = j[key].get("cleanup")
     return isinstance(done, dict) and device in done
 
 
 def close_cleanup_pass(home, data, device, paths, settings, dry):
-    """Run cleanup once per host on each dashboard-closed job whose worktree or branch this host
-    still holds, and record what it left."""
+    """Run cleanup once per host on each dashboard-closed job, and each job pickup synced as merged, whose
+    worktree or branch this host still holds, and record what it left."""
     for j in data["jobs"]:
-        c, job_id, project = j.get("close"), j.get("id"), j.get("project")
-        if not (j.get("stage") == "closed" and isinstance(c, dict) and isinstance(c.get("closed"), str)
+        stage, job_id, project = j.get("stage"), j.get("id"), j.get("project")
+        key, field = ("github", "merged") if stage == "merged" else ("close", "closed")
+        c = j.get(key)
+        if not (stage in TERMINAL and isinstance(c, dict) and isinstance(c.get(field), str)
                 and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
-        if cleaned_here(j, device) or project not in paths or not os.path.isdir(paths[project]):
+        if cleaned_here(j, device, key) or project not in paths or not os.path.isdir(paths[project]):
             continue
         repo, wt, branch = paths[project], home / "worktrees" / project / job_id, f"factory/{job_id}"
         if not (wt.exists() or git(repo, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")):
@@ -5200,13 +5317,13 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
             continue
         _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
 
-        def change(text, job_id=job_id, closed=c["closed"], left=left):
+        def change(text, job_id=job_id, stage=stage, key=key, field=field, at=c[field], left=left):
             board = load_board(text)
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
-            if (found is None or found.get("stage") != "closed" or not isinstance(found.get("close"), dict)
-                    or found["close"].get("closed") != closed or cleaned_here(found, device)):
+            if (found is None or found.get("stage") != stage or not isinstance(found.get(key), dict)
+                    or found[key].get(field) != at or cleaned_here(found, device, key)):
                 return None, False
-            patch_job(board, job_id, {"close": {"cleanup": {device: {"at": now(), "left": left}}}, "port": None})
+            patch_job(board, job_id, {key: {"cleanup": {device: {"at": now(), "left": left}}}, "port": None})
             return dump_board(board), True
         if cas(home, "/api/board", change):
             print(f"cleaned up {job_id} {project}" + (f", left: {'; '.join(left)}" if left else ""))
@@ -5293,6 +5410,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     stalls = read_stalls(home)
     settings = {}
     move_stop_pass(home, data, device, paths, settings, dry, stalls[0] if stalls else None)
+    pr_sync_pass(home, data, device, minutes, paths, settings, dry)
     close_pass(home, data, device, minutes, dry)
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
