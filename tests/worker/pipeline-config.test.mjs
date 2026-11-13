@@ -319,6 +319,7 @@ test("effective view merges tighter values, 404s unregistered slugs and 409s inv
     gates: [],
     pickup: { enabled: false, hosts: [] },
     triage: { enabled: false, threshold: 90, rules: "" },
+    hold: { min_ideas: 5, max_wait_hours: 12 },
     stage_notes: {},
     versions: { global: 0, project: 0 },
     floors: ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11"],
@@ -436,6 +437,41 @@ test("triage blocks validate field by field and a project block replaces the glo
   );
   view = await (await s.send("/api/pipeline/effective/sample")).json();
   assert.deepEqual(view.triage, project);
+});
+
+test("the hold key validates field by field and echoes in the effective view", async () => {
+  const s = setup();
+  const hold = (extra) => doc({ hold: { min_ideas: 3, max_wait_hours: 6, ...extra } });
+  const minCopy = "hold.min_ideas: must be a whole number from 1 to 20";
+  const hoursCopy = "hold.max_wait_hours: must be a whole number from 1 to 168";
+  for (const [body, text] of [
+    [doc({ hold: [] }), "hold: must be an object"],
+    [doc({ hold: 5 }), "hold: must be an object"],
+    [hold({ days: 1 }), "hold.days: unknown field"],
+    [doc({ hold: { max_wait_hours: 6 } }), minCopy],
+    [hold({ min_ideas: 0 }), minCopy],
+    [hold({ min_ideas: 21 }), minCopy],
+    [hold({ min_ideas: 2.5 }), minCopy],
+    [hold({ min_ideas: "3" }), minCopy],
+    [doc({ hold: { min_ideas: 3 } }), hoursCopy],
+    [hold({ max_wait_hours: 0 }), hoursCopy],
+    [hold({ max_wait_hours: 169 }), hoursCopy],
+  ]) {
+    const response = await s.put("/api/pipeline/global", body);
+    assert.equal(response.status, 400, body);
+    assert.equal(await response.text(), text);
+  }
+  assert.equal(s.puts().length, 0);
+  let view = await (await s.send("/api/pipeline/effective/sample")).json();
+  assert.deepEqual(view.hold, { min_ideas: 5, max_wait_hours: 12 });
+  const global = { min_ideas: 3, max_wait_hours: 6 };
+  assert.equal((await s.put("/api/pipeline/global", doc({ hold: global }))).status, 200);
+  view = await (await s.send("/api/pipeline/effective/sample")).json();
+  assert.deepEqual(view.hold, global);
+  const project = { min_ideas: 20, max_wait_hours: 168 };
+  assert.equal((await s.put("/api/pipeline/projects/sample", doc({ hold: project }))).status, 200);
+  view = await (await s.send("/api/pipeline/effective/sample")).json();
+  assert.deepEqual(view.hold, project);
 });
 
 test("the archive key validates field by field and saves only in the all-projects scope", async () => {

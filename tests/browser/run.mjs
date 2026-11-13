@@ -160,6 +160,55 @@ const CAPTURE_JOBS = [
       notes: "Limit it to the weekly report and name the columns.",
     },
   },
+  {
+    id: "101-wrap-doc-line",
+    project: "sample",
+    title: "Synthetic wrap doc line",
+    stage: "idea",
+    idea: "Synthetic wrap doc line",
+    updated: "2026-01-02T13:10:00Z",
+    refs: [{ id: "090-sample-old", kind: "follow-up-of" }],
+    claim: { device: "host-a", session: "s1", since: "2026-01-02T13:10:00Z" },
+    agents: [
+      {
+        at: "2026-01-02T12:00:00Z",
+        stage: "idea",
+        role: "orchestrator",
+        harness: "provider-a",
+        via: "launcher",
+        model: "model-a",
+        effort: "high",
+      },
+      {
+        at: "2026-01-02T12:05:00Z",
+        stage: "spec",
+        role: "spec",
+        harness: "claude",
+        via: "native",
+        model: "model-a",
+        effort: "medium",
+      },
+      {
+        at: "2026-01-02T13:10:00Z",
+        stage: "review",
+        round: 1,
+        role: "review-ui",
+        harness: "claude",
+        via: "native",
+        model: "model-a",
+        effort: "medium",
+      },
+    ],
+  },
+  {
+    id: "102-move-comment",
+    project: "sample",
+    title: "Synthetic move comment",
+    stage: "idea",
+    idea: "Synthetic move comment",
+    updated: "2026-01-02T12:00:00Z",
+    refs: [{ id: "090-sample-old", kind: "follow-up-of" }],
+  },
 ];
 const CAPTURE_BACKLOG_CONTEXT = [
   "Recommend: approve",
@@ -495,7 +544,7 @@ async function capture(outdir, referencePath) {
             });
             await page.goto(origin + "/dashboard.html", { waitUntil: "networkidle0" });
             await page.waitForSelector(".card");
-            await prepare(page, side);
+            const clip = await prepare(page, side);
             await page.evaluate(async () => {
               await document.fonts.ready;
               await new Promise((resolve) =>
@@ -503,7 +552,7 @@ async function capture(outdir, referencePath) {
               );
             });
             const file = `${outdir.replace(/\/$/, "")}/${side}-${name}.png`;
-            await page.screenshot({ path: file });
+            await page.screenshot(clip ? { path: file, clip } : { path: file });
             const { size } = await stat(file);
             if (size >= 5 * 1024 * 1024) throw new Error(`${file} exceeds 5 MiB`);
             console.log(
@@ -910,6 +959,95 @@ async function capture(outdir, referencePath) {
     };
     await view("archived-load-signin", 1280, 900, "light", openArchivedLoadSignin);
     await view("archived-load-signin-mobile", 390, 844, "dark", openArchivedLoadSignin);
+    // A prepare step that returns this page rectangle crops its view to it.
+    const clipOf = (page, first, last = first) =>
+      page.evaluate(
+        (a, b) => {
+          const top = document.querySelector(a).getBoundingClientRect();
+          const bottom = document.querySelector(b).getBoundingClientRect();
+          const left = Math.floor(Math.min(top.left, bottom.left));
+          const y = Math.floor(top.top);
+          return {
+            x: left + scrollX,
+            y: y + scrollY,
+            width: Math.ceil(Math.max(top.right, bottom.right)) - left,
+            height: Math.ceil(bottom.bottom) - y,
+          };
+        },
+        first,
+        last,
+      );
+    // The reference has no hold fieldset, so its side shows triage straight above archive.
+    const openPipelineHold = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/pipeline";
+      });
+      await page.waitForSelector("#settings-pipeline:not([hidden])");
+      await page.select("#pipeline-scope", "global");
+      await page.waitForFunction(() => !document.getElementById("pipeline-triage-mode").disabled);
+      if (side === "after") {
+        await page.select("#pipeline-hold-mode", "on");
+        for (const [id, value] of [
+          ["#pipeline-hold-min", "3"],
+          ["#pipeline-hold-hours", "6"],
+        ])
+          await page.$eval(
+            id,
+            (el, v) => {
+              el.value = v;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+            },
+            value,
+          );
+        await page.waitForFunction(
+          () => document.getElementById("pipeline-status").textContent === "Unsaved changes",
+        );
+      }
+      await page.evaluate(() =>
+        document.getElementById("pipeline-triage").scrollIntoView({ block: "start" }),
+      );
+      return clipOf(page, "#pipeline-triage", "#pipeline-archive");
+    };
+    await view("pipeline-hold-1280", 1280, 900, "light", openPipelineHold);
+    const openHeldCard = async (page) => {
+      const wrap = '.card-wrap:has(.card[data-id="102-move-comment"])';
+      await page.evaluate(
+        (s) => document.querySelector(s).scrollIntoView({ block: "center", inline: "center" }),
+        wrap,
+      );
+      return clipOf(page, wrap);
+    };
+    await view("held-card-390", 390, 844, "dark", openHeldCard, true);
+    // The reference has no agents table, so its side shows the drawer head alone.
+    const openAgentRuns = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#101-wrap-doc-line";
+      });
+      await page.waitForFunction(
+        () => document.getElementById("d-title").textContent === "Synthetic wrap doc line",
+      );
+      if (side === "after") {
+        await page.waitForSelector("#d-agents:not([hidden])");
+        await page.evaluate(() => {
+          document.getElementById("d-agents").open = true;
+        });
+      }
+      return clipOf(page, ".detail-head");
+    };
+    await view("agent-runs-390", 390, 844, "dark", openAgentRuns, true);
+    await view("agent-runs-1280", 1280, 900, "light", openAgentRuns);
+    // The reference keeps 001-capture open behind the sign-in banner; the candidate closes it.
+    const openArchiveSignin = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#001-capture";
+      });
+      await page.waitForFunction(() =>
+        document.getElementById("d-meta").textContent.includes("001-capture"),
+      );
+      await openArchivedLoadSignin(page);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    };
+    await view("archive-signin-1280", 1280, 900, "light", openArchiveSignin);
     await view("archive-list", 1280, 900, "light", openArchiveList);
     await view("archive-list-mobile", 390, 844, "dark", openArchiveList);
     const openArchiveListError = async (page, side) => {
