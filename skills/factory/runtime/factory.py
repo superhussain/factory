@@ -3739,13 +3739,20 @@ def hold_config(home, slug):
 def batch_holds(home, jobs, runnable):
     """{id: skip line} for the held ideas pickup does not launch this run. A project's held ideas
     wait until it has min_ideas of them or the oldest has gone max_wait_hours without an update.
-    Then the first in board order launches and the rest batch behind it."""
-    groups = {}
+    Then the first in board order launches and the rest batch behind it. A batch starter, an idea
+    prioritized with priority.batch from the dashboard, releases its project's held ideas behind it at once."""
+    groups, starters = {}, {}
     for j in jobs:
+        if j["stage"] == IDEA and prioritized(j) and j["priority"].get("batch") is True:
+            starters.setdefault(j["project"], j["id"])
         if batch_hold(j) and runnable(j):
             groups.setdefault(j["project"], []).append(j)
     stamp, lines = datetime.now(timezone.utc), {}
     for slug, held in groups.items():
+        if slug in starters:
+            for j in held:
+                lines[j["id"]] = f"skip {j['id']} {slug}: batches behind {starters[slug]}"
+            continue
         least, hours = hold_config(home, slug)
 
         def age(j):

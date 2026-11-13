@@ -2728,6 +2728,15 @@ class BatchHoldTest(PickupFixture):
         self.assertTrue(lines[3].startswith("would launch 110-add-csv-export alpha on primary: "))
         self.assertEqual(lines[4:], [f"host {DEVICE}: would launch 1"])
 
+    def test_batch_starter_holds_the_rest(self):
+        self.board["jobs"] = self.held_ideas(3) + [
+            idea("110-add-csv-export", "alpha", refs=FOLLOW, updated=stamp(minutes=-10),
+                 priority={"at": stamp(minutes=-1), "batch": True})]
+        lines = self.dry()
+        self.assertTrue(lines[0].startswith("would launch 110-add-csv-export alpha on primary: "))
+        self.assertEqual(lines[1:], [f"skip {job_id} alpha: batches behind 110-add-csv-export" for job_id in HELD[:3]]
+                         + [f"host {DEVICE}: would launch 1"])
+
     def test_view_hold_settings(self):
         self.board["jobs"] = self.held_ideas(3)
         view = effective("alpha", None, {"pickup": ON})
