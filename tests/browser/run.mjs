@@ -372,9 +372,12 @@ async function capture(outdir, referencePath) {
     let archiveSearchFails = false;
     let longProject = false;
     let refBoard = false;
-    let grantLoopback = false;
     const failed = [];
     const onlyViews = process.env.FACTORY_CAPTURE_VIEWS?.split(",");
+    const waitLiveDot = (page) =>
+      page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
+        timeout: 30000,
+      });
     async function view(name, width, height, theme, prepare, touch = false) {
       if (onlyViews && !onlyViews.includes(name)) return;
       for (const side of ["before", "after"]) {
@@ -383,11 +386,10 @@ async function capture(outdir, referencePath) {
           await retryCapture(`${side}-${name}`, async () => {
             const context = await browser.createBrowserContext();
             try {
-              if (grantLoopback)
-                await context.setPermission(origin, {
-                  permission: { name: "loopback-network" },
-                  state: "granted",
-                });
+              await context.setPermission(origin, {
+                permission: { name: "loopback-network" },
+                state: "granted",
+              });
               const page = await context.newPage();
               await page.setViewport({
                 width,
@@ -553,6 +555,7 @@ async function capture(outdir, referencePath) {
               });
               await page.goto(origin + "/dashboard.html", { waitUntil: "networkidle0" });
               await page.waitForSelector(".card");
+              await waitLiveDot(page);
               const clip = await prepare(page, side);
               await page.evaluate(async () => {
                 await document.fonts.ready;
@@ -729,6 +732,7 @@ async function capture(outdir, referencePath) {
       );
       await page.reload({ waitUntil: "networkidle0" });
       await page.waitForSelector("#filter:not([hidden])");
+      await waitLiveDot(page);
       await hideAllProjects(page);
     };
     await view("filter-none-few-columns-desktop", 1440, 900, "light", hideColumnsAndProjects);
@@ -851,18 +855,11 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("archive-settings", 1280, 900, "light", openArchiveSettings);
-    const waitLiveDot = (page) =>
-      page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
-        timeout: 30000,
-      });
     const openPollSettings = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/display";
       });
       await page.waitForSelector("#settings-display:not([hidden])");
-      // Pin the header dot to live on both sides, so the pair does not depend on socket timing.
-      // view() grants loopback-network before navigation, so the first socket opens and the dot goes live.
-      await waitLiveDot(page);
       await page.evaluate(() =>
         document.querySelector("#display-poll").scrollIntoView({ block: "center" }),
       );
@@ -877,9 +874,7 @@ async function capture(outdir, referencePath) {
         ),
       );
     };
-    grantLoopback = true;
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
-    grantLoopback = false;
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
@@ -945,8 +940,6 @@ async function capture(outdir, referencePath) {
     await view("archive-swap", 1280, 900, "light", openArchiveSwap);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
     const openArchivedLoadFailed = async (page) => {
-      // Pin the header dot to live on both sides. Without loopback-network, local network access blocks the intercepted before page's socket.
-      await waitLiveDot(page);
       // Both sides wait for the archive answer and then the toast text, so neither shot is taken mid-request.
       const answered = page.waitForResponse((response) => {
         const url = new URL(response.url());
@@ -964,9 +957,7 @@ async function capture(outdir, referencePath) {
           .textContent.startsWith("Could not load archived job"),
       );
     };
-    grantLoopback = true;
     await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
-    grantLoopback = false;
     const openArchivedLoadSignin = async (page) => {
       await page.evaluate(() => {
         location.hash = "#413-expired-link";
