@@ -1087,15 +1087,15 @@ async function capture(outdir, referencePath) {
         () => document.getElementById("d-title").textContent === "Synthetic wrap doc line",
       );
       await page.waitForSelector("#d-agents:not([hidden])");
+      // A 1200px drawer fits the whole table at 1280, since the screenshot resets any
+      // scroll there. At 390 the table scrolls to its right end so the last columns show.
       await page.evaluate(() => {
+        document.getElementById("detail").style.setProperty("--drawer-w", "1200px");
         document.getElementById("d-agents").open = true;
       });
-      // Scrolled to the table's right end so the last columns show. The 1280 screenshot
-      // re-lays out the page and resets the scroll, so that view shows the left end.
-      await page.waitForFunction(() => {
+      await page.evaluate(() => {
         const wrap = document.querySelector("#d-agents .table-wrap");
         wrap.scrollLeft = wrap.scrollWidth;
-        return wrap.scrollLeft > 0;
       });
       return clipOf(page, ".detail-head");
     };
