@@ -348,6 +348,7 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("the `### Fix now` nits are worth one more review round", approver)
         self.assertNotIn("absorb bar", approver)
         self.assertIn("never a glob. Round one has no rework file", approver)
+        self.assertIn("First list the job folder with `ls -R <job folder>`", approver)
         self.assertIn("rather than Sub-jobs", flat("agents/factory-spec-writer.md"))
 
     def test_checks_are_sized_to_the_change(self):
