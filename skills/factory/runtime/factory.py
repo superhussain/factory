@@ -32,6 +32,7 @@
                                             pipeline lists this host, through launchers.json; silent
                                             when there is nothing to do. The backlog triage sweep
                                             runs at most every 30 minutes; --triage-now runs it now
+  factory.py pickup setup [--install]      check every pickup prerequisite on this host and print each fix; --install writes and loads the 5 minute timer
   factory.py host pair <id> <code>          pair this device with a host added in Settings and set
                                             device: <id> in config.md
   factory.py pipeline <project-slug>        print the project's effective pipeline configuration as JSON,
@@ -154,6 +155,7 @@ import io
 import json
 import os
 import platform
+import plistlib
 import random
 import re
 import secrets
@@ -860,6 +862,8 @@ def board(factory, job_id):
     if "close" in patch:
         fail("only the dashboard, factory.py pickup and factory.py control set close. To relay a person's chat, "
              "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
+    if "github" in patch:
+        fail("only factory.py pickup sets github. Nothing was written.", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -1901,6 +1905,20 @@ def backlog_answers(path, questions, decision):
     return "\n".join(out) if any(a is not None for a in parsed) else ""
 
 
+def split_picks(text, labels):
+    """The picks of a ", " separated answer. A whole label wins over the split, so a label that holds
+    ", " stays one pick; the longest label that ends the text or is followed by ", " is taken first."""
+    picks, i = [], 0
+    while i < len(text):
+        rest = text[i:]
+        label = max((x for x in labels if rest == x or rest.startswith(x + ", ")), key=len, default=None)
+        piece = label if label is not None else rest.split(", ", 1)[0]
+        if piece:
+            picks.append(piece)
+        i += len(piece) + 2
+    return picks
+
+
 def parse_answers(path, questions, skip_error):
     """One (picked labels, other text) per question from an answers file of "- <header>: <answer>"
     lines, or None for a "no answer" line. Exits 2 when the file does not fit the questions, and
@@ -1934,7 +1952,7 @@ def parse_answers(path, questions, skip_error):
             out.append(None)
             continue
         picked, _, other = answer.partition("Other: ") if answer.startswith("Other: ") else answer.partition(". Other: ")
-        picked = [label for label in picked.split(", ") if label]
+        picked = split_picks(picked, q["labels"])
         other = " ".join(other.split())
         for label in picked:
             if label not in q["labels"]:
@@ -1990,7 +2008,8 @@ def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None)
 
     def chat_saved(j):
         record = j.get("backlog")
-        return isinstance(record, dict) and record.get("line") == raw and record.get("via") == "chat"
+        return isinstance(record, dict) and record.get("line") == raw and record.get("via") == "chat" \
+            and f"- [x] {slug}: {feature} ({j.get('id')})" not in lines
 
     def mine(j):
         return chat_saved(j) and j["backlog"].get("decision") == stored
@@ -2902,9 +2921,22 @@ CHAT_QUOTE_MAX = 500
 SUGGEST_APPROVE_USAGE = 'usage: suggest approve <job-id> <A|B|C> [--chat-file <file>]'
 
 
+def neutralize_chat(text):
+    """text with code fence markers dropped and each link shown as (link: <host>)."""
+    def show(m):
+        token = m.group(0)
+        if "://" not in token and not NOTE_LINK.search(token):
+            return token
+        rest = token.split("://", 1)[-1].split("/", 1)[0].rsplit("@", 1)[-1]
+        host = re.match(r"[A-Za-z0-9.-]*", rest).group(0).lower().strip(".-")
+        host = host[4:] if host.startswith("www.") else host
+        return f"(link: {host})" if host else "(link)"
+    return re.sub(r"\S+", show, re.sub(r"`{3,}|~{3,}", "", text))
+
+
 def chat_quote(text, flag="--chat-file"):
     """The stripped chat message, None when it is blank, or exit 2 when it breaks a text rule."""
-    text = (text or "").strip()
+    text = neutralize_chat((text or "").strip()).strip()
     if not text:
         return None
     why = check_text(text, 1, CHAT_QUOTE_MAX, multiline=True)
@@ -4253,6 +4285,8 @@ def pickup(*args):
     do. Never calls a model itself; backlog triage asks the Worker, which does. No idea text
     reaches a launcher's arguments, environment or log name. A Worker error inside a Tracer pass or
     the triage sweep costs a warning, not the launches."""
+    if args and args[0] == "setup":
+        return pickup_setup(*args[1:])
     flags = {}
     i = 0
     while i < len(args):
@@ -4307,6 +4341,232 @@ def pickup(*args):
     finally:
         if not dry:
             report_status(home, PICKUP_SCHEDULER, started, failing, save=True)
+
+
+USAGE_PICKUP_SETUP = "usage: pickup setup [--install]"
+CRON_PICKUP = re.compile(r"factory\.py.*\bpickup\b")
+
+
+def setup_run(argv, stdin=None):
+    """(returncode, output) of a scheduler command: stdout on success, stdout + stderr on failure;
+    127 when the program is missing."""
+    try:
+        done = subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=30)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        return 127, str(e)
+    return done.returncode, done.stdout if done.returncode == 0 else done.stdout + done.stderr
+
+
+def setup_try(call, *args):
+    """(value, None) from call, or (None, the text it failed with)."""
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        try:
+            return call(*args), None
+        except SystemExit:
+            return None, err.getvalue().strip()[len("factory.py: "):]
+
+
+def timer_path(scheduler):
+    """The file the timer for scheduler lives in; cron's lives in the crontab."""
+    if scheduler == "launchd":
+        return Path.home() / "Library" / "LaunchAgents" / "factory.pickup.plist"
+    return Path.home() / ".config" / "factory-pickup.cmd"
+
+
+def timer_values(home):
+    """{argv, path, log} the pickup timer runs with."""
+    folders = []
+    for route in setup_try(read_routes, home)[0] or []:
+        template = setup_try(route_launcher, home, route)[0]
+        if template:
+            folders.append(os.path.dirname(template[0]))
+    folders.append(os.path.dirname(sys.executable))
+    if not WINDOWS:
+        folders += ["/usr/bin", "/bin"]
+    return {"argv": [sys.executable, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
+            "path": os.pathsep.join(dict.fromkeys(folders)), "log": str(Path(home, "logs", "pickup.log"))}
+
+
+def timer_text(scheduler, values):
+    argv, path, log = values["argv"], values["path"], values["log"]
+    if scheduler == "cron":
+        return f"*/5 * * * * PATH={shlex.quote(path)} {shlex.join(argv)} >> {shlex.quote(log)} 2>&1"
+    if scheduler == "launchd":
+        return plistlib.dumps({"Label": "factory.pickup", "ProgramArguments": argv,
+                               "EnvironmentVariables": {"PATH": path}, "StartInterval": 300,
+                               "StandardOutPath": log, "StandardErrorPath": log}).decode()
+    return f'@echo off\r\nset "PATH={path};%PATH%"\r\n{subprocess.list2cmdline(argv)} >> "{log}" 2>&1\r\n'
+
+
+def timer_installed(scheduler, home):
+    """(installed, detail) for this host's pickup timer."""
+    if scheduler == "launchd":
+        plist = timer_path(scheduler)
+        if not plist.exists():
+            return False, "no launchd job factory.pickup"
+        if setup_run(["launchctl", "print", f"gui/{os.getuid()}/factory.pickup"])[0]:
+            return False, f"{plist} exists but is not loaded"
+        return True, "launchd job factory.pickup is loaded"
+    if scheduler == "cron":
+        code, out = setup_run(["crontab", "-l"])
+        if code or not any(CRON_PICKUP.search(line) for line in out.splitlines()):
+            return False, "no factory pickup line in the crontab"
+        if setup_run(["pgrep", "-x", "cron"])[0] and setup_run(["pgrep", "-x", "crond"])[0]:
+            return False, "the crontab line is set but cron is not running; on WSL run: sudo service cron start"
+        return True, "crontab runs pickup every 5 minutes"
+    if setup_run(["schtasks", "/Query", "/TN", "factory-pickup"])[0]:
+        return False, "no scheduled task factory-pickup"
+    return True, "scheduled task factory-pickup exists"
+
+
+def install_timer(home, scheduler):
+    """Write and load the 5 minute pickup timer; one line saying what changed."""
+    Path(home, "logs").mkdir(parents=True, exist_ok=True)
+    text = timer_text(scheduler, timer_values(home))
+    if scheduler == "launchd":
+        plist, uid = timer_path(scheduler), os.getuid()
+        if plist.exists() and plist.read_bytes() == text.encode() \
+                and setup_run(["launchctl", "print", f"gui/{uid}/factory.pickup"])[0] == 0:
+            return f"timer already installed: {plist}"
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        write_atomic(plist, text)
+        setup_run(["launchctl", "bootout", f"gui/{uid}/factory.pickup"])
+        code, out = setup_run(["launchctl", "bootstrap", f"gui/{uid}", str(plist)])
+        done = f"installed launchd timer: {plist}"
+    elif scheduler == "cron":
+        code, out = setup_run(["crontab", "-l"])
+        if code and not (code == 1 and "no crontab for" in out):
+            fail(f"could not read the crontab, so it was left as is: {out.strip()}", 1)
+        lines = out.splitlines() if code == 0 else []
+        wanted = [line for line in lines if not CRON_PICKUP.search(line)] + [text]
+        if lines == wanted:
+            return "timer already installed: crontab"
+        code, out = setup_run(["crontab", "-"], stdin="\n".join(wanted) + "\n")
+        done = "installed cron timer: crontab"
+    else:
+        cmd = timer_path(scheduler)
+        if not cmd.exists() or cmd.read_bytes() != text.encode():
+            cmd.parent.mkdir(parents=True, exist_ok=True)
+            write_atomic(cmd, text)
+        code, out = setup_run(["schtasks", "/Create", "/TN", "factory-pickup", "/SC", "MINUTE", "/MO", "5",
+                               "/TR", str(cmd), "/F"])
+        done = f"installed schtasks timer: {cmd}"
+    if code:
+        fail(f"could not install the {scheduler} timer: {out.strip()}", 1)
+    return done
+
+
+def timer_fix(scheduler, home):
+    """The lines that set up the pickup timer by hand."""
+    text = timer_text(scheduler, timer_values(home))
+    path = timer_path(scheduler)
+    if scheduler == "cron":
+        return ["Add this line with crontab -e:", text]
+    if scheduler == "launchd":
+        return [f"Save as {path}:", *text.splitlines(), f"Load it: launchctl bootstrap gui/{os.getuid()} {path}"]
+    return [f"Save as {path}:", *text.splitlines(),
+            f'Then run: schtasks /Create /TN factory-pickup /SC MINUTE /MO 5 /TR "{path}" /F']
+
+
+def setup_checks(home, device):
+    """[(name, ok, detail, fix lines)] for the 7 pieces pickup needs on this host, in order.
+    ok is None when an earlier check it depends on failed."""
+    argv = [sys.executable, str(Path(HERE, "factory.py"))]
+    if _HOME_OVERRIDE:
+        argv += ["--home", str(home)]
+    run = shlex.join(argv)
+    skill = Path(HERE).parent
+    checks = []
+
+    failing = [c["name"] for c in doctor(home)["checks"] if c["status"] != "pass"]
+    checks.append(("home", not failing, f"failing: {', '.join(failing)}" if failing
+                   else "config, credentials, projects and board pass",
+                   [f"Run: {run} doctor",
+                    "Then fix each failing check; see docs/troubleshooting.md in the factory repository."]))
+
+    config = Path(home, "config.md")
+    named = (frontmatter(config)[0] if config.exists() else {}).get("device", "")
+    short = socket.gethostname().split(".")[0]
+    valid = bool(named and HOST_NAME.fullmatch(named))
+    checks.append(("device", valid, f"device: {device}" if valid
+                   else f"config.md device: {named!r} is not a valid host name" if named
+                   else f"config.md sets no device:, so this host is {device}",
+                   [f"Replace the device: line in the frontmatter of {config} with:" if named
+                    else f"Add this line inside the frontmatter of {config}:",
+                    f"device: {short if HOST_NAME.fullmatch(short) else '<host-name>'}"]))
+
+    paths = read_paths(home)
+    slugs = [slug for slug, path in paths.items() if os.path.isdir(path)]
+    checks.append(("checkout", bool(slugs), ", ".join(slugs) if slugs
+                   else "paths.md lists no checkout that exists on this host",
+                   [f"Run: {run} init <repo-path>"]))
+
+    routes, why = setup_try(read_routes, home)
+    checks.append(("routes", routes is not None, ", ".join(r[0] for r in routes) if routes else why,
+                   [f"Write {Path(home, 'routes.md')}:", "---", "primary: <provider> <model> <effort>", "---"]))
+
+    if routes is None:
+        launchers, why = None, "not checked: fix check 4 first"
+    else:
+        errors = [setup_try(route_launcher, home, r)[1] for r in routes]
+        why = next((e for e in errors if e), None)
+        launchers = why is None
+    example = {"version": 1, "launchers": {r[0]: ["<program>", "<arg>", "..."] for r in routes or []}}
+    checks.append(("launchers", launchers, why or "every route has a launcher",
+                   [f"Write {Path(home, 'launchers.json')}:", json.dumps(example),
+                    f"Launcher examples: {skill / 'references' / 'pickup.md'}"]))
+
+    if failing or not slugs:
+        first = " and ".join(n for n, bad in (("1", failing), ("3", not slugs)) if bad)
+        listed, detail = None, f"not checked: fix check{'s' if failing and not slugs else ''} {first} first"
+    else:
+        on, parts = [], []
+        for slug in slugs:
+            settings, why = setup_try(pickup_settings, home, slug, paths[slug], device)
+            enabled, hosts, why = settings or (None, None, why)
+            if why:
+                parts.append(f"{slug}: {why}")
+            elif not enabled:
+                parts.append(f"{slug}: pickup off")
+            elif device not in hosts:
+                parts.append(f"{slug}: pickup lists {', '.join(hosts)}, not {device}")
+            else:
+                on.append(slug)
+        listed = bool(on)
+        detail = f"pickup lists {device} for {', '.join(on)}" if on else "; ".join(parts)
+    checks.append(("pipeline", listed, detail, [] if listed is None else
+                   ["Fix check 2 first if this host name is wrong.",
+                    "Otherwise, in the dashboard, Settings, Pipeline (or Settings, Projects, <project>), "
+                    f"turn pickup on and add host {device} exactly as written."]))
+
+    installed, detail = timer_installed(PICKUP_SCHEDULER, home)
+    checks.append(("timer", installed, detail,
+                   timer_fix(PICKUP_SCHEDULER, home) + [f"Or run: {run} pickup setup --install"]))
+    return checks
+
+
+def pickup_setup(*args):
+    """Check every piece pickup needs on this host and print the fix for each missing one; with
+    --install, write and load the 5 minute timer first. Writes no factory file. Exit 3 until all pass."""
+    if args not in ((), ("--install",)):
+        fail(USAGE_PICKUP_SETUP, 2)
+    home = factory_home()
+    device = holder(home)[0]
+    if args:
+        print(install_timer(home, PICKUP_SCHEDULER))
+    print(f"pickup setup on host {device} ({host_os()}, {PICKUP_SCHEDULER})")
+    print(f"skill {Path(HERE).parent}  python {sys.executable}  home {home}")
+    checks = setup_checks(home, device)
+    for n, (name, ok, detail, fix) in enumerate(checks, 1):
+        print(f"{n}. {'ok' if ok else 'missing':<8} {name}: {detail}")
+        if not ok:
+            for line in fix:
+                print(f"    {line}")
+    passed = sum(1 for c in checks if c[1])
+    print(f"{passed} of 7 ok." + ("" if passed == 7 else " Pickup does nothing on this host until every check is ok."))
+    print("A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.")
+    sys.exit(0 if passed == 7 else 3)
 
 
 def launch_env(given, provider, model):
@@ -4779,6 +5039,11 @@ def closing_message(job_id):
 
 
 GH_PR = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/\d+", re.ASCII)
+GH_PR_PARTS = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})", re.ASCII)
+SYNC_STAGES = ("pr-open", "needs-human")
+PR_SYNC_LIMIT = 100
+GITHUB_CLOSE_REASON = "PR closed on GitHub"
+MERGED_NOTE = "merged on GitHub"
 PR_CLOSE_COMMENT = (
     "> \U0001f916 **Agent-authored report** \u2014 written by factory.py pickup on the owner's behalf, "
     "posted automatically. Tests not run.\n\n"
@@ -4817,6 +5082,29 @@ def gh_cli(*args, stderr=False):
     else:
         result = r.returncode, r.stdout, r.stderr
     return result if stderr else result[:2]
+
+
+def pr_states(repo, numbers, device):
+    """The states of repo's pull requests from one gh api graphql call: ({number: state}, None),
+    or (None, why). A pull request GitHub returns null for is left out."""
+    owner, name = repo.split("/")
+    q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
+         + "".join(f"p{n}: pullRequest(number: {n}) {{ state }} " for n in numbers) + "} }")
+    r = gh_cli("api", "graphql", "-f", "query=" + q)
+    if r is None:
+        return None, f"gh is not installed on {device}"
+    if r[0] == "timeout":
+        return None, f"gh api graphql timed out after 60 seconds on {device}"
+    if r[0]:
+        return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
+    try:
+        found = json.loads(r[1])["data"]["repository"]
+    except (ValueError, KeyError, TypeError):
+        found = None
+    if not isinstance(found, dict):
+        return None, ("gh api graphql returned no repository "
+                      f"(check the project file's repo and gh auth status on {device})")
+    return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
 def close_pull_request(home, j, device, comment=None):
@@ -4919,17 +5207,26 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
                   + ("is off" if enabled is False else f"does not list {them}") + ".\n")
     else:
         manual = ""
+    if j["close"].get("by") == "github":
+        summary = (f"GitHub reported pull request {pr} closed without merging, so factory.py pickup closed the job "
+                   f"at {at} while at stage `{stage}`.")
+        requested = f"GitHub reported the pull request closed. Pickup queued the close at {at}."
+        unreviewed = ("No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` "
+                      "ref if the work is still wanted.")
+    else:
+        summary = f"Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: {reason}."
+        requested = f"Close requested from the dashboard at {at}."
+        unreviewed = "No agent reviewed this close. The reason is the owner's own words."
     text = (f"CLOSED: {reason}\n\n"
-            f"**Summary.** Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: "
-            f"{reason}. Nothing else is owed unless Left out says so.\n\n"
+            f"**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n"
             "## Evidence\n\n"
-            f"- Close requested from the dashboard at {at}.\n"
+            f"- {requested}\n"
             f"- Stage when closed: `{stage}`, round {j.get('round', 0)}.\n"
             f"- Branch: `{j.get('branch') or 'none'}`.\n"
             f"- Pull request: {f'{pr}, {PR_EVIDENCE[state]}' if outcome else 'none'}.\n"
             f"- Written by factory.py pickup on {device}.\n\n"
             "## Left out\n\n"
-            "- No agent reviewed this close. The reason is the owner's own words.\n"
+            f"- {unreviewed}\n"
             f"{open_pr}"
             "- The next pickup run on each host that holds the worktree or branch runs "
             f"`factory.py cleanup {j['project']}/{j['id']}` there when the project's pickup is on "
@@ -4938,6 +5235,78 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
             "origin holds the same commit.\n"
             f"{manual}")
     return text + "\n## Earlier decision\n\n" + earlier if earlier else text
+
+
+def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
+    """Move each pr-open or needs-human job whose pull request GitHub reports merged to merged, and queue
+    a close for each whose pull request GitHub reports closed. One gh api graphql call per repo."""
+    def match(j):
+        job_id, project, pr = j.get("id"), j.get("project"), j.get("pr")
+        if not (j.get("stage") in SYNC_STAGES and isinstance(pr, str) and not closing(j) and lead_of(j) is None
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(project, str) and SLUG.fullmatch(project)):
+            return None
+        return GH_PR_PARTS.fullmatch(pr)
+
+    repos, groups = {}, {}
+    for j in data["jobs"]:
+        m = match(j)
+        if not m:
+            continue
+        job_id, project = j["id"], j["project"]
+        c = blocking(j, device, "", minutes)
+        if c:
+            if dry:
+                print(f"skip sync {job_id} {project}: claimed by {c['device']} session {c.get('session')}")
+            continue
+        if project not in repos:
+            md = project_files(home, project)[0]
+            repos[project] = frontmatter(md)[0].get("repo", "") if md.exists() else ""
+        repo = f"{m[1]}/{m[2]}".lower()
+        if repos[project].lower() != repo:
+            continue
+        reason = pickup_reason(home, project, paths, settings, device, dry)
+        if reason:
+            if dry:
+                print(f"skip sync {job_id} {project}: {reason}")
+            continue
+        groups.setdefault(repo, []).append((j, int(m[3])))
+
+    for repo, jobs in groups.items():
+        if len(jobs) > PR_SYNC_LIMIT:
+            print(f"factory.py: pickup syncs the first {PR_SYNC_LIMIT} of {len(jobs)} pull requests in {repo}",
+                  file=sys.stderr)
+            jobs = jobs[:PR_SYNC_LIMIT]
+        states, why = pr_states(repo, [n for _, n in jobs], device)
+        if states is None:
+            print(f"factory.py: pickup skips the PR sync for {repo}: {why}", file=sys.stderr)
+            continue
+        for j, n in jobs:
+            state = states.get(n)
+            if state not in ("MERGED", "CLOSED"):
+                continue
+            line = f"{j['id']} {j['project']}: " + (MERGED_NOTE if state == "MERGED" else GITHUB_CLOSE_REASON)
+            if dry:
+                print(f"would sync {line}")
+                continue
+            if state == "MERGED":
+                patch = {"stage": "merged", "needs": None, "automerge": None, "babysit": None, "claim": None,
+                         "note": MERGED_NOTE, "github": {"merged": now()}}
+            else:
+                patch = {"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "by": "github"}, "babysit": None}
+
+            def change(text, j=j, patch=patch):
+                board = load_board(text)
+                found = next((x for x in board["jobs"] if x.get("id") == j["id"]), None)
+                if (found is None or not match(found) or found["pr"] != j["pr"]
+                        or found["project"] != j["project"] or blocking(found, device, "", minutes)):
+                    return None, None
+                row = patch_job(board, j["id"], patch)
+                return dump_board(board), row
+            row = cas(home, "/api/board", change)
+            if row:
+                data["jobs"][data["jobs"].index(j)] = row
+                print(f"synced {line}")
 
 
 def close_pass(home, data, device, minutes, dry):
@@ -4965,7 +5334,10 @@ def close_pass(home, data, device, minutes, dry):
             print(f"would close {job_id} {project}" + (f" and pull request {pr}" if pr else "")
                   + "".join(f" and stacked pull request {r['pr']}" for r in open_stacked(data, job_id)))
             continue
-        outcome = close_pull_request(home, j, device) if pr else None
+        if j["close"].get("by") == "github":
+            outcome = ("already closed", "")
+        else:
+            outcome = close_pull_request(home, j, device) if pr else None
         if outcome and outcome[0] == "closed":
             print(f"closed pull request {pr} for {job_id}")
         elif outcome and outcome[0] == "open":
@@ -4997,22 +5369,25 @@ def close_pass(home, data, device, minutes, dry):
             close_stacked_prs(home, job_id, stacked, device)
 
 
-def cleaned_here(j, device):
-    """True when this host already recorded its cleanup of a dashboard-closed job."""
-    done = j["close"].get("cleanup")
+def cleaned_here(j, device, key="close"):
+    """True when this host already recorded its cleanup of a job under j[key]: close for a dashboard-closed
+    job, github for one pickup synced as merged."""
+    done = j[key].get("cleanup")
     return isinstance(done, dict) and device in done
 
 
 def close_cleanup_pass(home, data, device, paths, settings, dry):
-    """Run cleanup once per host on each dashboard-closed job whose worktree or branch this host
-    still holds, and record what it left."""
+    """Run cleanup once per host on each dashboard-closed job, and each job pickup synced as merged, whose
+    worktree or branch this host still holds, and record what it left."""
     for j in data["jobs"]:
-        c, job_id, project = j.get("close"), j.get("id"), j.get("project")
-        if not (j.get("stage") == "closed" and isinstance(c, dict) and isinstance(c.get("closed"), str)
+        stage, job_id, project = j.get("stage"), j.get("id"), j.get("project")
+        key, field = ("github", "merged") if stage == "merged" else ("close", "closed")
+        c = j.get(key)
+        if not (stage in TERMINAL and isinstance(c, dict) and isinstance(c.get(field), str)
                 and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
-        if cleaned_here(j, device) or project not in paths or not os.path.isdir(paths[project]):
+        if cleaned_here(j, device, key) or project not in paths or not os.path.isdir(paths[project]):
             continue
         repo, wt, branch = paths[project], home / "worktrees" / project / job_id, f"factory/{job_id}"
         if not (wt.exists() or git(repo, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")):
@@ -5027,13 +5402,13 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
             continue
         _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
 
-        def change(text, job_id=job_id, closed=c["closed"], left=left):
+        def change(text, job_id=job_id, stage=stage, key=key, field=field, at=c[field], left=left):
             board = load_board(text)
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
-            if (found is None or found.get("stage") != "closed" or not isinstance(found.get("close"), dict)
-                    or found["close"].get("closed") != closed or cleaned_here(found, device)):
+            if (found is None or found.get("stage") != stage or not isinstance(found.get(key), dict)
+                    or found[key].get(field) != at or cleaned_here(found, device, key)):
                 return None, False
-            patch_job(board, job_id, {"close": {"cleanup": {device: {"at": now(), "left": left}}}, "port": None})
+            patch_job(board, job_id, {key: {"cleanup": {device: {"at": now(), "left": left}}}, "port": None})
             return dump_board(board), True
         if cas(home, "/api/board", change):
             print(f"cleaned up {job_id} {project}" + (f", left: {'; '.join(left)}" if left else ""))
@@ -5120,6 +5495,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     stalls = read_stalls(home)
     settings = {}
     move_stop_pass(home, data, device, paths, settings, dry, stalls[0] if stalls else None)
+    pr_sync_pass(home, data, device, minutes, paths, settings, dry)
     close_pass(home, data, device, minutes, dry)
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
@@ -5853,11 +6229,17 @@ BUILDKITE_TAIL_CHARS = 8000
 BUILDKITE_MAX_BYTES = 16 * 1024 * 1024
 
 
-def buildkite_log(home, check):
+def buildkite_log(home, check, buildkite_org):
     """ci_log for a failing check that links to a Buildkite build: the failed job's name and the
-    stripped, redacted tail of its log, or a problem saying why there is none. Never exits."""
+    stripped, redacted tail of its log, or a problem saying why there is none. Never exits.
+    Reads only the project's buildkite_org."""
     org, pipeline, number, job_id = BUILDKITE_BUILD.fullmatch(check["link"]).groups()
     reading = {"check": check["name"], "job": "", "tail": "", "problem": ""}
+    if not buildkite_org:
+        return {**reading, "problem": "set buildkite_org in the project frontmatter to read Buildkite logs"}
+    if org != buildkite_org:
+        return {**reading, "problem": f"the check links to Buildkite org {org}, not the project's buildkite_org "
+                                      f"{printable_line(buildkite_org, 100)}"}
     env = read_conf(home / ".env") if (home / ".env").exists() else {}
     token = env.get("BUILDKITE_API_TOKEN", "")
     if not token:
@@ -5904,7 +6286,7 @@ def buildkite_log(home, check):
             "tail": "\n".join(lines[-BUILDKITE_TAIL_LINES:])[-BUILDKITE_TAIL_CHARS:]}
 
 
-def pr_reading(home, pr, base):
+def pr_reading(home, pr, base, buildkite_org):
     """One reading of the PR for a babysit session, with the next step it calls for."""
     try:
         view = json.loads(gh_pr_view(pr, "--json", PR_STATE_FIELDS))
@@ -5991,7 +6373,7 @@ def pr_reading(home, pr, base):
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
-            "base": target, "next": step, "ci_log": buildkite_log(home, failed) if failed else None,
+            "base": target, "next": step, "ci_log": buildkite_log(home, failed, buildkite_org) if failed else None,
             "threads": threads, "merge_queue": pull.get("isMergeQueueEnabled") is True}
 
 
@@ -6003,10 +6385,11 @@ def pr_state_cmd(target, *args):
         fail("--wait takes one value from 1 to 600 seconds. " + PR_STATE_USAGE, 2)
     wait = int(args[1]) if args else 0
     pr = board_pr(home, slug, job_id)
-    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
+    meta = frontmatter(project_files(home, slug)[0])[0]
+    base = meta.get("base") or "main"
     start = time.monotonic()
     while True:
-        reading = pr_reading(home, pr, base)
+        reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""))
         elapsed = time.monotonic() - start
         if reading["next"] not in ("wait", "wait-base") or elapsed >= wait:
             print(json.dumps(reading))
@@ -6014,7 +6397,7 @@ def pr_state_cmd(target, *args):
         time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
 
 
-PR_ENQUEUE_MUTATION = ("query=mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id})"
+PR_ENQUEUE_MUTATION = ("query=mutation($id:ID!,$sha:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$sha})"
                        "{mergeQueueEntry{state position}}}")
 PR_QUEUE_USAGE = "usage: pr-queue <project-slug>/<job-id>"
 PR_QUEUE_INTERVAL = 10
@@ -6044,14 +6427,15 @@ def pr_queue_cmd(target):
         print(json.dumps({"pr": int(number), "status": status, "detail": detail}))
         raise SystemExit(code)
 
-    answer = gh_cli("api", "graphql", "-f", PR_ENQUEUE_MUTATION, "-f", f"id={view.get('id')}", stderr=True)
+    answer = gh_cli("api", "graphql", "-f", PR_ENQUEUE_MUTATION, "-f", f"id={view.get('id')}", "-f", f"sha={sha}",
+                     stderr=True)
     if answer and answer[0] == 0:
         try:
             entry = json.loads(answer[1])["data"]["enqueuePullRequest"]["mergeQueueEntry"]
         except (ValueError, KeyError, TypeError):
             entry = None
         if isinstance(entry, dict):
-            done("enqueued", f"position {entry.get('position')}", 0)
+            done("enqueued", f"position {entry['position']}" if entry.get("position") is not None else "", 0)
 
     result = gh_cli("api", "-X", "PUT", path, "-f", f"sha={sha}", "-f", "merge_action=merge_queue", stderr=True)
     if result is None or result[0] == "timeout":
@@ -6643,9 +7027,11 @@ def init(repo_path=".", agents="none", connection=None):
     meta, body = frontmatter(skill / "templates" / "project.md")
     meta.pop("path", None)
     meta.update(repo=repo, base="main", title=name)
+    template = (skill / "templates" / "project.md").read_text(encoding="utf-8")
+    comments = "".join(f"{line}\n" for line in template.split("---\n")[1].splitlines() if line.startswith("#"))
     project, state, remote_file = project_files(home, slug)
     read_project_state(state)
-    text = "---\n" + "".join(f"{k}: {v}\n" for k, v in meta.items()) + "---\n" + body
+    text = "---\n" + "".join(f"{k}: {v}\n" for k, v in meta.items()) + comments + "---\n" + body
     original = local_bytes(project)
     status, _, _ = api(home, "GET", f"/api/projects/{slug}.md", ok=(200, 404), raw=True)
     if status == 200:
@@ -8286,7 +8672,7 @@ RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+"
 RETRO_HEADERS = re.compile(
     r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))"
     r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)[^\r\n'\"\\]+")
-RETRO_URL_CREDS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{0,31}://)[^/\s@]+@")
+RETRO_URL_CREDS = re.compile(r"(?i)(?<=[a-z0-9+.-])://[^/\s@]+@")
 RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
 RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)(?!=?\d+:\d+(?!\S))[^\s:]*:\S+")
 RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential"
@@ -8336,7 +8722,7 @@ def retro_secret_pair(match):
 
 def retro_redact(text):
     text = RETRO_HEADERS.sub(r"\1\2[redacted]", text)
-    text = RETRO_URL_CREDS.sub(r"\1[redacted]@", text)
+    text = RETRO_URL_CREDS.sub("://[redacted]@", text)
     text = RETRO_BEARER.sub(r"\1[redacted]", text)
     text = RETRO_USER_PASS.sub(r"\1[redacted]", text)
     for pattern in (RETRO_KEYVALUE, RETRO_FLAG, RETRO_LONG_KEYVALUE, RETRO_LONG_FLAG):
@@ -8527,9 +8913,10 @@ def retro_rows(days):
                     continue
                 scanned += 1
                 t = by_type.setdefault(kind, {"count": 0, "turns": 0, "tokens": dict.fromkeys(RETRO_TOKENS, 0),
-                                              "errors": 0, "denials": 0, "models": []})
+                                              "errors": 0, "denials": 0, "models": [], "first_turns": []})
                 t["count"] += 1
                 t["turns"] += d["turns"]
+                t["first_turns"].append(d["context"]["first_turn"])
                 t["errors"] += d["errors"]["count"]
                 t["denials"] += d["denials"]["count"]
                 t["models"] = sorted(set(t["models"]) | set(d["models"]))
@@ -8619,9 +9006,10 @@ def retro_aggregate(days):
     home = factory_home()
     today = datetime.now().date()
     dates = [(today - timedelta(days=back)).isoformat() for back in range(days - 1, -1, -1)]
-    rows, skipped = [], 0
+    rows, skipped, latest = [], 0, {}
     for date in dates:
         for host, text in retro_fetch(home, date):
+            latest[host] = date
             for line in text.splitlines():
                 try:
                     row = json.loads(line)
@@ -8663,7 +9051,7 @@ def retro_aggregate(days):
     folder = home / "retro" / run
     if is_link(folder.parent) or is_link(folder):
         fail(f"{folder} or its parent is a link; nothing written", 2)
-    hosts, subagents, sub, attachments = {}, {}, {}, {}
+    hosts, subagents, firsts, sub, attachments = {}, {}, {}, {}, {}
     for row in rows:
         h = hosts.setdefault(row["host"], {"sessions": 0, "jobs": set(), "ad_hoc": 0})
         h["sessions"] += 1
@@ -8678,10 +9066,16 @@ def retro_aggregate(days):
                 s[key] += retro_int(t.get(key))
             retro_sum(s["tokens"], t.get("tokens"))
             retro_sum(sub, t.get("tokens"))
+            firsts.setdefault(kind, []).extend(
+                v for v in (t.get("first_turns") if isinstance(t.get("first_turns"), list) else []) if type(v) is int)
         for kind, size in retro_dict(row.get("first_turn_attachments")).items():
             attachments.setdefault(kind, []).append(retro_int(size))
-    for h in hosts.values():
+    for kind, s in subagents.items():
+        s["first_turn_median"] = retro_median(firsts.get(kind, []))
+    for name, h in hosts.items():
         h["jobs"] = len(h["jobs"])
+        h["latest"] = latest[name]
+    stale = sorted(name for name, h in hosts.items() if h["latest"] != dates[-1])
 
     def total(key, field=None):
         return sum(retro_int(retro_dict(r.get(key)).get(field) if field else r.get(key)) for r in rows)
@@ -8718,7 +9112,7 @@ def retro_aggregate(days):
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "expected": sorted(expected),
-                      "sessions": len(rows), "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
+                      "stale": stale, "sessions": len(rows), "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
                       "digest": str(folder / "digest.jsonl"), "transcripts": agg["transcripts"],
                       "out": str(folder / "reply.json"), "findings": str(folder / "findings.md")}, indent=2))
 

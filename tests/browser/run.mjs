@@ -210,6 +210,31 @@ const CAPTURE_JOBS = [
     updated: "2026-01-02T12:00:00Z",
     refs: [{ id: "090-sample-old", kind: "follow-up-of" }],
   },
+  {
+    id: "107-held-rider",
+    project: "sample",
+    title: "Synthetic held rider",
+    stage: "idea",
+    idea: "Synthetic held rider",
+    updated: "2026-10-27T09:00:00Z",
+    refs: [{ id: "090-sample-old", kind: "follow-up-of" }],
+  },
+  {
+    id: "106-chat-approved",
+    project: "sample",
+    title: "Synthetic chat approved",
+    stage: "idea",
+    idea: "Synthetic chat approved",
+    updated: "2026-01-02T12:00:00Z",
+    backlog: {
+      line: "- [ ] sample: Synthetic chat approved",
+      decision: "approved",
+      at: "2026-01-02T12:00:00Z",
+      via: "chat",
+      quote: "Approve the export idea.",
+      by: "host-a",
+    },
+  },
 ];
 const CAPTURE_BACKLOG_CONTEXT = [
   "Recommend: approve",
@@ -892,6 +917,25 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
+    const openSchedulerSettings = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/scheduler";
+      });
+      await page.waitForSelector("#settings-scheduler:not([hidden])");
+      await page.evaluate(() =>
+        document.querySelector("#scheduler-settings-heading").scrollIntoView({ block: "start" }),
+      );
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getElementById("settings-link")
+            .getAnimations()
+            .map((animation) => animation.finished),
+        ),
+      );
+    };
+    await view("scheduler-settings", 1280, 900, "light", openSchedulerSettings);
+    await view("scheduler-settings-mobile", 390, 844, "light", openSchedulerSettings);
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
@@ -1023,6 +1067,16 @@ async function capture(outdir, referencePath) {
       return clipOf(page, wrap);
     };
     await view("held-card-390", 390, 844, "dark", openHeldCard, true);
+    const openIdeaChips = async (page) => {
+      const wrap = (id) => `.card-wrap:has(.card[data-id="${id}"])`;
+      await page.evaluate(
+        (s) => document.querySelector(s).scrollIntoView({ block: "center", inline: "center" }),
+        wrap("107-held-rider"),
+      );
+      return clipOf(page, wrap("102-move-comment"), wrap("106-chat-approved"));
+    };
+    await view("idea-chips-390", 390, 844, "dark", openIdeaChips, true);
+    await view("idea-chips-1280", 1280, 900, "light", openIdeaChips);
     // The reference has no agents table, so its side shows the drawer head alone.
     const openAgentRuns = async (page, side) => {
       await page.evaluate(() => {
@@ -1041,6 +1095,27 @@ async function capture(outdir, referencePath) {
     };
     await view("agent-runs-390", 390, 844, "dark", openAgentRuns, true);
     await view("agent-runs-1280", 1280, 900, "light", openAgentRuns);
+    const openChatDrawer = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#106-chat-approved";
+      });
+      await page.waitForFunction(() =>
+        document.getElementById("d-meta").textContent.includes("106-chat-approved"),
+      );
+      return clipOf(page, ".detail-head");
+    };
+    await view("chat-drawer-390", 390, 844, "dark", openChatDrawer, true);
+    await view("chat-drawer-1280", 1280, 900, "light", openChatDrawer);
+    const openHeldDrawer = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#107-held-rider";
+      });
+      await page.waitForFunction(() =>
+        document.getElementById("d-meta").textContent.includes("107-held-rider"),
+      );
+      return clipOf(page, ".detail-head");
+    };
+    await view("held-drawer-390", 390, 844, "dark", openHeldDrawer, true);
     // The reference keeps 001-capture open behind the sign-in banner; the candidate closes it.
     const openArchiveSignin = async (page) => {
       await page.evaluate(() => {

@@ -4,6 +4,45 @@
 minutes. It claims runnable ideas for the projects whose pipeline lists this
 host and starts one session per idea through `launchers.json`.
 
+## Set up and check
+
+Run this on each host. It checks every piece pickup needs, in order, and prints
+the exact fix for each missing one with this host's own paths:
+
+```
+python3 <installed-skill>/runtime/factory.py pickup setup
+```
+
+| # | Check | What it reads |
+| --- | --- | --- |
+| 1 | `home` | `factory.py doctor`: config, credentials, projects and board |
+| 2 | `device` | `device:` in `config.md`; without it the host name is the hostname |
+| 3 | `checkout` | `paths.md`, a checkout that exists on this host |
+| 4 | `routes` | `routes.md` |
+| 5 | `launchers` | `launchers.json`, a launcher per route |
+| 6 | `pipeline` | each project's effective pipeline: pickup on and lists this exact host |
+| 7 | `timer` | the 5 minute timer in launchd, cron or Task Scheduler |
+
+It exits 0 when all 7 are ok, 3 when any is missing, and 2 on bad arguments.
+It writes no factory file. Then install the 5 minute timer for this host's
+scheduler. Running it again changes nothing:
+
+```
+python3 <installed-skill>/runtime/factory.py pickup setup --install
+```
+
+| Scheduler | File | Load | Already installed when |
+| --- | --- | --- | --- |
+| launchd | `~/Library/LaunchAgents/factory.pickup.plist` | `launchctl bootout`, then `bootstrap gui/<uid>` | same bytes and `launchctl print` exits 0 |
+| cron | user crontab | `crontab -` | the exact line is present, and no other pickup line |
+| schtasks | `~/.config/factory-pickup.cmd` | `schtasks /Create ... /F` | always re-created (`/F`) |
+
+The timer runs `factory.py --home <home> pickup` with the same Python and logs
+to `<home>/logs/pickup.log`. On cron, `--install` replaces any old line that runs
+`factory.py pickup` and keeps every other line.
+
+A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.
+
 ## What it does
 
 Each run, in order:
@@ -28,8 +67,9 @@ Each run, in order:
   `max_wait_hours` 1 to 168), it replaces 5 and 12. `factory.py ideas` does not
   hold. A dry run prints a project's pickup off, host or pipeline skip line for
   its held ideas instead of the batch line. Set them in the dashboard under
-  Settings, Pipeline, Batch follow-ups. The board marks each held idea with a
-  "Held for batching" chip.
+  Settings, Pipeline, Batch follow-ups. The board shows the same state on each
+  held idea's chip: "Waits for a batch (n of min, hh of maxh)", "Batches behind
+  <id>", or "Batch ready" on the one pickup launches next.
 - Skips a project whose checkout fails the `unsafe checkout` check, when pickup
   is on and lists this host. It fetches `origin/<base>` (with
   `GIT_TERMINAL_PROMPT=0` and a 60 s limit, so a remote that asks for
@@ -37,6 +77,10 @@ Each run, in order:
   `<base>` with a root commit that `origin/<base>` lacks, so a host still on
   archive history claims and launches nothing for that project. `worktree` runs
   the same check on the job branch and exits 6.
+- PR sync: right after the move stops and before the close pass, reads the state
+  of each `pr-open` or `needs-human` job's pull request from GitHub, one
+  `gh api graphql` call per repo, and moves a merged job to `merged` or queues a
+  close for a closed one. See [Syncing PR state](#syncing-pr-state).
 - Deny notes: before ideas, launches at most one `/factory deny-notes <id>` session
   for a `closed` job denied from the backlog whose `backlog.notes` are unread (no
   `backlog.notes_read`). The session gets the notes from `factory.py deny-notes <id>`
@@ -201,6 +245,8 @@ A standing instruction from the user, the person you are working for. It is abou
 
 ## Run it every 5 minutes
 
+`pickup setup --install` writes and loads this timer for you. The blocks below are what it writes.
+
 Run `factory.py pickup --dry-run` first: it prints what it would launch and
 changes nothing. Then install one timer per host.
 
@@ -314,7 +360,21 @@ changes nothing. Then install one timer per host.
 - When the closed job has a stacked rider with an open PR, the close pass closes the rider's open PR with a disclosed comment after the board write, and rewrites the rider's note.
 - A session on a closing job is refused at its next `board` or `hold` call with exit 6. `board` first releases that session's own claim, so the next pickup can close the job.
 - Only the dashboard, `pickup` and `factory.py control` write `close`. `board` refuses a `close` patch with exit 2.
-- The next pickup run on a host that still holds a closed job's worktree or `factory/<id>` branch runs `cleanup` on it when the project's pickup is on and lists that host, once per host, and records `close.cleanup.<host> = {at, left}`. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit and no worktree has it checked out. It deletes that branch with `git update-ref -d` guarded by the branch's current commit, never `git branch -D`. The kept branch's `left` entry ends with `and origin could not be reached`, `and origin has no such branch` or `and origin is at a different commit`. Its dry run prints `would clean up <id> <project>`. The close pass's `decision.md` names each host the board records as holding the job, from `claim` and every `move` holder, that the project's pickup is off for or does not list, and says which of the two it is. When it cannot read the pickup hosts, it names every recorded holder and says why it could not read them.
+- The next pickup run on a host that still holds a closed job's worktree or `factory/<id>` branch runs `cleanup` on it when the project's pickup is on and lists that host, once per host, and records `close.cleanup.<host> = {at, left}`. It does the same for a `merged` job with `github.merged`, which the PR sync sets, and records `github.cleanup.<host> = {at, left}`. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit and no worktree has it checked out. It deletes that branch with `git update-ref -d` guarded by the branch's current commit, never `git branch -D`. The kept branch's `left` entry ends with `and origin could not be reached`, `and origin has no such branch` or `and origin is at a different commit`. Its dry run prints `would clean up <id> <project>`. The close pass's `decision.md` names each host the board records as holding the job, from `claim` and every `move` holder, that the project's pickup is off for or does not list, and says which of the two it is. When it cannot read the pickup hosts, it names every recorded holder and says why it could not read them.
+
+## Syncing PR state
+
+- `pickup` runs its PR sync pass right after the move stops and before the close pass. It never starts a launcher or calls a model.
+- A job is a candidate when its stage is `pr-open` or `needs-human`, its `pr` is a `https://github.com/<owner>/<name>/pull/<n>` URL with `<n>` at most 9 digits, no close is queued, it is not a batched rider (riders follow their lead), no other session holds a live claim, the project file's `repo` equals the URL's owner and name (case-insensitive), and the project's pickup is on and lists this host.
+- Candidates are grouped by repo. Each repo gets one `gh api graphql` call that reads `state` for up to 100 pull requests in board order. With more, it prints `factory.py: pickup syncs the first 100 of <n> pull requests in <repo>` on stderr.
+- When the call fails, it prints `factory.py: pickup skips the PR sync for <repo>: <why>` on stderr and the run goes on: gh is not installed, timed out after 60 seconds, exited non-zero (check `gh auth status`), or returned no repository (check the project file's `repo` and `gh auth status`).
+- `MERGED`: one board write moves the job to `merged`, sets the note to `merged on GitHub` and `github = {merged}`, and removes `needs`, `automerge`, `babysit` and `claim`. It prints `synced <id> <project>: merged on GitHub`. The close cleanup then runs `cleanup` on each host that holds the worktree or branch, as for a closed job.
+- `CLOSED`: one board write queues `close = {reason: "PR closed on GitHub", at, by: "github"}` and removes `babysit`. It prints `synced <id> <project>: PR closed on GitHub`. The close pass in the same run closes the job without calling `gh pr`, and `decision.md` starts `CLOSED: PR closed on GitHub` and says GitHub reported the close.
+- Each board write re-checks every candidate condition and the same `pr`, so a second host that read the same state writes nothing.
+- An open PR, or one GitHub does not return, changes nothing and prints nothing.
+- Its dry run makes the same read and writes nothing. It prints `would sync <id> <project>: merged on GitHub` or `would sync <id> <project>: PR closed on GitHub`, and `skip sync <id> <project>: claimed by <device> session <tag>` or `skip sync <id> <project>: <reason>` for a live claim or a project whose pickup is off or does not list this host.
+- Only pickup writes `github` and `close.by`. `board` refuses a `github` patch with exit 2.
+- A synced move does not mirror Tracer, archive a Paseo workspace or post a stage-change chat line. Agents still own those.
 
 ## Logs and limits
 
@@ -331,3 +391,5 @@ Deploy the Worker, reinstall the skill on each host, write `launchers.json`, run
 `pickup --dry-run`, enable pickup for the project, install the cron entry, then
 pause (disable, do not delete) the stored ideas schedule. Run both together only
 briefly: the board claim stops double pickup.
+
+A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.

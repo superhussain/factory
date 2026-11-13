@@ -2,6 +2,7 @@
 repo: owner/name
 base: main
 title: name
+# buildkite_org: <org slug>
 ---
 # Factory project file
 
@@ -11,9 +12,10 @@ of this repo. The installed factory skill owns the shared loop and agents.
 
 This file lives in R2 behind the factory Worker, outside the repo. `factory.py`
 caches it in `<factory-home>/projects/`. The frontmatter names the
-GitHub repo, the base branch for PRs, and a display title. Only `repo`, `base`, and
-`title` are allowed shared frontmatter keys. Each device keeps its own checkout
-path separately in `paths.md`; paths and credentials do not belong here.
+GitHub repo, the base branch for PRs, and a display title. `repo`, `base` and
+`title` are required. `archive` and `buildkite_org` are optional. Uncomment
+`buildkite_org` so `pr-state` can read Buildkite logs. Each device keeps its own
+checkout path separately in `paths.md`; paths and credentials do not belong here.
 
 Edit this existing shared document through the dashboard's Project settings or
 the device project pull/push commands. Keep every agent section heading. Saves

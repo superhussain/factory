@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -140,7 +141,7 @@ const invalid = [
     "title: [a]",
   ].map((line) => [
     document.replace("base: main", line + "\nbase: main"),
-    "frontmatter allows one repo, base and title, plus an optional archive",
+    "frontmatter allows one repo, base and title, plus an optional archive and buildkite_org",
   ]),
   ...["https://github.com/a/b", "a/b/c", "./b", "a/..", "a/" + "b".repeat(101)].map((v) => [
     document.replace("example/sample", v),
@@ -149,7 +150,15 @@ const invalid = [
   [document.replace("base: main", "archive: a/b/c\nbase: main"), "invalid project archive"],
   [
     document.replace("base: main", "archive: a/b\narchive: a/c\nbase: main"),
-    "frontmatter allows one repo, base and title, plus an optional archive",
+    "frontmatter allows one repo, base and title, plus an optional archive and buildkite_org",
+  ],
+  ...["bad_org", ""].map((v) => [
+    document.replace("base: main", "buildkite_org: " + v + "\nbase: main"),
+    "invalid project buildkite_org",
+  ]),
+  [
+    document.replace("base: main", "buildkite_org: a\nbuildkite_org: b\nbase: main"),
+    "frontmatter allows one repo, base and title, plus an optional archive and buildkite_org",
   ],
   ...["", "a..b", "a//b", "a/", "a/.b", "a/b.", "a/b.lock", "-main", "a b", "a".repeat(201)].map(
     (v) => [document.replace("base: main", "base: " + v), "invalid project base"],
@@ -160,7 +169,7 @@ const invalid = [
   ]),
   [
     document.replace("title: Sample", "title: \"broken'"),
-    "frontmatter allows one repo, base and title, plus an optional archive",
+    "frontmatter allows one repo, base and title, plus an optional archive and buildkite_org",
   ],
   [
     document + "a\u200bb\n",
@@ -282,4 +291,25 @@ test("projects.json lists an optional archive", async () => {
       archive: "example/sample-private",
     },
   ]);
+});
+
+test("an optional buildkite_org is stored and not listed", async () => {
+  const s = setup();
+  const body = document.replace("base: main", "buildkite_org: example-org\nbase: main");
+  assert.equal((await s.request(body)).status, 200);
+  const res = await s.request(undefined, {}, "/projects.json", "GET");
+  assert.deepEqual(await res.json(), [
+    { slug: "sample", title: "Sample", repo: "example/sample", base: "main" },
+  ]);
+});
+
+test("dashboard allowlist names every project frontmatter error", async () => {
+  const html = await readFile(new URL("../../web/dashboard.html", import.meta.url), "utf8");
+  for (const error of [
+    "project frontmatter allows one repo, base and title, plus an optional archive and buildkite_org",
+    "invalid project archive",
+    "invalid project buildkite_org",
+  ])
+    assert.ok(html.includes(error), error);
+  assert.ok(!html.includes("base, and title only"));
 });

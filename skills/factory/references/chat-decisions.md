@@ -44,7 +44,9 @@ factory.py needs answer <job-id> --answers <file> --chat-file <file>
   when the message gives no reason.
 - Never edit, trim or summarize the message.
 - When the message is ambiguous, such as no option or two items, stop and ask.
-- When the message is refused, such as for a link, ask the person to answer at the
+- A link or code fence in the message is fine. The stored quote shows each link as
+  `(link: <host>)` and drops fence markers.
+- When the message is refused, such as for a secret, ask the person to answer at the
   terminal or on the dashboard. `control` has no terminal mode, so for it point the
   person to the dashboard only.
 
@@ -55,6 +57,8 @@ factory.py needs answer <job-id> --answers <file> --chat-file <file>
   question. The answer is option labels joined by `, `, and may end with
   `. Other: <text>`, or be only `Other: <text>`.
 - Rework needs `--notes-file` and accepts `no answer` for a question.
+- A rerun after a failed write reuses the job it saved. A job whose line is already
+  checked off is never reused, so a line re-added word for word gets a new job.
 - After it succeeds, tell the person the printed job id and decision.
 
 ## Needs answers

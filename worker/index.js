@@ -183,10 +183,10 @@ function validateProjectDocument(text) {
   if (lines[0] !== "---" || end < 0) return "project document needs closed --- frontmatter";
   const meta = new Map();
   const fieldsError =
-    "project frontmatter allows one repo, base and title, plus an optional archive";
+    "project frontmatter allows one repo, base and title, plus an optional archive and buildkite_org";
   for (const line of lines.slice(1, end)) {
     if (!line.trim() || line.trim().startsWith("#")) continue;
-    const match = /^(repo|base|title|archive):\s*(.*)$/.exec(line);
+    const match = /^(repo|base|title|archive|buildkite_org):\s*(.*)$/.exec(line);
     if (!match || meta.has(match[1])) return fieldsError;
     let value = match[2].trim();
     if (/^["']|["']$/.test(value)) {
@@ -195,7 +195,8 @@ function validateProjectDocument(text) {
     } else if (/^[\[{!&*|>]/.test(value)) return fieldsError;
     meta.set(match[1], value);
   }
-  if (meta.size !== 3 + (meta.has("archive") ? 1 : 0)) return fieldsError;
+  if (meta.size !== 3 + (meta.has("archive") ? 1 : 0) + (meta.has("buildkite_org") ? 1 : 0))
+    return fieldsError;
   const repo = meta.get("repo"),
     base = meta.get("base"),
     title = meta.get("title"),
@@ -206,6 +207,8 @@ function validateProjectDocument(text) {
       value.split("/").some((p) => p === "." || p === ".."));
   if (badRepo(repo)) return "invalid project repo";
   if (badRepo(archive)) return "invalid project archive";
+  if (meta.has("buildkite_org") && !/^[A-Za-z0-9-]{1,100}$/.test(meta.get("buildkite_org")))
+    return "invalid project buildkite_org";
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(base) ||
     base.includes("..") ||
@@ -1615,7 +1618,8 @@ async function pruneRetro(env, now) {
 const readImage = (request) => readCapped(request, MAX_IMAGE);
 
 // Stores clef-flash's pick and fixed reasons for a pushed needs.md. Advisory: every early
-// return or failure leaves the form as it was, and the push reply never changes.
+// return or failure leaves the form as it was, and the push reply's status never changes.
+// The record's ms is the model call alone.
 async function rateNeeds(env, slug, id, text) {
   if (!env.AI) return;
   const questions = needsQuestions(text);
@@ -1634,7 +1638,9 @@ async function rateNeeds(env, slug, id, text) {
   const source = project?.triage
     ? `pipeline:${slug}@${projectVersion}`
     : `pipeline:global@${globalVersion}`;
+  const started = Date.now();
   const result = await env.AI.run(TRIAGE_MODEL, needsInput(source, triage.rules, text, questions));
+  const ms = Date.now() - started;
   const choices = triageChoices(result, questions, triage.rules);
   if (!choices) return;
   await env.BUCKET.put(
@@ -1642,6 +1648,7 @@ async function rateNeeds(env, slug, id, text) {
     JSON.stringify({
       sha256: await sha256(new TextEncoder().encode(text)),
       model: TRIAGE_MODEL,
+      ms,
       at: new Date().toISOString(),
       choices,
     }),
@@ -1662,14 +1669,21 @@ async function jobPut(request, env, key) {
     ...(cond && { onlyIf: cond }),
     ...(type && { httpMetadata: { contentType: type } }),
   });
+  // A stored needs.md reply says how long the rating held the push, in Server-Timing.
   const needs = obj && NEEDS_KEY.exec(key);
+  let timing;
   if (needs) {
+    const started = Date.now();
     try {
       await rateNeeds(env, needs[1], needs[2], body);
     } catch {}
+    timing = `needs-rating;dur=${Date.now() - started}`;
   }
   return obj
-    ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
+    ? reply("ok", 200, "text/plain", {
+        ETag: obj.httpEtag,
+        ...(timing && { "Server-Timing": timing }),
+      })
     : reply("precondition failed", 412);
 }
 

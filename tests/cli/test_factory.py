@@ -229,6 +229,7 @@ class ProjectSyncTest(IsolatedTestCase):
         puts = [c for c in self.calls if c[0] == "PUT"]
         self.assertEqual(puts[0][3]["If-None-Match"], "*")
         self.assertNotIn(b"path:", self.data)
+        self.assertIn(b"# buildkite_org: <org slug>\n---\n", self.data)
         self.assertEqual(self.saved()["etag"], self.tag())
         self.assertEqual(self.document.read_bytes(), self.data)
         original = self.document.read_bytes()

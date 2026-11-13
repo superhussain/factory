@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+import plistlib
 import shlex
 import signal
 import subprocess
@@ -112,6 +113,8 @@ class PickupFixture(IsolatedTestCase):
         patch.object(factory, "report_status").start()
         self.sweep = patch.object(factory, "backlog_triage_pass").start()
         self.checkout = patch.object(factory, "checkout_problem", return_value=None).start()
+        patch.object(factory, "pr_states",
+                     side_effect=lambda repo, numbers, device: ({n: "OPEN" for n in numbers}, None)).start()
 
     def configure(self, line="started", code=0, sleep=0):
         (self.root / "fake.json").write_text(json.dumps({"line": line, "code": code, "sleep": sleep}),
@@ -2202,6 +2205,218 @@ class CloseCleanupTest(PickupFixture):
         self.assertTrue(self.wt.exists())
 
 
+class PrSyncTest(PickupFixture):
+    QUERY = ('query { repository(owner: "sample", name: "alpha") { p7: pullRequest(number: 7) { state } '
+             'p8: pullRequest(number: 8) { state } } }')
+    PR7 = "https://github.com/sample/alpha/pull/7"
+    PR8 = "https://github.com/sample/alpha/pull/8"
+    DECISION = "/api/jobs/alpha/043-sample-import/decision.md"
+    pr_states = staticmethod(factory.pr_states)
+
+    def setUp(self):
+        super().setUp()
+        for slug in ("alpha", "beta"):
+            self.views[slug] = (200, effective(slug, {"pickup": ON}))
+        self.views["delta"] = (200, effective("delta", {"pickup": {"enabled": True, "hosts": ["other-host"]}}))
+        (self.home / "projects").mkdir()
+        for slug in ("alpha", "beta", "delta"):
+            (self.home / "projects" / f"{slug}.md").write_text("---\nrepo: Sample/Alpha\n---\n", encoding="utf-8")
+        self.files = {}
+        self.states = {7: "MERGED", 8: "CLOSED"}
+        self.failure = None
+        self.reads = []
+        patch.object(factory, "pr_states", side_effect=self.read).start()
+        self.gh = patch.object(factory, "gh_pr").start()
+
+    def read(self, repo, numbers, device):
+        self.reads.append((repo, list(numbers)))
+        if self.failure:
+            return None, self.failure
+        return {n: self.states[n] for n in numbers if n in self.states}, None
+
+    def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if not path.endswith("/decision.md"):
+            return super().request(home, method, path, body, ok, headers, raw)
+        self.calls.append((method, path))
+        if method == "GET":
+            return 404, {}, ""
+        self.files[path] = body
+        return 200, {}, ""
+
+    def export(self, **extra):
+        return dict({"id": "042-sample-export", "stage": "needs-human", "project": "alpha", "pr": self.PR7,
+                     "automerge": False, "needs": "review and merge PR #7", "note": "held for review",
+                     "updated": "2026-01-01T00:00:00Z"}, **extra)
+
+    def sample_import(self, **extra):
+        return dict({"id": "043-sample-import", "stage": "pr-open", "project": "alpha", "pr": self.PR8,
+                     "branch": "factory/043-sample-import", "updated": "2026-01-01T00:00:00Z"}, **extra)
+
+    def test_pr_states_sends_one_query_and_parses_it(self):
+        answer = json.dumps({"data": {"repository": {"p7": {"state": "MERGED"}, "p8": None}}})
+        with patch.object(factory, "gh_cli", return_value=(0, answer)) as gh:
+            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: "MERGED"}, None))
+        gh.assert_called_once_with("api", "graphql", "-f", "query=" + self.QUERY)
+        for result, why in ((None, "gh is not installed on host-a"),
+                            (("timeout", ""), "gh api graphql timed out after 60 seconds on host-a"),
+                            ((1, ""), "gh api graphql exited 1 (check gh auth status on host-a)"),
+                            ((0, "not json"), "gh api graphql returned no repository (check the project file's repo and gh auth status on host-a)"),
+                            ((0, '{"data": {"repository": null}}'), "gh api graphql returned no repository (check the project file's repo and gh auth status on host-a)"),
+                            ((0, "[]"), "gh api graphql returned no repository (check the project file's repo and gh auth status on host-a)")):
+            with self.subTest(result=result), patch.object(factory, "gh_cli", return_value=result):
+                self.assertEqual(self.pr_states("sample/alpha", [7], DEVICE), (None, why))
+
+    def test_merged_pr_moves_the_job_to_merged(self):
+        stale = {"device": "other-host", "session": "s1", "since": stamp(hours=-5), "seen": stamp(hours=-4)}
+        for job in (self.export(stage="pr-open", babysit={"at": "2026-01-01T00:00:00Z", "by": "dashboard"}),
+                    self.export(claim=stale)):
+            with self.subTest(stage=job["stage"]):
+                self.calls.clear()
+                self.board["jobs"] = [job]
+                self.assertEqual(self.pickup(), (0, "synced 042-sample-export alpha: merged on GitHub\n", ""))
+                self.assertEqual(self.puts(), [("PUT", "/api/board")])
+                job = self.job("042-sample-export")
+                self.assertEqual((job["stage"], job["note"]), ("merged", "merged on GitHub"))
+                self.assertEqual(set(job["github"]), {"merged"})
+                self.assertEqual(job["done"], job["updated"])
+                for key in ("needs", "automerge", "babysit", "claim"):
+                    self.assertNotIn(key, job)
+                self.calls.clear()
+                self.assert_silent(self.pickup())
+
+    def test_closed_pr_closes_the_job(self):
+        self.board["jobs"] = [self.sample_import()]
+        self.assertEqual(self.pickup(), (0, "synced 043-sample-import alpha: PR closed on GitHub\n"
+                                            "closed 043-sample-import alpha\n", ""))
+        self.assertEqual(self.puts(), [("PUT", "/api/board"), ("PUT", self.DECISION), ("PUT", "/api/board")])
+        self.gh.assert_not_called()
+        job = self.job("043-sample-import")
+        at = job["close"]["at"]
+        self.assertEqual(self.files[self.DECISION], (
+            "CLOSED: PR closed on GitHub\n\n"
+            f"**Summary.** GitHub reported pull request {self.PR8} closed without merging, so factory.py pickup "
+            f"closed the job at {at} while at stage `pr-open`. Nothing else is owed unless Left out says so.\n\n"
+            "## Evidence\n\n"
+            f"- GitHub reported the pull request closed. Pickup queued the close at {at}.\n"
+            "- Stage when closed: `pr-open`, round 0.\n"
+            "- Branch: `factory/043-sample-import`.\n"
+            f"- Pull request: {self.PR8}, already closed.\n"
+            "- Written by factory.py pickup on host-a.\n\n"
+            "## Left out\n\n"
+            "- No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` ref "
+            "if the work is still wanted.\n"
+            "- The next pickup run on each host that holds the worktree or branch runs "
+            "`factory.py cleanup alpha/043-sample-import` there when the project's pickup is on "
+            "and lists that host. On any other host, run `factory.py cleanup alpha/043-sample-import` "
+            "by hand. It keeps a dirty worktree, and a branch that is not merged unless "
+            "origin holds the same commit.\n"))
+        self.assertEqual((job["stage"], job["note"]), ("closed", "PR closed on GitHub"))
+        self.assertEqual((set(job["close"]), job["close"]["by"]), ({"reason", "at", "by", "closed"}, "github"))
+        self.calls.clear()
+        self.assert_silent(self.pickup())
+
+    def test_merged_job_is_cleaned_once_per_host(self):
+        patch.object(factory, "worktree_pids", return_value=[]).start()
+
+        def git(cwd, *args):
+            return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
+                                  text=True).stdout.strip()
+        git(self.repo_a, "init", "-q")
+        git(self.repo_a, "symbolic-ref", "HEAD", "refs/heads/main")
+        git(self.repo_a, "commit", "-q", "--allow-empty", "-m", "base")
+        wt = self.home / "worktrees" / "alpha" / "042-sample-export"
+        git(self.repo_a, "worktree", "add", "-q", str(wt), "-b", "factory/042-sample-export")
+        self.board["jobs"] = [self.export(port=8230)]
+        self.assertEqual(self.pickup(), (0, "synced 042-sample-export alpha: merged on GitHub\n"
+                                            "cleaned up 042-sample-export alpha\n", ""))
+        self.assertFalse(wt.exists())
+        self.assertEqual(git(self.repo_a, "branch", "--list", "factory/042-sample-export"), "")
+        job = self.job("042-sample-export")
+        self.assertEqual(set(job["github"]), {"merged", "cleanup"})
+        self.assertEqual(set(job["github"]["cleanup"]), {DEVICE})
+        self.assertEqual(job["github"]["cleanup"][DEVICE]["left"], [])
+        self.assertNotIn("port", job)
+        self.assertEqual(self.puts(), [("PUT", "/api/board"), ("PUT", "/api/board")])
+        git(self.repo_a, "worktree", "add", "-q", str(wt), "-b", "factory/042-sample-export")
+        self.calls.clear()
+        self.assert_silent(self.pickup())
+        self.assertTrue(wt.exists())
+
+    def test_board_refuses_a_github_patch(self):
+        self.board["jobs"] = [self.export()]
+        with patch.object(factory.sys, "stdin", io.StringIO('{"github": {"merged": "2026-01-02T12:00:00Z"}}')):
+            result = invoke(factory, ["board", str(self.home), "042-sample-export"])
+        self.assertEqual(result, (2, "", "factory.py: only factory.py pickup sets github. Nothing was written.\n"))
+        self.assertEqual(self.puts(), [])
+
+    def test_one_read_per_repo_across_projects(self):
+        self.states = {}
+        self.board["jobs"] = [self.export(), self.sample_import(project="beta")]
+        self.assert_silent(self.pickup())
+        self.assertEqual(self.reads, [("sample/alpha", [7, 8])])
+
+    def test_skips_a_pr_number_past_nine_digits(self):
+        self.board["jobs"] = [self.export(pr="https://github.com/sample/alpha/pull/9999999999"),
+                              self.sample_import()]
+        self.assertEqual(self.pickup(), (0, "synced 043-sample-import alpha: PR closed on GitHub\n"
+                                            "closed 043-sample-import alpha\n", ""))
+        self.assertEqual(self.reads, [("sample/alpha", [8])])
+        self.assertEqual(self.job("042-sample-export")["stage"], "needs-human")
+
+    def test_all_open_is_silent(self):
+        self.states = {7: "OPEN", 8: "OPEN"}
+        self.board["jobs"] = [self.export(), self.sample_import()]
+        self.assert_silent(self.pickup())
+
+    def test_dry_run_prints_and_writes_nothing(self):
+        self.board["jobs"] = [self.export(), self.sample_import()]
+        self.assertEqual(self.pickup("--dry-run"), (0, "would sync 042-sample-export alpha: merged on GitHub\n"
+                                                       "would sync 043-sample-import alpha: PR closed on GitHub\n"
+                                                       "host host-a: would launch 0\n", ""))
+        self.assertEqual(self.puts(), [])
+
+    def test_a_failed_read_warns_and_later_passes_run(self):
+        for why in ("gh is not installed on host-a", "gh api graphql timed out after 60 seconds on host-a",
+                    "gh api graphql exited 1 (check gh auth status on host-a)",
+                    "gh api graphql returned no repository (check the project file's repo and gh auth status on host-a)"):
+            with self.subTest(why=why):
+                self.failure = why
+                self.board["jobs"] = [self.export(), self.sample_import(),
+                                      {"id": "044-sample-close", "stage": "build", "project": "alpha",
+                                       "updated": "2026-01-01T00:00:00Z",
+                                       "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}}]
+                self.assertEqual(self.pickup(), (0, "closed 044-sample-close alpha\n",
+                                                 f"factory.py: pickup skips the PR sync for sample/alpha: {why}\n"))
+                self.assertEqual((self.job("042-sample-export")["stage"], self.job("043-sample-import")["stage"]),
+                                 ("needs-human", "pr-open"))
+
+    def test_syncs_the_first_hundred_pull_requests_of_a_repo(self):
+        self.states = {}
+        self.board["jobs"] = [self.sample_import(id=f"{n:03}-sample", pr=f"https://github.com/sample/alpha/pull/{n}")
+                              for n in range(1, 102)]
+        self.assertEqual(self.pickup(), (0, "", "factory.py: pickup syncs the first 100 of 101 pull requests "
+                                                "in sample/alpha\n"))
+        self.assertEqual(self.reads, [("sample/alpha", list(range(1, 101)))])
+
+    def test_skips_claimed_closing_riders_unlisted_hosts_and_other_repos(self):
+        self.states = {n: "MERGED" for n in range(7, 12)}
+        self.board["jobs"] = [
+            self.export(claim=held("other-host")),
+            self.sample_import(close={"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}),
+            self.export(id="045-sample-rider", pr="https://github.com/sample/alpha/pull/9",
+                        refs=[{"id": "042-sample-export", "kind": "batched-into"}]),
+            self.export(id="046-sample-delta", project="delta", pr="https://github.com/sample/alpha/pull/10"),
+            self.export(id="047-sample-other", pr="https://github.com/sample/other/pull/11")]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines(), [
+            "skip sync 042-sample-export alpha: claimed by other-host session s1",
+            "skip sync 046-sample-delta delta: pickup does not list host host-a",
+            f"would close 043-sample-import alpha and pull request {self.PR8}",
+            "host host-a: would launch 0"])
+        self.assertEqual((self.reads, self.puts()), ([], []))
+
+
 class DenyNotesTest(PickupFixture):
     def setUp(self):
         super().setUp()
@@ -2660,6 +2875,167 @@ class BatchHoldTest(PickupFixture):
         self.assertEqual((code, err), (0, ""))
         self.assertRegex(out, r"^launched 101-wrap-doc-line alpha on primary session [0-9a-f]{6}\n$")
         self.assertEqual([j["id"] for j in self.board["jobs"] if "claim" in j], ["101-wrap-doc-line"])
+
+
+class PickupSetupTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        (self.home / "paths.md").write_text(f"---\nalpha: {self.repo_a}\n---\n", encoding="utf-8")
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+        self.doctor = patch.object(factory, "doctor", return_value={
+            "checks": [{"name": "config", "status": "pass", "message": ""}]}).start()
+        patch.object(factory, "PICKUP_SCHEDULER", "cron").start()
+        patch.object(factory, "setup_run", side_effect=self.scheduler).start()
+        self.crontab = ""
+        self.crontab_error = None
+        self.loaded = False
+        self.runs = []
+
+    def scheduler(self, argv, stdin=None):
+        self.runs.append(argv)
+        if argv == ["crontab", "-l"] and self.crontab_error:
+            return 1, self.crontab_error
+        if argv == ["crontab", "-l"]:
+            return (0, self.crontab) if self.crontab else (1, "no crontab for user")
+        if argv == ["crontab", "-"]:
+            self.crontab = stdin
+        if argv[:2] == ["launchctl", "print"]:
+            return (0 if self.loaded else 113), ""
+        return 0, ""
+
+    def setup(self, *args):
+        return invoke(factory, ["pickup", "setup", *args])
+
+    def cron_line(self):
+        return factory.timer_text("cron", factory.timer_values(self.home))
+
+    def writes(self):
+        return [argv for argv in self.runs if argv == ["crontab", "-"]]
+
+    def test_all_ok_exits_0(self):
+        self.crontab = self.cron_line() + "\n"
+        code, out, _ = self.setup()
+        self.assertEqual(code, 0)
+        self.assertIn("7 of 7 ok.\n", out)
+        self.assertEqual(out.splitlines()[-1], "A stored Paseo or Claude schedule prompt does not pick up ideas. "
+                                               "Only the host timer runs pickup.")
+        self.assertEqual([line.split()[0] for line in out.splitlines()[2:9]], [f"{n}." for n in range(1, 8)])
+
+    def test_missing_device_names_the_fix(self):
+        (self.home / "config.md").write_text("---\n---\n", encoding="utf-8")
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("2. missing  device:", out)
+        self.assertIn("\n    device: ", out)
+
+    def test_pickup_off_names_the_host(self):
+        self.views["alpha"] = (200, effective("alpha"))
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("alpha: pickup off", out)
+        self.assertIn(f"add host {DEVICE} exactly as written", out)
+
+    def test_missing_launcher(self):
+        self.write_launchers({"primary": [sys.executable, str(self.fake)]})
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("5. missing  launchers:", out)
+
+    def test_doctor_fail_skips_pipeline(self):
+        self.doctor.return_value = {"checks": [{"name": "credentials", "status": "fail", "message": ""}]}
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("6. missing  pipeline: not checked: fix check 1 first\n", out)
+        self.assertNotIn("Fix check 2 first", out)
+        self.assertFalse(any(path.startswith("/api/pipeline") for _, path in self.calls))
+
+    def test_doctor_fail_and_no_checkout_skip_pipeline(self):
+        self.doctor.return_value = {"checks": [{"name": "credentials", "status": "fail", "message": ""}]}
+        (self.home / "paths.md").write_text("---\nalpha: /nonexistent-1530\n---\n", encoding="utf-8")
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("6. missing  pipeline: not checked: fix checks 1 and 3 first\n", out)
+        self.assertNotIn("Fix check 2 first", out)
+
+    def test_no_checkout_skips_pipeline(self):
+        (self.home / "paths.md").write_text("---\nalpha: /nonexistent-1530\n---\n", encoding="utf-8")
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("6. missing  pipeline: not checked: fix check 3 first\n", out)
+        self.assertNotIn("Fix check 2 first", out)
+
+    def test_install_cron_is_idempotent(self):
+        self.crontab = "0 1 * * * true\n*/5 * * * * python3 /old/factory.py pickup\n"
+        code, out, _ = self.setup("--install")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("installed cron timer: crontab\n"))
+        self.assertEqual(self.crontab, "0 1 * * * true\n" + self.cron_line() + "\n")
+        self.assertEqual(len(self.writes()), 1)
+        code, out, _ = self.setup("--install")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("timer already installed: crontab\n"))
+        self.assertEqual(len(self.writes()), 1)
+
+    def test_install_cron_keeps_an_unreadable_crontab(self):
+        self.crontab_error = "crontab: permission denied"
+        code, _, err = self.setup("--install")
+        self.assertEqual(code, 1)
+        self.assertIn("could not read the crontab, so it was left as is: crontab: permission denied", err)
+        self.assertEqual(self.writes(), [])
+
+    def test_invalid_device_is_named(self):
+        (self.home / "config.md").write_text("---\ndevice: bad host\n---\n", encoding="utf-8")
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("2. missing  device: config.md device: 'bad host' is not a valid host name\n", out)
+        self.assertIn(f"    Replace the device: line in the frontmatter of {self.home / 'config.md'} with:\n", out)
+        self.assertNotIn("Add this line inside the frontmatter", out)
+
+    def test_fix_lines_quote_paths_with_spaces(self):
+        patch.object(factory.sys, "executable", "/opt/my python/python3").start()
+        code, out, _ = self.setup()
+        self.assertIn("    Or run: '/opt/my python/python3' ", out)
+
+    def test_fix_lines_carry_the_home_override(self):
+        code, out, _ = invoke(factory, ["--home", str(self.home), "pickup", "setup"])
+        self.assertEqual(code, 3)
+        self.assertIn(f"factory.py --home {self.home} pickup setup --install\n", out)
+
+    @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
+    def test_install_launchd_writes_plist(self):
+        patch.object(factory, "PICKUP_SCHEDULER", "launchd").start()
+        self.setup("--install")
+        plist = Path.home() / "Library" / "LaunchAgents" / "factory.pickup.plist"
+        doc = plistlib.loads(plist.read_bytes())
+        self.assertEqual(doc["StartInterval"], 300)
+        self.assertEqual(doc["ProgramArguments"][-3:], ["--home", str(self.home), "pickup"])
+        self.assertIn(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)], self.runs)
+        self.loaded = True
+        stamp = plist.stat().st_mtime_ns
+        self.runs.clear()
+        code, out, _ = self.setup("--install")
+        self.assertTrue(out.startswith(f"timer already installed: {plist}\n"))
+        self.assertEqual(plist.stat().st_mtime_ns, stamp)
+        self.assertFalse(any(argv[:2] == ["launchctl", "bootstrap"] for argv in self.runs))
+
+    def test_install_schtasks(self):
+        patch.object(factory, "PICKUP_SCHEDULER", "schtasks").start()
+        self.setup("--install")
+        cmd = Path.home() / ".config" / "factory-pickup.cmd"
+        self.assertTrue(cmd.exists())
+        create = next(argv for argv in self.runs if argv[:2] == ["schtasks", "/Create"])
+        self.assertEqual(create[-3:], ["/TR", str(cmd), "/F"])
+
+    def test_bad_argument_exits_2(self):
+        code, _, err = self.setup("--nope")
+        self.assertEqual(code, 2)
+        self.assertIn("usage: pickup setup [--install]", err)
+
+    def test_setup_never_claims(self):
+        self.crontab = self.cron_line() + "\n"
+        self.assertEqual(self.setup()[0], 0)
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.launched(), [])
 
 
 if __name__ == "__main__":

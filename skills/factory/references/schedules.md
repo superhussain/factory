@@ -25,9 +25,11 @@ Claude Code sessions, the aggregating host included, installs it.
 
 - launchd (macOS), `~/Library/LaunchAgents/factory.retro-push.plist` with
   `ProgramArguments` `/usr/bin/python3`, `<installed-skill>/runtime/factory.py`,
-  `retro`, `push`; `StartCalendarInterval` `Hour` 8, `Minute` 30; `StandardOutPath`
-  and `StandardErrorPath` `<home>/logs/retro-push.log`. Load with
-  `launchctl bootstrap gui/$(id -u) <plist>`.
+  `retro`, `push`; `StartCalendarInterval` an array of three dicts,
+  `Hour` 6, 7 and 8, each `Minute` 30; `StandardOutPath` and `StandardErrorPath`
+  `<home>/logs/retro-push.log`. Load with `launchctl bootstrap gui/$(id -u) <plist>`.
+  A sleeping Mac runs a missed calendar time once, at its next wake, so one 08:30
+  entry can land after the 09:00 aggregate. Each push replaces that day's file.
 
 - Task Scheduler (Windows): wrapper `%USERPROFILE%\.config\factory-retro-push.cmd`
   that runs

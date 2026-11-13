@@ -282,7 +282,8 @@ class RolesTest(IsolatedTestCase):
         for value in (*self.runtime.RETRO_CATEGORIES, "160 characters", "`<host>/`", "tooling"):
             self.assertIn(value, role)
         command = (SKILL / "references/commands/retro.md").read_text(encoding="utf-8")
-        for value in ("retro push", "retro aggregate", "factory-retro", "byte for byte", "retro admit <run>"):
+        for value in ("retro push", "retro aggregate", "factory-retro", "byte for byte", "retro admit <run>", "`stale`",
+                      "stale: <host>, latest digest <latest>"):
             self.assertIn(value, command)
         self.assertNotIn("suggest approve", command)
         self.assertIn("\nNever run an autonomy command or decide a backlog line; a person decides each line.\n",
@@ -293,7 +294,8 @@ class RolesTest(IsolatedTestCase):
     def test_retro_schedule(self):
         schedule = (SKILL / "schedules/retro.md").read_text(encoding="utf-8")
         for value in ("<installed-skill>", "<python-launcher>", "retro: autonomy paused", "no claude route: runtime <runtime>", "If `runtime` is not `claude`",
-                      "byte for byte", "`expected`"):
+                      "byte for byte", "`expected`", "`stale`",
+                      "stale: <host>, latest digest <latest>"):
             self.assertIn(value, schedule)
         steps = ("routes pick", "autonomy status", "retro push", "retro aggregate --days 3", "factory-retro",
                  "retro admit <run>")
@@ -304,6 +306,10 @@ class RolesTest(IsolatedTestCase):
         approve = [line for line in schedule.splitlines() if "suggest approve" in line]
         self.assertEqual(len(approve), 1)
         self.assertTrue(approve[0].startswith("Never "))
+
+    def test_retro_push_launchd_times(self):
+        schedules = (SKILL / "references/schedules.md").read_text(encoding="utf-8")
+        self.assertIn("`Hour` 6, 7 and 8, each `Minute` 30", schedules)
 
     def test_unattended_standing_instruction(self):
         line = self.runtime.UNATTENDED

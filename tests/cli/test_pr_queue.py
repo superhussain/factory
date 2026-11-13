@@ -83,7 +83,9 @@ class PrQueueTest(IsolatedTestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(self.graphql[0][:3], ("api", "graphql", "-f"))
         self.assertIn("enqueuePullRequest", self.graphql[0][3])
-        self.assertEqual(self.graphql[0][4:], ("-f", "id=PR_node44"))
+        self.assertEqual(self.graphql[0][4:6], ("-f", "id=PR_node44"))
+        self.assertEqual(self.graphql[0][6], "-f")
+        self.assertRegex(self.graphql[0][7], r"^sha=[0-9a-f]{40}$")
 
     def test_a_refused_mutation_falls_back_to_merge_async(self):
         for answer in ((1, "", "refused"), (0, json.dumps({"data": {"enqueuePullRequest": None}}), ""),
