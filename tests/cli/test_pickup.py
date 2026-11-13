@@ -2341,6 +2341,13 @@ class PrSyncTest(PickupFixture):
         self.assert_silent(self.pickup())
         self.assertTrue(wt.exists())
 
+    def test_board_refuses_a_github_patch(self):
+        self.board["jobs"] = [self.export()]
+        with patch.object(factory.sys, "stdin", io.StringIO('{"github": {"merged": "2026-01-02T12:00:00Z"}}')):
+            result = invoke(factory, ["board", str(self.home), "042-sample-export"])
+        self.assertEqual(result, (2, "", "factory.py: only factory.py pickup sets github. Nothing was written.\n"))
+        self.assertEqual(self.puts(), [])
+
     def test_one_read_per_repo_across_projects(self):
         self.states = {}
         self.board["jobs"] = [self.export(), self.sample_import(project="beta")]

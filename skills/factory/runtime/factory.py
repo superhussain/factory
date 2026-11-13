@@ -860,6 +860,8 @@ def board(factory, job_id):
     if "close" in patch:
         fail("only the dashboard, factory.py pickup and factory.py control set close. To relay a person's chat, "
              "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
+    if "github" in patch:
+        fail("only factory.py pickup sets github. Nothing was written.", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
