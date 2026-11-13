@@ -425,6 +425,6 @@ test("the scheduled handler runs the pass through waitUntil", async () => {
   const s = setup();
   const pending = [];
   worker.scheduled({ scheduledTime: NOW.getTime() }, s.env, { waitUntil: (p) => pending.push(p) });
-  assert.equal(pending.length, 2);
+  assert.equal(pending.length, 3);
   assert.equal((await pending[0]).status, "archived");
 });
