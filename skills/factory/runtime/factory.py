@@ -2944,14 +2944,21 @@ def suggest_cmd(sub, *args):
         fail("usage: suggest admit <file> | " + SUGGEST_APPROVE_USAGE[len("usage: "):], 2)
 
 
-CONTROL_ACTIONS = ("prioritize", "unprioritize", "pause", "resume", "close")
+CONTROL_ACTIONS = ("prioritize", "unprioritize", "pause", "resume", "close", "babysit", "move", "rerun")
 PRIORITY_STAGES = (IDEA,) + IN_FLIGHT
-CONTROL_USAGE = ('usage: control <job-id> <prioritize|unprioritize|pause|resume> --chat-file <file> '
+CONTROL_USAGE = ('usage: control <job-id> <prioritize|unprioritize|pause|resume|babysit|rerun> --chat-file <file> '
+                 '| control <job-id> move <host> --chat-file <file> '
                  '| control <job-id> close --reason-file <file> --chat-file <file>')
 
 
 def control_cmd(job_id, action, *flags):
-    """Make the dashboard's Prioritize, Remove priority, Pause, Resume or Close from a person's chat message."""
+    """Make the dashboard's Prioritize, Remove priority, Pause, Resume, Close, Babysit PR, Move or Rerun
+    from a person's chat message."""
+    host = None
+    if action == "move":
+        if not flags or not HOST_NAME.fullmatch(flags[0]):
+            fail(CONTROL_USAGE, 2)
+        host, flags = flags[0], flags[1:]
     pairs = dict(zip(flags[::2], flags[1::2]))
     want = {"--reason-file", "--chat-file"} if action == "close" else {"--chat-file"}
     if not JOB_ID.fullmatch(job_id) or ".." in job_id or action not in CONTROL_ACTIONS \
@@ -2965,6 +2972,9 @@ def control_cmd(job_id, action, *flags):
     home = factory_home()
     device = holder(home)[0]
     record = {"via": "chat", "quote": quote, "by": device}
+    if action in ("babysit", "move", "rerun"):
+        control_launch(home, job_id, action, host, record)
+        return
 
     def change(text):
         data = load_board(text)
@@ -3006,6 +3016,17 @@ def control_cmd(job_id, action, *flags):
     if action == "close":
         out["reason"] = stored.get("reason") if isinstance(stored, dict) else None
     print(json.dumps(out))
+
+
+def pickup_host_problem(home, slug, host):
+    """Why host would never pick up a job of slug, or None when it is active and pickup lists it."""
+    hosts = json.loads(api(home, "GET", "/api/hosts")[2])
+    if not any(isinstance(h, dict) and h.get("id") == host and h.get("state") == "active" for h in hosts):
+        return f"{host} is not an active host"
+    enabled, listed, _ = pickup_config(home, slug)
+    if not enabled or host not in listed:
+        return f"{host} does not run pickup for {slug}"
+    return None
 
 
 def snapshot(repo, commit, dest):
