@@ -419,7 +419,7 @@ only `factory.py deny-notes` writes it.
   against the job's base (`$BASE` unless the job was stacked) with
   `gh pr create -R "$REPO" --head factory/<id> --base "$BASE"`. The `-R` matters
   because cwd may not be the repo, and a fork's checkout otherwise defaults to
-  upstream. Pass the same `-R` to every `gh pr` call. Write the description per
+  upstream, so pass it to every `gh pr` call. Write the description per
   the project file's PRs section: what changed and why, a testing section, the
   screenshots from `build.md`, and any device checks from `decision.md`. Set stage
   `pr-open`, `pr` to the PR URL, and `automerge` true for an APPROVE PR, in one
@@ -434,33 +434,33 @@ only `factory.py deny-notes` writes it.
   description opens with `Stacked on #<n>.` and covers only the rider's tasks. Patch
   the rider `{"pr": "<its PR URL>"}`. Write `$JOBS/<rider-id>/decision.md` with the
   job's `decision.md` first line, then `Approved with <id>: $DASHBOARD#<id>/decision`,
-  and run `push "$SLUG/<rider-id>"`. The job's `Batched ideas` list leaves the rider
-  out and ends with `Stacked: #<rider PR number>`.
+  and run `push "$SLUG/<rider-id>"`. The job's `Batched ideas` list omits the rider
+  and ends with `Stacked: #<rider PR number>`.
 - Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
-  at `pr-open` until its parent merges and the child is retargeted to `$BASE`, then
-  merges the same way. Wait for checks with
-  `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0 means they passed,
-  or the repo has none. Exit 3 means they are still pending, so run it again. Exit 1
-  names the failing checks. Exit 4 means no open PR; 5 means gh never gave a usable
-  reply. Never poll `gh pr checks` in a loop or with `--watch`.
+  at `pr-open` until its parent merges and it is retargeted to `$BASE`. Wait for
+  checks with `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0 means
+  they passed, or the repo has none. Exit 3 means they are still pending, so run it
+  again. Exit 1 names the failing checks. Exit 4 means no open PR; 5 means gh never
+  gave a usable reply. Never poll `gh pr checks` in a loop or with `--watch`.
   Immediately before every `gh pr merge`, run `factory.py pipeline "$SLUG"` again
   and use that fresh `$PIPELINE`. A non-zero exit moves the job to `needs-human` as
   Pipeline configuration describes, and nothing merges. When `$PIPELINE.merge` is
-  `human`, patch `automerge` false and `needs` to `review and merge PR #<n>: this
-  project's pipeline holds every PR for a person`, and do not merge. Otherwise
-  retarget any PR stacked on this one to `$BASE`, and run
+  `human`, patch `automerge` false and `needs` as in Shipping, and do not merge.
+  Otherwise retarget any PR stacked on this one to `$BASE`, and run
   `gh pr merge <n> -R "$REPO" --merge --delete-branch` as its own command. Move the
   job to `merged`, then run `cleanup`. A failing check or a merge conflict goes back to the builder as a
   rework with the log. A second failure moves the job to `needs-human`.
-  When the job had a stacked rider, `board` moves that rider out of the batch at
-  `pr-open` with the job's `automerge` and `escalated`. Merge the rider's PR the same
-  way, move it to `merged`, and run `cleanup "$SLUG/<rider-id>"`.
-- Jobs at `pr-open` from before auto-merge stay as they are. They never auto-merge.
+  With a stacked rider, `board` moves it out of the batch at `pr-open` with the job's
+  `automerge` and `escalated`. Merge its PR the same way, move it to `merged`, and
+  run `cleanup "$SLUG/<rider-id>"`. When a job with a stacked rider closes, `board`
+  closes the rider's open PR with a disclosed comment, the same guards as a dashboard
+  close, and the rider goes back to `idea`.
+- Jobs at `pr-open` from before auto-merge stay as they are and never auto-merge.
   A human merges or closes them, and the orchestrator moves the job when it sees that.
 - An ESCALATE PR is held. Put a `> [!WARNING]` callout at the top of the description
   listing the approver's sign-off items, set `escalated` to true, and start the board
   note with "escalated:".
-  A human reviews and merges it. Move the job to `merged` when you see the PR merged.
+  A human reviews and merges it. Move the job to `merged` when you see it merged.
 - `needs` is the human's queue. Set it only when the next step genuinely requires
   the user: a decision, a device check or screenshots, a credential, an ESCALATE
   sign-off, a PR the pipeline holds for a person (`merge` `human`), a gate
