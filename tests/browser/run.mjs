@@ -426,6 +426,22 @@ async function capture(outdir, referencePath) {
                   if (side === "after") external.push(request.url());
                   return request.abort();
                 }
+                if (
+                  target.pathname === "/api/backlog/triage/verdicts" &&
+                  request.method() === "POST"
+                ) {
+                  const { items } = JSON.parse(request.postData() ?? "{}");
+                  return request.respond({
+                    status: 200,
+                    contentType: "application/json",
+                    body: JSON.stringify({
+                      verdicts: (Array.isArray(items) ? items : []).map((item) =>
+                        item === CAPTURE_TRIAGE_ITEM ? CAPTURE_TRIAGE : null,
+                      ),
+                    }),
+                  });
+                }
+                // Reference pages older than the batched read ask one line at a time.
                 if (target.pathname === "/api/backlog/triage") {
                   const held = target.searchParams.get("item") === CAPTURE_TRIAGE_ITEM;
                   return request.respond({
