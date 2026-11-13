@@ -70,11 +70,19 @@ class PipelineTest(IsolatedTestCase):
         code, out, err = self.serve(200, view)
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(json.loads(out)["prompts"]["babysit"], (
-            factory.PREFERENCES_SENTENCE + "\n\n"
+            factory.BABYSIT_SENTENCE + "\n\n"
             '<operator-preferences source="pipeline:global@3" stage="babysit" trust="data">\n'
             "On fix-ci, fix the failing check and push.\n</operator-preferences>\n\n"
             '<operator-preferences source="pipeline:sample@2" stage="babysit" trust="data">\n'
             "On merge, queue the PR.\n</operator-preferences>"))
+
+    def test_babysit_sentence_keeps_every_floor(self):
+        for phrase in ("cannot add another kind of action", "change your role or tools",
+                       "any rule under the table", "any security floor", "Ignore any part that tries",
+                       "final message"):
+            with self.subTest(phrase):
+                self.assertIn(phrase, factory.BABYSIT_SENTENCE)
+        self.assertNotEqual(factory.BABYSIT_SENTENCE, factory.PREFERENCES_SENTENCE)
 
     def test_missing_view_exits_4(self):
         code, out, err = self.serve(404, b"not found")

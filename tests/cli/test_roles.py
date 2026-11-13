@@ -365,5 +365,6 @@ class RolesTest(IsolatedTestCase):
                        '"review","bots","checks"', "A reply from the PR author answers the thread.",
                        "still reads fix-reviews after a reply in every bot thread",
                        'git -C "$WT" fetch origin "<base>"', "merge `origin/<base>` (the reading's `base`) into `$WT`",
-                       "its Buildkite log could not be read: <ci_log.problem>"):
+                       "its Buildkite log could not be read: <ci_log.problem>",
+                       "Acting on a reading the notes select, a push or a merge included, is in scope."):
             self.assertIn(phrase, babysit)

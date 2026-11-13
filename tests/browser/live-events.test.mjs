@@ -47,6 +47,14 @@ test("live board events", { timeout: 240000 }, async (t) => {
         const clear = window.clearInterval;
         window.pollTimers = new Map();
         window.labelTicks = [];
+        window.liveCloses = [];
+        const Socket = window.WebSocket;
+        window.WebSocket = class extends Socket {
+          constructor(...args) {
+            super(...args);
+            this.addEventListener("close", (e) => window.liveCloses.push(`${e.code} ${e.reason}`));
+          }
+        };
         window.setInterval = (fn, ms, ...args) => {
           const id = interval(fn, ms, ...args);
           if (fn.name === "pollTick") window.pollTimers.set(id, ms);
@@ -157,7 +165,14 @@ test("live board events", { timeout: 240000 }, async (t) => {
             .classList.contains("pr-open"),
         wait,
       );
-      assert.deepEqual(await timers(page), []);
+      const [socketOpen, pending, closes] = await page.evaluate(() => [
+        liveOpen,
+        [...window.pollTimers.values()],
+        window.liveCloses,
+      ]);
+      if (socketOpen) assert.deepEqual(pending, [], "poll timer ran while the socket was open");
+      else assert.deepEqual(pending, [30000], "socket closed: " + closes.join(", "));
+      await page.waitForFunction("liveOpen && window.pollTimers.size === 0", wait);
       assert.equal(await stageOf(page), "pr-open");
 
       // With no further event, the freshness label still ages, and redrawing it reads nothing.
