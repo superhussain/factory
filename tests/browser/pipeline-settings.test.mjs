@@ -742,6 +742,19 @@ test("pipeline settings page", { timeout: 180000 }, async (t) => {
         ["false", "true"],
       );
       await fill("#pipeline-hold-hours", "6");
+      await fill("#pipeline-hold-min", "21");
+      await waitStatus(
+        page,
+        "Fix before saving: hold.min_ideas: must be a whole number from 1 to 20",
+      );
+      assert.deepEqual(
+        [
+          await page.$eval("#pipeline-hold-min", (el) => el.getAttribute("aria-invalid")),
+          await page.$eval("#pipeline-hold-hours", (el) => el.getAttribute("aria-invalid")),
+        ],
+        ["true", "false"],
+      );
+      await fill("#pipeline-hold-min", "3");
       await waitStatus(page, "Unsaved changes");
       await clickSave(page);
       await page.waitForFunction(
