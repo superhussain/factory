@@ -23,6 +23,19 @@ def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", auto=None
                           "commits": [{"committedDate": "2026-01-01T09:00:00Z"}, {"committedDate": HEAD}]})
 
 
+def graph(queue=False, threads=()):
+    return 0, json.dumps({"isInMergeQueue": queue, "reviewThreads": {"nodes": list(threads)}})
+
+
+# GraphQL names a GitHub App by its bare slug and marks it with __typename Bot; only REST adds "[bot]".
+BOTS = ("ci-helper", "lint-helper")
+
+
+def thread(*logins, resolved=False):
+    return {"isResolved": resolved, "comments": {"nodes": [
+        {"author": {"__typename": "Bot" if login in BOTS else "User", "login": login}} for login in logins]}}
+
+
 def checks(*buckets):
     return 0, json.dumps([{"bucket": b, "name": f"check-{i}"} for i, b in enumerate(buckets)])
 
@@ -49,7 +62,7 @@ class PrStateTest(IsolatedTestCase):
         def gh(*gh_args, stderr=False):
             calls.append(gh_args)
             reading = readings[min(sum(c[0] == "view" for c in calls) - 1, len(readings) - 1)]
-            answer = {"view": reading[0], "checks": reading[1]}.get(gh_args[0], (reading + ((0, "false\n"),))[2])
+            answer = {"view": reading[0], "checks": reading[1]}.get(gh_args[0], (reading + (graph(),))[2])
             return answer + ("",) if stderr and answer else answer
 
         with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job]})}) as server:
@@ -69,7 +82,7 @@ class PrStateTest(IsolatedTestCase):
     def test_merge_prints_one_reading(self):
         code, out, err, calls = self.state([(view(), checks("pass", "skipping"))])
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(json.loads(out), {"pr": 44, "state": "open", "review": "approved", "checks": "pass",
+        self.assertEqual(json.loads(out), {"pr": 44, "state": "open", "review": "approved", "bots": 0, "checks": "pass",
                                            "queued": False, "conflict": False, "stacked": False, "base": "main",
                                            "next": "merge"})
         self.assertEqual(calls[0][:3], ("view", PR, "--json"))
@@ -77,9 +90,28 @@ class PrStateTest(IsolatedTestCase):
         self.assertNotIn("isInMergeQueue", calls[0][3])
         self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket"))
         self.assertEqual(calls[2][0], "graphql")
-        self.assertIn("pullRequest(number:$n){isInMergeQueue}", calls[2][2])
+        self.assertIn("pullRequest(number:$n){isInMergeQueue reviewThreads(last:100){nodes{isResolved "
+                      "comments(first:100){nodes{author{__typename login}}}}}}", calls[2][2])
         self.assertEqual(calls[2][3:], ("-f", "o=example", "-f", "r=sample", "-F", "n=44",
-                                        "--jq", ".data.repository.pullRequest.isInMergeQueue"))
+                                        "--jq", ".data.repository.pullRequest"))
+
+    def test_unanswered_bot_threads_ask_for_fixes(self):
+        code, out, err, _ = self.state([(view(), checks("pass"), graph(threads=[thread("ci-helper")]))])
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["bots"], reading["next"], reading["review"]), (1, "fix-reviews", "approved"))
+        two = graph(threads=[thread("ci-helper"), thread("lint-helper", "reviewer-a")])
+        code, out, _, _ = self.state([(view(), checks("pass"), two)])
+        self.assertEqual((json.loads(out)["bots"], json.loads(out)["next"]), (2, "fix-reviews"))
+
+    def test_answered_resolved_and_human_threads_do_not_count(self):
+        threads = [thread("ci-helper", resolved=True), thread("ci-helper", "pr-owner"),
+                   thread("reviewer-a"), thread("reviewer-a", "ci-helper"), thread("helper[bot]"), thread()]
+        code, out, err, _ = self.state([(view(), checks("pass"), graph(threads=threads))])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((json.loads(out)["bots"], json.loads(out)["next"]), (0, "merge"))
+        bot = review("COMMENTED", login="ci-helper[bot]")
+        self.assertEqual(self.next_of((view(reviews=[bot]), checks("pass"), graph())), "merge")
 
     def test_merged_and_closed(self):
         self.assertEqual(self.next_of((view("MERGED"), checks("pass"))), "merged")
@@ -118,7 +150,7 @@ class PrStateTest(IsolatedTestCase):
             with self.subTest(bucket):
                 self.assertEqual(self.next_of((view(), checks("pass", bucket, "pending"))), "fix-ci")
         self.assertEqual(self.next_of((view(), checks("pass", "pending"))), "wait")
-        self.assertEqual(self.next_of((view(), checks("pass"), (0, "true\n"))), "wait")
+        self.assertEqual(self.next_of((view(), checks("pass"), graph(True))), "wait")
         self.assertEqual(self.next_of((view(auto={"enabledAt": HEAD}), checks("pass"))), "wait")
 
     def test_unreadable_checks_read_as_none_when_the_pr_lists_none(self):
@@ -210,7 +242,8 @@ class PrStateTest(IsolatedTestCase):
                 self.assertEqual((code, out), (5, ""))
                 self.assertIn(why, err)
         for reading, why in ((None, "not installed"), (("timeout", ""), "gh api graphql timed out"),
-                             ((1, ""), "gh api graphql exited 1")):
+                             ((1, ""), "gh api graphql exited 1"),
+                             ((0, "not json"), "gh api graphql printed no JSON object")):
             with self.subTest(queue=reading):
                 code, out, err, _ = self.state([(view(), checks("pass"), reading)])
                 self.assertEqual((code, out), (5, ""))

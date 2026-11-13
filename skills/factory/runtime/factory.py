@@ -5394,8 +5394,10 @@ def checks_cmd(target, *args):
 PR_STATE_USAGE = "usage: pr-state <project-slug>/<job-id> [--wait S]"
 PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName"
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
-# gh pr view --json has no isInMergeQueue field, so it comes from GraphQL.
-PR_QUEUE_QUERY = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isInMergeQueue}}}"
+# gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
+PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
+                    "{isInMergeQueue reviewThreads(last:100){nodes{isResolved"
+                    " comments(first:100){nodes{author{__typename login}}}}}}}}")
 PR_STATE_INTERVAL = 30
 
 
@@ -5438,15 +5440,29 @@ def pr_reading(pr, base):
     approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
     state = str(view.get("state") or "").lower()
     owner, name, _, number = pr.split("/")[3:7]
-    in_queue = gh_answer(gh_cli("api", "graphql", "-f", PR_QUEUE_QUERY, "-f", f"o={owner}", "-f", f"r={name}",
-                                "-F", f"n={number}", "--jq", ".data.repository.pullRequest.isInMergeQueue"),
-                         "gh api graphql").strip() == "true"
+    try:
+        pull = json.loads(gh_answer(gh_cli("api", "graphql", "-f", PR_GRAPHQL_QUERY, "-f", f"o={owner}",
+                                           "-f", f"r={name}", "-F", f"n={number}",
+                                           "--jq", ".data.repository.pullRequest"), "gh api graphql"))
+    except ValueError:
+        pull = None
+    if not isinstance(pull, dict):
+        fail("gh api graphql printed no JSON object", 5)
+    in_queue = pull.get("isInMergeQueue") is True
+    bots = 0
+    for thread in (pull.get("reviewThreads") or {}).get("nodes") or []:
+        if not isinstance(thread, dict) or thread.get("isResolved"):
+            continue
+        comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
+        if comments and (comments[0].get("author") or {}).get("__typename") == "Bot" \
+                and all(login(c) != author for c in comments):
+            bots += 1
     queued = in_queue or bool(view.get("autoMergeRequest"))
     conflict = view.get("mergeStateStatus") == "DIRTY"
     stacked = target != base
     if state in ("merged", "closed"):
         step = state
-    elif unanswered:
+    elif unanswered or bots:
         step = "fix-reviews"
     elif not approved:
         step = "needs-review"
@@ -5461,7 +5477,7 @@ def pr_reading(pr, base):
     else:
         step = "merge"
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
-            "review": "changes" if unanswered else "approved" if approved else "none",
+            "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
             "base": target, "next": step}
 
