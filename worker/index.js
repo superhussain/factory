@@ -41,6 +41,9 @@ import {
   TRIAGE_REASON,
   TRIAGE_REASON_NO_RULES,
   backlogQuestions,
+  duplicateCandidates,
+  duplicateInput,
+  duplicatePick,
   triageBatchConfidence,
   triageBatchInput,
   triageChoices,
@@ -1013,6 +1016,20 @@ async function storeTriageVerdict(env, item, verdict) {
   else await env.BUCKET.delete(key);
 }
 
+// Marks each queued verdict whose line may repeat an open job of the project. The note is
+// advisory, so any failure leaves the verdicts as they are.
+async function flagDuplicates(env, slug, entries, verdicts) {
+  try {
+    const candidates = duplicateCandidates((await storedBoard(env)).jobs, slug);
+    if (!candidates.length || !entries.length) return;
+    const result = await env.AI.run(TRIAGE_MODEL, duplicateInput(slug, candidates, entries));
+    for (const { n } of entries) {
+      const id = duplicatePick(result, n, candidates);
+      if (id) verdicts[n - 1].duplicate = id;
+    }
+  } catch {}
+}
+
 // Rates one new backlog line against its project's triage rules. The Worker compares the
 // score with the threshold, so a device cannot move the bar.
 async function backlogTriage(request, env) {
@@ -1081,13 +1098,16 @@ async function backlogTriage(request, env) {
   }
   const confidence = triageConfidence(result);
   if (confidence === null) return reply("the triage model gave an unusable reply", 502);
-  return finish({
+  const verdict = {
     decision: confidence >= threshold ? "queue" : "hold",
     confidence,
     threshold,
     reason: triage.rules ? TRIAGE_REASON : TRIAGE_REASON_NO_RULES,
     model: TRIAGE_MODEL,
-  });
+  };
+  if (verdict.decision === "queue")
+    await flagDuplicates(env, slug, [{ n: 1, item, context }], [verdict]);
+  return finish(verdict);
 }
 
 // Rates up to 8 plain backlog lines of one project in one model call. Each entry gets its own
@@ -1171,6 +1191,8 @@ async function backlogTriageBatch(request, env) {
               model: TRIAGE_MODEL,
             };
     }
+    const queued = entries.filter(({ n }) => verdicts[n - 1].decision === "queue");
+    await flagDuplicates(env, slug, queued, verdicts);
   }
   for (const [i, verdict] of verdicts.entries())
     if (verdict.decision) await storeTriageVerdict(env, items[i].item, verdict);
