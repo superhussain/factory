@@ -27,8 +27,13 @@ def graph(queue=False, threads=()):
     return 0, json.dumps({"isInMergeQueue": queue, "reviewThreads": {"nodes": list(threads)}})
 
 
+# GraphQL names a GitHub App by its bare slug and marks it with __typename Bot; only REST adds "[bot]".
+BOTS = ("ci-helper", "lint-helper")
+
+
 def thread(*logins, resolved=False):
-    return {"isResolved": resolved, "comments": {"nodes": [{"author": {"login": login}} for login in logins]}}
+    return {"isResolved": resolved, "comments": {"nodes": [
+        {"author": {"__typename": "Bot" if login in BOTS else "User", "login": login}} for login in logins]}}
 
 
 def checks(*buckets):
@@ -86,22 +91,22 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket"))
         self.assertEqual(calls[2][0], "graphql")
         self.assertIn("pullRequest(number:$n){isInMergeQueue reviewThreads(last:100){nodes{isResolved "
-                      "comments(first:100){nodes{author{login}}}}}}", calls[2][2])
+                      "comments(first:100){nodes{author{__typename login}}}}}}", calls[2][2])
         self.assertEqual(calls[2][3:], ("-f", "o=example", "-f", "r=sample", "-F", "n=44",
                                         "--jq", ".data.repository.pullRequest"))
 
     def test_unanswered_bot_threads_ask_for_fixes(self):
-        code, out, err, _ = self.state([(view(), checks("pass"), graph(threads=[thread("ci-helper[bot]")]))])
+        code, out, err, _ = self.state([(view(), checks("pass"), graph(threads=[thread("ci-helper")]))])
         self.assertEqual((code, err), (0, ""))
         reading = json.loads(out)
         self.assertEqual((reading["bots"], reading["next"], reading["review"]), (1, "fix-reviews", "approved"))
-        two = graph(threads=[thread("ci-helper[bot]"), thread("lint-helper[bot]", "reviewer-a")])
+        two = graph(threads=[thread("ci-helper"), thread("lint-helper", "reviewer-a")])
         code, out, _, _ = self.state([(view(), checks("pass"), two)])
         self.assertEqual((json.loads(out)["bots"], json.loads(out)["next"]), (2, "fix-reviews"))
 
     def test_answered_resolved_and_human_threads_do_not_count(self):
-        threads = [thread("ci-helper[bot]", resolved=True), thread("ci-helper[bot]", "pr-owner"),
-                   thread("reviewer-a"), thread("reviewer-a", "ci-helper[bot]"), thread()]
+        threads = [thread("ci-helper", resolved=True), thread("ci-helper", "pr-owner"),
+                   thread("reviewer-a"), thread("reviewer-a", "ci-helper"), thread("helper[bot]"), thread()]
         code, out, err, _ = self.state([(view(), checks("pass"), graph(threads=threads))])
         self.assertEqual((code, err), (0, ""))
         self.assertEqual((json.loads(out)["bots"], json.loads(out)["next"]), (0, "merge"))

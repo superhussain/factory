@@ -5378,7 +5378,8 @@ PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMerge
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
 PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
-                    "{isInMergeQueue reviewThreads(last:100){nodes{isResolved comments(first:100){nodes{author{login}}}}}}}}")
+                    "{isInMergeQueue reviewThreads(last:100){nodes{isResolved"
+                    " comments(first:100){nodes{author{__typename login}}}}}}}}")
 PR_STATE_INTERVAL = 30
 
 
@@ -5435,7 +5436,8 @@ def pr_reading(pr, base):
         if not isinstance(thread, dict) or thread.get("isResolved"):
             continue
         comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
-        if comments and login(comments[0]).endswith("[bot]") and all(login(c) != author for c in comments):
+        if comments and (comments[0].get("author") or {}).get("__typename") == "Bot" \
+                and all(login(c) != author for c in comments):
             bots += 1
     queued = in_queue or bool(view.get("autoMergeRequest"))
     conflict = view.get("mergeStateStatus") == "DIRTY"
