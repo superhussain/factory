@@ -59,7 +59,7 @@
                                             re-reads every 30 seconds for up to S seconds (1 to 600) while
                                             next is wait; a bad pr exits 4, a gh problem 5
   factory.py pr-queue <project-slug>/<job-id>
-                                            print whether GitHub queued the job PR through merge-async:
+                                            print whether GitHub queued the job PR, by the enqueue mutation first, else merge-async:
                                             one JSON line of pr, status and detail; enqueued exits 0,
                                             failed or refused 1, pending after 120 seconds 3, a bad or
                                             stacked pr 4, a gh problem 5
@@ -6014,6 +6014,8 @@ def pr_state_cmd(target, *args):
         time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
 
 
+PR_ENQUEUE_MUTATION = ("query=mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id})"
+                       "{mergeQueueEntry{state position}}}")
 PR_QUEUE_USAGE = "usage: pr-queue <project-slug>/<job-id>"
 PR_QUEUE_INTERVAL = 10
 PR_QUEUE_TIMEOUT = 120
@@ -6021,13 +6023,13 @@ MERGE_ASYNC_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 
 
 def pr_queue_cmd(target):
-    """Queue the job's PR through merge-async and print one JSON line once GitHub says enqueued or failed."""
+    """Queue the job's PR with the enqueuePullRequest mutation, else through merge-async, and print one JSON line once GitHub says enqueued or failed."""
     home, slug, job_id = r2_target(target, True)
     pr = board_pr(home, slug, job_id)
     base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
     owner, name, _, number = pr.split("/")[3:7]
     try:
-        view = json.loads(gh_pr_view(pr, "--json", "headRefOid,baseRefName"))
+        view = json.loads(gh_pr_view(pr, "--json", "headRefOid,baseRefName,id"))
     except ValueError:
         view = None
     sha = view.get("headRefOid") if isinstance(view, dict) else None
@@ -6041,6 +6043,15 @@ def pr_queue_cmd(target):
     def done(status, detail, code):
         print(json.dumps({"pr": int(number), "status": status, "detail": detail}))
         raise SystemExit(code)
+
+    answer = gh_cli("api", "graphql", "-f", PR_ENQUEUE_MUTATION, "-f", f"id={view.get('id')}", stderr=True)
+    if answer and answer[0] == 0:
+        try:
+            entry = json.loads(answer[1])["data"]["enqueuePullRequest"]["mergeQueueEntry"]
+        except (ValueError, KeyError, TypeError):
+            entry = None
+        if isinstance(entry, dict):
+            done("enqueued", f"position {entry.get('position')}", 0)
 
     result = gh_cli("api", "-X", "PUT", path, "-f", f"sha={sha}", "-f", "merge_action=merge_queue", stderr=True)
     if result is None or result[0] == "timeout":

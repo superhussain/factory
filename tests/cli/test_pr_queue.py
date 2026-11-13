@@ -16,7 +16,7 @@ REQUIRED = 'Required workflow "sample-validate" is not satisfied'
 
 
 def view(base="main", sha=SHA):
-    return 0, json.dumps({"headRefOid": sha, "baseRefName": base})
+    return 0, json.dumps({"headRefOid": sha, "baseRefName": base, "id": "PR_node44"})
 
 
 def put(body=None):
@@ -39,16 +39,20 @@ class PrQueueTest(IsolatedTestCase):
     def sleep(self, seconds):
         self.now += seconds
 
-    def queue(self, polls, pr_view=None, put_answer=PUT):
+    def queue(self, polls, pr_view=None, put_answer=PUT, graphql=(1, "", "mutation refused\n")):
         """Run pr-queue with gh answering the view, the PUT, then each poll in turn, repeating the last."""
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open", "pr": PR}
         calls = []
+        self.graphql = []
 
         def gh_pr(*args, stderr=False):
             calls.append(("pr",) + args)
             return view() if pr_view is None else pr_view
 
         def gh_cli(*args, stderr=False):
+            if "graphql" in args:
+                self.graphql.append(args)
+                return graphql
             calls.append(args)
             if "PUT" in args:
                 return put() if put_answer is PUT else put_answer
@@ -66,10 +70,30 @@ class PrQueueTest(IsolatedTestCase):
         code, out, err, calls = self.queue([status("pending"), status("ENQUEUED")])
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(out, '{"pr": 44, "status": "enqueued", "detail": ""}\n')
-        self.assertEqual(calls[0], ("pr", "view", PR, "--json", "headRefOid,baseRefName"))
+        self.assertEqual(calls[0], ("pr", "view", PR, "--json", "headRefOid,baseRefName,id"))
         self.assertEqual(calls[1], ("api", "-X", "PUT", PATH, "-f", f"sha={SHA}", "-f", "merge_action=merge_queue"))
         self.assertEqual(calls[2:], [("api", f"{PATH}/{UUID}")] * 2)
         self.assertEqual(self.now, 10)
+
+    def test_the_enqueue_mutation_queues_first(self):
+        entry = {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"state": "QUEUED", "position": 3}}}}
+        code, out, err, calls = self.queue([status("failed")], graphql=(0, json.dumps(entry), ""))
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, '{"pr": 44, "status": "enqueued", "detail": "position 3"}\n')
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.graphql[0][:3], ("api", "graphql", "-f"))
+        self.assertIn("enqueuePullRequest", self.graphql[0][3])
+        self.assertEqual(self.graphql[0][4:], ("-f", "id=PR_node44"))
+
+    def test_a_refused_mutation_falls_back_to_merge_async(self):
+        for answer in ((1, "", "refused"), (0, json.dumps({"data": {"enqueuePullRequest": None}}), ""),
+                       (0, "not json", ""), None):
+            with self.subTest(answer=answer):
+                code, out, err, calls = self.queue([status("enqueued")], graphql=answer)
+                self.assertEqual((code, err), (0, ""))
+                self.assertEqual(out, '{"pr": 44, "status": "enqueued", "detail": ""}\n')
+                self.assertEqual(len(self.graphql), 1)
+                self.assertEqual(calls[1][:3], ("api", "-X", "PUT"))
 
     def test_failed_exits_1_with_detail(self):
         code, out, err, _ = self.queue([status("failed", message="queue rejected the head")])
