@@ -1419,7 +1419,7 @@ function card(j, inNeeds, archived = false) {
       (j.branch ? line('meta branch', j.branch) : '') +
       line('meta round', 'round ' + (j.round ?? 0) + (buildState(j) ? ' · build ' + buildState(j) : ''))) +
     (refText ? '<div class="meta refs line" title="' + esc(refText) + '">' + refs(j).map(refLine).join(' &middot; ') + '</div>' : '') +
-    (dup ? '<div class="meta refs duplicate line">possible duplicate of ' +
+    (dup ? '<div class="meta refs duplicate line" title="' + esc('possible duplicate of ' + dup) + '">possible duplicate of ' +
       (dupOnBoard ? '<span class="ref-link" data-ref="' + esc(dup) + '">' + esc(dup) + '</span>' : esc(dup)) + '</div>' : '') +
     (riders.length ? '<div class="meta refs riders line" title="' + esc('batches ' + riders.join(' · ')) + '">batches ' +
       riders.map((id) => '<span class="ref-link" data-ref="' + esc(id) + '">' + esc(id) + '</span>').join(' &middot; ') + '</div>' : '') +
