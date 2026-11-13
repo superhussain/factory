@@ -224,6 +224,14 @@ exits 4. A linked `reply.json`, `aggregate.json`, `findings.md` or
 to the shared backlog, triage never rates them, and a person decides each one on the
 dashboard; the run folder's files stay on this host.
 
+A card may carry a `finding` number. `retro admit` then uploads a `factory.retro-run/1`
+record to `PUT /api/retros/<run>` with the checked findings, each card's finding link and
+whether it was admitted or why it was skipped, even when nothing was admitted. It prints
+`uploaded retro run <run>`. It needs `device:` in `config.md`, and prints
+`retro upload skipped: set device: in config.md` without it. An upload error prints
+`retro upload failed: <status> <text>` to stderr and never changes the exit code. A Worker
+without the route answers 404. The `#/retros` dashboard page lists the runs.
+
 ## Exit recovery
 
 | Exit | Action |

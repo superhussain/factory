@@ -27,6 +27,9 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    the exit code. Retro may edit only project scopes on the autonomy allowlist; `global`
    is person-only, and admit skips any other scope. A person undoes an edit with Restore
    to draft in Settings, Pipeline.
+   An `uploaded retro run <run>` line means the findings and the cards' outcomes are on the
+   `#/retros` page. A `retro upload failed` or `retro upload skipped` line on stderr means
+   they are not; it never changes the exit code.
    An `edited <file> to version N: <summary>` line means a file edit is saved through
    `PUT /api/project-retro/<file>`; a person undoes it with Restore to draft in Settings, Projects.
    A person decides each line on the dashboard Backlog decision page.
