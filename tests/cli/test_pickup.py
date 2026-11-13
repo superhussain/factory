@@ -1149,6 +1149,15 @@ class MoveHostTest(MoveFixture):
         self.assertEqual(self.pickup()[1], "stopped 042-sample-export alpha: moved to studio-mac\n")
         self.assertIn("stopped", self.job("042-sample-export")["move"])
 
+    def test_unchecked_processes_leave_stopped_unset(self):
+        self.moved()
+        self.alive = None
+        code, out, err = self.pickup()
+        self.assertEqual((code, out), (0, ""))
+        self.assertEqual(err, "factory.py: pickup could not stop 042-sample-export: processes were not checked\n")
+        self.assertEqual(self.puts(), [])
+        self.assertNotIn("stopped", self.job("042-sample-export")["move"])
+
     def test_dry_run_prints_would_stop(self):
         self.moved()
         code, out, err = self.pickup("--dry-run")
@@ -2169,6 +2178,7 @@ class CloseCleanupTest(PickupFixture):
         self.assertFalse(self.branch_exists())
         self.assertEqual(self.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"], [])
 
+    @unittest.skipIf(sys.platform == "win32", "lsof is not used on Windows")
     def test_cleanup_without_lsof_still_removes_a_merged_job(self):
         self.git(self.repo_a, "merge", "-q", "--no-ff", "-m", "merge", "factory/042-sample-export")
         self.board["jobs"] = [self.closed()]
@@ -2181,6 +2191,18 @@ class CloseCleanupTest(PickupFixture):
         self.assertEqual(self.pickup(), (0, "cleaned up 042-sample-export alpha\n",
                                          f"factory.py: lsof not found, so processes in {self.wt} were not checked\n"))
         self.assertFalse(self.wt.exists())
+
+    @unittest.skipIf(sys.platform == "win32", "lsof is not used on Windows")
+    def test_stop_pids_without_lsof_is_unchecked(self):
+        which = factory.shutil.which
+        patch.object(factory, "PROC_ROOT", str(self.root / "no-proc")).start()
+        patch.object(factory, "LSOF_FALLBACKS", ()).start()
+        patch.object(factory.shutil, "which",
+                     side_effect=lambda name, *a, **k: None if name == "lsof" else which(name, *a, **k)).start()
+        with patch.object(sys, "stderr", io.StringIO()) as err:
+            self.assertIsNone(factory.stop_pids(self.wt))
+        self.assertEqual(err.getvalue(),
+                         f"factory.py: lsof not found, so processes in {os.path.realpath(self.wt)} were not checked\n")
 
     @unittest.skipIf(sys.platform == "win32", "lsof is not used on Windows")
     def test_lsof_falls_back_to_a_system_folder(self):
