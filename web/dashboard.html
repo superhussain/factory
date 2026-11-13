@@ -1605,9 +1605,9 @@ const prQueryMatch = (j, query) => {
   return !!n && typeof j.pr === 'string' && j.pr.endsWith('/pull/' + n);
 };
 
-// The text the jumper matches: id, title, project, Jira key, PR link and idea, one field per line.
+// The text the jumper matches: id, title, project, Jira key, PR link, idea and goal, one field per line.
 function jobSearchText(j) {
-  return [j.id, j.title, j.project, projectName(j), j.jira, j.pr, j.idea]
+  return [j.id, j.title, j.project, projectName(j), j.jira, j.pr, j.idea, j.goal]
     .filter((f) => typeof f === 'string').join('\n').toLowerCase();
 }
 

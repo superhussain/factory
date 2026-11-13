@@ -1779,8 +1779,8 @@ function checkRiderControls(storedJobs, jobs) {
   return null;
 }
 
-// Only factory.py batch adds a batched-into ref, and only the lead's close or merge drops one.
-// An error message, or null.
+// Only factory.py batch adds a batched-into ref, into a lead stored at spec or new in this write.
+// Only the lead's close or merge drops one or deletes its rider row. An error message, or null.
 function checkBatchRefs(storedJobs, jobs) {
   const firstById = (rows) => {
     const byId = new Map();
@@ -1808,10 +1808,19 @@ function checkBatchRefs(storedJobs, jobs) {
         after.length === 1 &&
         row.stage === "spec" &&
         (!storedRow || storedRow.stage === "idea") &&
-        written.get(added)?.stage === "spec"
+        written.get(added)?.stage === "spec" &&
+        (!stored.get(added) || stored.get(added).stage === "spec")
       )
     )
       return `a board write cannot batch ${quoteIdCut(row.id, QUOTED_ID_MAX)} into ${quoteIdCut(added, QUOTED_ID_MAX)}: factory.py batch does that, while the lead is at spec. Nothing was written.`;
+  }
+  for (const [id, storedRow] of stored) {
+    if (written.has(id)) continue;
+    for (const leadId of batchLeads(storedRow)) {
+      const lead = written.get(leadId);
+      if (lead && lead.stage !== "closed" && lead.stage !== "merged")
+        return `a board write cannot delete ${quoteIdCut(id, QUOTED_ID_MAX)}: its lead ${quoteIdCut(leadId, QUOTED_ID_MAX)} is still open. Close or merge the lead first. Nothing was written.`;
+    }
   }
   return null;
 }

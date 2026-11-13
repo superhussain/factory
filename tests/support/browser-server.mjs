@@ -78,14 +78,17 @@ export async function seedBoard(origin, jobs, updated = "2026-01-01T00:00:00Z") 
     jobs.flatMap((job) => (job.refs ?? []).filter(isBatchRef).map((r) => r.id)),
   );
   // The Worker refuses one write that drops an id and adds a row, so drop first. Riders go too,
-  // so their refs are added again below rather than dropped while the lead is open.
+  // so their refs are added again below rather than dropped while the lead is open. Their leads,
+  // old and new, go in the same write: the Worker refuses deleting a rider while its lead stays open.
   const current = await fetch(origin + "/api/board", { redirect: "manual" });
   if (current.ok) {
     const ids = new Set(jobs.map((job) => job.id));
-    const kept = (await current.json()).jobs.filter(
-      (job) => ids.has(job.id) && !riders.has(job.id),
+    const stored = (await current.json()).jobs;
+    const storedLeads = stored.flatMap((job) =>
+      (job.refs ?? []).filter(isBatchRef).map((r) => r.id),
     );
-    await write(kept);
+    const dropped = new Set([...riders, ...leads, ...storedLeads]);
+    await write(stored.filter((job) => ids.has(job.id) && !dropped.has(job.id)));
   }
   if (riders.size) {
     // Add each batched-into ref the way factory.py batch does: rider idea to spec, lead at spec.
