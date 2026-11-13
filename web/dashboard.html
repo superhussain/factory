@@ -1517,6 +1517,12 @@ function batchState(j) {
   };
 }
 
+// The held chips' text as the board last drew it. clockTick redraws once a chip's text would change.
+let heldDrawn = '';
+function heldChipsKey() {
+  return jobs.filter(batchHeld).map((j) => j.id + ':' + batchState(j).text).join('\n');
+}
+
 // One fact on one row, with the full text in its tooltip.
 function line(cls, text) {
   return '<div class="' + cls + ' line" title="' + esc(text) + '">' + esc(text) + '</div>';
@@ -3416,6 +3422,7 @@ function renderBoard() {
     target?.focus({ preventScroll: true });
   }
   syncCardActions();
+  heldDrawn = heldChipsKey();
 }
 
 $('board').addEventListener('click', (e) => {
@@ -7050,7 +7057,14 @@ function runLiveRead(key) {
 }
 window.addEventListener('blur', () => setTimeout(schedulePoll, 0));
 window.addEventListener('focus', () => { if (pollStarted && !liveOpen && !document.hidden) pollTick(); syncLive(); schedulePoll(); });
-setInterval(() => { if (!document.hidden) drawUpdated(); }, 30000);
+// A redraw while a card has focus or its menu is open would move them, so the chips wait for the next tick.
+function clockTick() {
+  if (document.hidden) return;
+  drawUpdated();
+  if (cardMenu || $('board').contains(document.activeElement)) return;
+  if (loaded && heldChipsKey() !== heldDrawn) renderBoard();
+}
+setInterval(clockTick, 30000);
 $('display-columns').append(...COLUMNS.map(s => {
   const box = Object.assign(document.createElement('input'), {type:'checkbox', id:'display-column-' + s, disabled:s === 'needs-you'});
   box.dataset.stage = s;
