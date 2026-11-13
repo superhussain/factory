@@ -2618,6 +2618,14 @@ class PickupSetupTest(PickupFixture):
         self.assertNotIn("Fix check 2 first", out)
         self.assertFalse(any(path.startswith("/api/pipeline") for _, path in self.calls))
 
+    def test_doctor_fail_and_no_checkout_skip_pipeline(self):
+        self.doctor.return_value = {"checks": [{"name": "credentials", "status": "fail", "message": ""}]}
+        (self.home / "paths.md").write_text("---\nalpha: /nonexistent-1530\n---\n", encoding="utf-8")
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("6. missing  pipeline: not checked: fix checks 1 and 3 first\n", out)
+        self.assertNotIn("Fix check 2 first", out)
+
     def test_no_checkout_skips_pipeline(self):
         (self.home / "paths.md").write_text("---\nalpha: /nonexistent-1530\n---\n", encoding="utf-8")
         code, out, _ = self.setup()
