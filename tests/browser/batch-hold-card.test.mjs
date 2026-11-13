@@ -78,6 +78,14 @@ test("held for batching chip", { timeout: 120000 }, async () => {
       wait.startsWith("Waits for a batch (2 of 3, 3h of 24h). Pickup holds this idea"),
       wait,
     );
+    await page.evaluate(() => {
+      location.hash = "#104-triage-item";
+    });
+    await page.waitForSelector("#d-held:not([hidden])");
+    assert.equal(
+      await page.$eval("#d-held", (el) => el.textContent),
+      "Pickup launches 102-move-comment next and batches this idea behind it. Settings, Pipeline, Batch follow-ups sets the numbers.",
+    );
     assert.deepEqual(errors, []);
   });
 });

@@ -1618,7 +1618,8 @@ async function pruneRetro(env, now) {
 const readImage = (request) => readCapped(request, MAX_IMAGE);
 
 // Stores clef-flash's pick and fixed reasons for a pushed needs.md. Advisory: every early
-// return or failure leaves the form as it was, and the push reply never changes.
+// return or failure leaves the form as it was, and the push reply's status never changes.
+// The record's ms is the model call alone.
 async function rateNeeds(env, slug, id, text) {
   if (!env.AI) return;
   const questions = needsQuestions(text);
@@ -1637,7 +1638,9 @@ async function rateNeeds(env, slug, id, text) {
   const source = project?.triage
     ? `pipeline:${slug}@${projectVersion}`
     : `pipeline:global@${globalVersion}`;
+  const started = Date.now();
   const result = await env.AI.run(TRIAGE_MODEL, needsInput(source, triage.rules, text, questions));
+  const ms = Date.now() - started;
   const choices = triageChoices(result, questions, triage.rules);
   if (!choices) return;
   await env.BUCKET.put(
@@ -1645,6 +1648,7 @@ async function rateNeeds(env, slug, id, text) {
     JSON.stringify({
       sha256: await sha256(new TextEncoder().encode(text)),
       model: TRIAGE_MODEL,
+      ms,
       at: new Date().toISOString(),
       choices,
     }),
@@ -1665,14 +1669,21 @@ async function jobPut(request, env, key) {
     ...(cond && { onlyIf: cond }),
     ...(type && { httpMetadata: { contentType: type } }),
   });
+  // A stored needs.md reply says how long the rating held the push, in Server-Timing.
   const needs = obj && NEEDS_KEY.exec(key);
+  let timing;
   if (needs) {
+    const started = Date.now();
     try {
       await rateNeeds(env, needs[1], needs[2], body);
     } catch {}
+    timing = `needs-rating;dur=${Date.now() - started}`;
   }
   return obj
-    ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
+    ? reply("ok", 200, "text/plain", {
+        ETag: obj.httpEtag,
+        ...(timing && { "Server-Timing": timing }),
+      })
     : reply("precondition failed", 412);
 }
 

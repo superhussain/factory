@@ -1099,6 +1099,27 @@ async function capture(outdir, referencePath) {
     };
     await view("agent-runs-390", 390, 844, "dark", openAgentRuns, true);
     await view("agent-runs-1280", 1280, 900, "light", openAgentRuns);
+    const openChatDrawer = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#106-chat-approved";
+      });
+      await page.waitForFunction(() =>
+        document.getElementById("d-meta").textContent.includes("106-chat-approved"),
+      );
+      return clipOf(page, ".detail-head");
+    };
+    await view("chat-drawer-390", 390, 844, "dark", openChatDrawer, true);
+    await view("chat-drawer-1280", 1280, 900, "light", openChatDrawer);
+    const openHeldDrawer = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#107-held-rider";
+      });
+      await page.waitForFunction(() =>
+        document.getElementById("d-meta").textContent.includes("107-held-rider"),
+      );
+      return clipOf(page, ".detail-head");
+    };
+    await view("held-drawer-390", 390, 844, "dark", openHeldDrawer, true);
     // The reference keeps 001-capture open behind the sign-in banner; the candidate closes it.
     const openArchiveSignin = async (page) => {
       await page.evaluate(() => {

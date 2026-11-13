@@ -4538,9 +4538,10 @@ def timer_fix(scheduler, home):
 def setup_checks(home, device):
     """[(name, ok, detail, fix lines, note)] for the 7 pieces pickup needs on this host, in order.
     ok is None when an earlier check it depends on failed."""
-    run = f"{sys.executable} {Path(HERE, 'factory.py')}"
+    argv = [sys.executable, str(Path(HERE, "factory.py"))]
     if _HOME_OVERRIDE:
-        run += f" --home {shlex.quote(str(home))}"
+        argv += ["--home", str(home)]
+    run = shlex.join(argv)
     skill = Path(HERE).parent
     checks = []
 
@@ -4557,7 +4558,8 @@ def setup_checks(home, device):
     checks.append(("device", valid, f"device: {device}" if valid
                    else f"config.md device: {named!r} is not a valid host name" if named
                    else f"config.md sets no device:, so this host is {device}",
-                   [f"Add this line inside the frontmatter of {config}:",
+                   [f"Replace the device: line in the frontmatter of {config} with:" if named
+                    else f"Add this line inside the frontmatter of {config}:",
                     f"device: {short if HOST_NAME.fullmatch(short) else '<host-name>'}"], None))
 
     paths = read_paths(home)
@@ -4582,7 +4584,8 @@ def setup_checks(home, device):
                     f"Launcher examples: {skill / 'references' / 'pickup.md'}"], None))
 
     if failing or not slugs:
-        listed, detail = None, "not checked: fix checks 1 and 3 first"
+        first = " and ".join(n for n, bad in (("1", failing), ("3", not slugs)) if bad)
+        listed, detail = None, f"not checked: fix check{'s' if failing and not slugs else ''} {first} first"
     else:
         on, parts = [], []
         for slug in slugs:
@@ -4598,7 +4601,7 @@ def setup_checks(home, device):
                 on.append(slug)
         listed = bool(on)
         detail = f"pickup lists {device} for {', '.join(on)}" if on else "; ".join(parts)
-    checks.append(("pipeline", listed, detail,
+    checks.append(("pipeline", listed, detail, [] if listed is None else
                    ["Fix check 2 first if this host name is wrong.",
                     "Otherwise, in the dashboard, Settings, Pipeline (or Settings, Projects, <project>), "
                     f"turn pickup on and add host {device} exactly as written."], None))

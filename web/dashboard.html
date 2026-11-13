@@ -522,7 +522,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head .pr-link { margin-top: 8px; }
     .detail-head .job-actions { position: static; }
     .detail-head .job-actions-menu { top: calc(100% + 4px); right: 16px; }
-    .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact #d-agents, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
+    .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-chat, .detail.compact #d-held, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact #d-agents, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
     .doc { padding: 16px 16px 40px; }
     .pager > .doc, .pager > .gallery { touch-action: pan-y pinch-zoom; }
   }
@@ -555,7 +555,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs agent-runs" id="d-agents" hidden><summary></summary><div class="table-wrap"><table><thead><tr><th scope="col">When</th><th scope="col">Stage</th><th scope="col">Round</th><th scope="col">Role</th><th scope="col">Harness</th><th scope="col">Via</th><th scope="col">Model</th><th scope="col">Effort</th></tr></thead><tbody></tbody></table></div></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs agent-runs" id="d-agents" hidden><summary></summary><div class="table-wrap"><table><thead><tr><th scope="col">When</th><th scope="col">Stage</th><th scope="col">Round</th><th scope="col">Role</th><th scope="col">Harness</th><th scope="col">Via</th><th scope="col">Model</th><th scope="col">Effort</th></tr></thead><tbody></tbody></table></div></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>
@@ -1470,23 +1470,40 @@ function chatDecision(j) {
 // The hold of each project's effective pipeline, filled by loadHoldConfigs. A project not loaded uses the defaults, as hold_config does.
 const HOLD_DEFAULT = { min_ideas: 5, max_wait_hours: 12 };
 const holdConfigs = new Map();
+// The epoch each slug's hold fetch started in. clearHoldConfigs moves the epoch, so an older fetch's result is dropped.
+const holdLoading = new Map();
+let holdEpoch = 0;
+
+function clearHoldConfigs() {
+  holdConfigs.clear();
+  holdLoading.clear();
+  holdEpoch++;
+}
 
 async function loadHoldConfigs() {
-  const slugs = new Set(jobs.filter(batchHeld).map((j) => j.project).filter((p) => typeof p === 'string' && !holdConfigs.has(p)));
+  const slugs = new Set(jobs.filter(batchHeld).map((j) => j.project).filter((p) => typeof p === 'string' && !holdConfigs.has(p) && !holdLoading.has(p)));
   let set = false;
   await Promise.all([...slugs].map(async (slug) => {
+    const epoch = holdEpoch;
+    holdLoading.set(slug, epoch);
     try {
       const r = await fetch('./api/pipeline/effective/' + encodeURIComponent(slug), { cache: 'no-store' });
       if (!r.ok || r.redirected) return;
       const hold = (await r.json())?.hold;
+      if (epoch !== holdEpoch) return;
       if (Number.isInteger(hold?.min_ideas) && hold.min_ideas >= 1 && hold.min_ideas <= 20 &&
         Number.isInteger(hold.max_wait_hours) && hold.max_wait_hours >= 1 && hold.max_wait_hours <= 168) {
         holdConfigs.set(slug, { min_ideas: hold.min_ideas, max_wait_hours: hold.max_wait_hours });
         set = true;
       }
-    } catch {}
+    } catch {} finally {
+      if (holdLoading.get(slug) === epoch) holdLoading.delete(slug);
+    }
   }));
-  if (set) renderBoard();
+  if (!set) return;
+  renderBoard();
+  const open = jobs.find((x) => x.id === openId);
+  if (open) renderDrawerStatus(open);
 }
 
 // A held idea pickup would group: not paused, closing, waiting on you, gated or in Tracer.
@@ -2940,7 +2957,7 @@ async function savePipelineScope(scope = $('pipeline-scope').value) {
       if (fromPage) $('pipeline-summary').value = '';
       loadPipelineHistory(scope);
       loadPipelineEffective(scope);
-      holdConfigs.clear();
+      clearHoldConfigs();
       loadHoldConfigs();
       if (scope === 'global') loadTracerSetting();
     } else if ([400,403,413,415].includes(r.status)) {
@@ -3747,6 +3764,15 @@ function drawerMeta(j) {
     (j.close?.at && !TERMINAL.includes(j.stage) ? ' · closing' : '');
 }
 
+// The chat decision and held state as drawer lines, so touch, keyboard and screen reader users get what the chip titles say.
+function renderDrawerStatus(j) {
+  const chat = chatDecision(j), held = batchState(j);
+  $('d-chat').textContent = chat ? chat.title : '';
+  $('d-chat').hidden = !chat;
+  $('d-held').textContent = held ? held.title : '';
+  $('d-held').hidden = !held;
+}
+
 async function loadArchivedJob(id) {
   if (archiveMisses.has(id)) return { job: null };
   try {
@@ -3815,6 +3841,7 @@ async function openJob(id) {
   const pipeline = pipelineLabel(j);
   $('d-pipeline').textContent = pipeline;
   $('d-pipeline').hidden = !pipeline;
+  renderDrawerStatus(j);
   const shown = jobActionsFor(j);
   for (const id of JOB_ACTIONS) $(id).hidden = !shown.includes(id);
   $('d-babysit-bar').hidden = archived || !shown.includes('d-babysit');
@@ -4716,6 +4743,7 @@ function syncDetail() {
   if (!openId) return;
   const j = jobs.find((x) => x.id === openId);
   if (!j) return;
+  renderDrawerStatus(j);
   const pending = pendingTab();
   if (stamp(j) !== openStamp ||
       (pending && candidates(j).includes(pending))) openJob(openId);
@@ -6623,7 +6651,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-chat', 'd-held', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
