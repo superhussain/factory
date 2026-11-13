@@ -3103,6 +3103,29 @@ def pick_route(home):
     return next((route for route in routes if route[0] not in active), None)
 
 
+def provider_runtime(provider):
+    """The end of provider's extends chain in this host's Paseo config.json, else provider itself."""
+    try:
+        path = Path(os.environ.get("PASEO_HOME") or Path.home() / ".paseo", "config.json")
+    except RuntimeError:
+        return provider
+    if not path.is_file():
+        return provider
+    try:
+        providers = json.loads(path.read_text(encoding="utf-8")).get("agents", {}).get("providers", {})
+        if not isinstance(providers, dict):
+            raise ValueError()
+    except (ValueError, AttributeError):
+        fail(f"cannot read {path}: routes pick needs it to find the base runtime of {provider}", 2)
+    seen = [provider]
+    while isinstance(providers.get(seen[-1]), dict) and "extends" in providers[seen[-1]]:
+        base = providers[seen[-1]]["extends"]
+        if not isinstance(base, str) or not SLUG.fullmatch(base) or base in seen:
+            fail(f"bad extends under provider '{seen[-1]}' in {path}: use a provider name, with no loop", 2)
+        seen.append(base)
+    return seen[-1]
+
+
 def limit_route(home, name, minutes):
     """Mark one route or the experiment limited for minutes from now, and return its limited_until."""
     valid = [r[0] for r in read_routes(home)]
@@ -3134,7 +3157,7 @@ def routes_cmd(sub, *args):
         if route is None:
             fail("no available route: " + ", ".join(f"{r[0]} until {active[r[0]]}" for r in routes), 3)
         name, provider, model, effort = route
-        print(json.dumps({"route": name, "provider": provider, "model": model,
+        print(json.dumps({"route": name, "provider": provider, "runtime": provider_runtime(provider), "model": model,
                           **({"effort": effort} if effort else {})}, indent=2))
     elif sub == "limit" and len(args) in (1, 2, 3):
         if len(args) > 1 and (len(args) != 3 or args[1] != "--minutes"
