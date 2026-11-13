@@ -59,7 +59,8 @@ works from any directory.
    while at `needs-human` is mirrored too. Exit 2, 4 or 6 writes nothing: report
    the line and go on unbatched. Exit 5 may keep idea riders it attached: rerun
    `batch <project>/<id> --session <tag>` and go on with its `riders`. `board`
-   refuses a patch that adds or removes a `batched-into` ref.
+   refuses a patch that adds or removes a `batched-into` ref. When the job's
+   `priority.alone` is true, `batch` lists no candidates. Go on unbatched.
 6. Continue the loop from step 2 of `/factory <feature>`, with the `idea` field
    as the feature text. When the job has pasted images, also give the spec writer
    `$JOBS/<id>/idea-images.md` and its images, so the spec starts from the idea's
