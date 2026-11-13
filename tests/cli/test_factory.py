@@ -1584,6 +1584,21 @@ class MoveFenceTest(IsolatedTestCase):
         self.assertNotIn("babysit", self.saved())
         self.assertFalse(factory.babysitting(self.saved()))
 
+    def test_board_babysit_null_drops_the_press_priority(self):
+        at = "2026-01-02T12:00:00Z"
+        self.save(dict(self.job, babysit={"at": at}, priority={"at": at}))
+        with patch.object(factory.sys, "stdin", io.StringIO('{"babysit": null}')):
+            factory.board(self.home, "001-test")
+        self.assertNotIn("babysit", self.saved())
+        self.assertNotIn("priority", self.saved())
+
+    def test_board_babysit_null_keeps_an_earlier_priority(self):
+        self.save(dict(self.job, babysit={"at": "2026-01-02T12:00:00Z"}, priority={"at": "2026-01-01T12:00:00Z"}))
+        with patch.object(factory.sys, "stdin", io.StringIO('{"babysit": null}')):
+            factory.board(self.home, "001-test")
+        self.assertNotIn("babysit", self.saved())
+        self.assertEqual(self.saved()["priority"], {"at": "2026-01-01T12:00:00Z"})
+
     def test_board_refuses_a_stacked_patch(self):
         before = self.store["/api/board"]
         err = io.StringIO()

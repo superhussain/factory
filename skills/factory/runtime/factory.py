@@ -918,7 +918,12 @@ def board(factory, job_id):
                  f"A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.", 2)
         stacked = (open_stacked(data, job_id) if patch.get("stage") == "closed" and found
                    and found.get("stage") not in TERMINAL and lead_of(found) is None else [])
+        babysit, priority = (found or {}).get("babysit"), (found or {}).get("priority")
+        pressed = ("babysit" in patch and patch["babysit"] is None and isinstance(babysit, dict)
+                   and isinstance(priority, dict) and priority.get("at") == babysit.get("at"))
         job = patch_job(data, job_id, patch)
+        if pressed:
+            job.pop("priority", None)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
         elif mine(job.get("claim") or {}, device, session):
