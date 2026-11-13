@@ -3029,6 +3029,105 @@ def pickup_host_problem(home, slug, host):
     return None
 
 
+def write_move(job, to, stamp, record):
+    """Move job to host to, as the dashboard's writeMove does, and drop its claim and Paseo link."""
+    claim = job.get("claim") if isinstance(job.get("claim"), dict) else {}
+    m = job.get("move") if isinstance(job.get("move"), dict) else None
+    prior = m if not claim and m and not move_stopped(m) else {}
+    origin = claim.get("device") or prior.get("from")
+    session = claim.get("session") or prior.get("session")
+    earlier = earlier_moves(m) if m else []
+    if m and m.get("from") and not prior:
+        earlier.append({**{k: m[k] for k in ("from", "session", "agent", "server", "at") if m.get(k)},
+                        **({"stopped": m["stopped"]} if move_stopped(m) else {})})
+    paseo = job.get("paseo") if isinstance(job.get("paseo"), dict) else {}
+    link = paseo if paseo.get("agent") else prior
+    job["move"] = {**{k: v for k, v in (("from", origin), ("session", session), ("agent", link.get("agent")),
+                                        ("server", link.get("server"))) if v},
+                   "to": to, "at": stamp, **record, **({"earlier": earlier} if earlier else {})}
+    job.pop("claim", None)
+    job.pop("paseo", None)
+
+
+def control_launch(home, job_id, action, host, record):
+    """Make the dashboard's Babysit PR, Move or Rerun after the dashboard's checks, and print the result."""
+    problems = {}
+    word = {"babysit": "babysat", "move": f"moved to {host}", "rerun": "rerun"}[action]
+
+    def refuse(why):
+        fail(f"{job_id} cannot be {word}: {why}. Nothing was written.", 2)
+
+    def problem(slug, to):
+        if (slug, to) not in problems:
+            problems[slug, to] = pickup_host_problem(home, slug, to)
+        return problems[slug, to]
+
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None:
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
+        if action == "babysit" and job.get("babysit"):
+            return None, ("unchanged", None)
+        stage, lead, slug = job.get("stage"), lead_of(job), job.get("project")
+        claim = job.get("claim") if isinstance(job.get("claim"), dict) else {}
+        m = job.get("move") if isinstance(job.get("move"), dict) else {}
+        pr = job.get("pr") if isinstance(job.get("pr"), str) else ""
+        if not slug:
+            refuse("it has no project")
+        if stage not in (("pr-open",) if action == "babysit" else IN_FLIGHT):
+            refuse(f"it is at {stage}")
+        if lead:
+            refuse(f"it is a rider of {lead}")
+        if action == "babysit":
+            if not GH_PR.fullmatch(pr):
+                refuse("it has no GitHub pull request URL")
+            if job.get("paused"):
+                refuse("it is paused")
+            if job.get("close"):
+                refuse("it has a close queued")
+        elif action == "move":
+            to = host
+            if not claim and m.get("to") == to and "claimed" not in m:
+                return None, ("unchanged", to)
+            if to == (claim.get("device") or (None if move_stopped(m) else m.get("from"))):
+                refuse(f"it already runs on {to}")
+            if any(x["from"] == to for x in queued_stops(m)):
+                refuse(f"a stop is still queued on {to}; pick another host")
+            if problem(slug, to):
+                refuse(problem(slug, to))
+        else:
+            if not claim and m.get("from") and m.get("to") == m["from"] and "claimed" not in m:
+                return None, ("unchanged", m["to"])
+            to = claim.get("device")
+            if not to:
+                refuse("it has no claim, so no host runs it")
+            if job.get("paused"):
+                refuse("it is paused")
+            if isinstance(job.get("needs"), str) and job["needs"].strip():
+                refuse("it is waiting on a person")
+            if problem(slug, to):
+                refuse(problem(slug, to) + ", so nothing would restart it; move it to another host instead")
+        stamp = now()
+        if action == "babysit":
+            to = None
+            job["babysit"] = {"at": stamp, **record}
+            if job.get("priority") is None:
+                job["priority"] = {"at": stamp, **record}
+            job.pop("needs", None)
+            job.pop("escalated", None)
+            job["note"] = f"babysitting PR #{pr.rsplit('/', 1)[1]}"
+        else:
+            write_move(job, to, stamp, record)
+        job["updated"] = data["updated"] = stamp
+        return dump_board(data), ("queued", to)
+    result, to = cas(home, "/api/board", change)
+    out = {"id": job_id, "action": action, "result": result}
+    if action != "babysit":
+        out["to"] = to
+    print(json.dumps(out))
+
+
 def snapshot(repo, commit, dest):
     """Write commit's regular files and directories into dest, with no .git and no links."""
     r = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", commit], capture_output=True)
