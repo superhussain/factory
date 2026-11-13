@@ -60,7 +60,7 @@
                                             re-reads every 30 seconds for up to S seconds (1 to 600) while
                                             next is wait; a bad pr exits 4, a gh problem 5
   factory.py pr-queue <project-slug>/<job-id>
-                                            print whether GitHub queued the job PR through merge-async:
+                                            print whether GitHub queued the job PR, by the enqueue mutation first, else merge-async:
                                             one JSON line of pr, status and detail; enqueued exits 0,
                                             failed or refused 1, pending after 120 seconds 3, a bad or
                                             stacked pr 4, a gh problem 5
@@ -922,7 +922,12 @@ def board(factory, job_id):
                  f"A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.", 2)
         stacked = (open_stacked(data, job_id) if patch.get("stage") == "closed" and found
                    and found.get("stage") not in TERMINAL and lead_of(found) is None else [])
+        babysit, priority = (found or {}).get("babysit"), (found or {}).get("priority")
+        pressed = ("babysit" in patch and patch["babysit"] is None and isinstance(babysit, dict)
+                   and isinstance(priority, dict) and priority.get("at") == babysit.get("at"))
         job = patch_job(data, job_id, patch)
+        if pressed:
+            job.pop("priority", None)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
         elif mine(job.get("claim") or {}, device, session):
@@ -2862,9 +2867,10 @@ def suggest_admit(path, by="explorer"):
         sys.exit(3)
 
 
-def retro_backlog_admit(cards):
+def retro_backlog_admit(cards, outcomes=None):
     """Add each checked retro card as a held backlog line with a decision form. Skips duplicates
-    and cards over a cap, and exits 3 when autonomy is paused or nothing was added."""
+    and cards over a cap, and exits 3 when autonomy is paused or nothing was added. When outcomes
+    is a list, appends {"fingerprint", "result"} per card: admitted, or the skip reason."""
     home = factory_home()
     projects = registered(home)
     for i, s in enumerate(cards["suggestions"]):
@@ -2906,8 +2912,12 @@ def retro_backlog_admit(cards):
         else:
             admitted.append(f"{slug}: {s['title']}")
             added.append(slug)
+            if outcomes is not None:
+                outcomes.append({"fingerprint": fp, "result": "admitted"})
             continue
         skipped.append({"title": s["title"], "reason": reason})
+        if outcomes is not None:
+            outcomes.append({"fingerprint": fp, "result": reason})
     print(json.dumps({"admitted": admitted, "skipped": skipped}, indent=2))
     if not admitted:
         sys.exit(3)
@@ -4341,6 +4351,8 @@ def pickup(*args):
 
 USAGE_PICKUP_SETUP = "usage: pickup setup [--install]"
 CRON_PICKUP = re.compile(r"factory\.py.*\bpickup\b")
+ENV_ASSIGN = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=")
+SYSTEM_PYTHON = "/usr/bin/python3"
 
 
 def setup_run(argv, stdin=None):
@@ -4363,6 +4375,32 @@ def setup_try(call, *args):
             return None, err.getvalue().strip()[len("factory.py: "):]
 
 
+def timer_python():
+    """(path, why) of the python the pickup timer runs: SYSTEM_PYTHON when it runs this runtime,
+    else this command's python, which a version manager may move on upgrade."""
+    if WINDOWS:
+        return sys.executable, "this command's python"
+    if not os.path.isfile(SYSTEM_PYTHON):
+        return sys.executable, f"this command's python; {SYSTEM_PYTHON} is missing"
+    if sys.platform == "darwin" and setup_run(["xcode-select", "-p"])[0]:
+        return sys.executable, f"this command's python; {SYSTEM_PYTHON} needs the Xcode command line tools"
+    code, out = setup_run([SYSTEM_PYTHON, "-I", "-B", str(Path(HERE, "factory.py"))])
+    if code == 2 and out.lstrip().startswith("factory.py: usage:"):
+        return SYSTEM_PYTHON, "system python3"
+    return sys.executable, f"this command's python; {SYSTEM_PYTHON} cannot run the runtime"
+
+
+def launcher_folders(template):
+    """Folders the timer PATH needs for a resolved launcher: its program's, and for env the command env runs."""
+    folders = [os.path.dirname(template[0])]
+    if os.path.basename(template[0]) == "env":
+        command = next((a for a in template[1:] if not a.startswith("-") and not ENV_ASSIGN.match(a)), None)
+        found = command and shutil.which(command)
+        if found:
+            folders.append(os.path.dirname(found))
+    return folders
+
+
 def timer_path(scheduler):
     """The file the timer for scheduler lives in; cron's lives in the crontab."""
     if scheduler == "launchd":
@@ -4371,17 +4409,19 @@ def timer_path(scheduler):
 
 
 def timer_values(home):
-    """{argv, path, log} the pickup timer runs with."""
+    """{argv, path, log, python, why} the pickup timer runs with."""
+    python, why = timer_python()
     folders = []
     for route in setup_try(read_routes, home)[0] or []:
         template = setup_try(route_launcher, home, route)[0]
         if template:
-            folders.append(os.path.dirname(template[0]))
-    folders.append(os.path.dirname(sys.executable))
+            folders += launcher_folders(template)
+    folders.append(os.path.dirname(python))
     if not WINDOWS:
-        folders += ["/usr/bin", "/bin"]
-    return {"argv": [sys.executable, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
-            "path": os.pathsep.join(dict.fromkeys(folders)), "log": str(Path(home, "logs", "pickup.log"))}
+        folders += ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    return {"argv": [python, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
+            "path": os.pathsep.join(dict.fromkeys(folders)), "log": str(Path(home, "logs", "pickup.log")),
+            "python": python, "why": why}
 
 
 def timer_text(scheduler, values):
@@ -4414,6 +4454,47 @@ def timer_installed(scheduler, home):
     if setup_run(["schtasks", "/Query", "/TN", "factory-pickup"])[0]:
         return False, "no scheduled task factory-pickup"
     return True, "scheduled task factory-pickup exists"
+
+
+def cron_argv(line):
+    """The command a crontab line runs: fields after the schedule, minus VAR= prefixes and redirects."""
+    try:
+        words = shlex.split(line)[5:]
+    except ValueError:
+        return None
+    while words and ENV_ASSIGN.match(words[0]):
+        words.pop(0)
+    end = next((i for i, w in enumerate(words) if w.startswith(">") or w.startswith("2>")), len(words))
+    return words[:end]
+
+
+def timer_drift(scheduler, values):
+    """None when the installed timer runs what --install would write, else what differs."""
+    want = values["argv"]
+    if scheduler == "launchd":
+        plist = timer_path(scheduler)
+        try:
+            have = plistlib.loads(plist.read_bytes()).get("ProgramArguments")
+        except (OSError, ValueError, AttributeError):
+            return f"could not read {plist}"
+        if not isinstance(have, list) or not all(isinstance(a, str) for a in have):
+            return f"could not read ProgramArguments in {plist}"
+    elif scheduler == "cron":
+        lines = [l for l in setup_run(["crontab", "-l"])[1].splitlines() if CRON_PICKUP.search(l)]
+        argvs = [cron_argv(l) for l in lines]
+        if want in argvs:
+            return None
+        have = argvs[0] if argvs and argvs[0] else None
+        if have is None:
+            return f"could not read the crontab line {lines[0] if lines else ''}".rstrip()
+    else:
+        cmd = timer_path(scheduler)
+        if cmd.exists() and cmd.read_bytes() == timer_text(scheduler, values).encode():
+            return None
+        return f"{cmd} differs from what --install would write"
+    if have == want:
+        return None
+    return f"the timer runs {shlex.join(have)}, but --install would write {shlex.join(want)}"
 
 
 def install_timer(home, scheduler):
@@ -4466,7 +4547,7 @@ def timer_fix(scheduler, home):
 
 
 def setup_checks(home, device):
-    """[(name, ok, detail, fix lines)] for the 7 pieces pickup needs on this host, in order.
+    """[(name, ok, detail, fix lines, note)] for the 7 pieces pickup needs on this host, in order.
     ok is None when an earlier check it depends on failed."""
     argv = [sys.executable, str(Path(HERE, "factory.py"))]
     if _HOME_OVERRIDE:
@@ -4479,7 +4560,7 @@ def setup_checks(home, device):
     checks.append(("home", not failing, f"failing: {', '.join(failing)}" if failing
                    else "config, credentials, projects and board pass",
                    [f"Run: {run} doctor",
-                    "Then fix each failing check; see docs/troubleshooting.md in the factory repository."]))
+                    "Then fix each failing check; see docs/troubleshooting.md in the factory repository."], None))
 
     config = Path(home, "config.md")
     named = (frontmatter(config)[0] if config.exists() else {}).get("device", "")
@@ -4490,17 +4571,17 @@ def setup_checks(home, device):
                    else f"config.md sets no device:, so this host is {device}",
                    [f"Replace the device: line in the frontmatter of {config} with:" if named
                     else f"Add this line inside the frontmatter of {config}:",
-                    f"device: {short if HOST_NAME.fullmatch(short) else '<host-name>'}"]))
+                    f"device: {short if HOST_NAME.fullmatch(short) else '<host-name>'}"], None))
 
     paths = read_paths(home)
     slugs = [slug for slug, path in paths.items() if os.path.isdir(path)]
     checks.append(("checkout", bool(slugs), ", ".join(slugs) if slugs
                    else "paths.md lists no checkout that exists on this host",
-                   [f"Run: {run} init <repo-path>"]))
+                   [f"Run: {run} init <repo-path>"], None))
 
     routes, why = setup_try(read_routes, home)
     checks.append(("routes", routes is not None, ", ".join(r[0] for r in routes) if routes else why,
-                   [f"Write {Path(home, 'routes.md')}:", "---", "primary: <provider> <model> <effort>", "---"]))
+                   [f"Write {Path(home, 'routes.md')}:", "---", "primary: <provider> <model> <effort>", "---"], None))
 
     if routes is None:
         launchers, why = None, "not checked: fix check 4 first"
@@ -4511,7 +4592,7 @@ def setup_checks(home, device):
     example = {"version": 1, "launchers": {r[0]: ["<program>", "<arg>", "..."] for r in routes or []}}
     checks.append(("launchers", launchers, why or "every route has a launcher",
                    [f"Write {Path(home, 'launchers.json')}:", json.dumps(example),
-                    f"Launcher examples: {skill / 'references' / 'pickup.md'}"]))
+                    f"Launcher examples: {skill / 'references' / 'pickup.md'}"], None))
 
     if failing or not slugs:
         first = " and ".join(n for n, bad in (("1", failing), ("3", not slugs)) if bad)
@@ -4534,11 +4615,14 @@ def setup_checks(home, device):
     checks.append(("pipeline", listed, detail, [] if listed is None else
                    ["Fix check 2 first if this host name is wrong.",
                     "Otherwise, in the dashboard, Settings, Pipeline (or Settings, Projects, <project>), "
-                    f"turn pickup on and add host {device} exactly as written."]))
+                    f"turn pickup on and add host {device} exactly as written."], None))
 
     installed, detail = timer_installed(PICKUP_SCHEDULER, home)
+    note = timer_drift(PICKUP_SCHEDULER, timer_values(home)) if installed else None
+    if note:
+        note += f". To update it, run: {run} pickup setup --install"
     checks.append(("timer", installed, detail,
-                   timer_fix(PICKUP_SCHEDULER, home) + [f"Or run: {run} pickup setup --install"]))
+                   timer_fix(PICKUP_SCHEDULER, home) + [f"Or run: {run} pickup setup --install"], note))
     return checks
 
 
@@ -4552,10 +4636,13 @@ def pickup_setup(*args):
     if args:
         print(install_timer(home, PICKUP_SCHEDULER))
     print(f"pickup setup on host {device} ({host_os()}, {PICKUP_SCHEDULER})")
-    print(f"skill {Path(HERE).parent}  python {sys.executable}  home {home}")
+    values = timer_values(home)
+    print(f"skill {Path(HERE).parent}  timer python {values['python']} ({values['why']})  home {home}")
     checks = setup_checks(home, device)
-    for n, (name, ok, detail, fix) in enumerate(checks, 1):
+    for n, (name, ok, detail, fix, note) in enumerate(checks, 1):
         print(f"{n}. {'ok' if ok else 'missing':<8} {name}: {detail}")
+        if note:
+            print(f"    note: {note}")
         if not ok:
             for line in fix:
                 print(f"    {line}")
@@ -4758,8 +4845,38 @@ def claim_babysit(home, job_id, device, minutes, paths):
     return cas(home, "/api/board", change)
 
 
+def babysit_argv(argv, job_id):
+    """argv with a workspace slug babysit-<id> and a title babysit <id>. A Paseo launcher that opens a new
+    workspace gets the slug right after run when it has none."""
+    argv = list(argv)
+    for flag, value in (("--worktree-slug", f"babysit-{job_id}"), ("--title", f"babysit {job_id}")):
+        if flag in argv[:-1]:
+            argv[argv.index(flag) + 1] = value
+    if Path(argv[0]).name == "paseo" and "--new-workspace" in argv and "--worktree-slug" not in argv \
+            and "run" in argv:
+        argv[argv.index("run") + 1:argv.index("run") + 1] = ["--worktree-slug", f"babysit-{job_id}"]
+    return argv
+
+
 def babysit_pass(home, data, device, minutes, paths, settings, dry):
-    """Launch at most one /factory babysit session for a job the dashboard handed to one."""
+    """Run at most one /factory babysit for a job the dashboard handed to one: in the job's own Paseo agent
+    when it has one, else in a new session."""
+    statuses = ...
+
+    def job_agent(j):
+        """(agent, state) for the job's Paseo link, else (None, None). state is idle, closed or running, or
+        foreign (another server), unanswered (paseo ls failed) or None (agent absent). Any other status is returned as is."""
+        nonlocal statuses
+        link = j.get("paseo")
+        agent = link.get("agent") if isinstance(link, dict) else None
+        if not (isinstance(agent, str) and PASEO_ID.fullmatch(agent) and not agent.startswith("-")):
+            return None, None
+        if link.get("server") != paseo_server():
+            return agent, "foreign"
+        if statuses is ...:
+            statuses = paseo_statuses()
+        return agent, "unanswered" if statuses is None else statuses.get(agent)
+
     def skip(j):
         """Why this job is not ready, or None."""
         project = j.get("project")
@@ -4775,6 +4892,13 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
         c = blocking(j, device, "", minutes)
         if c:
             return f"{head}: claimed by {c['device']} session {c.get('session')}"
+        agent, state = job_agent(j)
+        if state == "foreign":
+            return f"{head}: agent {agent} lives on server {j['paseo'].get('server')}"
+        if state == "unanswered":
+            return f"{head}: paseo ls failed"
+        if state not in (None, "idle", "closed"):
+            return f"{head}: agent {agent} is {state}"
         reason = pickup_reason(home, project, paths, settings, device, dry)
         return f"{head}: {reason}" if reason else None
 
@@ -4784,6 +4908,22 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
                 "provider": provider, "model": model, "effort": effort or "",
                 "prompt": launch_prompt(f"/factory babysit {j['id']} --session {session}")}
 
+    def launch(j, tag, route):
+        if route is None:
+            print(f"factory.py: pickup could not launch babysit {j['id']}: no available route", file=sys.stderr)
+            release_pickup_claim(home, j["id"], device, tag)
+            return
+        template = route_launcher(home, route)
+        given = values(j, tag, route)
+        argv = babysit_argv(launcher_argv(template, given), j["id"])
+        ok, detail, log_path = launch_idea(home, given, route[0], argv, launch_env(given, route[1], route[2]))
+        if ok:
+            print(f"launched babysit {j['id']} {j['project']} on {route[0]} session {tag}")
+            record_launch(home, j["id"], dict(launch_row(given, argv, tag), role="babysit"))
+        else:
+            launch_failed(home, route[0], j["id"], detail, log_path,
+                          lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)
+
     ready = False
     for j in (j for j in data["jobs"] if babysit_due(j)):
         line = skip(j)
@@ -4791,34 +4931,44 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
             line = f"wait babysit {j['id']} {j['project']}: one babysit launch per run"
         elif line is None:
             ready = True
+            agent, state = job_agent(j)
             route = pick_route(home)
-            if route is None and not dry:
-                return
-            if route is None:
-                stamp = now()
-                active = {n: until for n, until in read_limits(home).items() if until > stamp}
-                line = "no route: no available route: " + ", ".join(
-                    f"{r[0]} until {active[r[0]]}" for r in read_routes(home))
-            else:
-                template = route_launcher(home, route)
+            if state in ("idle", "closed"):
                 if dry:
-                    line = f"would launch babysit {j['id']} {j['project']} on {route[0]}: " \
-                        + shlex.join(launcher_argv(template, values(j, "<session>", route)))
+                    line = f"would send babysit {j['id']} {j['project']} to agent {agent}"
                 else:
                     tag = claim_babysit(home, j["id"], device, minutes, paths)
                     if tag is None:
                         return
-                    given = values(j, tag, route)
-                    argv = launcher_argv(template, given)
-                    ok, detail, log_path = launch_idea(home, given, route[0], argv,
-                                                       launch_env(given, route[1], route[2]))
-                    if ok:
-                        print(f"launched babysit {j['id']} {j['project']} on {route[0]} session {tag}")
-                        record_launch(home, j["id"], dict(launch_row(given, argv, tag), role="babysit"))
-                    else:
-                        launch_failed(home, route[0], j["id"], detail, log_path,
-                                      lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)
+                    if paseo_send(agent, launch_prompt(f"/factory babysit {j['id']} --session {tag}")):
+                        print(f"sent babysit {j['id']} {j['project']} to agent {agent} session {tag}")
+                        return
+                    if state == "idle":
+                        print(f"factory.py: pickup could not send babysit {j['id']} to agent {agent}: "
+                              "paseo send failed; the next run retries", file=sys.stderr)
+                        release_pickup_claim(home, j["id"], device, tag)
+                        return
+                    print(f"factory.py: pickup could not send babysit {j['id']} to agent {agent}: "
+                          "paseo send failed; launching a new session", file=sys.stderr)
+                    launch(j, tag, route)
                     return
+            elif route is None and not dry:
+                return
+            elif route is None:
+                stamp = now()
+                active = {n: until for n, until in read_limits(home).items() if until > stamp}
+                line = "no route: no available route: " + ", ".join(
+                    f"{r[0]} until {active[r[0]]}" for r in read_routes(home))
+            elif dry:
+                line = f"would launch babysit {j['id']} {j['project']} on {route[0]}: " \
+                    + shlex.join(babysit_argv(launcher_argv(route_launcher(home, route), values(j, "<session>", route)),
+                                          j["id"]))
+            else:
+                tag = claim_babysit(home, j["id"], device, minutes, paths)
+                if tag is None:
+                    return
+                launch(j, tag, route)
+                return
         if dry:
             print(line)
 
@@ -5334,7 +5484,11 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
         if dry:
             print(f"would clean up {job_id} {project}")
             continue
-        _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
+        try:
+            _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
+        except Exception as e:
+            print(f"factory.py: pickup could not clean up {job_id} {project}: {e}", file=sys.stderr)
+            continue
 
         def change(text, job_id=job_id, stage=stage, key=key, field=field, at=c[field], left=left):
             board = load_board(text)
@@ -6085,10 +6239,11 @@ def gh_pr_view(pr, *args):
     return gh_answer(gh_pr("view", pr, *args), "gh pr view")
 
 
-def pr_checks(pr):
+def pr_checks(pr, required=False):
     """(checks, problem): the PR's checks as gh pr checks lists them and None, or [] and why
-    the reply was unusable. gh's own no-checks reply is usable, as []."""
-    result = gh_pr("checks", pr, "--json", "name,bucket,link", stderr=True)
+    the reply was unusable. gh's own no-checks reply is usable, as []. With required, only the checks
+    that gate the merge."""
+    result = gh_pr("checks", pr, *(("--required",) if required else ()), "--json", "name,bucket,link", stderr=True)
     if result is None:
         return [], "gh is not installed"
     code, out, err = result
@@ -6102,7 +6257,7 @@ def pr_checks(pr):
             isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("bucket"), str)
             for c in checks):
         return checks, None
-    if code == 1 and not out.strip() and "no checks reported" in err:
+    if code == 1 and not out.strip() and re.search(r"no (required )?checks reported", err):
         return [], None
     return [], f"exited {code} with no check list" if code else "printed no check list"
 
@@ -6150,8 +6305,8 @@ PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMerge
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
 PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
-                    "{isInMergeQueue mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved"
-                    " comments(first:100){nodes{author{__typename login}}}}}"
+                    "{isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved"
+                    " comments(first:100){nodes{authorAssociation author{__typename login}}}}}"
                     " latestReviews(first:100){nodes{author{__typename login}}}}}}")
 PR_STATE_INTERVAL = 30
 BUILDKITE_API = "https://api.buildkite.com/v2"
@@ -6230,8 +6385,8 @@ def pr_reading(home, pr, base, buildkite_org):
     target = view.get("baseRefName") or base
     if not isinstance(target, str) or not re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", target):
         fail("gh printed an unusable baseRefName", 5)
-    listed = pr_checks(pr)[0]
-    if view.get("statusCheckRollup") and not listed:
+    listed, problem = pr_checks(pr, required=True)
+    if problem and view.get("statusCheckRollup"):
         fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5)
     buckets = {c["bucket"] for c in listed}
     checks = "fail" if buckets & {"fail", "cancel"} else "pending" if "pending" in buckets \
@@ -6269,28 +6424,33 @@ def pr_reading(home, pr, base, buildkite_org):
     approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
     state = str(view.get("state") or "").lower()
     in_queue = pull.get("isInMergeQueue") is True or isinstance(pull.get("mergeQueueEntry"), dict)
-    bots = 0
+    bots = threads = 0
     for thread in (pull.get("reviewThreads") or {}).get("nodes") or []:
         if not isinstance(thread, dict) or thread.get("isResolved"):
             continue
         comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
-        if comments and (comments[0].get("author") or {}).get("__typename") == "Bot" \
-                and all(login(c) != author for c in comments):
+        if not comments or any(login(c) == author for c in comments):
+            continue
+        if (comments[0].get("author") or {}).get("__typename") == "Bot":
             bots += 1
+        elif comments[0].get("authorAssociation") in PR_REVIEWERS:
+            threads += 1
     queued = in_queue or bool(view.get("autoMergeRequest"))
     conflict = view.get("mergeStateStatus") == "DIRTY"
     stacked = target != base
     if state in ("merged", "closed"):
         step = state
-    elif unanswered or bots:
+    elif unanswered or bots or threads:
         step = "fix-reviews"
-    elif not approved:
-        step = "needs-review"
     elif conflict:
         step = "rebase"
     elif checks == "fail":
         step = "fix-ci"
-    elif checks == "pending" or queued or (checks == "none" and new):
+    elif checks == "pending" or (checks == "none" and new):
+        step = "wait"
+    elif not approved:
+        step = "needs-review"
+    elif queued:
         step = "wait"
     elif stacked:
         step = "wait-base"
@@ -6301,7 +6461,8 @@ def pr_reading(home, pr, base, buildkite_org):
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
-            "base": target, "next": step, "ci_log": buildkite_log(home, failed, buildkite_org) if failed else None}
+            "base": target, "next": step, "ci_log": buildkite_log(home, failed, buildkite_org) if failed else None,
+            "threads": threads, "merge_queue": pull.get("isMergeQueueEnabled") is True}
 
 
 def pr_state_cmd(target, *args):
@@ -6324,6 +6485,8 @@ def pr_state_cmd(target, *args):
         time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
 
 
+PR_ENQUEUE_MUTATION = ("query=mutation($id:ID!,$sha:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$sha})"
+                       "{mergeQueueEntry{state position}}}")
 PR_QUEUE_USAGE = "usage: pr-queue <project-slug>/<job-id>"
 PR_QUEUE_INTERVAL = 10
 PR_QUEUE_TIMEOUT = 120
@@ -6331,13 +6494,13 @@ MERGE_ASYNC_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 
 
 def pr_queue_cmd(target):
-    """Queue the job's PR through merge-async and print one JSON line once GitHub says enqueued or failed."""
+    """Queue the job's PR with the enqueuePullRequest mutation, else through merge-async, and print one JSON line once GitHub says enqueued or failed."""
     home, slug, job_id = r2_target(target, True)
     pr = board_pr(home, slug, job_id)
     base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
     owner, name, _, number = pr.split("/")[3:7]
     try:
-        view = json.loads(gh_pr_view(pr, "--json", "headRefOid,baseRefName"))
+        view = json.loads(gh_pr_view(pr, "--json", "headRefOid,baseRefName,id"))
     except ValueError:
         view = None
     sha = view.get("headRefOid") if isinstance(view, dict) else None
@@ -6351,6 +6514,16 @@ def pr_queue_cmd(target):
     def done(status, detail, code):
         print(json.dumps({"pr": int(number), "status": status, "detail": detail}))
         raise SystemExit(code)
+
+    answer = gh_cli("api", "graphql", "-f", PR_ENQUEUE_MUTATION, "-f", f"id={view.get('id')}", "-f", f"sha={sha}",
+                     stderr=True)
+    if answer and answer[0] == 0:
+        try:
+            entry = json.loads(answer[1])["data"]["enqueuePullRequest"]["mergeQueueEntry"]
+        except (ValueError, KeyError, TypeError):
+            entry = None
+        if isinstance(entry, dict):
+            done("enqueued", f"position {entry['position']}" if entry.get("position") is not None else "", 0)
 
     result = gh_cli("api", "-X", "PUT", path, "-f", f"sha={sha}", "-f", "merge_action=merge_queue", stderr=True)
     if result is None or result[0] == "timeout":
@@ -7268,7 +7441,7 @@ def push(target):
     rels = [p.relative_to(folder).as_posix() for p in sorted(folder.rglob("*"))
             if p.is_file() and not p.is_symlink()]
     rels = [r for r in rels if JOB_REL.fullmatch(r)]
-    pushed, conflicts, spec_pushed = 0, [], False
+    pushed, conflicts, spec_pushed, spec_stale = 0, [], False, False
     for rel in rels:
         data = local_bytes(folder / rel)
         entry = manifest.get(rel)
@@ -7281,6 +7454,7 @@ def push(target):
         if entry and sha(data) == entry["sha256"]:
             if remote[rel] != entry["etag"]:
                 print(f"{rel}: remote newer, run pull")
+                spec_stale = spec_stale or rel == "spec.md"
             continue
         if not entry and rel in remote:
             # First push after upgrading: adopt R2's copy if it matches.
@@ -7304,7 +7478,8 @@ def push(target):
     goal_due = spec_pushed or pending.exists()
     save_manifest(folder, manifest)
     print(f"pushed {pushed} files")
-    if goal_due and (folder / "spec.md").exists() and "spec.md" not in conflicts:
+    if goal_due and (folder / "spec.md").exists() and "spec.md" not in conflicts \
+            and not spec_stale:
         record_goal(home, slug, job_id, spec_goal((folder / "spec.md").read_text(encoding="utf-8")))
         pending.unlink(missing_ok=True)
     if conflicts:
@@ -7773,6 +7948,14 @@ def worktree(target):
     print(wt)
 
 
+LSOF_FALLBACKS = ("/usr/sbin/lsof", "/usr/bin/lsof")
+PROC_ROOT = "/proc"
+
+
+def lsof_exe():
+    return shutil.which("lsof") or next((p for p in LSOF_FALLBACKS if os.access(p, os.X_OK)), None)
+
+
 def worktree_pids(wt):
     """PIDs whose cwd is inside wt. Windows can't read another process's cwd, so it
     matches command lines instead, which misses a process started with a relative path."""
@@ -7802,16 +7985,20 @@ def worktree_pids(wt):
     def inside(path):
         return path == wt or path.startswith(wt + os.sep)
 
-    if os.path.isdir("/proc"):
-        for pid in filter(str.isdigit, os.listdir("/proc")):
+    if os.path.isdir(PROC_ROOT):
+        for pid in filter(str.isdigit, os.listdir(PROC_ROOT)):
             try:
-                if inside(os.readlink(f"/proc/{pid}/cwd")):
+                if inside(os.readlink(f"{PROC_ROOT}/{pid}/cwd")):
                     yield int(pid)
             except OSError:
                 pass
         return
+    exe = lsof_exe()
+    if exe is None:
+        print(f"factory.py: lsof not found, so processes in {wt} were not checked", file=sys.stderr)
+        return
     pid = None
-    for line in run(["lsof", "-a", "-d", "cwd", "-Fpn"]).splitlines():
+    for line in run([exe, "-a", "-d", "cwd", "-Fpn"]).splitlines():
         if line.startswith("p"):
             pid = int(line[1:])
         elif line.startswith("n") and pid is not None and inside(line[1:]):
@@ -7863,19 +8050,19 @@ def cleanup(target):
 
 def cleanup_job(repo, wt, branch, drop_pushed=False):
     """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. (removed, left)."""
-    def run_git(*args):
+    def run_git(*args, timeout=20):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
-            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=20,
+            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout,
                                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
         except subprocess.TimeoutExpired:
-            return None, "", f"git {args[0]} timed out after 20 s"
+            return None, "", f"git {args[0]} timed out after {timeout} s"
         except OSError:
             return None, "", f"could not run git {args[0]}"
         return r.returncode, r.stdout.strip(), r.stderr
 
-    def first_error(*args):
-        code, _, err = run_git(*args)
+    def first_error(*args, timeout=20):
+        code, _, err = run_git(*args, timeout=timeout)
         if code is None:
             return err
         if code == 0:
@@ -7912,7 +8099,7 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
     if wt.exists():
         alive = stop_pids(wt)
         error = (f"processes still running: {' '.join(map(str, alive))}" if alive
-                 else first_error("worktree", "remove", str(wt)))
+                 else first_error("worktree", "remove", str(wt), timeout=None))
         if error:
             left += [f"worktree {wt}: {error}", f"branch {branch}: kept because its worktree remains"]
         else:
@@ -8610,6 +8797,7 @@ RETRO_SESSION_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[0-9a-f-]{8,36}
 RETRO_SESSION = re.compile(r"[0-9a-f-]{8,36}", re.ASCII)
 MAX_RETRO_BYTES = 131072
 RETRO_EDIT_SCHEMA = "factory.retro-edit/1"
+RETRO_RUN_SCHEMA = "factory.retro-run/1"
 RETRO_DOC_EDIT_SCHEMA = "factory.retro-doc-edit/1"
 RETRO_EDIT_CHANGE = 600
 MAX_RETRO_EDITS = 2
@@ -9246,6 +9434,40 @@ def render_findings(agg, doc, rejected=(), edits=()):
     return "\n".join(lines) + "\n"
 
 
+def retro_upload(home, run, agg, kept, cards, links, outcomes):
+    """PUT the run's checked findings and logged cards as a factory.retro-run/1 record. kept holds each
+    reply finding in order, None where admission rejected it; links holds each card's finding number or
+    None. Errors print to stderr and never change the exit code."""
+    config = home / "config.md"
+    device = (frontmatter(config)[0] if config.is_file() else {}).get("device") or ""
+    if not HOST_NAME.fullmatch(device):
+        print("retro upload skipped: set device: in config.md", file=sys.stderr)
+        return
+    ranked = sorted(((n, f) for n, f in enumerate(kept, 1) if f), key=lambda p: (-p[1]["count"] * p[1]["cost"], p[1]["title"]))
+    rank_of = {n: rank for rank, (n, _) in enumerate(ranked, 1)}
+    findings = [{"rank": rank, **{k: f[k] for k in ("title", "category", "count", "cost", "project", "root_cause", "fix")},
+                 "cards": []} for rank, (_, f) in enumerate(ranked, 1)]
+    results = {o["fingerprint"]: o["result"] for o in outcomes}
+    loose = []
+    for s, link in zip(cards, links):
+        fp = fingerprint(s["project"], s)
+        row = {"title": s["title"], "project": s["project"], "fingerprint": fp,
+               "result": results.get(fp, "not admitted")[:120]}
+        (findings[rank_of[link] - 1]["cards"] if link in rank_of else loose).append(row)
+    record = {"schema": RETRO_RUN_SCHEMA, "run": run, "host": device, "from": agg["from"], "to": agg["to"],
+              "sessions": sum(h["sessions"] for h in agg["hosts"].values()), "rejected": kept.count(None),
+              "findings": findings, "cards": loose}
+    try:
+        status, _, text = api(home, "PUT", f"/api/retros/{run}", json.dumps(record), ok=(200, 400, 403, 404, 413),
+                              headers={"Content-Type": "application/json"})
+    except SystemExit:
+        return
+    if status == 200:
+        print(f"uploaded retro run {run}")
+    else:
+        print(f"retro upload failed: {status} {printable_line(text, 200)}", file=sys.stderr)
+
+
 def retro_admit(run):
     """Check a retro run's reply, write its ranked findings.md and add its cards to the backlog.
     A bad finding is dropped and listed; a bad card admits no card."""
@@ -9290,15 +9512,28 @@ def retro_admit(run):
     if doc.get("edits"):
         results = retro_apply_edits(home, run, doc["edits"], agg)
         write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected, edits=results))
-    if not doc["suggestions"]:
-        print("no suggestions")
-        return
-    cards = {"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": doc["suggestions"]}
-    err = check_suggestions(cards, "retro")
-    if err:
-        fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
-    write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
-    retro_backlog_admit(cards)
+    reply_findings = [None if bad else f for _, f, bad in checked]
+    upload = ([], [])
+    outcomes = []
+    try:
+        if not doc["suggestions"]:
+            print("no suggestions")
+            return
+        links = [s.pop("finding", None) if isinstance(s, dict) else None for s in doc["suggestions"]]
+        total = len(doc["findings"])
+        for i, link in enumerate(links):
+            if link is not None and not (type(link) is int and 1 <= link <= total):
+                fail(f"{path}: suggestions[{i}].finding: must be a finding number from 1 to {total}; "
+                     "findings.md written, no cards admitted", 2)
+        cards = {"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": doc["suggestions"]}
+        err = check_suggestions(cards, "retro")
+        if err:
+            fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
+        upload = (doc["suggestions"], links)
+        write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
+        retro_backlog_admit(cards, outcomes)
+    finally:
+        retro_upload(home, run, agg, reply_findings, *upload, outcomes)
 
 
 def retro_date(d):

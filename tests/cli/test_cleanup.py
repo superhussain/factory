@@ -187,21 +187,13 @@ class CleanupTest(IsolatedTestCase):
         self.assertNotIn(str(self.wt), self.git(self.repo, "worktree", "list"))
         self.assertFalse(self.branch_exists())
 
-    def test_every_git_call_has_timeout(self):
+    def test_only_worktree_remove_waits_without_a_cap(self):
         self.merge()
         self.push()
         code, _, seen = self.git_raises("no-such-verb", None)
         self.assertEqual(code, 0)
-        self.assertTrue(seen)
-        self.assertEqual(set(seen), {20})
-
-    def test_git_times_out(self):
-        code, out, _ = self.git_raises("worktree", subprocess.TimeoutExpired(["git"], 20))
-        self.assertEqual(code, 1)
-        self.assertEqual(out, {"removed": [], "left": [
-            f"worktree {self.wt}: git worktree timed out after 20 s",
-            "branch factory/001-test: kept because its worktree remains"]})
-        self.assertTrue(self.wt.exists())
+        self.assertEqual(seen.count(None), 1)
+        self.assertEqual(set(seen) - {None}, {20})
 
     def test_git_not_runnable(self):
         code, out, _ = self.git_raises(None, FileNotFoundError("git"))

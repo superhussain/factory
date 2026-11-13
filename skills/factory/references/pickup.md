@@ -4,6 +4,29 @@
 minutes. It claims runnable ideas for the projects whose pipeline lists this
 host and starts one session per idea through `launchers.json`.
 
+## Agent setup prompt
+
+Paste this prompt into a coding agent running on the host, such as Paseo, Claude Code or OpenCode. The agent drives `pickup setup` until every check is ok. The dashboard's Settings, Scheduler, Agent tab shows the same text; a test keeps the two equal.
+
+```text
+Set up automatic factory pickup on this host. You are a coding agent on the machine that should pick up ideas. Work through these steps in order.
+
+1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory.py, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: python3 SKILL/runtime/factory.py pickup setup
+   If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with python3 tools/install.py --destination <skills folder> --replace from a clone of the factory repo, then start again.
+2. It prints 7 numbered checks, each ok or missing, with a fix under each missing one. Fix checks 1 to 6 in order. After each fix, run pickup setup again.
+   - home: run the doctor line it prints. If the factory home or its credentials are missing, stop and tell me. Never print or copy values from the .env file.
+   - device: add a device: line inside the frontmatter of config.md in the factory home, with a short name for this host.
+   - checkout: run the init line it prints with the path of this host's clone of each project. That adds it to paths.md.
+   - routes: write routes.md from providers and models that exist on this host. Find them first, for example with paseo provider ls and paseo provider models <provider>, opencode models, or the model aliases claude --help lists. Never copy route, provider or model names from another person's setup.
+   - launchers: write launchers.json with one launcher per route, copied from the matching example in SKILL/references/pickup.md. Keep every argument the example shows, including its permission mode. Never add --dangerously-skip-permissions or any flag that approves every action.
+   - pipeline: pickup must be on for the project and list this host exactly as pickup setup prints it. That is a dashboard setting under Settings, Pipeline, or Settings, Projects, then the project. If you cannot change it yourself, tell me exactly what to click and type, and wait until I say it is done.
+3. Run python3 SKILL/runtime/factory.py pickup --dry-run and show me what it would launch.
+4. Check 7 is the timer. Show me the command python3 SKILL/runtime/factory.py pickup setup --install and say that it writes and loads a 5 minute timer for this host. Run it only after I answer yes. Otherwise I run it myself.
+5. Run pickup setup again until it prints 7 of 7 ok. Then tell me which python the timer runs and any note it printed.
+
+A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.
+```
+
 ## Set up and check
 
 Run this on each host. It checks every piece pickup needs, in order, and prints
@@ -37,8 +60,7 @@ python3 <installed-skill>/runtime/factory.py pickup setup --install
 | cron | user crontab | `crontab -` | the exact line is present, and no other pickup line |
 | schtasks | `~/.config/factory-pickup.cmd` | `schtasks /Create ... /F` | always re-created (`/F`) |
 
-The timer runs `factory.py --home <home> pickup` with the same Python and logs
-to `<home>/logs/pickup.log`. On cron, `--install` replaces any old line that runs
+The timer runs `factory.py --home <home> pickup` with `/usr/bin/python3` when that python runs the runtime, else with the python that ran `--install`. The second line of the output names the timer python and why. When a timer already exists but runs a different python or skill path than `--install` would write, check 7 stays ok and prints a `note:` line. On cron, `--install` replaces any old line that runs
 `factory.py pickup` and keeps every other line.
 
 A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.
@@ -89,12 +111,25 @@ Each run, in order:
   skipped. This launch does not count against `--limit` or the in-flight cap.
 - Babysit: right after the priority nudges, launches at most one `/factory babysit <id>`
   session for a `pr-open` job with `babysit` set. It claims the job, records an agents
-  row with role babysit, and changes nothing else. It skips a job that waits on a human,
-  is paused, closing or held by a live claim, or whose project pickup does not list this
-  host. A dry run prints `would launch babysit ...` and
+  row with role babysit when it launches a new session, and changes nothing else. It
+  skips a job that waits on a human, is paused, closing or held by a live claim, or whose
+  project pickup does not list this host. A dry run prints `would launch babysit ...` and
   `skip babysit <id> <project>: <reason>`. A failed launch releases the claim. This
   launch and babysat jobs do not count against `--limit` or the in-flight cap. The
   session follows [babysit](commands/babysit.md).
+  Every babysit goes to the job's own linked Paseo agent. On this host's Paseo server an
+  `idle` or `closed` agent gets the command with `paseo send` (a closed agent resumes): a dry
+  run prints `would send babysit <id> <project> to agent <agent>`, and a send prints
+  `sent babysit <id> <project> to agent <agent> session <tag>`. A `running` agent skips the
+  job this run (`skip babysit <id> <project>: agent <agent> is running`, likewise for any
+  other status such as `initializing`). An agent on another
+  server skips it (`agent <agent> lives on server <server>`), and so does a failed `paseo ls`
+  (`paseo ls failed`). An agent absent from `paseo ls`, or no link, launches a new session.
+  A failed send to an `idle` agent prints a stderr line, releases the claim and launches
+  nothing. A failed send to a `closed` agent prints a stderr line and launches a new session
+  with the same tag. A new babysit session gets workspace slug `babysit-<id>` and title
+  `babysit <id>`: pickup rewrites `--worktree-slug` and `--title` in the launcher, and inserts
+  `--worktree-slug` after `run` for a `paseo` launcher with `--new-workspace` that lacks it.
 - Picks the first route in `routes.md` that is not marked limited, then resolves
   the launcher for it. A config error exits 2 before anything is claimed.
 - Claims one idea at a time — the board compare-and-swap stops two hosts taking
@@ -213,11 +248,17 @@ configuration. The repository ships none.
 - Claude Code headless:
 
   ```json
-  ["claude", "-p", "{prompt}", "--model", "{model}", "--effort", "{effort}"]
+  ["env", "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0", "claude", "-p", "{prompt}",
+   "--model", "{model}", "--effort", "{effort}", "--permission-mode", "auto"]
   ```
 
-  Tool permissions come from the user's Claude Code settings. Never add
-  `--dangerously-skip-permissions` or another auto-approval flag.
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` keeps a headless run waiting on its own
+  background work, as SKILL.md requires. `--permission-mode auto` lets Claude Code
+  approve routine actions without a prompt, since nobody answers one. Where auto mode
+  is not available, use `dontAsk` with an allow list in your Claude Code settings.
+  Never use `bypassPermissions`, `--dangerously-skip-permissions` or another flag that
+  approves every action. On Windows, set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` as a
+  user environment variable and drop the first two items.
 
 Core needs neither. Any program that accepts these values works.
 

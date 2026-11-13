@@ -246,7 +246,7 @@
     },
     {
       "id": "FactoryTest",
-      "count": 62,
+      "count": 63,
       "methods": [
         "test_stuck_drops_a_stale_stub",
         "test_hold_sets_started_once",
@@ -308,6 +308,7 @@
         "test_push_records_spec_goal",
         "test_push_skips_unchanged_goal",
         "test_push_retries_goal_after_board_failure",
+        "test_push_keeps_goal_pending_when_remote_spec_is_newer",
         "test_push_clears_goal_when_spec_drops_it",
         "test_handoff_records_goal"
       ]

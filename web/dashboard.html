@@ -169,7 +169,15 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (hover: hover) { .filter-menu label:hover { background: var(--line); } }
   @media (pointer: coarse) { .filter-menu label { min-height: 44px; } .filter-menu .filter-title { white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; } }
   .header-actions { display: flex; gap: inherit; }
-  body[data-view="settings"] #board, body[data-view="settings"] #detail { display: none; }
+  body[data-view="settings"] #board, body[data-view="settings"] #detail,
+  body[data-view="retros"] #board, body[data-view="retros"] #detail { display: none; }
+  #retros-list { display: grid; gap: 16px; }
+  .retro-run h3 .muted { font-weight: 400; margin-left: 8px; }
+  .retro-run tr[aria-current="true"] { background: var(--accent-soft); }
+  .retro-run details { margin-top: 4px; font-size: 12px; }
+  .retro-run a { color: var(--accent); }
+  .retro-run .reference-table { min-width: 640px; }
+  .retro-run ul { margin: 0; padding-left: 16px; }
   .settings-page { max-width: 1440px; margin: 0 auto; padding: 28px; }
   .settings-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
   .settings-head h2 { font-size: 16px; margin: 0; }
@@ -546,6 +554,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="header-actions">
     <button class="btn icon" id="new-idea" aria-label="New idea" title="New idea (N)" aria-keyshortcuts="n" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2c.4.3.6.7.6 1.2V12h4v-1.1c0-.5.2-.9.6-1.2A4.5 4.5 0 0 0 8 1.5zM6.5 14.5h3"/></svg></button>
     <button class="btn icon" id="job-jump" aria-label="Jump to job" title="Jump to job (J, /, ⌘K or Ctrl+K)" aria-keyshortcuts="j / Meta+K Control+K"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 4 4"/></svg></button>
+    <a class="btn icon" id="retros-link" href="#/retros" aria-label="Retros" title="Retros (R)" aria-keyshortcuts="r"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2 2v2.6h2.6"/><path d="M8 5v3l2 1.5"/></svg></a>
     <a class="btn icon" id="settings-link" href="#/settings" aria-label="Settings" title="Settings (S)" aria-keyshortcuts="s"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="4.5"/><path class="teeth" d="M8 1v3M8 12v3M1 8h3M12 8h3M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12"/></svg></a>
   </div>
   <div class="status"><span id="updated">loading</span><span class="dot" id="dot" role="img" aria-label="connection" title="connection"></span></div>
@@ -812,13 +821,38 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     </section>
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
       <h3 id="scheduler-settings-heading" tabindex="-1">Scheduler</h3>
-      <p class="muted">Automatic pickup needs two things on each host: a scheduler that runs factory.py pickup every 5 minutes, and a launcher that starts one agent session per idea. Nothing here is saved. Copy a snippet, then replace each placeholder with this host's values.</p>
+      <p class="muted" id="scheduler-intro">Automatic pickup needs each host to run factory.py pickup every 5 minutes, with a launcher for each route. Let a coding agent on the host set it up, or follow the manual steps.</p>
+      <p class="muted" id="scheduler-not-a-prompt">A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the host timer runs pickup.</p>
+      <div class="settings-tabs" id="scheduler-mode-tabs" role="tablist" aria-label="Setup method">
+        <button type="button" role="tab" id="scheduler-mode-tab-agent" aria-controls="scheduler-mode-panel-agent" aria-selected="true" tabindex="0">Agent</button>
+        <button type="button" role="tab" id="scheduler-mode-tab-human" aria-controls="scheduler-mode-panel-human" aria-selected="false" tabindex="-1">Human</button>
+      </div>
+      <div id="scheduler-mode-panel-agent" role="tabpanel" aria-labelledby="scheduler-mode-tab-agent">
+        <p class="muted">Paste this prompt into a coding agent running on the host, such as Paseo, Claude Code or OpenCode. The agent runs pickup setup and fixes each missing check in order. It asks before it installs the timer, and tells you what to click when a fix is a dashboard setting.</p>
+        <div class="snippet"><div class="actions"><button class="btn" type="button" data-copy="scheduler-agent-prompt" aria-label="Copy agent setup prompt">Copy</button></div><pre class="wrap"><code id="scheduler-agent-prompt">Set up automatic factory pickup on this host. You are a coding agent on the machine that should pick up ideas. Work through these steps in order.
+
+1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory.py, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: python3 SKILL/runtime/factory.py pickup setup
+   If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with python3 tools/install.py --destination &lt;skills folder&gt; --replace from a clone of the factory repo, then start again.
+2. It prints 7 numbered checks, each ok or missing, with a fix under each missing one. Fix checks 1 to 6 in order. After each fix, run pickup setup again.
+   - home: run the doctor line it prints. If the factory home or its credentials are missing, stop and tell me. Never print or copy values from the .env file.
+   - device: add a device: line inside the frontmatter of config.md in the factory home, with a short name for this host.
+   - checkout: run the init line it prints with the path of this host's clone of each project. That adds it to paths.md.
+   - routes: write routes.md from providers and models that exist on this host. Find them first, for example with paseo provider ls and paseo provider models &lt;provider&gt;, opencode models, or the model aliases claude --help lists. Never copy route, provider or model names from another person's setup.
+   - launchers: write launchers.json with one launcher per route, copied from the matching example in SKILL/references/pickup.md. Keep every argument the example shows, including its permission mode. Never add --dangerously-skip-permissions or any flag that approves every action.
+   - pipeline: pickup must be on for the project and list this host exactly as pickup setup prints it. That is a dashboard setting under Settings, Pipeline, or Settings, Projects, then the project. If you cannot change it yourself, tell me exactly what to click and type, and wait until I say it is done.
+3. Run python3 SKILL/runtime/factory.py pickup --dry-run and show me what it would launch.
+4. Check 7 is the timer. Show me the command python3 SKILL/runtime/factory.py pickup setup --install and say that it writes and loads a 5 minute timer for this host. Run it only after I answer yes. Otherwise I run it myself.
+5. Run pickup setup again until it prints 7 of 7 ok. Then tell me which python the timer runs and any note it printed.
+
+A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.</code></pre></div>
+      </div>
+      <div id="scheduler-mode-panel-human" role="tabpanel" aria-labelledby="scheduler-mode-tab-human" hidden>
+      <p class="muted">Nothing here is saved. Copy a snippet, then replace each placeholder with this host's values.</p>
       <h4>Start here</h4>
       <p class="muted">Run this on each host. It checks every piece pickup needs, in order, and prints the exact fix for each missing one with this host's own paths. It exits non-zero until every check is ok.</p>
       <div class="snippet"><pre class="wrap"><code id="scheduler-snippet-setup">python3 &lt;installed-skill&gt;/runtime/factory.py pickup setup</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup" aria-label="Copy setup check command">Copy</button></div></div>
       <p class="muted">Then install the 5 minute timer for this host's scheduler. Running it again changes nothing. The sections below show what it writes, if you prefer to set it up by hand.</p>
       <div class="snippet"><pre class="wrap"><code id="scheduler-snippet-setup-install">python3 &lt;installed-skill&gt;/runtime/factory.py pickup setup --install</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup-install" aria-label="Copy timer install command">Copy</button></div></div>
-      <p class="muted" id="scheduler-not-a-prompt">A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the host timer runs pickup.</p>
       <h4>What runs pickup</h4>
       <ul class="scheduler-list">
         <li>Scheduler: the host's own timer, such as cron, launchd or Task Scheduler. It runs pickup every 5 minutes. Pickup never calls a model and prints nothing when there is no work.</li>
@@ -882,6 +916,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
         <p class="muted">Python on Windows has no time zone data. Install it so usage-limit reset times parse. Without it, limits default to 60 minutes.</p>
         <div class="snippet"><pre><code id="scheduler-snippet-windows-tzdata">py -3 -m pip install --user tzdata</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-windows-tzdata" aria-label="Copy tzdata install command">Copy</button></div></div>
       </div>
+      </div>
       <p id="scheduler-status" role="status"></p>
     </section>
     <section class="settings-section" id="settings-reference" aria-labelledby="reference-settings-heading" hidden>
@@ -917,6 +952,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
           <tr><td>N</td><td>New idea</td></tr>
           <tr><td>P</td><td>Select project</td></tr>
           <tr><td>S</td><td>Open Settings</td></tr>
+          <tr><td>R</td><td>Open Retros</td></tr>
           <tr><td>A or .</td><td>Open the jumper with actions for the hovered or focused job card, or the open job</td></tr>
           <tr><td>B</td><td>Open the first backlog item</td></tr>
           <tr><td>A or D</td><td>Approve or deny the open backlog item</td></tr>
@@ -925,6 +961,14 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
       </table></div>
     </section>
   </div>
+</div>
+<div class="settings-page" id="retros-page" role="region" aria-labelledby="retros-page-heading" hidden>
+  <div class="settings-head">
+    <a class="btn icon" id="retros-back" href="#" aria-label="Back to board" title="Back to board"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
+    <h2 id="retros-page-heading" tabindex="-1">Retros</h2>
+  </div>
+  <p class="muted" id="retros-status" role="status"></p>
+  <div id="retros-list"></div>
 </div>
 <dialog id="idea-dlg" aria-labelledby="idea-h">
   <form id="idea-form">
@@ -1159,7 +1203,7 @@ function refreshBacklog() {
   const version = boardReadVersion;
   // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
   const seen = backlog.map((b) => b.raw).join('\n');
-  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); });
+  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); });
 }
 
 async function poll({ ifChanged = false, withBacklog = true } = {}) {
@@ -1739,7 +1783,8 @@ function renderJobResults() {
   const projectFilter = $('filter');
   const projectCommand = !projectFilter || projectFilter.hidden || projectFilter.disabled ? null
     : { kind: 'command', key: 'command:select-project', title: 'Select project', meta: 'Command · Change the board project filter', words: 'select project command' };
-  const commands = [command, projectCommand].filter((r) => r && tokens.every((t) => r.words.includes(t)));
+  const retrosCommand = { kind: 'command', key: 'command:retros', title: 'Retros', meta: 'Command · Open retro runs and findings (R)', words: 'retros retro runs findings command' };
+  const commands = [command, projectCommand, retrosCommand].filter((r) => r && tokens.every((t) => r.words.includes(t)));
   const jobRows = matched.map((j) => ({
     kind: 'job', key: 'job:' + j.id, job: j, title: j.title || j.id,
     meta: projectName(j) + ' · ' + j.id + ' · ' + j.stage,
@@ -1764,6 +1809,7 @@ function renderJobResults() {
     { id: 'links', title: 'Links', rows: actions.filter((r) => r.kind === 'link') },
     { id: 'new-idea', title: 'New idea', rows: commands.filter((r) => r.key === 'command:new-idea') },
     { id: 'select-project', title: 'Select project', rows: commands.filter((r) => r.key === 'command:select-project') },
+    { id: 'retros', title: 'Retros', rows: commands.filter((r) => r.key === 'command:retros') },
     ...[['needs-you', 'Needs you'], ...JOB_PICKER_STAGES.map((stage) => [stage, stage === 'pr-open' ? 'PR open' : stage[0].toUpperCase() + stage.slice(1)]),
       ['other', 'Other jobs']].map(([id, title]) => ({ id, title, rows: jobRows.filter((r) => jobResultSection(r.job) === id) })),
     { id: 'archived', title: 'Archived jobs', rows: archiveRows },
@@ -1908,6 +1954,11 @@ function activateJobResult() {
     return searchArchive(row.query);
   }
   if (row.key === 'command:select-project') return openProjectPicker();
+  if (row.key === 'command:retros') {
+    closeJobPicker(true);
+    location.hash = '#/retros';
+    return;
+  }
   if (row.kind === 'command') {
     // The trigger may have gone away while the picker sat open; then nothing opens.
     const trigger = $('new-idea');
@@ -2555,11 +2606,18 @@ function renderRoute() {
   if (section && location.hash !== '#/settings/' + section)
     history.replaceState(null, '', location.pathname + location.search + '#/settings/' + section);
   const focusInside = $('settings-page').contains(document.activeElement);
+  const retrosWas = $('retros-page').hidden === false;
   settingsShown = section;
-  document.body.dataset.view = section ? 'settings' : 'board';
+  const retrosOpen = !section && retrosRoute() !== null;
+  document.body.dataset.view = section ? 'settings' : retrosOpen ? 'retros' : 'board';
   $('settings-page').hidden = !section;
-  document.title = section ? 'Settings · ' + baseTitle : baseTitle;
+  $('retros-page').hidden = !retrosOpen;
+  document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : baseTitle;
+  if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); }
+  else if (retrosOpen) renderRetrosPage();
+  if (!retrosOpen) retrosScrolled = '';
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
+  if (retrosOpen) $('retros-link').setAttribute('aria-current', 'page'); else $('retros-link').removeAttribute('aria-current');
   for (const name of SETTINGS_SECTIONS) {
     $('settings-' + name).hidden = name !== section;
     if (name === section) $('settings-nav-' + name).setAttribute('aria-current', 'page'); else $('settings-nav-' + name).removeAttribute('aria-current');
@@ -2572,6 +2630,7 @@ function renderRoute() {
   if (section === 'notifications' && was !== 'notifications') enterNotificationsSection();
   if (section === 'scheduler' && was !== 'scheduler') enterSchedulerSection();
   if (section === 'reference' && was !== 'reference') enterReferenceSection();
+  if (retrosWas && !retrosOpen && !section) $('retros-link').focus();
   if (!section && was && (focusInside || document.activeElement === document.body)) $('settings-link').focus();
 }
 function leaveSettings() {
@@ -2580,6 +2639,118 @@ function leaveSettings() {
 }
 $('settings-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
 $('board-link').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
+
+// Retros page: the '#/retros[/<run>[/<rank>]]' view. Each uploaded finding sits beside the backlog line
+// or job its card became, and that work's status.
+let retros = null;
+let retrosFailed = false;
+let retrosScrolled = '';
+let retrosHtml = '';
+const RETRO_MARK = /^Retro: run [A-Za-z0-9_-]{1,64}, fingerprint ([0-9a-f]{16}), created \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
+
+function retrosRoute() {
+  let h = '';
+  try { h = decodeURIComponent(location.hash.slice(1)); } catch {}
+  const m = /^\/retros(?:\/([A-Za-z0-9_-]{1,64})(?:\/([1-9]\d?))?)?$/.exec(h);
+  return m ? { run: m[1] ?? null, rank: m[2] ? Number(m[2]) : null } : null;
+}
+
+// Each Retro provenance line indented under a backlog line, checked or not, as factory.py retro_marks reads them.
+function retroMarks(text) {
+  const marks = [];
+  let under = null;
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    const m = /^- \[([ x])\] ([\w-]+): \S/.exec(line);
+    if (m) under = { line, open: m[1] === ' ', job: /\(([\w.-]+)\)$/.exec(line)?.[1] ?? null };
+    else if (under && line.startsWith('  ') && RETRO_MARK.test(line.slice(2))) marks.push({ fingerprint: RETRO_MARK.exec(line.slice(2))[1], ...under });
+    else if (line && !line.startsWith('  ')) under = null;
+  }
+  return marks;
+}
+
+function retroJobStatus(id) {
+  const j = jobs.find((x) => x.id === id);
+  if (!j) return { text: 'Archived', href: null };
+  const text = j.stage === 'merged' ? 'Merged'
+    : j.stage === 'closed' ? (j.backlog?.decision === 'denied' ? 'Denied' : 'Closed')
+    : 'Open \u00b7 ' + j.stage;
+  return { text, href: '#' + encodeURIComponent(id) };
+}
+
+function retroCardStatus(card, marks) {
+  const job = jobs.find((j) => j.origin?.fingerprint === card.fingerprint);
+  if (job) return retroJobStatus(job.id);
+  const mark = marks.find((m) => m.fingerprint === card.fingerprint);
+  if (mark?.open) {
+    const item = backlog.find((b) => b.raw === mark.line);
+    return { text: 'Waiting', href: item ? '#/backlog/' + item.key : null };
+  }
+  if (mark?.job) return retroJobStatus(mark.job);
+  const dup = /^duplicate (\S+)$/.exec(card.result);
+  if (dup) return retroJobStatus(dup[1]);
+  return { text: 'Not logged: ' + card.result, href: null };
+}
+
+async function loadRetros() {
+  try {
+    const r = await fetch('./api/retros', { cache: 'no-store' });
+    if (r.status !== 200) throw new Error(String(r.status));
+    retros = await r.json();
+    retrosFailed = false;
+  } catch { retros = null; retrosFailed = true; }
+  renderRetrosPage();
+}
+
+function renderRetrosPage() {
+  const route = retrosRoute();
+  if (!route) return;
+  $('retros-status').textContent = retrosFailed ? 'Could not load retros. Reload to try again.'
+    : retros?.length === 0 ? 'No retro runs yet. Each retro admit uploads its findings here.' : '';
+  // Statuses read the board and the backlog, so no row is drawn before both are in.
+  if (!retros || !loaded || !backlogLoaded) {
+    if (!retrosFailed) $('retros-status').textContent = 'Loading retros\u2026';
+    $('retros-list').innerHTML = '';
+    retrosHtml = '';
+    return;
+  }
+  const marks = retroMarks(backlogText);
+  const label = (status) => status.href ? '<a href="' + esc(status.href) + '">' + esc(status.text) + '</a>' : esc(status.text);
+  const cardLine = (card, status) => esc(card.title) + ' \u00b7 ' + label(status);
+  const html = retros.map((run) => {
+    const statuses = run.findings.flatMap((f) => f.cards).concat(run.cards).map((c) => retroCardStatus(c, marks));
+    const counts = new Map();
+    for (const { text } of statuses) {
+      const word = text.startsWith('Open') ? 'open' : text.startsWith('Not logged') ? 'not logged' : text.toLowerCase();
+      counts.set(word, (counts.get(word) ?? 0) + 1);
+    }
+    const summary = ['merged', 'open', 'waiting', 'denied', 'closed', 'archived', 'not logged']
+      .filter((word) => counts.has(word)).map((word) => counts.get(word) + ' ' + word).join(', ');
+    const rows = run.findings.map((f) => {
+      const open = route.run === run.run && route.rank === f.rank;
+      const logged = f.cards.map((c) => '<li>' + cardLine(c, retroCardStatus(c, marks)) + '</li>').join('');
+      return '<tr id="retro-' + esc(run.run) + '-' + f.rank + '"' + (open ? ' aria-current="true"' : '') + '><td>' + f.rank + '</td><td>' + esc(f.title) +
+        '<details' + (open ? ' open' : '') + '><summary>Root cause and fix</summary><p>' + esc(f.root_cause) + '</p><p>' + esc(f.fix) + '</p></details></td><td>' +
+        esc(f.category) + '</td><td>' + esc(f.project) + '</td><td>' + (f.count * f.cost).toLocaleString('en-US') + '</td><td>' +
+        (logged ? '<ul>' + logged + '</ul>' : '<span class="muted">No card</span>') + '</td></tr>';
+    }).join('');
+    const loose = run.cards.length
+      ? '<h4>Cards without a finding</h4><ul>' + run.cards.map((c) => '<li>' + cardLine(c, retroCardStatus(c, marks)) + '</li>').join('') + '</ul>' : '';
+    return '<section class="settings-section retro-run" id="retro-run-' + esc(run.run) + '" aria-labelledby="retro-h-' + esc(run.run) + '"><h3 id="retro-h-' + esc(run.run) + '">' +
+      esc(run.run) + '<span class="muted">' + esc(run.host) + ' \u00b7 ' + esc(run.from) + ' to ' + esc(run.to) + ' \u00b7 ' + run.sessions + ' sessions \u00b7 ' + run.rejected + ' rejected</span></h3>' +
+      '<p class="muted retro-summary">' + esc(summary) + '</p>' +
+      '<div class="reference-scroll"><table class="reference-table"><thead><tr><th scope="col">Rank</th><th scope="col">Finding</th><th scope="col">Category</th><th scope="col">Project</th><th scope="col">Score</th><th scope="col">Logged as</th></tr></thead><tbody>' +
+      rows + '</tbody></table></div>' + loose + '</section>';
+  }).join('');
+  if (html !== retrosHtml) { retrosHtml = html; $('retros-list').innerHTML = html; }
+  const target = route.run && (route.rank ? 'retro-' + route.run + '-' + route.rank : 'retro-run-' + route.run);
+  if (target && target !== retrosScrolled && document.getElementById(target)) {
+    retrosScrolled = target;
+    document.getElementById(target).scrollIntoView({ block: 'center' });
+  }
+}
+
+$('retros-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
 
 // Pipeline settings: one in-memory draft per scope. Stored text is shown only through
 // value and textContent, never parsed as markup.
@@ -3363,9 +3534,10 @@ function renderBoard() {
       '<p>Jobs show up here as they move through the loop.</p>' +
       (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
-    if (!settingsShown) document.title = BASE_TITLE;
+    if (!settingsShown && !retrosRoute()) document.title = BASE_TITLE;
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
+    renderRetrosPage();
     return;
   }
   const noneShown = !shownProjectKeys().length;
@@ -3379,7 +3551,7 @@ function renderBoard() {
   // Oldest first, so the longest wait sits on top.
   waiting.sort((a, b) => (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
-  if (!settingsShown) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
+  if (!settingsShown && !retrosRoute()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
   // The extra auto track lets the filter-empty line span the whole board.
@@ -3422,6 +3594,7 @@ function renderBoard() {
     target?.focus({ preventScroll: true });
   }
   syncCardActions();
+  renderRetrosPage();
 }
 
 $('board').addEventListener('click', (e) => {
@@ -4556,7 +4729,7 @@ function closeDetail(keepHash = false) {
   renderBoard();
   if (raw !== null) focusBacklogControl(raw);
   refreshPicker();
-  if (!keepHash && settingsRoute() === null) history.replaceState(null, '', location.pathname + location.search);
+  if (!keepHash && settingsRoute() === null && retrosRoute() === null) history.replaceState(null, '', location.pathname + location.search);
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
@@ -4579,7 +4752,7 @@ document.addEventListener('keydown', (e) => {
 // Arrow navigation over cards and job pages, plus n, j or /, p, s and a single-key openers.
 // A separate listener, so the Esc/Cmd+K handler above stays byte-identical.
 function handleBoardKeys(e) {
-  if (settingsRoute() !== null) return;
+  if (settingsRoute() !== null || retrosRoute() !== null) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
   if (e.target.closest('input, textarea, select, [contenteditable], #d-resize')) return;
   if (document.querySelector('dialog[open]')) return;
@@ -4624,6 +4797,9 @@ function handleBoardKeys(e) {
   } else if (e.key === 's') {
     e.preventDefault();
     location.hash = '#/settings/projects';
+  } else if (e.key === 'r') {
+    e.preventDefault();
+    location.hash = '#/retros';
   } else if (e.key === 'a' || e.key === '.') {
     if (openBacklogRaw !== null) return;
     const target = cardShortcutTarget(e);
@@ -4636,7 +4812,7 @@ document.addEventListener('keydown', handleBoardKeys);
 
 // b opens the first backlog item. a and d approve or deny the open one, which opens the next.
 function handleBacklogKeys(e) {
-  if (settingsRoute() !== null) return;
+  if (settingsRoute() !== null || retrosRoute() !== null) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || e.repeat) return;
   if (e.target.closest('textarea, select, [contenteditable], #d-resize, input:not([type=radio]):not([type=checkbox])')) return;
   if (document.querySelector('dialog[open]')) return;
@@ -4966,6 +5142,7 @@ function addIdea(board, snap, now) {
 const BACKLOG_LINE = /^- \[ \] ([\w-]+): (\S.*)$/;
 const BACKLOG_REF = / \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$/;
 let backlog = [];               // parsed items from the last good read
+let backlogText = '';           // the last good read's whole text, checked lines included
 let backlogLoaded = false;      // a 200 or 404 has been read at least once
 const backlogBusy = new Set();  // item.raw values with a decision in flight
 const backlogPending = new Map(); // item.raw -> captureId, kept until a decision settles
@@ -5036,7 +5213,8 @@ async function loadBacklog() {
       const items = backlogItems(text);
       for (const item of items) item.key = await sha12(item.raw);
       backlog = items;
-    } else if (r.status === 404) backlog = [];
+      backlogText = text;
+    } else if (r.status === 404) { backlog = []; backlogText = ''; }
     else return;
     backlogLoaded = true;
     pruneBacklogDrafts();
@@ -6627,7 +6805,7 @@ function openBacklogItem(item) {
   docDir = null;
   docBase = null;
   docRepo = projects?.get(item.project)?.repo || null;
-  if (settingsRoute() === null) history.replaceState(null, '', location.pathname + location.search + '#/backlog/' + item.key);
+  if (settingsRoute() === null && retrosRoute() === null) history.replaceState(null, '', location.pathname + location.search + '#/backlog/' + item.key);
   $('detail').hidden = false;
   $('d-title').textContent = 'Backlog item';
   $('d-meta').textContent = projectName({ project: item.project }) + ' · backlog';
@@ -7121,13 +7299,19 @@ $('display-reset').addEventListener('click', () => {
   renderDisplaySettings();
   $('display-status').textContent = 'Display settings reset to defaults.';
 });
-// Scheduler setup help is static text. Copy buttons copy a snippet exactly, placeholders included.
+// Scheduler setup help is static text: an agent prompt and manual snippets. Copy buttons copy a snippet exactly, placeholders included.
 const SCHEDULER_TABS = ['scheduler-tab-cron', 'scheduler-tab-launchd', 'scheduler-tab-windows'];
 function selectSchedulerTab(id) {
   selectRovingTab(SCHEDULER_TABS, id);
   for (const tab of SCHEDULER_TABS) $(tab.replace('-tab-', '-panel-')).hidden = tab !== id;
 }
 listenTabs('scheduler-tabs', SCHEDULER_TABS, selectSchedulerTab);
+const SCHEDULER_MODE_TABS = ['scheduler-mode-tab-agent', 'scheduler-mode-tab-human'];
+function selectSchedulerMode(id) {
+  selectRovingTab(SCHEDULER_MODE_TABS, id);
+  for (const tab of SCHEDULER_MODE_TABS) $(tab.replace('-tab-', '-panel-')).hidden = tab !== id;
+}
+listenTabs('scheduler-mode-tabs', SCHEDULER_MODE_TABS, selectSchedulerMode);
 function enterSchedulerSection() {
   $('scheduler-status').textContent = '';
   $('scheduler-settings-heading').focus();

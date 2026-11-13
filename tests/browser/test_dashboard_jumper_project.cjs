@@ -94,6 +94,13 @@ function commandRowsFor(text) {
       kind: "command",
       words: "select project command",
     },
+    {
+      key: "command:retros",
+      title: "Retros",
+      meta: "Command · Open retro runs and findings (R)",
+      kind: "command",
+      words: "retros retro runs findings command",
+    },
   ]
     .filter((r) => tokens.every((t) => r.words.includes(t)))
     .map(({ words, ...r }) => r);
@@ -373,7 +380,7 @@ async function browserRun(origin) {
         const s = await state(page);
         const commandKeys =
           text === "" || text === "command"
-            ? ["command:new-idea", command]
+            ? ["command:new-idea", command, "command:retros"]
             : text === "new id"
               ? ["command:new-idea"]
               : text === "zz-no-match"
@@ -402,7 +409,9 @@ async function browserRun(origin) {
         const groups = [
           ...(actions.some((r) => r.kind === "page") ? ["Pages"] : []),
           ...(actions.some((r) => r.kind === "link") ? ["Links"] : []),
-          ...commandKeys.map((k) => (k === command ? "Select project" : "New idea")),
+          ...commandKeys.map((k) =>
+            k === command ? "Select project" : k === "command:retros" ? "Retros" : "New idea",
+          ),
           ...(text === ""
             ? ["Idea", "Build", "PR open", "Merged"]
             : text === "project"

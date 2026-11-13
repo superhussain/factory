@@ -76,7 +76,7 @@ class PortabilityTest(IsolatedTestCase):
         files, _ = installer.tree(SKILL, source=True)
         self.assertEqual(set(files), set(installer.REQUIRED))
         self.assertIn("runtime/pr_screenshots.py", files)
-        self.assertEqual(len(files), 42)
+        self.assertEqual(len(files), 43)
         for name, data in files.items():
             text = data.decode("utf-8")
             self.assertNotIn("file://", text)
