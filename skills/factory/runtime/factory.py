@@ -5339,7 +5339,7 @@ def pr_reading(pr, base):
     if not isinstance(view, dict):
         fail("gh pr view printed no JSON object", 5)
     target = view.get("baseRefName") or base
-    if not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9._/-]{1,255}", target):
+    if not isinstance(target, str) or not re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", target):
         fail("gh printed an unusable baseRefName", 5)
     listed = pr_checks(pr)[0]
     if view.get("statusCheckRollup") and not listed:

@@ -222,7 +222,7 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual((json.loads(out)["base"], json.loads(out)["stacked"]), ("main", False))
 
     def test_an_unusable_base_exits_5(self):
-        for base in ("main;id", "feat branch", "$(id)", "a" * 256, 7):
+        for base in ("main;id", "feat branch", "$(id)", "-x", "a" * 256, 7):
             with self.subTest(base=base):
                 code, out, err, _ = self.state([(view(base=base), checks("pass"))])
                 self.assertEqual((code, out), (5, ""))
