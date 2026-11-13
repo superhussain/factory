@@ -3528,6 +3528,18 @@ async function loadNeedsTriage(j, sha) {
   } catch { return null; }
 }
 
+// Redraws the open needs form with its record, keeping the focused control and its selection.
+function redrawNeeds() {
+  const controls = () => [...($('needs-form')?.querySelectorAll('input, textarea, button') ?? [])];
+  const at = controls().indexOf(document.activeElement);
+  const { selectionStart, selectionEnd } = document.activeElement;
+  renderDetail();
+  const el = controls()[at];
+  if (at < 0 || !el) return;
+  el.focus({ preventScroll: true });
+  if (el.tagName === 'TEXTAREA') el.setSelectionRange(selectionStart, selectionEnd);
+}
+
 // The stored choice for question p, or null unless its header and every label match.
 function needsPick(triage, p) {
   const c = Array.isArray(triage) ? triage[p.index] : null;
@@ -3765,8 +3777,11 @@ async function openJob(id) {
   if (typeof j.idea === 'string' && j.idea) got.unshift({ name: 'idea.md', text: j.idea });
   const needsFile = got.find((f) => f.name === 'needs.md');
   if (needsFile) needsFile.sha = await sha12(needsFile.text);
-  if (needsFile) needsFile.triage = await loadNeedsTriage(j, needsFile.sha);
   if (openId !== id) return;
+  if (needsFile && !first) {
+    const prior = files.find((f) => f.name === 'needs.md');
+    needsFile.triage = prior?.sha === needsFile.sha ? prior.triage : null;
+  }
   files = got;
   filesLoading = false;
   walkthroughs = walk;
@@ -3777,6 +3792,11 @@ async function openJob(id) {
   else if (!files.find((f) => f.name === activeFile)) activeFile = (files.find((f) => f.name !== 'idea.md') || files[0])?.name ?? null;
   renderDetail();
   refreshPicker();
+  if (needsFile && !needsFile.triage) loadNeedsTriage(j, needsFile.sha).then((triage) => {
+    if (!triage || openId !== id || !files.includes(needsFile)) return;
+    needsFile.triage = triage;
+    if (activeFile === 'needs.md') redrawNeeds();
+  });
   // A hash tab that isn't written yet stays in the URL, so the poll can open it once it lands.
   if (activeFile && !pendingTab()) writeHash();
 }
