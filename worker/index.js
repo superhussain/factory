@@ -1679,9 +1679,13 @@ async function retrosList(env) {
   } while (cursor);
   keys.sort().reverse();
   const records = await Promise.all(
-    keys.slice(0, RETRO_RUNS_LISTED).map(async (key) => (await env.BUCKET.get(key)).text()),
+    keys.slice(0, RETRO_RUNS_LISTED).map(async (key) => (await env.BUCKET.get(key))?.text()),
   );
-  return reply(`[${records.join(",")}]`, 200, "application/json");
+  return reply(
+    `[${records.filter((text) => text !== undefined).join(",")}]`,
+    200,
+    "application/json",
+  );
 }
 
 // The hosts with a retro digest for the day, in host record order.

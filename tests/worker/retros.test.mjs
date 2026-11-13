@@ -108,6 +108,21 @@ test("the list is newest first and holds at most 30 runs", async () => {
   assert.equal(listed[29].run, "20261101T000002Z-aaaaaa");
 });
 
+test("a run deleted between list and get is skipped", async () => {
+  const s = await setup();
+  const older = "20261101T000000Z-aaaaaa";
+  assert.equal((await s.put(record({ run: older }), mac, older)).status, 200);
+  assert.equal((await s.put(record())).status, 200);
+  const get = s.bucket.get.bind(s.bucket);
+  s.bucket.get = async (key) => (key === `retro-runs/${older}.json` ? null : get(key));
+  const listed = await s.send("GET", "/api/retros");
+  assert.equal(listed.status, 200);
+  assert.deepEqual(
+    JSON.parse(listed.text).map((r) => r.run),
+    [RUN],
+  );
+});
+
 test("only the bound host writes, and only its own record", async () => {
   const s = await setup();
   const stranger = { ...pc, client_id: "client-other" };
