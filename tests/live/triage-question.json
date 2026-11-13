@@ -1,0 +1,4 @@
+{
+  "item": "sample: Add a delivery choice to report exports",
+  "context": "Recommend: approve\nLets a reader pick how report exports arrive.\n\n## Question: Format\nWhich file format does the export use?\nPick: one\n- CSV (recommended): Opens in every spreadsheet.\n- JSON: Easy for scripts to read.\n- XLSX: Keeps column types in Excel.\n- PDF: Ready to print or share.\n\n## Question: Delivery\nHow does the export reach the reader?\nPick: one\n- Download (recommended): Saves the file at once.\n- Email: Sends the file to the reader's inbox.\n- Shared link: Gives a link others can open.\n- Cloud drive: Saves the file to a linked drive.\n\n## Question: Columns\nWhich columns go in the export?\nPick: many\n- Date: When the row was recorded.\n- Amount: The row's total.\n- Owner: Who the row belongs to.\n- Status: Where the row stands now.\n"
+}
