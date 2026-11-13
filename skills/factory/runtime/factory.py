@@ -3017,6 +3017,109 @@ def control_cmd(job_id, action, *flags):
     print(json.dumps(out))
 
 
+NEEDS_ANSWER_USAGE = "usage: needs answer <job-id> --answers <file> --chat-file <file>"
+NEEDS_SKIPPED = "answer every question; needs answer takes one line per question"
+
+
+def needs_questions(text):
+    """The questions of a needs.md, as the dashboard's parseNeeds reads them, or [] when it has
+    no question form."""
+    sections = [(None, [])]
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if line.startswith("## "):
+            sections.append((line, []))
+        else:
+            sections[-1][1].append(line)
+    questions = []
+    for head, lines in sections:
+        if not (head or "").startswith("## Question:"):
+            continue
+        header = head[len("## Question:"):].strip()
+        picks = [line for line in lines if line.startswith("Pick:")]
+        if len(questions) == 4 or not header or utf16_len(header) > 60 or len(picks) != 1 \
+                or picks[0] not in ("Pick: one", "Pick: many"):
+            return []
+        at = lines.index(picks[0])
+        prompt = " ".join(line for line in lines[:at] if line.strip()).strip()
+        options = []
+        for row in (line for line in lines[at + 1:] if line.strip()):
+            m = re.fullmatch(r"- (.+?)(?::\s+(.+))?", row)
+            if not m:
+                return []
+            rec = re.fullmatch(r"(.*) \(recommended\)", m.group(1), re.I)
+            options.append({"label": rec.group(1) if rec else m.group(1), "desc": m.group(2) or "",
+                            "recommended": bool(rec)})
+        pick = picks[0][len("Pick: "):]
+        if not prompt or not 2 <= len(options) <= 4 \
+                or pick == "one" and sum(o["recommended"] for o in options) > 1:
+            return []
+        questions.append({"header": header, "prompt": prompt, "pick": pick, "options": options,
+                          "labels": [o["label"] for o in options]})
+    return questions
+
+
+def waits_on_you(j):
+    """A job waiting on a person, as the dashboard's waitsOnYou reads it."""
+    if j.get("stage") in TERMINAL:
+        return False
+    return j.get("stage") == "needs-human" or isinstance(j.get("needs"), str) and bool(j["needs"].strip()) \
+        or j.get("stage") == "pr-open" and escalated(j)
+
+
+def needs_answers_markdown(questions, picks, sha12, stamp, device, quote):
+    """answers.md as the dashboard's answersMarkdown writes it, naming the chat message as its source."""
+    blocks = ["# Answers", f"For needs.md sha256 {sha12}, submitted {stamp} from chat by {device}.",
+              f'Chat message: "{" ".join(quote.split())}"']
+    for i, (q, (picked, other)) in enumerate(zip(questions, picks), 1):
+        blocks += [f"## Question {i}: {q['header']}", q["prompt"], f"Pick: {q['pick']}",
+                   "\n".join(f"- [{'x' if o['label'] in picked else ' '}] {o['label']}"
+                             + (" (recommended)" if o["recommended"] else "") + (f": {o['desc']}" if o["desc"] else "")
+                             for o in q["options"]),
+                   f"Other:\n> {other}" if other else "Other: none"]
+    return "\n\n".join(blocks) + "\n"
+
+
+def needs_answer(job_id, answers, chat_file):
+    """Submit a person's chat answers to a job's needs.md form with the dashboard's writes:
+    answers.md first, then the board's needs cleared unless the job is at needs-human."""
+    if not JOB_ID.fullmatch(job_id) or ".." in job_id:
+        fail(NEEDS_ANSWER_USAGE, 2)
+    quote = chat_quote(read_chat_file(chat_file))
+    home = factory_home()
+    job = next((j for j in load_board(api(home, "GET", "/api/board")[2])["jobs"] if j.get("id") == job_id), None)
+    if job is None:
+        fail(f"no job {job_id} on the board. Nothing was written.", 4)
+    if not waits_on_you(job):
+        fail(f"{job_id} is not waiting on you. Nothing was written.", 2)
+    base = "/api/jobs/" + (f"{job['project']}/" if job.get("project") else "") + f"{job_id}/"
+    status, _, text = api(home, "GET", base + "needs.md", ok=(200, 404))
+    if status == 404:
+        fail(f"{job_id} has no needs.md. Nothing was written.", 4)
+    questions = needs_questions(text)
+    if not questions:
+        fail(f"{job_id}'s needs.md has no question form. Nothing was written.", 2)
+    picks = parse_answers(answers, questions, NEEDS_SKIPPED)
+    sha12 = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    body = needs_answers_markdown(questions, picks, sha12, now(), holder(home)[0], quote)
+    cas(home, base + "answers.md", lambda _: (body, None))
+
+    def clear(board):
+        data = load_board(board)
+        j = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if j is None or j.get("stage") == "needs-human" or f"#{job_id}/needs" not in str(j.get("needs") or ""):
+            return None, "kept"
+        del j["needs"]
+        j["updated"] = data["updated"] = now()
+        return dump_board(data), "cleared"
+    print(json.dumps({"id": job_id, "answers": "saved", "needs": cas(home, "/api/board", clear)}))
+
+
+def needs_cmd(sub, *args):
+    job_id, flags = args[0], dict(zip(args[1::2], args[2::2]))
+    if sub != "answer" or set(flags) != {"--answers", "--chat-file"}:
+        fail(NEEDS_ANSWER_USAGE, 2)
+    needs_answer(job_id, flags["--answers"], flags["--chat-file"])
+
 def snapshot(repo, commit, dest):
     """Write commit's regular files and directories into dest, with no .git and no links."""
     r = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", commit], capture_output=True)
@@ -8536,6 +8639,7 @@ COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
 COMMANDS["agent"] = (agent_cmd, 1, 7)
+COMMANDS["needs"] = (needs_cmd, 6, 6)
 
 def main(argv=None):
     global _HOME_OVERRIDE, _LOCATED
