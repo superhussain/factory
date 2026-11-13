@@ -187,13 +187,13 @@ class CleanupTest(IsolatedTestCase):
         self.assertNotIn(str(self.wt), self.git(self.repo, "worktree", "list"))
         self.assertFalse(self.branch_exists())
 
-    def test_every_git_call_has_timeout(self):
+    def test_only_worktree_remove_waits_without_a_cap(self):
         self.merge()
         self.push()
         code, _, seen = self.git_raises("no-such-verb", None)
         self.assertEqual(code, 0)
-        self.assertTrue(seen)
-        self.assertEqual(set(seen), {20})
+        self.assertEqual(seen.count(None), 1)
+        self.assertEqual(set(seen) - {None}, {20})
 
     def test_git_times_out(self):
         code, out, _ = self.git_raises("worktree", subprocess.TimeoutExpired(["git"], 20))

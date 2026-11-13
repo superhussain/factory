@@ -7521,10 +7521,10 @@ def cleanup(target):
 
 def cleanup_job(repo, wt, branch, drop_pushed=False):
     """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. (removed, left)."""
-    def run_git(*args):
+    def run_git(*args, timeout=20):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
-            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=20,
+            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout,
                                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
         except subprocess.TimeoutExpired:
             return None, "", f"git {args[0]} timed out after 20 s"
@@ -7532,8 +7532,8 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             return None, "", f"could not run git {args[0]}"
         return r.returncode, r.stdout.strip(), r.stderr
 
-    def first_error(*args):
-        code, _, err = run_git(*args)
+    def first_error(*args, timeout=20):
+        code, _, err = run_git(*args, timeout=timeout)
         if code is None:
             return err
         if code == 0:
@@ -7570,7 +7570,7 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
     if wt.exists():
         alive = stop_pids(wt)
         error = (f"processes still running: {' '.join(map(str, alive))}" if alive
-                 else first_error("worktree", "remove", str(wt)))
+                 else first_error("worktree", "remove", str(wt), timeout=None))
         if error:
             left += [f"worktree {wt}: {error}", f"branch {branch}: kept because its worktree remains"]
         else:
