@@ -913,7 +913,7 @@ class RetroBacklogTest(SuggestCase):
                    "cost": 250, "sessions": [REF], "root_cause": "The alias needs a terminal size.",
                    "fix": "Alias ls only in interactive shells.", "project": "other"}
         (folder / "reply.json").write_text(json.dumps({"schema": "factory.retro/1", "run": run, "findings": [finding],
-                                                       "suggestions": [example_card()]}), encoding="utf-8")
+                                                       "suggestions": [dict(example_card(), finding=1)]}), encoding="utf-8")
         board = json.dumps(self.board)
         with contextlib.redirect_stderr(io.StringIO()) as err, patch.object(factory, "retro_upload"):
             factory.retro_admit(run)
