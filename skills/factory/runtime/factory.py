@@ -1985,7 +1985,8 @@ def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None)
 
     def chat_saved(j):
         record = j.get("backlog")
-        return isinstance(record, dict) and record.get("line") == raw and record.get("via") == "chat"
+        return isinstance(record, dict) and record.get("line") == raw and record.get("via") == "chat" \
+            and f"- [x] {slug}: {feature} ({j.get('id')})" not in lines
 
     def mine(j):
         return chat_saved(j) and j["backlog"].get("decision") == stored
