@@ -5783,11 +5783,17 @@ BUILDKITE_TAIL_CHARS = 8000
 BUILDKITE_MAX_BYTES = 16 * 1024 * 1024
 
 
-def buildkite_log(home, check):
+def buildkite_log(home, check, buildkite_org):
     """ci_log for a failing check that links to a Buildkite build: the failed job's name and the
-    stripped, redacted tail of its log, or a problem saying why there is none. Never exits."""
+    stripped, redacted tail of its log, or a problem saying why there is none. Never exits.
+    Reads only the project's buildkite_org."""
     org, pipeline, number, job_id = BUILDKITE_BUILD.fullmatch(check["link"]).groups()
     reading = {"check": check["name"], "job": "", "tail": "", "problem": ""}
+    if not buildkite_org:
+        return {**reading, "problem": "set buildkite_org in the project frontmatter to read Buildkite logs"}
+    if org != buildkite_org:
+        return {**reading, "problem": f"the check links to Buildkite org {org}, not the project's buildkite_org "
+                                      f"{printable_line(buildkite_org, 100)}"}
     env = read_conf(home / ".env") if (home / ".env").exists() else {}
     token = env.get("BUILDKITE_API_TOKEN", "")
     if not token:
@@ -5834,7 +5840,7 @@ def buildkite_log(home, check):
             "tail": "\n".join(lines[-BUILDKITE_TAIL_LINES:])[-BUILDKITE_TAIL_CHARS:]}
 
 
-def pr_reading(home, pr, base):
+def pr_reading(home, pr, base, buildkite_org):
     """One reading of the PR for a babysit session, with the next step it calls for."""
     try:
         view = json.loads(gh_pr_view(pr, "--json", PR_STATE_FIELDS))
@@ -5916,7 +5922,7 @@ def pr_reading(home, pr, base):
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
-            "base": target, "next": step, "ci_log": buildkite_log(home, failed) if failed else None}
+            "base": target, "next": step, "ci_log": buildkite_log(home, failed, buildkite_org) if failed else None}
 
 
 def pr_state_cmd(target, *args):
@@ -5927,10 +5933,11 @@ def pr_state_cmd(target, *args):
         fail("--wait takes one value from 1 to 600 seconds. " + PR_STATE_USAGE, 2)
     wait = int(args[1]) if args else 0
     pr = board_pr(home, slug, job_id)
-    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
+    meta = frontmatter(project_files(home, slug)[0])[0]
+    base = meta.get("base") or "main"
     start = time.monotonic()
     while True:
-        reading = pr_reading(home, pr, base)
+        reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""))
         elapsed = time.monotonic() - start
         if reading["next"] not in ("wait", "wait-base") or elapsed >= wait:
             print(json.dumps(reading))
