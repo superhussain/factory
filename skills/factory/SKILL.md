@@ -218,7 +218,7 @@ says to.
 | Command | Message | Next step |
 | --- | --- | --- |
 | `hold`, `board` | `<id> is held by <device> session <tag>` | Tell the user who holds the job and when it was last seen, then stop. Take over only when the user says so, with `hold <project>/<id> take`. |
-| `hold`, `board` | `<id> was moved to <host> from the dashboard` | Stop. Do not retry or take it. |
+| `hold`, `board` | `<id> was moved to <host>` | Stop. Do not retry or take it. |
 | `hold`, `pull`, `push` | `conflict in <files>` | Set the job to `needs-human` with the message as the note, and stop. `hold` has already claimed the job, so the board write goes through. |
 | `sync` | `conflict in <project>/<id>/<file>, ...` | Tell the user which jobs conflict. They don't block a new job. |
 | `push`, `pull`, `sync`, `hold`, `handoff` | `<path> is a symlink or junction...` or `cannot inspect job paths under <folder>...` | Report the stop and do nothing to the paths: never remove links, change permissions, or `take` the job automatically. Mark the job `needs-human` with the message as the note only if this session owns the claim (`hold` may have already claimed it). Links, their targets, and local edits are left untouched. |

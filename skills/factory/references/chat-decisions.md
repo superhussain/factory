@@ -18,6 +18,8 @@ factory.py control <job-id> close --reason-file <file> --chat-file <file>
   `babysit` means the next pickup launches the babysit session. A `queued` `move`
   or `rerun` means the next pickup on the old host stops the session, then `to`
   claims the job.
+- Before you relay a `move` or `rerun`, tell the person it stops the running
+  session, and work that session has not pushed is lost.
 
 ## Who counts
 

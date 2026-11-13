@@ -1428,7 +1428,7 @@ class MoveFenceTest(IsolatedTestCase):
 
     def test_board_and_hold_fence_a_moved_session(self):
         before = self.moved()
-        message = ("001-test was moved to studio-mac from the dashboard at 2026-11-08T10:00:00Z. "
+        message = ("001-test was moved to studio-mac at 2026-11-08T10:00:00Z. "
                    "Nothing was written. Stop this session.\n")
         for call in (lambda: factory.board(self.home, "001-test"), lambda: factory.hold(self.target),
                      lambda: factory.hold(self.target, "released")):
@@ -1450,7 +1450,7 @@ class MoveFenceTest(IsolatedTestCase):
                     contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
                 call()
             self.assertEqual(raised.exception.code, 6)
-            self.assertIn("001-test was moved to cloud-box from the dashboard at 2026-11-08T11:00:00Z.",
+            self.assertIn("001-test was moved to cloud-box at 2026-11-08T11:00:00Z.",
                           err.getvalue())
             self.assertEqual(self.store["/api/board"], before)
         factory.hold(self.target, "take")

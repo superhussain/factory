@@ -251,7 +251,7 @@ changes nothing. Then install one timer per host.
 
 - The dashboard's move button replaces a job's `claim` and `paseo` with `move = {from, session, to, at}`. Only the dashboard, `pickup` and `factory.py control <job-id> move <host>|rerun --chat-file <file>` write `move`; `control` adds the chat record `via`, `quote` and `by`.
 - A second move keeps each earlier holder in `move.earlier`. Those sessions stay fenced, and each earlier host's `pickup` still stops its worktree.
-- The old session is fenced: its next `board` or `hold` exits 6 with `<id> was moved to <host> from the dashboard`. `hold <project>/<id> take` still claims the job.
+- The old session is fenced: its next `board` or `hold` exits 6 with `<id> was moved to <host>`. `hold <project>/<id> take` still claims the job.
 - The old host's `pickup` stops the job's worktree processes first on every run, then sets `move.stopped`.
   - It stops them only when the project's pickup is on and lists that host. Otherwise the stop stays queued.
   - Each run prints `factory.py: pickup skips the stop of <id> <project>: <reason>` on stderr, and a dry run prints `skip stop <id> <project>: <reason>` on stdout instead.
