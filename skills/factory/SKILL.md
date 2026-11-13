@@ -405,7 +405,7 @@ only `factory.py deny-notes` writes it.
 - A model change always stops the old writer and starts a fresh builder from a new
   `prompt "$SLUG/<id>" build --out` file, per the agent-prompt rule above, with
   the latest round or rework file on a short line after the pointer. Resume with
-  SendMessage (or the runtime's prompt tool) only when the actual model need not
+  SendMessage (or the runtime's prompt tool) only when the model need not
   change. If the old builder is unreachable, a fresh agent reading the same files
   is equivalent. Keep `note` model-neutral: patch it with the reason for the tier,
   not a fixed model name.
@@ -417,9 +417,9 @@ only `factory.py deny-notes` writes it.
 - Shipping opens a PR, and an APPROVE PR merges without waiting for a human. Push
   once more with `git -C "$REPO_PATH" push -u origin factory/<id>`, then open a PR
   against the job's base (`$BASE` unless the job was stacked) with
-  `gh pr create -R "$REPO" --head factory/<id> --base "$BASE"`. The `-R` matters
-  because cwd may not be the repo, and a fork's checkout otherwise defaults to
-  upstream, so pass it to every `gh pr` call. Write the description per
+  `gh pr create -R "$REPO" --head factory/<id> --base "$BASE"`. Pass `-R` to every
+  `gh pr` call, since cwd may not be the repo and a fork's checkout otherwise
+  defaults to upstream. Write the description per
   the project file's PRs section: what changed and why, a testing section, the
   screenshots from `build.md`, and any device checks from `decision.md`. Set stage
   `pr-open`, `pr` to the PR URL, and `automerge` true for an APPROVE PR, in one
@@ -461,7 +461,7 @@ only `factory.py deny-notes` writes it.
   listing the approver's sign-off items, set `escalated` to true, and start the board
   note with "escalated:".
   A human reviews and merges it. Move the job to `merged` when you see it merged.
-- `needs` is the human's queue. Set it only when the next step genuinely requires
+- `needs` is the human's queue. Set it only when the next step requires
   the user: a decision, a device check or screenshots, a credential, an ESCALATE
   sign-off, a PR the pipeline holds for a person (`merge` `human`), a gate
   sign-off such as spec-approval, or anything no agent or coordinator may do. When
@@ -476,7 +476,7 @@ only `factory.py deny-notes` writes it.
   when you pick the job back up because he acted, and when the job moves to
   `merged` or `closed`. The dashboard's needs you column lists every job with
   `needs`, at `needs-human`, or with an escalated PR, and `stuck` and `ideas` skip
-  any job with `needs` set.
+  any job with `needs`.
 - Before you write `needs.md` or read `answers.md`, read [needs.md format](references/needs.md).
 
   | Situation | Wrong | Right |
@@ -499,7 +499,7 @@ only `factory.py deny-notes` writes it.
   Reviewers split nits into `### Fix now` and `### Follow-up`. Cosmetic nits never
   become follow-ups. The approver weighs what is still open before APPROVE.
 - A merged or closed job stays that way. New work on it is a new job with `refs`
-  pointing back, so the board shows what is actually open. Use `rework-of` to fix
+  pointing back, so the board shows what is open. Use `rework-of` to fix
   or redo it, `follow-up-of` for work it surfaced, and `sub-job-of` for a slice
   split off a larger feature. Prefer several small jobs to one large one.
 - Never push to `$BASE` or force-push. Merge only APPROVE PRs, and only as above.
