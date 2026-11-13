@@ -4412,7 +4412,7 @@ def timer_values(home):
             folders += launcher_folders(template)
     folders.append(os.path.dirname(python))
     if not WINDOWS:
-        folders += ["/usr/bin", "/bin"]
+        folders += ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
     return {"argv": [python, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
             "path": os.pathsep.join(dict.fromkeys(folders)), "log": str(Path(home, "logs", "pickup.log")),
             "python": python, "why": why}
