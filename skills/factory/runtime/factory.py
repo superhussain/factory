@@ -3036,16 +3036,17 @@ def control_cmd(job_id, action, *flags):
 
 
 def pickup_host_problem(home, slug, host):
-    """Why host would never pick up a job of slug, or None when it is active and pickup lists it."""
+    """(reason, on_host): why host would never pick up a job of slug, and whether the reason is
+    the host itself rather than the pickup view. (None, False) when it is active and pickup lists it."""
     hosts = json.loads(api(home, "GET", "/api/hosts")[2])
     if not any(isinstance(h, dict) and h.get("id") == host and h.get("state") == "active" for h in hosts):
-        return f"{host} is not an active host"
+        return f"{host} is not an active host", True
     enabled, listed, why = pickup_config(home, slug)
     if why:
-        return why
+        return why, False
     if not enabled or host not in listed:
-        return f"{host} does not run pickup for {slug}"
-    return None
+        return f"{host} does not run pickup for {slug}", True
+    return None, False
 
 
 def write_move(job, to, stamp, record):
@@ -3113,8 +3114,9 @@ def control_launch(home, job_id, action, host, record):
                 refuse(f"it already runs on {to}")
             if any(x["from"] == to for x in queued_stops(m)):
                 refuse(f"a stop is still queued on {to}; pick another host")
-            if problem(slug, to):
-                refuse(problem(slug, to))
+            why, _ = problem(slug, to)
+            if why:
+                refuse(why)
         else:
             if not claim and m.get("from") and m.get("to") == m["from"] and "claimed" not in m:
                 return None, ("unchanged", m["to"])
@@ -3125,8 +3127,9 @@ def control_launch(home, job_id, action, host, record):
                 refuse("it is paused")
             if isinstance(job.get("needs"), str) and job["needs"].strip():
                 refuse("it is waiting on a person")
-            if problem(slug, to):
-                refuse(problem(slug, to) + ", so nothing would restart it; move it to another host instead")
+            why, on_host = problem(slug, to)
+            if why:
+                refuse(why + (", so nothing would restart it; move it to another host instead" if on_host else ""))
         stamp = now()
         if action == "babysit":
             to = None
