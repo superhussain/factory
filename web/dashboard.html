@@ -376,6 +376,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (pointer: coarse) { .card-actions::after { content: ""; position: absolute; inset: -8px -8px -8px -4px; } }
   .job-actions-menu.card-actions-menu { position: fixed; right: auto; z-index: 30; }
   .board-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); overflow-wrap: anywhere; }
+  .board-status:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .board-status[hidden] { display: none; }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
   @media (hover: hover) { .pr-link:hover { text-decoration: underline; } }
@@ -547,7 +548,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
 </header>
 <main class="board" id="board"></main>
 <div class="job-actions-menu card-actions-menu" id="card-actions-menu" role="menu" aria-label="Job actions" hidden></div>
-<p class="board-status" id="board-status" role="status" hidden></p>
+<p class="board-status" id="board-status" role="status" tabindex="-1" hidden></p>
 <aside class="detail" id="detail" hidden>
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
@@ -3355,7 +3356,7 @@ function candidates(j) {
     for (const r of REVIEWERS) list.push('round-' + i + '/review-' + r + '.md');
     list.push('rework-' + i + '.md');
   }
-  list.push('rework-' + (n + 1) + '.md', 'decision.md', 'needs.md', 'answers.md');
+  list.push('rework-' + (n + 1) + '.md', 'decision.md', 'needs.md', 'answers.md', 'scratchpad.md');
   return list;
 }
 
@@ -5285,18 +5286,39 @@ function focusOpener(opener) {
 
 const BOARD_STATUS_MS = 12000, COPIED_STATUS_MS = 2000;
 let boardStatusTimer = 0;
+let boardStatusHeld = false;
 
 // A separate task sets the text after the toast empties, so a repeat is announced again.
 function showBoardStatus(text) {
   clearTimeout(boardStatusTimer);
+  if (!text) boardStatusHeld = false;
   $('board-status').textContent = '';
   $('board-status').hidden = !text;
   if (!text) return;
   boardStatusTimer = setTimeout(() => {
     $('board-status').textContent = text;
-    boardStatusTimer = setTimeout(() => showBoardStatus(''), text === 'Copied' ? COPIED_STATUS_MS : BOARD_STATUS_MS);
+    if (!boardStatusHeld) boardStatusTimer = setTimeout(() => showBoardStatus(''), text === 'Copied' ? COPIED_STATUS_MS : BOARD_STATUS_MS);
   }, 100);
 }
+
+// A tapped or focused toast stays until released, then gets its full timer again.
+function holdBoardStatus() {
+  if ($('board-status').hidden || !$('board-status').textContent) return;
+  boardStatusHeld = true;
+  clearTimeout(boardStatusTimer);
+}
+
+function releaseBoardStatus() {
+  if (!boardStatusHeld) return;
+  boardStatusHeld = false;
+  const text = $('board-status').textContent;
+  if (text) boardStatusTimer = setTimeout(() => showBoardStatus(''), text === 'Copied' ? COPIED_STATUS_MS : BOARD_STATUS_MS);
+}
+
+$('board-status').addEventListener('pointerdown', holdBoardStatus);
+$('board-status').addEventListener('focusin', holdBoardStatus);
+$('board-status').addEventListener('focusout', releaseBoardStatus);
+document.addEventListener('pointerdown', (e) => { if (!$('board-status').contains(e.target)) releaseBoardStatus(); });
 
 function showCopyStatus(text) {
   clearCopyStatus();

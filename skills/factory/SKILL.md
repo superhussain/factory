@@ -125,7 +125,7 @@ A job's worktree is `WT="$WORKTREES/<id>"`, on branch `factory/<id>` cut from `$
 | Path | What |
 | --- | --- |
 | `$PROJECT` | project context for every agent |
-| `$JOBS/<id>/` | `spec.md`, `build.md`, `round-N/review-{security,ux,ui,code}.md`, `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
+| `$JOBS/<id>/` | `spec.md`, `build.md`, `round-N/review-{security,ux,ui,code}.md`, `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, `<file>-evidence.md`, `scratchpad.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
 | `$WT` | the builder's worktree |
 | `$FACTORY/config.md`, `$FACTORY/.env` | device settings and the private Access service token |
 
@@ -133,30 +133,24 @@ R2 holds the board (one for every project, each job carrying `project`), the
 backlog, the project files, and a copy of every job folder's markdown and images. `factory.py`
 reads and writes them, and job folders go up by hand:
 
-- After any job file is written (spec, build, each review, decision, rework), run
-  `python3 "$RUNTIME" push "$SLUG/<id>"`. It uploads the job's changed markdown and
-  images (PNG, JPEG, GIF, WebP, up to 5 MiB each), optional interactive walkthroughs
-  (`walkthrough.html` for the spec, `<page>.walkthrough.html` beside any other page,
-  such as `build.walkthrough.html` or `round-1/review-ui.walkthrough.html`, up to
-  1 MiB each), and refuses to overwrite a file another device changed. `pull`,
-  `sync`, and `hold` restore them. View a walkthrough through the dashboard, never
-  by opening the pulled file from disk. Opening it straight from disk skips the CSP sandbox.
+- After writing any job file, run `python3 "$RUNTIME" push "$SLUG/<id>"`. It uploads
+  the job's changed markdown, images (PNG, JPEG, GIF, WebP, up to 5 MiB each) and
+  walkthroughs named as in the table (up to 1 MiB each), and refuses to overwrite a
+  file another device changed. `pull`, `sync`, and `hold` restore them. View a
+  walkthrough through the dashboard, never from disk, which skips the CSP sandbox.
 - After filling a new project file, run `python3 "$RUNTIME" push "$SLUG"`.
-- Project file sync (`pull <slug>`, `push <slug>`, `.remote` copies) and Project settings are in [project settings](references/project-settings.md). Read it before you pull, push or edit a project file.
+- Read [project settings](references/project-settings.md) before you pull, push or edit a project file.
 - `pull "$SLUG/<id>"` downloads what changed in R2 and keeps local edits, and
   `sync "$SLUG"` does that for every job of the project that is not `merged` or
-  `closed`. A finished job's files don't change, so `pull "$SLUG/<id>"` fetches
-  one when needed.
+  `closed`. Pull a finished job by id.
 - When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
   the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
   each file. `push` never uploads a `.remote`, and refuses the file until a human
-  merges the copy into it and deletes the `.remote`. An image can't be merged, so
-  keep one version: delete `after.png.remote` to keep the local image, or move it
-  over `after.png` to keep R2's.
+  merges the copy into it and deletes the `.remote`. For an image, delete the
+  `.remote` to keep yours, or move it over the file to keep R2's.
 
-- In a job that changes UI, the builder saves screenshots in `$JOBS/<id>/` and embeds
-  them in build.md by relative path, before and after pairs side by side in a
-  `| Before | After |` table. The builder never uploads to the public image host.
+- In a UI job, the builder saves screenshots in `$JOBS/<id>/` and embeds them in
+  build.md as a `| Before | After |` table. The builder never uploads to the public image host.
    Private build-tab evidence is the default; a project may opt into a publisher, see
    [integrations](references/integrations.md#links-images-and-evidence).
    Keep only captions that match the final round.
@@ -169,6 +163,15 @@ reads and writes them, and job folders go up by hand:
   any other row without one.
 - `where` exits 4 when nothing matches, and stderr lists the known slugs. Tell the
   user to run `/factory init` in the repo.
+
+### Scratchpad
+
+Never create any other `.md` file in a job folder. Anything outside a stage goes in
+`scratchpad.md`: analysis and research notes, monitoring or evidence logs,
+measurements, checklists, and notes kept across sessions. Push it like any job file.
+The dashboard shows it as the scratchpad tab, `#<id>/scratchpad`. Only the
+orchestrator, or an agent its prompt tells to, writes it: dated `## YYYY-MM-DD <topic>`
+sections, newest last, under a summary of at most 120 words, with no code or secrets.
 
 ## Step zero, every command
 

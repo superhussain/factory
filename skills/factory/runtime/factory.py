@@ -3157,19 +3157,29 @@ def provider_runtime(provider):
     return seen[-1]
 
 
-def limit_route(home, name, minutes):
-    """Mark one route or the experiment limited for minutes from now, and return its limited_until."""
-    valid = [r[0] for r in read_routes(home)]
-    experiment = read_experiment(home, valid)
+def check_limit_name(home, name):
+    """True when name is the experiment, False when it is a route, else exit 2 naming what is accepted."""
+    routes = [r[0] for r in read_routes(home)]
+    experiment = read_experiment(home, routes)
+    if experiment and name == experiment["name"]:
+        return True
+    if name in routes:
+        return False
+    path = Path(home, "routes.md")
     if experiment:
-        valid.append(experiment["name"])
-    if name not in valid:
-        fail(f"unknown route {name!r}: not in {Path(home, 'routes.md')}", 2)
+        fail(f"unknown route or experiment {name!r}: not in {path}", 2)
+    fail(f"unknown route {name!r}: not in {path}", 2)
+
+
+def limit_route(home, name, minutes):
+    """Mark one route or the experiment limited for minutes from now.
+    Return (limited_until, True when name is the experiment)."""
+    experiment = check_limit_name(home, name)
     stamp = now()
     limits = {n: until for n, until in read_limits(home).items() if until > stamp}
     limits[name] = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
     write_atomic(Path(home, "route-limits.json"), json.dumps(limits, indent=2) + "\n")
-    return limits[name]
+    return limits[name], experiment
 
 
 def routes_cmd(sub, *args):
@@ -3181,8 +3191,16 @@ def routes_cmd(sub, *args):
         routes = read_routes(home)
         active = {name: until for name, until in read_limits(home).items() if until > stamp}
         if sub == "list":
-            print(json.dumps([{"route": n, "provider": p, "model": m, **({"effort": e} if e else {}),
-                               "limited_until": active.get(n)} for n, p, m, e in routes], indent=2))
+            rows = [{"route": n, "provider": p, "model": m, **({"effort": e} if e else {}),
+                     "limited_until": active.get(n)} for n, p, m, e in routes]
+            experiment = read_experiment(home, [r[0] for r in routes])
+            if experiment:
+                rows.append({"experiment": experiment["name"], "provider": experiment["provider"],
+                             "model": experiment["model"],
+                             **({"effort": experiment["effort"]} if experiment["effort"] else {}),
+                             "percent": experiment["percent"],
+                             "limited_until": active.get(experiment["name"])})
+            print(json.dumps(rows, indent=2))
             return
         route = pick_route(home)
         if route is None:
@@ -3195,12 +3213,11 @@ def routes_cmd(sub, *args):
                               or not re.fullmatch(r"[1-9][0-9]*", args[2]) or int(args[2]) > 1440):
             fail("usage: routes limit <name> [--minutes N], with N from 1 to 1440", 2)
         name = args[0]
-        until = limit_route(home, name, int(args[2]) if len(args) == 3 else 60)
-        print(json.dumps({"route": name, "limited_until": until}, indent=2))
+        until, experiment = limit_route(home, name, int(args[2]) if len(args) == 3 else 60)
+        print(json.dumps({"experiment" if experiment else "route": name, "limited_until": until}, indent=2))
     elif sub == "clear" and len(args) == 1:
         name = args[0]
-        if name not in [r[0] for r in read_routes(home)]:
-            fail(f"unknown route {name!r}: not in {Path(home, 'routes.md')}", 2)
+        check_limit_name(home, name)
         limits = read_limits(home)
         if name in limits:
             del limits[name]
@@ -3768,7 +3785,7 @@ def takeover(home, data, device, minutes, paths, settings, dry):
             print(f"would take over {job_id} {slug} from {session} on {fallback[0]}: "
                   + shlex.join(launcher_argv(route_launcher(home, fallback), given)))
             return 1
-        until = limit_route(home, stalled[0], max(1, min(1440, -(-seconds // 60))))
+        until = limit_route(home, stalled[0], max(1, min(1440, -(-seconds // 60))))[0]
         print(f"limited {stalled[0]} until {until}")
         live = pick_route(home)
         if live is None:
@@ -3812,7 +3829,7 @@ def takeover(home, data, device, minutes, paths, settings, dry):
             log.seek(max(0, os.path.getsize(log_path) - 4096))
             tail = log.read().decode("utf-8", "replace")
         if LIMIT_TEXT.search(tail):
-            until = limit_route(home, live[0], limit_minutes(tail, datetime.now(timezone.utc)))
+            until = limit_route(home, live[0], limit_minutes(tail, datetime.now(timezone.utc)))[0]
             print(f"limited {live[0]} until {until}")
         if stage == IDEA:
             release_claim(home, job_id, device, tag)
@@ -4031,16 +4048,16 @@ def launch_env(given, provider, model):
                 FACTORY_PROMPT=given["prompt"])
 
 
-def launch_failed(home, name, job_id, detail, log_path, release, fatal=True):
+def launch_failed(home, name, job_id, detail, log_path, release, fatal=True, experiment=False):
     """After a failed launch: mark the route limited when its log says so, else exit 1, or with fatal=False log the failure and return.
     Either way release() drops the claim first."""
     with open(log_path, "rb") as log:
         log.seek(max(0, os.path.getsize(log_path) - 4096))
         tail = log.read().decode("utf-8", "replace")
     if LIMIT_TEXT.search(tail):
-        until = limit_route(home, name, limit_minutes(tail, datetime.now(timezone.utc)))
+        until = limit_route(home, name, limit_minutes(tail, datetime.now(timezone.utc)))[0]
         release()
-        print(f"limited {name} until {until}")
+        print(f"limited experiment {name} until {until}" if experiment else f"limited {name} until {until}")
         print(f"released {job_id}")
         return
     release()
@@ -4896,7 +4913,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
             continue
         limit_name = experiment["name"] if arm == "b" and experiment else name
         launch_failed(home, limit_name, entry["id"], detail, log_path,
-                      lambda: release_claim(home, entry["id"], device, entry["session"]))
+                      lambda: release_claim(home, entry["id"], device, entry["session"]),
+                      experiment=bool(experiment) and arm == "b")
         return
 
 

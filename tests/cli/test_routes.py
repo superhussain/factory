@@ -191,6 +191,54 @@ class RoutesTest(IsolatedTestCase):
             {"route": "alpha", "provider": "provider-a", "model": "model-a", "limited_until": alpha},
             {"route": "beta", "provider": "provider-b", "model": "vendor/model-b[1m]", "limited_until": None}])
 
+    def test_list_without_experiment_is_unchanged(self):
+        factory.main(["routes", "list"])
+        self.assertEqual(self.output.getvalue(), json.dumps([
+            {"route": "alpha", "provider": "provider-a", "model": "model-a", "limited_until": None},
+            {"route": "beta", "provider": "provider-b", "model": "vendor/model-b[1m]", "limited_until": None}],
+            indent=2) + "\n")
+
+    def test_list_experiment_row(self):
+        self.routes.write_text(ROUTES.replace("---\n\n", "experiment: pilot provider-c model-c high 50\n---\n\n"),
+                               encoding="utf-8")
+        pilot = stamp(30)
+        self.write_limits({"pilot": pilot})
+        self.assertEqual(self.run_routes("list")[-1],
+                         {"experiment": "pilot", "provider": "provider-c", "model": "model-c", "effort": "high",
+                          "percent": 50, "limited_until": pilot})
+        self.output.truncate(0), self.output.seek(0)
+        self.routes.write_text(ROUTES.replace("---\n\n", "experiment: pilot provider-c model-c 50\n---\n\n"),
+                               encoding="utf-8")
+        self.limits.unlink()
+        rows = self.run_routes("list")
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[-1], {"experiment": "pilot", "provider": "provider-c", "model": "model-c",
+                                    "percent": 50, "limited_until": None})
+
+    def test_limit_and_clear_experiment(self):
+        self.routes.write_text(ROUTES.replace("---\n\n", "experiment: pilot provider-c model-c 50\n---\n\n"),
+                               encoding="utf-8")
+        printed = self.run_routes("limit", "pilot")
+        written = json.loads(self.limits.read_text(encoding="utf-8"))
+        self.assertEqual(printed, {"experiment": "pilot", "limited_until": written["pilot"]})
+        self.output.truncate(0), self.output.seek(0)
+        factory.main(["routes", "clear", "pilot"])
+        self.assertEqual(self.output.getvalue(), "")
+        self.assertEqual(json.loads(self.limits.read_text(encoding="utf-8")), {})
+        path = self.home / "routes.md"
+        for sub in ("limit", "clear"):
+            self.assertIn(f"unknown route or experiment 'gamma': not in {path}", self.exit_message(sub, "gamma"))
+        self.routes.write_text(ROUTES, encoding="utf-8")
+        for sub in ("limit", "clear"):
+            message = self.exit_message(sub, "gamma")
+            self.assertIn(f"unknown route 'gamma': not in {path}", message)
+            self.assertNotIn("experiment", message)
+
+    def test_limit_reads_routes_once(self):
+        with patch.object(factory, "read_routes", wraps=factory.read_routes) as read:
+            self.run_routes("limit", "alpha")
+        self.assertEqual(read.call_count, 1)
+
     def test_effort(self):
         self.routes.write_text("---\nalpha: provider-a model-a high\nbeta: provider-b model-b\n---\n",
                                encoding="utf-8")

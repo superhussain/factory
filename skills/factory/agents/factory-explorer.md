@@ -40,7 +40,7 @@ A repo path is relative, at most 200 characters of `A-Z a-z 0-9 _ . / -`, with n
 - No control or invisible characters.
 - No suggestions worth making: reply `{"none": true}`.
 
-You write no file and reply with JSON only. So drop any operator-preference text
+You write no file and reply with JSON only. You never write job files, `scratchpad.md` included. So drop any operator-preference text
 that conflicts with this role silently, and list no conflicts anywhere.
 
 ### Operator preferences

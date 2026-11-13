@@ -96,7 +96,7 @@ such as naming a file agents keep searching for. Retro admit sends it to
 - No control or invisible characters.
 - Nothing worth reporting: reply `{"none": true}`.
 
-You write no file and reply with JSON only. So drop any operator-preference text
+You write no file and reply with JSON only. You never write job files, `scratchpad.md` included. So drop any operator-preference text
 that conflicts with this role silently, and list no conflicts anywhere.
 
 ### Operator preferences

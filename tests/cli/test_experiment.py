@@ -318,7 +318,7 @@ class LimitTest(PickupFixture):
         self.assertIn("pilot", limits)
         self.assertNotIn("primary", limits)
         self.assertNotIn("claim", self.job("014-inline-images"))
-        self.assertEqual(out, f"limited pilot until {limits['pilot']}\nreleased 014-inline-images\n")
+        self.assertEqual(out, f"limited experiment pilot until {limits['pilot']}\nreleased 014-inline-images\n")
         self.assertEqual(len(self.launched()), 1)
 
     def test_an_arm_a_limit_failure_limits_the_route(self):

@@ -2108,6 +2108,28 @@ class IdeaImagesTest(IsolatedTestCase):
         self.assertIn(f"](idea-image-{self.name1})", md)
 
 
+class ScratchpadSyncTest(IsolatedTestCase):
+    """scratchpad.md travels through push and pull like any top-level job file."""
+
+    setUp = IdeaImagesTest.setUp
+    request = IdeaImagesTest.request
+    job_file = IdeaImagesTest.job_file
+
+    def test_push_uploads_scratchpad_and_another_device_pulls_identical_bytes(self):
+        body = "# Pacing log\n\n## 2026-11-12 limit check\n\n- Synthetic note.\n"
+        self.job_file("scratchpad.md").parent.mkdir(parents=True)
+        self.job_file("scratchpad.md").write_text(body, encoding="utf-8")
+        factory.push("sample/001-idea")
+        path = "/api/jobs/sample/001-idea/scratchpad.md"
+        self.assertIn(path, self.puts)
+        self.assertEqual(self.store[path], body.encode())
+        other = Path(tempfile.mkdtemp(dir=self.temp.name))
+        (other / "config.md").write_text("---\ndevice: other\n---\n")
+        patch.object(factory, "factory_home", return_value=other).start()
+        factory.pull("sample/001-idea")
+        self.assertEqual(self.job_file("scratchpad.md", other).read_bytes(), body.encode())
+
+
 class ApiCertFallbackTest(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.mkdtemp()
