@@ -892,6 +892,25 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
+    const openSchedulerSettings = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/scheduler";
+      });
+      await page.waitForSelector("#settings-scheduler:not([hidden])");
+      await page.evaluate(() =>
+        document.querySelector("#scheduler-settings-heading").scrollIntoView({ block: "start" }),
+      );
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getElementById("settings-link")
+            .getAnimations()
+            .map((animation) => animation.finished),
+        ),
+      );
+    };
+    await view("scheduler-settings", 1280, 900, "light", openSchedulerSettings);
+    await view("scheduler-settings-mobile", 390, 844, "light", openSchedulerSettings);
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {

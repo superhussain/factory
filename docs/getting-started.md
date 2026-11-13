@@ -85,7 +85,7 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | --- | --- | --- |
 | Hold PRs for a person, change review rounds, require spec approval, add stage notes, including Babysit PR instructions | Settings, Pipeline | [autonomy.md](autonomy.md) |
 | Add another computer | `bootstrap.py up` on it, then Settings, Hosts | [device.md](device.md#host-registration) |
-| Let hosts pick up ideas on a timer | `routes.md`, `launchers.json`, a 5 minute timer, pipeline `pickup` | [pickup.md](../skills/factory/references/pickup.md) |
+| Let hosts pick up ideas on a timer | `factory.py pickup setup` on each host, then `pickup setup --install` | [pickup.md](../skills/factory/references/pickup.md) |
 | Let a model triage the backlog | Settings, Pipeline, Backlog triage | [autonomy.md](autonomy.md#backlog-triage) |
 | Archive finished jobs | Settings, Pipeline, Archive old jobs | [configuration.md](configuration.md) |
 | Keep project notes, decisions and a runbook | Settings, Projects, document tabs | [configuration.md](configuration.md) |
@@ -93,6 +93,8 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | PR screenshots, Paseo, Tracer | device config | [integrations.md](integrations.md) |
 | Browser notifications and display | Settings, Notifications and Display | none |
 | Upgrade later | `git pull` here, then `install.py --replace` on each host | [upgrade.md](upgrade.md) |
+
+Automatic pickup: run `python3 <installed-skill>/runtime/factory.py pickup setup` on each host and fix each missing line until it prints 7 of 7 ok. A stored Paseo or Claude schedule prompt does not pick up ideas.
 
 ## Set up with an agent
 

@@ -8,14 +8,16 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    continue.
 2. Run `python3 "$RUNTIME" retro aggregate [--days N]`. On exit 3, report the stderr
    line and stop. On any other nonzero exit, report the exit code and stop. On exit 0,
-   read `run`, `aggregate`, `digest`, `transcripts`, `out` and `findings` from the
-   printed JSON, and `host` from the `aggregate` file.
+   read `run`, `aggregate`, `digest`, `transcripts`, `out`, `findings` and `stale`
+   from the printed JSON, and `host` from the `aggregate` file.
 3. Dispatch one `factory-retro` subagent, giving it `run`, `aggregate`, `digest`,
    `transcripts` and `host`.
 4. Write its reply byte for byte to `out`.
 5. Run `python3 "$RUNTIME" retro admit <run>`. Report its output and the `findings`
-   path. Exit 3 means the agent found nothing, autonomy is paused, or every card was a
-   duplicate, over a cap or unusable. In the last two cases `findings.md` is written,
+   path. Then name each host in `stale` as `stale: <host>, latest digest <latest>`,
+   with `latest` from that host's entry in the `aggregate` file's `hosts`. Exit 3
+   means the agent found nothing, autonomy is paused, or every card was a duplicate,
+   over a cap or unusable. In the last two cases `findings.md` is written,
    so still report its path. A rejected findings[N] line means admission dropped that finding;
    findings.md lists it under Rejected findings without its text. Exit 2 after a wrote
    line means the cards failed: findings.md is written and no card was admitted.

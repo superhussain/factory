@@ -4,6 +4,45 @@
 minutes. It claims runnable ideas for the projects whose pipeline lists this
 host and starts one session per idea through `launchers.json`.
 
+## Set up and check
+
+Run this on each host. It checks every piece pickup needs, in order, and prints
+the exact fix for each missing one with this host's own paths:
+
+```
+python3 <installed-skill>/runtime/factory.py pickup setup
+```
+
+| # | Check | What it reads |
+| --- | --- | --- |
+| 1 | `home` | `factory.py doctor`: config, credentials, projects and board |
+| 2 | `device` | `device:` in `config.md`; without it the host name is the hostname |
+| 3 | `checkout` | `paths.md`, a checkout that exists on this host |
+| 4 | `routes` | `routes.md` |
+| 5 | `launchers` | `launchers.json`, a launcher per route |
+| 6 | `pipeline` | each project's effective pipeline: pickup on and lists this exact host |
+| 7 | `timer` | the 5 minute timer in launchd, cron or Task Scheduler |
+
+It exits 0 when all 7 are ok, 3 when any is missing, and 2 on bad arguments.
+It writes no factory file. Then install the 5 minute timer for this host's
+scheduler. Running it again changes nothing:
+
+```
+python3 <installed-skill>/runtime/factory.py pickup setup --install
+```
+
+| Scheduler | File | Load | Already installed when |
+| --- | --- | --- | --- |
+| launchd | `~/Library/LaunchAgents/factory.pickup.plist` | `launchctl bootout`, then `bootstrap gui/<uid>` | same bytes and `launchctl print` exits 0 |
+| cron | user crontab | `crontab -` | the exact line is present, and no other pickup line |
+| schtasks | `~/.config/factory-pickup.cmd` | `schtasks /Create ... /F` | always re-created (`/F`) |
+
+The timer runs `factory.py --home <home> pickup` with the same Python and logs
+to `<home>/logs/pickup.log`. On cron, `--install` replaces any old line that runs
+`factory.py pickup` and keeps every other line.
+
+A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.
+
 ## What it does
 
 Each run, in order:
@@ -192,6 +231,8 @@ A standing instruction from the user, the person you are working for. It is abou
 
 ## Run it every 5 minutes
 
+`pickup setup --install` writes and loads this timer for you. The blocks below are what it writes.
+
 Run `factory.py pickup --dry-run` first: it prints what it would launch and
 changes nothing. Then install one timer per host.
 
@@ -336,3 +377,5 @@ Deploy the Worker, reinstall the skill on each host, write `launchers.json`, run
 `pickup --dry-run`, enable pickup for the project, install the cron entry, then
 pause (disable, do not delete) the stored ideas schedule. Run both together only
 briefly: the board claim stops double pickup.
+
+A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.

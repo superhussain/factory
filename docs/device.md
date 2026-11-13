@@ -203,8 +203,10 @@ projects. Every ad-hoc row's `project` becomes `ad-hoc` in both files, so neithe
 names that work. Lines that are not digest rows count as `skipped`. So do rows
 whose `host` is not the host that pushed them or whose `session` is not a
 transcript id. It prints the run, the file paths, this host's transcripts root, and
-the `out` and `findings` paths for `/factory retro`. A window no host pushed exits
-3 and writes nothing. A linked `retro` or run folder exits 2.
+the `out` and `findings` paths for `/factory retro`. Each `hosts` entry carries
+`latest`, the newest date in the window that host pushed a digest for. The printed
+`stale` lists hosts whose `latest` is not the window's last date. A window no host
+pushed exits 3 and writes nothing. A linked `retro` or run folder exits 2.
 
 `retro admit <run>` checks the retro agent's `reply.json` in that folder against
 `factory.retro/1`. A bad reply, or one whose findings all fail, exits 2 with

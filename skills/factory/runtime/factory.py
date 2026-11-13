@@ -32,6 +32,7 @@
                                             pipeline lists this host, through launchers.json; silent
                                             when there is nothing to do. The backlog triage sweep
                                             runs at most every 30 minutes; --triage-now runs it now
+  factory.py pickup setup [--install]      check every pickup prerequisite on this host and print each fix; --install writes and loads the 5 minute timer
   factory.py host pair <id> <code>          pair this device with a host added in Settings and set
                                             device: <id> in config.md
   factory.py pipeline <project-slug>        print the project's effective pipeline configuration as JSON,
@@ -154,6 +155,7 @@ import io
 import json
 import os
 import platform
+import plistlib
 import random
 import re
 import secrets
@@ -4250,6 +4252,8 @@ def pickup(*args):
     do. Never calls a model itself; backlog triage asks the Worker, which does. No idea text
     reaches a launcher's arguments, environment or log name. A Worker error inside a Tracer pass or
     the triage sweep costs a warning, not the launches."""
+    if args and args[0] == "setup":
+        return pickup_setup(*args[1:])
     flags = {}
     i = 0
     while i < len(args):
@@ -4304,6 +4308,229 @@ def pickup(*args):
     finally:
         if not dry:
             report_status(home, PICKUP_SCHEDULER, started, failing, save=True)
+
+
+USAGE_PICKUP_SETUP = "usage: pickup setup [--install]"
+CRON_PICKUP = re.compile(r"factory\.py.*\bpickup\b")
+
+
+def setup_run(argv, stdin=None):
+    """(returncode, output) of a scheduler command: stdout on success, stdout + stderr on failure;
+    127 when the program is missing."""
+    try:
+        done = subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=30)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        return 127, str(e)
+    return done.returncode, done.stdout if done.returncode == 0 else done.stdout + done.stderr
+
+
+def setup_try(call, *args):
+    """(value, None) from call, or (None, the text it failed with)."""
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        try:
+            return call(*args), None
+        except SystemExit:
+            return None, err.getvalue().strip()[len("factory.py: "):]
+
+
+def timer_path(scheduler):
+    """The file the timer for scheduler lives in; cron's lives in the crontab."""
+    if scheduler == "launchd":
+        return Path.home() / "Library" / "LaunchAgents" / "factory.pickup.plist"
+    return Path.home() / ".config" / "factory-pickup.cmd"
+
+
+def timer_values(home):
+    """{argv, path, log} the pickup timer runs with."""
+    folders = []
+    for route in setup_try(read_routes, home)[0] or []:
+        template = setup_try(route_launcher, home, route)[0]
+        if template:
+            folders.append(os.path.dirname(template[0]))
+    folders.append(os.path.dirname(sys.executable))
+    if not WINDOWS:
+        folders += ["/usr/bin", "/bin"]
+    return {"argv": [sys.executable, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
+            "path": os.pathsep.join(dict.fromkeys(folders)), "log": str(Path(home, "logs", "pickup.log"))}
+
+
+def timer_text(scheduler, values):
+    argv, path, log = values["argv"], values["path"], values["log"]
+    if scheduler == "cron":
+        return f"*/5 * * * * PATH={shlex.quote(path)} {shlex.join(argv)} >> {shlex.quote(log)} 2>&1"
+    if scheduler == "launchd":
+        return plistlib.dumps({"Label": "factory.pickup", "ProgramArguments": argv,
+                               "EnvironmentVariables": {"PATH": path}, "StartInterval": 300,
+                               "StandardOutPath": log, "StandardErrorPath": log}).decode()
+    return f'@echo off\r\nset "PATH={path};%PATH%"\r\n{subprocess.list2cmdline(argv)} >> "{log}" 2>&1\r\n'
+
+
+def timer_installed(scheduler, home):
+    """(installed, detail) for this host's pickup timer."""
+    if scheduler == "launchd":
+        plist = timer_path(scheduler)
+        if not plist.exists():
+            return False, "no launchd job factory.pickup"
+        if setup_run(["launchctl", "print", f"gui/{os.getuid()}/factory.pickup"])[0]:
+            return False, f"{plist} exists but is not loaded"
+        return True, "launchd job factory.pickup is loaded"
+    if scheduler == "cron":
+        code, out = setup_run(["crontab", "-l"])
+        if code or not any(CRON_PICKUP.search(line) for line in out.splitlines()):
+            return False, "no factory pickup line in the crontab"
+        if setup_run(["pgrep", "-x", "cron"])[0] and setup_run(["pgrep", "-x", "crond"])[0]:
+            return False, "the crontab line is set but cron is not running; on WSL run: sudo service cron start"
+        return True, "crontab runs pickup every 5 minutes"
+    if setup_run(["schtasks", "/Query", "/TN", "factory-pickup"])[0]:
+        return False, "no scheduled task factory-pickup"
+    return True, "scheduled task factory-pickup exists"
+
+
+def install_timer(home, scheduler):
+    """Write and load the 5 minute pickup timer; one line saying what changed."""
+    Path(home, "logs").mkdir(parents=True, exist_ok=True)
+    text = timer_text(scheduler, timer_values(home))
+    if scheduler == "launchd":
+        plist, uid = timer_path(scheduler), os.getuid()
+        if plist.exists() and plist.read_bytes() == text.encode() \
+                and setup_run(["launchctl", "print", f"gui/{uid}/factory.pickup"])[0] == 0:
+            return f"timer already installed: {plist}"
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        write_atomic(plist, text)
+        setup_run(["launchctl", "bootout", f"gui/{uid}/factory.pickup"])
+        code, out = setup_run(["launchctl", "bootstrap", f"gui/{uid}", str(plist)])
+        done = f"installed launchd timer: {plist}"
+    elif scheduler == "cron":
+        code, out = setup_run(["crontab", "-l"])
+        if code and not (code == 1 and "no crontab for" in out):
+            fail(f"could not read the crontab, so it was left as is: {out.strip()}", 1)
+        lines = out.splitlines() if code == 0 else []
+        wanted = [line for line in lines if not CRON_PICKUP.search(line)] + [text]
+        if lines == wanted:
+            return "timer already installed: crontab"
+        code, out = setup_run(["crontab", "-"], stdin="\n".join(wanted) + "\n")
+        done = "installed cron timer: crontab"
+    else:
+        cmd = timer_path(scheduler)
+        if not cmd.exists() or cmd.read_bytes() != text.encode():
+            cmd.parent.mkdir(parents=True, exist_ok=True)
+            write_atomic(cmd, text)
+        code, out = setup_run(["schtasks", "/Create", "/TN", "factory-pickup", "/SC", "MINUTE", "/MO", "5",
+                               "/TR", str(cmd), "/F"])
+        done = f"installed schtasks timer: {cmd}"
+    if code:
+        fail(f"could not install the {scheduler} timer: {out.strip()}", 1)
+    return done
+
+
+def timer_fix(scheduler, home):
+    """The lines that set up the pickup timer by hand."""
+    text = timer_text(scheduler, timer_values(home))
+    path = timer_path(scheduler)
+    if scheduler == "cron":
+        return ["Add this line with crontab -e:", text]
+    if scheduler == "launchd":
+        return [f"Save as {path}:", *text.splitlines(), f"Load it: launchctl bootstrap gui/{os.getuid()} {path}"]
+    return [f"Save as {path}:", *text.splitlines(),
+            f'Then run: schtasks /Create /TN factory-pickup /SC MINUTE /MO 5 /TR "{path}" /F']
+
+
+def setup_checks(home, device):
+    """[(name, ok, detail, fix lines)] for the 7 pieces pickup needs on this host, in order.
+    ok is None when an earlier check it depends on failed."""
+    run = f"{sys.executable} {Path(HERE, 'factory.py')}"
+    if _HOME_OVERRIDE:
+        run += f" --home {shlex.quote(str(home))}"
+    skill = Path(HERE).parent
+    checks = []
+
+    failing = [c["name"] for c in doctor(home)["checks"] if c["status"] != "pass"]
+    checks.append(("home", not failing, f"failing: {', '.join(failing)}" if failing
+                   else "config, credentials, projects and board pass",
+                   [f"Run: {run} doctor",
+                    "Then fix each failing check; see docs/troubleshooting.md in the factory repository."]))
+
+    config = Path(home, "config.md")
+    named = (frontmatter(config)[0] if config.exists() else {}).get("device", "")
+    short = socket.gethostname().split(".")[0]
+    valid = bool(named and HOST_NAME.fullmatch(named))
+    checks.append(("device", valid, f"device: {device}" if valid
+                   else f"config.md device: {named!r} is not a valid host name" if named
+                   else f"config.md sets no device:, so this host is {device}",
+                   [f"Add this line inside the frontmatter of {config}:",
+                    f"device: {short if HOST_NAME.fullmatch(short) else '<host-name>'}"]))
+
+    paths = read_paths(home)
+    slugs = [slug for slug, path in paths.items() if os.path.isdir(path)]
+    checks.append(("checkout", bool(slugs), ", ".join(slugs) if slugs
+                   else "paths.md lists no checkout that exists on this host",
+                   [f"Run: {run} init <repo-path>"]))
+
+    routes, why = setup_try(read_routes, home)
+    checks.append(("routes", routes is not None, ", ".join(r[0] for r in routes) if routes else why,
+                   [f"Write {Path(home, 'routes.md')}:", "---", "primary: <provider> <model> <effort>", "---"]))
+
+    if routes is None:
+        launchers, why = None, "not checked: fix check 4 first"
+    else:
+        errors = [setup_try(route_launcher, home, r)[1] for r in routes]
+        why = next((e for e in errors if e), None)
+        launchers = why is None
+    example = {"version": 1, "launchers": {r[0]: ["<program>", "<arg>", "..."] for r in routes or []}}
+    checks.append(("launchers", launchers, why or "every route has a launcher",
+                   [f"Write {Path(home, 'launchers.json')}:", json.dumps(example),
+                    f"Launcher examples: {skill / 'references' / 'pickup.md'}"]))
+
+    if failing or not slugs:
+        listed, detail = None, "not checked: fix checks 1 and 3 first"
+    else:
+        on, parts = [], []
+        for slug in slugs:
+            settings, why = setup_try(pickup_settings, home, slug, paths[slug], device)
+            enabled, hosts, why = settings or (None, None, why)
+            if why:
+                parts.append(f"{slug}: {why}")
+            elif not enabled:
+                parts.append(f"{slug}: pickup off")
+            elif device not in hosts:
+                parts.append(f"{slug}: pickup lists {', '.join(hosts)}, not {device}")
+            else:
+                on.append(slug)
+        listed = bool(on)
+        detail = f"pickup lists {device} for {', '.join(on)}" if on else "; ".join(parts)
+    checks.append(("pipeline", listed, detail,
+                   ["Fix check 2 first if this host name is wrong.",
+                    "Otherwise, in the dashboard, Settings, Pipeline (or Settings, Projects, <project>), "
+                    f"turn pickup on and add host {device} exactly as written."]))
+
+    installed, detail = timer_installed(PICKUP_SCHEDULER, home)
+    checks.append(("timer", installed, detail,
+                   timer_fix(PICKUP_SCHEDULER, home) + [f"Or run: {run} pickup setup --install"]))
+    return checks
+
+
+def pickup_setup(*args):
+    """Check every piece pickup needs on this host and print the fix for each missing one; with
+    --install, write and load the 5 minute timer first. Writes no factory file. Exit 3 until all pass."""
+    if args not in ((), ("--install",)):
+        fail(USAGE_PICKUP_SETUP, 2)
+    home = factory_home()
+    device = holder(home)[0]
+    if args:
+        print(install_timer(home, PICKUP_SCHEDULER))
+    print(f"pickup setup on host {device} ({host_os()}, {PICKUP_SCHEDULER})")
+    print(f"skill {Path(HERE).parent}  python {sys.executable}  home {home}")
+    checks = setup_checks(home, device)
+    for n, (name, ok, detail, fix) in enumerate(checks, 1):
+        print(f"{n}. {'ok' if ok else 'missing':<8} {name}: {detail}")
+        if not ok:
+            for line in fix:
+                print(f"    {line}")
+    passed = sum(1 for c in checks if c[1])
+    print(f"{passed} of 7 ok." + ("" if passed == 7 else " Pickup does nothing on this host until every check is ok."))
+    print("A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.")
+    sys.exit(0 if passed == 7 else 3)
 
 
 def launch_env(given, provider, model):
@@ -8314,7 +8541,7 @@ RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+"
 RETRO_HEADERS = re.compile(
     r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))"
     r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)[^\r\n'\"\\]+")
-RETRO_URL_CREDS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{0,31}://)[^/\s@]+@")
+RETRO_URL_CREDS = re.compile(r"(?i)(?<=[a-z0-9+.-])://[^/\s@]+@")
 RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
 RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)(?!=?\d+:\d+(?!\S))[^\s:]*:\S+")
 RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential"
@@ -8364,7 +8591,7 @@ def retro_secret_pair(match):
 
 def retro_redact(text):
     text = RETRO_HEADERS.sub(r"\1\2[redacted]", text)
-    text = RETRO_URL_CREDS.sub(r"\1[redacted]@", text)
+    text = RETRO_URL_CREDS.sub("://[redacted]@", text)
     text = RETRO_BEARER.sub(r"\1[redacted]", text)
     text = RETRO_USER_PASS.sub(r"\1[redacted]", text)
     for pattern in (RETRO_KEYVALUE, RETRO_FLAG, RETRO_LONG_KEYVALUE, RETRO_LONG_FLAG):
@@ -8647,9 +8874,10 @@ def retro_aggregate(days):
     home = factory_home()
     today = datetime.now().date()
     dates = [(today - timedelta(days=back)).isoformat() for back in range(days - 1, -1, -1)]
-    rows, skipped = [], 0
+    rows, skipped, latest = [], 0, {}
     for date in dates:
         for host, text in retro_fetch(home, date):
+            latest[host] = date
             for line in text.splitlines():
                 try:
                     row = json.loads(line)
@@ -8708,8 +8936,10 @@ def retro_aggregate(days):
             retro_sum(sub, t.get("tokens"))
         for kind, size in retro_dict(row.get("first_turn_attachments")).items():
             attachments.setdefault(kind, []).append(retro_int(size))
-    for h in hosts.values():
+    for name, h in hosts.items():
         h["jobs"] = len(h["jobs"])
+        h["latest"] = latest[name]
+    stale = sorted(name for name, h in hosts.items() if h["latest"] != dates[-1])
 
     def total(key, field=None):
         return sum(retro_int(retro_dict(r.get(key)).get(field) if field else r.get(key)) for r in rows)
@@ -8746,7 +8976,7 @@ def retro_aggregate(days):
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "expected": sorted(expected),
-                      "sessions": len(rows), "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
+                      "stale": stale, "sessions": len(rows), "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
                       "digest": str(folder / "digest.jsonl"), "transcripts": agg["transcripts"],
                       "out": str(folder / "reply.json"), "findings": str(folder / "findings.md")}, indent=2))
 
