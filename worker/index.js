@@ -9,7 +9,7 @@ import {
   HOST_NAME,
   validatePipeline,
 } from "./admission.js";
-import { archiveGet, runArchive } from "./archive.js";
+import { archiveGet, needsTriageKey, runArchive } from "./archive.js";
 import {
   DASHBOARD_VERSION,
   escapeHtml,
@@ -62,7 +62,6 @@ const JOB_DIR = /^\/api\/jobs\/([\w-]+)\/(\w[\w.-]*)\/(.*)$/;
 const JOB_REL =
   /^((round-\d+\/)?[\w.-]+\.(md|png|jpe?g|gif|webp)|(round-\d+\/)?[\w-]+\.walkthrough\.html|walkthrough\.html)$/;
 const NEEDS_KEY = /^jobs\/([\w-]+)\/(\w[\w.-]*)\/needs\.md$/;
-const needsTriageKey = (slug, id) => `needs-triage/${slug}/${id}.json`;
 const PROJECT = /^\/api\/projects\/([\w-]+)\.md$/;
 const PROJECT_DOCUMENT_NAMES = ["notes.md", "decisions.md", "runbook.md"];
 const PROJECT_DOCUMENTS = /^\/api\/project-documents\/([A-Za-z0-9_-]+)$/;
