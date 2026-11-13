@@ -109,6 +109,9 @@
                                             make the dashboard's Prioritize, Remove priority, Pause,
                                             Resume or Close from a person's chat message, print the
                                             result as JSON
+  factory.py needs answer <job-id> --answers <file> --chat-file <file>
+                                            submit a person's chat answers to a job's needs.md form
+                                            with the dashboard's writes, print the result as JSON
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
