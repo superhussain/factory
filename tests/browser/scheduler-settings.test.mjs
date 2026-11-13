@@ -104,10 +104,33 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
       ]) {
         assert.ok(plist.includes(line), line);
       }
-      const section = await page.$eval("#settings-scheduler", (el) => el.textContent);
+      const section = await page.$eval("#settings-scheduler", (el) => {
+        const copy = el.cloneNode(true);
+        copy.querySelector("#scheduler-not-a-prompt").remove();
+        return copy.textContent;
+      });
       for (const pattern of [/paseo/i, /claude/i, /dangerously/i, /model-a/i]) {
         assert.doesNotMatch(section, pattern);
       }
+    });
+
+    await t.test("scheduler K7 setup first", async () => {
+      assert.equal(
+        await page.$eval("#settings-scheduler h4", (el) => el.textContent),
+        "Start here",
+      );
+      const commands = {
+        setup: "python3 <installed-skill>/runtime/factory.py pickup setup",
+        "setup-install": "python3 <installed-skill>/runtime/factory.py pickup setup --install",
+      };
+      for (const [name, command] of Object.entries(commands)) {
+        assert.equal(await snippet(name), command);
+        assert.ok(pickup.includes(command), name);
+      }
+      assert.equal(
+        await page.$eval("#scheduler-not-a-prompt", (el) => el.textContent),
+        "A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the host timer runs pickup.",
+      );
     });
 
     await t.test("scheduler K4 copy", async () => {

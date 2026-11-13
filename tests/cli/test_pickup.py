@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+import plistlib
 import shlex
 import signal
 import subprocess
@@ -2543,6 +2544,144 @@ class BatchHoldTest(PickupFixture):
         self.assertEqual((code, err), (0, ""))
         self.assertRegex(out, r"^launched 101-wrap-doc-line alpha on primary session [0-9a-f]{6}\n$")
         self.assertEqual([j["id"] for j in self.board["jobs"] if "claim" in j], ["101-wrap-doc-line"])
+
+
+class PickupSetupTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        (self.home / "paths.md").write_text(f"---\nalpha: {self.repo_a}\n---\n", encoding="utf-8")
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+        self.doctor = patch.object(factory, "doctor", return_value={
+            "checks": [{"name": "config", "status": "pass", "message": ""}]}).start()
+        patch.object(factory, "PICKUP_SCHEDULER", "cron").start()
+        patch.object(factory, "setup_run", side_effect=self.scheduler).start()
+        self.crontab = ""
+        self.crontab_error = None
+        self.loaded = False
+        self.runs = []
+
+    def scheduler(self, argv, stdin=None):
+        self.runs.append(argv)
+        if argv == ["crontab", "-l"] and self.crontab_error:
+            return 1, self.crontab_error
+        if argv == ["crontab", "-l"]:
+            return (0, self.crontab) if self.crontab else (1, "no crontab for user")
+        if argv == ["crontab", "-"]:
+            self.crontab = stdin
+        if argv[:2] == ["launchctl", "print"]:
+            return (0 if self.loaded else 113), ""
+        return 0, ""
+
+    def setup(self, *args):
+        return invoke(factory, ["pickup", "setup", *args])
+
+    def cron_line(self):
+        return factory.timer_text("cron", factory.timer_values(self.home))
+
+    def writes(self):
+        return [argv for argv in self.runs if argv == ["crontab", "-"]]
+
+    def test_all_ok_exits_0(self):
+        self.crontab = self.cron_line() + "\n"
+        code, out, _ = self.setup()
+        self.assertEqual(code, 0)
+        self.assertIn("7 of 7 ok.\n", out)
+        self.assertEqual(out.splitlines()[-1], "A stored Paseo or Claude schedule prompt does not pick up ideas. "
+                                               "Only the host timer runs pickup.")
+        self.assertEqual([line.split()[0] for line in out.splitlines()[2:9]], [f"{n}." for n in range(1, 8)])
+
+    def test_missing_device_names_the_fix(self):
+        (self.home / "config.md").write_text("---\n---\n", encoding="utf-8")
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("2. missing  device:", out)
+        self.assertIn("\n    device: ", out)
+
+    def test_pickup_off_names_the_host(self):
+        self.views["alpha"] = (200, effective("alpha"))
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("alpha: pickup off", out)
+        self.assertIn(f"add host {DEVICE} exactly as written", out)
+
+    def test_missing_launcher(self):
+        self.write_launchers({"primary": [sys.executable, str(self.fake)]})
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("5. missing  launchers:", out)
+
+    def test_doctor_fail_skips_pipeline(self):
+        self.doctor.return_value = {"checks": [{"name": "credentials", "status": "fail", "message": ""}]}
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("6. missing  pipeline: not checked", out)
+        self.assertFalse(any(path.startswith("/api/pipeline") for _, path in self.calls))
+
+    def test_install_cron_is_idempotent(self):
+        self.crontab = "0 1 * * * true\n*/5 * * * * python3 /old/factory.py pickup\n"
+        code, out, _ = self.setup("--install")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("installed cron timer: crontab\n"))
+        self.assertEqual(self.crontab, "0 1 * * * true\n" + self.cron_line() + "\n")
+        self.assertEqual(len(self.writes()), 1)
+        code, out, _ = self.setup("--install")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("timer already installed: crontab\n"))
+        self.assertEqual(len(self.writes()), 1)
+
+    def test_install_cron_keeps_an_unreadable_crontab(self):
+        self.crontab_error = "crontab: permission denied"
+        code, _, err = self.setup("--install")
+        self.assertEqual(code, 1)
+        self.assertIn("could not read the crontab, so it was left as is: crontab: permission denied", err)
+        self.assertEqual(self.writes(), [])
+
+    def test_invalid_device_is_named(self):
+        (self.home / "config.md").write_text("---\ndevice: bad host\n---\n", encoding="utf-8")
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("2. missing  device: config.md device: 'bad host' is not a valid host name\n", out)
+
+    def test_fix_lines_carry_the_home_override(self):
+        code, out, _ = invoke(factory, ["--home", str(self.home), "pickup", "setup"])
+        self.assertEqual(code, 3)
+        self.assertIn(f"factory.py --home {self.home} pickup setup --install\n", out)
+
+    @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
+    def test_install_launchd_writes_plist(self):
+        patch.object(factory, "PICKUP_SCHEDULER", "launchd").start()
+        self.setup("--install")
+        plist = Path.home() / "Library" / "LaunchAgents" / "factory.pickup.plist"
+        doc = plistlib.loads(plist.read_bytes())
+        self.assertEqual(doc["StartInterval"], 300)
+        self.assertEqual(doc["ProgramArguments"][-3:], ["--home", str(self.home), "pickup"])
+        self.assertIn(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)], self.runs)
+        self.loaded = True
+        stamp = plist.stat().st_mtime_ns
+        self.runs.clear()
+        code, out, _ = self.setup("--install")
+        self.assertTrue(out.startswith(f"timer already installed: {plist}\n"))
+        self.assertEqual(plist.stat().st_mtime_ns, stamp)
+        self.assertFalse(any(argv[:2] == ["launchctl", "bootstrap"] for argv in self.runs))
+
+    def test_install_schtasks(self):
+        patch.object(factory, "PICKUP_SCHEDULER", "schtasks").start()
+        self.setup("--install")
+        cmd = Path.home() / ".config" / "factory-pickup.cmd"
+        self.assertTrue(cmd.exists())
+        create = next(argv for argv in self.runs if argv[:2] == ["schtasks", "/Create"])
+        self.assertEqual(create[-3:], ["/TR", str(cmd), "/F"])
+
+    def test_bad_argument_exits_2(self):
+        code, _, err = self.setup("--nope")
+        self.assertEqual(code, 2)
+        self.assertIn("usage: pickup setup [--install]", err)
+
+    def test_setup_never_claims(self):
+        self.crontab = self.cron_line() + "\n"
+        self.assertEqual(self.setup()[0], 0)
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.launched(), [])
 
 
 if __name__ == "__main__":

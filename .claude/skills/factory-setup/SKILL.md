@@ -89,9 +89,10 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory.py` onc
 
 ## 9. Pickup
 
-- Only when pickup is yes. Check: `python3 "$FACTORY" pickup --dry-run` after the files exist.
-- Ask, Scheduler: "Which timer does this host use?" Options: cron (Recommended on Linux), launchd (macOS), Task Scheduler (Windows).
-- Then write `<home>/routes.md` and `<home>/launchers.json` from [pickup.md](../../../skills/factory/references/pickup.md) and hand over the timer block.
+- Only when pickup is yes. Check: `python3 "$FACTORY" pickup setup`. Run it yourself and show its output.
+- Walk the missing lines in order, one per message. Write `routes.md` and `launchers.json` in the factory home after a yes. Give the dashboard controls for the pipeline line and wait for "done".
+- Hand over `python3 "$FACTORY" pickup setup --install` for their own terminal, then rerun `pickup setup` until it exits 0.
+- Never offer a stored Paseo or Claude schedule prompt for pickup. It does not pick up ideas.
 
 ## 10. Extras
 
