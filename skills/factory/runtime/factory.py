@@ -3036,16 +3036,17 @@ def control_cmd(job_id, action, *flags):
 
 
 def pickup_host_problem(home, slug, host):
-    """Why host would never pick up a job of slug, or None when it is active and pickup lists it."""
+    """(reason, on_host): why host would never pick up a job of slug, and whether the reason is
+    the host itself rather than the pickup view. (None, False) when it is active and pickup lists it."""
     hosts = json.loads(api(home, "GET", "/api/hosts")[2])
     if not any(isinstance(h, dict) and h.get("id") == host and h.get("state") == "active" for h in hosts):
-        return f"{host} is not an active host"
+        return f"{host} is not an active host", True
     enabled, listed, why = pickup_config(home, slug)
     if why:
-        return why
+        return why, False
     if not enabled or host not in listed:
-        return f"{host} does not run pickup for {slug}"
-    return None
+        return f"{host} does not run pickup for {slug}", True
+    return None, False
 
 
 def write_move(job, to, stamp, record):
@@ -3113,8 +3114,9 @@ def control_launch(home, job_id, action, host, record):
                 refuse(f"it already runs on {to}")
             if any(x["from"] == to for x in queued_stops(m)):
                 refuse(f"a stop is still queued on {to}; pick another host")
-            if problem(slug, to):
-                refuse(problem(slug, to))
+            why, _ = problem(slug, to)
+            if why:
+                refuse(why)
         else:
             if not claim and m.get("from") and m.get("to") == m["from"] and "claimed" not in m:
                 return None, ("unchanged", m["to"])
@@ -3125,8 +3127,9 @@ def control_launch(home, job_id, action, host, record):
                 refuse("it is paused")
             if isinstance(job.get("needs"), str) and job["needs"].strip():
                 refuse("it is waiting on a person")
-            if problem(slug, to):
-                refuse(problem(slug, to) + ", so nothing would restart it; move it to another host instead")
+            why, on_host = problem(slug, to)
+            if why:
+                refuse(why + (", so nothing would restart it; move it to another host instead" if on_host else ""))
         stamp = now()
         if action == "babysit":
             to = None
@@ -5982,36 +5985,41 @@ def validate_home(home):
                 continue
             if is_link(current) or not current.is_dir():
                 raise ValueError()
-            def scan_error(error):
-                raise error
-            for directory, dirs, files in os.walk(current, onerror=scan_error):
-                for entry in dirs + files:
-                    current = Path(directory, entry)
-                    if is_link(current):
-                        raise ValueError()
-                    if entry in dirs:
-                        if not os.access(current, os.R_OK | os.X_OK):
+            stack = [str(current)]
+            while stack:
+                current = stack.pop()
+                with os.scandir(current) as entries:
+                    for entry in entries:
+                        current = entry.path
+                        st = entry.stat(follow_symlinks=False)
+                        if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                             raise ValueError()
-                        continue
-                    regular_metadata(current)
-                    if name == "projects" and entry.endswith(".sync.json"):
-                        with contextlib.redirect_stderr(io.StringIO()):
-                            try:
-                                read_project_state(current)
-                            except SystemExit:
+                        if stat.S_ISDIR(st.st_mode):
+                            if not os.access(entry.path, os.R_OK | os.X_OK):
                                 raise ValueError()
-                    elif name == "jobs" and entry == ".sync.json":
-                        manifest = json.loads(current.read_text(encoding="utf-8"))
-                        if not isinstance(manifest, dict):
+                            stack.append(entry.path)
+                            continue
+                        if not stat.S_ISREG(st.st_mode) or not os.access(entry.path, os.R_OK):
                             raise ValueError()
-                        for rel, value in manifest.items():
-                            if (not JOB_REL.fullmatch(rel) or ".." in rel
-                                    or not isinstance(value, dict) or set(value) != {"etag", "sha256"}
-                                    or not isinstance(value["etag"], str) or not value["etag"]
-                                    or not isinstance(value["sha256"], str)
-                                    or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"])):
+                        if name == "projects" and entry.name.endswith(".sync.json"):
+                            with contextlib.redirect_stderr(io.StringIO()):
+                                try:
+                                    read_project_state(Path(entry.path))
+                                except SystemExit:
+                                    raise ValueError()
+                        elif name == "jobs" and entry.name == ".sync.json":
+                            manifest = json.loads(Path(entry.path).read_text(encoding="utf-8"))
+                            if not isinstance(manifest, dict):
                                 raise ValueError()
+                            for rel, value in manifest.items():
+                                if (not JOB_REL.fullmatch(rel) or ".." in rel
+                                        or not isinstance(value, dict) or set(value) != {"etag", "sha256"}
+                                        or not isinstance(value["etag"], str) or not value["etag"]
+                                        or not isinstance(value["sha256"], str)
+                                        or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"])):
+                                    raise ValueError()
     except (OSError, ValueError, UnicodeError, RuntimeError):
+        current = Path(current)
         relative = str(current.relative_to(home)) if current != home else "."
         fail(f"Invalid local metadata: {relative}.", 2)
 
@@ -6718,17 +6726,22 @@ def conflict_exit(conflicts):
 
 
 def record_goal(home, slug, job_id, goal):
-    """Copy the spec Goal onto the job's board row so search can match it. Leaves job.updated alone."""
+    """Copy the spec Goal onto the job's board row so search can match it, or drop the row's
+    goal when the spec has none. Leaves job.updated alone."""
     def change(text):
         data = load_board(text)
         job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
         if not job or job.get("project") != slug or job.get("goal") == goal:
             return None, False
-        job["goal"], data["updated"] = goal, now()
+        if goal is None:
+            job.pop("goal")
+        else:
+            job["goal"] = goal
+        data["updated"] = now()
         return dump_board(data), True
 
     if cas(home, "/api/board", change):
-        print("recorded the spec Goal on the board")
+        print("recorded the spec Goal on the board" if goal else "cleared the board goal: spec.md has no Goal section")
 
 
 def push(target):
@@ -6774,9 +6787,8 @@ def push(target):
         spec_pushed = spec_pushed or rel == "spec.md"
     save_manifest(folder, manifest)
     print(f"pushed {pushed} files")
-    goal = spec_goal((folder / "spec.md").read_text(encoding="utf-8")) if spec_pushed else None
-    if goal:
-        record_goal(home, slug, job_id, goal)
+    if spec_pushed:
+        record_goal(home, slug, job_id, spec_goal((folder / "spec.md").read_text(encoding="utf-8")))
     if conflicts:
         conflict_exit(conflicts)
 

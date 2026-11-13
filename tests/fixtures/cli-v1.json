@@ -246,7 +246,7 @@
     },
     {
       "id": "FactoryTest",
-      "count": 60,
+      "count": 61,
       "methods": [
         "test_stuck_drops_a_stale_stub",
         "test_hold_sets_started_once",
@@ -306,7 +306,8 @@
         "test_board_cannot_forge_handoff",
         "test_stuck_skips_a_stale_job_waiting_on_human",
         "test_push_records_spec_goal",
-        "test_push_skips_unchanged_or_missing_goal",
+        "test_push_skips_unchanged_goal",
+        "test_push_clears_goal_when_spec_drops_it",
         "test_handoff_records_goal"
       ]
     },

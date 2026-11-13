@@ -372,6 +372,17 @@ class PrStateTest(IsolatedTestCase):
         error = factory.http.client.IncompleteRead(b"")
         self.assertEqual(problem(env, {}, down=True), "can't reach Buildkite: IncompleteRead(0 bytes read)")
 
+    def test_a_buildkite_log_over_the_read_cap_is_no_usable_log(self):
+        (self.home / ".env").write_text(f"BUILDKITE_API_TOKEN={TOKEN}\n")
+        routes = {BUILD: (200, {"jobs": [{"id": JOB_ID}]}),
+                  f"{BUILD}/jobs/{JOB_ID}/log": (200, {"content": "x" * 100})}
+        with patch.object(factory, "BUILDKITE_MAX_BYTES", 64):
+            code, out, err, _ = self.state([(view(), buildkite())], routes=routes)
+        self.assertEqual((code, err), (0, ""))
+        ci_log = json.loads(out)["ci_log"]
+        self.assertEqual((ci_log["problem"], ci_log["tail"]), ("Buildkite sent no usable log", ""))
+        self.assertEqual([r[1] for r in self.buildkite_requests()], [BUILD, f"{BUILD}/jobs/{JOB_ID}/log"])
+
     def test_ci_log_is_null_without_a_buildkite_failure(self):
         (self.home / ".env").write_text(f"BUILDKITE_API_TOKEN={TOKEN}\n")
         actions = (0, json.dumps([{"bucket": "fail", "name": "test",

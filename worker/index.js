@@ -341,6 +341,7 @@ async function casPut(request, env, key, type) {
     if (!Array.isArray(data?.jobs)) return reply("body needs a jobs array", 400);
     const stored = await storedBoard(env);
     const bad =
+      checkGoals(data.jobs) ??
       (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
       (stored.etag === cond.get("If-Match")
         ? (checkRowIds(stored.jobs, data.jobs) ??
@@ -1701,6 +1702,20 @@ function quoteIdCut(id, max) {
   let n = Math.min(id.length, max - 5);
   while (quoteId(id.slice(0, n)).length + 3 > max) n--;
   return quoteId(id.slice(0, n)).slice(0, -1) + '..."';
+}
+
+// An error message, or null. A row's goal is the spec Goal paragraph, which factory.py push
+// cuts to 300 code points, so anything else is a client bug.
+function checkGoals(jobs) {
+  for (const row of jobs) {
+    if (!Object.hasOwn(row ?? {}, "goal")) continue;
+    const { goal } = row;
+    if (typeof goal === "string" && [...goal].length <= 300) continue;
+    const label =
+      typeof row.id === "string" ? quoteIdCut(row.id, QUOTED_ID_MAX) : "a row without a string id";
+    return `a board write cannot set goal on ${label}: it must be a string of at most 300 characters. Nothing was written.`;
+  }
+  return null;
 }
 
 // An error message, or null. A row has no identity but its id, so a write that drops a

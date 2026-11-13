@@ -342,6 +342,10 @@ class ControlTest(SuggestCase):
             ("046-needs", 2, "046-needs cannot be rerun: it is waiting on a person. Nothing was written."),
             ("047-retired", 2, "047-retired cannot be rerun: gamma is not an active host" + tail),
             ("048-unlisted", 2, "048-unlisted cannot be rerun: beta does not run pickup for sample" + tail)))
+        self.pickup = {"enabled": "yes", "hosts": ["alpha"]}
+        self.assert_refused(lambda job_id: self.chat(job_id, "rerun", RERUN), (
+            ("043-sample-export", 2,
+             "043-sample-export cannot be rerun: malformed pickup in the pipeline view. Nothing was written."),))
 
     def test_usage(self):
         before = json.dumps(self.board)
