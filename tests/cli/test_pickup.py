@@ -2828,8 +2828,24 @@ class PickupSetupTest(PickupFixture):
         self.doctor.return_value = {"checks": [{"name": "credentials", "status": "fail", "message": ""}]}
         code, out, _ = self.setup()
         self.assertEqual(code, 3)
-        self.assertIn("6. missing  pipeline: not checked", out)
+        self.assertIn("6. missing  pipeline: not checked: fix check 1 first\n", out)
+        self.assertNotIn("Fix check 2 first", out)
         self.assertFalse(any(path.startswith("/api/pipeline") for _, path in self.calls))
+
+    def test_doctor_fail_and_no_checkout_skip_pipeline(self):
+        self.doctor.return_value = {"checks": [{"name": "credentials", "status": "fail", "message": ""}]}
+        (self.home / "paths.md").write_text("---\nalpha: /nonexistent-1530\n---\n", encoding="utf-8")
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("6. missing  pipeline: not checked: fix checks 1 and 3 first\n", out)
+        self.assertNotIn("Fix check 2 first", out)
+
+    def test_no_checkout_skips_pipeline(self):
+        (self.home / "paths.md").write_text("---\nalpha: /nonexistent-1530\n---\n", encoding="utf-8")
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("6. missing  pipeline: not checked: fix check 3 first\n", out)
+        self.assertNotIn("Fix check 2 first", out)
 
     def test_install_cron_is_idempotent(self):
         self.crontab = "0 1 * * * true\n*/5 * * * * python3 /old/factory.py pickup\n"
@@ -2855,6 +2871,13 @@ class PickupSetupTest(PickupFixture):
         code, out, _ = self.setup()
         self.assertEqual(code, 3)
         self.assertIn("2. missing  device: config.md device: 'bad host' is not a valid host name\n", out)
+        self.assertIn(f"    Replace the device: line in the frontmatter of {self.home / 'config.md'} with:\n", out)
+        self.assertNotIn("Add this line inside the frontmatter", out)
+
+    def test_fix_lines_quote_paths_with_spaces(self):
+        patch.object(factory.sys, "executable", "/opt/my python/python3").start()
+        code, out, _ = self.setup()
+        self.assertIn("    Or run: '/opt/my python/python3' ", out)
 
     def test_fix_lines_carry_the_home_override(self):
         code, out, _ = invoke(factory, ["--home", str(self.home), "pickup", "setup"])
