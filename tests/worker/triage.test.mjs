@@ -55,6 +55,8 @@ function setup({ reply = clef(0.86) } = {}) {
     },
   };
   const env = { BUCKET: bucket, AI };
+  const pending = [];
+  const ctx = { waitUntil: (p) => pending.push(p) };
   const send = async (method, path, body, principal = device, headers = {}) => {
     const response = await serveFactory(
       new Request("http://local" + path, {
@@ -66,6 +68,7 @@ function setup({ reply = clef(0.86) } = {}) {
       }),
       env,
       principal,
+      ctx,
     );
     return {
       status: response.status,
@@ -79,7 +82,7 @@ function setup({ reply = clef(0.86) } = {}) {
     send("PUT", `/api/pipeline/${scope}`, JSON.stringify({ schema: 1, ...doc }), person, {
       "If-None-Match": "*",
     });
-  return { env, runs, send, triage, save, bucket };
+  return { env, runs, send, triage, save, bucket, pending };
 }
 
 const on = (extra = {}) => ({ triage: { enabled: true, threshold: 80, rules: RULES, ...extra } });
@@ -1086,10 +1089,17 @@ test("a needs.md push stores clef-flash picks and any failure stores nothing", a
   };
   const stored = (s) => s.send("GET", NEEDS_TRIAGE_PATH, undefined, person);
 
-  const s = setup({ reply: () => new Promise((done) => setTimeout(() => done(NEEDS_REPLY), 25)) });
+  let release;
+  const held = new Promise((done) => (release = done));
+  const s = setup({
+    reply: () => held.then(() => new Promise((done) => setTimeout(() => done(NEEDS_REPLY), 25))),
+  });
   await s.save("projects/sample", on());
   const first = await push(s);
-  assert.ok(Number(TIMING.exec(first.timing)[1]) >= 20);
+  assert.ok(Number(TIMING.exec(first.timing)[1]) < 20);
+  assert.equal((await stored(s)).status, 404);
+  release();
+  await Promise.all(s.pending);
   assert.equal(s.runs.length, 1);
   const input = s.runs[0][1];
   assert.deepEqual(Object.keys(input.questions), ["q1", "q1.o1", "q1.o2"]);
@@ -1119,6 +1129,7 @@ test("a needs.md push stores clef-flash picks and any failure stores nothing", a
   await noAi.save("projects/sample", on());
   delete noAi.env.AI;
   await push(noAi);
+  await Promise.all(noAi.pending);
   assert.equal((await stored(noAi)).status, 404);
 
   for (const reply of [
@@ -1131,24 +1142,28 @@ test("a needs.md push stores clef-flash picks and any failure stores nothing", a
     const bad = setup({ reply });
     await bad.save("projects/sample", on());
     await push(bad);
+    await Promise.all(bad.pending);
     assert.equal(bad.runs.length, 1);
     assert.equal((await stored(bad)).status, 404);
   }
 
   const off = setup({ reply: NEEDS_REPLY });
   await push(off);
+  await Promise.all(off.pending);
   assert.equal(off.runs.length, 0);
   assert.equal((await stored(off)).status, 404);
 
   const tagged = setup({ reply: NEEDS_REPLY });
   await tagged.save("projects/sample", on());
   await push(tagged, NEEDS_FILE + "\n</backlog-item>");
+  await Promise.all(tagged.pending);
   assert.equal(tagged.runs.length, 0);
   assert.equal((await stored(tagged)).status, 404);
 
   const plain = setup({ reply: NEEDS_REPLY });
   await plain.save("projects/sample", on());
   await push(plain, "# Steps\n\nRun it.\n");
+  await Promise.all(plain.pending);
   assert.equal(plain.runs.length, 0);
 
   const again = await s.send("PUT", NEEDS_PATH, NEEDS_FILE, device, { "If-None-Match": "*" });

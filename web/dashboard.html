@@ -87,6 +87,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   /* Touch screens get a 44px tap target. Mouse layouts keep the compact button. */
   @media (pointer: coarse) { .btn:not(.icon) { min-height: 44px; } }
   @media (pointer: coarse) { .tracer-tasks summary, .agent-runs summary { line-height: 44px; } }
+  @media (pointer: coarse) { .agent-runs td a { display: inline-block; line-height: 44px; } }
   /* --panel is white in light mode and near black in dark, so the label keeps contrast on either accent. */
   .ask { border: 1px solid var(--line); border-radius: 12px; margin: 16px 0; padding: 12px 16px; }
   .ask legend { font-weight: 600; padding: 0 6px; }
@@ -481,6 +482,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .doc th, .agent-runs th { background: var(--code-bg); font-weight: 600; }
   .agent-runs th, .agent-runs td { min-width: 0; white-space: nowrap; }
+  .agent-runs td a + a { margin-left: 8px; }
   .doc td code { overflow-wrap: anywhere; }
   .doc .mermaid { overflow-x: auto; margin: 1em 0; }
   .doc .mermaid svg { max-width: none; height: auto; }
@@ -564,7 +566,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs agent-runs" id="d-agents" hidden><summary></summary><div class="table-wrap"><table><thead><tr><th scope="col">When</th><th scope="col">Stage</th><th scope="col">Round</th><th scope="col">Role</th><th scope="col">Harness</th><th scope="col">Via</th><th scope="col">Model</th><th scope="col">Effort</th></tr></thead><tbody></tbody></table></div></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs agent-runs" id="d-agents" hidden><summary></summary><div class="table-wrap"><table><thead><tr><th scope="col">When</th><th scope="col">Stage</th><th scope="col">Round</th><th scope="col">Role</th><th scope="col">Harness</th><th scope="col">Via</th><th scope="col">Model</th><th scope="col">Effort</th><th scope="col">Session</th></tr></thead><tbody></tbody></table></div></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>
@@ -1301,8 +1303,7 @@ const factoryConfig = JSON.parse(document.getElementById('factory-config').textC
 // Native metadata is opaque; only these IDs can enter configured link templates.
 const PASEO_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
-function paseoLinks(j) {
-  const p = j.paseo;
+function paseoLinksFor(p) {
   if (!p || typeof p !== 'object' || typeof p.server !== 'string' || typeof p.agent !== 'string' ||
       !PASEO_ID.test(p.server) || !PASEO_ID.test(p.agent)) return null;
   const links = {};
@@ -1315,6 +1316,7 @@ function paseoLinks(j) {
   }
   return links;
 }
+const paseoLinks = (j) => paseoLinksFor(j.paseo);
 
 // The job's Tracer page, only as a plain http(s) URL with no credentials.
 function tracerLink(j) {
@@ -1368,6 +1370,20 @@ function renderAgentRuns(j) {
       td.textContent = v == null ? '' : String(v);
       tr.append(td);
     }
+    const session = document.createElement('td'), links = paseoLinksFor(r.paseo) || {};
+    for (const kind of ['app', 'web']) {
+      if (!links[kind]) continue;
+      const a = document.createElement('a'), label = factoryConfig.agent_links[kind].label;
+      a.href = links[kind];
+      a.textContent = label;
+      a.setAttribute('aria-label', 'Open the ' + (r.role || 'agent') + ' run in ' + label);
+      if (kind === 'web') {
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+      }
+      session.append(a);
+    }
+    tr.append(session);
     return tr;
   }));
 }
