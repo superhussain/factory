@@ -125,7 +125,7 @@ A job's worktree is `WT="$WORKTREES/<id>"`, on branch `factory/<id>` cut from `$
 | Path | What |
 | --- | --- |
 | `$PROJECT` | project context for every agent |
-| `$JOBS/<id>/` | `spec.md`, `build.md`, `round-N/review-{security,ux,ui,code}.md`, `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
+| `$JOBS/<id>/` | `spec.md`, `build.md`, `round-N/review-{security,ux,ui,code}.md`, `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, `<file>-evidence.md`, `scratchpad.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
 | `$WT` | the builder's worktree |
 | `$FACTORY/config.md`, `$FACTORY/.env` | device settings and the private Access service token |
 
@@ -169,6 +169,24 @@ reads and writes them, and job folders go up by hand:
   any other row without one.
 - `where` exits 4 when nothing matches, and stderr lists the known slugs. Tell the
   user to run `/factory init` in the repo.
+
+### Scratchpad
+
+The job folder holds the named pipeline files, `<file>-evidence.md`, `scratchpad.md`
+and their images. Nothing else. Never create any other `.md` file in a job folder.
+Anything outside a stage goes in `scratchpad.md`: analysis and research notes,
+monitoring or evidence logs, measurements, checklists, and notes kept across sessions.
+Push it like any job file. The dashboard shows it as the scratchpad tab, `#<id>/scratchpad`.
+
+| Role | May write `scratchpad.md` |
+| --- | --- |
+| orchestrator | yes |
+| agent told to in its prompt | yes |
+| any other agent | no |
+
+- Open it with a summary of at most 120 words.
+- Add entries as dated `## YYYY-MM-DD <topic>` sections, newest last.
+- No code, no secrets.
 
 ## Step zero, every command
 

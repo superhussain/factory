@@ -102,6 +102,11 @@ to take over with `hold <project>/<id> take` after old workers are confirmed sto
 Read the old session and inspect uncommitted work before recovery. Preserve edits;
 never reset the branch. Normal resume does not use `take`.
 
+## Scratchpad
+
+Notes outside a stage go in the job's `scratchpad.md`, never another `.md` file. See
+[Scratchpad](../SKILL.md#scratchpad) for who writes it and how.
+
 ## Resume
 
 Run `job <id>` first and check the stage before claiming. If it is a human or PR
