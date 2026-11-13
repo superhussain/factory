@@ -234,6 +234,11 @@ class RoutesTest(IsolatedTestCase):
             self.assertIn(f"unknown route 'gamma': not in {path}", message)
             self.assertNotIn("experiment", message)
 
+    def test_limit_reads_routes_once(self):
+        with patch.object(factory, "read_routes", wraps=factory.read_routes) as read:
+            self.run_routes("limit", "alpha")
+        self.assertEqual(read.call_count, 1)
+
     def test_effort(self):
         self.routes.write_text("---\nalpha: provider-a model-a high\nbeta: provider-b model-b\n---\n",
                                encoding="utf-8")

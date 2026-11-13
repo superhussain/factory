@@ -3147,13 +3147,14 @@ def check_limit_name(home, name):
 
 
 def limit_route(home, name, minutes):
-    """Mark one route or the experiment limited for minutes from now, and return its limited_until."""
-    check_limit_name(home, name)
+    """Mark one route or the experiment limited for minutes from now.
+    Return (limited_until, True when name is the experiment)."""
+    experiment = check_limit_name(home, name)
     stamp = now()
     limits = {n: until for n, until in read_limits(home).items() if until > stamp}
     limits[name] = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
     write_atomic(Path(home, "route-limits.json"), json.dumps(limits, indent=2) + "\n")
-    return limits[name]
+    return limits[name], experiment
 
 
 def routes_cmd(sub, *args):
@@ -3187,9 +3188,8 @@ def routes_cmd(sub, *args):
                               or not re.fullmatch(r"[1-9][0-9]*", args[2]) or int(args[2]) > 1440):
             fail("usage: routes limit <name> [--minutes N], with N from 1 to 1440", 2)
         name = args[0]
-        key = "experiment" if check_limit_name(home, name) else "route"
-        until = limit_route(home, name, int(args[2]) if len(args) == 3 else 60)
-        print(json.dumps({key: name, "limited_until": until}, indent=2))
+        until, experiment = limit_route(home, name, int(args[2]) if len(args) == 3 else 60)
+        print(json.dumps({"experiment" if experiment else "route": name, "limited_until": until}, indent=2))
     elif sub == "clear" and len(args) == 1:
         name = args[0]
         check_limit_name(home, name)
@@ -3760,7 +3760,7 @@ def takeover(home, data, device, minutes, paths, settings, dry):
             print(f"would take over {job_id} {slug} from {session} on {fallback[0]}: "
                   + shlex.join(launcher_argv(route_launcher(home, fallback), given)))
             return 1
-        until = limit_route(home, stalled[0], max(1, min(1440, -(-seconds // 60))))
+        until = limit_route(home, stalled[0], max(1, min(1440, -(-seconds // 60))))[0]
         print(f"limited {stalled[0]} until {until}")
         live = pick_route(home)
         if live is None:
@@ -3804,7 +3804,7 @@ def takeover(home, data, device, minutes, paths, settings, dry):
             log.seek(max(0, os.path.getsize(log_path) - 4096))
             tail = log.read().decode("utf-8", "replace")
         if LIMIT_TEXT.search(tail):
-            until = limit_route(home, live[0], limit_minutes(tail, datetime.now(timezone.utc)))
+            until = limit_route(home, live[0], limit_minutes(tail, datetime.now(timezone.utc)))[0]
             print(f"limited {live[0]} until {until}")
         if stage == IDEA:
             release_claim(home, job_id, device, tag)
@@ -4030,7 +4030,7 @@ def launch_failed(home, name, job_id, detail, log_path, release, fatal=True, exp
         log.seek(max(0, os.path.getsize(log_path) - 4096))
         tail = log.read().decode("utf-8", "replace")
     if LIMIT_TEXT.search(tail):
-        until = limit_route(home, name, limit_minutes(tail, datetime.now(timezone.utc)))
+        until = limit_route(home, name, limit_minutes(tail, datetime.now(timezone.utc)))[0]
         release()
         print(f"limited experiment {name} until {until}" if experiment else f"limited {name} until {until}")
         print(f"released {job_id}")
