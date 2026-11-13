@@ -5401,7 +5401,7 @@ PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner
                     " latestReviews(first:100){nodes{author{__typename login}}}}}}")
 PR_STATE_INTERVAL = 30
 BUILDKITE_API = "https://api.buildkite.com/v2"
-BUILDKITE_BUILD = re.compile(r"https://buildkite\.com/([A-Za-z0-9-]{1,100})/([A-Za-z0-9_.-]{1,100})/builds/([0-9]{1,12})"
+BUILDKITE_BUILD = re.compile(r"https://buildkite\.com/([A-Za-z0-9-]{1,100})/([A-Za-z0-9_-]{1,100})/builds/([0-9]{1,12})"
                              r"(?:#([0-9a-f-]{36}))?", re.ASCII)
 BUILDKITE_TAIL_LINES = 80
 BUILDKITE_TAIL_CHARS = 8000

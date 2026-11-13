@@ -379,7 +379,8 @@ class PrStateTest(IsolatedTestCase):
         for reading, step in (((view(), buildkite(bucket="pass")), "merge"), ((view(), actions), "fix-ci"),
                               ((view(merge="DIRTY"), buildkite()), "rebase"),
                               ((view(), buildkite("https://buildkite.com/example-org/sample-web/builds/812/x")),
-                               "fix-ci")):
+                               "fix-ci"),
+                              ((view(), buildkite("https://buildkite.com/example-org/../builds/812")), "fix-ci")):
             with self.subTest(reading=reading):
                 code, out, err, _ = self.state([reading], routes={BUILD: build_jobs()})
                 self.assertEqual((code, err, json.loads(out)["next"], json.loads(out)["ci_log"]), (0, "", step, None))
