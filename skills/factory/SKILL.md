@@ -289,17 +289,17 @@ job's own `$REPO`.
 `pending`, `PASS`, `CHANGES`, or `SKIPPED` (ux and ui only, written by `review-plan`). Reviewer keys are fixed: security, ux, ui, code.
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
 which ports live jobs hold. Only `factory.py` writes `claim`.
-`done` is when the job entered `merged` or `closed`, and only `factory.py` writes it.
-`started` is when the job first got a claim, and only `factory.py` writes it.
-`escalated` is set when an ESCALATE PR ships, and marks a PR that waits on a human.
+Only `factory.py` writes `done`, when the job entered `merged` or `closed`, and
+`started`, when it first got a claim.
+`escalated`, set when an ESCALATE PR ships, marks a PR waiting on a human.
 `automerge` marks an APPROVE PR waiting to merge. `resumes` counts consecutive
 scheduled resumes without progress, and only `factory.py stuck` writes it.
 `refs` links a job to the jobs it came from, and the dashboard shows them on the
-card and as links in the job panel. The drawer's Add follow-up idea item saves a
+card and in the job panel. The drawer's Add follow-up idea item saves a
 new idea with a `follow-up-of` ref to the open job. `build` is set only on merged jobs that need a
 device build. Jobs whose `runs` match rode the same build. Both are optional, and
 `factory.py` rejects a malformed one.
-`pipeline` holds the pipeline configuration versions the job last ran under, from
+`pipeline` holds the pipeline versions the job last ran under, from
 `factory.py pipeline`. `factory.py` rejects a malformed one.
 `backlog` is set only on jobs decided from the Backlog column or `backlog decide`. It holds
 the backlog line, the decision, when it was made, and any notes typed with the decision.
