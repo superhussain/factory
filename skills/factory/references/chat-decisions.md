@@ -11,7 +11,8 @@ factory.py control <job-id> close --reason-file <file> --chat-file <file>
 ```
 
 - After `control` succeeds, tell the person the printed job id and `result`, and
-  for `close` the printed `reason`.
+  for `close` the printed `reason`. A `close` result of `queued` means the next
+  pickup closes the job and writes its decision.
 
 ## Who counts
 

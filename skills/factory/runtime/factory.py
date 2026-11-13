@@ -833,7 +833,7 @@ def board(factory, job_id):
              "run factory.py control <job-id> prioritize --chat-file <file>", 2)
     if "paused" in patch:
         fail("only the dashboard and factory.py control set paused. To relay a person's chat, "
-             "run factory.py control <job-id> pause --chat-file <file>", 2)
+             "run factory.py control <job-id> pause|resume --chat-file <file>", 2)
     if patch.get("babysit") is not None:
         fail("only the dashboard sets babysit; a session clears it with null", 2)
     if "close" in patch:
@@ -2973,10 +2973,17 @@ def control_cmd(job_id, action, *flags):
             fail(f"no job {job_id} on the board. Nothing was written.", 4)
         stage, lead = job.get("stage"), lead_of(job)
         if action in ("prioritize", "pause", "close"):
-            barred = stage not in PRIORITY_STAGES if action == "prioritize" \
-                else stage in TERMINAL or action == "close" and stage == IDEA
-            why = "it has no project" if not job.get("project") else f"it is at {stage}" if barred \
-                else lead and f"it is a rider of {lead}"
+            if action == "prioritize":
+                barred = stage not in PRIORITY_STAGES
+            else:
+                barred = stage in TERMINAL or action == "close" and stage == IDEA
+            why = None
+            if not job.get("project"):
+                why = "it has no project"
+            elif barred:
+                why = f"it is at {stage}"
+            elif lead:
+                why = f"it is a rider of {lead}"
             if why:
                 word = {"prioritize": "prioritized", "pause": "paused", "close": "closed"}[action]
                 fail(f"{job_id} cannot be {word}: {why}. Nothing was written.", 2)
@@ -2997,7 +3004,7 @@ def control_cmd(job_id, action, *flags):
     result, stored = cas(home, "/api/board", change)
     out = {"id": job_id, "action": action, "result": result}
     if action == "close":
-        out["reason"] = stored["reason"]
+        out["reason"] = stored.get("reason") if isinstance(stored, dict) else None
     print(json.dumps(out))
 
 

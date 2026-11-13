@@ -145,6 +145,17 @@ class ControlTest(SuggestCase):
                                          "reason": "Duplicate of 041-sample-export"})
         self.assertEqual(self.puts(), puts)
 
+    def test_close_over_a_malformed_close_is_unchanged(self):
+        for close in ({"at": "2026-01-02T12:00:00Z"}, True):
+            with self.subTest(close=close):
+                self.job()["close"] = close
+                puts = self.puts()
+                code, err, _ = self.close("042-sample-export")
+                self.assertEqual(code, 0, err)
+                self.assertEqual(self.result(), {"id": "042-sample-export", "action": "close", "result": "unchanged",
+                                                 "reason": None})
+                self.assertEqual(self.puts(), puts)
+
     def test_close_refusals(self):
         self.refusals()
         self.assert_refused(self.close, (

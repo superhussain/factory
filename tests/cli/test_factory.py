@@ -1494,7 +1494,7 @@ class MoveFenceTest(IsolatedTestCase):
             factory.board(self.home, "001-test")
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("only the dashboard and factory.py control set paused. To relay a person's chat, "
-                      "run factory.py control <job-id> pause --chat-file <file>", err.getvalue())
+                      "run factory.py control <job-id> pause|resume --chat-file <file>", err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
     def test_board_refuses_a_babysit_patch(self):
