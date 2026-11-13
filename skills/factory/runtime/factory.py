@@ -822,6 +822,8 @@ def board(factory, job_id):
         fail("only factory.py suggest sets origin", 2)
     if "started" in patch:
         fail("only factory.py sets started", 2)
+    if "goal" in patch:
+        fail("only factory.py push sets goal", 2)
     if "agents" in patch:
         fail("only factory.py agent and pickup set agents", 2)
     if "move" in patch:
@@ -1035,7 +1037,7 @@ def handoff(target):
     def change(text):
         data = load_board(text)
         job = owned(data)
-        if job != before:
+        if {k: v for k, v in job.items() if k != "goal"} != {k: v for k, v in before.items() if k != "goal"}:
             fail("job changed while publishing the handoff; inspect it before retrying", 6)
         packet = {"state": "ready", "from": dict(job["claim"]), "head": head,
                   "stage": job["stage"], "round": job.get("round", 0), "at": now()}
@@ -5110,6 +5112,17 @@ def markdown_section(text, name):
     return "\n".join(lines[start + 1:end])
 
 
+def spec_goal(text):
+    """The first paragraph under spec.md's ## Goal heading on one line, cut to 300 characters, or None."""
+    block = []
+    for line in (markdown_section(text, "Goal") or "").splitlines():
+        if line.strip():
+            block.append(line.strip())
+        elif block:
+            break
+    return printable_line(" ".join(block), 300) or None
+
+
 def visible_globs(project_file):
     """VISIBLE_GLOBS plus every backtick span in the project file's ## UI section."""
     section = markdown_section(project_file.read_text(encoding="utf-8"), "UI") or ""
@@ -6289,6 +6302,20 @@ def conflict_exit(conflicts):
          "delete the .remote, or move it over the image", 6)
 
 
+def record_goal(home, slug, job_id, goal):
+    """Copy the spec Goal onto the job's board row so search can match it. Leaves job.updated alone."""
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if not job or job.get("project") != slug or job.get("goal") == goal:
+            return None, False
+        job["goal"], data["updated"] = goal, now()
+        return dump_board(data), True
+
+    if cas(home, "/api/board", change):
+        print("recorded the spec Goal on the board")
+
+
 def push(target):
     home, slug, job_id = r2_target(target, False)
     if not job_id:
@@ -6300,7 +6327,7 @@ def push(target):
     rels = [p.relative_to(folder).as_posix() for p in sorted(folder.rglob("*"))
             if p.is_file() and not p.is_symlink()]
     rels = [r for r in rels if JOB_REL.fullmatch(r)]
-    pushed, conflicts = 0, []
+    pushed, conflicts, spec_pushed = 0, [], False
     for rel in rels:
         data = local_bytes(folder / rel)
         entry = manifest.get(rel)
@@ -6329,8 +6356,12 @@ def push(target):
             fail("the Worker returned no ETag: redeploy the factory Worker", 5)
         manifest[rel] = {"etag": strong(headers["ETag"]), "sha256": sha(data)}
         pushed += 1
+        spec_pushed = spec_pushed or rel == "spec.md"
     save_manifest(folder, manifest)
     print(f"pushed {pushed} files")
+    goal = spec_goal((folder / "spec.md").read_text(encoding="utf-8")) if spec_pushed else None
+    if goal:
+        record_goal(home, slug, job_id, goal)
     if conflicts:
         conflict_exit(conflicts)
 

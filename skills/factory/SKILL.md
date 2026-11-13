@@ -252,6 +252,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "branch": "factory/003-rate-limiting",
   "stage": "idea | spec | build | review | approve | needs-human | pr-open | merged | closed",
   "idea": "the feature as typed, set only on jobs added from the dashboard",
+  "goal": "the spec Goal paragraph; set only by factory.py push",
   "round": 2,
   "rounds": [{ "security": "CHANGES", "ux": "PASS", "ui": "PASS", "code": "PASS" },
              { "security": "pending", "ux": "PASS", "ui": "pending", "code": "PASS" }],
