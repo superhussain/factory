@@ -2769,12 +2769,16 @@ class PickupSetupTest(PickupFixture):
             "checks": [{"name": "config", "status": "pass", "message": ""}]}).start()
         patch.object(factory, "PICKUP_SCHEDULER", "cron").start()
         patch.object(factory, "setup_run", side_effect=self.scheduler).start()
+        patch.object(factory, "SYSTEM_PYTHON", str(self.home / "no-python3")).start()
+        self.system_python = (1, "")
         self.crontab = ""
         self.crontab_error = None
         self.loaded = False
         self.runs = []
 
     def scheduler(self, argv, stdin=None):
+        if argv[0] == factory.SYSTEM_PYTHON:
+            return self.system_python
         self.runs.append(argv)
         if argv == ["crontab", "-l"] and self.crontab_error:
             return 1, self.crontab_error
@@ -2803,6 +2807,79 @@ class PickupSetupTest(PickupFixture):
         self.assertEqual(out.splitlines()[-1], "A stored Paseo or Claude schedule prompt does not pick up ideas. "
                                                "Only the host timer runs pickup.")
         self.assertEqual([line.split()[0] for line in out.splitlines()[2:9]], [f"{n}." for n in range(1, 8)])
+        self.assertNotIn("note:", out)
+
+    def test_timer_prefers_system_python(self):
+        python = self.home / "py3"
+        python.write_text("", encoding="utf-8")
+        patch.object(factory, "SYSTEM_PYTHON", str(python)).start()
+        self.system_python = (2, "factory.py: usage:\n")
+        self.assertEqual(factory.timer_values(self.home)["argv"][0], str(python))
+        _, out, _ = self.setup()
+        self.assertIn(f"timer python {python} (system python3)", out.splitlines()[1])
+
+    def test_timer_python_missing_falls_back(self):
+        _, out, _ = self.setup()
+        self.assertIn(f"timer python {sys.executable} (this command's python; {self.home}/no-python3 is missing)",
+                      out.splitlines()[1])
+
+    def test_timer_python_broken_falls_back(self):
+        python = self.home / "py3"
+        python.write_text("", encoding="utf-8")
+        patch.object(factory, "SYSTEM_PYTHON", str(python)).start()
+        self.system_python = (1, "SyntaxError")
+        self.assertEqual(factory.timer_values(self.home)["argv"][0], sys.executable)
+        _, out, _ = self.setup()
+        self.assertTrue(out.splitlines()[1].endswith(f"cannot run the runtime)  home {self.home}"))
+
+    def test_timer_drift_note(self):
+        self.crontab = ("*/5 * * * * PATH=/usr/bin /opt/py3.12/bin/python3 /old/skill/runtime/factory.py pickup "
+                        ">> /tmp/p.log 2>&1\n")
+        code, out, _ = self.setup()
+        self.assertEqual(code, 0)
+        self.assertIn("7 of 7 ok.\n", out)
+        self.assertIn("\n7. ok       timer: crontab runs pickup every 5 minutes\n"
+                      "    note: the timer runs /opt/py3.12/bin/python3 /old/skill/runtime/factory.py pickup, "
+                      "but --install would write ", out)
+
+    @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
+    def test_launchd_drift_note(self):
+        patch.object(factory, "PICKUP_SCHEDULER", "launchd").start()
+        plist = Path.home() / "Library" / "LaunchAgents" / "factory.pickup.plist"
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        plist.write_bytes(plistlib.dumps({"Label": "factory.pickup",
+                                          "ProgramArguments": ["/old/python3", "/old/factory.py", "pickup"]}))
+        self.loaded = True
+        _, out, _ = self.setup()
+        self.assertIn("7. ok       timer:", out)
+        self.assertIn("note: the timer runs /old/python3 /old/factory.py pickup", out)
+
+    @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
+    def test_launchd_without_program_arguments_notes(self):
+        patch.object(factory, "PICKUP_SCHEDULER", "launchd").start()
+        plist = Path.home() / "Library" / "LaunchAgents" / "factory.pickup.plist"
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        plist.write_bytes(plistlib.dumps({"Label": "factory.pickup", "Program": "/old/python3"}))
+        self.loaded = True
+        code, out, _ = self.setup()
+        self.assertEqual(code, 0)
+        self.assertIn(f"    note: could not read ProgramArguments in {plist}", out)
+        plist.write_bytes(plistlib.dumps(["not", "a", "dict"]))
+        code, out, _ = self.setup()
+        self.assertEqual(code, 0)
+        self.assertIn(f"    note: could not read {plist}.", out)
+
+    @unittest.skipIf(sys.platform == "win32", "env launchers are POSIX")
+    def test_env_launcher_adds_program_folder(self):
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        agent = bin_dir / "fake-agent"
+        agent.write_text("#!/bin/sh\n", encoding="utf-8")
+        agent.chmod(0o755)
+        patch.dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ["PATH"]).start()
+        template = ["env", "X=0", "fake-agent", "{prompt}"]
+        self.write_launchers({"primary": template, "fallback": template})
+        self.assertIn(str(bin_dir), factory.timer_values(self.home)["path"].split(os.pathsep))
 
     def test_missing_device_names_the_fix(self):
         (self.home / "config.md").write_text("---\n---\n", encoding="utf-8")

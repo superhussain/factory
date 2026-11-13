@@ -4345,6 +4345,8 @@ def pickup(*args):
 
 USAGE_PICKUP_SETUP = "usage: pickup setup [--install]"
 CRON_PICKUP = re.compile(r"factory\.py.*\bpickup\b")
+ENV_ASSIGN = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=")
+SYSTEM_PYTHON = "/usr/bin/python3"
 
 
 def setup_run(argv, stdin=None):
@@ -4367,6 +4369,32 @@ def setup_try(call, *args):
             return None, err.getvalue().strip()[len("factory.py: "):]
 
 
+def timer_python():
+    """(path, why) of the python the pickup timer runs: SYSTEM_PYTHON when it runs this runtime,
+    else this command's python, which a version manager may move on upgrade."""
+    if WINDOWS:
+        return sys.executable, "this command's python"
+    if not os.path.isfile(SYSTEM_PYTHON):
+        return sys.executable, f"this command's python; {SYSTEM_PYTHON} is missing"
+    if sys.platform == "darwin" and setup_run(["xcode-select", "-p"])[0]:
+        return sys.executable, f"this command's python; {SYSTEM_PYTHON} needs the Xcode command line tools"
+    code, out = setup_run([SYSTEM_PYTHON, "-I", "-B", str(Path(HERE, "factory.py"))])
+    if code == 2 and out.lstrip().startswith("factory.py: usage:"):
+        return SYSTEM_PYTHON, "system python3"
+    return sys.executable, f"this command's python; {SYSTEM_PYTHON} cannot run the runtime"
+
+
+def launcher_folders(template):
+    """Folders the timer PATH needs for a resolved launcher: its program's, and for env the command env runs."""
+    folders = [os.path.dirname(template[0])]
+    if os.path.basename(template[0]) == "env":
+        command = next((a for a in template[1:] if not a.startswith("-") and not ENV_ASSIGN.match(a)), None)
+        found = command and shutil.which(command)
+        if found:
+            folders.append(os.path.dirname(found))
+    return folders
+
+
 def timer_path(scheduler):
     """The file the timer for scheduler lives in; cron's lives in the crontab."""
     if scheduler == "launchd":
@@ -4375,17 +4403,19 @@ def timer_path(scheduler):
 
 
 def timer_values(home):
-    """{argv, path, log} the pickup timer runs with."""
+    """{argv, path, log, python, why} the pickup timer runs with."""
+    python, why = timer_python()
     folders = []
     for route in setup_try(read_routes, home)[0] or []:
         template = setup_try(route_launcher, home, route)[0]
         if template:
-            folders.append(os.path.dirname(template[0]))
-    folders.append(os.path.dirname(sys.executable))
+            folders += launcher_folders(template)
+    folders.append(os.path.dirname(python))
     if not WINDOWS:
         folders += ["/usr/bin", "/bin"]
-    return {"argv": [sys.executable, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
-            "path": os.pathsep.join(dict.fromkeys(folders)), "log": str(Path(home, "logs", "pickup.log"))}
+    return {"argv": [python, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
+            "path": os.pathsep.join(dict.fromkeys(folders)), "log": str(Path(home, "logs", "pickup.log")),
+            "python": python, "why": why}
 
 
 def timer_text(scheduler, values):
@@ -4418,6 +4448,47 @@ def timer_installed(scheduler, home):
     if setup_run(["schtasks", "/Query", "/TN", "factory-pickup"])[0]:
         return False, "no scheduled task factory-pickup"
     return True, "scheduled task factory-pickup exists"
+
+
+def cron_argv(line):
+    """The command a crontab line runs: fields after the schedule, minus VAR= prefixes and redirects."""
+    try:
+        words = shlex.split(line)[5:]
+    except ValueError:
+        return None
+    while words and ENV_ASSIGN.match(words[0]):
+        words.pop(0)
+    end = next((i for i, w in enumerate(words) if w.startswith(">") or w.startswith("2>")), len(words))
+    return words[:end]
+
+
+def timer_drift(scheduler, values):
+    """None when the installed timer runs what --install would write, else what differs."""
+    want = values["argv"]
+    if scheduler == "launchd":
+        plist = timer_path(scheduler)
+        try:
+            have = plistlib.loads(plist.read_bytes()).get("ProgramArguments")
+        except (OSError, ValueError, AttributeError):
+            return f"could not read {plist}"
+        if not isinstance(have, list) or not all(isinstance(a, str) for a in have):
+            return f"could not read ProgramArguments in {plist}"
+    elif scheduler == "cron":
+        lines = [l for l in setup_run(["crontab", "-l"])[1].splitlines() if CRON_PICKUP.search(l)]
+        argvs = [cron_argv(l) for l in lines]
+        if want in argvs:
+            return None
+        have = argvs[0] if argvs and argvs[0] else None
+        if have is None:
+            return f"could not read the crontab line {lines[0] if lines else ''}".rstrip()
+    else:
+        cmd = timer_path(scheduler)
+        if cmd.exists() and cmd.read_bytes() == timer_text(scheduler, values).encode():
+            return None
+        return f"{cmd} differs from what --install would write"
+    if have == want:
+        return None
+    return f"the timer runs {shlex.join(have)}, but --install would write {shlex.join(want)}"
 
 
 def install_timer(home, scheduler):
@@ -4470,7 +4541,7 @@ def timer_fix(scheduler, home):
 
 
 def setup_checks(home, device):
-    """[(name, ok, detail, fix lines)] for the 7 pieces pickup needs on this host, in order.
+    """[(name, ok, detail, fix lines, note)] for the 7 pieces pickup needs on this host, in order.
     ok is None when an earlier check it depends on failed."""
     argv = [sys.executable, str(Path(HERE, "factory.py"))]
     if _HOME_OVERRIDE:
@@ -4483,7 +4554,7 @@ def setup_checks(home, device):
     checks.append(("home", not failing, f"failing: {', '.join(failing)}" if failing
                    else "config, credentials, projects and board pass",
                    [f"Run: {run} doctor",
-                    "Then fix each failing check; see docs/troubleshooting.md in the factory repository."]))
+                    "Then fix each failing check; see docs/troubleshooting.md in the factory repository."], None))
 
     config = Path(home, "config.md")
     named = (frontmatter(config)[0] if config.exists() else {}).get("device", "")
@@ -4494,17 +4565,17 @@ def setup_checks(home, device):
                    else f"config.md sets no device:, so this host is {device}",
                    [f"Replace the device: line in the frontmatter of {config} with:" if named
                     else f"Add this line inside the frontmatter of {config}:",
-                    f"device: {short if HOST_NAME.fullmatch(short) else '<host-name>'}"]))
+                    f"device: {short if HOST_NAME.fullmatch(short) else '<host-name>'}"], None))
 
     paths = read_paths(home)
     slugs = [slug for slug, path in paths.items() if os.path.isdir(path)]
     checks.append(("checkout", bool(slugs), ", ".join(slugs) if slugs
                    else "paths.md lists no checkout that exists on this host",
-                   [f"Run: {run} init <repo-path>"]))
+                   [f"Run: {run} init <repo-path>"], None))
 
     routes, why = setup_try(read_routes, home)
     checks.append(("routes", routes is not None, ", ".join(r[0] for r in routes) if routes else why,
-                   [f"Write {Path(home, 'routes.md')}:", "---", "primary: <provider> <model> <effort>", "---"]))
+                   [f"Write {Path(home, 'routes.md')}:", "---", "primary: <provider> <model> <effort>", "---"], None))
 
     if routes is None:
         launchers, why = None, "not checked: fix check 4 first"
@@ -4515,7 +4586,7 @@ def setup_checks(home, device):
     example = {"version": 1, "launchers": {r[0]: ["<program>", "<arg>", "..."] for r in routes or []}}
     checks.append(("launchers", launchers, why or "every route has a launcher",
                    [f"Write {Path(home, 'launchers.json')}:", json.dumps(example),
-                    f"Launcher examples: {skill / 'references' / 'pickup.md'}"]))
+                    f"Launcher examples: {skill / 'references' / 'pickup.md'}"], None))
 
     if failing or not slugs:
         first = " and ".join(n for n, bad in (("1", failing), ("3", not slugs)) if bad)
@@ -4538,11 +4609,14 @@ def setup_checks(home, device):
     checks.append(("pipeline", listed, detail, [] if listed is None else
                    ["Fix check 2 first if this host name is wrong.",
                     "Otherwise, in the dashboard, Settings, Pipeline (or Settings, Projects, <project>), "
-                    f"turn pickup on and add host {device} exactly as written."]))
+                    f"turn pickup on and add host {device} exactly as written."], None))
 
     installed, detail = timer_installed(PICKUP_SCHEDULER, home)
+    note = timer_drift(PICKUP_SCHEDULER, timer_values(home)) if installed else None
+    if note:
+        note += f". To update it, run: {run} pickup setup --install"
     checks.append(("timer", installed, detail,
-                   timer_fix(PICKUP_SCHEDULER, home) + [f"Or run: {run} pickup setup --install"]))
+                   timer_fix(PICKUP_SCHEDULER, home) + [f"Or run: {run} pickup setup --install"], note))
     return checks
 
 
@@ -4556,10 +4630,13 @@ def pickup_setup(*args):
     if args:
         print(install_timer(home, PICKUP_SCHEDULER))
     print(f"pickup setup on host {device} ({host_os()}, {PICKUP_SCHEDULER})")
-    print(f"skill {Path(HERE).parent}  python {sys.executable}  home {home}")
+    values = timer_values(home)
+    print(f"skill {Path(HERE).parent}  timer python {values['python']} ({values['why']})  home {home}")
     checks = setup_checks(home, device)
-    for n, (name, ok, detail, fix) in enumerate(checks, 1):
+    for n, (name, ok, detail, fix, note) in enumerate(checks, 1):
         print(f"{n}. {'ok' if ok else 'missing':<8} {name}: {detail}")
+        if note:
+            print(f"    note: {note}")
         if not ok:
             for line in fix:
                 print(f"    {line}")

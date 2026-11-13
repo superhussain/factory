@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 from unittest.mock import patch
 from xml.etree import ElementTree
+from xml.sax.saxutils import unescape
 
 from support import ROOT, SKILL, IsolatedTestCase, load_runtime, snapshot
 
@@ -326,6 +327,19 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("Interactive `/factory` use never adds it", skill)
         self.assertIn("then the standing instruction that ends this prompt, byte for byte",
                       " ".join(text["schedules/resume.md"].split()))
+
+    def test_agent_setup_prompt_is_one_text(self):
+        pickup = (SKILL / "references/pickup.md").read_text(encoding="utf-8")
+        prompt = re.search(r"\n## Agent setup prompt\n.*?\n```text\n(.*?)\n```\n", pickup, re.S).group(1)
+        page = (ROOT / "web/dashboard.html").read_text(encoding="utf-8")
+        shown = re.search(r'<code id="scheduler-agent-prompt">(.*?)</code>', page, re.S).group(1)
+        self.assertEqual(unescape(shown), prompt)
+        for phrase in ("pickup setup", "pickup --dry-run", "pickup setup --install", "7 of 7 ok",
+                       "paseo provider ls", "Never copy route, provider or model names",
+                       "Run it only after I answer yes",
+                       "A stored Paseo or Claude schedule prompt does not pick up ideas"):
+            self.assertIn(phrase, prompt)
+        self.assertNotIn("`", prompt)
 
     def test_open_items_are_absorbed_before_queued(self):
         def flat(name):

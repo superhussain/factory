@@ -818,13 +818,38 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     </section>
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
       <h3 id="scheduler-settings-heading" tabindex="-1">Scheduler</h3>
-      <p class="muted">Automatic pickup needs two things on each host: a scheduler that runs factory.py pickup every 5 minutes, and a launcher that starts one agent session per idea. Nothing here is saved. Copy a snippet, then replace each placeholder with this host's values.</p>
+      <p class="muted" id="scheduler-intro">Automatic pickup needs each host to run factory.py pickup every 5 minutes, with a launcher for each route. Let a coding agent on the host set it up, or follow the manual steps.</p>
+      <p class="muted" id="scheduler-not-a-prompt">A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the host timer runs pickup.</p>
+      <div class="settings-tabs" id="scheduler-mode-tabs" role="tablist" aria-label="Setup method">
+        <button type="button" role="tab" id="scheduler-mode-tab-agent" aria-controls="scheduler-mode-panel-agent" aria-selected="true" tabindex="0">Agent</button>
+        <button type="button" role="tab" id="scheduler-mode-tab-human" aria-controls="scheduler-mode-panel-human" aria-selected="false" tabindex="-1">Human</button>
+      </div>
+      <div id="scheduler-mode-panel-agent" role="tabpanel" aria-labelledby="scheduler-mode-tab-agent">
+        <p class="muted">Paste this prompt into a coding agent running on the host, such as Paseo, Claude Code or OpenCode. The agent runs pickup setup and fixes each missing check in order. It asks before it installs the timer, and tells you what to click when a fix is a dashboard setting.</p>
+        <div class="snippet"><div class="actions"><button class="btn" type="button" data-copy="scheduler-agent-prompt" aria-label="Copy agent setup prompt">Copy</button></div><pre class="wrap"><code id="scheduler-agent-prompt">Set up automatic factory pickup on this host. You are a coding agent on the machine that should pick up ideas. Work through these steps in order.
+
+1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory.py, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: python3 SKILL/runtime/factory.py pickup setup
+   If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with python3 tools/install.py --destination &lt;skills folder&gt; --replace from a clone of the factory repo, then start again.
+2. It prints 7 numbered checks, each ok or missing, with a fix under each missing one. Fix checks 1 to 6 in order. After each fix, run pickup setup again.
+   - home: run the doctor line it prints. If the factory home or its credentials are missing, stop and tell me. Never print or copy values from the .env file.
+   - device: add a device: line inside the frontmatter of config.md in the factory home, with a short name for this host.
+   - checkout: run the init line it prints with the path of this host's clone of each project. That adds it to paths.md.
+   - routes: write routes.md from providers and models that exist on this host. Find them first, for example with paseo provider ls and paseo provider models &lt;provider&gt;, opencode models, or the model aliases claude --help lists. Never copy route, provider or model names from another person's setup.
+   - launchers: write launchers.json with one launcher per route, copied from the matching example in SKILL/references/pickup.md. Keep every argument the example shows, including its permission mode. Never add --dangerously-skip-permissions or any flag that approves every action.
+   - pipeline: pickup must be on for the project and list this host exactly as pickup setup prints it. That is a dashboard setting under Settings, Pipeline, or Settings, Projects, then the project. If you cannot change it yourself, tell me exactly what to click and type, and wait until I say it is done.
+3. Run python3 SKILL/runtime/factory.py pickup --dry-run and show me what it would launch.
+4. Check 7 is the timer. Show me the command python3 SKILL/runtime/factory.py pickup setup --install and say that it writes and loads a 5 minute timer for this host. Run it only after I answer yes. Otherwise I run it myself.
+5. Run pickup setup again until it prints 7 of 7 ok. Then tell me which python the timer runs and any note it printed.
+
+A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.</code></pre></div>
+      </div>
+      <div id="scheduler-mode-panel-human" role="tabpanel" aria-labelledby="scheduler-mode-tab-human" hidden>
+      <p class="muted">Nothing here is saved. Copy a snippet, then replace each placeholder with this host's values.</p>
       <h4>Start here</h4>
       <p class="muted">Run this on each host. It checks every piece pickup needs, in order, and prints the exact fix for each missing one with this host's own paths. It exits non-zero until every check is ok.</p>
       <div class="snippet"><pre class="wrap"><code id="scheduler-snippet-setup">python3 &lt;installed-skill&gt;/runtime/factory.py pickup setup</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup" aria-label="Copy setup check command">Copy</button></div></div>
       <p class="muted">Then install the 5 minute timer for this host's scheduler. Running it again changes nothing. The sections below show what it writes, if you prefer to set it up by hand.</p>
       <div class="snippet"><pre class="wrap"><code id="scheduler-snippet-setup-install">python3 &lt;installed-skill&gt;/runtime/factory.py pickup setup --install</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup-install" aria-label="Copy timer install command">Copy</button></div></div>
-      <p class="muted" id="scheduler-not-a-prompt">A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the host timer runs pickup.</p>
       <h4>What runs pickup</h4>
       <ul class="scheduler-list">
         <li>Scheduler: the host's own timer, such as cron, launchd or Task Scheduler. It runs pickup every 5 minutes. Pickup never calls a model and prints nothing when there is no work.</li>
@@ -887,6 +912,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
         <div class="snippet"><pre><code id="scheduler-snippet-windows-task">schtasks /Create /TN factory-pickup /SC MINUTE /MO 5 /TR "%USERPROFILE%\.config\factory-pickup.cmd" /F</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-windows-task" aria-label="Copy schtasks command">Copy</button></div></div>
         <p class="muted">Python on Windows has no time zone data. Install it so usage-limit reset times parse. Without it, limits default to 60 minutes.</p>
         <div class="snippet"><pre><code id="scheduler-snippet-windows-tzdata">py -3 -m pip install --user tzdata</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-windows-tzdata" aria-label="Copy tzdata install command">Copy</button></div></div>
+      </div>
       </div>
       <p id="scheduler-status" role="status"></p>
     </section>
@@ -7255,13 +7281,19 @@ $('display-reset').addEventListener('click', () => {
   renderDisplaySettings();
   $('display-status').textContent = 'Display settings reset to defaults.';
 });
-// Scheduler setup help is static text. Copy buttons copy a snippet exactly, placeholders included.
+// Scheduler setup help is static text: an agent prompt and manual snippets. Copy buttons copy a snippet exactly, placeholders included.
 const SCHEDULER_TABS = ['scheduler-tab-cron', 'scheduler-tab-launchd', 'scheduler-tab-windows'];
 function selectSchedulerTab(id) {
   selectRovingTab(SCHEDULER_TABS, id);
   for (const tab of SCHEDULER_TABS) $(tab.replace('-tab-', '-panel-')).hidden = tab !== id;
 }
 listenTabs('scheduler-tabs', SCHEDULER_TABS, selectSchedulerTab);
+const SCHEDULER_MODE_TABS = ['scheduler-mode-tab-agent', 'scheduler-mode-tab-human'];
+function selectSchedulerMode(id) {
+  selectRovingTab(SCHEDULER_MODE_TABS, id);
+  for (const tab of SCHEDULER_MODE_TABS) $(tab.replace('-tab-', '-panel-')).hidden = tab !== id;
+}
+listenTabs('scheduler-mode-tabs', SCHEDULER_MODE_TABS, selectSchedulerMode);
 function enterSchedulerSection() {
   $('scheduler-status').textContent = '';
   $('scheduler-settings-heading').focus();
