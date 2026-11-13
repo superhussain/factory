@@ -342,7 +342,7 @@ class PrStateTest(IsolatedTestCase):
 
         def refuse(opener, request, *args, **kwargs):
             if "/v2/" in request.full_url:
-                raise OSError(f"refused for {TOKEN}")
+                raise error
             return real_open(opener, request, *args, **kwargs)
 
         def problem(env, routes, down=False):
@@ -367,7 +367,10 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual(problem(env, {BUILD: build_jobs(("script", "failed", "Lint frontend")),
                                        f"{BUILD}/jobs/{JOB_ID}/log": (200, {"size": 0})}),
                          "Buildkite sent no usable log")
+        error = OSError(f"refused for {TOKEN}")
         self.assertEqual(problem(env, {}, down=True), "can't reach Buildkite: refused for [token]")
+        error = factory.http.client.IncompleteRead(b"")
+        self.assertEqual(problem(env, {}, down=True), "can't reach Buildkite: IncompleteRead(0 bytes read)")
 
     def test_ci_log_is_null_without_a_buildkite_failure(self):
         (self.home / ".env").write_text(f"BUILDKITE_API_TOKEN={TOKEN}\n")

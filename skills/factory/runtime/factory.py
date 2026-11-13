@@ -5428,7 +5428,7 @@ def buildkite_log(home, check):
         except urllib.error.HTTPError as e:
             scopes = " (the token needs read_builds and read_build_logs)" if e.code in (401, 403) else ""
             return None, f"Buildkite answered {e.code}{scopes}"
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, http.client.HTTPException) as e:
             return None, "can't reach Buildkite: " + printable_line(str(e).replace(token, "[token]"), 200)
         try:
             data = json.loads(body) if len(body) <= BUILDKITE_MAX_BYTES else None
