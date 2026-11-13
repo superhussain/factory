@@ -4412,7 +4412,7 @@ def timer_values(home):
             folders += launcher_folders(template)
     folders.append(os.path.dirname(python))
     if not WINDOWS:
-        folders += ["/usr/bin", "/bin"]
+        folders += ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
     return {"argv": [python, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
             "path": os.pathsep.join(dict.fromkeys(folders)), "log": str(Path(home, "logs", "pickup.log")),
             "python": python, "why": why}
@@ -5413,7 +5413,11 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
         if dry:
             print(f"would clean up {job_id} {project}")
             continue
-        _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
+        try:
+            _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
+        except Exception as e:
+            print(f"factory.py: pickup could not clean up {job_id} {project}: {e}", file=sys.stderr)
+            continue
 
         def change(text, job_id=job_id, stage=stage, key=key, field=field, at=c[field], left=left):
             board = load_board(text)
@@ -7852,6 +7856,14 @@ def worktree(target):
     print(wt)
 
 
+LSOF_FALLBACKS = ("/usr/sbin/lsof", "/usr/bin/lsof")
+PROC_ROOT = "/proc"
+
+
+def lsof_exe():
+    return shutil.which("lsof") or next((p for p in LSOF_FALLBACKS if os.access(p, os.X_OK)), None)
+
+
 def worktree_pids(wt):
     """PIDs whose cwd is inside wt. Windows can't read another process's cwd, so it
     matches command lines instead, which misses a process started with a relative path."""
@@ -7881,16 +7893,20 @@ def worktree_pids(wt):
     def inside(path):
         return path == wt or path.startswith(wt + os.sep)
 
-    if os.path.isdir("/proc"):
-        for pid in filter(str.isdigit, os.listdir("/proc")):
+    if os.path.isdir(PROC_ROOT):
+        for pid in filter(str.isdigit, os.listdir(PROC_ROOT)):
             try:
-                if inside(os.readlink(f"/proc/{pid}/cwd")):
+                if inside(os.readlink(f"{PROC_ROOT}/{pid}/cwd")):
                     yield int(pid)
             except OSError:
                 pass
         return
+    exe = lsof_exe()
+    if exe is None:
+        print(f"factory.py: lsof not found, so processes in {wt} were not checked", file=sys.stderr)
+        return
     pid = None
-    for line in run(["lsof", "-a", "-d", "cwd", "-Fpn"]).splitlines():
+    for line in run([exe, "-a", "-d", "cwd", "-Fpn"]).splitlines():
         if line.startswith("p"):
             pid = int(line[1:])
         elif line.startswith("n") and pid is not None and inside(line[1:]):
