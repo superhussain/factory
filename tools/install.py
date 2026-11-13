@@ -26,6 +26,8 @@ REQUIRED = (
     "approver", "builder", "explorer", "review-code", "review-security", "review-ui", "review-ux", "spec-writer",
     "retro"))
 
+LEGACY = "huss-factory"
+
 
 def fail(message):
     print("install.py: " + message, file=sys.stderr)
@@ -94,6 +96,21 @@ def stamp(source, content):
     return json.dumps({"commit": commit, "tree": tree.hexdigest()}, sort_keys=True) + "\n"
 
 
+def drop_legacy(destination):
+    path = destination / LEGACY
+    if not os.path.lexists(path):
+        return
+    if not linked(path):
+        print("install.py: " + str(path) + " is a folder, not a link; remove it by hand so agents load only factory",
+              file=sys.stderr)
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        os.rmdir(path)
+    print("removed " + str(path))
+
+
 def identity(path):
     info = path.lstat()
     return info.st_dev, info.st_ino, info.st_mtime_ns
@@ -134,6 +151,8 @@ def install(source: Path, destination: Path, replace: bool = False) -> Path:
         required_dirs = {str(Path(name).parent).replace(os.sep, "/") for name in REQUIRED} - {"."}
         if prior is not None and prior[0] == content and set(prior[1]) == set(content) | required_dirs:
             print(str(target))
+            current = destination / LEGACY
+            drop_legacy(destination)
             return target
         if prior is not None and not replace:
             fail(f"{target}: existing install differs; use --replace explicitly")
@@ -161,6 +180,8 @@ def install(source: Path, destination: Path, replace: bool = False) -> Path:
         print(str(target))
         if backup is not None:
             print(str(backup))
+        current = destination / LEGACY
+        drop_legacy(destination)
         return target
     except (OSError, ValueError):
         fail(f"{current}: cannot safely install factory")
