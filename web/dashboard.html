@@ -467,6 +467,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     min-width: 9em; max-width: 28em; overflow-wrap: normal; word-break: normal;
   }
   .doc th, .agent-runs th { background: var(--code-bg); font-weight: 600; }
+  .agent-runs th, .agent-runs td { min-width: 0; white-space: nowrap; }
   .doc td code { overflow-wrap: anywhere; }
   .doc .mermaid { overflow-x: auto; margin: 1em 0; }
   .doc .mermaid svg { max-width: none; height: auto; }
@@ -711,7 +712,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           </select></label>
           <label for="pipeline-hold-min">Ideas before a batch starts<input type="number" id="pipeline-hold-min" min="1" max="20" step="1"></label>
           <label for="pipeline-hold-hours">Hours the oldest idea waits<input type="number" id="pipeline-hold-hours" min="1" max="168" step="1"></label>
-          <p id="pipeline-hold-help" class="muted">Pickup holds follow-ups and ideas backlog triage queued until a project has this many of them, or the oldest has waited this many hours without an update. Then one session builds them together. Ideas a person adds, approves or prioritizes never wait. A project value replaces the global one whole.</p>
+          <p id="pipeline-hold-help" class="muted">Pickup holds follow-ups and ideas that backlog triage queued until a project has this many of them, or the oldest has waited this many hours without an update. Then one session builds them together. Ideas a person adds, approves or prioritizes never wait. A project value replaces the global one whole.</p>
         </fieldset>
         <fieldset id="pipeline-archive">
           <legend>Archive old jobs</legend>
@@ -2667,7 +2668,7 @@ function renderPipelineSettings() {
     const value = String(d.hold?.[key] ?? '');
     if ($(id).value !== value && document.activeElement !== $(id)) $(id).value = value;
     $(id).disabled = busy || !holdMode;
-    $(id).setAttribute('aria-invalid', String(!!holdError));
+    $(id).setAttribute('aria-invalid', String(!!holdError?.startsWith('hold.' + key)));
   }
   $('pipeline-archive').hidden = $('pipeline-scope').value !== 'global';
   const archiveMode = d.archive?.mode ?? '';
