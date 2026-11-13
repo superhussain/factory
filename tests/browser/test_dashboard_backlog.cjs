@@ -481,6 +481,13 @@ async function offlineContext() {
   assert.equal("context" in two, false, "the context stops at the next item line");
   assert.equal("context" in three, false, "blank-only indented lines are no context");
 
+  let started = performance.now();
+  assert.equal(api.parseBacklogContext("## Question: a" + "\n".repeat(5980) + "x"), null);
+  assert.ok(performance.now() - started < 50, "blank-edge trim is linear in parseBacklogContext");
+  started = performance.now();
+  assert.equal(api.backlogItems("- [ ] sample: T\n" + "\n".repeat(5980) + "  x")[0].context, "x");
+  assert.ok(performance.now() - started < 50, "blank-edge trim is linear in backlogItems");
+
   const parsed = clone(api.parseBacklogContext(CONTEXT));
   assert.equal(parsed.recommend, "approved");
   assert.equal(
