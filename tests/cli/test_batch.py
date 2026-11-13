@@ -13,6 +13,8 @@ REF = {"id": LEAD, "kind": "batched-into"}
 NOW = "2026-01-01T12:00:00Z"
 LINE = "- [ ] sample: Name the weekly CSV weekly-<date>.csv (follow-up-of 080-sample-report)"
 CLAIM = {"device": "test", "session": "tag", "since": NOW, "seen": NOW}
+RIDER = "092-sample-csv-name"
+PR = "https://github.com/sample/app/pull/42"
 BAD_ID = "a job id is letters, digits, dots, dashes and underscores, like 003-rate-limiting. Nothing was written."
 
 
@@ -44,6 +46,17 @@ class BatchTest(IsolatedTestCase):
         api = patch.object(factory, "api", side_effect=self.api)
         api.start()
         self.addCleanup(api.stop)
+        (self.home / "projects").mkdir()
+        (self.home / "projects" / "sample.md").write_text("---\nrepo: sample/app\n---\n")
+        self.gh_calls = []
+        self.gh_view = (0, f"OPEN false factory/{RIDER}\n")
+        gh = patch.object(factory, "gh_pr", side_effect=self.gh_pr)
+        gh.start()
+        self.addCleanup(gh.stop)
+
+    def gh_pr(self, *args):
+        self.gh_calls.append(args)
+        return self.gh_view if args[0] == "view" else (0, "")
 
     def set_jobs(self, rows):
         self.text = factory.dump_board({"updated": "", "jobs": rows})
@@ -524,3 +537,49 @@ class BatchTest(IsolatedTestCase):
         for key in ("refs", "stacked", "pr"):
             self.assertNotIn(key, j)
         self.assertEqual(self.job("091-sample-typo")["note"], f"unbatched: {LEAD} closed")
+
+    def stacked_pr_batch(self):
+        self.stacked_batch()
+        rows = json.loads(self.text)["jobs"]
+        rows[2]["pr"] = PR
+        self.set_jobs(rows)
+
+    def close_lead(self):
+        with patch.dict(os.environ, {"PASEO_AGENT_ID": ""}), patch("sys.stdin", io.StringIO('{"stage": "closed"}')):
+            return invoke(factory, ["board", str(self.home), LEAD, "--session", "tag"])
+
+    def test_board_close_closes_stacked_pr(self):
+        self.stacked_pr_batch()
+        code, out, err = self.close_lead()
+        self.assertEqual((code, json.loads(out)["stage"]), (0, "closed"))
+        self.assertEqual(self.gh_calls[-1], ("close", PR, "--comment",
+                                             factory.STACKED_CLOSE_COMMENT.format(lead=LEAD, id=RIDER)))
+        self.assertIn(f"factory.py: stacked pull request {PR} of {RIDER} closed with a comment\n", err)
+        j = self.job(RIDER)
+        self.assertEqual((j["stage"], j["note"]), ("idea", f"unbatched: {LEAD} closed; stacked PR {PR} closed with a comment"))
+
+    def assert_left_open(self, why):
+        self.stacked_pr_batch()
+        code, out, err = self.close_lead()
+        self.assertEqual((code, json.loads(out)["stage"]), (0, "closed"))
+        self.assertNotIn("close", [c[0] for c in self.gh_calls])
+        self.assertIn(f"factory.py: leaves stacked pull request {PR} of {RIDER} open: {why}\n", err)
+        self.assertEqual(self.job(RIDER)["note"], f"unbatched: {LEAD} closed; stacked PR {PR} is still open")
+
+    def test_board_close_leaves_stacked_pr_open(self):
+        self.gh_view = (0, "OPEN false factory/other\n")
+        self.assert_left_open(f"its head branch factory/other is not the job's branch factory/{RIDER}")
+
+    def test_board_close_without_gh(self):
+        self.gh_view = None
+        self.assert_left_open("gh is not installed on test")
+
+    def test_refused_board_close_skips_stacked_pr(self):
+        self.stacked_pr_batch()
+        rows = json.loads(self.text)["jobs"]
+        rows[0]["claim"] = {**CLAIM, "session": "other", "seen": factory.now()}
+        self.set_jobs(rows)
+        self.puts = 0
+        code, out, err = self.close_lead()
+        self.assertEqual((code, out, self.puts, self.gh_calls), (6, "", 0, []))
+        self.assertEqual(self.job(RIDER)["pr"], PR)

@@ -1730,7 +1730,9 @@ class CloseTest(PickupFixture):
 
     def gh(self, *args):
         self.calls.append(("gh",) + args)
-        return None if self.gh_answers is None else self.gh_answers[args[0]]
+        if self.gh_answers is None:
+            return None
+        return self.gh_answers[args[:2]] if args[:2] in self.gh_answers else self.gh_answers[args[0]]
 
     def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
         if not (path.startswith("/api/jobs/alpha/") and path.endswith("/decision.md")):
@@ -1955,6 +1957,37 @@ class CloseTest(PickupFixture):
         code, out, err = self.pickup("--dry-run")
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(out.splitlines()[0], f"would close 042-sample-export alpha and pull request {self.PR}")
+        self.assertEqual([call for call in self.calls if call[0] == "gh"], [])
+        self.assertEqual((self.puts(), self.files), ([], {}))
+
+    RIDER_PR = "https://github.com/sample/alpha/pull/8"
+
+    def stacked_rider(self):
+        return {"id": "043-sample-schema", "project": "alpha", "stage": "build", "stacked": True,
+                "pr": self.RIDER_PR, "refs": [{"id": "042-sample-export", "kind": "batched-into"}],
+                "updated": "2026-01-01T00:00:00Z"}
+
+    def test_close_closes_stacked_rider_pr(self):
+        self.board["jobs"] = [self.closing(), self.stacked_rider()]
+        self.gh_answers[("view", self.RIDER_PR)] = (0, "OPEN false factory/043-sample-schema\n")
+        self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n",
+                                         f"factory.py: stacked pull request {self.RIDER_PR} of 043-sample-schema "
+                                         "closed with a comment\n"))
+        gh = [call for call in self.calls if call[0] == "gh"]
+        self.assertEqual(gh[-1], ("gh", "close", self.RIDER_PR, "--comment", factory.STACKED_CLOSE_COMMENT.format(
+            lead="042-sample-export", id="043-sample-schema")))
+        self.assertLess(self.calls.index(("PUT", "/api/board")), self.calls.index(gh[-1]))
+        job = self.job("043-sample-schema")
+        self.assertEqual((job["stage"], job["note"]), (
+            "idea", f"unbatched: 042-sample-export closed; stacked PR {self.RIDER_PR} closed with a comment"))
+        self.assertNotIn("pr", job)
+
+    def test_close_dry_run_names_stacked_pr(self):
+        self.board["jobs"] = [self.closing(), self.stacked_rider()]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[0],
+                         f"would close 042-sample-export alpha and stacked pull request {self.RIDER_PR}")
         self.assertEqual([call for call in self.calls if call[0] == "gh"], [])
         self.assertEqual((self.puts(), self.files), ([], {}))
 
