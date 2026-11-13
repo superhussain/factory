@@ -2614,7 +2614,7 @@ function renderRoute() {
   if (section === 'notifications' && was !== 'notifications') enterNotificationsSection();
   if (section === 'scheduler' && was !== 'scheduler') enterSchedulerSection();
   if (section === 'reference' && was !== 'reference') enterReferenceSection();
-  if (retrosWas && !retrosOpen) $('retros-link').focus();
+  if (retrosWas && !retrosOpen && !section) $('retros-link').focus();
   if (!section && was && (focusInside || document.activeElement === document.body)) $('settings-link').focus();
 }
 function leaveSettings() {

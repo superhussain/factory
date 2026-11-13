@@ -244,6 +244,15 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await t.test("going from retros to settings does not focus the Retros link", async () => {
+      const { page } = await openPage("#/retros");
+      await page.waitForSelector("#retros-page:not([hidden])", wait);
+      await page.click("#settings-link");
+      await page.waitForSelector("#settings-page:not([hidden])", wait);
+      assert.notEqual(await page.evaluate(() => document.activeElement.id), "retros-link");
+      await page.browserContext().close();
+    });
+
     await t.test("empty and failed loads say so", async () => {
       retros = { status: 200, body: "[]" };
       let { page } = await openPage("#/retros");
