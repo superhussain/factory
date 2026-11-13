@@ -104,11 +104,12 @@
   factory.py suggest approve <job-id> <A|B|C> [--chat-file <file>]
                                             a human at a terminal approves one option of such a card,
                                             or --chat-file records a person's chat message instead
-  factory.py control <job-id> <prioritize|unprioritize|pause|resume> --chat-file <file>
+  factory.py control <job-id> <prioritize|unprioritize|pause|resume|babysit|rerun> --chat-file <file>
+  factory.py control <job-id> move <host> --chat-file <file>
   factory.py control <job-id> close --reason-file <file> --chat-file <file>
                                             make the dashboard's Prioritize, Remove priority, Pause,
-                                            Resume or Close from a person's chat message, print the
-                                            result as JSON
+                                            Resume, Babysit PR, Move, Rerun or Close from a person's
+                                            chat message, print the result as JSON
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)

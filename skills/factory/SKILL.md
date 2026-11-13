@@ -312,8 +312,8 @@ Only pickup and `agent record` append `agents` rows, newest 32 kept;
 `agent report` counts them.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
-`babysit` is `{at}` once a person presses Babysit PR on a `pr-open` job. Only the dashboard
-sets it, and a `/factory babysit` session clears it with `null`; `board` refuses any other value.
+`babysit` is `{at}`, set on a `pr-open` job by Babysit PR or `control` (plus `via`, `quote`,
+`by`). A `/factory babysit` session clears it with `null`; `board` refuses other values.
 
 ## Rules
 
