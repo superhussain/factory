@@ -8,8 +8,8 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    continue.
 2. Run `python3 "$RUNTIME" retro aggregate [--days N]`. On exit 3, report the stderr
    line and stop. On any other nonzero exit, report the exit code and stop. On exit 0,
-   read `run`, `aggregate`, `digest`, `transcripts`, `out` and `findings` from the
-   printed JSON, and `host` from the `aggregate` file.
+   read `run`, `aggregate`, `digest`, `transcripts`, `out`, `findings` and `stale`
+   from the printed JSON, and `host` from the `aggregate` file.
 3. Dispatch one `factory-retro` subagent, giving it `run`, `aggregate`, `digest`,
    `transcripts` and `host`.
 4. Write its reply byte for byte to `out`.
@@ -28,6 +28,8 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    An `edited <file> to version N: <summary>` line means a file edit is saved through
    `PUT /api/project-retro/<file>`; a person undoes it with Restore to draft in Settings, Projects.
    A person decides each line on the dashboard Backlog decision page.
+   Then name each host in `stale` as `stale: <host>, latest digest <latest>`, with
+   `latest` from that host's entry in the `aggregate` file's `hosts`.
 
 Do the retro through these commands only, and edit neither the reply nor the run folder.
 Never run an autonomy command or decide a backlog line; a person decides each line.
