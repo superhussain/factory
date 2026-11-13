@@ -7852,6 +7852,14 @@ def worktree(target):
     print(wt)
 
 
+LSOF_FALLBACKS = ("/usr/sbin/lsof", "/usr/bin/lsof")
+PROC_ROOT = "/proc"
+
+
+def lsof_exe():
+    return shutil.which("lsof") or next((p for p in LSOF_FALLBACKS if os.access(p, os.X_OK)), None)
+
+
 def worktree_pids(wt):
     """PIDs whose cwd is inside wt. Windows can't read another process's cwd, so it
     matches command lines instead, which misses a process started with a relative path."""
@@ -7881,16 +7889,20 @@ def worktree_pids(wt):
     def inside(path):
         return path == wt or path.startswith(wt + os.sep)
 
-    if os.path.isdir("/proc"):
-        for pid in filter(str.isdigit, os.listdir("/proc")):
+    if os.path.isdir(PROC_ROOT):
+        for pid in filter(str.isdigit, os.listdir(PROC_ROOT)):
             try:
-                if inside(os.readlink(f"/proc/{pid}/cwd")):
+                if inside(os.readlink(f"{PROC_ROOT}/{pid}/cwd")):
                     yield int(pid)
             except OSError:
                 pass
         return
+    exe = lsof_exe()
+    if exe is None:
+        print(f"factory.py: lsof not found, so processes in {wt} were not checked", file=sys.stderr)
+        return
     pid = None
-    for line in run(["lsof", "-a", "-d", "cwd", "-Fpn"]).splitlines():
+    for line in run([exe, "-a", "-d", "cwd", "-Fpn"]).splitlines():
         if line.startswith("p"):
             pid = int(line[1:])
         elif line.startswith("n") and pid is not None and inside(line[1:]):
