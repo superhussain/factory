@@ -6805,9 +6805,11 @@ def init(repo_path=".", agents="none", connection=None):
     meta, body = frontmatter(skill / "templates" / "project.md")
     meta.pop("path", None)
     meta.update(repo=repo, base="main", title=name)
+    template = (skill / "templates" / "project.md").read_text(encoding="utf-8")
+    comments = "".join(f"{line}\n" for line in template.split("---\n")[1].splitlines() if line.startswith("#"))
     project, state, remote_file = project_files(home, slug)
     read_project_state(state)
-    text = "---\n" + "".join(f"{k}: {v}\n" for k, v in meta.items()) + "---\n" + body
+    text = "---\n" + "".join(f"{k}: {v}\n" for k, v in meta.items()) + comments + "---\n" + body
     original = local_bytes(project)
     status, _, _ = api(home, "GET", f"/api/projects/{slug}.md", ok=(200, 404), raw=True)
     if status == 200:
