@@ -5775,10 +5775,11 @@ def gh_pr_view(pr, *args):
     return gh_answer(gh_pr("view", pr, *args), "gh pr view")
 
 
-def pr_checks(pr):
+def pr_checks(pr, required=False):
     """(checks, problem): the PR's checks as gh pr checks lists them and None, or [] and why
-    the reply was unusable. gh's own no-checks reply is usable, as []."""
-    result = gh_pr("checks", pr, "--json", "name,bucket,link", stderr=True)
+    the reply was unusable. gh's own no-checks reply is usable, as []. With required, only the checks
+    that gate the merge."""
+    result = gh_pr("checks", pr, *(("--required",) if required else ()), "--json", "name,bucket,link", stderr=True)
     if result is None:
         return [], "gh is not installed"
     code, out, err = result
@@ -5792,7 +5793,7 @@ def pr_checks(pr):
             isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("bucket"), str)
             for c in checks):
         return checks, None
-    if code == 1 and not out.strip() and "no checks reported" in err:
+    if code == 1 and not out.strip() and re.search(r"no (required )?checks reported", err):
         return [], None
     return [], f"exited {code} with no check list" if code else "printed no check list"
 
@@ -5840,8 +5841,8 @@ PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMerge
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
 PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
-                    "{isInMergeQueue mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved"
-                    " comments(first:100){nodes{author{__typename login}}}}}"
+                    "{isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved"
+                    " comments(first:100){nodes{authorAssociation author{__typename login}}}}}"
                     " latestReviews(first:100){nodes{author{__typename login}}}}}}")
 PR_STATE_INTERVAL = 30
 BUILDKITE_API = "https://api.buildkite.com/v2"
@@ -5914,8 +5915,8 @@ def pr_reading(home, pr, base):
     target = view.get("baseRefName") or base
     if not isinstance(target, str) or not re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", target):
         fail("gh printed an unusable baseRefName", 5)
-    listed = pr_checks(pr)[0]
-    if view.get("statusCheckRollup") and not listed:
+    listed, problem = pr_checks(pr, required=True)
+    if problem and view.get("statusCheckRollup"):
         fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5)
     buckets = {c["bucket"] for c in listed}
     checks = "fail" if buckets & {"fail", "cancel"} else "pending" if "pending" in buckets \
@@ -5953,20 +5954,23 @@ def pr_reading(home, pr, base):
     approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
     state = str(view.get("state") or "").lower()
     in_queue = pull.get("isInMergeQueue") is True or isinstance(pull.get("mergeQueueEntry"), dict)
-    bots = 0
+    bots = threads = 0
     for thread in (pull.get("reviewThreads") or {}).get("nodes") or []:
         if not isinstance(thread, dict) or thread.get("isResolved"):
             continue
         comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
-        if comments and (comments[0].get("author") or {}).get("__typename") == "Bot" \
-                and all(login(c) != author for c in comments):
+        if not comments or any(login(c) == author for c in comments):
+            continue
+        if (comments[0].get("author") or {}).get("__typename") == "Bot":
             bots += 1
+        elif comments[0].get("authorAssociation") in PR_REVIEWERS:
+            threads += 1
     queued = in_queue or bool(view.get("autoMergeRequest"))
     conflict = view.get("mergeStateStatus") == "DIRTY"
     stacked = target != base
     if state in ("merged", "closed"):
         step = state
-    elif unanswered or bots:
+    elif unanswered or bots or threads:
         step = "fix-reviews"
     elif conflict:
         step = "rebase"
@@ -5987,7 +5991,8 @@ def pr_reading(home, pr, base):
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
-            "base": target, "next": step, "ci_log": buildkite_log(home, failed) if failed else None}
+            "base": target, "next": step, "ci_log": buildkite_log(home, failed) if failed else None,
+            "threads": threads, "merge_queue": pull.get("isMergeQueueEnabled") is True}
 
 
 def pr_state_cmd(target, *args):
