@@ -368,13 +368,25 @@ class FactoryTest(IsolatedTestCase):
         self.assertEqual(self.saved()["updated"], "2026-01-02T12:00:00Z")
         self.assertIn("recorded the spec Goal on the board", self.output.getvalue())
 
-    def test_push_skips_unchanged_or_missing_goal(self):
+    def test_push_skips_unchanged_goal(self):
         self.write_spec("Sample exports stay under one megabyte.\n")
         factory.push(self.target)
         self.put_paths.clear()
         factory.push(self.target)
         self.assertNotIn("/api/board", self.put_paths)
+
+    def test_push_clears_goal_when_spec_drops_it(self):
+        self.write_spec("Sample exports stay under one megabyte.\n")
+        factory.push(self.target)
+        self.put_paths.clear()
         (self.folder / "spec.md").write_text("# Spec: 001-test\n\n## Scope\n\n- one\n")
+        factory.push(self.target)
+        self.assertIn("/api/jobs/sample/001-test/spec.md", self.put_paths)
+        self.assertEqual(self.put_paths.count("/api/board"), 1)
+        self.assertNotIn("goal", self.saved())
+        self.assertIn("cleared the board goal: spec.md has no Goal section", self.output.getvalue())
+        self.put_paths.clear()
+        (self.folder / "spec.md").write_text("# Spec: 001-test\n\n## Scope\n\n- two\n")
         factory.push(self.target)
         self.assertIn("/api/jobs/sample/001-test/spec.md", self.put_paths)
         self.assertNotIn("/api/board", self.put_paths)

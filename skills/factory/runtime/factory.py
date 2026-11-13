@@ -6723,17 +6723,22 @@ def conflict_exit(conflicts):
 
 
 def record_goal(home, slug, job_id, goal):
-    """Copy the spec Goal onto the job's board row so search can match it. Leaves job.updated alone."""
+    """Copy the spec Goal onto the job's board row so search can match it, or drop the row's
+    goal when the spec has none. Leaves job.updated alone."""
     def change(text):
         data = load_board(text)
         job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
         if not job or job.get("project") != slug or job.get("goal") == goal:
             return None, False
-        job["goal"], data["updated"] = goal, now()
+        if goal is None:
+            job.pop("goal")
+        else:
+            job["goal"] = goal
+        data["updated"] = now()
         return dump_board(data), True
 
     if cas(home, "/api/board", change):
-        print("recorded the spec Goal on the board")
+        print("recorded the spec Goal on the board" if goal else "cleared the board goal: spec.md has no Goal section")
 
 
 def push(target):
@@ -6779,9 +6784,8 @@ def push(target):
         spec_pushed = spec_pushed or rel == "spec.md"
     save_manifest(folder, manifest)
     print(f"pushed {pushed} files")
-    goal = spec_goal((folder / "spec.md").read_text(encoding="utf-8")) if spec_pushed else None
-    if goal:
-        record_goal(home, slug, job_id, goal)
+    if spec_pushed:
+        record_goal(home, slug, job_id, spec_goal((folder / "spec.md").read_text(encoding="utf-8")))
     if conflicts:
         conflict_exit(conflicts)
 
