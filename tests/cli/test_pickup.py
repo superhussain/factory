@@ -2556,11 +2556,14 @@ class PickupSetupTest(PickupFixture):
         patch.object(factory, "PICKUP_SCHEDULER", "cron").start()
         patch.object(factory, "setup_run", side_effect=self.scheduler).start()
         self.crontab = ""
+        self.crontab_error = None
         self.loaded = False
         self.runs = []
 
     def scheduler(self, argv, stdin=None):
         self.runs.append(argv)
+        if argv == ["crontab", "-l"] and self.crontab_error:
+            return 1, self.crontab_error
         if argv == ["crontab", "-l"]:
             return (0, self.crontab) if self.crontab else (1, "no crontab for user")
         if argv == ["crontab", "-"]:
@@ -2625,6 +2628,24 @@ class PickupSetupTest(PickupFixture):
         self.assertEqual(code, 0)
         self.assertTrue(out.startswith("timer already installed: crontab\n"))
         self.assertEqual(len(self.writes()), 1)
+
+    def test_install_cron_keeps_an_unreadable_crontab(self):
+        self.crontab_error = "crontab: permission denied"
+        code, _, err = self.setup("--install")
+        self.assertEqual(code, 1)
+        self.assertIn("could not read the crontab, so it was left as is: crontab: permission denied", err)
+        self.assertEqual(self.writes(), [])
+
+    def test_invalid_device_is_named(self):
+        (self.home / "config.md").write_text("---\ndevice: bad host\n---\n", encoding="utf-8")
+        code, out, _ = self.setup()
+        self.assertEqual(code, 3)
+        self.assertIn("2. missing  device: config.md device: 'bad host' is not a valid host name\n", out)
+
+    def test_fix_lines_carry_the_home_override(self):
+        code, out, _ = invoke(factory, ["--home", str(self.home), "pickup", "setup"])
+        self.assertEqual(code, 3)
+        self.assertIn(f"factory.py --home {self.home} pickup setup --install\n", out)
 
     @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
     def test_install_launchd_writes_plist(self):

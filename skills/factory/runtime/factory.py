@@ -4313,12 +4313,13 @@ CRON_PICKUP = re.compile(r"factory\.py.*\bpickup\b")
 
 
 def setup_run(argv, stdin=None):
-    """(returncode, stdout + stderr) of a scheduler command; 127 when the program is missing."""
+    """(returncode, output) of a scheduler command: stdout on success, stdout + stderr on failure;
+    127 when the program is missing."""
     try:
         done = subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=30)
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         return 127, str(e)
-    return done.returncode, done.stdout + done.stderr
+    return done.returncode, done.stdout if done.returncode == 0 else done.stdout + done.stderr
 
 
 def setup_try(call, *args):
@@ -4355,7 +4356,7 @@ def timer_values(home):
 def timer_text(scheduler, values):
     argv, path, log = values["argv"], values["path"], values["log"]
     if scheduler == "cron":
-        return f"*/5 * * * * PATH={path} {shlex.join(argv)} >> {shlex.quote(log)} 2>&1"
+        return f"*/5 * * * * PATH={shlex.quote(path)} {shlex.join(argv)} >> {shlex.quote(log)} 2>&1"
     if scheduler == "launchd":
         return plistlib.dumps({"Label": "factory.pickup", "ProgramArguments": argv,
                                "EnvironmentVariables": {"PATH": path}, "StartInterval": 300,
@@ -4400,6 +4401,8 @@ def install_timer(home, scheduler):
         done = f"installed launchd timer: {plist}"
     elif scheduler == "cron":
         code, out = setup_run(["crontab", "-l"])
+        if code and not (code == 1 and "no crontab for" in out):
+            fail(f"could not read the crontab, so it was left as is: {out.strip()}", 1)
         lines = out.splitlines() if code == 0 else []
         wanted = [line for line in lines if not CRON_PICKUP.search(line)] + [text]
         if lines == wanted:
@@ -4435,6 +4438,8 @@ def setup_checks(home, device):
     """[(name, ok, detail, fix lines)] for the 7 pieces pickup needs on this host, in order.
     ok is None when an earlier check it depends on failed."""
     run = f"{sys.executable} {Path(HERE, 'factory.py')}"
+    if _HOME_OVERRIDE:
+        run += f" --home {shlex.quote(str(home))}"
     skill = Path(HERE).parent
     checks = []
 
@@ -4447,8 +4452,9 @@ def setup_checks(home, device):
     config = Path(home, "config.md")
     named = (frontmatter(config)[0] if config.exists() else {}).get("device", "")
     short = socket.gethostname().split(".")[0]
-    checks.append(("device", bool(named and HOST_NAME.fullmatch(named)),
-                   f"device: {device}" if named and HOST_NAME.fullmatch(named)
+    valid = bool(named and HOST_NAME.fullmatch(named))
+    checks.append(("device", valid, f"device: {device}" if valid
+                   else f"config.md device: {named!r} is not a valid host name" if named
                    else f"config.md sets no device:, so this host is {device}",
                    [f"Add this line inside the frontmatter of {config}:",
                     f"device: {short if HOST_NAME.fullmatch(short) else '<host-name>'}"]))
