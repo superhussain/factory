@@ -177,7 +177,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .settings-section .retro-head h3 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
   .retro-run-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .retro-run-meta code { font-family: var(--font-mono); font-size: 11px; }
-  .retro-summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .retro-summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
   .retro-findings-head, .retro-finding { display: grid; grid-template-columns: 28px minmax(0, 1fr) 150px 180px; column-gap: 16px; }
   .retro-findings-head { padding: 0 10px 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); }
   .retro-findings { list-style: none; margin: 0; padding: 0; }
@@ -189,6 +189,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .retro-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
   .retro-share { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .retro-share-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .retro-chip-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .retro-share-bar { display: block; height: 4px; margin-top: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
   .retro-share-bar > span { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--accent); }
   .retro-cards { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -2769,11 +2770,12 @@ function renderRetrosPage() {
     return;
   }
   const marks = retroMarks(backlogText);
-  const chip = (card, status) => {
+  const chip = (card, status, named = true) => {
     const cls = 'chip retro-chip is-' + retroWord(status.text).replace(' ', '-');
-    const name = ' aria-label="' + esc(card.title + ': ' + status.text) + '" title="' + esc(card.title) + '"';
-    return status.href ? '<a class="' + cls + '" href="' + esc(status.href) + '"' + name + '>' + esc(status.text) + '</a>'
-      : '<span class="' + cls + '"' + name + '>' + esc(status.text) + '</span>';
+    const text = (named ? '<span class="retro-chip-name">' + esc(card.title) + ': </span>' : '') + esc(status.text);
+    const title = named ? ' title="' + esc(card.title) + '"' : '';
+    return status.href ? '<a class="' + cls + '" href="' + esc(status.href) + '"' + title + '>' + text + '</a>'
+      : '<span class="' + cls + '"' + title + '>' + text + '</span>';
   };
   const html = retros.map((run) => {
     const seen = new Map();
@@ -2799,12 +2801,12 @@ function renderRetrosPage() {
         '<div class="retro-why-block"><p class="retro-why-label is-fix">Fix</p><p>' + esc(f.fix) + '</p></div></div></details></li>';
     }).join('');
     const loose = run.cards.length ? '<p class="retro-unlinked"><span class="retro-unlinked-label">Not linked to a finding</span>' +
-      run.cards.map((c) => '<span class="retro-unlinked-card">' + esc(c.title) + ' ' + chip(c, retroCardStatus(c, marks)) + '</span>').join('') + '</p>' : '';
+      run.cards.map((c) => '<span class="retro-unlinked-card">' + esc(c.title) + ' ' + chip(c, retroCardStatus(c, marks), false) + '</span>').join('') + '</p>' : '';
     const meta = [esc(run.host), esc(retroDay(run.from)) + ' to ' + esc(retroDay(run.to)), run.sessions + (run.sessions === 1 ? ' session' : ' sessions')]
       .concat(run.rejected ? [run.rejected + ' rejected'] : []).concat('<code>' + esc(run.run) + '</code>').join(' · ');
     return '<section class="settings-section retro-run" id="retro-run-' + esc(run.run) + '" aria-labelledby="retro-h-' + esc(run.run) + '">' +
-      '<div class="retro-head"><div><h3 id="retro-h-' + esc(run.run) + '">' + esc(retroWhen(run.run)) + '</h3><p class="retro-run-meta">' + meta + '</p></div>' +
-      '<p class="retro-summary">' + summary + '</p></div>' +
+      '<div class="retro-head"><div><h3 id="retro-h-' + esc(run.run) + '">' + esc(retroWhen(run.run)) + '</h3><p class="retro-run-meta">' + meta + '</p>' +
+      '<p class="retro-summary">' + summary + '</p></div></div>' +
       '<div class="retro-findings-head" aria-hidden="true"><span>#</span><span>Finding</span><span>Share of estimated cost</span><span>Card</span></div>' +
       '<ol class="retro-findings">' + items + '</ol>' + loose + '</section>';
   }).join('');

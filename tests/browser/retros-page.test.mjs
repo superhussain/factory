@@ -147,9 +147,13 @@ test("retros page", { timeout: 180000 }, async (t) => {
     const rows = (page) =>
       page.$$eval("#retros-list .retro-finding", (items) =>
         items.map((item) =>
-          [".retro-rank", ".retro-title", ".retro-share-value", ".retro-cards"].map(
-            (selector) => item.querySelector(selector).textContent,
-          ),
+          [".retro-rank", ".retro-title", ".retro-share-value"]
+            .map((selector) => item.querySelector(selector).textContent)
+            .concat(
+              [...item.querySelectorAll(".retro-cards > *")]
+                .map((c) => c.lastChild.textContent)
+                .join(""),
+            ),
         ),
       );
 
@@ -204,7 +208,7 @@ test("retros page", { timeout: 180000 }, async (t) => {
         true,
       );
       const links = await page.$$eval("#retros-list .retro-cards a", (as) =>
-        as.map((a) => [a.textContent, a.getAttribute("href")]),
+        as.map((a) => [a.lastChild.textContent, a.getAttribute("href")]),
       );
       assert.deepEqual(links[0], ["Merged", "#1490-guard-the-ls-alias"]);
       const waiting = links.find(([text]) => text === "Waiting");
@@ -232,6 +236,14 @@ test("retros page", { timeout: 180000 }, async (t) => {
       assert.match(unlinked, /^Not linked to a finding/);
       assert.match(unlinked, /Loose card\s*Merged/);
       assert.equal(await page.$("#retros-list h4"), null);
+      assert.equal(
+        await page.$eval(
+          "#retro-20261105T090000Z-d4e5f6-3 .retro-cards > :first-child",
+          (el) => el.textContent,
+        ),
+        "Gone card: Archived",
+      );
+      assert.equal(await page.$("#retros-list .retro-unlinked .retro-chip-name"), null);
       const summary = await page.$("#retros-list .retro-why summary");
       assert.equal(await summary.evaluate((el) => el.textContent), "Root cause and fix");
       assert.ok(await summary.$("svg"));
