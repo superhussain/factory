@@ -246,10 +246,11 @@
     },
     {
       "id": "FactoryTest",
-      "count": 62,
+      "count": 63,
       "methods": [
         "test_stuck_drops_a_stale_stub",
         "test_hold_sets_started_once",
+        "test_hold_names_a_babysit_request",
         "test_hold_prints_elapsed_since_started",
         "test_handoff_uploads_then_releases_without_resetting_stage_or_round",
         "test_all_active_stages_and_old_acceptance_metadata",
