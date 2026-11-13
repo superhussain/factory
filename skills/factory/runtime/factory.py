@@ -1896,6 +1896,20 @@ def backlog_answers(path, questions, decision):
     return "\n".join(out) if any(a is not None for a in parsed) else ""
 
 
+def split_picks(text, labels):
+    """The picks of a ", " separated answer. A whole label wins over the split, so a label that holds
+    ", " stays one pick; the longest label that ends the text or is followed by ", " is taken first."""
+    picks, i = [], 0
+    while i < len(text):
+        rest = text[i:]
+        label = max((x for x in labels if rest == x or rest.startswith(x + ", ")), key=len, default=None)
+        piece = label if label is not None else rest.split(", ", 1)[0]
+        if piece:
+            picks.append(piece)
+        i += len(piece) + 2
+    return picks
+
+
 def parse_answers(path, questions, skip_error):
     """One (picked labels, other text) per question from an answers file of "- <header>: <answer>"
     lines, or None for a "no answer" line. Exits 2 when the file does not fit the questions, and
@@ -1929,7 +1943,7 @@ def parse_answers(path, questions, skip_error):
             out.append(None)
             continue
         picked, _, other = answer.partition("Other: ") if answer.startswith("Other: ") else answer.partition(". Other: ")
-        picked = [label for label in picked.split(", ") if label]
+        picked = split_picks(picked, q["labels"])
         other = " ".join(other.split())
         for label in picked:
             if label not in q["labels"]:
