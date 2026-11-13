@@ -89,6 +89,16 @@ class RoutesTest(IsolatedTestCase):
             with self.subTest(text=text):
                 config.write_text(text, encoding="utf-8")
                 self.assertIn(message, self.exit_message("pick"))
+        config.write_text("{}", encoding="utf-8")
+        real_read = factory.Path.read_text
+
+        def read_text(path, *args, **kwargs):
+            if path == config:
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_read(path, *args, **kwargs)
+
+        with patch.object(factory.Path, "read_text", read_text):
+            self.assertIn(f"cannot read {config}: routes pick needs it", self.exit_message("pick"))
 
     def test_pick_ignores_expired(self):
         self.write_limits({"alpha": stamp(-1)})

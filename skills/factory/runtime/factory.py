@@ -3116,7 +3116,7 @@ def provider_runtime(provider):
         providers = json.loads(path.read_text(encoding="utf-8")).get("agents", {}).get("providers", {})
         if not isinstance(providers, dict):
             raise ValueError()
-    except (ValueError, AttributeError):
+    except (OSError, ValueError, AttributeError):
         fail(f"cannot read {path}: routes pick needs it to find the base runtime of {provider}", 2)
     seen = [provider]
     while isinstance(providers.get(seen[-1]), dict) and "extends" in providers[seen[-1]]:
