@@ -2202,6 +2202,25 @@ class CloseCleanupTest(PickupFixture):
         self.assertTrue(self.wt.exists())
 
 
+class PrSyncTest(PickupFixture):
+    QUERY = ('query { repository(owner: "sample", name: "alpha") { p7: pullRequest(number: 7) { state } '
+             'p8: pullRequest(number: 8) { state } } }')
+
+    def test_pr_states_sends_one_query_and_parses_it(self):
+        answer = json.dumps({"data": {"repository": {"p7": {"state": "MERGED"}, "p8": None}}})
+        with patch.object(factory, "gh_cli", return_value=(0, answer)) as gh:
+            self.assertEqual(factory.pr_states("sample/alpha", [7, 8], DEVICE), ({7: "MERGED"}, None))
+        gh.assert_called_once_with("api", "graphql", "-f", "query=" + self.QUERY)
+        for result, why in ((None, "gh is not installed on host-a"),
+                            (("timeout", ""), "gh api graphql timed out after 60 seconds on host-a"),
+                            ((1, ""), "gh api graphql exited 1 (check gh auth status on host-a)"),
+                            ((0, "not json"), "gh api graphql returned no repository"),
+                            ((0, '{"data": {"repository": null}}'), "gh api graphql returned no repository"),
+                            ((0, "[]"), "gh api graphql returned no repository")):
+            with self.subTest(result=result), patch.object(factory, "gh_cli", return_value=result):
+                self.assertEqual(factory.pr_states("sample/alpha", [7], DEVICE), (None, why))
+
+
 class DenyNotesTest(PickupFixture):
     def setUp(self):
         super().setUp()

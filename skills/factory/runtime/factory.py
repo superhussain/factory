@@ -4710,6 +4710,11 @@ def closing_message(job_id):
 
 
 GH_PR = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/\d+", re.ASCII)
+GH_PR_PARTS = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)", re.ASCII)
+SYNC_STAGES = ("pr-open", "needs-human")
+PR_SYNC_LIMIT = 100
+GITHUB_CLOSE_REASON = "PR closed on GitHub"
+MERGED_NOTE = "merged on GitHub"
 PR_CLOSE_COMMENT = (
     "> \U0001f916 **Agent-authored report** \u2014 written by factory.py pickup on the owner's behalf, "
     "posted automatically. Tests not run.\n\n"
@@ -4749,6 +4754,28 @@ def gh_cli(*args, stderr=False):
         result = r.returncode, r.stdout, r.stderr
     return result if stderr else result[:2]
 
+
+
+def pr_states(repo, numbers, device):
+    """The states of repo's pull requests from one gh api graphql call: ({number: state}, None),
+    or (None, why). A pull request GitHub returns null for is left out."""
+    owner, name = repo.split("/")
+    q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
+         + "".join(f"p{n}: pullRequest(number: {n}) {{ state }} " for n in numbers) + "} }")
+    r = gh_cli("api", "graphql", "-f", "query=" + q)
+    if r is None:
+        return None, f"gh is not installed on {device}"
+    if r[0] == "timeout":
+        return None, f"gh api graphql timed out after 60 seconds on {device}"
+    if r[0]:
+        return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
+    try:
+        found = json.loads(r[1])["data"]["repository"]
+    except (ValueError, KeyError, TypeError):
+        found = None
+    if not isinstance(found, dict):
+        return None, "gh api graphql returned no repository"
+    return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 def close_pull_request(home, j, device, comment=None):
     """Close the job's open PR with a comment, PR_CLOSE_COMMENT unless one is given. Returns (state, why)."""
