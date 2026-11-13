@@ -58,6 +58,11 @@
                                             pr, state, review, checks, queued, conflict and next; --wait
                                             re-reads every 30 seconds for up to S seconds (1 to 600) while
                                             next is wait; a bad pr exits 4, a gh problem 5
+  factory.py pr-queue <project-slug>/<job-id>
+                                            print whether GitHub queued the job PR through merge-async:
+                                            one JSON line of pr, status and detail; enqueued exits 0,
+                                            failed or refused 1, pending after 120 seconds 3, a bad or
+                                            stacked pr 4, a gh problem 5
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
@@ -5927,6 +5932,66 @@ def pr_state_cmd(target, *args):
         time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
 
 
+PR_QUEUE_USAGE = "usage: pr-queue <project-slug>/<job-id>"
+PR_QUEUE_INTERVAL = 10
+PR_QUEUE_TIMEOUT = 120
+MERGE_ASYNC_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def pr_queue_cmd(target):
+    """Queue the job's PR through merge-async and print one JSON line once GitHub says enqueued or failed."""
+    home, slug, job_id = r2_target(target, True)
+    pr = board_pr(home, slug, job_id)
+    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
+    owner, name, _, number = pr.split("/")[3:7]
+    try:
+        view = json.loads(gh_pr_view(pr, "--json", "headRefOid,baseRefName"))
+    except ValueError:
+        view = None
+    sha = view.get("headRefOid") if isinstance(view, dict) else None
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        fail("gh pr view printed no usable headRefOid", 5)
+    if view.get("baseRefName") != base:
+        fail(f"PR #{number} targets {printable_line(str(view.get('baseRefName')), 255)}, not {base}: "
+             "it waits for its parent", 4)
+    path = f"repos/{owner}/{name}/pulls/{number}/merge-async"
+
+    def done(status, detail, code):
+        print(json.dumps({"pr": int(number), "status": status, "detail": detail}))
+        raise SystemExit(code)
+
+    result = gh_cli("api", "-X", "PUT", path, "-f", f"sha={sha}", "-f", "merge_action=merge_queue", stderr=True)
+    if result is None or result[0] == "timeout":
+        gh_answer(result, "gh api merge-async")
+    code, out, err = result
+    if code:
+        done("refused", printable_line(err or out, 500), 1)
+    try:
+        reply = json.loads(out)
+    except ValueError:
+        reply = None
+    uuid = next((v for v in reply.values() if isinstance(v, str) and MERGE_ASYNC_ID.fullmatch(v)), None) \
+        if isinstance(reply, dict) else None
+    if uuid is None:
+        fail("gh api merge-async printed no request id", 5)
+    start = time.monotonic()
+    while True:
+        try:
+            data = json.loads(gh_answer(gh_cli("api", f"{path}/{uuid}"), "gh api merge-async"))
+        except ValueError:
+            data = None
+        if not isinstance(data, dict):
+            fail("gh api merge-async printed no JSON object", 5)
+        status = str(data.get("status") or "").lower()
+        if status == "enqueued":
+            done(status, "", 0)
+        if status == "failed":
+            done(status, printable_line(json.dumps(data), 500), 1)
+        if time.monotonic() - start >= PR_QUEUE_TIMEOUT:
+            done(status, printable_line(json.dumps(data), 500), 3)
+        time.sleep(PR_QUEUE_INTERVAL)
+
+
 def tracer_start(j):
     """True when Tracer scope approval moved this job to build and no session has started it."""
     return j.get("stage") == "build" and j.get("note") == TRACER_APPROVED_NOTE
@@ -8983,6 +9048,7 @@ COMMANDS["prompt"] = (prompt_cmd, 2, 8)
 COMMANDS["wait"] = (wait_cmd, 2, 23)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
 COMMANDS["pr-state"] = (pr_state_cmd, 1, 3)
+COMMANDS["pr-queue"] = (pr_queue_cmd, 1, 1)
 COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
 COMMANDS["host"] = (host_cmd, 3, 3)
