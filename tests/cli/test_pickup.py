@@ -2500,6 +2500,14 @@ class BabysitTest(PickupFixture):
         self.assertNotIn("claim", self.job("042-sample-export"))
         self.assertEqual((self.sent, self.launched()), ([], []))
 
+    def test_an_agent_in_any_other_state_skips_the_babysit(self):
+        self.linked({"synthetic-agent": "initializing"})
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("skip babysit 042-sample-export alpha: agent synthetic-agent is initializing\n", out)
+        self.assertEqual(self.pickup()[1], "")
+        self.assertEqual((self.sent, self.launched()), ([], []))
+
     def test_an_agent_on_another_server_skips_the_babysit(self):
         self.linked({"synthetic-agent": "idle"}, server="other-server")
         code, out, err = self.pickup("--dry-run")
@@ -2545,6 +2553,15 @@ class BabysitTest(PickupFixture):
         self.assertEqual(len(self.sent), 1)
         self.assertEqual(self.launched()[0]["argv"][7], f"/factory babysit 042-sample-export --session {tag}\n\n"
                          + factory.UNATTENDED)
+
+    def test_a_failed_send_to_a_closed_agent_with_no_route_says_so(self):
+        self.linked({"synthetic-agent": "closed"}, send=False)
+        with patch.object(factory, "pick_route", return_value=None):
+            code, out, err = self.pickup()
+        self.assertEqual((code, out), (0, ""))
+        self.assertTrue(err.endswith("factory.py: pickup could not launch babysit 042-sample-export: "
+                                     "no available route\n"), err)
+        self.assertNotIn("claim", self.job("042-sample-export"))
 
     def test_a_new_babysit_launch_names_its_workspace_and_title(self):
         paseo = ["/usr/bin/paseo", "run", "--no-wait", "--new-workspace", "worktree", "--title", "042 idea"]

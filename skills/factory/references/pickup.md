@@ -54,7 +54,8 @@ Each run, in order:
   `idle` or `closed` agent gets the command with `paseo send` (a closed agent resumes): a dry
   run prints `would send babysit <id> <project> to agent <agent>`, and a send prints
   `sent babysit <id> <project> to agent <agent> session <tag>`. A `running` agent skips the
-  job this run (`skip babysit <id> <project>: agent <agent> is running`). An agent on another
+  job this run (`skip babysit <id> <project>: agent <agent> is running`, likewise for any
+  other status such as `initializing`). An agent on another
   server skips it (`agent <agent> lives on server <server>`), and so does a failed `paseo ls`
   (`paseo ls failed`). An agent absent from `paseo ls`, or no link, launches a new session.
   A failed send to an `idle` agent prints a stderr line, releases the claim and launches

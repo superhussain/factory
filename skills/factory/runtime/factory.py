@@ -4522,7 +4522,7 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
 
     def job_agent(j):
         """(agent, state) for the job's Paseo link, else (None, None). state is idle, closed or running, or
-        foreign (another server), unanswered (paseo ls failed) or None (agent absent)."""
+        foreign (another server), unanswered (paseo ls failed) or None (agent absent). Any other status is returned as is."""
         nonlocal statuses
         link = j.get("paseo")
         agent = link.get("agent") if isinstance(link, dict) else None
@@ -4550,12 +4550,12 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
         if c:
             return f"{head}: claimed by {c['device']} session {c.get('session')}"
         agent, state = job_agent(j)
-        if state == "running":
-            return f"{head}: agent {agent} is running"
         if state == "foreign":
             return f"{head}: agent {agent} lives on server {j['paseo'].get('server')}"
         if state == "unanswered":
             return f"{head}: paseo ls failed"
+        if state not in (None, "idle", "closed"):
+            return f"{head}: agent {agent} is {state}"
         reason = pickup_reason(home, project, paths, settings, device, dry)
         return f"{head}: {reason}" if reason else None
 
@@ -4567,6 +4567,7 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
 
     def launch(j, tag, route):
         if route is None:
+            print(f"factory.py: pickup could not launch babysit {j['id']}: no available route", file=sys.stderr)
             release_pickup_claim(home, j["id"], device, tag)
             return
         template = route_launcher(home, route)
@@ -7553,7 +7554,7 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout,
                                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
         except subprocess.TimeoutExpired:
-            return None, "", f"git {args[0]} timed out after 20 s"
+            return None, "", f"git {args[0]} timed out after {timeout} s"
         except OSError:
             return None, "", f"could not run git {args[0]}"
         return r.returncode, r.stdout.strip(), r.stderr

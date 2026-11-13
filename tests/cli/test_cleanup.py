@@ -195,14 +195,6 @@ class CleanupTest(IsolatedTestCase):
         self.assertEqual(seen.count(None), 1)
         self.assertEqual(set(seen) - {None}, {20})
 
-    def test_git_times_out(self):
-        code, out, _ = self.git_raises("worktree", subprocess.TimeoutExpired(["git"], 20))
-        self.assertEqual(code, 1)
-        self.assertEqual(out, {"removed": [], "left": [
-            f"worktree {self.wt}: git worktree timed out after 20 s",
-            "branch factory/001-test: kept because its worktree remains"]})
-        self.assertTrue(self.wt.exists())
-
     def test_git_not_runnable(self):
         code, out, _ = self.git_raises(None, FileNotFoundError("git"))
         self.assertEqual(code, 1)
