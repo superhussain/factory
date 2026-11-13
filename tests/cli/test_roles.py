@@ -1,10 +1,10 @@
-import html
 import os
 import re
 import shutil
 from pathlib import Path
 from unittest.mock import patch
 from xml.etree import ElementTree
+from xml.sax.saxutils import unescape
 
 from support import ROOT, SKILL, IsolatedTestCase, load_runtime, snapshot
 
@@ -333,7 +333,7 @@ class RolesTest(IsolatedTestCase):
         prompt = re.search(r"\n## Agent setup prompt\n.*?\n```text\n(.*?)\n```\n", pickup, re.S).group(1)
         page = (ROOT / "web/dashboard.html").read_text(encoding="utf-8")
         shown = re.search(r'<code id="scheduler-agent-prompt">(.*?)</code>', page, re.S).group(1)
-        self.assertEqual(html.unescape(shown), prompt)
+        self.assertEqual(unescape(shown), prompt)
         for phrase in ("pickup setup", "pickup --dry-run", "pickup setup --install", "7 of 7 ok",
                        "paseo provider ls", "Never copy route, provider or model names",
                        "Run it only after I answer yes",
