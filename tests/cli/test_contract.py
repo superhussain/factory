@@ -141,11 +141,11 @@ class LegacyInventoryTest(IsolatedTestCase):
         import unittest
         import test_factory
         fixture = json.loads((ROOT / "tests/fixtures/cli-v1.json").read_text())
-        counts = {"ProjectSyncTest": 11, "FactoryTest": 61, "IdeaTest": 19,
+        counts = {"ProjectSyncTest": 11, "FactoryTest": 62, "IdeaTest": 19,
                   "AgentInstallTest": 6, "ResumeInstructionTest": 2, "IdeaImagesTest": 8}
         self.assertEqual({row["id"]: row["count"] for row in fixture["legacy_groups"]}, counts)
         for row in fixture["legacy_groups"]:
             actual = unittest.TestLoader().getTestCaseNames(getattr(test_factory, row["id"]))
             self.assertEqual(len(actual), row["count"])
             self.assertEqual(set(actual), set(row["methods"]))
-        self.assertEqual(sum(counts.values()), 107)
+        self.assertEqual(sum(counts.values()), 108)
