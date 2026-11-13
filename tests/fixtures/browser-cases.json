@@ -142,6 +142,7 @@
   "tests/browser/follow-up.test.mjs",
   "tests/browser/rerun.test.mjs",
   "tests/browser/capture-retry.test.mjs",
+  "tests/browser/capture-compare.test.mjs",
   "tests/browser/owned-fixtures.test.mjs",
   "tests/browser/pipeline-settings.test.mjs",
   "tests/browser/settings-page.test.mjs",
