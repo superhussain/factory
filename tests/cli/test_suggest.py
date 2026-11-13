@@ -547,7 +547,10 @@ class SuggestTest(SuggestCase):
         self.admit(suggestions())
         card = self.board["jobs"][-1]["id"]
         message = "  approve the ls alias item,\ninteractive only  "
-        code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat", message, tty=False)
+        path = self.home / "chat.txt"
+        path.write_text(message, encoding="utf-8")
+        code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat-file", str(path),
+                                          tty=False)
         self.assertEqual(code, 0, err)
         asked.assert_not_called()
         job = self.board["jobs"][-1]
@@ -565,21 +568,30 @@ class SuggestTest(SuggestCase):
         self.admit(suggestions())
         card = self.board["jobs"][-1]["id"]
         before, puts = json.dumps(self.board), self.puts()
-        for extra in ((), ("--chat", ""), ("--chat", "   ")):
-            with self.subTest(extra=extra):
-                code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", *extra, tty=False)
-                self.assertEqual(code, 2)
-                self.assertIn("suggest approve needs an interactive terminal; a human runs it", err)
-                asked.assert_not_called()
+        code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", tty=False)
+        self.assertEqual(code, 2)
+        self.assertIn("suggest approve needs an interactive terminal; a human runs it", err)
+        asked.assert_not_called()
+        code, err, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat-file", "", tty=True,
+                                          typed=card)
+        self.assertEqual(code, 2)
+        self.assertIn("--chat-file : cannot read it as UTF-8 text; nothing was changed", err)
+        asked.assert_not_called()
+        path = self.home / "chat.txt"
         for message, why in (("approve A, see https://example.test/x", "must not hold a code fence or a link"),
                              ("a" * 501, "must be a string of 1-500 characters")):
             with self.subTest(message=message[:20]):
-                code, err, _ = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat", message, tty=False)
+                path.write_text(message, encoding="utf-8")
+                code, err, _ = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat-file", str(path),
+                                              tty=False)
                 self.assertEqual(code, 2)
-                self.assertIn(f"--chat {why}; nothing was changed", err)
-        for args in (("--chat",), ("--note", "approve A"), ("--chat", "approve A", "extra")):
+                self.assertIn(f"--chat-file {why}; nothing was changed", err)
+        for args in (("--chat-file",), ("--note", "approve A"), ("--chat", "approve A"),
+                     ("--chat-file", str(path), "extra")):
             with self.subTest(args=args):
-                self.assertEqual(self.run_human(factory.suggest_cmd, "approve", card, "A", *args, tty=False)[0], 2)
+                code, err, _ = self.run_human(factory.suggest_cmd, "approve", card, "A", *args, tty=False)
+                self.assertEqual(code, 2)
+                self.assertIn(factory.SUGGEST_APPROVE_USAGE[len("usage: "):], err)
         self.assertEqual(json.dumps(self.board), before)
         self.assertEqual(self.puts(), puts)
 

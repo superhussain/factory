@@ -25,7 +25,15 @@ class BacklogDecideTests(TriageFixture):
             path = self.dir / "answers.md"
             path.write_text(answers, encoding="utf-8")
             args += ["--answers", str(path)]
-        return invoke(self.module, args + list(extra) + ([] if chat is None else ["--chat", chat]))
+        return invoke(self.module, args + list(extra) + ([] if chat is None else ["--chat-file", self.text(chat)]))
+
+    def text(self, text, name="chat.txt"):
+        path = self.dir / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def notes(self, text, name="notes.txt"):
+        return "--notes-file", self.text(text, name)
 
     def footer(self, verb, at):
         return f'\n\n---\n{verb} in chat by wsl at {at}: "{MESSAGE}"'
@@ -52,7 +60,7 @@ class BacklogDecideTests(TriageFixture):
 
     def test_approve_with_notes_and_other(self):
         code, _, err = self.decide("approve", "- Guard the ls alias: Interactive only. Other: and   warn once",
-                                   "--notes", "  Keep it small.  ")
+                                   *self.notes("  Keep it small.  "))
         self.assertEqual(code, 0, err)
         job = self.board()[-1]
         self.assertEqual(job["backlog"]["notes"], "Keep it small.")
@@ -77,7 +85,7 @@ class BacklogDecideTests(TriageFixture):
         path = self.dir / "none.md"
         path.write_text("- Guard the ls alias: no answer\n", encoding="utf-8")
         code, out, err = invoke(self.module, ["backlog", "decide", key, "rework", "--answers", str(path),
-                                              "--notes", "Say which shells.", "--chat", MESSAGE])
+                                              *self.notes("Say which shells."), "--chat-file", self.text(MESSAGE)])
         self.assertEqual(code, 0, err)
         job = self.board()[-1]
         at = job["updated"]
@@ -91,7 +99,7 @@ class BacklogDecideTests(TriageFixture):
         self.assertEqual(json.loads(out)["decision"], "rework")
 
     def test_rework_needs_no_answers(self):
-        code, _, err = self.decide("rework", None, "--notes", "Say which shells.")
+        code, _, err = self.decide("rework", None, *self.notes("Say which shells."))
         self.assertEqual(code, 0, err)
         self.assertNotIn("answers", self.board()[-1]["backlog"])
 
@@ -104,16 +112,16 @@ class BacklogDecideTests(TriageFixture):
              "answer every question to approve or deny; pass --answers with one line per question"),
             (("approve", "- Guard the ls alias: Keep it"), 2,
              "Keep it is not an option of Guard the ls alias; pick from Interactive only, Drop the alias"),
-            (("rework", "- Guard the ls alias: Keep it", "--notes", "n"), 2, "Keep it is not an option"),
+            (("rework", "- Guard the ls alias: Keep it", *self.notes("n", "n.txt")), 2, "Keep it is not an option"),
             (("approve", "- Guard the ls alias: Interactive only, Drop the alias"), 2,
              "Guard the ls alias takes one pick"),
             (("approve", ""), 2, "one line per question, as - <header>: <answer>, for: Guard the ls alias"),
             (("approve", ANSWER + "\n- Another: x"), 2, "one line per question"),
             (("approve", "- Other header: Interactive only"), 2, "one line per question"),
             (("approve", ANSWER + " see https://example.test/x"), 2, "links are not allowed"),
-            (("rework", None), 2, "rework needs --notes that say what to change"),
-            (("rework", None, "--notes", "   "), 2, "rework needs --notes that say what to change"),
-            (("approve", ANSWER, "--notes", "a" * 2001), 2, "--notes must be a string of 1-2000 characters"),
+            (("rework", None), 2, "rework needs --notes-file that says what to change"),
+            (("rework", None, *self.notes("   ", "blank.txt")), 2, "blank.txt is empty; nothing was changed"),
+            (("approve", ANSWER, *self.notes("a" * 2001)), 2, "--notes-file must be a string of 1-2000 characters"),
         ]
         for (decision, answers, *extra), code, message in cases:
             with self.subTest(message=message, decision=decision):
@@ -128,18 +136,22 @@ class BacklogDecideTests(TriageFixture):
                 self.unchanged(before)
         result = self.decide("approve", chat="see https://example.test/x")
         self.assertEqual(result[0], 2)
-        self.assertIn("--chat must not hold a code fence or a link; nothing was changed", result[2])
-        result = invoke(self.module, ["backlog", "decide", "0123456789ab", "deny", "--chat", MESSAGE])
+        self.assertIn("--chat-file must not hold a code fence or a link; nothing was changed", result[2])
+        chat = self.text(MESSAGE)
+        result = invoke(self.module, ["backlog", "decide", "0123456789ab", "deny", "--chat-file", chat])
         self.assertEqual(result, (4, "", "factory.py: no open backlog item 0123456789ab; it was decided, reworded "
                                          "or removed\n"))
         unregistered = self.module.backlog_key("- [ ] nowhere: Unregistered item")
-        result = invoke(self.module, ["backlog", "decide", unregistered, "approve", "--chat", MESSAGE])
+        result = invoke(self.module, ["backlog", "decide", unregistered, "approve", "--chat-file", chat])
         self.assertEqual(result, (4, "", "factory.py: register project nowhere before deciding this item\n"))
-        for args in (["decide", KEY, "maybe", "--chat", MESSAGE], ["decide", "nothex", "deny", "--chat", MESSAGE],
-                     ["decide", KEY, "deny", "--chat", MESSAGE, "--chat", MESSAGE],
-                     ["decide", KEY, "deny", "--bogus", "x", "--chat", MESSAGE], ["decide", KEY, "deny", "--chat"]):
+        for args in (["decide", KEY, "maybe", "--chat-file", chat], ["decide", "nothex", "deny", "--chat-file", chat],
+                     ["decide", KEY, "deny", "--chat-file", chat, "--chat-file", chat],
+                     ["decide", KEY, "deny", "--bogus", "x", "--chat-file", chat], ["decide", KEY, "deny", "--chat-file"],
+                     ["decide", KEY, "deny", "--chat", MESSAGE], ["decide", KEY, "rework", "--notes", "n", "--chat-file", chat]):
             with self.subTest(args=args):
-                self.assertEqual(invoke(self.module, ["backlog", *args])[0], 2)
+                result = invoke(self.module, ["backlog", *args])
+                self.assertEqual(result[0], 2)
+                self.assertIn(self.module.BACKLOG_DECIDE_USAGE, result[2])
         self.unchanged(before)
 
     def test_two_picks_allowed_under_pick_many(self):
@@ -199,6 +211,17 @@ class BacklogDecideTests(TriageFixture):
         self.assertEqual([j["id"] for j in self.board()], ["003-old-job", "004-guard-the-ls"])
         self.assertIn("- [x] sample: Guard the ls alias (004-guard-the-ls)", self.files["/api/backlog"])
 
+    def test_rerun_with_a_new_quote_reuses_the_job(self):
+        self.cas_down = {"/api/backlog"}
+        self.assertEqual(self.decide("approve")[0], 5)
+        self.cas_down = set()
+        code, out, err = self.decide("approve", chat="yes, approve the ls alias one")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["id"], "004-guard-the-ls")
+        self.assertEqual([j["id"] for j in self.board()], ["003-old-job", "004-guard-the-ls"])
+        self.assertEqual(self.board()[-1]["backlog"]["quote"], MESSAGE)
+        self.assertIn("- [x] sample: Guard the ls alias (004-guard-the-ls)", self.files["/api/backlog"])
+
     def test_chat_file(self):
         path = self.dir / "chat.txt"
         path.write_text(MESSAGE + "\n", encoding="utf-8")
@@ -210,6 +233,7 @@ class BacklogDecideTests(TriageFixture):
         base = ["backlog", "decide", KEY, "approve", "--answers", str(answers)]
         for extra, code, err in ((["--chat-file", str(link)], 6, "is a symlink or junction; nothing was changed"),
                                  (["--chat-file", str(self.dir / "missing.txt")], 2, "cannot read it as UTF-8 text"),
+                                 (["--chat-file", ""], 2, "--chat-file : cannot read it as UTF-8 text"),
                                  (["--chat-file", str(path), "--chat", MESSAGE], 2, "usage: backlog decide")):
             with self.subTest(extra=extra):
                 result = invoke(self.module, base + extra)
@@ -244,7 +268,10 @@ class BacklogDecideTests(TriageFixture):
         before = dict(self.files)
         code, _, err = self.decide("deny", "- Guard the ls alias: Drop the alias")
         self.assertEqual(code, 6)
-        self.assertIn("004-guard-the-ls already holds another decision for this item and was picked up", err)
+        self.assertEqual(err, "factory.py: 004-guard-the-ls already holds the approved decision for this item and "
+                              "was picked up, so nothing was changed. To keep approved, rerun backlog decide "
+                              f"{KEY} approve. To change it, decide the item on the dashboard and close "
+                              "004-guard-the-ls there.\n")
         self.unchanged(before)
 
     def test_chat_file_refusals_name_the_flag(self):
