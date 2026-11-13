@@ -71,6 +71,7 @@ function setup({ reply = clef(0.86) } = {}) {
       status: response.status,
       text: await response.text(),
       etag: response.headers.get("ETag"),
+      timing: response.headers.get("Server-Timing"),
     };
   };
   const triage = (body) => send("POST", "/api/backlog/triage", body);
@@ -1062,6 +1063,7 @@ const NEEDS_FILE =
   "# Pick a release path\n\n## Steps\n1. Run it.\n\n## Question: Release path\nWhich path should the sample take?\nPick: one\n- Fast (recommended): ship now.\n- Careful: wait a day.\n";
 const NEEDS_PATH = "/api/jobs/sample/001-needs/needs.md";
 const NEEDS_TRIAGE_PATH = "/api/jobs/sample/001-needs/needs-triage.json";
+const TIMING = /^needs-rating;dur=(\d+)$/;
 const NEEDS_REPLY = {
   model: "clef-flash",
   answers: {
@@ -1078,21 +1080,25 @@ test("a needs.md push stores clef-flash picks and any failure stores nothing", a
     assert.equal(r.status, 200);
     assert.equal(r.text, "ok");
     assert.ok(r.etag);
+    assert.match(r.timing, TIMING);
     assert.ok(s.bucket.objects.get("jobs/sample/001-needs/needs.md"));
+    return r;
   };
   const stored = (s) => s.send("GET", NEEDS_TRIAGE_PATH, undefined, person);
 
-  const s = setup({ reply: NEEDS_REPLY });
+  const s = setup({ reply: () => new Promise((done) => setTimeout(() => done(NEEDS_REPLY), 25)) });
   await s.save("projects/sample", on());
-  await push(s);
+  const first = await push(s);
+  assert.ok(Number(TIMING.exec(first.timing)[1]) >= 20);
   assert.equal(s.runs.length, 1);
   const input = s.runs[0][1];
   assert.deepEqual(Object.keys(input.questions), ["q1", "q1.o1", "q1.o2"]);
   assert.ok(input.state.endsWith(`<backlog-item trust="data">\n${NEEDS_FILE}\n</backlog-item>`));
   const r = await stored(s);
   assert.equal(r.status, 200);
-  const { at, ...record } = JSON.parse(r.text);
+  const { at, ms, ...record } = JSON.parse(r.text);
   assert.match(at, /^\d{4}-\d\d-\d\dT/);
+  assert.ok(Number.isInteger(ms) && ms >= 20, String(ms));
   assert.deepEqual(record, {
     sha256: createHash("sha256").update(NEEDS_FILE).digest("hex"),
     model: MODEL,
@@ -1144,6 +1150,15 @@ test("a needs.md push stores clef-flash picks and any failure stores nothing", a
   await plain.save("projects/sample", on());
   await push(plain, "# Steps\n\nRun it.\n");
   assert.equal(plain.runs.length, 0);
+
+  const again = await s.send("PUT", NEEDS_PATH, NEEDS_FILE, device, { "If-None-Match": "*" });
+  assert.equal(again.status, 412);
+  assert.equal(again.timing, null);
+  const spec = await s.send("PUT", "/api/jobs/sample/001-needs/spec.md", "# Spec\n", device, {
+    "If-None-Match": "*",
+  });
+  assert.equal(spec.status, 200);
+  assert.equal(spec.timing, null);
 
   const write = await s.send("PUT", NEEDS_TRIAGE_PATH, "{}", device, { "If-None-Match": "*" });
   assert.equal(write.status, 404);
