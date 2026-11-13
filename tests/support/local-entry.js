@@ -22,10 +22,11 @@ const config = {
 };
 
 export default {
-  fetch: (request, env) =>
+  fetch: (request, env, ctx) =>
     serveFactory(
       request,
       { ...env, config },
       { verified: true, kind: "user", email: "operator@example.test" },
+      ctx,
     ),
 };
