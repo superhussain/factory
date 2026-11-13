@@ -141,6 +141,10 @@ class NeedsAnswerTest(SuggestCase):
         link.symlink_to(target)
         self.assertIn("symlink", self.refuse(6, chat=str(link)))
 
+    def test_chat_file_link_is_neutralized(self):
+        self.answer(chat="042: CSV, see https://factory.example.test/#/x")
+        self.assertIn('Chat message: "042: CSV, see (link: factory.example.test)"', self.files["answers.md"])
+
     def test_bad_usage(self):
         with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit) as raised:
             factory.needs_cmd("submit", JOB, "--answers", "a", "--chat-file", "c")

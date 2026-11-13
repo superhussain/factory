@@ -134,9 +134,10 @@ class BacklogDecideTests(TriageFixture):
                 result = self.decide("approve", chat=chat)
                 self.assertEqual(result[0], 2)
                 self.unchanged(before)
-        result = self.decide("approve", chat="see https://example.test/x")
+        result = self.decide("approve", chat="see ghp_" + "a" * 24)
         self.assertEqual(result[0], 2)
-        self.assertIn("--chat-file must not hold a code fence or a link; nothing was changed", result[2])
+        self.assertIn("--chat-file looks like a secret; nothing was changed", result[2])
+        self.unchanged(before)
         chat = self.text(MESSAGE)
         result = invoke(self.module, ["backlog", "decide", "0123456789ab", "deny", "--chat-file", chat])
         self.assertEqual(result, (4, "", "factory.py: no open backlog item 0123456789ab; it was decided, reworded "
@@ -246,6 +247,11 @@ class BacklogDecideTests(TriageFixture):
         self.assertEqual((job["backlog"]["via"], job["backlog"]["quote"]), ("chat", MESSAGE))
         self.assertTrue(job["idea"].endswith(self.footer("Approved", job["updated"])))
 
+    def test_chat_file_link_is_neutralized(self):
+        result = self.decide("approve", chat="approve https://factory.example.test/#/backlog/0123456789ab")
+        self.assertEqual(result[0], 0, result[2])
+        self.assertEqual(self.board()[-1]["backlog"]["quote"], "approve (link: factory.example.test)")
+
     def test_rerun_with_another_decision_replaces_the_unsaved_one(self):
         self.cas_down = {"/api/backlog"}
         self.assertEqual(self.decide("approve")[0], 5)
@@ -280,7 +286,7 @@ class BacklogDecideTests(TriageFixture):
         path = self.dir / "chat.txt"
         before = dict(self.files)
         for text, err in ((" \n", f"--chat-file {path} is empty; nothing was changed"),
-                          ("see https://example.test/x", "--chat-file must not hold a code fence or a link")):
+                          ("see ghp_" + "a" * 24, "--chat-file looks like a secret")):
             with self.subTest(text=text):
                 path.write_text(text, encoding="utf-8")
                 code, _, out = invoke(self.module, ["backlog", "decide", KEY, "approve", "--answers", str(answers),
