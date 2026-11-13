@@ -110,10 +110,10 @@ patch, or a hand-back. After a merge or queue command, read again. A queued PR r
   | `enqueued` | 0 | read again |
   | `failed` or `refused`, with `Required workflow` in `detail` | 1 | run `git -C "$WT" fetch origin "<base>"`, merge `origin/<base>` into `$WT`, push, read again |
   | any other `failed` or `refused` | 1 | patch `{"needs": "PR #<n> could not enter the merge queue: <detail>. Fix that on GitHub, then press Babysit PR again", "babysit": null, "claim": null}` and stop |
-  | still pending after 120 seconds | 3 | patch the same needs with `detail` and stop |
+  | still pending after 120 seconds | 3 | patch `{"needs": "PR #<n> was still waiting to enter the merge queue after 120 seconds: <detail>. Check it on GitHub, then press Babysit PR again", "babysit": null, "claim": null}` and stop |
 
   Exit 4 (a bad or stacked `pr`) and 5 (gh failed) use the stderr-line needs patch
-  above. Run `pr-queue` at most twice per session. A required-workflow merge push
+  above. Run `pr-queue` at most twice per session; after that, hand back. A required-workflow merge push
   counts toward the 3-push cap.
 - Never merge while `stacked` is true. The merge commands would land the PR in its
   parent's branch. GitHub retargets it to `$BASE` once the parent merges, and the next

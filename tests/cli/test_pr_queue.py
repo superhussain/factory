@@ -12,7 +12,7 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 UUID = "0190a1b2-0000-4000-8000-0000000000aa"
 PATH = "repos/example/sample/pulls/44/merge-async"
 PUT = object()
-REQUIRED = 'Required workflow "Jira Ticket Validate" is not satisfied'
+REQUIRED = 'Required workflow "sample-validate" is not satisfied'
 
 
 def view(base="main", sha=SHA):
@@ -110,6 +110,13 @@ class PrQueueTest(IsolatedTestCase):
                 code, out, err, calls = self.queue([status("enqueued")], put_answer=put(body))
                 self.assertEqual((code, out, len(calls)), (5, "", 2))
                 self.assertIn("gh api merge-async printed no request id", err)
+
+    def test_gh_problem_on_a_poll_exits_5(self):
+        for answer, why in (((0, "[]"), "printed no JSON object"), ((1, ""), "gh api merge-async exited 1")):
+            with self.subTest(answer=answer):
+                code, out, err, _ = self.queue([answer])
+                self.assertEqual((code, out), (5, ""))
+                self.assertIn(why, err)
 
     def test_gh_problem_on_the_put_exits_5(self):
         for answer in (None, ("timeout", "", "")):
