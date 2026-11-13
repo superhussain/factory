@@ -115,7 +115,8 @@ Each run, in order:
   or whose project pickup does not list this host. A dry run prints
   `would launch babysit ...` and `skip babysit <id> <project>: <reason>`. A failed launch
   releases the claim. This launch and babysat jobs do not count against `--limit` or the
-  in-flight cap. The session follows [babysit](commands/babysit.md).
+  in-flight cap. The session follows [babysit](commands/babysit.md). A live holder
+  learns of the click from its next `hold`, which prints `babysit requested`.
 - Picks the first route in `routes.md` that is not marked limited, then resolves
   the launcher for it. A config error exits 2 before anything is claimed.
 - Claims one idea at a time — the board compare-and-swap stops two hosts taking
