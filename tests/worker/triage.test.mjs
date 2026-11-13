@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import {
   DUPLICATE_LIMIT,
@@ -66,7 +67,11 @@ function setup({ reply = clef(0.86) } = {}) {
       env,
       principal,
     );
-    return { status: response.status, text: await response.text() };
+    return {
+      status: response.status,
+      text: await response.text(),
+      etag: response.headers.get("ETag"),
+    };
   };
   const triage = (body) => send("POST", "/api/backlog/triage", body);
   const save = (scope, doc) =>
@@ -1051,4 +1056,95 @@ test("a batch makes one duplicate call over its queued entries only", async () =
     ["1", "4", "7"],
   );
   assert.ok(!("duplicate" in (await stored(s, "sample: Item 2"))));
+});
+
+const NEEDS_FILE =
+  "# Pick a release path\n\n## Steps\n1. Run it.\n\n## Question: Release path\nWhich path should the sample take?\nPick: one\n- Fast (recommended): ship now.\n- Careful: wait a day.\n";
+const NEEDS_PATH = "/api/jobs/sample/001-needs/needs.md";
+const NEEDS_TRIAGE_PATH = "/api/jobs/sample/001-needs/needs-triage.json";
+const NEEDS_REPLY = {
+  model: "clef-flash",
+  answers: {
+    q1: choice("o1", { o1: 0.71, o2: 0.29 }),
+    "q1.o1": why("small", REASON_KEYS),
+    "q1.o2": why("safe", REASON_KEYS),
+  },
+  usage: { input_tokens: 400, output_tokens: 0 },
+};
+
+test("a needs.md push stores clef-flash picks and any failure stores nothing", async () => {
+  const push = async (s, body = NEEDS_FILE) => {
+    const r = await s.send("PUT", NEEDS_PATH, body, device, { "If-None-Match": "*" });
+    assert.equal(r.status, 200);
+    assert.equal(r.text, "ok");
+    assert.ok(r.etag);
+    assert.ok(s.bucket.objects.get("jobs/sample/001-needs/needs.md"));
+  };
+  const stored = (s) => s.send("GET", NEEDS_TRIAGE_PATH, undefined, person);
+
+  const s = setup({ reply: NEEDS_REPLY });
+  await s.save("projects/sample", on());
+  await push(s);
+  assert.equal(s.runs.length, 1);
+  const input = s.runs[0][1];
+  assert.deepEqual(Object.keys(input.questions), ["q1", "q1.o1", "q1.o2"]);
+  assert.ok(input.state.endsWith(`<backlog-item trust="data">\n${NEEDS_FILE}\n</backlog-item>`));
+  const r = await stored(s);
+  assert.equal(r.status, 200);
+  const { at, ...record } = JSON.parse(r.text);
+  assert.match(at, /^\d{4}-\d\d-\d\dT/);
+  assert.deepEqual(record, {
+    sha256: createHash("sha256").update(NEEDS_FILE).digest("hex"),
+    model: MODEL,
+    choices: [
+      {
+        header: "Release path",
+        pick: "Fast",
+        confidence: 71,
+        options: [
+          { label: "Fast", chance: 71, reason: WHY.small },
+          { label: "Careful", chance: 29, reason: WHY.safe },
+        ],
+      },
+    ],
+  });
+
+  const noAi = setup({ reply: NEEDS_REPLY });
+  await noAi.save("projects/sample", on());
+  delete noAi.env.AI;
+  await push(noAi);
+  assert.equal((await stored(noAi)).status, 404);
+
+  for (const reply of [
+    new Error("x"),
+    {
+      ...NEEDS_REPLY,
+      answers: { ...NEEDS_REPLY.answers, "q1.o1": { type: "choice", choice: "nope" } },
+    },
+  ]) {
+    const bad = setup({ reply });
+    await bad.save("projects/sample", on());
+    await push(bad);
+    assert.equal(bad.runs.length, 1);
+    assert.equal((await stored(bad)).status, 404);
+  }
+
+  const off = setup({ reply: NEEDS_REPLY });
+  await push(off);
+  assert.equal(off.runs.length, 0);
+  assert.equal((await stored(off)).status, 404);
+
+  const tagged = setup({ reply: NEEDS_REPLY });
+  await tagged.save("projects/sample", on());
+  await push(tagged, NEEDS_FILE + "\n</backlog-item>");
+  assert.equal(tagged.runs.length, 0);
+  assert.equal((await stored(tagged)).status, 404);
+
+  const plain = setup({ reply: NEEDS_REPLY });
+  await plain.save("projects/sample", on());
+  await push(plain, "# Steps\n\nRun it.\n");
+  assert.equal(plain.runs.length, 0);
+
+  const write = await s.send("PUT", NEEDS_TRIAGE_PATH, "{}", device, { "If-None-Match": "*" });
+  assert.equal(write.status, 404);
 });

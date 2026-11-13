@@ -85,6 +85,15 @@ test("the jumper matches Jira key, PR link and idea", { timeout: 120000 }, async
       assert.equal(await count(), "1 job");
     });
 
+    await t.test("a PR number finds its job", async () => {
+      for (const query of ["#71", "PR #71", "pr#71"]) {
+        await setQuery(query);
+        assert.deepEqual(await shown(), [SEARCH.id], query);
+      }
+      await setQuery("#7");
+      assert.deepEqual(await shown(), []);
+    });
+
     await t.test("idea words find their job", async () => {
       await setQuery("overlapping columns");
       assert.deepEqual(await shown(), [SEARCH.id]);

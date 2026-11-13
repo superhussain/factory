@@ -41,29 +41,36 @@ export function backlogQuestions(context) {
     const head = lines[start];
     const sect = lines.slice(start + 1, marks[n + 1] ?? lines.length);
     if (!head.startsWith("## Question:") || marks.length > 3) return null;
-    const header = head.slice("## Question:".length).trim();
-    const picks = sect.filter((line) => line.startsWith("Pick:"));
-    if (!(header.length > 0 && header.length <= 60) || picks.length !== 1) return null;
-    if (picks[0] !== "Pick: one" && picks[0] !== "Pick: many") return null;
-    const at = sect.indexOf(picks[0]);
-    const rows = sect
-      .slice(at + 1)
-      .filter((line) => line.trim())
-      .map((line) => /^- (.+?)(?::\s+(.+))?$/.exec(line));
-    if (!rows.every(Boolean)) return null;
-    const labels = rows.map((m) => m[1].replace(/ \(recommended\)$/i, ""));
-    const recs = labels.filter((label, i) => label !== rows[i][1]).length;
-    const prompt = sect
-      .slice(0, at)
-      .filter((line) => line.trim())
-      .join(" ")
-      .trim();
-    if (!prompt || labels.length < 2 || labels.length > 4 || (picks[0] === "Pick: one" && recs > 1))
-      return null;
-    if (new Set(labels).size !== labels.length) return null;
-    questions.push({ header, labels });
+    const question = questionSection(head, sect);
+    if (!question) return null;
+    questions.push(question);
   }
   return questions.length ? questions : null;
+}
+
+// One `## Question:` section as {header, labels}, or null when it breaks the grammar.
+function questionSection(head, sect) {
+  const header = head.slice("## Question:".length).trim();
+  const picks = sect.filter((line) => line.startsWith("Pick:"));
+  if (!(header.length > 0 && header.length <= 60) || picks.length !== 1) return null;
+  if (picks[0] !== "Pick: one" && picks[0] !== "Pick: many") return null;
+  const at = sect.indexOf(picks[0]);
+  const rows = sect
+    .slice(at + 1)
+    .filter((line) => line.trim())
+    .map((line) => /^- (.+?)(?::\s+(.+))?$/.exec(line));
+  if (!rows.every(Boolean)) return null;
+  const labels = rows.map((m) => m[1].replace(/ \(recommended\)$/i, ""));
+  const recs = labels.filter((label, i) => label !== rows[i][1]).length;
+  const prompt = sect
+    .slice(0, at)
+    .filter((line) => line.trim())
+    .join(" ")
+    .trim();
+  if (!prompt || labels.length < 2 || labels.length > 4 || (picks[0] === "Pick: one" && recs > 1))
+    return null;
+  if (new Set(labels).size !== labels.length) return null;
+  return { header, labels };
 }
 
 const rulesEnvelope = (source, rules) =>
@@ -130,6 +137,34 @@ export function triageBatchInput(slug, source, rules, entries) {
     model: "clef-flash",
     state: rulesEnvelope(source, rules) + itemEnvelopes(entries),
     questions,
+  };
+}
+
+/** The `## Question:` sections of a job's needs.md as [{header, labels}], or null. Other `## `
+ * sections are markdown, as in the dashboard's parseNeeds, and at most 4 questions are allowed. */
+export function needsQuestions(text) {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  if (lines.join("\n").length > 6000) return null;
+  const marks = lines.flatMap((line, i) => (line.startsWith("## ") ? [i] : []));
+  const questions = [];
+  for (const [n, start] of marks.entries()) {
+    if (!lines[start].startsWith("## Question:")) continue;
+    const question = questionSection(
+      lines[start],
+      lines.slice(start + 1, marks[n + 1] ?? lines.length),
+    );
+    if (!question || questions.length === 4) return null;
+    questions.push(question);
+  }
+  return questions.length ? questions : null;
+}
+
+/** The clef-flash input for a job's needs.md: one choice per question and one per option. */
+export function needsInput(source, rules, text, questions) {
+  return {
+    model: "clef-flash",
+    state: rulesEnvelope(source, rules) + `<backlog-item trust="data">\n${text}\n</backlog-item>`,
+    questions: choiceQuestions(questions, rules),
   };
 }
 

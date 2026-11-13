@@ -7614,7 +7614,6 @@ RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
 RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)(?!=?\d+:\d+(?!\S))[^\s:]*:\S+")
 RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential"
 RETRO_SECRET_WORD = re.compile(r"(?i)(?:" + RETRO_SECRET_WORDS + ")")
-RETRO_COUNT_WORD = re.compile(r"(?i)tokens")
 RETRO_COUNT = re.compile(r"\d{1,7}[,;)}\]]*")
 RETRO_KEYVALUE = re.compile(
     r"(?i)(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{0,64}?(?:" + RETRO_SECRET_WORDS + ")"
@@ -7645,10 +7644,15 @@ RETRO_TOKENS = {"cache_read": "cache_read_input_tokens", "cache_write": "cache_c
                 "uncached_input": "input_tokens", "output": "output_tokens"}
 
 
+def retro_count_name(name):
+    """Whether every secret word in name is token followed by s, as in max_tokens."""
+    return all(m.group(0).lower() == "token" and name[m.end():m.end() + 1] in ("s", "S")
+               for m in RETRO_SECRET_WORD.finditer(name))
+
+
 def retro_secret_pair(match):
     name, sep, value = match.group(1, 2, 3)
-    if not RETRO_SECRET_WORD.search(name) or (
-            RETRO_COUNT.fullmatch(value) and not RETRO_SECRET_WORD.search(RETRO_COUNT_WORD.sub("s", name))):
+    if not RETRO_SECRET_WORD.search(name) or (RETRO_COUNT.fullmatch(value) and retro_count_name(name)):
         return match.group(0)
     return name + sep + "[redacted]"
 

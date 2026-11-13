@@ -389,6 +389,10 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 To stop triage, set it to Off in Settings, Pipeline. Ideas it already queued stay
 ordinary ideas, and a person can discard them.
 
+### Needs questions
+
+When a device pushes a job's `needs.md` with `## Question:` sections, and the project's effective `triage.enabled` is true, the Worker asks clef-flash which option fits each question and why. It stores the pick, each option's chance and one fixed reason in `needs-triage/<slug>/<id>.json`, and the needs form shows them. The reasons are the same fixed sentences backlog triage uses. A missing AI binding, a model failure, an unusable reply or a `needs.md` over 6000 characters stores nothing, and the push still succeeds. The form never fills in an answer.
+
 ## Review escalation
 
 After a review round with CHANGES below the round cap, one clef-flash call over the
