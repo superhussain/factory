@@ -179,6 +179,7 @@ const CAPTURE_JOBS = [
         via: "launcher",
         model: "model-a",
         effort: "high",
+        paseo: { server: "srv-a", agent: "agent-orch" },
       },
       {
         at: "2026-01-02T12:05:00Z",
@@ -188,6 +189,7 @@ const CAPTURE_JOBS = [
         via: "native",
         model: "model-a",
         effort: "medium",
+        paseo: { server: "srv-a", agent: "agent-orch" },
       },
       {
         at: "2026-01-02T13:10:00Z",
@@ -1086,20 +1088,24 @@ async function capture(outdir, referencePath) {
     };
     await view("idea-chips-390", 390, 844, "dark", openIdeaChips, true);
     await view("idea-chips-1280", 1280, 900, "light", openIdeaChips);
-    // The reference has no agents table, so its side shows the drawer head alone.
-    const openAgentRuns = async (page, side) => {
+    const openAgentRuns = async (page) => {
       await page.evaluate(() => {
         location.hash = "#101-wrap-doc-line";
       });
       await page.waitForFunction(
         () => document.getElementById("d-title").textContent === "Synthetic wrap doc line",
       );
-      if (side === "after") {
-        await page.waitForSelector("#d-agents:not([hidden])");
-        await page.evaluate(() => {
-          document.getElementById("d-agents").open = true;
-        });
-      }
+      await page.waitForSelector("#d-agents:not([hidden])");
+      // A 1200px drawer fits the whole table at 1280, since the screenshot resets any
+      // scroll there. At 390 the table scrolls to its right end so the last columns show.
+      await page.evaluate(() => {
+        document.getElementById("detail").style.setProperty("--drawer-w", "1200px");
+        document.getElementById("d-agents").open = true;
+      });
+      await page.evaluate(() => {
+        const wrap = document.querySelector("#d-agents .table-wrap");
+        wrap.scrollLeft = wrap.scrollWidth;
+      });
       return clipOf(page, ".detail-head");
     };
     await view("agent-runs-390", 390, 844, "dark", openAgentRuns, true);

@@ -393,7 +393,7 @@ ordinary ideas, and a person can discard them.
 
 When a device pushes a job's `needs.md` with `## Question:` sections, and the project's effective `triage.enabled` is true, the Worker asks clef-flash which option fits each question and why. It stores the pick, each option's chance and one fixed reason in `needs-triage/<slug>/<id>.json`, and the needs form shows them. The reasons are the same fixed sentences backlog triage uses. A missing AI binding, a model failure, an unusable reply or a `needs.md` over 6000 characters stores nothing, and the push still succeeds. The form never fills in an answer.
 
-The push waits for the rating. The `needs.md` PUT reply says how long in `Server-Timing: needs-rating;dur=<ms>`, which covers every step of the rating, including early returns and failures. The stored record's `ms` field is the model call alone. Read it at `GET /api/jobs/<slug>/<id>/needs-triage.json`.
+The push does not wait for the rating: the Worker rates the file after the reply with ctx.waitUntil, so needs-rating;dur=<ms> reads near 0. The `needs.md` PUT reply says how long the push waited in `Server-Timing: needs-rating;dur=<ms>`. The stored record's `ms` field is the model call alone. Read it at `GET /api/jobs/<slug>/<id>/needs-triage.json`.
 
 ## Review escalation
 

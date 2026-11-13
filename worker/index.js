@@ -1679,9 +1679,13 @@ async function retrosList(env) {
   } while (cursor);
   keys.sort().reverse();
   const records = await Promise.all(
-    keys.slice(0, RETRO_RUNS_LISTED).map(async (key) => (await env.BUCKET.get(key)).text()),
+    keys.slice(0, RETRO_RUNS_LISTED).map(async (key) => (await env.BUCKET.get(key))?.text()),
   );
-  return reply(`[${records.join(",")}]`, 200, "application/json");
+  return reply(
+    `[${records.filter((text) => text !== undefined).join(",")}]`,
+    200,
+    "application/json",
+  );
 }
 
 // The hosts with a retro digest for the day, in host record order.
@@ -1760,7 +1764,7 @@ async function rateNeeds(env, slug, id, text) {
 // Job files take an optional condition, so a device never overwrites a version it
 // hasn't seen. Devices that send none still write blind. Images keep the type their
 // extension names.
-async function jobPut(request, env, key) {
+async function jobPut(request, env, key, ctx) {
   const cond = condition(request);
   if (cond === null) return needsCondition();
   const type = imageType(key);
@@ -1770,14 +1774,12 @@ async function jobPut(request, env, key) {
     ...(cond && { onlyIf: cond }),
     ...(type && { httpMetadata: { contentType: type } }),
   });
-  // A stored needs.md reply says how long the rating held the push, in Server-Timing.
+  // A stored needs.md is rated after the reply; Server-Timing says how long the push waited on it.
   const needs = obj && NEEDS_KEY.exec(key);
   let timing;
   if (needs) {
     const started = Date.now();
-    try {
-      await rateNeeds(env, needs[1], needs[2], body);
-    } catch {}
+    ctx.waitUntil(rateNeeds(env, needs[1], needs[2], body).catch(() => {}));
     timing = `needs-rating;dur=${Date.now() - started}`;
   }
   return obj
@@ -2026,7 +2028,7 @@ async function ideaImagePut(request, env, name) {
   return reply("ok");
 }
 
-async function api(request, env, path, principal) {
+async function api(request, env, path, principal, ctx) {
   const method = request.method;
   if (path.startsWith("/api/pipeline/retro/")) {
     const p = ("/api/pipeline/" + path.slice("/api/pipeline/retro/".length)).match(PIPELINE);
@@ -2161,13 +2163,13 @@ async function api(request, env, path, principal) {
         : notFound();
     if (!JOB_REL.test(m[3])) return notFound();
     if (method === "GET") return getJobFile(request, env, principal, prefix + m[3]);
-    if (method === "PUT") return jobPut(request, env, prefix + m[3]);
+    if (method === "PUT") return jobPut(request, env, prefix + m[3], ctx);
   }
   return notFound();
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     let config;
     try {
       config = readServerConfig(env);
@@ -2181,7 +2183,7 @@ export default {
     } catch {
       return reply("forbidden", 403);
     }
-    return serveFactory(request, { ...env, config }, principal);
+    return serveFactory(request, { ...env, config }, principal, ctx);
   },
   scheduled(controller, env, ctx) {
     ctx.waitUntil(runArchive(env, new Date(controller.scheduledTime)));
@@ -2192,8 +2194,9 @@ export default {
 /** @param {Request} request
  * @param {object} env
  * @param {import('./access.ts').VerifiedPrincipal} principal
+ * @param {ExecutionContext} ctx
  */
-export async function serveFactory(request, env, principal) {
+export async function serveFactory(request, env, principal, ctx) {
   if (principal?.verified !== true) return reply("forbidden", 403);
   const path = new URL(request.url).pathname;
   if (path.includes("..")) return reply("bad path", 400);
@@ -2210,7 +2213,7 @@ export async function serveFactory(request, env, principal) {
       return reply("forbidden", 403);
     return connectEvents(request, env);
   }
-  if (path.startsWith("/api/")) return api(request, env, path, principal);
+  if (path.startsWith("/api/")) return api(request, env, path, principal, ctx);
   if (request.method !== "GET") return notFound();
   if (path === "/") return renderDashboard(env.config);
   if (path === "/dashboard.html")

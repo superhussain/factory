@@ -1,11 +1,16 @@
-// The three header icon buttons stay on one row and match the project filter height.
+// The four header icon buttons stay on one row and match the project filter height.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
 
 const JOBS = [
-  { id: "001-sample", project: "sample", title: "Synthetic sample job", stage: "spec" },
+  {
+    id: "001-sample",
+    project: "sample",
+    title: "Synthetic sample job",
+    stage: "spec",
+  },
 ].map((job) => ({ ...job, updated: "2026-01-01T00:00:00Z" }));
 
 const TOUCH = { isMobile: true, hasTouch: true };
@@ -34,7 +39,7 @@ test("header icons share one row and match the filter height", { timeout: 120000
       await page.waitForSelector("#new-idea:not([hidden])");
       const header = await page.evaluate(() => {
         const rect = (id) => document.getElementById(id).getBoundingClientRect();
-        const icons = ["new-idea", "job-jump", "settings-link"];
+        const icons = ["new-idea", "job-jump", "retros-link", "settings-link"];
         const el = document.querySelector("header");
         return {
           tops: icons.map((id) => Math.round(rect(id).top)),
@@ -44,11 +49,34 @@ test("header icons share one row and match the filter height", { timeout: 120000
         };
       });
       assert.equal(new Set(header.tops).size, 1, `icon tops at ${label}: ${header.tops}`);
-      assert.deepEqual(header.heights, [size, size, size, size], `heights at ${label}`);
+      assert.deepEqual(header.heights, [size, size, size, size, size], `heights at ${label}`);
       assert.ok(
         header.scrollWidth <= header.clientWidth,
         `header scrolls at ${label}: ${header.scrollWidth} > ${header.clientWidth}`,
       );
+      if (viewport.width === 1280) {
+        const link = await page.$eval("#retros-link", (el) => ({
+          next: el.nextElementSibling.id,
+          previous: el.previousElementSibling.id,
+          href: el.getAttribute("href"),
+          label: el.getAttribute("aria-label"),
+          title: el.title,
+          keys: el.getAttribute("aria-keyshortcuts"),
+          svg: [
+            el.querySelector("svg").getBoundingClientRect().width,
+            el.querySelector("svg").getBoundingClientRect().height,
+          ],
+        }));
+        assert.deepEqual(link, {
+          next: "settings-link",
+          previous: "job-jump",
+          href: "#/retros",
+          label: "Retros",
+          title: "Retros (R)",
+          keys: "r",
+          svg: [16, 16],
+        });
+      }
       if (viewport.hasTouch) {
         await page.evaluate(() => (location.hash = "#/settings"));
         await page.waitForFunction(

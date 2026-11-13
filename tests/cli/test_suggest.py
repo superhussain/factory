@@ -645,6 +645,10 @@ class SuggestTest(SuggestCase):
                 ("approve https://factory.example.test/#/backlog/0123456789ab", "approve (link: factory.example.test)"),
                 ("see [card](https://www.x.test/a)", "see (link: x.test)"),
                 ("http://user:pw@10.0.0.1:8080/x", "(link: 10.0.0.1)"),
+                ("see [x](x.test/a)", "see (link: x.test)"),
+                ("(www.x.test/a)", "(link: x.test)"),
+                ("(docs.x.test/a)", "(link: docs.x.test)"),
+                ("https://deploy:s3cret-pass@x.test/a", "(link: x.test)"),
                 ("```text\nok", "text\nok"),
                 ("plain words", "plain words")):
             with self.subTest(text=text):

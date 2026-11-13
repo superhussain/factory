@@ -152,6 +152,39 @@ class AgentRecordTest(BoardFixture):
         self.assertNotIn("effort", row)
         self.assertIsNone(factory.record_agent(self.home, "999-missing", {"role": "build"}))
 
+    def test_row_carries_paseo(self):
+        with patch.object(factory, "paseo_session", return_value={"server": "srv-a", "agent": "agent-orch"}):
+            code, out, err = self.record("review-code", "opencode", "native", "gpt-6.1-sol", "high")
+        self.assertEqual((code, err), (0, ""))
+        [row] = self.job()["agents"]
+        self.assertEqual(row["paseo"], {"server": "srv-a", "agent": "agent-orch"})
+        self.assertEqual(json.loads(out), row)
+
+
+class AgentHoldLinkTest(BoardFixture):
+    PASEO = {"server": "srv-a", "agent": "agent-orch"}
+
+    def test_links_only_this_sessions_unlinked_rows(self):
+        other = {"server": "srv-a", "agent": "agent-old"}
+        job = {"agents": [dict(ROWS[0]), dict(ROWS[1], paseo=other), dict(ROWS[2]), "a hand-edited row"]}
+        factory.link_agent_rows(job, "a1b2c3", self.PASEO)
+        self.assertEqual(job["agents"][0]["paseo"], self.PASEO)
+        self.assertEqual(job["agents"][1]["paseo"], other)
+        self.assertNotIn("paseo", job["agents"][2])
+        self.assertEqual(job["agents"][3], "a hand-edited row")
+        factory.link_agent_rows({}, "a1b2c3", self.PASEO)
+
+    def test_hold_links_the_launch_row(self):
+        self.job()["agents"] = [dict(ROWS[2]), dict(ROWS[0])]
+        patch.object(factory, "paseo_session", return_value=self.PASEO).start()
+        patch.object(factory, "pull_job", return_value=("pulled", [])).start()
+        patch.object(factory, "record_paseo_claim").start()
+        code, out, err = invoke(factory, ["hold", f"alpha/{JOB}", "--session", "d4e5f6"])
+        self.assertEqual((code, err), (0, ""))
+        rows = self.job()["agents"]
+        self.assertEqual(rows[0]["paseo"], self.PASEO)
+        self.assertNotIn("paseo", rows[1])
+
 
 class AgentReportTest(BoardFixture):
     def test_table(self):

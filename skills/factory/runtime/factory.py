@@ -60,7 +60,7 @@
                                             re-reads every 30 seconds for up to S seconds (1 to 600) while
                                             next is wait; a bad pr exits 4, a gh problem 5
   factory.py pr-queue <project-slug>/<job-id>
-                                            print whether GitHub queued the job PR through merge-async:
+                                            print whether GitHub queued the job PR, by the enqueue mutation first, else merge-async:
                                             one JSON line of pr, status and detail; enqueued exits 0,
                                             failed or refused 1, pending after 120 seconds 3, a bad or
                                             stacked pr 4, a gh problem 5
@@ -922,7 +922,12 @@ def board(factory, job_id):
                  f"A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.", 2)
         stacked = (open_stacked(data, job_id) if patch.get("stage") == "closed" and found
                    and found.get("stage") not in TERMINAL and lead_of(found) is None else [])
+        babysit, priority = (found or {}).get("babysit"), (found or {}).get("priority")
+        pressed = ("babysit" in patch and patch["babysit"] is None and isinstance(babysit, dict)
+                   and isinstance(priority, dict) and priority.get("at") == babysit.get("at"))
         job = patch_job(data, job_id, patch)
+        if pressed:
+            job.pop("priority", None)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
         elif mine(job.get("claim") or {}, device, session):
@@ -959,13 +964,14 @@ def hold(target, take=None):
         data = load_board(text)
         job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
         if job is None:
-            return None, ("missing", None, None)
+            return None, ("missing", None, None, False)
         if job.get("project") != slug:
             fail(f"{job_id} belongs to {job.get('project')}, not {slug}", 2)
         if take != "take" and moved_away(job, device, session):
             fail(moved_message(job_id, job["move"]), 6)
         if closing(job):
             fail(closing_message(job_id), 6)
+        asked = job.get("stage") == "pr-open" and babysitting(job)
         # Released hold is the receiving side of handoff, whose sender gate keeps
         # human and PR gates unclaimed; mirror it before claiming or accepting.
         if take == "released" and job.get("stage") not in IN_FLIGHT:
@@ -983,9 +989,9 @@ def hold(target, take=None):
         if take == "released" and job.get("claim") and not mine(job["claim"], device, session):
             held = job["claim"]
         if held and take != "take":
-            return None, ("held", held, None)
+            return None, ("held", held, None, False)
         if fresh_hold(job, device, session, paseo, take):
-            return None, ("ok", None, job["started"])
+            return None, ("ok", None, job["started"], asked)
         c = dict(job.get("claim") or {})
         keep = bool(c) and mine(c, device, session)
         # Replace the claim whole rather than merging into the old one.
@@ -994,13 +1000,14 @@ def hold(target, take=None):
         # Keep only the latest session's link. A non-Paseo takeover drops the old device's.
         if paseo:
             job["paseo"] = paseo
+            link_agent_rows(job, session, paseo)
         else:
             job.pop("paseo", None)
         if (job.get("handoff") or {}).get("state") == "ready":
             job["handoff"].update(state="accepted", to=new_claim(device, session), accepted=now())
         # The board note is never rewritten, so human restrictions stay visible.
-        return dump_board(data), ("ok", None if keep else c, job["started"])
-    result, other, started = cas(home, "/api/board", change)
+        return dump_board(data), ("ok", None if keep else c, job["started"], asked)
+    result, other, started, asked = cas(home, "/api/board", change)
     if result == "missing":
         fail(f"no job {job_id} on the board. Nothing was written.", 4)
     if result == "held":
@@ -1009,6 +1016,9 @@ def hold(target, take=None):
     if paseo:
         record_paseo_claim(home, job_id, paseo)
     print(f"elapsed {elapsed_seconds(started)}s")
+    if asked:
+        print(f"babysit requested: Babysit PR was pressed on {job_id}; "
+              f"run /factory babysit {job_id} --session {session} in this session now")
     if other:
         print(f"took over from {other['device']} session {other.get('session')}, last seen {other['seen']}")
     line, conflicts = pull_job(home, slug, job_id)
@@ -2932,7 +2942,13 @@ def neutralize_chat(text):
         token = m.group(0)
         if "://" not in token and not NOTE_LINK.search(token):
             return token
-        rest = token.split("://", 1)[-1].split("/", 1)[0].rsplit("@", 1)[-1]
+        if "://" in token:
+            rest = token.split("://", 1)[-1]
+        else:
+            # Walk back over host characters so leading labels like docs. stay in the host.
+            head = token[:NOTE_LINK.search(token).start()]
+            rest = token[re.search(r"[A-Za-z0-9.-]*$", head).start():]
+        rest = rest.split("/", 1)[0].rsplit("@", 1)[-1]
         host = re.match(r"[A-Za-z0-9.-]*", rest).group(0).lower().strip(".-")
         host = host[4:] if host.startswith("www.") else host
         return f"(link: {host})" if host else "(link)"
@@ -4853,8 +4869,38 @@ def claim_babysit(home, job_id, device, minutes, paths):
     return cas(home, "/api/board", change)
 
 
+def babysit_argv(argv, job_id):
+    """argv with a workspace slug babysit-<id> and a title babysit <id>. A Paseo launcher that opens a new
+    workspace gets the slug right after run when it has none."""
+    argv = list(argv)
+    for flag, value in (("--worktree-slug", f"babysit-{job_id}"), ("--title", f"babysit {job_id}")):
+        if flag in argv[:-1]:
+            argv[argv.index(flag) + 1] = value
+    if Path(argv[0]).name == "paseo" and "--new-workspace" in argv and "--worktree-slug" not in argv \
+            and "run" in argv:
+        argv[argv.index("run") + 1:argv.index("run") + 1] = ["--worktree-slug", f"babysit-{job_id}"]
+    return argv
+
+
 def babysit_pass(home, data, device, minutes, paths, settings, dry):
-    """Launch at most one /factory babysit session for a job the dashboard handed to one."""
+    """Run at most one /factory babysit for a job the dashboard handed to one: in the job's own Paseo agent
+    when it has one, else in a new session."""
+    statuses = ...
+
+    def job_agent(j):
+        """(agent, state) for the job's Paseo link, else (None, None). state is idle, closed or running, or
+        foreign (another server), unanswered (paseo ls failed) or None (agent absent). Any other status is returned as is."""
+        nonlocal statuses
+        link = j.get("paseo")
+        agent = link.get("agent") if isinstance(link, dict) else None
+        if not (isinstance(agent, str) and PASEO_ID.fullmatch(agent) and not agent.startswith("-")):
+            return None, None
+        if link.get("server") != paseo_server():
+            return agent, "foreign"
+        if statuses is ...:
+            statuses = paseo_statuses()
+        return agent, "unanswered" if statuses is None else statuses.get(agent)
+
     def skip(j):
         """Why this job is not ready, or None."""
         project = j.get("project")
@@ -4870,6 +4916,13 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
         c = blocking(j, device, "", minutes)
         if c:
             return f"{head}: claimed by {c['device']} session {c.get('session')}"
+        agent, state = job_agent(j)
+        if state == "foreign":
+            return f"{head}: agent {agent} lives on server {j['paseo'].get('server')}"
+        if state == "unanswered":
+            return f"{head}: paseo ls failed"
+        if state not in (None, "idle", "closed"):
+            return f"{head}: agent {agent} is {state}"
         reason = pickup_reason(home, project, paths, settings, device, dry)
         return f"{head}: {reason}" if reason else None
 
@@ -4879,6 +4932,22 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
                 "provider": provider, "model": model, "effort": effort or "",
                 "prompt": launch_prompt(f"/factory babysit {j['id']} --session {session}")}
 
+    def launch(j, tag, route):
+        if route is None:
+            print(f"factory.py: pickup could not launch babysit {j['id']}: no available route", file=sys.stderr)
+            release_pickup_claim(home, j["id"], device, tag)
+            return
+        template = route_launcher(home, route)
+        given = values(j, tag, route)
+        argv = babysit_argv(launcher_argv(template, given), j["id"])
+        ok, detail, log_path = launch_idea(home, given, route[0], argv, launch_env(given, route[1], route[2]))
+        if ok:
+            print(f"launched babysit {j['id']} {j['project']} on {route[0]} session {tag}")
+            record_launch(home, j["id"], dict(launch_row(given, argv, tag), role="babysit"))
+        else:
+            launch_failed(home, route[0], j["id"], detail, log_path,
+                          lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)
+
     ready = False
     for j in (j for j in data["jobs"] if babysit_due(j)):
         line = skip(j)
@@ -4886,32 +4955,44 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
             line = f"wait babysit {j['id']} {j['project']}: one babysit launch per run"
         elif line is None:
             ready = True
+            agent, state = job_agent(j)
             route = pick_route(home)
-            if route is None and not dry:
-                return
-            if route is None:
-                stamp = now()
-                active = {n: until for n, until in read_limits(home).items() if until > stamp}
-                line = "no route: no available route: " + ", ".join(
-                    f"{r[0]} until {active[r[0]]}" for r in read_routes(home))
-            else:
-                template = route_launcher(home, route)
+            if state in ("idle", "closed"):
                 if dry:
-                    line = f"would launch babysit {j['id']} {j['project']} on {route[0]}: " \
-                        + shlex.join(launcher_argv(template, values(j, "<session>", route)))
+                    line = f"would send babysit {j['id']} {j['project']} to agent {agent}"
                 else:
                     tag = claim_babysit(home, j["id"], device, minutes, paths)
                     if tag is None:
                         return
-                    given = values(j, tag, route)
-                    ok, detail, log_path = launch_idea(home, given, route[0], launcher_argv(template, given),
-                                                       launch_env(given, route[1], route[2]))
-                    if ok:
-                        print(f"launched babysit {j['id']} {j['project']} on {route[0]} session {tag}")
-                    else:
-                        launch_failed(home, route[0], j["id"], detail, log_path,
-                                      lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)
+                    if paseo_send(agent, launch_prompt(f"/factory babysit {j['id']} --session {tag}")):
+                        print(f"sent babysit {j['id']} {j['project']} to agent {agent} session {tag}")
+                        return
+                    if state == "idle":
+                        print(f"factory.py: pickup could not send babysit {j['id']} to agent {agent}: "
+                              "paseo send failed; the next run retries", file=sys.stderr)
+                        release_pickup_claim(home, j["id"], device, tag)
+                        return
+                    print(f"factory.py: pickup could not send babysit {j['id']} to agent {agent}: "
+                          "paseo send failed; launching a new session", file=sys.stderr)
+                    launch(j, tag, route)
                     return
+            elif route is None and not dry:
+                return
+            elif route is None:
+                stamp = now()
+                active = {n: until for n, until in read_limits(home).items() if until > stamp}
+                line = "no route: no available route: " + ", ".join(
+                    f"{r[0]} until {active[r[0]]}" for r in read_routes(home))
+            elif dry:
+                line = f"would launch babysit {j['id']} {j['project']} on {route[0]}: " \
+                    + shlex.join(babysit_argv(launcher_argv(route_launcher(home, route), values(j, "<session>", route)),
+                                          j["id"]))
+            else:
+                tag = claim_babysit(home, j["id"], device, minutes, paths)
+                if tag is None:
+                    return
+                launch(j, tag, route)
+                return
         if dry:
             print(line)
 
@@ -6183,10 +6264,11 @@ def gh_pr_view(pr, *args):
     return gh_answer(gh_pr("view", pr, *args), "gh pr view")
 
 
-def pr_checks(pr):
+def pr_checks(pr, required=False):
     """(checks, problem): the PR's checks as gh pr checks lists them and None, or [] and why
-    the reply was unusable. gh's own no-checks reply is usable, as []."""
-    result = gh_pr("checks", pr, "--json", "name,bucket,link", stderr=True)
+    the reply was unusable. gh's own no-checks reply is usable, as []. With required, only the checks
+    that gate the merge."""
+    result = gh_pr("checks", pr, *(("--required",) if required else ()), "--json", "name,bucket,link", stderr=True)
     if result is None:
         return [], "gh is not installed"
     code, out, err = result
@@ -6200,7 +6282,7 @@ def pr_checks(pr):
             isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("bucket"), str)
             for c in checks):
         return checks, None
-    if code == 1 and not out.strip() and "no checks reported" in err:
+    if code == 1 and not out.strip() and re.search(r"no (required )?checks reported", err):
         return [], None
     return [], f"exited {code} with no check list" if code else "printed no check list"
 
@@ -6248,8 +6330,8 @@ PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMerge
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
 PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
-                    "{isInMergeQueue mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved"
-                    " comments(first:100){nodes{author{__typename login}}}}}"
+                    "{isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved"
+                    " comments(first:100){nodes{authorAssociation author{__typename login}}}}}"
                     " latestReviews(first:100){nodes{author{__typename login}}}}}}")
 PR_STATE_INTERVAL = 30
 BUILDKITE_API = "https://api.buildkite.com/v2"
@@ -6328,8 +6410,8 @@ def pr_reading(home, pr, base, buildkite_org):
     target = view.get("baseRefName") or base
     if not isinstance(target, str) or not re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", target):
         fail("gh printed an unusable baseRefName", 5)
-    listed = pr_checks(pr)[0]
-    if view.get("statusCheckRollup") and not listed:
+    listed, problem = pr_checks(pr, required=True)
+    if problem and view.get("statusCheckRollup"):
         fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5)
     buckets = {c["bucket"] for c in listed}
     checks = "fail" if buckets & {"fail", "cancel"} else "pending" if "pending" in buckets \
@@ -6367,28 +6449,33 @@ def pr_reading(home, pr, base, buildkite_org):
     approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
     state = str(view.get("state") or "").lower()
     in_queue = pull.get("isInMergeQueue") is True or isinstance(pull.get("mergeQueueEntry"), dict)
-    bots = 0
+    bots = threads = 0
     for thread in (pull.get("reviewThreads") or {}).get("nodes") or []:
         if not isinstance(thread, dict) or thread.get("isResolved"):
             continue
         comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
-        if comments and (comments[0].get("author") or {}).get("__typename") == "Bot" \
-                and all(login(c) != author for c in comments):
+        if not comments or any(login(c) == author for c in comments):
+            continue
+        if (comments[0].get("author") or {}).get("__typename") == "Bot":
             bots += 1
+        elif comments[0].get("authorAssociation") in PR_REVIEWERS:
+            threads += 1
     queued = in_queue or bool(view.get("autoMergeRequest"))
     conflict = view.get("mergeStateStatus") == "DIRTY"
     stacked = target != base
     if state in ("merged", "closed"):
         step = state
-    elif unanswered or bots:
+    elif unanswered or bots or threads:
         step = "fix-reviews"
-    elif not approved:
-        step = "needs-review"
     elif conflict:
         step = "rebase"
     elif checks == "fail":
         step = "fix-ci"
-    elif checks == "pending" or queued or (checks == "none" and new):
+    elif checks == "pending" or (checks == "none" and new):
+        step = "wait"
+    elif not approved:
+        step = "needs-review"
+    elif queued:
         step = "wait"
     elif stacked:
         step = "wait-base"
@@ -6399,7 +6486,8 @@ def pr_reading(home, pr, base, buildkite_org):
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
-            "base": target, "next": step, "ci_log": buildkite_log(home, failed, buildkite_org) if failed else None}
+            "base": target, "next": step, "ci_log": buildkite_log(home, failed, buildkite_org) if failed else None,
+            "threads": threads, "merge_queue": pull.get("isMergeQueueEnabled") is True}
 
 
 def pr_state_cmd(target, *args):
@@ -6422,6 +6510,8 @@ def pr_state_cmd(target, *args):
         time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
 
 
+PR_ENQUEUE_MUTATION = ("query=mutation($id:ID!,$sha:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$sha})"
+                       "{mergeQueueEntry{state position}}}")
 PR_QUEUE_USAGE = "usage: pr-queue <project-slug>/<job-id>"
 PR_QUEUE_INTERVAL = 10
 PR_QUEUE_TIMEOUT = 120
@@ -6429,13 +6519,13 @@ MERGE_ASYNC_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 
 
 def pr_queue_cmd(target):
-    """Queue the job's PR through merge-async and print one JSON line once GitHub says enqueued or failed."""
+    """Queue the job's PR with the enqueuePullRequest mutation, else through merge-async, and print one JSON line once GitHub says enqueued or failed."""
     home, slug, job_id = r2_target(target, True)
     pr = board_pr(home, slug, job_id)
     base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
     owner, name, _, number = pr.split("/")[3:7]
     try:
-        view = json.loads(gh_pr_view(pr, "--json", "headRefOid,baseRefName"))
+        view = json.loads(gh_pr_view(pr, "--json", "headRefOid,baseRefName,id"))
     except ValueError:
         view = None
     sha = view.get("headRefOid") if isinstance(view, dict) else None
@@ -6449,6 +6539,16 @@ def pr_queue_cmd(target):
     def done(status, detail, code):
         print(json.dumps({"pr": int(number), "status": status, "detail": detail}))
         raise SystemExit(code)
+
+    answer = gh_cli("api", "graphql", "-f", PR_ENQUEUE_MUTATION, "-f", f"id={view.get('id')}", "-f", f"sha={sha}",
+                     stderr=True)
+    if answer and answer[0] == 0:
+        try:
+            entry = json.loads(answer[1])["data"]["enqueuePullRequest"]["mergeQueueEntry"]
+        except (ValueError, KeyError, TypeError):
+            entry = None
+        if isinstance(entry, dict):
+            done("enqueued", f"position {entry['position']}" if entry.get("position") is not None else "", 0)
 
     result = gh_cli("api", "-X", "PUT", path, "-f", f"sha={sha}", "-f", "merge_action=merge_queue", stderr=True)
     if result is None or result[0] == "timeout":
@@ -7366,7 +7466,7 @@ def push(target):
     rels = [p.relative_to(folder).as_posix() for p in sorted(folder.rglob("*"))
             if p.is_file() and not p.is_symlink()]
     rels = [r for r in rels if JOB_REL.fullmatch(r)]
-    pushed, conflicts, spec_pushed = 0, [], False
+    pushed, conflicts, spec_pushed, spec_stale = 0, [], False, False
     for rel in rels:
         data = local_bytes(folder / rel)
         entry = manifest.get(rel)
@@ -7379,6 +7479,7 @@ def push(target):
         if entry and sha(data) == entry["sha256"]:
             if remote[rel] != entry["etag"]:
                 print(f"{rel}: remote newer, run pull")
+                spec_stale = spec_stale or rel == "spec.md"
             continue
         if not entry and rel in remote:
             # First push after upgrading: adopt R2's copy if it matches.
@@ -7402,7 +7503,8 @@ def push(target):
     goal_due = spec_pushed or pending.exists()
     save_manifest(folder, manifest)
     print(f"pushed {pushed} files")
-    if goal_due and (folder / "spec.md").exists() and "spec.md" not in conflicts:
+    if goal_due and (folder / "spec.md").exists() and "spec.md" not in conflicts \
+            and not spec_stale:
         record_goal(home, slug, job_id, spec_goal((folder / "spec.md").read_text(encoding="utf-8")))
         pending.unlink(missing_ok=True)
     if conflicts:
@@ -7973,19 +8075,19 @@ def cleanup(target):
 
 def cleanup_job(repo, wt, branch, drop_pushed=False):
     """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. (removed, left)."""
-    def run_git(*args):
+    def run_git(*args, timeout=20):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
-            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=20,
+            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout,
                                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
         except subprocess.TimeoutExpired:
-            return None, "", f"git {args[0]} timed out after 20 s"
+            return None, "", f"git {args[0]} timed out after {timeout} s"
         except OSError:
             return None, "", f"could not run git {args[0]}"
         return r.returncode, r.stdout.strip(), r.stderr
 
-    def first_error(*args):
-        code, _, err = run_git(*args)
+    def first_error(*args, timeout=20):
+        code, _, err = run_git(*args, timeout=timeout)
         if code is None:
             return err
         if code == 0:
@@ -8022,7 +8124,7 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
     if wt.exists():
         alive = stop_pids(wt)
         error = (f"processes still running: {' '.join(map(str, alive))}" if alive
-                 else first_error("worktree", "remove", str(wt)))
+                 else first_error("worktree", "remove", str(wt), timeout=None))
         if error:
             left += [f"worktree {wt}: {error}", f"branch {branch}: kept because its worktree remains"]
         else:
@@ -9524,6 +9626,13 @@ def record_agent(home, job_id, row, claimant=None, project=None):
     return cas(home, "/api/board", change)
 
 
+def link_agent_rows(job, session, paseo):
+    """Set paseo on each of job's agents rows that session recorded and no session has linked yet."""
+    for row in job.get("agents") or []:
+        if isinstance(row, dict) and row.get("session") == session and "paseo" not in row:
+            row["paseo"] = paseo
+
+
 def record_launch(home, job_id, row):
     """record_agent for a launch that already happened: a failed write warns instead of ending the pass."""
     try:
@@ -9566,6 +9675,9 @@ def agent_cmd(sub, *args):
         if effort:
             row["effort"] = effort[0]
         row["session"] = session
+        paseo = paseo_session()
+        if paseo:
+            row["paseo"] = paseo
         saved = record_agent(home, job_id, row, (device, session), slug)
         if saved is None:
             fail(f"no job {job_id} on the board. Nothing was written.", 4)
