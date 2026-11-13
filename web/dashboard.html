@@ -1597,6 +1597,13 @@ async function searchArchive(query) {
   renderJobResults();
 }
 
+// "#47", "PR #47" or "pr#47" names PR 47; a job matches when its pr link ends in /pull/47.
+const PR_QUERY = /^(?:pr\s*)?#(\d+)$/i;
+const prQueryMatch = (j, query) => {
+  const n = PR_QUERY.exec(query)?.[1];
+  return !!n && typeof j.pr === 'string' && j.pr.endsWith('/pull/' + n);
+};
+
 // The text the jumper matches: id, title, project, Jira key, PR link and idea, one field per line.
 function jobSearchText(j) {
   return [j.id, j.title, j.project, projectName(j), j.jira, j.pr, j.idea]
@@ -1614,7 +1621,7 @@ function renderJobResults() {
   if (actionsMode) return renderJobActionResults();
   const query = $('job-search').value.trim().toLowerCase();
   const actions = actionRows(query);
-  const matched = jobs.filter((j) => jobSearchText(j).includes(query))
+  const matched = jobs.filter((j) => jobSearchText(j).includes(query) || prQueryMatch(j, query))
     // Newest first: factory.py next_id makes the leading id digits grow, so a bigger prefix is newer.
     // Unprefixed ids sort last; the sort is stable, so ties keep board order.
     .sort((a, b) => (/^(\d+)/.exec(b.id)?.[1] ?? 0) - (/^(\d+)/.exec(a.id)?.[1] ?? 0));
