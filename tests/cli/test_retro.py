@@ -426,7 +426,7 @@ def digest_row(host, session, job="1017", **over):
            "repeated_cmds": {"ls <path>": 3},
            "subagents": {"count": 1, "by_type": {"factory-builder": {
                "count": 1, "turns": 7, "tokens": {"cache_read": 40, "cache_write": 0, "uncached_input": 2, "output": 3},
-               "errors": 1, "denials": 0, "models": ["claude-opus-5-5"]}}}}
+               "errors": 1, "denials": 0, "models": ["claude-opus-5-5"], "first_turns": [500]}}}}
     row.update(over)
     return row
 
@@ -507,7 +507,8 @@ class RetroAggregateTest(RetroWorkerCase):
                 {"text": "winsize crash", "count": 9, "sessions": [f"host-a/{S1}", f"host-a/{S2}", f"host-b/{S3}"]}]},
             "repeated_cmds": [{"text": "ls <path>", "count": 9,
                                "sessions": [f"host-a/{S1}", f"host-a/{S2}", f"host-b/{S3}"]}],
-            "subagents": {"factory-builder": {"count": 3, "turns": 21, "errors": 3, "denials": 0, "tokens": sub}},
+            "subagents": {"factory-builder": {"count": 3, "turns": 21, "errors": 3, "denials": 0, "tokens": sub,
+                                              "first_turn_median": 500}},
             "review_rounds": {"1": 2}, "agent_prompts": {"count": 3, "chars": 150}, "human_msgs": 3,
             "interrupts": 0,
             "pipeline": {"global": {"version": 0, "stage_notes": {}},

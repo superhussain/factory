@@ -8825,7 +8825,7 @@ def retro_aggregate(days):
     folder = home / "retro" / run
     if is_link(folder.parent) or is_link(folder):
         fail(f"{folder} or its parent is a link; nothing written", 2)
-    hosts, subagents, sub, attachments = {}, {}, {}, {}
+    hosts, subagents, firsts, sub, attachments = {}, {}, {}, {}, {}
     for row in rows:
         h = hosts.setdefault(row["host"], {"sessions": 0, "jobs": set(), "ad_hoc": 0})
         h["sessions"] += 1
@@ -8840,8 +8840,12 @@ def retro_aggregate(days):
                 s[key] += retro_int(t.get(key))
             retro_sum(s["tokens"], t.get("tokens"))
             retro_sum(sub, t.get("tokens"))
+            firsts.setdefault(kind, []).extend(
+                v for v in (t.get("first_turns") if isinstance(t.get("first_turns"), list) else []) if type(v) is int)
         for kind, size in retro_dict(row.get("first_turn_attachments")).items():
             attachments.setdefault(kind, []).append(retro_int(size))
+    for kind, s in subagents.items():
+        s["first_turn_median"] = retro_median(firsts.get(kind, []))
     for name, h in hosts.items():
         h["jobs"] = len(h["jobs"])
         h["latest"] = latest[name]
