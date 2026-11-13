@@ -9342,10 +9342,21 @@ def render_findings(agg, doc, rejected=(), edits=()):
     return "\n".join(lines) + "\n"
 
 
+def check_finding_link(link, total):
+    """The error in a retro card's finding link, or None. A link is one finding number from 1 to
+    total, or a list of 1 to total distinct ones."""
+    def number(n):
+        return type(n) is int and 1 <= n <= total
+    if number(link) or (type(link) is list and 1 <= len(link) <= total and all(map(number, link))
+                        and len(set(link)) == len(link)):
+        return None
+    return f"must be a finding number from 1 to {total}, or a list of distinct finding numbers"
+
+
 def retro_upload(home, run, agg, kept, cards, links, outcomes):
     """PUT the run's checked findings and logged cards as a factory.retro-run/1 record. kept holds each
     reply finding in order, None where admission rejected it; links holds each card's finding number or
-    None. Errors print to stderr and never change the exit code."""
+    list of numbers. Errors print to stderr and never change the exit code."""
     config = home / "config.md"
     device = (frontmatter(config)[0] if config.is_file() else {}).get("device") or ""
     if not HOST_NAME.fullmatch(device):
@@ -9361,7 +9372,11 @@ def retro_upload(home, run, agg, kept, cards, links, outcomes):
         fp = fingerprint(s["project"], s)
         row = {"title": s["title"], "project": s["project"], "fingerprint": fp,
                "result": results.get(fp, "not admitted")[:120]}
-        (findings[rank_of[link] - 1]["cards"] if link in rank_of else loose).append(row)
+        ranks = sorted({rank_of[n] for n in ([link] if type(link) is int else link or []) if n in rank_of})
+        for rank in ranks:
+            findings[rank - 1]["cards"].append(row)
+        if not ranks:
+            loose.append(row)
     record = {"schema": RETRO_RUN_SCHEMA, "run": run, "host": device, "from": agg["from"], "to": agg["to"],
               "sessions": sum(h["sessions"] for h in agg["hosts"].values()), "rejected": kept.count(None),
               "findings": findings, "cards": loose}
@@ -9429,14 +9444,14 @@ def retro_admit(run):
             return
         links = [s.pop("finding", None) if isinstance(s, dict) else None for s in doc["suggestions"]]
         total = len(doc["findings"])
-        for i, link in enumerate(links):
-            if link is not None and not (type(link) is int and 1 <= link <= total):
-                fail(f"{path}: suggestions[{i}].finding: must be a finding number from 1 to {total}; "
-                     "findings.md written, no cards admitted", 2)
         cards = {"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": doc["suggestions"]}
         err = check_suggestions(cards, "retro")
         if err:
             fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
+        for i, link in enumerate(links):
+            bad = check_finding_link(link, total)
+            if bad:
+                fail(f"{path}: suggestions[{i}].finding: {bad}; findings.md written, no cards admitted", 2)
         upload = (doc["suggestions"], links)
         write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
         retro_backlog_admit(cards, outcomes)
