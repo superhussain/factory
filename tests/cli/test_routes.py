@@ -48,13 +48,57 @@ class RoutesTest(IsolatedTestCase):
         self.limits.write_text(json.dumps(limits), encoding="utf-8")
 
     def test_pick_first(self):
-        self.assertEqual(self.run_routes("pick"), {"route": "alpha", "provider": "provider-a", "model": "model-a"})
+        self.assertEqual(self.run_routes("pick"), {"route": "alpha", "provider": "provider-a",
+                                                    "runtime": "provider-a", "model": "model-a"})
         self.assertFalse(self.limits.exists())
 
     def test_pick_skips_limited(self):
         self.write_limits({"alpha": stamp(30)})
         self.assertEqual(self.run_routes("pick"),
-                         {"route": "beta", "provider": "provider-b", "model": "vendor/model-b[1m]"})
+                         {"route": "beta", "provider": "provider-b", "runtime": "provider-b",
+                          "model": "vendor/model-b[1m]"})
+
+    def test_pick_runtime(self):
+        paseo = self.home / "paseo"
+        paseo.mkdir()
+        os.environ["PASEO_HOME"] = str(paseo)
+        config = paseo / "config.json"
+
+        def runtime(provider, providers):
+            config.write_text(json.dumps({"agents": {"providers": providers}}), encoding="utf-8")
+            self.routes.write_text(f"---\nalpha: {provider} model-a\n---\n", encoding="utf-8")
+            self.output.truncate(0), self.output.seek(0)
+            return self.run_routes("pick")["runtime"]
+
+        providers = {"claude-factory": {"extends": "claude"}, "claude-x": {"extends": "opencode"},
+                     "two-hop": {"extends": "claude-factory"}, "plain": {"label": "no extends"}}
+        self.assertEqual(runtime("claude-factory", providers), "claude")
+        self.assertEqual(runtime("claude-x", providers), "opencode")
+        self.assertEqual(runtime("two-hop", providers), "claude")
+        self.assertEqual(runtime("plain", providers), "plain")
+        self.assertEqual(runtime("missing", providers), "missing")
+        config.unlink()
+        self.output.truncate(0), self.output.seek(0)
+        self.assertEqual(self.run_routes("pick")["runtime"], "missing")
+        self.output.truncate(0), self.output.seek(0)
+        cases = {"{": "cannot read", '{"agents": {"providers": []}}': "cannot read",
+                 '{"agents": {"providers": {"missing": {"extends": 5}}}}': "bad extends under provider 'missing'",
+                 '{"agents": {"providers": {"missing": {"extends": "loop"}, "loop": {"extends": "missing"}}}}':
+                     "bad extends under provider"}
+        for text, message in cases.items():
+            with self.subTest(text=text):
+                config.write_text(text, encoding="utf-8")
+                self.assertIn(message, self.exit_message("pick"))
+        config.write_text("{}", encoding="utf-8")
+        real_read = factory.Path.read_text
+
+        def read_text(path, *args, **kwargs):
+            if path == config:
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_read(path, *args, **kwargs)
+
+        with patch.object(factory.Path, "read_text", read_text):
+            self.assertIn(f"cannot read {config}: routes pick needs it", self.exit_message("pick"))
 
     def test_pick_ignores_expired(self):
         self.write_limits({"alpha": stamp(-1)})
@@ -151,7 +195,8 @@ class RoutesTest(IsolatedTestCase):
         self.routes.write_text("---\nalpha: provider-a model-a high\nbeta: provider-b model-b\n---\n",
                                encoding="utf-8")
         self.assertEqual(self.run_routes("pick"),
-                         {"route": "alpha", "provider": "provider-a", "model": "model-a", "effort": "high"})
+                         {"route": "alpha", "provider": "provider-a", "runtime": "provider-a", "model": "model-a",
+                          "effort": "high"})
         self.output.truncate(0), self.output.seek(0)
         self.assertEqual(self.run_routes("list"), [
             {"route": "alpha", "provider": "provider-a", "model": "model-a", "effort": "high",
@@ -159,7 +204,8 @@ class RoutesTest(IsolatedTestCase):
             {"route": "beta", "provider": "provider-b", "model": "model-b", "limited_until": None}])
         self.output.truncate(0), self.output.seek(0)
         self.write_limits({"alpha": stamp(30)})
-        self.assertEqual(self.run_routes("pick"), {"route": "beta", "provider": "provider-b", "model": "model-b"})
+        self.assertEqual(self.run_routes("pick"), {"route": "beta", "provider": "provider-b", "runtime": "provider-b",
+                                                   "model": "model-b"})
         self.output.truncate(0), self.output.seek(0)
         for effort in factory.ROUTE_EFFORTS:
             self.routes.write_text(f"---\nalpha: provider-a model-a {effort}\n---\n", encoding="utf-8")

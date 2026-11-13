@@ -5,6 +5,7 @@
 // views against the read-only reference page and is never part of CI or assertions.
 // Each capture side gets up to three attempts in a fresh browser context, so one hung page
 // under host load does not end the run.
+// Compare two captures of one side with `node tests/browser/capture-compare.mjs`; it passes when no channel differs by more than 16.
 // Capture pages bypass the dashboard service worker so request interception answers /board.json.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";

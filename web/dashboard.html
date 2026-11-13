@@ -4720,6 +4720,16 @@ let backlogLoaded = false;      // a 200 or 404 has been read at least once
 const backlogBusy = new Set();  // item.raw values with a decision in flight
 const backlogPending = new Map(); // item.raw -> captureId, kept until a decision settles
 
+// Drops blank leading and trailing lines with an index walk, so long blank runs stay linear.
+function trimBlankEdges(text) {
+  const lines = text.split('\n');
+  let top = 0;
+  let end = lines.length - 1;
+  while (top < end && /^[ \t]*$/.test(lines[top])) top++;
+  while (end > top && /^[ \t]*$/.test(lines[end])) end--;
+  return lines.slice(top, end + 1).join('\n');
+}
+
 function backlogItems(text) {
   const lines = text.split('\n').map((l) => l.replace(/\r$/, ''));
   const items = [];
@@ -4731,7 +4741,7 @@ function backlogItems(text) {
     const ref = BACKLOG_REF.exec(feature);
     const held = [];
     while (i + 1 < lines.length && (lines[i + 1] === '' || lines[i + 1].startsWith('  '))) held.push(lines[++i].slice(2));
-    const context = held.join('\n').replace(/^(?:[ \t]*\n)+|(?:\n[ \t]*)+$/g, '');
+    const context = trimBlankEdges(held.join('\n'));
     items.push({
       raw, project: m[1], feature,
       text: ref ? feature.slice(0, ref.index) : feature,
@@ -4744,7 +4754,7 @@ function backlogItems(text) {
 
 // factory.py backlog_context rules. null means the text is not in the backlog context format.
 function parseBacklogContext(text) {
-  const lines = text.replace(/\r\n?/g, '\n').replace(/^(?:[ \t]*\n)+|(?:\n[ \t]*)+$/g, '').split('\n');
+  const lines = trimBlankEdges(text.replace(/\r\n?/g, '\n')).split('\n');
   const recommend = { 'Recommend: approve': 'approved', 'Recommend: deny': 'denied' }[lines[0]];
   if (!recommend || lines.join('\n').length > 6000) return null;
   const at = lines.findIndex((l) => l.startsWith('## Question:'));

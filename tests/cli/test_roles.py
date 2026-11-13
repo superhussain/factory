@@ -266,7 +266,7 @@ class RolesTest(IsolatedTestCase):
         self.assertIn('{"none": true}', role)
         schedule = (SKILL / "schedules/explore.md").read_text(encoding="utf-8")
         for value in ("<installed-skill>", "<python-launcher>", "<project-slug>", "suggest admit",
-                      "explore <project-slug> done <run>", "no claude route", "claude-", "factory-explorer"):
+                      "explore <project-slug> done <run>", "no claude route", "If `runtime` is not `claude`", "factory-explorer"):
             self.assertIn(value, schedule)
         approve = [line for line in schedule.splitlines() if "suggest approve" in line]
         self.assertEqual(len(approve), 1)
@@ -291,7 +291,7 @@ class RolesTest(IsolatedTestCase):
 
     def test_retro_schedule(self):
         schedule = (SKILL / "schedules/retro.md").read_text(encoding="utf-8")
-        for value in ("<installed-skill>", "<python-launcher>", "retro: autonomy paused", "no claude route", "claude-",
+        for value in ("<installed-skill>", "<python-launcher>", "retro: autonomy paused", "no claude route", "If `runtime` is not `claude`",
                       "byte for byte", "`expected`"):
             self.assertIn(value, schedule)
         steps = ("routes pick", "autonomy status", "retro push", "retro aggregate --days 3", "factory-retro",

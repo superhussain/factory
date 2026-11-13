@@ -66,14 +66,15 @@ exits 0.
 Cleanup rule: on a merged or closed job, the pipeline runs
 `factory.py archive-workspace <slug>/<id>` and `factory.py cleanup <slug>/<id>`
 without asking. They remove only worktrees this pipeline created: a `factory-<id>`
-Paseo workspace, or the job's worktree under the factory home. `archive-workspace` archives
+Paseo workspace, or the job's worktree under the factory home, and that job's private prompt folder under
+`prompts/<slug>/<id>`, refusing a link. `archive-workspace` archives
 a merged or closed job's own workspace whatever its git state and reports leftovers
 first. `cleanup` refuses a dirty worktree and keeps a branch that is not merged. Neither
 forces. A host owner who runs Claude Code in auto mode can allow them with this sample
 entry under `autoMode.allow` in their settings:
 
 ```json
-"Run factory.py archive-workspace <slug>/<id> or factory.py cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home). archive-workspace archives a merged or closed job's own factory-<id> workspace whatever its git state and reports leftovers first, cleanup refuses a dirty worktree and keeps unmerged branches, and neither forces."
+"Run factory.py archive-workspace <slug>/<id> or factory.py cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home, and that job's private prompt folder under prompts/<slug>/<id>, refusing a link). archive-workspace archives a merged or closed job's own factory-<id> workspace whatever its git state and reports leftovers first, cleanup refuses a dirty worktree and keeps unmerged branches, and neither forces."
 ```
 
 `schedules/resume.md`, `schedules/explore.md` and `schedules/retro.md` are prompt templates, not executables. Ideas are picked up by `factory.py pickup` instead (see Automatic pickup below and `references/pickup.md` in the installed skill).
@@ -96,7 +97,7 @@ Reinstalling the skill does not deploy the Worker or refresh stored scheduler pr
 
 ### Dispatch routes and usage limits
 
-Each host lists its own dispatch routes in `<home>/routes.md`, primary first, one `<name>: <provider> <model> [<effort>]` frontmatter line each, where the optional effort token is passed to launchers that use `{effort}`. Copy the provider and model from your own routing configuration; the repository ships none. `routes pick` prints the first route not marked limited. `routes limit <name> [--minutes N]` marks one limited for N minutes (default 60, at most 1440) in `<home>/route-limits.json`, `routes clear <name>` lifts the mark, and `routes list` shows every route with its limit. Both files stay on their host; never copy them, or any credential, to another host. A host picks ideas only for projects in its own `paths.md`, and the board claim stops two hosts taking one idea. The `--max-inflight` cap counts the whole board, so every host's pickup shares one cap. When no route is available the run claims nothing. `unclaim <id> --session <tag>` returns an idea that a failed dispatch left claimed.
+Each host lists its own dispatch routes in `<home>/routes.md`, primary first, one `<name>: <provider> <model> [<effort>]` frontmatter line each, where the optional effort token is passed to launchers that use `{effort}`. Copy the provider and model from your own routing configuration; the repository ships none. `routes pick` prints the first route not marked limited, with `runtime`, its provider's base runtime: the end of the provider's `extends` chain in `$PASEO_HOME/config.json` (default `~/.paseo/config.json`), else the provider itself. `routes limit <name> [--minutes N]` marks one limited for N minutes (default 60, at most 1440) in `<home>/route-limits.json`, `routes clear <name>` lifts the mark, and `routes list` shows every route with its limit. Both files stay on their host; never copy them, or any credential, to another host. A host picks ideas only for projects in its own `paths.md`, and the board claim stops two hosts taking one idea. The `--max-inflight` cap counts the whole board, so every host's pickup shares one cap. When no route is available the run claims nothing. `unclaim <id> --session <tag>` returns an idea that a failed dispatch left claimed.
 
 ### Automatic pickup
 
