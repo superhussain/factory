@@ -1610,7 +1610,7 @@ function retroRunShape(body, run, hostId) {
   const text = (v, lo, hi) =>
     typeof v === "string" && v.length >= lo && v.length <= hi && !/[\p{Cc}\u2028\u2029]/u.test(v);
   const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
-  const slug = (v) => typeof v === "string" && /^[\w-]{1,64}$/.test(v);
+  const slug = (v) => typeof v === "string" && /^[\p{L}\p{N}_-]+$/u.test(v);
   const card = (c) =>
     exact(c, ["title", "project", "fingerprint", "result"]) &&
     text(c.title, 1, 80) &&
