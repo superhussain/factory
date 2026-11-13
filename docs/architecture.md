@@ -149,6 +149,18 @@ date.
 | `PUT /api/pipeline/retro/<scope>` | the bound service token of a paired or active host, while autonomy runs, for an allowlisted project scope only (never `global`) | replace one stage note as the next pipeline version, saved by `retro`; see [autonomy.md](autonomy.md#retro-pipeline-edits) |
 | `PUT /api/project-retro/<slug>/<name>` | the bound service token of a paired or active host, while autonomy runs, for an allowlisted project only | splice one find-and-replace into a project file or document as the next version, saved by `retro`; see [autonomy.md](autonomy.md#retro-file-edits) |
 
+Retro runs are stored one record per run at `retro-runs/<run>.json`, outside the 35-day
+prune. `retro admit` sends a `factory.retro-run/1` record with the checked findings, each
+card's `finding` link and its outcome. The body is at most 64 KiB, `host` must be the bound
+host, and a bad shape answers 400. A re-admit of the same run replaces the record. The
+`#/retros` dashboard page reads the newest 30 and resolves each card's status from the board and
+the backlog.
+
+| Route | Who | Effect |
+| --- | --- | --- |
+| `PUT /api/retros/<run>` | the bound service token of a paired or active host | store or replace that run's record |
+| `GET /api/retros` | any verified principal | JSON array of the newest 30 run records, newest first |
+
 The status may carry `triage_failed_since`, an ISO 8601 UTC time, while
 backlog triage fails on that host.
 

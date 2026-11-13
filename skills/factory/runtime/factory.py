@@ -2861,9 +2861,10 @@ def suggest_admit(path, by="explorer"):
         sys.exit(3)
 
 
-def retro_backlog_admit(cards):
+def retro_backlog_admit(cards, outcomes=None):
     """Add each checked retro card as a held backlog line with a decision form. Skips duplicates
-    and cards over a cap, and exits 3 when autonomy is paused or nothing was added."""
+    and cards over a cap, and exits 3 when autonomy is paused or nothing was added. When outcomes
+    is a list, appends {"fingerprint", "result"} per card: admitted, or the skip reason."""
     home = factory_home()
     projects = registered(home)
     for i, s in enumerate(cards["suggestions"]):
@@ -2905,8 +2906,12 @@ def retro_backlog_admit(cards):
         else:
             admitted.append(f"{slug}: {s['title']}")
             added.append(slug)
+            if outcomes is not None:
+                outcomes.append({"fingerprint": fp, "result": "admitted"})
             continue
         skipped.append({"title": s["title"], "reason": reason})
+        if outcomes is not None:
+            outcomes.append({"fingerprint": fp, "result": reason})
     print(json.dumps({"admitted": admitted, "skipped": skipped}, indent=2))
     if not admitted:
         sys.exit(3)
@@ -8607,6 +8612,7 @@ RETRO_SESSION_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[0-9a-f-]{8,36}
 RETRO_SESSION = re.compile(r"[0-9a-f-]{8,36}", re.ASCII)
 MAX_RETRO_BYTES = 131072
 RETRO_EDIT_SCHEMA = "factory.retro-edit/1"
+RETRO_RUN_SCHEMA = "factory.retro-run/1"
 RETRO_DOC_EDIT_SCHEMA = "factory.retro-doc-edit/1"
 RETRO_EDIT_CHANGE = 600
 MAX_RETRO_EDITS = 2
@@ -9243,6 +9249,40 @@ def render_findings(agg, doc, rejected=(), edits=()):
     return "\n".join(lines) + "\n"
 
 
+def retro_upload(home, run, agg, kept, cards, links, outcomes):
+    """PUT the run's checked findings and logged cards as a factory.retro-run/1 record. kept holds each
+    reply finding in order, None where admission rejected it; links holds each card's finding number or
+    None. Errors print to stderr and never change the exit code."""
+    config = home / "config.md"
+    device = (frontmatter(config)[0] if config.is_file() else {}).get("device") or ""
+    if not HOST_NAME.fullmatch(device):
+        print("retro upload skipped: set device: in config.md", file=sys.stderr)
+        return
+    ranked = sorted(((n, f) for n, f in enumerate(kept, 1) if f), key=lambda p: (-p[1]["count"] * p[1]["cost"], p[1]["title"]))
+    rank_of = {n: rank for rank, (n, _) in enumerate(ranked, 1)}
+    findings = [{"rank": rank, **{k: f[k] for k in ("title", "category", "count", "cost", "project", "root_cause", "fix")},
+                 "cards": []} for rank, (_, f) in enumerate(ranked, 1)]
+    results = {o["fingerprint"]: o["result"] for o in outcomes}
+    loose = []
+    for s, link in zip(cards, links):
+        fp = fingerprint(s["project"], s)
+        row = {"title": s["title"], "project": s["project"], "fingerprint": fp,
+               "result": results.get(fp, "not admitted")[:120]}
+        (findings[rank_of[link] - 1]["cards"] if link in rank_of else loose).append(row)
+    record = {"schema": RETRO_RUN_SCHEMA, "run": run, "host": device, "from": agg["from"], "to": agg["to"],
+              "sessions": sum(h["sessions"] for h in agg["hosts"].values()), "rejected": kept.count(None),
+              "findings": findings, "cards": loose}
+    try:
+        status, _, text = api(home, "PUT", f"/api/retros/{run}", json.dumps(record), ok=(200, 400, 403, 404, 413),
+                              headers={"Content-Type": "application/json"})
+    except SystemExit:
+        return
+    if status == 200:
+        print(f"uploaded retro run {run}")
+    else:
+        print(f"retro upload failed: {status} {printable_line(text, 200)}", file=sys.stderr)
+
+
 def retro_admit(run):
     """Check a retro run's reply, write its ranked findings.md and add its cards to the backlog.
     A bad finding is dropped and listed; a bad card admits no card."""
@@ -9287,15 +9327,28 @@ def retro_admit(run):
     if doc.get("edits"):
         results = retro_apply_edits(home, run, doc["edits"], agg)
         write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected, edits=results))
-    if not doc["suggestions"]:
-        print("no suggestions")
-        return
-    cards = {"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": doc["suggestions"]}
-    err = check_suggestions(cards, "retro")
-    if err:
-        fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
-    write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
-    retro_backlog_admit(cards)
+    reply_findings = [None if bad else f for _, f, bad in checked]
+    upload = ([], [])
+    outcomes = []
+    try:
+        if not doc["suggestions"]:
+            print("no suggestions")
+            return
+        links = [s.pop("finding", None) if isinstance(s, dict) else None for s in doc["suggestions"]]
+        total = len(doc["findings"])
+        for i, link in enumerate(links):
+            if link is not None and not (type(link) is int and 1 <= link <= total):
+                fail(f"{path}: suggestions[{i}].finding: must be a finding number from 1 to {total}; "
+                     "findings.md written, no cards admitted", 2)
+        cards = {"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": doc["suggestions"]}
+        err = check_suggestions(cards, "retro")
+        if err:
+            fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
+        upload = (doc["suggestions"], links)
+        write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
+        retro_backlog_admit(cards, outcomes)
+    finally:
+        retro_upload(home, run, agg, reply_findings, *upload, outcomes)
 
 
 def retro_date(d):

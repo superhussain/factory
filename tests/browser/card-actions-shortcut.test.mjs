@@ -47,6 +47,7 @@ const KEYS = [
   ["N", "New idea"],
   ["P", "Select project"],
   ["S", "Open Settings"],
+  ["R", "Open Retros"],
   ["A or .", "Open the jumper with actions for the hovered or focused job card, or the open job"],
   ["B", "Open the first backlog item"],
   ["A or D", "Approve or deny the open backlog item"],
