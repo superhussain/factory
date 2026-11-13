@@ -166,6 +166,17 @@ class PrStateTest(IsolatedTestCase):
         code, out, _, _ = self.state([(view(decision=""), checks("pass"))])
         self.assertEqual(json.loads(out)["review"], "none")
 
+    def test_unapproved_pr_is_worked_before_needs_review(self):
+        required = {"decision": "REVIEW_REQUIRED"}
+        for reading, step in (((view(merge="DIRTY", **required), checks("pass")), "rebase"),
+                              ((view(**required), checks("fail")), "fix-ci"),
+                              ((view(**required), checks("pending")), "wait"),
+                              ((view(auto={"enabledAt": HEAD}, **required), checks("pass")), "needs-review"),
+                              ((view(**required), checks("pass"), graph(True)), "needs-review"),
+                              ((view(base=PARENT, **required), checks("pass")), "needs-review")):
+            with self.subTest(reading, step=step):
+                self.assertEqual(self.next_of(reading), step)
+
     def test_graphql_bot_reviews_never_count(self):
         bots = graph(reviews=["ci-helper", "reviewer-a"])
         approve = review("APPROVED", login="ci-helper")

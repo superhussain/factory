@@ -5899,13 +5899,15 @@ def pr_reading(home, pr, base):
         step = state
     elif unanswered or bots:
         step = "fix-reviews"
-    elif not approved:
-        step = "needs-review"
     elif conflict:
         step = "rebase"
     elif checks == "fail":
         step = "fix-ci"
-    elif checks == "pending" or queued or (checks == "none" and new):
+    elif checks == "pending" or (checks == "none" and new):
+        step = "wait"
+    elif not approved:
+        step = "needs-review"
+    elif queued:
         step = "wait"
     elif stacked:
         step = "wait-base"
