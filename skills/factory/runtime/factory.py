@@ -994,6 +994,7 @@ def hold(target, take=None):
         # Keep only the latest session's link. A non-Paseo takeover drops the old device's.
         if paseo:
             job["paseo"] = paseo
+            link_agent_rows(job, session, paseo)
         else:
             job.pop("paseo", None)
         if (job.get("handoff") or {}).get("state") == "ready":
@@ -9363,6 +9364,13 @@ def record_agent(home, job_id, row, claimant=None, project=None):
     return cas(home, "/api/board", change)
 
 
+def link_agent_rows(job, session, paseo):
+    """Set paseo on each of job's agents rows that session recorded and no session has linked yet."""
+    for row in job.get("agents") or []:
+        if isinstance(row, dict) and row.get("session") == session and "paseo" not in row:
+            row["paseo"] = paseo
+
+
 def record_launch(home, job_id, row):
     """record_agent for a launch that already happened: a failed write warns instead of ending the pass."""
     try:
@@ -9405,6 +9413,9 @@ def agent_cmd(sub, *args):
         if effort:
             row["effort"] = effort[0]
         row["session"] = session
+        paseo = paseo_session()
+        if paseo:
+            row["paseo"] = paseo
         saved = record_agent(home, job_id, row, (device, session), slug)
         if saved is None:
             fail(f"no job {job_id} on the board. Nothing was written.", 4)
