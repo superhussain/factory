@@ -129,6 +129,8 @@ Each run, in order:
   with the same tag. A new babysit session gets workspace slug `babysit-<id>` and title
   `babysit <id>`: pickup rewrites `--worktree-slug` and `--title` in the launcher, and inserts
   `--worktree-slug` after `run` for a `paseo` launcher with `--new-workspace` that lacks it.
+  A live holder, such as a `running` agent skipped above, learns of the click from its
+  next `hold`, which prints `babysit requested`.
 - Picks the first route in `routes.md` that is not marked limited, then resolves
   the launcher for it. A config error exits 2 before anything is claimed.
 - Claims one idea at a time — the board compare-and-swap stops two hosts taking

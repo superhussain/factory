@@ -466,6 +466,21 @@ class FactoryTest(IsolatedTestCase):
         self.assertIsNotNone(match)
         self.assertTrue(340 <= int(match.group(1)) <= 400)
 
+    def test_hold_names_a_babysit_request(self):
+        self.save(dict(self.saved(), stage="pr-open", pr="https://github.com/o/r/pull/12",
+                       babysit={"at": "2026-11-13T00:00:00Z"}))
+        factory.hold(self.target)
+        self.assertIn("babysit requested: Babysit PR was pressed on 001-test; run /factory babysit "
+                      "001-test --session sender in this session now",
+                      self.output.getvalue().splitlines())
+        job = self.saved()
+        job.pop("babysit")
+        self.save(job)
+        self.output.seek(0)
+        self.output.truncate()
+        factory.hold(self.target)
+        self.assertNotIn("babysit requested", self.output.getvalue())
+
     def test_receiver_accepts_with_own_claim_and_paseo_link(self):
         factory.handoff(self.target)
         with patch.dict(os.environ, {"FACTORY_SESSION": "receiver"}), patch.object(
