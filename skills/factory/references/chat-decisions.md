@@ -44,7 +44,9 @@ factory.py needs answer <job-id> --answers <file> --chat-file <file>
   when the message gives no reason.
 - Never edit, trim or summarize the message.
 - When the message is ambiguous, such as no option or two items, stop and ask.
-- When the message is refused, such as for a link, ask the person to answer at the
+- A link or code fence in the message is fine. The stored quote shows each link as
+  `(link: <host>)` and drops fence markers.
+- When the message is refused, such as for a secret, ask the person to answer at the
   terminal or on the dashboard. `control` has no terminal mode, so for it point the
   person to the dashboard only.
 

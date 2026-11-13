@@ -11,6 +11,9 @@ Code projects root.
 **Read.**
 - Read, grep and glob only `aggregate`, `digest` and files under `transcripts`.
 - Start from `aggregate`. Use `digest` rows to find which sessions a pattern came from.
+- `context` and `attachments_median` cover main sessions only.
+  `attachments_median` sizes are JSON bytes, not tokens. A role's own first-turn
+  tokens are `subagents.<type>.first_turn_median`.
 - Drill into a transcript only for a session ref that starts with `<host>/`. Other
   hosts' transcripts are not on this host.
 - Never open `.env*` files or credential files such as keys, tokens or certificates.

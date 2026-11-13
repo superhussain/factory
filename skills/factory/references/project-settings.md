@@ -3,7 +3,7 @@
 Project settings defaults to an existing R2 `projects/<slug>.md` configuration.
 Its Document selector also offers the three reference slots below, not repo files,
 device paths, global configuration, or credentials. Keep all configuration agent headings.
-Frontmatter allows one `repo`, `base`, and `title` only. Use an ASCII GitHub
+Frontmatter allows one `repo`, `base` and `title`, plus an optional `archive` and `buildkite_org`. Use an ASCII GitHub
 `owner/name` (or empty repo), a simple 1-200-character ASCII ref without traversal,
 empty/dot-ended/`.lock` components, and a 1-160-character title without controls.
 Flat comments and matching quotes are accepted; nested/multiline YAML and unknown

@@ -2916,9 +2916,22 @@ CHAT_QUOTE_MAX = 500
 SUGGEST_APPROVE_USAGE = 'usage: suggest approve <job-id> <A|B|C> [--chat-file <file>]'
 
 
+def neutralize_chat(text):
+    """text with code fence markers dropped and each link shown as (link: <host>)."""
+    def show(m):
+        token = m.group(0)
+        if "://" not in token and not NOTE_LINK.search(token):
+            return token
+        rest = token.split("://", 1)[-1].split("/", 1)[0].rsplit("@", 1)[-1]
+        host = re.match(r"[A-Za-z0-9.-]*", rest).group(0).lower().strip(".-")
+        host = host[4:] if host.startswith("www.") else host
+        return f"(link: {host})" if host else "(link)"
+    return re.sub(r"\S+", show, re.sub(r"`{3,}|~{3,}", "", text))
+
+
 def chat_quote(text, flag="--chat-file"):
     """The stripped chat message, None when it is blank, or exit 2 when it breaks a text rule."""
-    text = (text or "").strip()
+    text = neutralize_chat((text or "").strip()).strip()
     if not text:
         return None
     why = check_text(text, 1, CHAT_QUOTE_MAX, multiline=True)
@@ -6998,9 +7011,11 @@ def init(repo_path=".", agents="none", connection=None):
     meta, body = frontmatter(skill / "templates" / "project.md")
     meta.pop("path", None)
     meta.update(repo=repo, base="main", title=name)
+    template = (skill / "templates" / "project.md").read_text(encoding="utf-8")
+    comments = "".join(f"{line}\n" for line in template.split("---\n")[1].splitlines() if line.startswith("#"))
     project, state, remote_file = project_files(home, slug)
     read_project_state(state)
-    text = "---\n" + "".join(f"{k}: {v}\n" for k, v in meta.items()) + "---\n" + body
+    text = "---\n" + "".join(f"{k}: {v}\n" for k, v in meta.items()) + comments + "---\n" + body
     original = local_bytes(project)
     status, _, _ = api(home, "GET", f"/api/projects/{slug}.md", ok=(200, 404), raw=True)
     if status == 200:
@@ -8880,9 +8895,10 @@ def retro_rows(days):
                     continue
                 scanned += 1
                 t = by_type.setdefault(kind, {"count": 0, "turns": 0, "tokens": dict.fromkeys(RETRO_TOKENS, 0),
-                                              "errors": 0, "denials": 0, "models": []})
+                                              "errors": 0, "denials": 0, "models": [], "first_turns": []})
                 t["count"] += 1
                 t["turns"] += d["turns"]
+                t["first_turns"].append(d["context"]["first_turn"])
                 t["errors"] += d["errors"]["count"]
                 t["denials"] += d["denials"]["count"]
                 t["models"] = sorted(set(t["models"]) | set(d["models"]))
@@ -9017,7 +9033,7 @@ def retro_aggregate(days):
     folder = home / "retro" / run
     if is_link(folder.parent) or is_link(folder):
         fail(f"{folder} or its parent is a link; nothing written", 2)
-    hosts, subagents, sub, attachments = {}, {}, {}, {}
+    hosts, subagents, firsts, sub, attachments = {}, {}, {}, {}, {}
     for row in rows:
         h = hosts.setdefault(row["host"], {"sessions": 0, "jobs": set(), "ad_hoc": 0})
         h["sessions"] += 1
@@ -9032,8 +9048,12 @@ def retro_aggregate(days):
                 s[key] += retro_int(t.get(key))
             retro_sum(s["tokens"], t.get("tokens"))
             retro_sum(sub, t.get("tokens"))
+            firsts.setdefault(kind, []).extend(
+                v for v in (t.get("first_turns") if isinstance(t.get("first_turns"), list) else []) if type(v) is int)
         for kind, size in retro_dict(row.get("first_turn_attachments")).items():
             attachments.setdefault(kind, []).append(retro_int(size))
+    for kind, s in subagents.items():
+        s["first_turn_median"] = retro_median(firsts.get(kind, []))
     for name, h in hosts.items():
         h["jobs"] = len(h["jobs"])
         h["latest"] = latest[name]
