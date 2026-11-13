@@ -18,6 +18,7 @@ const ROWS = [
     done: "2026-09-01T12:00:00Z",
     jira: "PLAN-9005",
     pr: "https://github.com/example/sample/pull/412",
+    goal: "Login survives a token refresh.",
   },
   {
     id: "413-old-suggestion",
@@ -114,6 +115,19 @@ test("an age pass moves 412, 413 and 416, archive first, and leaves a floor", as
   const before = s.bucket.calls.length;
   assert.deepEqual(await s.run(), { status: "none", moved: [] });
   assert.equal(s.bucket.calls.slice(before).filter(([op]) => op === "put").length, 0);
+});
+
+test("an archive pass deletes the triage record of each moved row only", async () => {
+  const s = setup();
+  s.seed("needs-triage/sample/412-fix-login.json", { done: true });
+  s.seed("needs-triage/sample/415-add-export.json", { done: true });
+  assert.deepEqual((await s.run()).moved, [
+    "412-fix-login",
+    "413-old-suggestion",
+    "416-rate-limit",
+  ]);
+  assert.equal(s.bucket.objects.has("needs-triage/sample/412-fix-login.json"), false);
+  assert.equal(s.bucket.objects.has("needs-triage/sample/415-add-export.json"), true);
 });
 
 test("Off, an invalid setting and every keep rule leave the board alone", async (t) => {
@@ -296,7 +310,7 @@ test("the archive API serves id, page and q, and rejects bad queries", async () 
     total: 1,
   });
   assert.equal((await (await s.send("/api/board/archive?q=sample")).json()).total, 3);
-  for (const query of ["plan-9005", "pull/412", "#412", "PR #412", "pr#412"])
+  for (const query of ["plan-9005", "pull/412", "#412", "PR #412", "pr#412", "token refresh"])
     assert.deepEqual(
       await (await s.send("/api/board/archive?q=" + encodeURIComponent(query))).json(),
       { jobs: [ROWS[0]], total: 1 },

@@ -1,5 +1,5 @@
 // Board writes cannot add a dashboard job control to a batch rider, nor add or drop a
-// batched-into ref outside factory.py batch and the lead's close or merge. Rows are the made-up
+// batched-into ref or delete a rider row outside factory.py batch and the lead's close or merge. Rows are the made-up
 // running example: lead 1201 owns PR #88, rider 1203 is batched into it, 1204 is an idea.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -37,6 +37,8 @@ const batchRefusal = (row, lead) =>
   `a board write cannot batch "${row}" into "${lead}": factory.py batch does that, while the lead is at spec. Nothing was written.`;
 const unbatchRefusal = (row, lead) =>
   `a board write cannot unbatch "${row}": its lead "${lead}" is still open. Only the lead's close or merge drops the ref. Nothing was written.`;
+const deleteRefusal = (row, lead) =>
+  `a board write cannot delete "${row}": its lead "${lead}" is still open. Close or merge the lead first. Nothing was written.`;
 const { refs: _riderRefs, ...UNBATCHED } = RIDER;
 
 function setup(jobs = [LEAD, RIDER]) {
@@ -214,6 +216,37 @@ test("drops the ref once the lead closes, merges, or is gone", async () => {
   assert.equal((await setup().write([idle])).status, 200);
 });
 
+test("refuses deleting a rider while its lead is open", async () => {
+  await refusedWith(setup(), [LEAD], deleteRefusal(RIDER.id, LEAD.id));
+});
+
+test("deletes a rider once its lead closes, merges, or is gone", async () => {
+  for (const stage of ["closed", "merged"])
+    assert.equal((await setup().write([{ ...LEAD, stage }])).status, 200, stage);
+  assert.equal((await setup().write([])).status, 200);
+});
+
+test("refuses batching into a lead stored past spec", async () => {
+  const ref = { stage: "spec", refs: [{ id: LEAD.id, kind: "batched-into" }] };
+  await refusedWith(
+    setup([LEAD, IDEA]),
+    [
+      { ...LEAD, stage: "spec" },
+      { ...IDEA, ...ref },
+    ],
+    batchRefusal(IDEA.id, LEAD.id),
+  );
+});
+
+test("allows batching into a lead added in the same write", async () => {
+  const ref = { stage: "spec", refs: [{ id: LEAD.id, kind: "batched-into" }] };
+  const response = await setup([IDEA]).write([
+    { ...LEAD, stage: "spec" },
+    { ...IDEA, ...ref },
+  ]);
+  assert.equal(response.status, 200);
+});
+
 test("batch refusals fit 200 characters", async () => {
   const lead = { ...LEAD, id: "1201-" + "a".repeat(60) };
   const rider = {
@@ -225,6 +258,7 @@ test("batch refusals fit 200 characters", async () => {
   const idea = { ...IDEA, id: "1204-" + "c".repeat(60) };
   for (const [stored, rows, start] of [
     [[lead, rider], [lead, bare], "a board write cannot unbatch "],
+    [[lead, rider], [lead], "a board write cannot delete "],
     [
       [lead, idea],
       [lead, { ...idea, stage: "spec", refs: rider.refs }],

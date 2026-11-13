@@ -373,7 +373,7 @@ test("needs you form", { timeout: 180000 }, async (t) => {
       try {
         served = record(createHash("sha256").update(NEEDS).digest("hex"));
         await open("001-needs/needs");
-        await page.waitForSelector("#needs-form", wait);
+        await page.waitForSelector(".ask-model", wait);
         assert.equal(
           await page.$eval(".ask-model", (el) => el.textContent),
           "clef-flash picks Fast at 71%.",
@@ -389,6 +389,70 @@ test("needs you form", { timeout: 180000 }, async (t) => {
         assert.equal(await page.$(".ask-why"), null);
       } finally {
         page.off("request", serve);
+        await page.setRequestInterception(false);
+      }
+    });
+
+    await t.test("form before clef-flash", async () => {
+      const record = {
+        sha256: createHash("sha256").update(NEEDS).digest("hex"),
+        choices: [
+          {
+            header: "Release path",
+            pick: "Fast",
+            confidence: 71,
+            options: [
+              {
+                label: "Fast",
+                chance: 71,
+                reason: "It is the smallest change that solves the item.",
+              },
+              { label: "Careful", chance: 29, reason: "It avoids auth, data or deploy risk." },
+            ],
+          },
+        ],
+      };
+      let held;
+      const arrived = new Promise((resolve) => {
+        held = resolve;
+      });
+      await page.setRequestInterception(true);
+      const hold = (request) =>
+        request.method() === "GET" &&
+        new URL(request.url()).pathname === "/api/jobs/sample/001-needs/needs-triage.json"
+          ? held(request)
+          : request.continue();
+      page.on("request", hold);
+      try {
+        await open("001-needs/needs");
+        const request = await arrived;
+        await page.waitForSelector("#needs-form", wait);
+        assert.equal(await page.$(".ask-model"), null);
+        const box = (await page.$$("#needs-form textarea"))[1];
+        await box.evaluate((el) => {
+          el.value = "";
+        });
+        await box.click();
+        await box.type("Hold");
+        await request.respond({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(record),
+        });
+        await page.waitForSelector(".ask-model", wait);
+        assert.equal(
+          await page.$eval(".ask-model", (el) => el.textContent),
+          "clef-flash picks Fast at 71%.",
+        );
+        assert.deepEqual(
+          await page.evaluate(() => {
+            const el = document.activeElement;
+            return [el === document.querySelectorAll("#needs-form textarea")[1], el.value];
+          }),
+          [true, "Hold"],
+        );
+      } finally {
+        page.off("request", hold);
         await page.setRequestInterception(false);
       }
     });

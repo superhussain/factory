@@ -1,6 +1,6 @@
 # Chat decisions
 
-A person may answer a suggestion card or a backlog item in chat. The orchestrator
+A person may answer a suggestion card, a backlog item or a needs-you form in chat. The orchestrator
 then records that answer with one of these commands.
 
 ```text
@@ -9,6 +9,7 @@ factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--note
 factory.py control <job-id> <prioritize|unprioritize|pause|resume|babysit|rerun> --chat-file <file>
 factory.py control <job-id> move <host> --chat-file <file>
 factory.py control <job-id> close --reason-file <file> --chat-file <file>
+factory.py needs answer <job-id> --answers <file> --chat-file <file>
 ```
 
 - After `control` succeeds, tell the person the printed job id and `result`, and
@@ -56,6 +57,13 @@ factory.py control <job-id> close --reason-file <file> --chat-file <file>
 - Rework needs `--notes-file` and accepts `no answer` for a question.
 - After it succeeds, tell the person the printed job id and decision.
 
+## Needs answers
+
+- `needs answer` takes `--answers` in the same line format as Backlog answers.
+- Answer every question. It refuses `no answer`.
+- After it succeeds, tell the person the printed `answers` and `needs`. `needs` is
+  `kept` at `needs-human`, or when the job's needs text no longer points at its form.
+
 ## Dashboard actions
 
 | Dashboard action | Agent path today | Slice |
@@ -65,7 +73,7 @@ factory.py control <job-id> close --reason-file <file> --chat-file <file>
 | Babysit PR | `factory.py control <job-id> babysit` | exists |
 | Close job with a reason | `factory.py control` | exists |
 | Move to host, Rerun | `factory.py control` | exists |
-| Answer a needs-you form | none | planned |
+| Answer a needs-you form | `factory.py needs answer` | exists |
 | Edit idea, Discard idea, Assign project, Follow in Tracer | `board` patch | exists |
 | Backlog decision, explorer approval | `backlog decide`, `suggest approve` | exists |
 | Pipeline settings save | Worker 403 for services | planned, owner decision |

@@ -1,4 +1,4 @@
-// The jumper matches a job's Jira key, PR link and idea text as well as its id, title and project.
+// The jumper matches a job's Jira key, PR link, idea text and spec Goal as well as its id, title and project.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
@@ -22,6 +22,7 @@ const SEARCH = {
   jira: "PLAN-9005",
   pr: "https://github.com/example/sample/pull/71",
   idea: "Sample search job\nKeep overlapping columns apart.",
+  goal: "Sample exports stay under one megabyte.",
 };
 const OTHER = {
   id: "072-sample-other",
@@ -99,6 +100,13 @@ test("the jumper matches Jira key, PR link and idea", { timeout: 120000 }, async
       assert.deepEqual(await shown(), [SEARCH.id]);
       await setQuery("unrelated");
       assert.deepEqual(await shown(), [OTHER.id]);
+    });
+
+    await t.test("the spec Goal finds its job", async () => {
+      await setQuery("one megabyte");
+      await (await page.$("#job-picker")).screenshot({ path: `${SHOTS}jumper-goal-1280.png` });
+      assert.deepEqual(await shown(), [SEARCH.id]);
+      assert.equal(await count(), "1 job");
     });
 
     await t.test("no match says so", async () => {

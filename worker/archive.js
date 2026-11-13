@@ -7,10 +7,11 @@ import { announce } from "./events.js";
 export const ARCHIVE_KEY = "board-archive.json";
 export const ARCHIVE_PAGE = 50;
 export const ARCHIVE_CRON = "17 * * * *";
+export const needsTriageKey = (slug, id) => `needs-triage/${slug}/${id}.json`;
 
 const DAY = 86400000;
 const ID_PREFIX = /^(\d{3,})-/;
-const SEARCH_FIELDS = ["id", "title", "project", "jira", "pr", "idea"];
+const SEARCH_FIELDS = ["id", "title", "project", "jira", "pr", "idea", "goal"];
 const PR_QUERY = /^(?:pr\s*)?#(\d+)$/i;
 const terminal = (job) => job?.stage === "merged" || job?.stage === "closed";
 const doneAt = (job) => Date.parse(job?.done);
@@ -137,6 +138,9 @@ export async function runArchive(env, now) {
     );
   }
   await announce(env, "board.json");
+  for (const j of moved) {
+    if (typeof j.project === "string") await env.BUCKET.delete(needsTriageKey(j.project, j.id));
+  }
   return { status: "archived", moved: [...ids] };
 }
 

@@ -38,7 +38,7 @@ sibling stage is switched only after validation. Pause other installers and
 editors during replacement. `.factory-install.lock` serializes cooperating
 installers, not arbitrary external filesystem writers. An existing lock fails
 closed; inspect its owner and resolve it manually, never auto-break a stale lock.
-The installer touches no device state, other skills, native roles or schedules.
+The installer touches no device state, native roles or schedules. It leaves other skills alone, except that it removes a `huss-factory` link beside `factory`, the retired runtime that skips the job id check. A real `huss-factory` folder stays, with a warning to remove it by hand.
 
 ## Offline initialization and credentials
 

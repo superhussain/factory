@@ -255,6 +255,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "branch": "factory/003-rate-limiting",
   "stage": "idea | spec | build | review | approve | needs-human | pr-open | merged | closed",
   "idea": "the feature as typed, set only on jobs added from the dashboard",
+  "goal": "the spec Goal paragraph; set only by factory.py push",
   "round": 2,
   "rounds": [{ "security": "CHANGES", "ux": "PASS", "ui": "PASS", "code": "PASS" },
              { "security": "pending", "ux": "PASS", "ui": "pending", "code": "PASS" }],
@@ -265,7 +266,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "jira": "optional Jira key, read by the Tracer mirror",
   "tracer": { "follow": true, "gather": true, "feature": "factory-42", "url": "set only by factory.py after a Tracer mirror", "scope": "gathering, approved or declined; set only by factory.py", "building": "true only while a Tracer build agent holds the feature; set by pickup", "stopped": "true once factory.py asked Tracer to stop the build scope approval queued; set only by factory.py", "tasks": "up to 30 {id, title, status} from the Tracer feature; set by pickup once Tracer builds the job" },
   "note": "optional one-line status, e.g. escalation reason",
-  "needs": "optional one line on what only the human can do, e.g. approve spec.md, or review and merge PR #123 held by merge: human",
+  "needs": "optional: what only a human can do, e.g. approve spec.md",
   "port": "optional dev-server port or block the builder holds, e.g. 8130-8139",
   "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | batched-into (set only by factory.py batch; board refuses it)" }],
   "stacked": "true on the one rider that ships as a PR stacked on its lead's PR; set only by factory.py stack",
@@ -538,10 +539,9 @@ only `factory.py deny-notes` writes it.
   use never adds it.
 - Commands use `python3`, or `py -3` on Windows. No command needs bash: every
   command is `python3`, `git`, or `gh`.
-- Orchestrators run `suggest approve`, `backlog decide` and `factory.py control` only with
-  person text in files, as [chat decisions](references/chat-decisions.md) says. They never run `autonomy
-  resume`, `autonomy allow` or `/factory approve-spec`, or approve scope in Tracer;
-  a human does.
+- Orchestrators run `suggest approve`, `backlog decide`, `control` and `needs answer` only with
+  person text in files, per [chat decisions](references/chat-decisions.md). They never run `autonomy
+  resume`, `autonomy allow` or `/factory approve-spec`, or approve scope in Tracer; a human does.
 
 ## Security floors
 

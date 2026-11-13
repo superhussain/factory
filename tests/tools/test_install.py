@@ -171,6 +171,62 @@ class InstallTest(IsolatedTestCase):
         self.assertEqual(snapshot(self.destination), before)
         self.refused(lambda: self.installer.install(SKILL, self.root / "part/../skills"))
 
+    def test_legacy_link_removed_on_install_and_identical_rerun(self):
+        old = self.root / "old/huss-factory"
+        old.mkdir(parents=True)
+        (old / "SKILL.md").write_text("retired runtime")
+        self.destination.mkdir()
+        link = self.destination / "huss-factory"
+        for _ in range(2):
+            link.symlink_to(old, target_is_directory=True)
+            target, lines = self.install()
+            self.assertEqual(lines, [str(target), "removed " + str(link)])
+            self.assertFalse(os.path.lexists(link))
+            self.assertEqual((old / "SKILL.md").read_text(), "retired runtime")
+
+    def test_legacy_folder_kept_and_refused_install_keeps_link(self):
+        self.destination.mkdir()
+        folder = self.destination / "huss-factory"
+        folder.mkdir()
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            target, lines = self.install()
+        self.assertEqual(lines, [str(target)])
+        self.assertTrue(folder.is_dir())
+        self.assertEqual(err.getvalue(), "install.py: " + str(folder)
+                         + " is a folder, not a link; remove it by hand so agents load only factory\n")
+        folder.rmdir()
+        old = self.root / "old"
+        old.mkdir()
+        folder.symlink_to(old, target_is_directory=True)
+        (target / "SKILL.md").write_text("locally edited")
+        self.refused(self.install)
+        self.assertTrue(folder.is_symlink())
+
+    def test_legacy_link_removal_failure_exits_2(self):
+        old = self.root / "old/huss-factory"
+        old.mkdir(parents=True)
+        self.destination.mkdir()
+        link = self.destination / "huss-factory"
+        link.symlink_to(old, target_is_directory=True)
+        real_unlink, real_rmdir = os.unlink, os.rmdir
+
+        def refuse(real):
+            def call(path, *args, **kwargs):
+                if os.fspath(path) == str(link):
+                    raise PermissionError(path)
+                return real(path, *args, **kwargs)
+            return call
+
+        with patch.object(self.installer.os, "unlink", refuse(real_unlink)), \
+                patch.object(self.installer.os, "rmdir", refuse(real_rmdir)), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err, \
+                self.assertRaises(SystemExit) as error:
+            self.installer.install(SKILL, self.destination)
+        self.assertEqual(error.exception.code, 2)
+        self.assertEqual(err.getvalue(), f"install.py: {link}: cannot safely install factory\n")
+        self.assertTrue(link.is_symlink())
+        self.assertFalse((self.destination / ".factory-install.lock").exists())
+
     def test_installed_only_offline_setup_adoption_roles_and_http_conflict(self):
         distribution = self.root / "distribution"
         (distribution / "tools").mkdir(parents=True)

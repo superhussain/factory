@@ -287,6 +287,7 @@ class FactoryTest(IsolatedTestCase):
         self.fail_upload = False
         self.change_on_upload = False
         self.race = False
+        self.put_paths = []
         patch.object(factory, "api", side_effect=self.api).start()
         self.output = io.StringIO()
         self.redirect = contextlib.redirect_stdout(self.output)
@@ -312,6 +313,7 @@ class FactoryTest(IsolatedTestCase):
         data = self.store.get(path)
         tag = factory.sha(data) if data is not None else None
         if method == "PUT":
+            self.put_paths.append(path)
             if path != "/api/board" and self.fail_upload:
                 raise SystemExit(5)
             if path == "/api/board" and self.race:
@@ -352,6 +354,38 @@ class FactoryTest(IsolatedTestCase):
         self.assertEqual(job["handoff"]["head"], self.head)
         self.assertEqual(job["handoff"]["state"], "ready")
         self.assertIn("/api/jobs/sample/001-test/handoff.md", self.store)
+
+    def write_spec(self, goal):
+        (self.folder / "spec.md").write_text(f"# Spec: 001-test\n\n## Goal\n\n{goal}\n## Scope\n\n- one\n")
+
+    def test_push_records_spec_goal(self):
+        job = self.saved()
+        job["updated"] = "2026-01-02T12:00:00Z"
+        self.save(job)
+        self.write_spec("Sample exports stay\nunder one megabyte.\n\nSecond paragraph.\n")
+        factory.push(self.target)
+        self.assertEqual(self.saved()["goal"], "Sample exports stay under one megabyte.")
+        self.assertEqual(self.saved()["updated"], "2026-01-02T12:00:00Z")
+        self.assertIn("recorded the spec Goal on the board", self.output.getvalue())
+
+    def test_push_skips_unchanged_or_missing_goal(self):
+        self.write_spec("Sample exports stay under one megabyte.\n")
+        factory.push(self.target)
+        self.put_paths.clear()
+        factory.push(self.target)
+        self.assertNotIn("/api/board", self.put_paths)
+        (self.folder / "spec.md").write_text("# Spec: 001-test\n\n## Scope\n\n- one\n")
+        factory.push(self.target)
+        self.assertIn("/api/jobs/sample/001-test/spec.md", self.put_paths)
+        self.assertNotIn("/api/board", self.put_paths)
+
+    def test_handoff_records_goal(self):
+        self.write_spec("Sample exports stay under one megabyte.\n")
+        factory.handoff(self.target)
+        job = self.saved()
+        self.assertEqual(job["goal"], "Sample exports stay under one megabyte.")
+        self.assertNotIn("claim", job)
+        self.assertEqual(job["handoff"]["state"], "ready")
 
     def test_all_active_stages_and_old_acceptance_metadata(self):
         initial = self.store["/api/board"]
