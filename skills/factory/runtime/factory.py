@@ -8882,8 +8882,11 @@ def retro_upload(home, run, agg, kept, cards, links, outcomes):
     record = {"schema": RETRO_RUN_SCHEMA, "run": run, "host": device, "from": agg["from"], "to": agg["to"],
               "sessions": sum(h["sessions"] for h in agg["hosts"].values()), "rejected": kept.count(None),
               "findings": findings, "cards": loose}
-    status, _, text = api(home, "PUT", f"/api/retros/{run}", json.dumps(record), ok=(200, 400, 403, 404, 413),
-                          headers={"Content-Type": "application/json"})
+    try:
+        status, _, text = api(home, "PUT", f"/api/retros/{run}", json.dumps(record), ok=(200, 400, 403, 404, 413),
+                              headers={"Content-Type": "application/json"})
+    except SystemExit:
+        return
     if status == 200:
         print(f"uploaded retro run {run}")
     else:

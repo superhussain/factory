@@ -884,6 +884,14 @@ class RetroUploadTest(RetroWorkerCase):
         self.assertEqual((code, out), (0, f"wrote {self.folder / 'findings.md'}\nno suggestions\n"))
         self.assertEqual(err, "retro upload failed: 404 Not found\n")
 
+    def test_a_failed_request_keeps_the_exit_code(self):
+        (self.folder / "reply.json").write_text(json.dumps(reply()), encoding="utf-8")
+        with http_fixture({}) as server:
+            self.config(server.origin)
+            with patch.object(factory, "api", side_effect=SystemExit(5)):
+                code, out, err = invoke(factory, ["retro", "admit", RUN])
+        self.assertEqual((code, out), (0, f"wrote {self.folder / 'findings.md'}\nno suggestions\n"))
+
     def test_missing_device_skips_the_upload(self):
         (self.folder / "reply.json").write_text(json.dumps(reply()), encoding="utf-8")
         with http_fixture({}) as server:

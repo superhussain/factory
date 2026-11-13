@@ -174,6 +174,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .retro-run h3 .muted { font-weight: 400; margin-left: 8px; }
   .retro-run tr[aria-current="true"] { background: var(--accent-soft); }
   .retro-run details { margin-top: 4px; font-size: 12px; }
+  .retro-run a { color: var(--accent); }
+  .retro-run .reference-table { min-width: 640px; }
   .retro-run ul { margin: 0; padding-left: 16px; }
   .settings-page { max-width: 1440px; margin: 0 auto; padding: 28px; }
   .settings-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
@@ -926,7 +928,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
 <div class="settings-page" id="retros-page" role="region" aria-labelledby="retros-page-heading" hidden>
   <div class="settings-head">
     <a class="btn icon" id="retros-back" href="#" aria-label="Back to board" title="Back to board"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
-    <h2 id="retros-page-heading">Retros</h2>
+    <h2 id="retros-page-heading" tabindex="-1">Retros</h2>
   </div>
   <p class="muted" id="retros-status" role="status"></p>
   <div id="retros-list"></div>
@@ -2479,7 +2481,7 @@ function renderRoute() {
   $('settings-page').hidden = !section;
   $('retros-page').hidden = !retrosOpen;
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : baseTitle;
-  if (retrosOpen && !retrosWas) { retrosScrolled = ''; loadRetros(); }
+  if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
@@ -2495,6 +2497,7 @@ function renderRoute() {
   if (section === 'notifications' && was !== 'notifications') enterNotificationsSection();
   if (section === 'scheduler' && was !== 'scheduler') enterSchedulerSection();
   if (section === 'reference' && was !== 'reference') enterReferenceSection();
+  if (retrosWas && !retrosOpen) $('settings-link').focus();
   if (!section && was && (focusInside || document.activeElement === document.body)) $('settings-link').focus();
 }
 function leaveSettings() {
@@ -2509,6 +2512,7 @@ $('board-link').addEventListener('click', e => { e.preventDefault(); leaveSettin
 let retros = null;
 let retrosFailed = false;
 let retrosScrolled = '';
+let retrosHtml = '';
 const RETRO_MARK = /^Retro: run [A-Za-z0-9_-]{1,64}, fingerprint ([0-9a-f]{16}), created \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
 
 function retrosRoute() {
@@ -2561,7 +2565,7 @@ async function loadRetros() {
     if (r.status !== 200) throw new Error(String(r.status));
     retros = await r.json();
     retrosFailed = false;
-  } catch { retrosFailed = true; }
+  } catch { retros = null; retrosFailed = true; }
   renderRetrosPage();
 }
 
@@ -2571,11 +2575,16 @@ function renderRetrosPage() {
   $('retros-status').textContent = retrosFailed ? 'Could not load retros. Reload to try again.'
     : retros?.length === 0 ? 'No retro runs yet. Each retro admit uploads its findings here.' : '';
   // Statuses read the board and the backlog, so no row is drawn before both are in.
-  if (!retros || !loaded || !backlogLoaded) { $('retros-list').innerHTML = ''; return; }
+  if (!retros || !loaded || !backlogLoaded) {
+    if (!retrosFailed) $('retros-status').textContent = 'Loading retros\u2026';
+    $('retros-list').innerHTML = '';
+    retrosHtml = '';
+    return;
+  }
   const marks = retroMarks(backlogText);
   const label = (status) => status.href ? '<a href="' + esc(status.href) + '">' + esc(status.text) + '</a>' : esc(status.text);
   const cardLine = (card, status) => esc(card.title) + ' \u00b7 ' + label(status);
-  $('retros-list').innerHTML = retros.map((run) => {
+  const html = retros.map((run) => {
     const statuses = run.findings.flatMap((f) => f.cards).concat(run.cards).map((c) => retroCardStatus(c, marks));
     const counts = new Map();
     for (const { text } of statuses) {
@@ -2600,6 +2609,7 @@ function renderRetrosPage() {
       '<div class="reference-scroll"><table class="reference-table"><thead><tr><th scope="col">Rank</th><th scope="col">Finding</th><th scope="col">Category</th><th scope="col">Project</th><th scope="col">Score</th><th scope="col">Logged as</th></tr></thead><tbody>' +
       rows + '</tbody></table></div>' + loose + '</section>';
   }).join('');
+  if (html !== retrosHtml) { retrosHtml = html; $('retros-list').innerHTML = html; }
   const target = route.run && (route.rank ? 'retro-' + route.run + '-' + route.rank : 'retro-run-' + route.run);
   if (target && target !== retrosScrolled && document.getElementById(target)) {
     retrosScrolled = target;
