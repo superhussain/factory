@@ -9,6 +9,8 @@ factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--note
 factory.py control <job-id> <prioritize|unprioritize> --chat-file <file>
 ```
 
+- After `control` succeeds, tell the person the printed job id and `result`.
+
 ## Who counts
 
 - Run one only when the person's own most recent chat message names the item and
