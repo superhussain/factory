@@ -2899,9 +2899,22 @@ CHAT_QUOTE_MAX = 500
 SUGGEST_APPROVE_USAGE = 'usage: suggest approve <job-id> <A|B|C> [--chat-file <file>]'
 
 
+def neutralize_chat(text):
+    """text with code fence markers dropped and each link shown as (link: <host>)."""
+    def show(m):
+        token = m.group(0)
+        if "://" not in token and not NOTE_LINK.search(token):
+            return token
+        rest = token.split("://", 1)[-1].split("/", 1)[0].rsplit("@", 1)[-1]
+        host = re.match(r"[A-Za-z0-9.-]*", rest).group(0).lower().strip(".-")
+        host = host[4:] if host.startswith("www.") else host
+        return f"(link: {host})" if host else "(link)"
+    return re.sub(r"\S+", show, re.sub(r"`{3,}|~{3,}", "", text))
+
+
 def chat_quote(text, flag="--chat-file"):
     """The stripped chat message, None when it is blank, or exit 2 when it breaks a text rule."""
-    text = (text or "").strip()
+    text = neutralize_chat((text or "").strip()).strip()
     if not text:
         return None
     why = check_text(text, 1, CHAT_QUOTE_MAX, multiline=True)
