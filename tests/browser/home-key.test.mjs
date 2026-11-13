@@ -1,5 +1,5 @@
-// H goes back to the board from an open job, an open backlog item and Settings, against one owned
-// local Worker, with the focus each view sets on open. It does nothing in a text field or with a
+// H goes back to the board from an open job, an open backlog item, Settings and Retros, against one
+// owned local Worker, with the focus each view sets on open. It does nothing in a text field or with a
 // dialog open. Settings Reference lists it.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -99,8 +99,18 @@ test("h key goes home", { timeout: 120000 }, async () => {
     await page.waitForSelector("#settings-page[hidden]", wait);
     assert.equal(await page.evaluate(() => location.hash), "");
 
+    await page.evaluate(() => (location.hash = "#/retros"));
+    await page.waitForSelector("#retros-page:not([hidden])", wait);
+    await page.keyboard.press("h");
+    await page.waitForSelector("#retros-page[hidden]", wait);
+    assert.equal(await page.evaluate(() => location.hash), "");
+
     assert.deepEqual(
       await page.$eval("#settings-back", (el) => [el.title, el.getAttribute("aria-keyshortcuts")]),
+      ["Back to board (H)", "h"],
+    );
+    assert.deepEqual(
+      await page.$eval("#retros-back", (el) => [el.title, el.getAttribute("aria-keyshortcuts")]),
       ["Back to board (H)", "h"],
     );
     assert.deepEqual(
@@ -115,7 +125,7 @@ test("h key goes home", { timeout: 120000 }, async () => {
     const s = rows.findIndex(([key]) => key === "S");
     assert.deepEqual(rows[s + 1], [
       "H",
-      "Back to the board from a job, a backlog item or Settings",
+      "Back to the board from a job, a backlog item, Settings or Retros",
     ]);
     assert.deepEqual(errors, []);
   });

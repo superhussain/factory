@@ -951,7 +951,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
           <tr><td>N</td><td>New idea</td></tr>
           <tr><td>P</td><td>Select project</td></tr>
           <tr><td>S</td><td>Open Settings</td></tr>
-          <tr><td>H</td><td>Back to the board from a job, a backlog item or Settings</td></tr>
+          <tr><td>H</td><td>Back to the board from a job, a backlog item, Settings or Retros</td></tr>
           <tr><td>R</td><td>Open Retros</td></tr>
           <tr><td>A or .</td><td>Open the jumper with actions for the hovered or focused job card, or the open job</td></tr>
           <tr><td>B</td><td>Open the first backlog item</td></tr>
@@ -964,7 +964,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
 </div>
 <div class="settings-page" id="retros-page" role="region" aria-labelledby="retros-page-heading" hidden>
   <div class="settings-head">
-    <a class="btn icon" id="retros-back" href="#" aria-label="Back to board" title="Back to board"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
+    <a class="btn icon" id="retros-back" href="#" aria-label="Back to board" title="Back to board (H)" aria-keyshortcuts="h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
     <h2 id="retros-page-heading" tabindex="-1">Retros</h2>
   </div>
   <p class="muted" id="retros-status" role="status"></p>
@@ -4838,14 +4838,14 @@ function handleBacklogKeys(e) {
 }
 document.addEventListener('keydown', handleBacklogKeys);
 
-// h goes back to the board from Settings, an open job or an open backlog item.
+// h goes back to the board from Settings, Retros, an open job or an open backlog item.
 function handleHomeKey(e) {
   if (e.key !== 'h' || e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
   // The same fields as handleBacklogKeys: the radio or select a view focuses on open never blocks h, and
   // preventDefault below keeps a select's type-ahead off it.
   if (e.target.closest('textarea, [contenteditable], #d-resize, input:not([type=radio]):not([type=checkbox])')) return;
   if (document.querySelector('dialog[open]')) return;
-  if (settingsRoute() !== null) {
+  if (settingsRoute() !== null || retrosRoute() !== null) {
     e.preventDefault();
     leaveSettings();
   } else if (openId || openBacklogRaw !== null) {
