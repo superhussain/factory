@@ -811,9 +811,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <p class="muted">Automatic pickup needs two things on each host: a scheduler that runs factory.py pickup every 5 minutes, and a launcher that starts one agent session per idea. Nothing here is saved. Copy a snippet, then replace each placeholder with this host's values.</p>
       <h4>Start here</h4>
       <p class="muted">Run this on each host. It checks every piece pickup needs, in order, and prints the exact fix for each missing one with this host's own paths. It exits non-zero until every check is ok.</p>
-      <div class="snippet"><pre><code id="scheduler-snippet-setup">python3 &lt;installed-skill&gt;/runtime/factory.py pickup setup</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup" aria-label="Copy setup check command">Copy</button></div></div>
+      <div class="snippet"><pre class="wrap"><code id="scheduler-snippet-setup">python3 &lt;installed-skill&gt;/runtime/factory.py pickup setup</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup" aria-label="Copy setup check command">Copy</button></div></div>
       <p class="muted">Then install the 5 minute timer for this host's scheduler. Running it again changes nothing. The sections below show what it writes, if you prefer to set it up by hand.</p>
-      <div class="snippet"><pre><code id="scheduler-snippet-setup-install">python3 &lt;installed-skill&gt;/runtime/factory.py pickup setup --install</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup-install" aria-label="Copy timer install command">Copy</button></div></div>
+      <div class="snippet"><pre class="wrap"><code id="scheduler-snippet-setup-install">python3 &lt;installed-skill&gt;/runtime/factory.py pickup setup --install</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup-install" aria-label="Copy timer install command">Copy</button></div></div>
       <p class="muted" id="scheduler-not-a-prompt">A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the host timer runs pickup.</p>
       <h4>What runs pickup</h4>
       <ul class="scheduler-list">
