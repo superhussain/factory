@@ -1095,6 +1095,9 @@ def doc_edit(**over):
 class RetroDocEditTest(RetroWorkerCase):
     def setUp(self):
         super().setUp()
+        patcher = patch.object(factory, "retro_upload")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.folder = self.home / "retro" / RUN
         self.folder.mkdir(parents=True)
         self.write_agg({"pipeline": {"global": {"version": 0, "stage_notes": {}},

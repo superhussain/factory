@@ -896,7 +896,7 @@ class RetroBacklogTest(SuggestCase):
         (folder / "reply.json").write_text(json.dumps({"schema": "factory.retro/1", "run": run, "findings": [finding],
                                                        "suggestions": [example_card()]}), encoding="utf-8")
         board = json.dumps(self.board)
-        with contextlib.redirect_stderr(io.StringIO()) as err:
+        with contextlib.redirect_stderr(io.StringIO()) as err, patch.object(factory, "retro_upload"):
             factory.retro_admit(run)
         self.assertEqual(err.getvalue(), "")
         context = CONTEXT_FIXTURE.read_text(encoding="utf-8")
