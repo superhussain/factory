@@ -57,7 +57,7 @@ the lower one wins.
 - One commit, one push: on a fix-reviews or fix-ci reading, read every counted review, every thread bots or threads counts, and every failing required check once. Fix them all in one commit, push once, reply in every thread, then run pr-state "$SLUG/<id>" --wait 540 once.
 - For a one-file logic or cross-cutting fix, also run the project file's Babysit verify: line when its Verify section has one.
 - Change only what a counted review, thread or failing required check asks. No refactors, polish, new ideas or backlog entries, and no investigation beyond the failing log.
-- A review-comment revision takes about 10 minutes of wall clock, not counting CI.
+- A review-comment or required-CI revision takes about 5 minutes of wall clock, not counting CI, and at most 10 for a multi-file fix. Past 10, stop and note why on the board.
 
 ## Loop
 
