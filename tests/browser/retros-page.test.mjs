@@ -243,7 +243,7 @@ test("retros page", { timeout: 180000 }, async (t) => {
         ),
         "Gone card: Archived",
       );
-      assert.equal(await page.$("#retros-list .retro-unlinked .retro-chip-name"), null);
+      assert.equal(await page.$("#retros-list .retro-unlinked .sr-only"), null);
       const summary = await page.$("#retros-list .retro-why summary");
       assert.equal(await summary.evaluate((el) => el.textContent), "Root cause and fix");
       assert.ok(await summary.$("svg"));
