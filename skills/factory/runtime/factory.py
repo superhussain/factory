@@ -104,9 +104,11 @@
   factory.py suggest approve <job-id> <A|B|C> [--chat-file <file>]
                                             a human at a terminal approves one option of such a card,
                                             or --chat-file records a person's chat message instead
-  factory.py control <job-id> <prioritize|unprioritize> --chat-file <file> | --chat "<message>"
-                                            make the dashboard's Prioritize or Remove priority from a
-                                            person's chat message, print the result as JSON
+  factory.py control <job-id> <prioritize|unprioritize|pause|resume> --chat-file <file>
+  factory.py control <job-id> close --reason-file <file> --chat-file <file>
+                                            make the dashboard's Prioritize, Remove priority, Pause,
+                                            Resume or Close from a person's chat message, print the
+                                            result as JSON
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
@@ -830,11 +832,13 @@ def board(factory, job_id):
         fail("only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's chat, "
              "run factory.py control <job-id> prioritize --chat-file <file>", 2)
     if "paused" in patch:
-        fail("only the dashboard sets paused", 2)
+        fail("only the dashboard and factory.py control set paused. To relay a person's chat, "
+             "run factory.py control <job-id> pause --chat-file <file>", 2)
     if patch.get("babysit") is not None:
         fail("only the dashboard sets babysit; a session clears it with null", 2)
     if "close" in patch:
-        fail("only the dashboard and factory.py pickup set close", 2)
+        fail("only the dashboard, factory.py pickup and factory.py control set close. To relay a person's chat, "
+             "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -2940,47 +2944,61 @@ def suggest_cmd(sub, *args):
         fail("usage: suggest admit <file> | " + SUGGEST_APPROVE_USAGE[len("usage: "):], 2)
 
 
-CONTROL_ACTIONS = ("prioritize", "unprioritize")
+CONTROL_ACTIONS = ("prioritize", "unprioritize", "pause", "resume", "close")
 PRIORITY_STAGES = (IDEA,) + IN_FLIGHT
-CONTROL_USAGE = 'usage: control <job-id> <prioritize|unprioritize> --chat-file <file> | --chat "<message>"'
+CONTROL_USAGE = ('usage: control <job-id> <prioritize|unprioritize|pause|resume> --chat-file <file> '
+                 '| control <job-id> close --reason-file <file> --chat-file <file>')
 
 
-def control_cmd(job_id, action, flag, value):
-    """Make the dashboard's Prioritize or Remove priority from a person's chat message."""
+def control_cmd(job_id, action, *flags):
+    """Make the dashboard's Prioritize, Remove priority, Pause, Resume or Close from a person's chat message."""
+    pairs = dict(zip(flags[::2], flags[1::2]))
+    want = {"--reason-file", "--chat-file"} if action == "close" else {"--chat-file"}
     if not JOB_ID.fullmatch(job_id) or ".." in job_id or action not in CONTROL_ACTIONS \
-            or flag not in ("--chat", "--chat-file"):
+            or len(flags) != 2 * len(want) or set(pairs) != want:
         fail(CONTROL_USAGE, 2)
-    quote = chat_quote(read_chat_file(value), "--chat-file") if flag == "--chat-file" else chat_quote(value)
-    if quote is None:
-        fail(CONTROL_USAGE, 2)
+    quote = chat_quote(read_chat_file(pairs["--chat-file"]))
+    if action == "close":
+        reason = read_chat_file(pairs["--reason-file"], "--reason-file").strip()
+        if not CLOSE_REASON.fullmatch(reason):
+            fail("--reason-file must be one line of 1 to 200 characters; nothing was changed", 2)
     home = factory_home()
     device = holder(home)[0]
+    record = {"via": "chat", "quote": quote, "by": device}
 
     def change(text):
         data = load_board(text)
         job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
         if job is None:
             fail(f"no job {job_id} on the board. Nothing was written.", 4)
-        if action == "prioritize":
-            if not job.get("project"):
-                fail(f"{job_id} cannot be prioritized: it has no project. Nothing was written.", 2)
-            if job.get("stage") not in PRIORITY_STAGES:
-                fail(f"{job_id} cannot be prioritized: it is at {job.get('stage')}. Nothing was written.", 2)
-            lead = lead_of(job)
-            if lead:
-                fail(f"{job_id} cannot be prioritized: it is a rider of {lead}. Nothing was written.", 2)
-            if job.get("priority"):
-                return None, "unchanged"
-            stamp = now()
-            job["priority"] = {"at": stamp, "via": "chat", "quote": quote, "by": device}
+        stage, lead = job.get("stage"), lead_of(job)
+        if action in ("prioritize", "pause", "close"):
+            barred = stage not in PRIORITY_STAGES if action == "prioritize" \
+                else stage in TERMINAL or action == "close" and stage == IDEA
+            why = "it has no project" if not job.get("project") else f"it is at {stage}" if barred \
+                else lead and f"it is a rider of {lead}"
+            if why:
+                word = {"prioritize": "prioritized", "pause": "paused", "close": "closed"}[action]
+                fail(f"{job_id} cannot be {word}: {why}. Nothing was written.", 2)
+        key = {"prioritize": "priority", "unprioritize": "priority", "pause": "paused", "resume": "paused",
+               "close": "close"}[action]
+        adding = action in ("prioritize", "pause", "close")
+        if bool(job.get(key)) == adding:
+            return None, ("unchanged", job.get(key))
+        stamp = now()
+        if action == "close":
+            job[key] = {"reason": reason, "at": stamp, **record}
+        elif adding:
+            job[key] = {"at": stamp, **record}
         else:
-            if not job.get("priority"):
-                return None, "unchanged"
-            stamp = now()
-            del job["priority"]
+            del job[key]
         job["updated"] = data["updated"] = stamp
-        return dump_board(data), action + "d"
-    print(json.dumps({"id": job_id, "action": action, "result": cas(home, "/api/board", change)}))
+        return dump_board(data), ("queued" if action == "close" else action + "d", job.get(key))
+    result, stored = cas(home, "/api/board", change)
+    out = {"id": job_id, "action": action, "result": result}
+    if action == "close":
+        out["reason"] = stored["reason"]
+    print(json.dumps(out))
 
 
 def snapshot(repo, commit, dest):
@@ -8457,7 +8475,7 @@ COMMANDS["adopt-home"] = (adopt_home_cmd, 1, 1)
 COMMANDS["doctor"] = (doctor_cmd, 0, 0)
 COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
 COMMANDS["suggest"] = (suggest_cmd, 2, 5)
-COMMANDS["control"] = (control_cmd, 4, 4)
+COMMANDS["control"] = (control_cmd, 4, 6)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
 COMMANDS["experiment"] = (experiment_cmd, 2, 2)
 COMMANDS["unclaim"] = (unclaim, 1, 1)
