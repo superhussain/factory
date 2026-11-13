@@ -573,6 +573,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-rerun" role="menuitem" tabindex="-1" hidden>Rerun stage</button>
         <button class="btn" id="d-babysit" role="menuitem" tabindex="-1" title="Work this PR as the Babysit note asks, or hand it back" hidden>Babysit PR</button>
         <button class="btn" id="d-prioritize" role="menuitem" tabindex="-1" hidden>Prioritize</button>
+        <button class="btn" id="d-run-batch" role="menuitem" tabindex="-1" title="Pickup starts this idea next and batches the project's other held ideas behind it" hidden>Run batch now</button>
+        <button class="btn" id="d-start-alone" role="menuitem" tabindex="-1" title="Pickup starts this idea next by itself, with no riders" hidden>Start alone</button>
         <button class="btn" id="d-remove-priority" role="menuitem" tabindex="-1" hidden>Remove priority</button>
         <button class="btn" id="d-pause" role="menuitem" tabindex="-1" hidden>Pause pickup</button>
         <button class="btn" id="d-resume" role="menuitem" tabindex="-1" hidden>Resume pickup</button>
@@ -1486,10 +1488,17 @@ function batchRunnable(j) {
     !(j.origin?.gate === 'human' && !j.origin?.approved) && j.tracer?.building !== true;
 }
 
+// A job that started its project's held batch from the dashboard. Mirrors the starters in batch_holds.
+function batchStarter(x, project) {
+  return x.stage === 'idea' && x.project === project && x.priority?.batch === true;
+}
+
 // The held chip as { text, title }, or null when the idea is not held. Mirrors batch_holds in factory.py.
 function batchState(j) {
   if (!batchHeld(j)) return null;
   if (!batchRunnable(j)) return { text: 'Held for batching', title: HELD_TITLE };
+  const starter = jobs.find((x) => batchStarter(x, j.project));
+  if (starter) return { text: 'Batches behind ' + starter.id, title: 'Pickup launches ' + starter.id + ' next and batches this idea behind it. Settings, Pipeline, Batch follow-ups sets the numbers.' };
   const held = jobs.filter((x) => batchRunnable(x) && x.project === j.project);
   const { min_ideas: least, max_wait_hours: hours } = holdConfigs.get(j.project) || HOLD_DEFAULT;
   const age = (x) => /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(String(x.updated)) ? (Date.now() - Date.parse(x.updated)) / 3600000 : hours;
@@ -5355,7 +5364,7 @@ async function openIdeaEditor(ctx) {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
 
 // The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
 function jobActionsFor(j) {
@@ -5367,7 +5376,9 @@ function jobActionsFor(j) {
     'd-move-host': !rider && !!j.project && MOVE_STAGES.includes(j.stage),
     'd-rerun': canRerun(j),
     'd-babysit': canBabysit(j),
-    'd-prioritize': !rider && !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
+    'd-prioritize': !rider && !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority && !batchHeld(j),
+    'd-run-batch': !!j.project && batchRunnable(j) && !jobs.some((x) => batchStarter(x, j.project)),
+    'd-start-alone': !!j.project && batchHeld(j),
     'd-remove-priority': !!j.priority,
     'd-pause': !rider && !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
     'd-resume': !!j.paused,
@@ -5381,7 +5392,7 @@ function jobActionsFor(j) {
 // A runner's context. The drawer writes into its own lines and drops results once another job opens.
 function drawerAction(id) {
   const version = drawerVersion;
-  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
+  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-run-batch': 'd-prioritize-err', 'd-start-alone': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
   return {
     id: openId,
     card: false,
@@ -5596,12 +5607,14 @@ const PRIORITY_STAGES = ['idea', ...MOVE_STAGES];
 
 // factory.py pickup claims prioritized jobs first and nudges a running agent once.
 // Returns an error message, 'unchanged', or '' once the board is changed.
-function prioritizeJob(board, id, now) {
+function prioritizeJob(board, id, now, mode = '') {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
   if (!j.project || !PRIORITY_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be prioritized.';
   if (j.priority) return 'unchanged';
-  j.priority = { at: now };
+  if (mode && !batchHeld(j)) return 'This idea is no longer held for a batch.';
+  if (mode === 'batch' && board.jobs.some((x) => batchStarter(x, j.project))) return 'unchanged';
+  j.priority = mode ? { at: now, [mode]: true } : { at: now };
   j.updated = now;
   board.updated = now;
   return '';
@@ -5978,12 +5991,12 @@ $('d-assign').addEventListener('click', async () => {
     }
   }
 });
-async function prioritizeAction(ctx) {
+async function prioritizeAction(ctx, mode = '') {
   ctx.report('');
   if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const message = prioritizeJob(board, ctx.id, isoNow());
+      const message = prioritizeJob(board, ctx.id, isoNow(), mode);
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
@@ -6404,6 +6417,8 @@ const JOB_ACTION_RUN = {
   'd-rerun': rerunAction,
   'd-babysit': babysitAction,
   'd-prioritize': prioritizeAction,
+  'd-run-batch': (ctx) => prioritizeAction(ctx, 'batch'),
+  'd-start-alone': (ctx) => prioritizeAction(ctx, 'alone'),
   'd-remove-priority': removePriorityAction,
   'd-pause': pauseAction,
   'd-resume': resumeAction,
