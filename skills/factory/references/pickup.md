@@ -88,12 +88,13 @@ Each run, in order:
   `backlog add`, then runs `deny-notes <id> done`. Notes that fail admission are
   skipped. This launch does not count against `--limit` or the in-flight cap.
 - Babysit: right after the priority nudges, launches at most one `/factory babysit <id>`
-  session for a `pr-open` job with `babysit` set. It claims the job and changes nothing
-  else. It skips a job that waits on a human, is paused, closing or held by a live claim,
-  or whose project pickup does not list this host. A dry run prints
-  `would launch babysit ...` and `skip babysit <id> <project>: <reason>`. A failed launch
-  releases the claim. A launch records an agents row with role babysit. This launch and
-  babysat jobs do not count against `--limit` or the in-flight cap. The session follows [babysit](commands/babysit.md).
+  session for a `pr-open` job with `babysit` set. It claims the job, records an agents
+  row with role babysit, and changes nothing else. It skips a job that waits on a human,
+  is paused, closing or held by a live claim, or whose project pickup does not list this
+  host. A dry run prints `would launch babysit ...` and
+  `skip babysit <id> <project>: <reason>`. A failed launch releases the claim. This
+  launch and babysat jobs do not count against `--limit` or the in-flight cap. The
+  session follows [babysit](commands/babysit.md).
 - Picks the first route in `routes.md` that is not marked limited, then resolves
   the launcher for it. A config error exits 2 before anything is claimed.
 - Claims one idea at a time — the board compare-and-swap stops two hosts taking
