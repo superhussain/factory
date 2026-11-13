@@ -613,6 +613,24 @@ async function capture(outdir, referencePath) {
         if (weight !== "600") throw new Error("ticked task label is not bold");
       }
     };
+    // A prepare step that returns this page rectangle crops its view to it.
+    const clipOf = (page, first, last = first) =>
+      page.evaluate(
+        (a, b) => {
+          const top = document.querySelector(a).getBoundingClientRect();
+          const bottom = document.querySelector(b).getBoundingClientRect();
+          const left = Math.floor(Math.min(top.left, bottom.left));
+          const y = Math.floor(top.top);
+          return {
+            x: left + scrollX,
+            y: y + scrollY,
+            width: Math.ceil(Math.max(top.right, bottom.right)) - left,
+            height: Math.ceil(bottom.bottom) - y,
+          };
+        },
+        first,
+        last,
+      );
     const openSettings = async (page) => {
       if (await page.$("#settings-link")) {
         await page.evaluate(() => {
@@ -624,29 +642,15 @@ async function capture(outdir, referencePath) {
         await page.click("#project-settings");
         await page.select("#settings-resource", "notes.md");
       }
-      await page.waitForFunction(() => !document.getElementById("settings-status").hidden);
+      // The recovered draft's conflict message, not the project tab's status, marks the view ready.
+      await page.waitForFunction(() =>
+        document.getElementById("settings-status").textContent.includes("Your draft is kept"),
+      );
     };
+    // History and Change summary push the field past one 390x844 screen, so the view clips from the document tabs to Save.
     const openSettingsField = async (page) => {
       await openSettings(page);
-      await page.evaluate(() =>
-        document
-          .getElementById("settings-copy")
-          .closest(".actions")
-          .scrollIntoView({ block: "end" }),
-      );
-      const cropped = await page.evaluate(() =>
-        [
-          "settings-resource-help",
-          "settings-document",
-          "settings-status",
-          "settings-copy",
-          "settings-load",
-        ].filter((id) => {
-          const r = document.getElementById(id).getBoundingClientRect();
-          return r.top < 0 || r.bottom > window.innerHeight;
-        }),
-      );
-      if (cropped.length) throw new Error("settings capture crops " + cropped.join(", "));
+      return clipOf(page, "#settings-resource", "#settings-save");
     };
     const openJumper = async (page) => {
       await page.evaluate(() => {
@@ -959,24 +963,6 @@ async function capture(outdir, referencePath) {
     };
     await view("archived-load-signin", 1280, 900, "light", openArchivedLoadSignin);
     await view("archived-load-signin-mobile", 390, 844, "dark", openArchivedLoadSignin);
-    // A prepare step that returns this page rectangle crops its view to it.
-    const clipOf = (page, first, last = first) =>
-      page.evaluate(
-        (a, b) => {
-          const top = document.querySelector(a).getBoundingClientRect();
-          const bottom = document.querySelector(b).getBoundingClientRect();
-          const left = Math.floor(Math.min(top.left, bottom.left));
-          const y = Math.floor(top.top);
-          return {
-            x: left + scrollX,
-            y: y + scrollY,
-            width: Math.ceil(Math.max(top.right, bottom.right)) - left,
-            height: Math.ceil(bottom.bottom) - y,
-          };
-        },
-        first,
-        last,
-      );
     // The reference has no hold fieldset, so its side shows triage straight above archive.
     const openPipelineHold = async (page, side) => {
       await page.evaluate(() => {
