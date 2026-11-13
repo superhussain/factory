@@ -522,7 +522,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head .pr-link { margin-top: 8px; }
     .detail-head .job-actions { position: static; }
     .detail-head .job-actions-menu { top: calc(100% + 4px); right: 16px; }
-    .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact #d-agents, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
+    .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-chat, .detail.compact #d-held, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact #d-agents, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
     .doc { padding: 16px 16px 40px; }
     .pager > .doc, .pager > .gallery { touch-action: pan-y pinch-zoom; }
   }
@@ -555,7 +555,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs agent-runs" id="d-agents" hidden><summary></summary><div class="table-wrap"><table><thead><tr><th scope="col">When</th><th scope="col">Stage</th><th scope="col">Round</th><th scope="col">Role</th><th scope="col">Harness</th><th scope="col">Via</th><th scope="col">Model</th><th scope="col">Effort</th></tr></thead><tbody></tbody></table></div></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs agent-runs" id="d-agents" hidden><summary></summary><div class="table-wrap"><table><thead><tr><th scope="col">When</th><th scope="col">Stage</th><th scope="col">Round</th><th scope="col">Role</th><th scope="col">Harness</th><th scope="col">Via</th><th scope="col">Model</th><th scope="col">Effort</th></tr></thead><tbody></tbody></table></div></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>
@@ -1460,7 +1460,10 @@ async function loadHoldConfigs() {
       }
     } catch {}
   }));
-  if (set) renderBoard();
+  if (!set) return;
+  renderBoard();
+  const open = jobs.find((x) => x.id === openId);
+  if (open) renderDrawerStatus(open);
 }
 
 // A held idea pickup would group: not paused, closing, waiting on you, gated or in Tracer.
@@ -3721,6 +3724,15 @@ function drawerMeta(j) {
     (j.close?.at && !TERMINAL.includes(j.stage) ? ' · closing' : '');
 }
 
+// The chat decision and held state as drawer lines, so touch, keyboard and screen reader users get what the chip titles say.
+function renderDrawerStatus(j) {
+  const chat = chatDecision(j), held = batchState(j);
+  $('d-chat').textContent = chat ? chat.title : '';
+  $('d-chat').hidden = !chat;
+  $('d-held').textContent = held ? held.title : '';
+  $('d-held').hidden = !held;
+}
+
 async function loadArchivedJob(id) {
   if (archiveMisses.has(id)) return { job: null };
   try {
@@ -3789,6 +3801,7 @@ async function openJob(id) {
   const pipeline = pipelineLabel(j);
   $('d-pipeline').textContent = pipeline;
   $('d-pipeline').hidden = !pipeline;
+  renderDrawerStatus(j);
   const shown = jobActionsFor(j);
   for (const id of JOB_ACTIONS) $(id).hidden = !shown.includes(id);
   $('d-babysit-bar').hidden = archived || !shown.includes('d-babysit');
@@ -6587,6 +6600,7 @@ function openBacklogItem(item) {
   $('detail').hidden = false;
   $('d-title').textContent = 'Backlog item';
   $('d-meta').textContent = projectName({ project: item.project }) + ' · backlog';
+  $('d-chat').hidden = true; $('d-held').hidden = true;
   const head = $('d-refs');
   head.replaceChildren();
   for (const r of item.refs) {

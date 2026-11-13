@@ -73,6 +73,18 @@ test("chat decision chip", { timeout: 120000 }, async () => {
     ]);
     assert.equal(chips["305-dashboard"], null);
     assert.deepEqual(chips["303-chat-denied"], ["Denied in chat", "Denied in chat " + said]);
+    await page.evaluate(() => {
+      location.hash = "#301-chat-approved";
+    });
+    await page.waitForSelector("#d-chat:not([hidden])");
+    assert.equal(await page.$eval("#d-chat", (el) => el.textContent), "Approved in chat " + said);
+    await page.evaluate(() => {
+      location.hash = "#305-dashboard";
+    });
+    await page.waitForFunction(() =>
+      document.getElementById("d-meta").textContent.includes("305-dashboard"),
+    );
+    assert.equal(await page.$eval("#d-chat", (el) => el.hidden), true);
     assert.deepEqual(errors, []);
   });
 });
