@@ -4327,7 +4327,7 @@ def pickup(*args):
 
 USAGE_PICKUP_SETUP = "usage: pickup setup [--install]"
 CRON_PICKUP = re.compile(r"factory\.py.*\bpickup\b")
-ENV_ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+ENV_ASSIGN = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=")
 SYSTEM_PYTHON = "/usr/bin/python3"
 
 
