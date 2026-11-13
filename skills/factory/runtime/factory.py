@@ -5334,7 +5334,7 @@ def gh_pr_view(pr, *args):
 def pr_checks(pr):
     """(checks, problem): the PR's checks as gh pr checks lists them and None, or [] and why
     the reply was unusable. gh's own no-checks reply is usable, as []."""
-    result = gh_pr("checks", pr, "--json", "name,bucket", stderr=True)
+    result = gh_pr("checks", pr, "--json", "name,bucket,link", stderr=True)
     if result is None:
         return [], "gh is not installed"
     code, out, err = result
@@ -5399,9 +5399,66 @@ PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner
                     "{isInMergeQueue reviewThreads(last:100){nodes{isResolved"
                     " comments(first:100){nodes{author{__typename login}}}}}}}}")
 PR_STATE_INTERVAL = 30
+BUILDKITE_API = "https://api.buildkite.com/v2"
+BUILDKITE_BUILD = re.compile(r"https://buildkite\.com/([A-Za-z0-9-]{1,100})/([A-Za-z0-9_.-]{1,100})/builds/([0-9]{1,12})"
+                             r"(?:#([0-9a-f-]{36}))?", re.ASCII)
+BUILDKITE_TAIL_LINES = 80
+BUILDKITE_TAIL_CHARS = 8000
+BUILDKITE_MAX_BYTES = 16 * 1024 * 1024
 
 
-def pr_reading(pr, base):
+def buildkite_log(home, check):
+    """ci_log for a failing check that links to a Buildkite build: the failed job's name and the
+    stripped, redacted tail of its log, or a problem saying why there is none. Never exits."""
+    org, pipeline, number, job_id = BUILDKITE_BUILD.fullmatch(check["link"]).groups()
+    reading = {"check": check["name"], "job": "", "tail": "", "problem": ""}
+    env = read_conf(home / ".env") if (home / ".env").exists() else {}
+    token = env.get("BUILDKITE_API_TOKEN", "")
+    if not token:
+        return {**reading, "problem": "set BUILDKITE_API_TOKEN in the factory .env to read Buildkite logs"}
+    opener = urllib.request.build_opener(NoRedirect)
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "factory"}
+
+    def get(path):
+        url = f"{BUILDKITE_API}/organizations/{org}/pipelines/{pipeline}/builds/{number}{path}"
+        try:
+            with opener.open(urllib.request.Request(url, headers=headers), timeout=30) as r:
+                body = r.read(BUILDKITE_MAX_BYTES + 1)
+        except urllib.error.HTTPError as e:
+            scopes = " (the token needs read_builds and read_build_logs)" if e.code in (401, 403) else ""
+            return None, f"Buildkite answered {e.code}{scopes}"
+        except (OSError, ValueError) as e:
+            return None, "can't reach Buildkite: " + printable_line(str(e).replace(token, "[token]"), 200)
+        try:
+            data = json.loads(body) if len(body) <= BUILDKITE_MAX_BYTES else None
+        except ValueError:
+            data = None
+        return data, None if isinstance(data, dict) else "Buildkite sent no usable log"
+
+    build, problem = get("")
+    if problem:
+        return {**reading, "problem": problem}
+    jobs = [j for j in build.get("jobs") or [] if isinstance(j, dict)
+            and isinstance(j.get("id"), str) and re.fullmatch(r"[0-9a-f-]{36}", j["id"])]
+    job = next((j for j in jobs if (j["id"] == job_id if job_id else
+                                    j.get("type") == "script" and j.get("state") in ("failed", "timed_out"))), None)
+    if job is None:
+        return {**reading, "problem": f"no failed job in build {number}"}
+    log, problem = get(f"/jobs/{job['id']}/log")
+    if not problem and not isinstance(log.get("content"), str):
+        problem = "Buildkite sent no usable log"
+    if problem:
+        return {**reading, "problem": problem}
+    text = re.sub(r"\x1b_bk;t=[0-9]+\x07|\x1b\[[0-9;?]*[A-Za-z]", "", log["content"]).replace("\r\n", "\n")
+    for value in env.values():
+        if len(value) >= ENV_SECRET_MIN:
+            text = text.replace(value, "[redacted]")
+    lines = [line.rsplit("\r", 1)[-1] for line in text.rstrip("\n").split("\n")]
+    return {**reading, "job": str(job.get("name") or ""),
+            "tail": "\n".join(lines[-BUILDKITE_TAIL_LINES:])[-BUILDKITE_TAIL_CHARS:]}
+
+
+def pr_reading(home, pr, base):
     """One reading of the PR for a babysit session, with the next step it calls for."""
     try:
         view = json.loads(gh_pr_view(pr, "--json", PR_STATE_FIELDS))
@@ -5476,10 +5533,12 @@ def pr_reading(pr, base):
         step = "wait-base"
     else:
         step = "merge"
+    failed = next((c for c in listed if c["bucket"] in ("fail", "cancel") and isinstance(c.get("link"), str)
+                   and BUILDKITE_BUILD.fullmatch(c["link"])), None) if step == "fix-ci" else None
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
-            "base": target, "next": step}
+            "base": target, "next": step, "ci_log": buildkite_log(home, failed) if failed else None}
 
 
 def pr_state_cmd(target, *args):
@@ -5493,7 +5552,7 @@ def pr_state_cmd(target, *args):
     base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
     start = time.monotonic()
     while True:
-        reading = pr_reading(pr, base)
+        reading = pr_reading(home, pr, base)
         elapsed = time.monotonic() - start
         if reading["next"] not in ("wait", "wait-base") or elapsed >= wait:
             print(json.dumps(reading))
