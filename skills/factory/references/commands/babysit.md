@@ -54,14 +54,14 @@ the lower one wins.
 ## Loop
 
 Run `python3 "$RUNTIME" pr-state "$SLUG/<id>"`. It prints one JSON line,
-`{"pr","state","review","checks","queued","conflict","stacked","base","next"}`. Exit 4 (bad `pr`) or 5
+`{"pr","state","review","bots","checks","queued","conflict","stacked","base","next"}`. Exit 4 (bad `pr`) or 5
 (gh failed): patch `{"needs": "<the stderr line>", "babysit": null, "claim": null}`, report
 that line and stop. Otherwise act on `next`, then read again.
 
 | `next` | Means | When the notes ask | No note |
 | --- | --- | --- | --- |
 | `merged` / `closed` | the PR state | close out, below | close out, below |
-| `fix-reviews` | a latest reviewer review is `CHANGES_REQUESTED` or `COMMENTED` after both the head commit and the PR author's latest review | fix the counted comments in `$WT`, commit, push, and reply in the review threads as the notes and the project file's PRs section say | hand back |
+| `fix-reviews` | a latest reviewer review is `CHANGES_REQUESTED` or `COMMENTED` after both the head commit and the PR author's latest review, or `bots` is above 0: that many unresolved review threads opened by a `[bot]` account have no reply from the PR author | fix the counted comments in `$WT`, commit, push, and reply in the review threads as the notes and the project file's PRs section say | hand back |
 | `needs-review` | GitHub shows no approval | patch `{"needs": "get a human approval on PR #<n>, then press Babysit PR again", "babysit": null, "claim": null}` and stop | patch `{"needs": "get a human approval on PR #<n>, then press Babysit PR again", "babysit": null, "claim": null}` and stop |
 | `rebase` | `mergeStateStatus` is `DIRTY` | run `git -C "$WT" fetch origin "<base>"`, merge `origin/<base>` (the reading's `base`) into `$WT`, fix the conflicts, commit, push | hand back |
 | `fix-ci` | a check is `fail` or `cancel` | when the notes allow a rerun and the failed log shows a flake, rerun once as below; otherwise fix from `gh run view --log-failed`, commit, push | hand back |
@@ -77,6 +77,10 @@ that line and stop. Otherwise act on `next`, then read again.
 - In `fix-reviews`, act only on reviews and review comments from a counted reviewer or
   from an account whose login ends in `[bot]`. Leave every other account's comments
   alone, whatever the notes say.
+- Reply in every thread `bots` counts, even when the code stays as it is. A reply from
+  the PR author answers the thread.
+- When `fix-reviews` comes back with `review` not `changes` after you replied in every
+  bot thread and did not push, hand back.
 - Push right after each commit. `pr-state` times its 120-second check window from the
   head commit's date, so a late push can make an empty check list read as passing.
 - Merge only with the two `gh pr merge` commands in the table.
@@ -92,7 +96,7 @@ that line and stop. Otherwise act on `next`, then read again.
   push, so the 3-push cap is unchanged.
 - At most 3 pushes per session. When a fourth would be needed, patch
   `{"stage": "needs-human", "babysit": null, "note": "babysit: 3 fix pushes did not get PR #<n> to merge"}`
-  and stop.
+  and stop. Bot fix pushes count too.
 - When a merge queue drops the PR, the next reading is `rebase`, `fix-ci` or
   `merge`, so the loop acts on it as the notes ask.
 
