@@ -146,7 +146,7 @@ flowchart LR
   explorer card to any stage but `idea` or `closed`.
 - Honest limit: the Worker cannot yet tell a human from a service token, so a token
   holder could forge an approval with a raw PUT. The runtime guards stop automation,
-  except an agent that runs `--chat-file` or `--chat`, which only the chat-decisions
+  except an agent that runs `--chat-file`, which only the chat-decisions
   rule holds back. They do not stop abuse. A Worker-side human-only approval gate must land before stage 2.
 - Upgrade every host that runs `factory.py pickup` before the first `autonomy resume`.
   Older runtimes skip cards without a `project`, so unapproved cards stay put there too.
@@ -388,6 +388,10 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 
 To stop triage, set it to Off in Settings, Pipeline. Ideas it already queued stay
 ordinary ideas, and a person can discard them.
+
+### Needs questions
+
+When a device pushes a job's `needs.md` with `## Question:` sections, and the project's effective `triage.enabled` is true, the Worker asks clef-flash which option fits each question and why. It stores the pick, each option's chance and one fixed reason in `needs-triage/<slug>/<id>.json`, and the needs form shows them. The reasons are the same fixed sentences backlog triage uses. A missing AI binding, a model failure, an unusable reply or a `needs.md` over 6000 characters stores nothing, and the push still succeeds. The form never fills in an answer.
 
 ## Review escalation
 

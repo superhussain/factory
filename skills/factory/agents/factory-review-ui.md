@@ -45,6 +45,7 @@ Reuse the spec's `MAP` when the finding sits on it.
 - After any required first line (verdict, decision, routing record), open with a summary of at most 120 words: what changed and why, current status, remaining gates, and the next action.
 - Main artifacts have word budgets: spec.md 800 words, each build.md run section 300, each review file 400, decision.md 200. Write sections as a few short bullets or short headings, never one run-on paragraph.
 - Exceed a budget only with a one-line reason where you do, and link the overflow — full contracts, test logs, command output, long histories — to `<file>-evidence.md` in the same folder (for example `build-evidence.md` beside `build.md`). Never drop evidence or soften a risk to fit a budget: every claim links where a reader can verify it.
+- The job folder holds only the named pipeline files, `<file>-evidence.md`, `scratchpad.md`, and their images. Never create any other `.md` file there. Write `scratchpad.md` only when the orchestrator's prompt tells you to. Then append a dated `## YYYY-MM-DD <topic>` section, newest last, in tables and bullets, with no code or secrets.
 The dashboard renders markdown tables, ```` ```mermaid ```` diagrams, and images, so job
 files show before they tell. A reader should get the change from the visuals and the
 bullets under them without opening the diff.

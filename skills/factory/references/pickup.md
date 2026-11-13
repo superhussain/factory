@@ -127,11 +127,17 @@ shared project lists both.
   report attributes by the recorded name, so renaming the experiment starts a
   new population.
 - An arm `b` launch that fails on a usage limit marks the experiment's own key in
-  `route-limits.json`, not the route's. While that key is limited, arm `b` jobs
+  `route-limits.json`, not the route's, and prints `limited experiment <name> until
+  <ts>`. While that key is limited, arm `b` jobs
   are skipped for the run (`skip <id> <project>: experiment <name> limited until
   <ts>`) and arm `a` jobs still launch; they never silently launch as arm `a`.
   An arm `a` failure limits the route name as today, which stops both arms since
   both ride its launcher, until it clears.
+- `routes list` ends with an experiment row, `{"experiment": <name>, "provider",
+  "model", ["effort"], "percent", "limited_until"}`, when the line is set. `routes
+  limit <name>` and `routes clear <name>` accept the experiment name, and `limit`
+  then prints `{"experiment": <name>, "limited_until": <ts>}`. Without the line the
+  output is unchanged.
 - Dry run prints ` arm <a|b> model <model>` on each `would launch` line when the
   line is set or the job carries a record; without the line the output is
   unchanged.

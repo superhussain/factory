@@ -5,6 +5,7 @@
 // views against the read-only reference page and is never part of CI or assertions.
 // Each capture side gets up to three attempts in a fresh browser context, so one hung page
 // under host load does not end the run.
+// A side that fails all attempts is logged and the run continues; it ends with a FAIL summary and a non-zero exit.
 // Compare two captures of one side with `node tests/browser/capture-compare.mjs`; it passes when no channel differs by more than 16.
 // Capture pages bypass the dashboard service worker so request interception answers /board.json.
 import { spawn } from "node:child_process";
@@ -371,197 +372,215 @@ async function capture(outdir, referencePath) {
     let archiveSearchFails = false;
     let longProject = false;
     let refBoard = false;
-    let grantLoopback = false;
+    const failed = [];
     const onlyViews = process.env.FACTORY_CAPTURE_VIEWS?.split(",");
+    const waitLiveDot = (page) =>
+      page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
+        timeout: 30000,
+      });
     async function view(name, width, height, theme, prepare, touch = false) {
       if (onlyViews && !onlyViews.includes(name)) return;
       for (const side of ["before", "after"]) {
-        await retryCapture(`${side}-${name}`, async () => {
-          const context = await browser.createBrowserContext();
-          try {
-            if (grantLoopback)
+        const started = Date.now();
+        try {
+          await retryCapture(`${side}-${name}`, async () => {
+            const context = await browser.createBrowserContext();
+            try {
               await context.setPermission(origin, {
                 permission: { name: "loopback-network" },
                 state: "granted",
               });
-            const page = await context.newPage();
-            await page.setViewport({
-              width,
-              height,
-              deviceScaleFactor: 1,
-              hasTouch: touch,
-              isMobile: touch,
-            });
-            await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: theme }]);
-            await page.evaluateOnNewDocument((recovery) => {
-              const NativeDate = Date;
-              window.Date = class extends NativeDate {
-                constructor(...args) {
-                  super(...(args.length ? args : ["2026-10-27T12:00:00Z"]));
+              const page = await context.newPage();
+              await page.setViewport({
+                width,
+                height,
+                deviceScaleFactor: 1,
+                hasTouch: touch,
+                isMobile: touch,
+              });
+              await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: theme }]);
+              await page.evaluateOnNewDocument((recovery) => {
+                const NativeDate = Date;
+                window.Date = class extends NativeDate {
+                  constructor(...args) {
+                    super(...(args.length ? args : ["2026-10-27T12:00:00Z"]));
+                  }
+                  static now() {
+                    return new NativeDate("2026-10-27T12:00:00Z").getTime();
+                  }
+                };
+                const interval = window.setInterval;
+                window.setInterval = (fn, ms, ...args) =>
+                  fn.name === "poll" || fn.name === "pollTick" ? 0 : interval(fn, ms, ...args);
+                localStorage.setItem("factory-project-document-draft:sample:notes.md", recovery);
+              }, JSON.stringify(CAPTURE_RECOVERY));
+              // The dashboard's service worker would answer /board.json past this interception.
+              await page.setBypassServiceWorker(true);
+              await page.setRequestInterception(true);
+              page.on("request", async (request) => {
+                const target = new URL(request.url());
+                if (target.origin !== origin) {
+                  // The reference page requests its documented CDN; the replacement must not
+                  // attempt any external request. Both are blocked either way.
+                  if (side === "after") external.push(request.url());
+                  return request.abort();
                 }
-                static now() {
-                  return new NativeDate("2026-10-27T12:00:00Z").getTime();
-                }
-              };
-              const interval = window.setInterval;
-              window.setInterval = (fn, ms, ...args) =>
-                fn.name === "poll" || fn.name === "pollTick" ? 0 : interval(fn, ms, ...args);
-              localStorage.setItem("factory-project-document-draft:sample:notes.md", recovery);
-            }, JSON.stringify(CAPTURE_RECOVERY));
-            // The dashboard's service worker would answer /board.json past this interception.
-            await page.setBypassServiceWorker(true);
-            await page.setRequestInterception(true);
-            page.on("request", async (request) => {
-              const target = new URL(request.url());
-              if (target.origin !== origin) {
-                // The reference page requests its documented CDN; the replacement must not
-                // attempt any external request. Both are blocked either way.
-                if (side === "after") external.push(request.url());
-                return request.abort();
-              }
-              if (target.pathname === "/api/backlog/triage") {
-                const held = target.searchParams.get("item") === CAPTURE_TRIAGE_ITEM;
-                return request.respond({
-                  status: held ? 200 : 404,
-                  contentType: "application/json",
-                  body: held ? JSON.stringify(CAPTURE_TRIAGE) : "",
-                });
-              }
-              if (longProject && target.pathname === "/projects.json") {
-                const projects = await fetch(target.href);
-                return request.respond({
-                  status: projects.status,
-                  contentType: "application/json",
-                  body: JSON.stringify([
-                    ...(await projects.json()),
-                    { slug: "long", title: CAPTURE_LONG_TITLE, repo: "example/long", base: "main" },
-                  ]),
-                });
-              }
-              if (refBoard && target.pathname === "/board.json") {
-                const board = await fetch(target.href);
-                const body = await board.json();
-                return request.respond({
-                  status: board.status,
-                  contentType: "application/json",
-                  headers: { ETag: board.headers.get("ETag") ?? "" },
-                  body: JSON.stringify({
-                    ...body,
-                    jobs: body.jobs.map((j) =>
-                      j.id === "002-needs"
-                        ? {
-                            ...j,
-                            refs: [
-                              { kind: "follow-up-of", id: "004-rework-capture" },
-                              { kind: "follow-up-of", id: "001-capture" },
-                            ],
-                          }
-                        : j,
-                    ),
-                  }),
-                });
-              }
-              if (archivedBoard && target.pathname === "/board.json") {
-                const board = await fetch(target.href);
-                return request.respond({
-                  status: board.status,
-                  contentType: "application/json",
-                  headers: { ETag: board.headers.get("ETag") ?? "" },
-                  body: JSON.stringify({ ...(await board.json()), archived: { max_id: 416 } }),
-                });
-              }
-              if (target.pathname === "/api/board/archive") {
-                if (archivePageFails && target.searchParams.has("page"))
+                if (target.pathname === "/api/backlog/triage") {
+                  const held = target.searchParams.get("item") === CAPTURE_TRIAGE_ITEM;
                   return request.respond({
-                    status: 503,
-                    contentType: "text/plain",
-                    body: "unavailable",
-                  });
-                if (target.searchParams.get("page") === "1")
-                  return request.respond({
-                    status: 200,
+                    status: held ? 200 : 404,
                     contentType: "application/json",
+                    body: held ? JSON.stringify(CAPTURE_TRIAGE) : "",
+                  });
+                }
+                if (longProject && target.pathname === "/projects.json") {
+                  const projects = await fetch(target.href);
+                  return request.respond({
+                    status: projects.status,
+                    contentType: "application/json",
+                    body: JSON.stringify([
+                      ...(await projects.json()),
+                      {
+                        slug: "long",
+                        title: CAPTURE_LONG_TITLE,
+                        repo: "example/long",
+                        base: "main",
+                      },
+                    ]),
+                  });
+                }
+                if (refBoard && target.pathname === "/board.json") {
+                  const board = await fetch(target.href);
+                  const body = await board.json();
+                  return request.respond({
+                    status: board.status,
+                    contentType: "application/json",
+                    headers: { ETag: board.headers.get("ETag") ?? "" },
                     body: JSON.stringify({
-                      jobs: [CAPTURE_ARCHIVED, CAPTURE_ARCHIVED_CLOSED],
-                      page: 1,
-                      pages: 2,
-                      total: 52,
+                      ...body,
+                      jobs: body.jobs.map((j) =>
+                        j.id === "002-needs"
+                          ? {
+                              ...j,
+                              refs: [
+                                { kind: "follow-up-of", id: "004-rework-capture" },
+                                { kind: "follow-up-of", id: "001-capture" },
+                              ],
+                            }
+                          : j,
+                      ),
                     }),
                   });
-                if (archiveSearchFails && target.searchParams.has("q"))
+                }
+                if (archivedBoard && target.pathname === "/board.json") {
+                  const board = await fetch(target.href);
                   return request.respond({
-                    status: 500,
-                    contentType: "text/plain",
-                    body: "unavailable",
-                  });
-                const q = target.searchParams.get("q");
-                if (q !== null) {
-                  const jobs = [CAPTURE_ARCHIVED].filter((j) =>
-                    [j.id, j.title, j.project].some((f) =>
-                      f.toLowerCase().includes(q.toLowerCase()),
-                    ),
-                  );
-                  return request.respond({
-                    status: 200,
+                    status: board.status,
                     contentType: "application/json",
-                    body: JSON.stringify({ jobs, total: jobs.length }),
+                    headers: { ETag: board.headers.get("ETag") ?? "" },
+                    body: JSON.stringify({ ...(await board.json()), archived: { max_id: 416 } }),
                   });
                 }
-                if (target.searchParams.get("id") === "413-expired-link")
+                if (target.pathname === "/api/board/archive") {
+                  if (archivePageFails && target.searchParams.has("page"))
+                    return request.respond({
+                      status: 503,
+                      contentType: "text/plain",
+                      body: "unavailable",
+                    });
+                  if (target.searchParams.get("page") === "1")
+                    return request.respond({
+                      status: 200,
+                      contentType: "application/json",
+                      body: JSON.stringify({
+                        jobs: [CAPTURE_ARCHIVED, CAPTURE_ARCHIVED_CLOSED],
+                        page: 1,
+                        pages: 2,
+                        total: 52,
+                      }),
+                    });
+                  if (archiveSearchFails && target.searchParams.has("q"))
+                    return request.respond({
+                      status: 500,
+                      contentType: "text/plain",
+                      body: "unavailable",
+                    });
+                  const q = target.searchParams.get("q");
+                  if (q !== null) {
+                    const jobs = [CAPTURE_ARCHIVED].filter((j) =>
+                      [j.id, j.title, j.project].some((f) =>
+                        f.toLowerCase().includes(q.toLowerCase()),
+                      ),
+                    );
+                    return request.respond({
+                      status: 200,
+                      contentType: "application/json",
+                      body: JSON.stringify({ jobs, total: jobs.length }),
+                    });
+                  }
+                  if (target.searchParams.get("id") === "413-expired-link")
+                    return request.respond({
+                      status: 401,
+                      contentType: "text/plain",
+                      body: "unauthorized",
+                    });
+                  if (target.searchParams.get("id") === "411-sync-retry")
+                    return request.respond({
+                      status: 503,
+                      contentType: "text/plain",
+                      body: "unavailable",
+                    });
+                  const found = target.searchParams.get("id") === CAPTURE_ARCHIVED.id;
                   return request.respond({
-                    status: 401,
-                    contentType: "text/plain",
-                    body: "unauthorized",
+                    status: found ? 200 : 404,
+                    contentType: found ? "application/json" : "text/plain",
+                    body: found ? JSON.stringify({ jobs: [CAPTURE_ARCHIVED] }) : "not found",
                   });
-                if (target.searchParams.get("id") === "411-sync-retry")
+                }
+                if (side === "before" && target.pathname === "/dashboard.html") {
+                  const body = reference
+                    .replaceAll("__FACTORY_TITLE__", () => servedTitle)
+                    .replaceAll("__FACTORY_CONFIG__", () => servedConfig)
+                    .replaceAll("__FACTORY_REFERENCE__", () => servedReference)
+                    .replaceAll("__FACTORY_CSP__", () => servedMetaCsp)
+                    .replaceAll("__FACTORY_IMG_HOST__", "images.example.test");
                   return request.respond({
-                    status: 503,
-                    contentType: "text/plain",
-                    body: "unavailable",
+                    status: 200,
+                    contentType: "text/html",
+                    headers: { "Content-Security-Policy": servedCsp },
+                    body,
                   });
-                const found = target.searchParams.get("id") === CAPTURE_ARCHIVED.id;
-                return request.respond({
-                  status: found ? 200 : 404,
-                  contentType: found ? "application/json" : "text/plain",
-                  body: found ? JSON.stringify({ jobs: [CAPTURE_ARCHIVED] }) : "not found",
-                });
-              }
-              if (side === "before" && target.pathname === "/dashboard.html") {
-                const body = reference
-                  .replaceAll("__FACTORY_TITLE__", () => servedTitle)
-                  .replaceAll("__FACTORY_CONFIG__", () => servedConfig)
-                  .replaceAll("__FACTORY_REFERENCE__", () => servedReference)
-                  .replaceAll("__FACTORY_CSP__", () => servedMetaCsp)
-                  .replaceAll("__FACTORY_IMG_HOST__", "images.example.test");
-                return request.respond({
-                  status: 200,
-                  contentType: "text/html",
-                  headers: { "Content-Security-Policy": servedCsp },
-                  body,
-                });
-              }
-              return request.continue();
-            });
-            await page.goto(origin + "/dashboard.html", { waitUntil: "networkidle0" });
-            await page.waitForSelector(".card");
-            const clip = await prepare(page, side);
-            await page.evaluate(async () => {
-              await document.fonts.ready;
-              await new Promise((resolve) =>
-                requestAnimationFrame(() => requestAnimationFrame(resolve)),
+                }
+                return request.continue();
+              });
+              await page.goto(origin + "/dashboard.html", { waitUntil: "networkidle0" });
+              await page.waitForSelector(".card");
+              await waitLiveDot(page);
+              const clip = await prepare(page, side);
+              await page.evaluate(async () => {
+                await document.fonts.ready;
+                await new Promise((resolve) =>
+                  requestAnimationFrame(() => requestAnimationFrame(resolve)),
+                );
+              });
+              const file = `${outdir.replace(/\/$/, "")}/${side}-${name}.png`;
+              await page.screenshot(clip ? { path: file, clip } : { path: file });
+              const { size } = await stat(file);
+              if (size >= 5 * 1024 * 1024) throw new Error(`${file} exceeds 5 MiB`);
+              console.log(
+                JSON.stringify({ file, side, view: name, width, height, theme, bytes: size }),
               );
-            });
-            const file = `${outdir.replace(/\/$/, "")}/${side}-${name}.png`;
-            await page.screenshot(clip ? { path: file, clip } : { path: file });
-            const { size } = await stat(file);
-            if (size >= 5 * 1024 * 1024) throw new Error(`${file} exceeds 5 MiB`);
-            console.log(
-              JSON.stringify({ file, side, view: name, width, height, theme, bytes: size }),
-            );
-          } finally {
-            await context.close().catch(() => {});
-          }
-        });
+            } finally {
+              await context.close().catch(() => {});
+            }
+          });
+        } catch (caught) {
+          const error = String(caught?.message ?? caught);
+          failed.push({ view: `${side}-${name}`, error });
+          console.log(
+            JSON.stringify({ side, view: name, result: "FAIL", ms: Date.now() - started, error }),
+          );
+        }
       }
     }
 
@@ -613,6 +632,24 @@ async function capture(outdir, referencePath) {
         if (weight !== "600") throw new Error("ticked task label is not bold");
       }
     };
+    // A prepare step that returns this page rectangle crops its view to it.
+    const clipOf = (page, first, last = first) =>
+      page.evaluate(
+        (a, b) => {
+          const top = document.querySelector(a).getBoundingClientRect();
+          const bottom = document.querySelector(b).getBoundingClientRect();
+          const left = Math.floor(Math.min(top.left, bottom.left));
+          const y = Math.floor(top.top);
+          return {
+            x: left + scrollX,
+            y: y + scrollY,
+            width: Math.ceil(Math.max(top.right, bottom.right)) - left,
+            height: Math.ceil(bottom.bottom) - y,
+          };
+        },
+        first,
+        last,
+      );
     const openSettings = async (page) => {
       if (await page.$("#settings-link")) {
         await page.evaluate(() => {
@@ -624,29 +661,15 @@ async function capture(outdir, referencePath) {
         await page.click("#project-settings");
         await page.select("#settings-resource", "notes.md");
       }
-      await page.waitForFunction(() => !document.getElementById("settings-status").hidden);
+      // The recovered draft's conflict message, not the project tab's status, marks the view ready.
+      await page.waitForFunction(() =>
+        document.getElementById("settings-status").textContent.includes("Your draft is kept"),
+      );
     };
+    // History and Change summary push the field past one 390x844 screen, so the view clips from the document tabs to Save.
     const openSettingsField = async (page) => {
       await openSettings(page);
-      await page.evaluate(() =>
-        document
-          .getElementById("settings-copy")
-          .closest(".actions")
-          .scrollIntoView({ block: "end" }),
-      );
-      const cropped = await page.evaluate(() =>
-        [
-          "settings-resource-help",
-          "settings-document",
-          "settings-status",
-          "settings-copy",
-          "settings-load",
-        ].filter((id) => {
-          const r = document.getElementById(id).getBoundingClientRect();
-          return r.top < 0 || r.bottom > window.innerHeight;
-        }),
-      );
-      if (cropped.length) throw new Error("settings capture crops " + cropped.join(", "));
+      return clipOf(page, "#settings-resource", "#settings-save");
     };
     const openJumper = async (page) => {
       await page.evaluate(() => {
@@ -709,6 +732,7 @@ async function capture(outdir, referencePath) {
       );
       await page.reload({ waitUntil: "networkidle0" });
       await page.waitForSelector("#filter:not([hidden])");
+      await waitLiveDot(page);
       await hideAllProjects(page);
     };
     await view("filter-none-few-columns-desktop", 1440, 900, "light", hideColumnsAndProjects);
@@ -831,18 +855,11 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("archive-settings", 1280, 900, "light", openArchiveSettings);
-    const waitLiveDot = (page) =>
-      page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
-        timeout: 30000,
-      });
     const openPollSettings = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/display";
       });
       await page.waitForSelector("#settings-display:not([hidden])");
-      // Pin the header dot to live on both sides, so the pair does not depend on socket timing.
-      // view() grants loopback-network before navigation, so the first socket opens and the dot goes live.
-      await waitLiveDot(page);
       await page.evaluate(() =>
         document.querySelector("#display-poll").scrollIntoView({ block: "center" }),
       );
@@ -857,9 +874,7 @@ async function capture(outdir, referencePath) {
         ),
       );
     };
-    grantLoopback = true;
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
-    grantLoopback = false;
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
@@ -925,8 +940,6 @@ async function capture(outdir, referencePath) {
     await view("archive-swap", 1280, 900, "light", openArchiveSwap);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
     const openArchivedLoadFailed = async (page) => {
-      // Pin the header dot to live on both sides. Without loopback-network, local network access blocks the intercepted before page's socket.
-      await waitLiveDot(page);
       // Both sides wait for the archive answer and then the toast text, so neither shot is taken mid-request.
       const answered = page.waitForResponse((response) => {
         const url = new URL(response.url());
@@ -944,9 +957,7 @@ async function capture(outdir, referencePath) {
           .textContent.startsWith("Could not load archived job"),
       );
     };
-    grantLoopback = true;
     await view("archived-load-failed", 1280, 900, "light", openArchivedLoadFailed);
-    grantLoopback = false;
     const openArchivedLoadSignin = async (page) => {
       await page.evaluate(() => {
         location.hash = "#413-expired-link";
@@ -959,24 +970,6 @@ async function capture(outdir, referencePath) {
     };
     await view("archived-load-signin", 1280, 900, "light", openArchivedLoadSignin);
     await view("archived-load-signin-mobile", 390, 844, "dark", openArchivedLoadSignin);
-    // A prepare step that returns this page rectangle crops its view to it.
-    const clipOf = (page, first, last = first) =>
-      page.evaluate(
-        (a, b) => {
-          const top = document.querySelector(a).getBoundingClientRect();
-          const bottom = document.querySelector(b).getBoundingClientRect();
-          const left = Math.floor(Math.min(top.left, bottom.left));
-          const y = Math.floor(top.top);
-          return {
-            x: left + scrollX,
-            y: y + scrollY,
-            width: Math.ceil(Math.max(top.right, bottom.right)) - left,
-            height: Math.ceil(bottom.bottom) - y,
-          };
-        },
-        first,
-        last,
-      );
     // The reference has no hold fieldset, so its side shows triage straight above archive.
     const openPipelineHold = async (page, side) => {
       await page.evaluate(() => {
@@ -1157,6 +1150,13 @@ async function capture(outdir, referencePath) {
     await view("backlog-answered-mobile", 390, 844, "dark", openAnswered);
     await view("backlog-rework-desktop", 1440, 900, "light", openRework);
     await view("backlog-rework-mobile", 390, 844, "dark", openRework);
+    if (failed.length) {
+      console.log(JSON.stringify({ result: "FAIL", failed, external }));
+      throw new Error(
+        `${failed.length} capture views failed: ${failed.map((f) => f.view).join(", ")}` +
+          (external.length ? "; external requests during capture: " + external.join(", ") : ""),
+      );
+    }
     if (external.length)
       throw new Error("external requests during capture: " + external.join(", "));
     console.log(

@@ -133,7 +133,8 @@ class RetroRedactTest(RetroCase):
                           ("MAX_TOKENS=abc", "MAX_TOKENS=[redacted]"),
                           ("api_token=4096", "api_token=[redacted]"),
                           ("TokenSecret=123456", "TokenSecret=[redacted]"),
-                          ("tokensecret: 42", "tokensecret: [redacted]")):
+                          ("tokensecret: 42", "tokensecret: [redacted]"),
+                          ("secretokens=1234567", "secretokens=[redacted]")):
             with self.subTest(text=text[:20]):
                 self.assertEqual(factory.retro_redact(text), out)
 

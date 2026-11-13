@@ -297,11 +297,15 @@ test("the archive API serves id, page and q, and rejects bad queries", async () 
     total: 1,
   });
   assert.equal((await (await s.send("/api/board/archive?q=sample")).json()).total, 3);
-  for (const query of ["plan-9005", "pull/412", "token%20refresh"])
-    assert.deepEqual(await (await s.send("/api/board/archive?q=" + query)).json(), {
-      jobs: [ROWS[0]],
-      total: 1,
-    });
+  for (const query of ["plan-9005", "pull/412", "#412", "PR #412", "pr#412", "token refresh"])
+    assert.deepEqual(
+      await (await s.send("/api/board/archive?q=" + encodeURIComponent(query))).json(),
+      { jobs: [ROWS[0]], total: 1 },
+    );
+  assert.deepEqual(await (await s.send("/api/board/archive?q=%2341")).json(), {
+    jobs: [],
+    total: 0,
+  });
   for (const [query, text] of [
     ["page=0", "page: must be a whole number from 1"],
     ["page=1.5", "page: must be a whole number from 1"],

@@ -44,6 +44,8 @@ import {
   duplicateCandidates,
   duplicateInput,
   duplicatePick,
+  needsInput,
+  needsQuestions,
   triageBatchConfidence,
   triageBatchInput,
   triageChoices,
@@ -59,6 +61,8 @@ const JOB_FILE =
 const JOB_DIR = /^\/api\/jobs\/([\w-]+)\/(\w[\w.-]*)\/(.*)$/;
 const JOB_REL =
   /^((round-\d+\/)?[\w.-]+\.(md|png|jpe?g|gif|webp)|(round-\d+\/)?[\w-]+\.walkthrough\.html|walkthrough\.html)$/;
+const NEEDS_KEY = /^jobs\/([\w-]+)\/(\w[\w.-]*)\/needs\.md$/;
+const needsTriageKey = (slug, id) => `needs-triage/${slug}/${id}.json`;
 const PROJECT = /^\/api\/projects\/([\w-]+)\.md$/;
 const PROJECT_DOCUMENT_NAMES = ["notes.md", "decisions.md", "runbook.md"];
 const PROJECT_DOCUMENTS = /^\/api\/project-documents\/([A-Za-z0-9_-]+)$/;
@@ -1610,6 +1614,41 @@ async function pruneRetro(env, now) {
 // Raw image bytes, never decoded as text, or null past the cap.
 const readImage = (request) => readCapped(request, MAX_IMAGE);
 
+// Stores clef-flash's pick and fixed reasons for a pushed needs.md. Advisory: every early
+// return or failure leaves the form as it was, and the push reply never changes.
+async function rateNeeds(env, slug, id, text) {
+  if (!env.AI) return;
+  const questions = needsQuestions(text);
+  if (
+    !questions ||
+    checkOperatorText(text, "needs.md", "document") ||
+    hasReservedTag(text, "backlog-item")
+  )
+    return;
+  if (!(await env.BUCKET.head(`projects/${slug}.md`))) return;
+  const docs = await pipelineDocs(env, slug);
+  if (!docs) return;
+  const [, globalVersion, project, projectVersion] = docs;
+  const { triage } = effectivePipeline(slug, ...docs);
+  if (!triage.enabled) return;
+  const source = project?.triage
+    ? `pipeline:${slug}@${projectVersion}`
+    : `pipeline:global@${globalVersion}`;
+  const result = await env.AI.run(TRIAGE_MODEL, needsInput(source, triage.rules, text, questions));
+  const choices = triageChoices(result, questions, triage.rules);
+  if (!choices) return;
+  await env.BUCKET.put(
+    needsTriageKey(slug, id),
+    JSON.stringify({
+      sha256: await sha256(new TextEncoder().encode(text)),
+      model: TRIAGE_MODEL,
+      at: new Date().toISOString(),
+      choices,
+    }),
+    JSON_TYPE,
+  );
+}
+
 // Job files take an optional condition, so a device never overwrites a version it
 // hasn't seen. Devices that send none still write blind. Images keep the type their
 // extension names.
@@ -1623,6 +1662,12 @@ async function jobPut(request, env, key) {
     ...(cond && { onlyIf: cond }),
     ...(type && { httpMetadata: { contentType: type } }),
   });
+  const needs = obj && NEEDS_KEY.exec(key);
+  if (needs) {
+    try {
+      await rateNeeds(env, needs[1], needs[2], body);
+    } catch {}
+  }
   return obj
     ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
     : reply("precondition failed", 412);
@@ -1976,6 +2021,10 @@ async function api(request, env, path, principal) {
         : objects.map(name);
       return reply(JSON.stringify(list), 200, "application/json");
     }
+    if (m[3] === "needs-triage.json")
+      return method === "GET"
+        ? getFile(env, needsTriageKey(m[1], m[2]), "application/json")
+        : notFound();
     if (!JOB_REL.test(m[3])) return notFound();
     if (method === "GET") return getJobFile(request, env, principal, prefix + m[3]);
     if (method === "PUT") return jobPut(request, env, prefix + m[3]);

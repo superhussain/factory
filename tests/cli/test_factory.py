@@ -1527,7 +1527,8 @@ class MoveFenceTest(IsolatedTestCase):
                 contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
             factory.board(self.home, "001-test")
         self.assertEqual(raised.exception.code, 2)
-        self.assertIn("only the dashboard sets paused", err.getvalue())
+        self.assertIn("only the dashboard and factory.py control set paused. To relay a person's chat, "
+                      "run factory.py control <job-id> pause|resume --chat-file <file>", err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
     def test_board_refuses_a_babysit_patch(self):
@@ -1565,7 +1566,9 @@ class MoveFenceTest(IsolatedTestCase):
                 contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
             factory.board(self.home, "001-test")
         self.assertEqual(raised.exception.code, 2)
-        self.assertIn("only the dashboard and factory.py pickup set close", err.getvalue())
+        self.assertIn("only the dashboard, factory.py pickup and factory.py control set close. To relay a "
+                      "person's chat, run factory.py control <job-id> close --reason-file <file> --chat-file <file>",
+                      err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
     def test_board_releases_a_closing_claim(self):
@@ -2137,6 +2140,28 @@ class IdeaImagesTest(IsolatedTestCase):
                              factory.sha(self.job_file(rel).read_bytes()), rel)
         md = self.job_file("idea-images.md", other).read_text(encoding="utf-8")
         self.assertIn(f"](idea-image-{self.name1})", md)
+
+
+class ScratchpadSyncTest(IsolatedTestCase):
+    """scratchpad.md travels through push and pull like any top-level job file."""
+
+    setUp = IdeaImagesTest.setUp
+    request = IdeaImagesTest.request
+    job_file = IdeaImagesTest.job_file
+
+    def test_push_uploads_scratchpad_and_another_device_pulls_identical_bytes(self):
+        body = "# Pacing log\n\n## 2026-11-12 limit check\n\n- Synthetic note.\n"
+        self.job_file("scratchpad.md").parent.mkdir(parents=True)
+        self.job_file("scratchpad.md").write_text(body, encoding="utf-8")
+        factory.push("sample/001-idea")
+        path = "/api/jobs/sample/001-idea/scratchpad.md"
+        self.assertIn(path, self.puts)
+        self.assertEqual(self.store[path], body.encode())
+        other = Path(tempfile.mkdtemp(dir=self.temp.name))
+        (other / "config.md").write_text("---\ndevice: other\n---\n")
+        patch.object(factory, "factory_home", return_value=other).start()
+        factory.pull("sample/001-idea")
+        self.assertEqual(self.job_file("scratchpad.md", other).read_bytes(), body.encode())
 
 
 class ApiCertFallbackTest(unittest.TestCase):
