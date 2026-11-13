@@ -119,10 +119,12 @@ class PairTest(HostFixture):
         source = (SKILL / "runtime/factory.py").read_text(encoding="utf-8")
         lines = [line for line in source.splitlines() if "/api/hosts" in line]
         self.assertTrue(lines)
-        read = '    status, _, text = api(home, "GET", "/api/hosts", ok=(200, 404))'
-        self.assertEqual(lines.count(read), 1)
+        reads = ('    status, _, text = api(home, "GET", "/api/hosts", ok=(200, 404))',
+                 '    hosts = json.loads(api(home, "GET", "/api/hosts")[2])')
+        for read in reads:
+            self.assertEqual(lines.count(read), 1)
         for line in lines:
-            if line != read:
+            if line not in reads:
                 self.assertRegex(line, r"/api/hosts/(\{\w+\}|<id>)/(pair|status)\b")
 
 

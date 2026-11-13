@@ -6,7 +6,8 @@ then records that answer with one of these commands.
 ```text
 factory.py suggest approve <job-id> <A|B|C> --chat-file <file>
 factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes-file <file>] --chat-file <file>
-factory.py control <job-id> <prioritize|unprioritize|pause|resume> --chat-file <file>
+factory.py control <job-id> <prioritize|unprioritize|pause|resume|babysit|rerun> --chat-file <file>
+factory.py control <job-id> move <host> --chat-file <file>
 factory.py control <job-id> close --reason-file <file> --chat-file <file>
 factory.py needs answer <job-id> --answers <file> --chat-file <file>
 ```
@@ -14,6 +15,12 @@ factory.py needs answer <job-id> --answers <file> --chat-file <file>
 - After `control` succeeds, tell the person the printed job id and `result`, and
   for `close` the printed `reason`. A `close` result of `queued` means the next
   pickup closes the job and writes its decision.
+- For `move` and `rerun`, also tell the person the printed `to` host. A `queued`
+  `babysit` means the next pickup launches the babysit session. A `queued` `move`
+  or `rerun` means the next pickup on the old host stops the session, then `to`
+  claims the job.
+- Before you relay a `move` or `rerun`, tell the person it stops the running
+  session, and work that session has not pushed is lost.
 
 ## Who counts
 
@@ -63,9 +70,9 @@ factory.py needs answer <job-id> --answers <file> --chat-file <file>
 | --- | --- | --- |
 | Prioritize, Remove priority | `factory.py control` | exists |
 | Pause, Resume | `factory.py control` | exists |
-| Babysit PR | refused | planned |
+| Babysit PR | `factory.py control <job-id> babysit` | exists |
 | Close job with a reason | `factory.py control` | exists |
-| Move to host, Rerun | refused (`move`) | planned |
+| Move to host, Rerun | `factory.py control` | exists |
 | Answer a needs-you form | `factory.py needs answer` | exists |
 | Edit idea, Discard idea, Assign project, Follow in Tracer | `board` patch | exists |
 | Backlog decision, explorer approval | `backlog decide`, `suggest approve` | exists |

@@ -104,11 +104,12 @@
   factory.py suggest approve <job-id> <A|B|C> [--chat-file <file>]
                                             a human at a terminal approves one option of such a card,
                                             or --chat-file records a person's chat message instead
-  factory.py control <job-id> <prioritize|unprioritize|pause|resume> --chat-file <file>
+  factory.py control <job-id> <prioritize|unprioritize|pause|resume|babysit|rerun> --chat-file <file>
+  factory.py control <job-id> move <host> --chat-file <file>
   factory.py control <job-id> close --reason-file <file> --chat-file <file>
                                             make the dashboard's Prioritize, Remove priority, Pause,
-                                            Resume or Close from a person's chat message, print the
-                                            result as JSON
+                                            Resume, Babysit PR, Move, Rerun or Close from a person's
+                                            chat message, print the result as JSON
   factory.py needs answer <job-id> --answers <file> --chat-file <file>
                                             submit a person's chat answers to a job's needs.md form
                                             with the dashboard's writes, print the result as JSON
@@ -749,7 +750,7 @@ def moved_away(job, device, session):
 
 
 def moved_message(job_id, m):
-    return (f"{job_id} was moved to {m.get('to')} from the dashboard at {m.get('at')}. "
+    return (f"{job_id} was moved to {m.get('to')} at {m.get('at')}. "
             "Nothing was written. Stop this session.")
 
 
@@ -832,7 +833,8 @@ def board(factory, job_id):
     if "agents" in patch:
         fail("only factory.py agent and pickup set agents", 2)
     if "move" in patch:
-        fail("only the dashboard and factory.py pickup set move", 2)
+        fail("only the dashboard, factory.py pickup and factory.py control set move. To relay a person's chat, "
+             "run factory.py control <job-id> move <host>|rerun --chat-file <file>", 2)
     if "priority" in patch:
         fail("only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's chat, "
              "run factory.py control <job-id> prioritize --chat-file <file>", 2)
@@ -840,7 +842,8 @@ def board(factory, job_id):
         fail("only the dashboard and factory.py control set paused. To relay a person's chat, "
              "run factory.py control <job-id> pause|resume --chat-file <file>", 2)
     if patch.get("babysit") is not None:
-        fail("only the dashboard sets babysit; a session clears it with null", 2)
+        fail("only the dashboard and factory.py control set babysit; a session clears it with null. To relay a "
+             "person's chat, run factory.py control <job-id> babysit --chat-file <file>", 2)
     if "close" in patch:
         fail("only the dashboard, factory.py pickup and factory.py control set close. To relay a person's chat, "
              "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
@@ -2958,14 +2961,21 @@ def suggest_cmd(sub, *args):
         fail("usage: suggest admit <file> | " + SUGGEST_APPROVE_USAGE[len("usage: "):], 2)
 
 
-CONTROL_ACTIONS = ("prioritize", "unprioritize", "pause", "resume", "close")
+CONTROL_ACTIONS = ("prioritize", "unprioritize", "pause", "resume", "close", "babysit", "move", "rerun")
 PRIORITY_STAGES = (IDEA,) + IN_FLIGHT
-CONTROL_USAGE = ('usage: control <job-id> <prioritize|unprioritize|pause|resume> --chat-file <file> '
+CONTROL_USAGE = ('usage: control <job-id> <prioritize|unprioritize|pause|resume|babysit|rerun> --chat-file <file> '
+                 '| control <job-id> move <host> --chat-file <file> '
                  '| control <job-id> close --reason-file <file> --chat-file <file>')
 
 
 def control_cmd(job_id, action, *flags):
-    """Make the dashboard's Prioritize, Remove priority, Pause, Resume or Close from a person's chat message."""
+    """Make the dashboard's Prioritize, Remove priority, Pause, Resume, Close, Babysit PR, Move or Rerun
+    from a person's chat message."""
+    host = None
+    if action == "move":
+        if not flags or not HOST_NAME.fullmatch(flags[0]):
+            fail(CONTROL_USAGE, 2)
+        host, flags = flags[0], flags[1:]
     pairs = dict(zip(flags[::2], flags[1::2]))
     want = {"--reason-file", "--chat-file"} if action == "close" else {"--chat-file"}
     if not JOB_ID.fullmatch(job_id) or ".." in job_id or action not in CONTROL_ACTIONS \
@@ -2979,6 +2989,9 @@ def control_cmd(job_id, action, *flags):
     home = factory_home()
     device = holder(home)[0]
     record = {"via": "chat", "quote": quote, "by": device}
+    if action in ("babysit", "move", "rerun"):
+        control_launch(home, job_id, action, host, record)
+        return
 
     def change(text):
         data = load_board(text)
@@ -3019,6 +3032,118 @@ def control_cmd(job_id, action, *flags):
     out = {"id": job_id, "action": action, "result": result}
     if action == "close":
         out["reason"] = stored.get("reason") if isinstance(stored, dict) else None
+    print(json.dumps(out))
+
+
+def pickup_host_problem(home, slug, host):
+    """Why host would never pick up a job of slug, or None when it is active and pickup lists it."""
+    hosts = json.loads(api(home, "GET", "/api/hosts")[2])
+    if not any(isinstance(h, dict) and h.get("id") == host and h.get("state") == "active" for h in hosts):
+        return f"{host} is not an active host"
+    enabled, listed, why = pickup_config(home, slug)
+    if why:
+        return why
+    if not enabled or host not in listed:
+        return f"{host} does not run pickup for {slug}"
+    return None
+
+
+def write_move(job, to, stamp, record):
+    """Move job to host to, as the dashboard's writeMove does, and drop its claim and Paseo link."""
+    claim = job.get("claim") if isinstance(job.get("claim"), dict) else {}
+    m = job.get("move") if isinstance(job.get("move"), dict) else None
+    prior = m if not claim and m and not move_stopped(m) else {}
+    origin = claim.get("device") or prior.get("from")
+    session = claim.get("session") or prior.get("session")
+    earlier = earlier_moves(m) if m else []
+    if m and m.get("from") and not prior:
+        earlier.append({**{k: m[k] for k in ("from", "session", "agent", "server", "at") if m.get(k)},
+                        **({"stopped": m["stopped"]} if move_stopped(m) else {})})
+    paseo = job.get("paseo") if isinstance(job.get("paseo"), dict) else {}
+    link = paseo if paseo.get("agent") else prior
+    job["move"] = {**{k: v for k, v in (("from", origin), ("session", session), ("agent", link.get("agent")),
+                                        ("server", link.get("server"))) if v},
+                   "to": to, "at": stamp, **record, **({"earlier": earlier} if earlier else {})}
+    job.pop("claim", None)
+    job.pop("paseo", None)
+
+
+def control_launch(home, job_id, action, host, record):
+    """Make the dashboard's Babysit PR, Move or Rerun after the dashboard's checks, and print the result."""
+    problems = {}
+    word = {"babysit": "babysat", "move": f"moved to {host}", "rerun": "rerun"}[action]
+
+    def refuse(why):
+        fail(f"{job_id} cannot be {word}: {why}. Nothing was written.", 2)
+
+    def problem(slug, to):
+        if (slug, to) not in problems:
+            problems[slug, to] = pickup_host_problem(home, slug, to)
+        return problems[slug, to]
+
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None:
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
+        if action == "babysit" and job.get("babysit"):
+            return None, ("unchanged", None)
+        stage, lead, slug = job.get("stage"), lead_of(job), job.get("project")
+        claim = job.get("claim") if isinstance(job.get("claim"), dict) else {}
+        m = job.get("move") if isinstance(job.get("move"), dict) else {}
+        pr = job.get("pr") if isinstance(job.get("pr"), str) else ""
+        if not slug:
+            refuse("it has no project")
+        if stage not in (("pr-open",) if action == "babysit" else IN_FLIGHT):
+            refuse(f"it is at {stage}")
+        if lead:
+            refuse(f"it is a rider of {lead}")
+        if action == "babysit":
+            if not GH_PR.fullmatch(pr):
+                refuse("it has no GitHub pull request URL")
+            if job.get("paused"):
+                refuse("it is paused")
+            if job.get("close"):
+                refuse("it has a close queued")
+        elif action == "move":
+            to = host
+            if not claim and m.get("to") == to and "claimed" not in m:
+                return None, ("unchanged", to)
+            if to == (claim.get("device") or (None if move_stopped(m) else m.get("from"))):
+                refuse(f"it already runs on {to}")
+            if any(x["from"] == to for x in queued_stops(m)):
+                refuse(f"a stop is still queued on {to}; pick another host")
+            if problem(slug, to):
+                refuse(problem(slug, to))
+        else:
+            if not claim and m.get("from") and m.get("to") == m["from"] and "claimed" not in m:
+                return None, ("unchanged", m["to"])
+            to = claim.get("device")
+            if not to:
+                refuse("it has no claim, so no host runs it")
+            if job.get("paused"):
+                refuse("it is paused")
+            if isinstance(job.get("needs"), str) and job["needs"].strip():
+                refuse("it is waiting on a person")
+            if problem(slug, to):
+                refuse(problem(slug, to) + ", so nothing would restart it; move it to another host instead")
+        stamp = now()
+        if action == "babysit":
+            to = None
+            job["babysit"] = {"at": stamp, **record}
+            if job.get("priority") is None:
+                job["priority"] = {"at": stamp, **record}
+            job.pop("needs", None)
+            job.pop("escalated", None)
+            job["note"] = f"babysitting PR #{pr.rsplit('/', 1)[1]}"
+        else:
+            write_move(job, to, stamp, record)
+        job["updated"] = data["updated"] = stamp
+        return dump_board(data), ("queued", to)
+    result, to = cas(home, "/api/board", change)
+    out = {"id": job_id, "action": action, "result": result}
+    if action != "babysit":
+        out["to"] = to
     print(json.dumps(out))
 
 

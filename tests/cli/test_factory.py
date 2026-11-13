@@ -1462,7 +1462,7 @@ class MoveFenceTest(IsolatedTestCase):
 
     def test_board_and_hold_fence_a_moved_session(self):
         before = self.moved()
-        message = ("001-test was moved to studio-mac from the dashboard at 2026-11-08T10:00:00Z. "
+        message = ("001-test was moved to studio-mac at 2026-11-08T10:00:00Z. "
                    "Nothing was written. Stop this session.\n")
         for call in (lambda: factory.board(self.home, "001-test"), lambda: factory.hold(self.target),
                      lambda: factory.hold(self.target, "released")):
@@ -1484,7 +1484,7 @@ class MoveFenceTest(IsolatedTestCase):
                     contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
                 call()
             self.assertEqual(raised.exception.code, 6)
-            self.assertIn("001-test was moved to cloud-box from the dashboard at 2026-11-08T11:00:00Z.",
+            self.assertIn("001-test was moved to cloud-box at 2026-11-08T11:00:00Z.",
                           err.getvalue())
             self.assertEqual(self.store["/api/board"], before)
         factory.hold(self.target, "take")
@@ -1506,7 +1506,8 @@ class MoveFenceTest(IsolatedTestCase):
                 contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
             factory.board(self.home, "001-test")
         self.assertEqual(raised.exception.code, 2)
-        self.assertIn("only the dashboard and factory.py pickup set move", err.getvalue())
+        self.assertIn("only the dashboard, factory.py pickup and factory.py control set move. To relay a person's "
+                      "chat, run factory.py control <job-id> move <host>|rerun --chat-file <file>", err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
     def test_board_refuses_a_priority_patch(self):
@@ -1538,7 +1539,9 @@ class MoveFenceTest(IsolatedTestCase):
                 contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
             factory.board(self.home, "001-test")
         self.assertEqual(raised.exception.code, 2)
-        self.assertIn("only the dashboard sets babysit; a session clears it with null", err.getvalue())
+        self.assertIn("only the dashboard and factory.py control set babysit; a session clears it with null. To "
+                      "relay a person's chat, run factory.py control <job-id> babysit --chat-file <file>",
+                      err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
     def test_board_clears_babysit_with_null(self):
