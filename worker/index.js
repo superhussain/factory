@@ -1586,6 +1586,7 @@ async function retroPut(request, env, principal, id, date) {
 }
 
 const RETRO_RUN_WRITE_ONLY = "retro runs are written only by a bound host's service token";
+const RETRO_RUN_TAKEN = "retro run belongs to another host";
 const RETRO_RUN_BYTES = 64 << 10;
 const RETRO_RUNS_LISTED = 30;
 const RETRO_CATEGORIES = [
@@ -1656,7 +1657,7 @@ function retroRunShape(body, run, hostId) {
   return null;
 }
 
-// A bound host stores its run's record. A re-admit of the same run replaces it.
+// A bound host stores its run's record. Only the host that stored a run replaces it.
 async function retrosPut(request, env, principal, run) {
   const host = await boundHost(env, principal);
   if (!host) return reply(RETRO_RUN_WRITE_ONLY, 403);
@@ -1664,7 +1665,20 @@ async function retrosPut(request, env, principal, run) {
   if (body instanceof Response) return body;
   const error = retroRunShape(body, run, host.id);
   if (error) return reply(error, 400);
-  await env.BUCKET.put(retroRunKey(run), JSON.stringify(body), JSON_TYPE);
+  const key = retroRunKey(run);
+  const prev = await env.BUCKET.get(key);
+  if (prev) {
+    let owner;
+    try {
+      owner = JSON.parse(await prev.text()).host;
+    } catch {}
+    if (owner !== host.id) return reply(RETRO_RUN_TAKEN, 409);
+  }
+  const stored = await env.BUCKET.put(key, JSON.stringify(body), {
+    ...JSON_TYPE,
+    onlyIf: new Headers(prev ? { "If-Match": prev.httpEtag } : { "If-None-Match": "*" }),
+  });
+  if (!stored) return reply(RETRO_RUN_TAKEN, 409);
   return reply("ok");
 }
 
