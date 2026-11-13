@@ -28,8 +28,12 @@ const JOB = {
   round: 1,
   updated: "2026-01-02T13:10:00Z",
   agents: [
-    run("2026-01-02T12:00:00Z", "idea", "orchestrator", "launcher", "provider-a", "high"),
-    run("2026-01-02T12:05:00Z", "spec", "spec", "native", "claude", "medium"),
+    run("2026-01-02T12:00:00Z", "idea", "orchestrator", "launcher", "provider-a", "high", {
+      paseo: { server: "srv-a", agent: "agent-orch" },
+    }),
+    run("2026-01-02T12:05:00Z", "spec", "spec", "native", "claude", "medium", {
+      paseo: { server: "srv-a", agent: "bad id!" },
+    }),
     run("2026-01-02T13:10:00Z", "review", "review-ui", "native", "claude", "medium", { round: 1 }),
   ],
 };
@@ -71,8 +75,40 @@ test("agent runs table", { timeout: 120000 }, async () => {
       "native",
       "model-a",
       "medium",
+      "",
     ]);
     assert.equal(rows[0][2], "");
+    const links = await page.$$eval("#d-agents tbody tr", (trs) =>
+      trs.map((tr) =>
+        [...tr.cells[8].querySelectorAll("a")].map((a) => [
+          a.getAttribute("href"),
+          a.textContent,
+          a.getAttribute("aria-label"),
+          a.getAttribute("target"),
+          a.getAttribute("rel"),
+        ]),
+      ),
+    );
+    assert.deepEqual(links, [
+      [
+        [
+          "session://h/srv-a/agent/agent-orch",
+          "Session app",
+          "Open the orchestrator run in Session app",
+          null,
+          null,
+        ],
+        [
+          "https://sessions.example.test/srv-a/agent-orch",
+          "Session",
+          "Open the orchestrator run in Session",
+          "_blank",
+          "noopener noreferrer",
+        ],
+      ],
+      [],
+      [],
+    ]);
     await page.evaluate((id) => (location.hash = id), PLAIN.id);
     await page.waitForFunction(
       (id) => document.getElementById("d-title").textContent === id,

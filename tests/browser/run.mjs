@@ -179,6 +179,7 @@ const CAPTURE_JOBS = [
         via: "launcher",
         model: "model-a",
         effort: "high",
+        paseo: { server: "srv-a", agent: "agent-orch" },
       },
       {
         at: "2026-01-02T12:05:00Z",
@@ -188,6 +189,7 @@ const CAPTURE_JOBS = [
         via: "native",
         model: "model-a",
         effort: "medium",
+        paseo: { server: "srv-a", agent: "agent-orch" },
       },
       {
         at: "2026-01-02T13:10:00Z",
