@@ -5304,6 +5304,30 @@ def changed_files(wt, base):
     return [p for p in diff.stdout.split("\0") if p]
 
 
+def round_changed_files(wt, head):
+    """The paths changed since an earlier round's head, or None when that head is not an ancestor of HEAD
+    or git fails."""
+    if subprocess.run(["git", "-C", str(wt), "merge-base", "--is-ancestor", head, "HEAD"],
+                      capture_output=True).returncode:
+        return None
+    diff = subprocess.run(["git", "-C", str(wt), "diff", "--name-only", "--no-renames", "-z", head, "HEAD"],
+                          capture_output=True, text=True)
+    return None if diff.returncode else [p for p in diff.stdout.split("\0") if p]
+
+
+def previous_head(folder, n):
+    """(K, head) from the newest round-K/review-plan.json with K below n, or None."""
+    for k in range(n - 1, 0, -1):
+        path = folder / f"round-{k}" / "review-plan.json"
+        if path.is_file() and not is_link(path) and not is_link(path.parent):
+            try:
+                head = json.loads(path.read_text(encoding="utf-8")).get("head")
+            except (ValueError, AttributeError):
+                return None
+            return (k, head) if isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}", head) else None
+    return None
+
+
 def review_plan_cmd(target, round_text):
     """Write SKIPPED ux and ui reviews for a round that changes nothing a person sees, and print one JSON plan.
     Any doubt (no worktree, a git failure, no Acceptance criteria section) runs all four reviewers."""
@@ -5320,29 +5344,56 @@ def review_plan_cmd(target, round_text):
     folder = home / "jobs" / slug / job_id
     round_folder = folder / f"round-{round_text}"
     targets = [round_folder / f"review-{name}.md" for name in SKIPPABLE_REVIEWERS]
-    for node in (folder, round_folder, *targets):
+    plan_file = round_folder / "review-plan.json"
+    for node in (folder, round_folder, *targets, plan_file):
         if is_link(node):
             fail(f"{node} is a symlink or junction; nothing was written", 6)
     if not (folder / "spec.md").is_file():
         fail(f"{folder / 'spec.md'} is missing", 4)
     decision = folder / "decision.md"
-    changed = changed_files(wt, base) if wt.is_dir() else None
-    if changed is None:
-        visible, reason = True, f"the diff against origin/{base} could not be read"
+    decision_text = decision.read_text(encoding="utf-8") if decision.is_file() else ""
+    n = int(round_text)
+    rev = subprocess.run(["git", "-C", str(wt), "rev-parse", "HEAD"], capture_output=True, text=True) \
+        if wt.is_dir() else None
+    head = rev.stdout.strip() if rev and not rev.returncode else None
+    # A fix round reads its own diff when the last round's ux and ui did not ask for changes.
+    prev = previous_head(folder, n) if head else None
+    last = folder / f"round-{n - 1}"
+    passed = prev is not None and all(
+        (last / f"review-{name}.md").is_file()
+        and (last / f"review-{name}.md").read_text(encoding="utf-8").startswith(("VERDICT: PASS", "VERDICT: SKIPPED"))
+        for name in SKIPPABLE_REVIEWERS)
+    fixed = round_changed_files(wt, prev[1]) if passed else None
+    globs = visible_globs(project_file)
+    if fixed is not None:
+        hit = next(((path, g) for path in fixed for g in globs if fnmatch.fnmatchcase(path, g)), None)
+        if re.search(r"^## Visible change[ \t]*$", decision_text, re.M):
+            visible, reason = True, "decision.md names a visible change"
+        elif hit:
+            visible, reason = True, f"{hit[0]} matches {hit[1]}"
+        else:
+            visible, reason = False, (f"none of the {len(fixed)} files changed since round {prev[0]} matches a "
+                                      f"visible-file glob, and round {n - 1} ux and ui did not ask for changes")
     else:
-        visible, reason = plan_reason((folder / "spec.md").read_text(encoding="utf-8"),
-                                      decision.read_text(encoding="utf-8") if decision.is_file() else "",
-                                      changed, visible_globs(project_file))
+        changed = changed_files(wt, base) if wt.is_dir() else None
+        if changed is None:
+            visible, reason = True, f"the diff against origin/{base} could not be read"
+        else:
+            visible, reason = plan_reason((folder / "spec.md").read_text(encoding="utf-8"), decision_text,
+                                          changed, globs)
+    if not visible:
+        for path in targets:
+            if path.exists():
+                fail(f"{path} already exists; nothing was written", 6)
+    if head:
+        round_folder.mkdir(exist_ok=True)
+        write_atomic(str(plan_file), json.dumps({"round": n, "head": head}) + "\n")
     if visible:
-        print(json.dumps({"round": int(round_text), "run": list(TRACER_REVIEWERS), "skipped": [], "reason": reason}))
+        print(json.dumps({"round": n, "run": list(TRACER_REVIEWERS), "skipped": [], "reason": reason}))
         return
     for path in targets:
-        if path.exists():
-            fail(f"{path} already exists; nothing was written", 6)
-    round_folder.mkdir(exist_ok=True)
-    for path in targets:
         write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
-    print(json.dumps({"round": int(round_text), "run": ["security", "code"], "skipped": list(SKIPPABLE_REVIEWERS),
+    print(json.dumps({"round": n, "run": ["security", "code"], "skipped": list(SKIPPABLE_REVIEWERS),
                       "reason": reason}))
 
 
