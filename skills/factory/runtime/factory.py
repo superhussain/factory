@@ -4877,7 +4877,8 @@ def close_pass(home, data, device, minutes, dry):
             continue
         pr = j.get("pr")
         if dry:
-            print(f"would close {job_id} {project}" + (f" and pull request {pr}" if pr else ""))
+            print(f"would close {job_id} {project}" + (f" and pull request {pr}" if pr else "")
+                  + "".join(f" and stacked pull request {r['pr']}" for r in open_stacked(data, job_id)))
             continue
         outcome = close_pull_request(home, j, device) if pr else None
         if outcome and outcome[0] == "closed":
@@ -4899,13 +4900,16 @@ def close_pass(home, data, device, minutes, dry):
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
             if (found is None or not closing(found) or found["close"]["at"] != at
                     or found.get("stage") in TERMINAL or blocking(found, device, "", minutes)):
-                return None, False
+                return None, (False, [])
             found.pop("claim", None)
+            stacked = open_stacked(board, job_id)
             patch_job(board, job_id, {"stage": "closed", "note": reason, "needs": None,
                                       "close": {"closed": now()}})
-            return dump_board(board), True
-        if cas(home, "/api/board", change):
+            return dump_board(board), (True, stacked)
+        done, stacked = cas(home, "/api/board", change)
+        if done:
             print(f"closed {job_id} {project}")
+            close_stacked_prs(home, job_id, stacked, device)
 
 
 def cleaned_here(j, device):
