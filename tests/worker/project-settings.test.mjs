@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -300,4 +301,15 @@ test("an optional buildkite_org is stored and not listed", async () => {
   assert.deepEqual(await res.json(), [
     { slug: "sample", title: "Sample", repo: "example/sample", base: "main" },
   ]);
+});
+
+test("dashboard allowlist names every project frontmatter error", async () => {
+  const html = await readFile(new URL("../../web/dashboard.html", import.meta.url), "utf8");
+  for (const error of [
+    "project frontmatter allows one repo, base and title, plus an optional archive and buildkite_org",
+    "invalid project archive",
+    "invalid project buildkite_org",
+  ])
+    assert.ok(html.includes(error), error);
+  assert.ok(!html.includes("base, and title only"));
 });
