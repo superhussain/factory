@@ -4628,6 +4628,13 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     jobs.sort(key=lambda j: not prioritized(j))
     starts = {j["id"] for j in jobs if tracer_start(j) or moved_here(j, device)}
     experiment, exp_limited = None, None
+    # Only an experiment line needs routes.md this early; without one, a host with no routes stays silent.
+    routes_md = Path(home, "routes.md")
+    if jobs and routes_md.exists() and "experiment" in frontmatter(routes_md)[0]:
+        experiment = read_experiment(home, [r[0] for r in read_routes(home)])
+        until = read_limits(home).get(experiment["name"])
+        if until and until > now():
+            exp_limited = until
 
     def job_arm(j):
         """This job's arm: the recorded one, else the hash bucket when the line is set."""
@@ -4685,11 +4692,6 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     if route:
         name, provider, model, effort = route
         template = route_launcher(home, route)
-        experiment = read_experiment(home, [r[0] for r in read_routes(home)])
-        if experiment:
-            until = read_limits(home).get(experiment["name"])
-            if until and until > now():
-                exp_limited = until
 
     def values(entry):
         return {"id": entry["id"], "project": entry["project"], "repo_path": entry["repo_path"],

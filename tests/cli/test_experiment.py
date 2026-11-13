@@ -356,6 +356,20 @@ class LimitTest(PickupFixture):
                               f"{self.argv('016-doc-lint', 'provider-a', 'model-a')}\n"
                               f"host {DEVICE}: would launch 1\n")
 
+    def test_a_limited_arm_b_lead_does_not_stall_the_batch(self):
+        self.configure(EXPERIMENT)
+        until = stamp(minutes=45)
+        (self.home / "route-limits.json").write_text(json.dumps({"pilot": until}), encoding="utf-8")
+        follow = [{"id": "013-old", "kind": "follow-up-of"}]
+        self.board["jobs"] = [idea("014-inline-images", refs=follow, updated=stamp(hours=-13)),
+                              idea("016-doc-lint", refs=follow, updated=stamp(hours=-13))]
+        code, out, err = self.pickup("--dry-run", "--max-inflight", "2")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"skip 014-inline-images alpha: experiment pilot limited until {until}\n"
+                              f"would launch 016-doc-lint alpha on primary arm a model model-a: "
+                              f"{self.argv('016-doc-lint', 'provider-a', 'model-a')}\n"
+                              f"host {DEVICE}: would launch 1\n")
+
 
 class ReportFixture(PickupFixture):
     """A fixture board and local folders for the report command."""
