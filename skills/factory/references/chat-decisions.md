@@ -5,11 +5,13 @@ then records that answer with one of these commands.
 
 ```text
 factory.py suggest approve <job-id> <A|B|C> --chat-file <file>
-factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes <text>] --chat-file <file>
-factory.py control <job-id> <prioritize|unprioritize> --chat-file <file>
+factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes-file <file>] --chat-file <file>
+factory.py control <job-id> <prioritize|unprioritize|pause|resume> --chat-file <file>
+factory.py control <job-id> close --reason-file <file> --chat-file <file>
 ```
 
-- After `control` succeeds, tell the person the printed job id and `result`.
+- After `control` succeeds, tell the person the printed job id and `result`, and
+  for `close` the printed `reason`.
 
 ## Who counts
 
@@ -27,8 +29,10 @@ factory.py control <job-id> <prioritize|unprioritize> --chat-file <file>
 
 - Always use `--chat-file`. Write the person's message to a file with your
   file-writing tool, byte for byte. Never write it with `echo` or a heredoc in a
-  shell, and never put the message on the command line. `--chat "<message>"` stays
-  only for compatibility, because a shell can rewrite backticks, `$(...)` and `$5`.
+  shell, and never put the message on the command line, because a shell can rewrite
+  backticks, `$(...)` and `$5`.
+- Write the notes and the close reason with your file-writing tool too, and ask
+  when the message gives no reason.
 - Never edit, trim or summarize the message.
 - When the message is ambiguous, such as no option or two items, stop and ask.
 - When the message is refused, such as for a link, ask the person to answer at the
@@ -41,7 +45,7 @@ factory.py control <job-id> <prioritize|unprioritize> --chat-file <file>
 - Approve and deny need `--answers` with one `- <header>: <answer>` line per
   question. The answer is option labels joined by `, `, and may end with
   `. Other: <text>`, or be only `Other: <text>`.
-- Rework needs `--notes` and accepts `no answer` for a question.
+- Rework needs `--notes-file` and accepts `no answer` for a question.
 - After it succeeds, tell the person the printed job id and decision.
 
 ## Dashboard actions
@@ -49,9 +53,9 @@ factory.py control <job-id> <prioritize|unprioritize> --chat-file <file>
 | Dashboard action | Agent path today | Slice |
 | --- | --- | --- |
 | Prioritize, Remove priority | `factory.py control` | exists |
-| Pause, Resume | refused | planned |
+| Pause, Resume | `factory.py control` | exists |
 | Babysit PR | refused | planned |
-| Close job with a reason | refused | planned |
+| Close job with a reason | `factory.py control` | exists |
 | Move to host, Rerun | refused (`move`) | planned |
 | Answer a needs-you form | none | planned |
 | Edit idea, Discard idea, Assign project, Follow in Tracer | `board` patch | exists |

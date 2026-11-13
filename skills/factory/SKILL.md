@@ -536,7 +536,7 @@ sets it, and a `/factory babysit` session clears it with `null`; `board` refuses
 - Commands use `python3`, or `py -3` on Windows. No command needs bash: every
   command is `python3`, `git`, or `gh`.
 - Orchestrators run `suggest approve`, `backlog decide` and `factory.py control` only with
-  `--chat-file`, as [chat decisions](references/chat-decisions.md) says. They never run `autonomy
+  person text in files, as [chat decisions](references/chat-decisions.md) says. They never run `autonomy
   resume`, `autonomy allow` or `/factory approve-spec`, or approve scope in Tracer;
   a human does.
 
