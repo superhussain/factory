@@ -897,13 +897,8 @@ async function capture(outdir, referencePath) {
       await page.evaluate(() =>
         document.getElementById("pipeline-archive").scrollIntoView({ block: "start" }),
       );
-      const cropped = await page.evaluate(() =>
-        ["pipeline-archive", "pipeline-status"].filter((id) => {
-          const r = document.getElementById(id).getBoundingClientRect();
-          return r.top < 0 || r.bottom > window.innerHeight;
-        }),
-      );
-      if (cropped.length) throw new Error(name + " capture crops " + cropped.join(", "));
+      // Tracer and the stage notes push Status past one 1280x900 screen, so the view clips from Archiving to Status.
+      return clipOf(page, "#pipeline-archive", "#pipeline-status");
     };
     const openArchivePrefill = async (page) => {
       await page.evaluate(() => {
@@ -918,7 +913,7 @@ async function capture(outdir, referencePath) {
       );
       await page.select("#pipeline-archive-mode", "");
       await page.select("#pipeline-archive-mode", "count");
-      await settleArchiveSettings(page, "archive-prefill");
+      return settleArchiveSettings(page, "archive-prefill");
     };
     await view("archive-prefill", 1280, 900, "light", openArchivePrefill);
     const openArchiveSwap = async (page) => {
@@ -935,7 +930,7 @@ async function capture(outdir, referencePath) {
       await page.select("#pipeline-archive-mode", "");
       await page.select("#pipeline-archive-mode", "age");
       await page.select("#pipeline-archive-mode", "count");
-      await settleArchiveSettings(page, "archive-swap");
+      return settleArchiveSettings(page, "archive-swap");
     };
     await view("archive-swap", 1280, 900, "light", openArchiveSwap);
     await view("archived-drawer", 1280, 900, "light", openArchivedDrawer);
