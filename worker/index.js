@@ -92,6 +92,8 @@ const MAX_BODY = 1 << 20;
 // A day's list of hosts with a retro digest, and one host's digest for that day.
 const RETRO_DAY = /^\/api\/retro\/(\d{4}-\d{2}-\d{2})$/;
 const RETRO_FILE = /^\/api\/retro\/([^/]+)\/(\d{4}-\d{2}-\d{2})\.jsonl$/;
+// Retro runs: one factory.retro-run/1 record per admitted run, and the newest 30 listed.
+const RETROS = /^\/api\/retros(?:\/([A-Za-z0-9_-]{1,64}))?$/;
 // board.json holds every job, merged ones included, so it outgrows the per-file cap.
 const MAX_BOARD = 4 << 20;
 const MAX_IMAGE = 5 << 20;
@@ -1580,6 +1582,115 @@ async function retroPut(request, env, principal, id, date) {
   return reply("ok");
 }
 
+const RETRO_RUN_WRITE_ONLY = "retro runs are written only by a bound host's service token";
+const RETRO_RUN_BYTES = 64 << 10;
+const RETRO_RUNS_LISTED = 30;
+const RETRO_CATEGORIES = [
+  "navigation",
+  "automated-checks",
+  "reviewer-rules",
+  "steering",
+  "tool-economy",
+  "information-access",
+  "permissions",
+];
+const retroRunKey = (run) => `retro-runs/${run}.json`;
+
+// The shape error in a factory.retro-run/1 body, or null. Every string is one line.
+function retroRunShape(body, run, hostId) {
+  const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+  const exact = (v, keys) =>
+    isObject(v) && Object.keys(v).length === keys.length && keys.every((k) => k in v);
+  const text = (v, lo, hi) =>
+    typeof v === "string" && v.length >= lo && v.length <= hi && !/[\p{Cc}\u2028\u2029]/u.test(v);
+  const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+  const slug = (v) => typeof v === "string" && /^[\w-]{1,64}$/.test(v);
+  const card = (c) =>
+    exact(c, ["title", "project", "fingerprint", "result"]) &&
+    text(c.title, 1, 80) &&
+    slug(c.project) &&
+    /^[0-9a-f]{16}$/.test(c.fingerprint) &&
+    text(c.result, 1, 120);
+  const cards = (list, max) => Array.isArray(list) && list.length <= max && list.every(card);
+  const finding = (f) =>
+    exact(f, [
+      "rank",
+      "title",
+      "category",
+      "count",
+      "cost",
+      "project",
+      "root_cause",
+      "fix",
+      "cards",
+    ]) &&
+    whole(f.rank, 1, 12) &&
+    text(f.title, 1, 80) &&
+    RETRO_CATEGORIES.includes(f.category) &&
+    whole(f.count, 1, 10_000_000) &&
+    whole(f.cost, 1, 1_000_000_000) &&
+    slug(f.project) &&
+    text(f.root_cause, 1, 300) &&
+    text(f.fix, 1, 300) &&
+    cards(f.cards, 5);
+  if (
+    !exact(body, [
+      "schema",
+      "run",
+      "host",
+      "from",
+      "to",
+      "sessions",
+      "rejected",
+      "findings",
+      "cards",
+    ])
+  )
+    return "body: needs keys schema, run, host, from, to, sessions, rejected, findings, cards";
+  if (body.schema !== "factory.retro-run/1") return "schema: must be factory.retro-run/1";
+  if (body.run !== run) return `run: must be ${run}`;
+  if (body.host !== hostId) return `host: must be ${hostId}`;
+  for (const key of ["from", "to"])
+    if (typeof body[key] !== "string" || !isCalendarDate(body[key]))
+      return `${key}: must be a calendar date`;
+  for (const key of ["sessions", "rejected"])
+    if (!whole(body[key], 0, 10_000_000))
+      return `${key}: must be a whole number from 0 to 10000000`;
+  if (!Array.isArray(body.findings) || body.findings.length < 1 || body.findings.length > 12)
+    return "findings: must be a list of 1-12 items";
+  if (!body.findings.every(finding)) return "findings: an item is malformed";
+  if (!cards(body.cards, 5)) return "cards: must be a list of 0-5 well-formed cards";
+  return null;
+}
+
+// A bound host stores its run's record. A re-admit of the same run replaces it.
+async function retrosPut(request, env, principal, run) {
+  const host = await boundHost(env, principal);
+  if (!host) return reply(RETRO_RUN_WRITE_ONLY, 403);
+  const body = await readJson(request, RETRO_RUN_BYTES);
+  if (body instanceof Response) return body;
+  const error = retroRunShape(body, run, host.id);
+  if (error) return reply(error, 400);
+  await env.BUCKET.put(retroRunKey(run), JSON.stringify(body), JSON_TYPE);
+  return reply("ok");
+}
+
+// The newest retro runs, newest first. Run ids start with a UTC timestamp, so name order is date order.
+async function retrosList(env) {
+  const keys = [];
+  let cursor;
+  do {
+    const page = await env.BUCKET.list({ prefix: "retro-runs/", cursor });
+    keys.push(...page.objects.map((o) => o.key));
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  keys.sort().reverse();
+  const records = await Promise.all(
+    keys.slice(0, RETRO_RUNS_LISTED).map(async (key) => (await env.BUCKET.get(key)).text()),
+  );
+  return reply(`[${records.join(",")}]`, 200, "application/json");
+}
+
 // The hosts with a retro digest for the day, in host record order.
 async function retroDay(env, date) {
   const out = [];
@@ -1963,6 +2074,11 @@ async function api(request, env, path, principal) {
     if (method !== "GET") return notFound();
     if (principal.kind !== "service") return reply(RETRO_READ_ONLY, 403);
     return getFile(env, retroKey(id, date), "application/x-ndjson");
+  }
+  m = path.match(RETROS);
+  if (m) {
+    if (m[1] === undefined) return method === "GET" ? retrosList(env) : notFound();
+    return method === "PUT" ? retrosPut(request, env, principal, m[1]) : notFound();
   }
   m = path.match(IDEA_IMAGE_ROUTE);
   if (m) {
