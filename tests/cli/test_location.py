@@ -166,6 +166,34 @@ class LocationTest(IsolatedTestCase):
             (job / ".sync.json").write_text(json.dumps(bad))
             self.rejected(lambda: self.runtime.validate_home(self.home))
 
+    def test_metadata_walk_lstats_no_entry(self):
+        jobs = self.home / "jobs/sample"
+        for job in ("001-test", "002-test", "003-test"):
+            (jobs / job).mkdir(parents=True)
+            (jobs / job / ".sync.json").write_text("{}")
+            (jobs / job / "spec.md").write_text("spec")
+            (jobs / job / "build.md").write_text("build")
+
+        def lstats():
+            with patch.object(self.runtime.os, "lstat", wraps=os.lstat) as lstat:
+                self.runtime.validate_home(self.home)
+            return lstat.call_count
+
+        few = lstats()
+        for n in range(30):
+            (jobs / "001-test" / f"note-{n}.md").write_text("note")
+        self.assertEqual(lstats(), few)
+
+    def test_fifo_in_jobs_is_refused(self):
+        if os.name == "nt":
+            self.skipTest("os.mkfifo is POSIX-only")
+        job = self.home / "jobs/sample/001-test"
+        job.mkdir(parents=True)
+        os.mkfifo(job / "pipe")
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.rejected(lambda: self.runtime.validate_home(self.home))
+        self.assertIn("Invalid local metadata: jobs/sample/001-test/pipe.", err.getvalue())
+
     def test_unreadable_metadata_and_unlistable_tree(self):
         if os.name == "nt":
             self.skipTest("POSIX permission bits; Windows real junction test owns its filesystem check")

@@ -457,6 +457,73 @@ test("needs you form", { timeout: 180000 }, async (t) => {
       }
     });
 
+    await t.test("phone keeps the focused box in place", async () => {
+      const record = {
+        sha256: createHash("sha256").update(NEEDS).digest("hex"),
+        choices: [
+          {
+            header: "Release path",
+            pick: "Fast",
+            confidence: 71,
+            options: [
+              {
+                label: "Fast",
+                chance: 71,
+                reason: "It is the smallest change that solves the item.",
+              },
+              { label: "Careful", chance: 29, reason: "It avoids auth, data or deploy risk." },
+            ],
+          },
+        ],
+      };
+      let held;
+      const arrived = new Promise((resolve) => {
+        held = resolve;
+      });
+      await page.setViewport({ width: 390, height: 844 });
+      await page.setRequestInterception(true);
+      const hold = (request) =>
+        request.method() === "GET" &&
+        new URL(request.url()).pathname === "/api/jobs/sample/001-needs/needs-triage.json"
+          ? held(request)
+          : request.continue();
+      page.on("request", hold);
+      try {
+        await open("001-needs/needs");
+        const request = await arrived;
+        await page.waitForSelector("#needs-form", wait);
+        const box = (await page.$$("#needs-form textarea"))[1];
+        await box.evaluate((el) => {
+          el.value = "";
+          const doc = document.getElementById("d-doc");
+          doc.scrollTop +=
+            el.getBoundingClientRect().top - doc.getBoundingClientRect().top - doc.clientHeight / 2;
+        });
+        await box.focus();
+        await box.type("Hold");
+        const before = await box.evaluate((el) => el.getBoundingClientRect().top);
+        await request.respond({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(record),
+        });
+        await page.waitForSelector(".ask-model", wait);
+        const [focused, after] = await page.evaluate(() => {
+          const el = document.activeElement;
+          return [
+            el === document.querySelectorAll("#needs-form textarea")[1],
+            el.getBoundingClientRect().top,
+          ];
+        });
+        assert.equal(focused, true);
+        assert.ok(Math.abs(after - before) <= 1, `moved from ${before} to ${after}`);
+      } finally {
+        page.off("request", hold);
+        await page.setRequestInterception(false);
+        await page.setViewport({ width: 1280, height: 900 });
+      }
+    });
+
     assert.deepEqual(errors, []);
     await context.close();
   });
