@@ -104,6 +104,16 @@ test("a tapped or focused board toast stays until released", { timeout: 120000 }
         await release(page);
         await wait(1500);
         assert.equal(await visible(page), false, "blurred toast hides");
+
+        await page.evaluate((text) => {
+          showBoardStatus(text);
+          const toast = document.getElementById("board-status");
+          toast.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+          toast.focus();
+        }, TEXT);
+        await release(page);
+        await wait(1500);
+        assert.equal(await visible(page), false, "a toast held before its text lands still hides");
       }
       assert.deepEqual(external, [], "no external requests");
       assert.deepEqual(errors, [], "no page errors");
