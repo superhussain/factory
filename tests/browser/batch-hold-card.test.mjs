@@ -73,6 +73,11 @@ test("held for batching chip", { timeout: 120000 }, async () => {
       await page.$eval('.card[data-id="102-move-comment"] .chip.held', (el) => el.title),
       /Settings, Pipeline, Batch follow-ups sets the numbers\.$/,
     );
+    const wait = await page.$eval('.card[data-id="201-wait-a"] .chip.held', (el) => el.title);
+    assert.ok(
+      wait.startsWith("Waits for a batch (2 of 3, 3h of 24h). Pickup holds this idea"),
+      wait,
+    );
     assert.deepEqual(errors, []);
   });
 });

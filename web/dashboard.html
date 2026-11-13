@@ -1477,9 +1477,10 @@ function batchState(j) {
       ? { text: 'Batch ready', title: 'Pickup launches this idea next and batches the other held ideas behind it. Settings, Pipeline, Batch follow-ups sets the numbers.' }
       : { text: 'Batches behind ' + lead, title: 'Pickup launches ' + lead + ' next and batches this idea behind it. Settings, Pipeline, Batch follow-ups sets the numbers.' };
   }
+  const text = 'Waits for a batch (' + held.length + ' of ' + least + ', ' + Math.max(0, Math.floor(oldest)) + 'h of ' + hours + 'h)';
   return {
-    text: 'Waits for a batch (' + held.length + ' of ' + least + ', ' + Math.max(0, Math.floor(oldest)) + 'h of ' + hours + 'h)',
-    title: 'Pickup holds this idea until the project has ' + least + ' held ideas or the oldest has waited ' + hours + 'h. Settings, Pipeline, Batch follow-ups sets the numbers.',
+    text,
+    title: text + '. Pickup holds this idea until the project has ' + least + ' held ideas or the oldest has waited ' + hours + 'h. Settings, Pipeline, Batch follow-ups sets the numbers.',
   };
 }
 
