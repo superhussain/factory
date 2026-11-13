@@ -4023,7 +4023,7 @@ def launch_env(given, provider, model):
                 FACTORY_PROMPT=given["prompt"])
 
 
-def launch_failed(home, name, job_id, detail, log_path, release, fatal=True):
+def launch_failed(home, name, job_id, detail, log_path, release, fatal=True, experiment=False):
     """After a failed launch: mark the route limited when its log says so, else exit 1, or with fatal=False log the failure and return.
     Either way release() drops the claim first."""
     with open(log_path, "rb") as log:
@@ -4032,7 +4032,7 @@ def launch_failed(home, name, job_id, detail, log_path, release, fatal=True):
     if LIMIT_TEXT.search(tail):
         until = limit_route(home, name, limit_minutes(tail, datetime.now(timezone.utc)))
         release()
-        print(f"limited {name} until {until}")
+        print(f"limited experiment {name} until {until}" if experiment else f"limited {name} until {until}")
         print(f"released {job_id}")
         return
     release()
@@ -4888,7 +4888,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
             continue
         limit_name = experiment["name"] if arm == "b" and experiment else name
         launch_failed(home, limit_name, entry["id"], detail, log_path,
-                      lambda: release_claim(home, entry["id"], device, entry["session"]))
+                      lambda: release_claim(home, entry["id"], device, entry["session"]),
+                      experiment=bool(experiment) and arm == "b")
         return
 
 
