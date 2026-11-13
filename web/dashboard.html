@@ -1387,6 +1387,12 @@ function refLine(r) {
   return esc(REF_KINDS[r.kind]) + ' ' + id;
 }
 
+// The open job triage flagged a queued idea as repeating, or null. The note is advisory and shows only while the job is an idea.
+function duplicateOf(j) {
+  const id = j.backlog?.triage?.duplicate;
+  return j.stage === 'idea' && typeof id === 'string' && id !== j.id ? id : null;
+}
+
 // The link and the actions trigger sit beside the button, not inside it, so a click on them never reaches the card handler.
 // Each on-board ref and rider also gets a visually hidden stand-in link after the actions trigger, named for this card, so Tab reaches it.
 // A needs-you card shows its real stage and the ask, which is needs when set and the note otherwise. A rider's batch note is left out, and a rider with no ask says it waits on its lead, which its ref row names.
@@ -1395,6 +1401,8 @@ function card(j, inNeeds, archived = false) {
   const ask = own || (inNeeds && leadOf(j) ? 'Waiting on its lead' : '');
   const riders = archived ? [] : ridersOf(j.id);
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
+  const dup = duplicateOf(j);
+  const dupOnBoard = dup !== null && jobs.some((x) => x.id === dup);
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
   const tags = (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
     (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
@@ -1411,6 +1419,8 @@ function card(j, inNeeds, archived = false) {
       (j.branch ? line('meta branch', j.branch) : '') +
       line('meta round', 'round ' + (j.round ?? 0) + (buildState(j) ? ' · build ' + buildState(j) : ''))) +
     (refText ? '<div class="meta refs line" title="' + esc(refText) + '">' + refs(j).map(refLine).join(' &middot; ') + '</div>' : '') +
+    (dup ? '<div class="meta refs duplicate line" title="' + esc('possible duplicate of ' + dup) + '">possible duplicate of ' +
+      (dupOnBoard ? '<span class="ref-link" data-ref="' + esc(dup) + '">' + esc(dup) + '</span>' : esc(dup)) + '</div>' : '') +
     (riders.length ? '<div class="meta refs riders line" title="' + esc('batches ' + riders.join(' · ')) + '">batches ' +
       riders.map((id) => '<span class="ref-link" data-ref="' + esc(id) + '">' + esc(id) + '</span>').join(' &middot; ') + '</div>' : '') +
     (hostLine(j) ? line('meta host', hostLine(j)) : '') +
@@ -1423,6 +1433,7 @@ function card(j, inNeeds, archived = false) {
     (archived ? '' : '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
     ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') +
     refs(j).filter((r) => jobs.some((x) => x.id === r.id)).map((r) => standIn(r.id, REF_KINDS[r.kind] + ' ' + r.id)).join('') +
+    (dupOnBoard ? standIn(dup, 'possible duplicate of ' + dup) : '') +
     riders.map((id) => standIn(id, 'batches ' + id)).join('') + '</div>';
 }
 
@@ -4966,7 +4977,8 @@ async function decideBacklog(item, decision, notes, answers) {
   } finally {
     await loadBacklog();
     backlogBusy.delete(item.raw);
-    await poll();
+    // The backlog was just read. A second read from poll could land after the caller shows a failure and clear it.
+    await poll({ withBacklog: false });
   }
 }
 

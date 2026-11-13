@@ -1646,6 +1646,9 @@ def queue_backlog_item(home, slug, feature, verdict, context=None):
     ref = BACKLOG_SUFFIX.search(feature)
     text = feature[:ref.start()] if ref else feature
     score = f"confidence {verdict['confidence']}% (threshold {verdict['threshold']}%)"
+    duplicate = verdict.get("duplicate")
+    if not (isinstance(duplicate, str) and JOB_ID.fullmatch(duplicate)):
+        duplicate = None
     jobs = Path(home, "jobs")
     local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
 
@@ -1658,6 +1661,8 @@ def queue_backlog_item(home, slug, feature, verdict, context=None):
                "idea": idea_with_context(text, context, f"\n\nQueued by backlog triage: {score}. {verdict['reason']}"),
                "backlog": {"line": raw, "decision": "approved", "at": at, "by": "triage",
                            "triage": {k: verdict[k] for k in ("model", "confidence", "threshold", "reason")}}}
+        if duplicate:
+            job["backlog"]["triage"]["duplicate"] = duplicate
         refs = suffix_refs(ref)
         if refs:
             job["refs"] = refs
@@ -1701,7 +1706,7 @@ def queue_backlog_item(home, slug, feature, verdict, context=None):
               f"check off the line or remove {job_id} by hand", file=sys.stderr)
         return True
     if marked:
-        print(f"queued {item} as {job_id}: {score}")
+        print(f"queued {item} as {job_id}: {score}" + (f"; possible duplicate of {duplicate}" if duplicate else ""))
         return False
     try:
         cas(home, "/api/board", drop)
@@ -5357,6 +5362,9 @@ def pr_reading(pr, base):
         view = None
     if not isinstance(view, dict):
         fail("gh pr view printed no JSON object", 5)
+    target = view.get("baseRefName") or base
+    if not isinstance(target, str) or not re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", target):
+        fail("gh printed an unusable baseRefName", 5)
     listed = pr_checks(pr)[0]
     if view.get("statusCheckRollup") and not listed:
         fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5)
@@ -5390,7 +5398,7 @@ def pr_reading(pr, base):
                          "gh api graphql").strip() == "true"
     queued = in_queue or bool(view.get("autoMergeRequest"))
     conflict = view.get("mergeStateStatus") == "DIRTY"
-    stacked = bool(view.get("baseRefName")) and view.get("baseRefName") != base
+    stacked = target != base
     if state in ("merged", "closed"):
         step = state
     elif unanswered:
@@ -5410,7 +5418,7 @@ def pr_reading(pr, base):
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none",
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
-            "next": step}
+            "base": target, "next": step}
 
 
 def pr_state_cmd(target, *args):
@@ -7601,7 +7609,7 @@ RETRO_HEADERS = re.compile(
     r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)[^\r\n'\"\\]+")
 RETRO_URL_CREDS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{0,31}://)[^/\s@]+@")
 RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
-RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)[^\s:]*:\S+")
+RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)(?!=?\d+:\d+(?!\S))[^\s:]*:\S+")
 RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential"
 RETRO_SECRET_WORD = re.compile(r"(?i)(?:" + RETRO_SECRET_WORDS + ")")
 RETRO_COUNT_WORD = re.compile(r"(?i)tokens")

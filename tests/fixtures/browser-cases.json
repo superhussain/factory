@@ -132,6 +132,7 @@
   "tests/browser/batch-ref.test.mjs",
   "tests/browser/batch-lead.test.mjs",
   "tests/browser/card-ref-truncated.test.mjs",
+  "tests/browser/card-duplicate.test.mjs",
   "tests/browser/move-host.test.mjs",
   "tests/browser/prioritize.test.mjs",
   "tests/browser/babysit.test.mjs",

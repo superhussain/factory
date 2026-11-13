@@ -103,6 +103,15 @@ class RetroRedactTest(RetroCase):
                            ("git push -u origin main", "git push -u origin main")):
             self.assertEqual(factory.retro_redact(text), kept)
 
+    def test_numeric_uid_gid_is_kept(self):
+        for text in ("docker run -u 1000:1000 img", "docker run --user=0:0 img", "docker run -u=1000:1000 img"):
+            with self.subTest(text=text):
+                self.assertEqual(factory.retro_redact(text), text)
+        for text in ("docker run -u ci:hunter2 img", "docker run -u 1000:pw img",  # gitleaks:allow synthetic credentials
+                     "docker run --user=1000:pw img", "docker run -u 1000:1000x img"):
+            with self.subTest(text=text):
+                self.assertIn("[redacted]", factory.retro_redact(text))
+
     def test_long_name_run_redacts_in_linear_time(self):
         for text in ("a" * 30000, "-" * 30000, "a1" * 15000, "--" + "a" * 30000):
             with self.subTest(text=text[:3]):
