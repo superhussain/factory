@@ -1151,9 +1151,10 @@ async function capture(outdir, referencePath) {
     await view("backlog-rework-desktop", 1440, 900, "light", openRework);
     await view("backlog-rework-mobile", 390, 844, "dark", openRework);
     if (failed.length) {
-      console.log(JSON.stringify({ result: "FAIL", failed }));
+      console.log(JSON.stringify({ result: "FAIL", failed, external }));
       throw new Error(
-        `${failed.length} capture views failed: ${failed.map((f) => f.view).join(", ")}`,
+        `${failed.length} capture views failed: ${failed.map((f) => f.view).join(", ")}` +
+          (external.length ? "; external requests during capture: " + external.join(", ") : ""),
       );
     }
     if (external.length)
