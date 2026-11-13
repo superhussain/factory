@@ -663,7 +663,7 @@ class RetroAdmitTest(RetroCase):
         seen = []
         with patch.object(factory, "retro_backlog_admit", side_effect=lambda *args: seen.append(args)), \
                 patch.object(factory, "suggest_admit", side_effect=AssertionError("no idea cards")):
-            code, out, err = self.admit(reply(suggestions=[retro_suggestion()]))
+            code, out, err = self.admit(reply(suggestions=[retro_suggestion(finding=1)]))
         path = self.folder / "suggestions.json"
         cards = {"schema": "factory.suggestions/1", "by": "retro", "run": RUN, "suggestions": [retro_suggestion()]}
         self.assertEqual((code, err, out), (0, "", f"wrote {self.folder / 'findings.md'}\n"))
@@ -858,15 +858,29 @@ class RetroUploadTest(RetroWorkerCase):
         self.assertEqual(record["findings"][0]["cards"], [])
 
     def test_bad_finding_number_fails_but_uploads_findings(self):
-        for number in (0, 2, "1", True, 1.5):
+        for number in (0, 2, "1", True, 1.5, None, [], [1, 1], [0], [1, "1"]):
             with self.subTest(number=number):
-                code, out, err, puts = self.admit(reply(suggestions=[retro_suggestion(finding=number)]))
+                card = retro_suggestion(finding=number)
+                if number is None:
+                    del card["finding"]
+                code, out, err, puts = self.admit(reply(suggestions=[card]))
                 self.assertEqual(code, 2)
-                self.assertIn("suggestions[0].finding: must be a finding number from 1 to 1; "
-                              "findings.md written, no cards admitted", err)
+                self.assertIn("suggestions[0].finding: must be a finding number from 1 to 1, "
+                              "or a list of distinct finding numbers; findings.md written, no cards admitted", err)
                 self.assertEqual(len(json.loads(puts[0][3])["findings"]), 1)
                 self.assertEqual(json.loads(puts[0][3])["cards"], [])
                 self.assertFalse((self.folder / "suggestions.json").exists())
+
+    def test_one_card_links_two_findings(self):
+        code, out, err, puts = self.admit(reply(finding(), finding(title="Second"),
+                                                suggestions=[retro_suggestion(finding=[1, 2])]))
+        self.assertEqual((code, err), (0, ""))
+        record = json.loads(puts[0][3])
+        fp = factory.fingerprint("sample-tools", retro_suggestion())
+        row = {"title": "Guard the ls alias", "project": "sample-tools", "fingerprint": fp, "result": "admitted"}
+        self.assertEqual(record["findings"][0]["cards"], [row])
+        self.assertEqual(record["findings"][1]["cards"], [row])
+        self.assertEqual(record["cards"], [])
 
     def test_paused_admit_still_uploads(self):
         board = {"updated": "2026-11-12T09:00:00Z", "jobs": [], "autonomy": {"paused": True, "projects": [], "self": []}}

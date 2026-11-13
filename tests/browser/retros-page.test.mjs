@@ -82,11 +82,17 @@ const RUNS = [
     sessions: 31,
     rejected: 1,
     findings: [
-      finding(1, "Reviewers re-read the same files", [
-        card("Open work card", FP(1)),
-        card("Denied work card", FP(2)),
-        card("Closed work card", FP(3)),
-      ]),
+      finding(
+        1,
+        "Reviewers re-read the same files",
+        [
+          card("Open work card", FP(1)),
+          card("Denied work card", FP(2)),
+          card("Closed work card", FP(3)),
+          card("Waiting card", FP(5)),
+        ],
+        { count: 1000, cost: 1000 },
+      ),
       finding(2, "Checked and waiting cards", [
         card("Checked line card", FP(4)),
         card("Waiting card", FP(5)),
@@ -96,7 +102,7 @@ const RUNS = [
         card("Gone card", FP(7)),
         card("Capped card", FP(8), "daily cap"),
       ]),
-      finding(4, "A finding with no card", []),
+      finding(4, "A finding with no card", [], { count: 1, cost: 100 }),
     ],
     cards: [card("Loose card", FP(9), "duplicate 1490-guard-the-ls-alias")],
   },
@@ -113,10 +119,10 @@ test("retros page", { timeout: 180000 }, async (t) => {
     );
     await seedBoard(origin, JOBS);
     let retros = { status: 200, body: JSON.stringify(RUNS) };
-    const openPage = async (hash, viewport = { width: 1280, height: 900 }) => {
+    const openPage = async (hash, viewport = { width: 1280, height: 900 }, scheme = "light") => {
       const page = await (await browser.createBrowserContext()).newPage();
       await page.setViewport(viewport);
-      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
+      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: scheme }]);
       const errors = [];
       page.on("pageerror", (error) => errors.push(String(error)));
       await page.setRequestInterception(true);
@@ -139,13 +145,21 @@ test("retros page", { timeout: 180000 }, async (t) => {
       return { page, errors };
     };
     const rows = (page) =>
-      page.$$eval("#retros-list tbody tr", (trs) =>
-        trs.map((tr) => [...tr.cells].map((td) => td.textContent)),
+      page.$$eval("#retros-list .retro-finding", (items) =>
+        items.map((item) =>
+          [".retro-rank", ".retro-title", ".retro-share-value"]
+            .map((selector) => item.querySelector(selector).textContent)
+            .concat(
+              [...item.querySelectorAll(".retro-cards > *")]
+                .map((c) => c.lastChild.textContent)
+                .join(""),
+            ),
+        ),
       );
 
     await t.test("each status resolves with its link", async () => {
       const { page, errors } = await openPage("#/retros");
-      await page.waitForSelector("#retros-list tbody tr", wait);
+      await page.waitForSelector("#retros-list .retro-finding", wait);
       await page.waitForFunction(
         () => document.querySelectorAll("#retros-list .retro-summary").length === 2,
         wait,
@@ -153,27 +167,48 @@ test("retros page", { timeout: 180000 }, async (t) => {
       assert.match(await page.title(), /^Retros · /);
       assert.equal(await page.$eval("#retros-page-heading", (el) => el.textContent), "Retros");
       assert.deepEqual(
-        await page.$$eval("#retros-list .retro-summary", (els) => els.map((el) => el.textContent)),
-        ["1 merged", "3 merged, 1 open, 1 waiting, 1 denied, 1 closed, 1 archived, 1 not logged"],
+        await page.$$eval("#retros-list .retro-summary", (els) =>
+          els.map((el) => [...el.querySelectorAll(".chip")].map((chip) => chip.textContent)),
+        ),
+        [
+          ["1 merged"],
+          ["3 merged", "1 open", "1 waiting", "1 denied", "1 closed", "1 archived", "1 not logged"],
+        ],
       );
       const table = await rows(page);
       assert.deepEqual(
         table[0].slice(0, 2).map((c) => c.slice(0, 20)),
         ["1", "ls alias crashes in "],
       );
-      assert.equal(table[0][4], "63,250");
-      assert.equal(table[0][5], "Guard the ls alias · Merged");
+      assert.equal(table[0][2], "100%");
+      assert.equal(table[0][3], "Merged");
       assert.deepEqual(
-        table.slice(1).map((r) => r[5]),
+        table.slice(1).map((r) => r[2]),
+        ["89%", "6%", "6%", "<1%"],
+      );
+      assert.deepEqual(
+        table.slice(1).map((r) => r[3]),
         [
-          "Open work card · Open · buildDenied work card · DeniedClosed work card · Closed",
-          "Checked line card · MergedWaiting card · WaitingDuplicate card · Merged",
-          "Gone card · ArchivedCapped card · Not logged: daily cap",
+          "Open · buildDeniedClosedWaiting",
+          "MergedWaitingMerged",
+          "ArchivedNot logged: daily cap",
           "No card",
         ],
       );
-      const links = await page.$$eval("#retros-list td:last-child a", (as) =>
-        as.map((a) => [a.textContent, a.getAttribute("href")]),
+      assert.equal(
+        await page.$$eval("#retros-list .retro-share", (els) =>
+          els.some((el) => el.textContent.includes(",")),
+        ),
+        false,
+      );
+      assert.equal(
+        await page.$eval("#retro-20261105T090000Z-d4e5f6-4 .retro-cards .chip", (el) =>
+          el.classList.contains("is-none"),
+        ),
+        true,
+      );
+      const links = await page.$$eval("#retros-list .retro-cards a", (as) =>
+        as.map((a) => [a.lastChild.textContent, a.getAttribute("href")]),
       );
       assert.deepEqual(links[0], ["Merged", "#1490-guard-the-ls-alias"]);
       const waiting = links.find(([text]) => text === "Waiting");
@@ -183,12 +218,43 @@ test("retros page", { timeout: 180000 }, async (t) => {
         false,
       );
       assert.equal(
-        await page.$eval("#retros-list h4", (el) => el.textContent),
-        "Cards without a finding",
+        await page.$eval("#retro-h-20261112T090000Z-a1b2c3", (el) => el.textContent),
+        "Nov 12, 2026, 09:00 UTC",
       );
       assert.equal(
-        await page.$eval("#retros-list details summary", (el) => el.textContent),
-        "Root cause and fix",
+        await page.$eval(
+          "#retro-run-20261112T090000Z-a1b2c3 .retro-run-meta",
+          (el) => el.textContent,
+        ),
+        "mac · Nov 5 to Nov 11 · 40 sessions · 20261112T090000Z-a1b2c3",
+      );
+      assert.match(
+        await page.$eval(".retro-findings-head", (el) => el.textContent),
+        /Share of estimated cost/,
+      );
+      const unlinked = await page.$eval("#retros-list .retro-unlinked", (el) => el.textContent);
+      assert.match(unlinked, /^Not linked to a finding/);
+      assert.match(unlinked, /Loose card\s*Merged/);
+      assert.equal(await page.$("#retros-list h4"), null);
+      assert.equal(
+        await page.$eval(
+          "#retro-20261105T090000Z-d4e5f6-3 .retro-cards > :first-child",
+          (el) => el.textContent,
+        ),
+        "Gone card: Archived",
+      );
+      assert.equal(await page.$("#retros-list .retro-unlinked .retro-chip-name"), null);
+      const summary = await page.$("#retros-list .retro-why summary");
+      assert.equal(await summary.evaluate((el) => el.textContent), "Root cause and fix");
+      assert.ok(await summary.$("svg"));
+      assert.equal(await summary.evaluate((el) => getComputedStyle(el).listStyleType), "none");
+      await summary.click();
+      assert.equal(await summary.evaluate((el) => el.parentElement.open), true);
+      assert.deepEqual(
+        await summary.evaluate((el) =>
+          [...el.parentElement.querySelectorAll(".retro-why-label")].map((l) => l.textContent),
+        ),
+        ["Root cause", "Fix"],
       );
       assert.deepEqual(errors, []);
       await page.browserContext().close();
@@ -200,6 +266,22 @@ test("retros page", { timeout: 180000 }, async (t) => {
       assert.equal(
         await page.$eval("#retro-20261105T090000Z-d4e5f6-2 details", (el) => el.open),
         true,
+      );
+      await page.browserContext().close();
+    });
+
+    await t.test("a phone width has no sideways scroll", async () => {
+      const { page } = await openPage("#/retros", { width: 390, height: 844 });
+      await page.waitForSelector("#retros-list .retro-finding", wait);
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+        true,
+      );
+      assert.equal(
+        await page.$eval("#retro-run-20261105T090000Z-d4e5f6 .retro-share", (el) => el.textContent),
+        "89% of estimated cost",
       );
       await page.browserContext().close();
     });
@@ -278,18 +360,25 @@ test("retros page", { timeout: 180000 }, async (t) => {
     await t.test("captures", async () => {
       if (!process.env.RETROS_SHOTS) return;
       await mkdir(process.env.RETROS_SHOTS, { recursive: true });
-      for (const [name, viewport] of [
-        ["desktop", { width: 1280, height: 900 }],
-        ["mobile", { width: 390, height: 844 }],
+      for (const [name, viewport, scheme] of [
+        ["desktop", { width: 1280, height: 900 }, "light"],
+        ["mobile", { width: 390, height: 844 }, "light"],
+        ["dark", { width: 1280, height: 900 }, "dark"],
       ]) {
-        const { page } = await openPage("#/retros", viewport);
-        await page.waitForSelector("#retros-list tbody tr", wait);
+        const { page } = await openPage("#/retros", viewport, scheme);
+        await page.waitForSelector("#retros-list .retro-finding", wait);
         await page.screenshot({
           path: `${process.env.RETROS_SHOTS}/after-retros-${name}.png`,
           fullPage: true,
         });
         await page.browserContext().close();
       }
+      const open = await openPage("#/retros/20261105T090000Z-d4e5f6/2");
+      await open.page.waitForSelector("#retro-20261105T090000Z-d4e5f6-2[aria-current]", wait);
+      await (
+        await open.page.$("#retro-run-20261105T090000Z-d4e5f6")
+      ).screenshot({ path: `${process.env.RETROS_SHOTS}/after-retros-open.png` });
+      await open.page.browserContext().close();
       const { page } = await openPage("#/settings/reference");
       await page.waitForSelector("#settings-reference:not([hidden])", wait);
       await (
