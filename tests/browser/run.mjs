@@ -1079,20 +1079,24 @@ async function capture(outdir, referencePath) {
     };
     await view("idea-chips-390", 390, 844, "dark", openIdeaChips, true);
     await view("idea-chips-1280", 1280, 900, "light", openIdeaChips);
-    // The reference has no agents table, so its side shows the drawer head alone.
-    const openAgentRuns = async (page, side) => {
+    const openAgentRuns = async (page) => {
       await page.evaluate(() => {
         location.hash = "#101-wrap-doc-line";
       });
       await page.waitForFunction(
         () => document.getElementById("d-title").textContent === "Synthetic wrap doc line",
       );
-      if (side === "after") {
-        await page.waitForSelector("#d-agents:not([hidden])");
-        await page.evaluate(() => {
-          document.getElementById("d-agents").open = true;
-        });
-      }
+      await page.waitForSelector("#d-agents:not([hidden])");
+      await page.evaluate(() => {
+        document.getElementById("d-agents").open = true;
+      });
+      // Scrolled to the table's right end so the last columns show. The 1280 screenshot
+      // re-lays out the page and resets the scroll, so that view shows the left end.
+      await page.waitForFunction(() => {
+        const wrap = document.querySelector("#d-agents .table-wrap");
+        wrap.scrollLeft = wrap.scrollWidth;
+        return wrap.scrollLeft > 0;
+      });
       return clipOf(page, ".detail-head");
     };
     await view("agent-runs-390", 390, 844, "dark", openAgentRuns, true);
