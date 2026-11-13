@@ -86,6 +86,23 @@ test("held for batching chip", { timeout: 120000 }, async () => {
       await page.$eval("#d-held", (el) => el.textContent),
       "Pickup launches 102-move-comment next and batches this idea behind it. Settings, Pipeline, Batch follow-ups sets the numbers.",
     );
+    // 21 hours on, the oldest of other's held ideas has waited 24h. The 30-second tick redraws the
+    // chips, but not while a card has focus.
+    const chip = () => page.$eval('.card[data-id="201-wait-a"] .chip.held', (el) => el.textContent);
+    await page.evaluate(() => (location.hash = ""));
+    await page.waitForSelector("#detail[hidden]");
+    await page.focus('.card[data-id="201-wait-a"]');
+    await page.evaluate(() => {
+      const now = Date.now;
+      Date.now = () => now() + 21 * 3600000;
+    });
+    await page.evaluate(() => clockTick());
+    assert.equal(await chip(), "Waits for a batch (2 of 3, 3h of 24h)");
+    await page.evaluate(() => {
+      document.activeElement.blur();
+      clockTick();
+    });
+    assert.equal(await chip(), "Batch ready");
     assert.deepEqual(errors, []);
   });
 });

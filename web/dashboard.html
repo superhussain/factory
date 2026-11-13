@@ -635,6 +635,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-rerun" role="menuitem" tabindex="-1" hidden>Rerun stage</button>
         <button class="btn" id="d-babysit" role="menuitem" tabindex="-1" title="Work this PR as the Babysit note asks, or hand it back" hidden>Babysit PR</button>
         <button class="btn" id="d-prioritize" role="menuitem" tabindex="-1" hidden>Prioritize</button>
+        <button class="btn" id="d-run-batch" role="menuitem" tabindex="-1" title="Pickup starts this idea next and batches the project's other held ideas behind it" hidden>Run batch now</button>
+        <button class="btn" id="d-start-alone" role="menuitem" tabindex="-1" title="Pickup starts this idea next by itself, with no riders" hidden>Start alone</button>
         <button class="btn" id="d-remove-priority" role="menuitem" tabindex="-1" hidden>Remove priority</button>
         <button class="btn" id="d-pause" role="menuitem" tabindex="-1" hidden>Pause pickup</button>
         <button class="btn" id="d-resume" role="menuitem" tabindex="-1" hidden>Resume pickup</button>
@@ -643,7 +645,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-close-job" role="menuitem" tabindex="-1" hidden>Close job</button>
       </div>
     </div>
-    <button class="close" id="d-close" aria-label="Close"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <button class="close" id="d-close" aria-label="Close" title="Close (Esc or H)" aria-keyshortcuts="Escape h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <p class="err" id="d-edit-idea-err" role="alert" hidden></p>
   <p class="err" id="d-prioritize-err" role="alert" hidden></p>
@@ -666,7 +668,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
 </aside>
 <div class="settings-page" id="settings-page" role="region" aria-labelledby="settings-page-heading" hidden>
   <div class="settings-head">
-    <a class="btn icon" id="settings-back" href="#" aria-label="Back to board" title="Back to board"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
+    <a class="btn icon" id="settings-back" href="#" aria-label="Back to board" title="Back to board (H)" aria-keyshortcuts="h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
     <h2 id="settings-page-heading">Settings</h2>
   </div>
   <div class="settings-layout">
@@ -1003,6 +1005,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
           <tr><td>N</td><td>New idea</td></tr>
           <tr><td>P</td><td>Select project</td></tr>
           <tr><td>S</td><td>Open Settings</td></tr>
+          <tr><td>H</td><td>Back to the board from a job, a backlog item, Settings or Retros</td></tr>
           <tr><td>R</td><td>Open Retros</td></tr>
           <tr><td>A or .</td><td>Open the jumper with actions for the hovered or focused job card, or the open job</td></tr>
           <tr><td>B</td><td>Open the first backlog item</td></tr>
@@ -1015,7 +1018,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
 </div>
 <div class="settings-page" id="retros-page" role="region" aria-labelledby="retros-page-heading" hidden>
   <div class="settings-head">
-    <a class="btn icon" id="retros-back" href="#" aria-label="Back to board" title="Back to board"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
+    <a class="btn icon" id="retros-back" href="#" aria-label="Back to board" title="Back to board (H)" aria-keyshortcuts="h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
     <h2 id="retros-page-heading" tabindex="-1">Retros</h2>
   </div>
   <p class="muted" id="retros-status" role="status"></p>
@@ -1592,15 +1595,26 @@ async function loadHoldConfigs() {
 }
 
 // A held idea pickup would group: not paused, closing, waiting on you, gated or in Tracer.
-function batchRunnable(j) {
-  return batchHeld(j) && !j.paused?.at && !j.close?.at && !waitsOnYou(j) &&
+function pickupCanLaunch(j) {
+  return !j.paused?.at && !j.close?.at && !waitsOnYou(j) &&
     !(j.origin?.gate === 'human' && !j.origin?.approved) && j.tracer?.building !== true;
+}
+function batchRunnable(j) {
+  return batchHeld(j) && pickupCanLaunch(j);
+}
+
+// A job that started its project's held batch from the dashboard and that pickup can launch, so a
+// paused, closing or gated starter does not hold the rest forever. Mirrors the starters in batch_holds.
+function batchStarter(x, project) {
+  return x.stage === 'idea' && x.project === project && x.priority?.batch === true && pickupCanLaunch(x);
 }
 
 // The held chip as { text, title }, or null when the idea is not held. Mirrors batch_holds in factory.py.
 function batchState(j) {
   if (!batchHeld(j)) return null;
   if (!batchRunnable(j)) return { text: 'Held for batching', title: HELD_TITLE };
+  const starter = jobs.find((x) => batchStarter(x, j.project));
+  if (starter) return { text: 'Batches behind ' + starter.id, title: 'Pickup launches ' + starter.id + ' next and batches this idea behind it. Settings, Pipeline, Batch follow-ups sets the numbers.' };
   const held = jobs.filter((x) => batchRunnable(x) && x.project === j.project);
   const { min_ideas: least, max_wait_hours: hours } = holdConfigs.get(j.project) || HOLD_DEFAULT;
   const age = (x) => /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(String(x.updated)) ? (Date.now() - Date.parse(x.updated)) / 3600000 : hours;
@@ -1616,6 +1630,12 @@ function batchState(j) {
     text,
     title: text + '. Pickup holds this idea until the project has ' + least + ' held ideas or the oldest has waited ' + hours + 'h. Settings, Pipeline, Batch follow-ups sets the numbers.',
   };
+}
+
+// The held chips' text as the board last drew it. clockTick redraws once a chip's text would change.
+let heldDrawn = '';
+function heldChipsKey() {
+  return jobs.filter(batchHeld).map((j) => j.id + ':' + batchState(j).text).join('\n');
 }
 
 // One fact on one row, with the full text in its tooltip.
@@ -3679,6 +3699,7 @@ function renderBoard() {
   }
   syncCardActions();
   renderRetrosPage();
+  heldDrawn = heldChipsKey();
 }
 
 $('board').addEventListener('click', (e) => {
@@ -4923,6 +4944,23 @@ function handleBacklogKeys(e) {
 }
 document.addEventListener('keydown', handleBacklogKeys);
 
+// h goes back to the board from Settings, Retros, an open job or an open backlog item.
+function handleHomeKey(e) {
+  if (e.key !== 'h' || e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
+  // The same fields as handleBacklogKeys: the radio or select a view focuses on open never blocks h, and
+  // preventDefault below keeps a select's type-ahead off it.
+  if (e.target.closest('textarea, [contenteditable], #d-resize, input:not([type=radio]):not([type=checkbox])')) return;
+  if (document.querySelector('dialog[open]')) return;
+  if (settingsRoute() !== null || retrosRoute() !== null) {
+    e.preventDefault();
+    leaveSettings();
+  } else if (openId || openBacklogRaw !== null) {
+    e.preventDefault();
+    closeDetail();
+  }
+}
+document.addEventListener('keydown', handleHomeKey);
+
 const DRAWER_KEY = 'factory-drawer-width';
 const DRAWER_DEFAULT = 760;
 const DRAWER_MIN = 360;
@@ -5633,7 +5671,7 @@ async function openIdeaEditor(ctx) {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
 
 // The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
 function jobActionsFor(j) {
@@ -5645,7 +5683,9 @@ function jobActionsFor(j) {
     'd-move-host': !rider && !!j.project && MOVE_STAGES.includes(j.stage),
     'd-rerun': canRerun(j),
     'd-babysit': canBabysit(j),
-    'd-prioritize': !rider && !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority,
+    'd-prioritize': !rider && !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority && !batchHeld(j),
+    'd-run-batch': !!j.project && batchRunnable(j) && !jobs.some((x) => batchStarter(x, j.project)),
+    'd-start-alone': !!j.project && batchHeld(j),
     'd-remove-priority': !!j.priority,
     'd-pause': !rider && !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
     'd-resume': !!j.paused,
@@ -5659,7 +5699,7 @@ function jobActionsFor(j) {
 // A runner's context. The drawer writes into its own lines and drops results once another job opens.
 function drawerAction(id) {
   const version = drawerVersion;
-  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
+  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-run-batch': 'd-prioritize-err', 'd-start-alone': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
   return {
     id: openId,
     card: false,
@@ -5874,12 +5914,14 @@ const PRIORITY_STAGES = ['idea', ...MOVE_STAGES];
 
 // factory.py pickup claims prioritized jobs first and nudges a running agent once.
 // Returns an error message, 'unchanged', or '' once the board is changed.
-function prioritizeJob(board, id, now) {
+function prioritizeJob(board, id, now, mode = '') {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
   if (!j.project || !PRIORITY_STAGES.includes(j.stage) || leadOf(j)) return 'This job can no longer be prioritized.';
   if (j.priority) return 'unchanged';
-  j.priority = { at: now };
+  if (mode && !batchHeld(j)) return 'This idea is no longer held for a batch.';
+  if (mode === 'batch' && board.jobs.some((x) => batchStarter(x, j.project))) return 'unchanged';
+  j.priority = mode ? { at: now, [mode]: true } : { at: now };
   j.updated = now;
   board.updated = now;
   return '';
@@ -6256,12 +6298,12 @@ $('d-assign').addEventListener('click', async () => {
     }
   }
 });
-async function prioritizeAction(ctx) {
+async function prioritizeAction(ctx, mode = '') {
   ctx.report('');
   if (ctx.button) ctx.button.disabled = true;
   try {
     await casBoard((board) => {
-      const message = prioritizeJob(board, ctx.id, isoNow());
+      const message = prioritizeJob(board, ctx.id, isoNow(), mode);
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
@@ -6682,6 +6724,8 @@ const JOB_ACTION_RUN = {
   'd-rerun': rerunAction,
   'd-babysit': babysitAction,
   'd-prioritize': prioritizeAction,
+  'd-run-batch': (ctx) => prioritizeAction(ctx, 'batch'),
+  'd-start-alone': (ctx) => prioritizeAction(ctx, 'alone'),
   'd-remove-priority': removePriorityAction,
   'd-pause': pauseAction,
   'd-resume': resumeAction,
@@ -7297,7 +7341,14 @@ function runLiveRead(key) {
 }
 window.addEventListener('blur', () => setTimeout(schedulePoll, 0));
 window.addEventListener('focus', () => { if (pollStarted && !liveOpen && !document.hidden) pollTick(); syncLive(); schedulePoll(); });
-setInterval(() => { if (!document.hidden) drawUpdated(); }, 30000);
+// A redraw while a card has focus or its menu is open would move them, so the chips wait for the next tick.
+function clockTick() {
+  if (document.hidden) return;
+  drawUpdated();
+  if (cardMenu || $('board').contains(document.activeElement)) return;
+  if (loaded && heldChipsKey() !== heldDrawn) renderBoard();
+}
+setInterval(clockTick, 30000);
 $('display-columns').append(...COLUMNS.map(s => {
   const box = Object.assign(document.createElement('input'), {type:'checkbox', id:'display-column-' + s, disabled:s === 'needs-you'});
   box.dataset.stage = s;

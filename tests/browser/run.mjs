@@ -406,7 +406,8 @@ async function capture(outdir, referencePath) {
       page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
         timeout: 30000,
       });
-    async function view(name, width, height, theme, prepare, touch = false) {
+    // keepViewport captures without resizing the viewport, which would close an open card menu.
+    async function view(name, width, height, theme, prepare, touch = false, keepViewport = false) {
       if (onlyViews && !onlyViews.includes(name)) return;
       for (const side of ["before", "after"]) {
         const started = Date.now();
@@ -608,7 +609,11 @@ async function capture(outdir, referencePath) {
                 );
               });
               const file = `${outdir.replace(/\/$/, "")}/${side}-${name}.png`;
-              await page.screenshot(clip ? { path: file, clip } : { path: file });
+              await page.screenshot(
+                clip
+                  ? { path: file, clip, ...(keepViewport && { captureBeyondViewport: false }) }
+                  : { path: file },
+              );
               const { size } = await stat(file);
               if (size >= 5 * 1024 * 1024) throw new Error(`${file} exceeds 5 MiB`);
               console.log(
@@ -1126,6 +1131,40 @@ async function capture(outdir, referencePath) {
       return clipOf(page, ".detail-head");
     };
     await view("held-drawer-390", 390, 844, "dark", openHeldDrawer, true);
+    const openHeldActions = async (page) => {
+      const wrap = '.card-wrap:has(.card[data-id="107-held-rider"])';
+      await page.evaluate(
+        (s) => document.querySelector(s).scrollIntoView({ block: "center", inline: "center" }),
+        wrap,
+      );
+      await clickNow(page, '.card-actions[data-actions="107-held-rider"]');
+      await page.waitForSelector("#card-actions-menu:not([hidden])");
+      return page.evaluate((s) => {
+        const a = document.querySelector(s).getBoundingClientRect();
+        const b = document.getElementById("card-actions-menu").getBoundingClientRect();
+        const x = Math.floor(Math.min(a.left, b.left));
+        const y = Math.floor(Math.min(a.top, b.top));
+        return {
+          x: x + scrollX,
+          y: y + scrollY,
+          width: Math.ceil(Math.max(a.right, b.right)) - x,
+          height: Math.ceil(Math.max(a.bottom, b.bottom)) - y,
+        };
+      }, wrap);
+    };
+    await view("held-actions-390", 390, 844, "dark", openHeldActions, true, true);
+    await view("held-actions-1280", 1280, 900, "light", openHeldActions, false, true);
+    const openReferenceKeys = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/reference";
+      });
+      await page.waitForSelector("#settings-reference:not([hidden])");
+      await page.evaluate(() =>
+        document.getElementById("reference-keys").scrollIntoView({ block: "center" }),
+      );
+      return clipOf(page, "#reference-keys");
+    };
+    await view("reference-keys-1280", 1280, 900, "light", openReferenceKeys);
     // The reference keeps 001-capture open behind the sign-in banner; the candidate closes it.
     const openArchiveSignin = async (page) => {
       await page.evaluate(() => {

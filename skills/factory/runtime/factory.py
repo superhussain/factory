@@ -2251,9 +2251,12 @@ def batch_cmd(target, *idea_ids):
         lead = next((j for j in data["jobs"] if j.get("id") == lead_id), None)
         if lead is None:
             fail(f"no job {lead_id} on the board. Nothing was written.", 4)
+        alone = isinstance(lead.get("priority"), dict) and lead["priority"].get("alone") is True
         if idea_ids:
             if not mine(lead.get("claim") or {}, device, session):
                 fail(f"{lead_id} is not held by this session. Nothing was written.", 6)
+            if alone:
+                fail(f"{lead_id} was started alone from the dashboard, so it takes no riders. Nothing was written.", 2)
             if lead.get("stage") != "spec":
                 fail(f"batch runs while {lead_id} is at spec, not {lead.get('stage')}. Nothing was written.", 2)
             if "tracer" in lead:
@@ -2286,6 +2289,8 @@ def batch_cmd(target, *idea_ids):
                       if j.get("id") != lead_id and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
                       and batch_problem(data, j, slug, device, session, minutes) is None]
         candidates += [v[3] for k, v in lines.items() if k not in line_picks]
+        if alone:
+            candidates = []
         result = {"lead": lead_id, "riders": [entry(j) for j in riders_of(data, lead_id)],
                   "candidates": candidates[:MAX_CANDIDATES]}
         return (dump_board(data) if idea_ids else None), (result, made)
@@ -3760,13 +3765,22 @@ def hold_config(home, slug):
 def batch_holds(home, jobs, runnable):
     """{id: skip line} for the held ideas pickup does not launch this run. A project's held ideas
     wait until it has min_ideas of them or the oldest has gone max_wait_hours without an update.
-    Then the first in board order launches and the rest batch behind it."""
-    groups = {}
+    Then the first in board order launches and the rest batch behind it. A batch starter, an idea
+    prioritized with priority.batch from the dashboard, releases its project's held ideas behind it at once.
+    A paused, closing or gated starter does not count, so the rest never wait behind an idea pickup skips."""
+    groups, starters = {}, {}
     for j in jobs:
+        if j["stage"] == IDEA and prioritized(j) and j["priority"].get("batch") is True \
+                and not (gated(j) or paused(j) or closing(j) or tracer_building(j)):
+            starters.setdefault(j["project"], j["id"])
         if batch_hold(j) and runnable(j):
             groups.setdefault(j["project"], []).append(j)
     stamp, lines = datetime.now(timezone.utc), {}
     for slug, held in groups.items():
+        if slug in starters:
+            for j in held:
+                lines[j["id"]] = f"skip {j['id']} {slug}: batches behind {starters[slug]}"
+            continue
         least, hours = hold_config(home, slug)
 
         def age(j):
@@ -5180,7 +5194,8 @@ def gh_cli(*args, stderr=False):
 
 def pr_states(repo, numbers, device):
     """The states of repo's pull requests from one gh api graphql call: ({number: state}, None),
-    or (None, why). A pull request GitHub returns null for is left out."""
+    or (None, why). A pull request GitHub returns null for is left out. A non-zero exit whose answer
+    still holds data.repository, as a partial GraphQL error gives, returns the states that resolved."""
     owner, name = repo.split("/")
     q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
          + "".join(f"p{n}: pullRequest(number: {n}) {{ state }} " for n in numbers) + "} }")
@@ -5189,13 +5204,13 @@ def pr_states(repo, numbers, device):
         return None, f"gh is not installed on {device}"
     if r[0] == "timeout":
         return None, f"gh api graphql timed out after 60 seconds on {device}"
-    if r[0]:
-        return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
     try:
         found = json.loads(r[1])["data"]["repository"]
     except (ValueError, KeyError, TypeError):
         found = None
     if not isinstance(found, dict):
+        if r[0]:
+            return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
         return None, ("gh api graphql returned no repository "
                       f"(check the project file's repo and gh auth status on {device})")
     return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
@@ -5301,7 +5316,7 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
                   + ("is off" if enabled is False else f"does not list {them}") + ".\n")
     else:
         manual = ""
-    if j["close"].get("by") == "github":
+    if j["close"].get("via") == "github":
         summary = (f"GitHub reported pull request {pr} closed without merging, so factory.py pickup closed the job "
                    f"at {at} while at stage `{stage}`.")
         requested = f"GitHub reported the pull request closed. Pickup queued the close at {at}."
@@ -5387,7 +5402,7 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
                 patch = {"stage": "merged", "needs": None, "automerge": None, "babysit": None, "claim": None,
                          "note": MERGED_NOTE, "github": {"merged": now()}}
             else:
-                patch = {"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "by": "github"}, "babysit": None}
+                patch = {"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "via": "github"}, "babysit": None}
 
             def change(text, j=j, patch=patch):
                 board = load_board(text)
@@ -5428,7 +5443,7 @@ def close_pass(home, data, device, minutes, dry):
             print(f"would close {job_id} {project}" + (f" and pull request {pr}" if pr else "")
                   + "".join(f" and stacked pull request {r['pr']}" for r in open_stacked(data, job_id)))
             continue
-        if j["close"].get("by") == "github":
+        if j["close"].get("via") == "github":
             outcome = ("already closed", "")
         else:
             outcome = close_pull_request(home, j, device) if pr else None

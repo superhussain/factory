@@ -277,6 +277,15 @@ class BatchTest(IsolatedTestCase):
         self.set_jobs(rows)
         self.refuse(2, f"cannot batch into {LEAD}: follows Tracer", TARGET, "091-sample-typo")
 
+    def test_started_alone_takes_no_riders(self):
+        rows = jobs()
+        rows[0]["priority"] = {"at": "2026-01-01T00:00:00Z", "alone": True}
+        self.set_jobs(rows)
+        code, out, _ = self.batch(TARGET)
+        self.assertEqual((code, json.loads(out)["candidates"]), (0, []))
+        self.refuse(2, f"{LEAD} was started alone from the dashboard, so it takes no riders. Nothing was written.",
+                    TARGET, "091-sample-typo")
+
     def test_attach_refuses_bad_picked_ids(self):
         self.set_jobs(jobs() + [idea("bad id")])
         self.refuse(2, f"bad job id 'bad id': {BAD_ID}", TARGET, "bad id")

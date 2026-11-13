@@ -2290,6 +2290,10 @@ class PrSyncTest(PickupFixture):
         with patch.object(factory, "gh_cli", return_value=(0, answer)) as gh:
             self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: "MERGED"}, None))
         gh.assert_called_once_with("api", "graphql", "-f", "query=" + self.QUERY)
+        partial = json.dumps({"data": {"repository": {"p7": {"state": "MERGED"}, "p8": None}},
+                              "errors": [{"type": "NOT_FOUND", "path": ["repository", "p8"]}]})
+        with patch.object(factory, "gh_cli", return_value=(1, partial)):
+            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: "MERGED"}, None))
         for result, why in ((None, "gh is not installed on host-a"),
                             (("timeout", ""), "gh api graphql timed out after 60 seconds on host-a"),
                             ((1, ""), "gh api graphql exited 1 (check gh auth status on host-a)"),
@@ -2344,9 +2348,17 @@ class PrSyncTest(PickupFixture):
             "by hand. It keeps a dirty worktree, and a branch that is not merged unless "
             "origin holds the same commit.\n"))
         self.assertEqual((job["stage"], job["note"]), ("closed", "PR closed on GitHub"))
-        self.assertEqual((set(job["close"]), job["close"]["by"]), ({"reason", "at", "by", "closed"}, "github"))
+        self.assertEqual((set(job["close"]), job["close"]["via"]), ({"reason", "at", "via", "closed"}, "github"))
         self.calls.clear()
         self.assert_silent(self.pickup())
+
+    def test_a_host_named_github_still_closes_the_pr(self):
+        self.gh.return_value = (0, "CLOSED false factory/043-sample-import\n")
+        self.board["jobs"] = [self.sample_import(
+            close={"reason": "Duplicate", "at": "2026-01-02T12:00:00Z", "by": "github", "via": "chat"})]
+        self.assertEqual(self.pickup(), (0, "closed 043-sample-import alpha\n", ""))
+        self.assertEqual(self.gh.call_args.args[:2], ("view", self.PR8))
+        self.assertIn("Closed from the dashboard", self.files[self.DECISION])
 
     def test_merged_job_is_cleaned_once_per_host(self):
         patch.object(factory, "worktree_pids", return_value=[]).start()
@@ -2879,6 +2891,27 @@ class BatchHoldTest(PickupFixture):
         self.assertEqual(lines[:3], self.waits(HELD[:3], "3 of 5 held, oldest 0h of 12h"))
         self.assertTrue(lines[3].startswith("would launch 110-add-csv-export alpha on primary: "))
         self.assertEqual(lines[4:], [f"host {DEVICE}: would launch 1"])
+
+    def test_batch_starter_holds_the_rest(self):
+        self.board["jobs"] = self.held_ideas(3) + [
+            idea("110-add-csv-export", "alpha", refs=FOLLOW, updated=stamp(minutes=-10),
+                 priority={"at": stamp(minutes=-1), "batch": True})]
+        lines = self.dry()
+        self.assertTrue(lines[0].startswith("would launch 110-add-csv-export alpha on primary: "))
+        self.assertEqual(lines[1:], [f"skip {job_id} alpha: batches behind 110-add-csv-export" for job_id in HELD[:3]]
+                         + [f"host {DEVICE}: would launch 1"])
+
+    def test_paused_or_gated_starter_holds_nothing(self):
+        for extra in ({"paused": {"at": stamp(minutes=-1)}}, {"close": {"at": stamp(minutes=-1), "reason": "Synthetic duplicate"}},
+                      {"needs": "Pick a format"}, {"origin": {"gate": "human"}}):
+            with self.subTest(extra=extra):
+                self.board["jobs"] = self.held_ideas(3) + [
+                    idea("110-add-csv-export", "alpha", refs=FOLLOW, updated=stamp(minutes=-10),
+                         priority={"at": stamp(minutes=-1), "batch": True}, **extra)]
+                lines = self.dry()
+                self.assertCountEqual([line for line in lines if "batch" in line],
+                                      self.waits(HELD[:3], "3 of 5 held, oldest 0h of 12h"))
+                self.assertTrue(any(line.startswith("skip 110-add-csv-export alpha: ") for line in lines), lines)
 
     def test_view_hold_settings(self):
         self.board["jobs"] = self.held_ideas(3)

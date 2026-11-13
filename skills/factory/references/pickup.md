@@ -371,6 +371,7 @@ changes nothing. Then install one timer per host.
 ## Prioritizing a job
 
 - The dashboard's Prioritize item sets `priority = {at}` on a job at `idea`, `spec`, `build`, `review` or `approve`. Remove priority deletes it.
+- Run batch now on a held idea sets `priority.batch`. Pickup starts it next, and while it is at `idea` and not paused, closing or waiting on a human, the project's other held ideas print `batches behind <id>`. Start alone sets `priority.alone`, and `batch` then lists no candidates and refuses riders.
 - `pickup` claims prioritized ideas before older ones, across projects too. Gates, caps and routes still apply.
 - The dashboard shows a prioritized job at the top of its column in idea, spec, build, review and approve.
 - When the job's session on this host was claimed before `priority.at` and its Paseo agent is not closed, `pickup` sends the agent one fixed nudge with `paseo send --no-wait`, then sets `priority.nudged`. A failed send is printed on stderr and retried next run.
@@ -398,13 +399,13 @@ changes nothing. Then install one timer per host.
 - `pickup` runs its PR sync pass right after the move stops and before the close pass. It never starts a launcher or calls a model.
 - A job is a candidate when its stage is `pr-open` or `needs-human`, its `pr` is a `https://github.com/<owner>/<name>/pull/<n>` URL with `<n>` at most 9 digits, no close is queued, it is not a batched rider (riders follow their lead), no other session holds a live claim, the project file's `repo` equals the URL's owner and name (case-insensitive), and the project's pickup is on and lists this host.
 - Candidates are grouped by repo. Each repo gets one `gh api graphql` call that reads `state` for up to 100 pull requests in board order. With more, it prints `factory.py: pickup syncs the first 100 of <n> pull requests in <repo>` on stderr.
-- When the call fails, it prints `factory.py: pickup skips the PR sync for <repo>: <why>` on stderr and the run goes on: gh is not installed, timed out after 60 seconds, exited non-zero (check `gh auth status`), or returned no repository (check the project file's `repo` and `gh auth status`).
+- When the call fails, it prints `factory.py: pickup skips the PR sync for <repo>: <why>` on stderr and the run goes on: gh is not installed, timed out after 60 seconds, exited non-zero (check `gh auth status`), or returned no repository (check the project file's `repo` and `gh auth status`). A non-zero exit whose answer still holds `data.repository` syncs the pull requests that resolved.
 - `MERGED`: one board write moves the job to `merged`, sets the note to `merged on GitHub` and `github = {merged}`, and removes `needs`, `automerge`, `babysit` and `claim`. It prints `synced <id> <project>: merged on GitHub`. The close cleanup then runs `cleanup` on each host that holds the worktree or branch, as for a closed job.
-- `CLOSED`: one board write queues `close = {reason: "PR closed on GitHub", at, by: "github"}` and removes `babysit`. It prints `synced <id> <project>: PR closed on GitHub`. The close pass in the same run closes the job without calling `gh pr`, and `decision.md` starts `CLOSED: PR closed on GitHub` and says GitHub reported the close.
+- `CLOSED`: one board write queues `close = {reason: "PR closed on GitHub", at, via: "github"}` and removes `babysit`. It prints `synced <id> <project>: PR closed on GitHub`. The close pass in the same run closes the job without calling `gh pr`, and `decision.md` starts `CLOSED: PR closed on GitHub` and says GitHub reported the close.
 - Each board write re-checks every candidate condition and the same `pr`, so a second host that read the same state writes nothing.
 - An open PR, or one GitHub does not return, changes nothing and prints nothing.
 - Its dry run makes the same read and writes nothing. It prints `would sync <id> <project>: merged on GitHub` or `would sync <id> <project>: PR closed on GitHub`, and `skip sync <id> <project>: claimed by <device> session <tag>` or `skip sync <id> <project>: <reason>` for a live claim or a project whose pickup is off or does not list this host.
-- Only pickup writes `github` and `close.by`. `board` refuses a `github` patch with exit 2.
+- Only pickup writes `github` and `close.via = "github"`. `board` refuses a `github` patch with exit 2.
 - A synced move does not mirror Tracer, archive a Paseo workspace or post a stage-change chat line. Agents still own those.
 
 ## Logs and limits
