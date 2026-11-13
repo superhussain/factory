@@ -39,8 +39,8 @@ On a nonzero exit, note the exit code and continue.
 
 On exit 3, reply `retro: no digests` with the first stderr line and stop. On any
 other nonzero exit, name the exit code and stop. On exit 0, read `run`, `aggregate`,
-`digest`, `transcripts`, `out`, `findings`, `hosts` and `expected` from the printed
-JSON, and `host` from the `aggregate` file.
+`digest`, `transcripts`, `out`, `findings`, `hosts`, `expected` and `stale` from the
+printed JSON, and `host` from the `aggregate` file.
 
 5. Retro. Dispatch one `factory-retro` subagent with the picked model, giving it
 `run`, `aggregate`, `digest`, `transcripts` and `host`.
@@ -58,6 +58,8 @@ missing from `hosts`. `expected` lists the hosts that run pickup for any registe
 project, from each project's effective pipeline. On exit 3 or 2, still report its
 output; name `findings` only if admit printed a wrote line, otherwise report no
 findings file. On exit 0, report the `findings` path.
+Then name each host in `stale` as `stale: <host>, latest digest <latest>`, with
+`latest` from that host's entry in the `aggregate` file's `hosts`.
 
 Do no factory work yourself. Run no other commands. Never retry.
 Never run `suggest approve`, decide a backlog line, or run any `autonomy` command but `status`.
