@@ -1019,9 +1019,10 @@ async function storeTriageVerdict(env, item, verdict) {
 // Marks each queued verdict whose line may repeat an open job of the project. The note is
 // advisory, so any failure leaves the verdicts as they are.
 async function flagDuplicates(env, slug, entries, verdicts) {
+  if (!entries.length) return;
   try {
     const candidates = duplicateCandidates((await storedBoard(env)).jobs, slug);
-    if (!candidates.length || !entries.length) return;
+    if (!candidates.length) return;
     const result = await env.AI.run(TRIAGE_MODEL, duplicateInput(slug, candidates, entries));
     for (const { n } of entries) {
       const id = duplicatePick(result, n, candidates);
