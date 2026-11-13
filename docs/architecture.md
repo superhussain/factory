@@ -151,7 +151,7 @@ date.
 
 Retro runs are stored one record per run at `retro-runs/<run>.json`, outside the 35-day
 prune. `retro admit` sends a `factory.retro-run/1` record with the checked findings, each
-card's `finding` link and its outcome. The body is at most 64 KiB, `host` must be the bound
+card's `finding` link (one number or a list; a card linked to several findings is stored under each) and its outcome. The body is at most 64 KiB, `host` must be the bound
 host, and a bad shape answers 400. A re-admit of the same run replaces the record. The
 `#/retros` dashboard page reads the newest 30 and resolves each card's status from the board and
 the backlog.

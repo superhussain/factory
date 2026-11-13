@@ -69,9 +69,7 @@ around it. Its keys are `schema` (`"factory.retro/1"`), `run` copied as given,
 | `reason` | 1 to 300 characters |
 | `diagram` | optional mermaid source, 1 to 1500 characters |
 
-A card may also carry `finding`, the 1-based number of the reply finding it fixes. Retro admit
-removes it before checking the card, so the card fields above stay the same. Leave it out for a
-card that fixes no single finding.
+Every card carries `finding`, the 1-based number of the reply finding it fixes, or a list of distinct numbers when one card fixes several, such as `[3, 4]` for one shell fix that covers two findings. Retro admit removes it before checking the card, so the card fields above stay the same. A card with no `finding`, or a number outside 1 to the finding count, admits no card.
 
 A repo path is relative, at most 200 characters of `A-Z a-z 0-9 _ . / -`, with no
 `..` segment. Every field but diagram is required, and no other key is allowed. Do not add by; retro admit sets it.
