@@ -885,7 +885,7 @@ def board(factory, job_id):
                      "Claim new ids with claim. Nothing was written.", 2)
         held = blocking(found, device, session, minutes)
         if held:
-            return None, (None, held)
+            return None, (None, held, [])
         if moved_away(found, device, session):
             fail(moved_message(job_id, found["move"]), 6)
         if found is not None and closing(found):
@@ -893,7 +893,7 @@ def board(factory, job_id):
                 fail(closing_message(job_id), 6)
             found.pop("claim")
             patch_job(data, job_id, {})
-            return dump_board(data), (None, "closing")
+            return dump_board(data), (None, "closing", [])
         origin = (found or {}).get("origin")
         if isinstance(origin, dict) and origin.get("gate") == "human" and not origin.get("approved") \
                 and "stage" in patch and patch["stage"] not in (IDEA, "closed"):
@@ -904,6 +904,8 @@ def board(factory, job_id):
         if "refs" in patch and batch_refs(patch["refs"]) != batch_refs((found or {}).get("refs")):
             fail(f"only factory.py batch and the lead's mirror add or remove a batched-into ref. "
                  f"A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.", 2)
+        stacked = (open_stacked(data, job_id) if patch.get("stage") == "closed" and found
+                   and found.get("stage") not in TERMINAL and lead_of(found) is None else [])
         job = patch_job(data, job_id, patch)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
@@ -914,8 +916,8 @@ def board(factory, job_id):
         if tracer_gate_passed(job, patch):
             job.update(stage="build", note=TRACER_APPROVED_NOTE)
             job.pop("needs", None)
-        return dump_board(data), (job, None)
-    job, held = cas(factory, "/api/board", change)
+        return dump_board(data), (job, None, stacked)
+    job, held, stacked = cas(factory, "/api/board", change)
     if held == "closing":
         fail(closing_message(job_id), 6)
     if held:
@@ -924,6 +926,7 @@ def board(factory, job_id):
     if paseo and job and job.get("paseo") == paseo:
         record_paseo_claim(home, job_id, paseo)
     print(json.dumps(job, indent=2))
+    close_stacked_prs(Path(factory), job_id, stacked, device)
     if "stage" in patch or "rounds" in patch or (patch.get("tracer") or {}).get("follow") is True:
         tracer_after_board(Path(factory), job, patch)
 
