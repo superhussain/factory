@@ -4898,6 +4898,78 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
     return text + "\n## Earlier decision\n\n" + earlier if earlier else text
 
 
+
+def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
+    """Move each pr-open or needs-human job whose pull request GitHub reports merged to merged, and queue
+    a close for each whose pull request GitHub reports closed. One gh api graphql call per repo."""
+    def match(j):
+        job_id, project, pr = j.get("id"), j.get("project"), j.get("pr")
+        if not (j.get("stage") in SYNC_STAGES and isinstance(pr, str) and not closing(j) and lead_of(j) is None
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(project, str) and SLUG.fullmatch(project)):
+            return None
+        return GH_PR_PARTS.fullmatch(pr)
+
+    repos, groups = {}, {}
+    for j in data["jobs"]:
+        m = match(j)
+        if not m:
+            continue
+        job_id, project = j["id"], j["project"]
+        c = blocking(j, device, "", minutes)
+        if c:
+            if dry:
+                print(f"skip sync {job_id} {project}: claimed by {c['device']} session {c.get('session')}")
+            continue
+        if project not in repos:
+            md = project_files(home, project)[0]
+            repos[project] = frontmatter(md)[0].get("repo", "") if md.exists() else ""
+        repo = f"{m[1]}/{m[2]}".lower()
+        if repos[project].lower() != repo:
+            continue
+        reason = pickup_reason(home, project, paths, settings, device, dry)
+        if reason:
+            if dry:
+                print(f"skip sync {job_id} {project}: {reason}")
+            continue
+        groups.setdefault(repo, []).append((j, int(m[3])))
+
+    for repo, jobs in groups.items():
+        if len(jobs) > PR_SYNC_LIMIT:
+            print(f"factory.py: pickup syncs the first {PR_SYNC_LIMIT} of {len(jobs)} pull requests in {repo}",
+                  file=sys.stderr)
+            jobs = jobs[:PR_SYNC_LIMIT]
+        states, why = pr_states(repo, [n for _, n in jobs], device)
+        if states is None:
+            print(f"factory.py: pickup skips the PR sync for {repo}: {why}", file=sys.stderr)
+            continue
+        for j, n in jobs:
+            state = states.get(n)
+            if state not in ("MERGED", "CLOSED"):
+                continue
+            line = f"{j['id']} {j['project']}: " + (MERGED_NOTE if state == "MERGED" else GITHUB_CLOSE_REASON)
+            if dry:
+                print(f"would sync {line}")
+                continue
+            if state == "MERGED":
+                patch = {"stage": "merged", "needs": None, "automerge": None, "babysit": None, "claim": None,
+                         "note": MERGED_NOTE, "github": {"merged": now()}}
+            else:
+                patch = {"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "by": "github"}, "babysit": None}
+
+            def change(text, j=j, patch=patch):
+                board = load_board(text)
+                found = next((x for x in board["jobs"] if x.get("id") == j["id"]), None)
+                if (found is None or not match(found) or found["pr"] != j["pr"]
+                        or found["project"] != j["project"] or blocking(found, device, "", minutes)):
+                    return None, None
+                row = patch_job(board, j["id"], patch)
+                return dump_board(board), row
+            row = cas(home, "/api/board", change)
+            if row:
+                data["jobs"][data["jobs"].index(j)] = row
+                print(f"synced {line}")
+
 def close_pass(home, data, device, minutes, dry):
     """Close each job the dashboard queued a close for: decision.md first, then the stage."""
     configs = {}
@@ -5078,6 +5150,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     stalls = read_stalls(home)
     settings = {}
     move_stop_pass(home, data, device, paths, settings, dry, stalls[0] if stalls else None)
+    pr_sync_pass(home, data, device, minutes, paths, settings, dry)
     close_pass(home, data, device, minutes, dry)
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
