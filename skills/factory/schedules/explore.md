@@ -13,7 +13,7 @@ prompt template, not an executable or an automatically enabled schedule.
 
 On any nonzero exit, name the exit code and first stderr line, then stop. On exit 0,
 read `provider`, `runtime` and `model`.
-If `runtime` is not `claude`, reply `no claude route` and stop.
+If `runtime` is not `claude`, reply `no claude route: runtime <runtime>`, with the `runtime` value read above, and stop.
 
 2. Snapshot. Run:
 
