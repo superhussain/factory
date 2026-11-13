@@ -959,13 +959,14 @@ def hold(target, take=None):
         data = load_board(text)
         job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
         if job is None:
-            return None, ("missing", None, None)
+            return None, ("missing", None, None, False)
         if job.get("project") != slug:
             fail(f"{job_id} belongs to {job.get('project')}, not {slug}", 2)
         if take != "take" and moved_away(job, device, session):
             fail(moved_message(job_id, job["move"]), 6)
         if closing(job):
             fail(closing_message(job_id), 6)
+        asked = job.get("stage") == "pr-open" and babysitting(job)
         # Released hold is the receiving side of handoff, whose sender gate keeps
         # human and PR gates unclaimed; mirror it before claiming or accepting.
         if take == "released" and job.get("stage") not in IN_FLIGHT:
@@ -983,9 +984,9 @@ def hold(target, take=None):
         if take == "released" and job.get("claim") and not mine(job["claim"], device, session):
             held = job["claim"]
         if held and take != "take":
-            return None, ("held", held, None)
+            return None, ("held", held, None, False)
         if fresh_hold(job, device, session, paseo, take):
-            return None, ("ok", None, job["started"])
+            return None, ("ok", None, job["started"], asked)
         c = dict(job.get("claim") or {})
         keep = bool(c) and mine(c, device, session)
         # Replace the claim whole rather than merging into the old one.
@@ -999,8 +1000,8 @@ def hold(target, take=None):
         if (job.get("handoff") or {}).get("state") == "ready":
             job["handoff"].update(state="accepted", to=new_claim(device, session), accepted=now())
         # The board note is never rewritten, so human restrictions stay visible.
-        return dump_board(data), ("ok", None if keep else c, job["started"])
-    result, other, started = cas(home, "/api/board", change)
+        return dump_board(data), ("ok", None if keep else c, job["started"], asked)
+    result, other, started, asked = cas(home, "/api/board", change)
     if result == "missing":
         fail(f"no job {job_id} on the board. Nothing was written.", 4)
     if result == "held":
@@ -1009,6 +1010,9 @@ def hold(target, take=None):
     if paseo:
         record_paseo_claim(home, job_id, paseo)
     print(f"elapsed {elapsed_seconds(started)}s")
+    if asked:
+        print(f"babysit requested: Babysit PR was pressed on {job_id}; "
+              f"run /factory babysit {job_id} --session {session} in this session now")
     if other:
         print(f"took over from {other['device']} session {other.get('session')}, last seen {other['seen']}")
     line, conflicts = pull_job(home, slug, job_id)
