@@ -72,6 +72,13 @@ function expectedRows(text, withDrawer) {
       kind: "command",
       words: "select project command",
     },
+    {
+      key: "command:retros",
+      title: "Retros",
+      meta: "Command · Open retro runs and findings (R)",
+      kind: "command",
+      words: "retros retro runs findings command",
+    },
   ]
     .filter((r) => tokens.every((t) => r.words.includes(t)))
     .map(({ words, ...r }) => r);

@@ -246,6 +246,7 @@ async function browserRun(origin) {
             : {}),
           "New idea": [command],
           "Select project": ["command:select-project"],
+          Retros: ["command:retros"],
           ...expectedJobs,
         };
       assert.deepEqual(
@@ -317,7 +318,9 @@ async function browserRun(origin) {
         const expected = {
           ...contextual,
           ...(matchingCommand ? { "New idea": [command] } : {}),
-          ...(text === "" ? { "Select project": ["command:select-project"] } : {}),
+          ...(text === ""
+            ? { "Select project": ["command:select-project"], Retros: ["command:retros"] }
+            : {}),
           ...matchingJobs,
         };
         assert.deepEqual(
@@ -333,7 +336,7 @@ async function browserRun(origin) {
           actions = Object.values(contextual).flat().length;
         assert.equal(
           s.count,
-          `${jobs} ${jobs === 1 ? "job" : "jobs"}${actions ? " · " + actions + " for 092-context" : ""}${text === "" ? " · 2 commands" : matchingCommand ? " · 1 command" : ""}`,
+          `${jobs} ${jobs === 1 ? "job" : "jobs"}${actions ? " · " + actions + " for 092-context" : ""}${text === "" ? " · 3 commands" : matchingCommand ? " · 1 command" : ""}`,
         );
         assert.equal(s.empty, !s.rows.length);
         assert.equal(s.emptyText, withDrawer ? "No matching jobs or actions" : "No jobs found");
