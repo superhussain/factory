@@ -535,7 +535,8 @@ def riders_of(data, lead_id):
 def mirror_batch(data, lead):
     """Move a lead's riders with it: its stage and PR, or back to idea when it closes. A stacked
     rider takes the stage only, and leaves the batch when the lead merges. Each rider shows the
-    lead's needs ask while the lead is at needs-human."""
+    lead's needs ask while the lead is at needs-human. After a lead closes, close_stacked_prs closes a
+    stacked rider's open PR and rewrites its note."""
     for rider in riders_of(data, lead["id"]):
         if rider.get("stage") in TERMINAL:
             continue
@@ -884,7 +885,7 @@ def board(factory, job_id):
                      "Claim new ids with claim. Nothing was written.", 2)
         held = blocking(found, device, session, minutes)
         if held:
-            return None, (None, held)
+            return None, (None, held, [])
         if moved_away(found, device, session):
             fail(moved_message(job_id, found["move"]), 6)
         if found is not None and closing(found):
@@ -892,7 +893,7 @@ def board(factory, job_id):
                 fail(closing_message(job_id), 6)
             found.pop("claim")
             patch_job(data, job_id, {})
-            return dump_board(data), (None, "closing")
+            return dump_board(data), (None, "closing", [])
         origin = (found or {}).get("origin")
         if isinstance(origin, dict) and origin.get("gate") == "human" and not origin.get("approved") \
                 and "stage" in patch and patch["stage"] not in (IDEA, "closed"):
@@ -903,6 +904,8 @@ def board(factory, job_id):
         if "refs" in patch and batch_refs(patch["refs"]) != batch_refs((found or {}).get("refs")):
             fail(f"only factory.py batch and the lead's mirror add or remove a batched-into ref. "
                  f"A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.", 2)
+        stacked = (open_stacked(data, job_id) if patch.get("stage") == "closed" and found
+                   and found.get("stage") not in TERMINAL and lead_of(found) is None else [])
         job = patch_job(data, job_id, patch)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
@@ -913,8 +916,8 @@ def board(factory, job_id):
         if tracer_gate_passed(job, patch):
             job.update(stage="build", note=TRACER_APPROVED_NOTE)
             job.pop("needs", None)
-        return dump_board(data), (job, None)
-    job, held = cas(factory, "/api/board", change)
+        return dump_board(data), (job, None, stacked)
+    job, held, stacked = cas(factory, "/api/board", change)
     if held == "closing":
         fail(closing_message(job_id), 6)
     if held:
@@ -923,6 +926,7 @@ def board(factory, job_id):
     if paseo and job and job.get("paseo") == paseo:
         record_paseo_claim(home, job_id, paseo)
     print(json.dumps(job, indent=2))
+    close_stacked_prs(Path(factory), job_id, stacked, device)
     if "stage" in patch or "rounds" in patch or (patch.get("tracer") or {}).get("follow") is True:
         tracer_after_board(Path(factory), job, patch)
 
@@ -4699,6 +4703,13 @@ PR_CLOSE_COMMENT = (
     "posted automatically. Tests not run.\n\n"
     "The owner closed factory job `{id}` from the dashboard, so this pull request will not merge. "
     "The decision page at {link} records the reason.")
+STACKED_CLOSE_COMMENT = (
+    "> \U0001f916 **Agent-authored report** \u2014 written by factory.py on the owner's behalf, "
+    "posted automatically. Tests not run.\n\n"
+    "This pull request was stacked on factory job `{lead}`, which closed without merging, so this pull request "
+    "will not merge. Factory job `{id}` went back to the ideas column.")
+STACKED_CLOSE_NOTES = {"closed": "closed with a comment", "already closed": "was already closed",
+                       "merged": "was already merged"}
 PR_EVIDENCE = {"closed": "closed by pickup with a comment that links this page", "merged": "already merged",
                "already closed": "already closed", "open": "still open"}
 
@@ -4727,8 +4738,8 @@ def gh_cli(*args, stderr=False):
     return result if stderr else result[:2]
 
 
-def close_pull_request(home, j, device):
-    """Close the job's open PR with a comment. Returns (state, why)."""
+def close_pull_request(home, j, device, comment=None):
+    """Close the job's open PR with a comment, PR_CLOSE_COMMENT unless one is given. Returns (state, why)."""
     pr, md = j["pr"], project_files(home, j["project"])[0]
     if not md.exists():
         return "open", f"there is no project file for {j['project']} on {device}"
@@ -4761,7 +4772,8 @@ def close_pull_request(home, j, device):
         return "open", f"its head branch {head} is not the job's branch {branch}"
     if state != "OPEN":
         return "open", f"gh pr view reported state {state}"
-    comment = PR_CLOSE_COMMENT.format(id=j["id"], link=f"{api_url(home)}/#{j['id']}/decision")
+    if comment is None:
+        comment = PR_CLOSE_COMMENT.format(id=j["id"], link=f"{api_url(home)}/#{j['id']}/decision")
     close = gh_pr("close", pr, "--comment", comment)
     if close is None:
         return "open", f"gh is not installed on {device}"
@@ -4770,6 +4782,36 @@ def close_pull_request(home, j, device):
     if close[0]:
         return "open", f"gh pr close exited {close[0]} (check gh auth status on {device})"
     return "closed", ""
+
+
+def open_stacked(data, lead_id):
+    """The stacked riders of lead_id that still have a PR, read before a close clears it."""
+    return [{"id": r["id"], "project": r.get("project"), "pr": r["pr"]} for r in riders_of(data, lead_id)
+            if r.get("stacked") is True and isinstance(r.get("pr"), str) and r["pr"]
+            and isinstance(r.get("project"), str) and SLUG.fullmatch(r["project"])
+            and r.get("stage") not in TERMINAL]
+
+
+def close_stacked_prs(home, lead_id, riders, device):
+    """Close each stacked rider's open PR after its lead closed, and rewrite the rider's note to say so."""
+    for r in riders:
+        job_id, pr = r["id"], r["pr"]
+        state, why = close_pull_request(home, {**r, "branch": f"factory/{job_id}"}, device,
+                                        STACKED_CLOSE_COMMENT.format(lead=lead_id, id=job_id))
+        if state == "open":
+            print(f"factory.py: leaves stacked pull request {pr} of {job_id} open: {why}", file=sys.stderr)
+            continue
+        print(f"factory.py: stacked pull request {pr} of {job_id} {STACKED_CLOSE_NOTES[state]}", file=sys.stderr)
+        note = f"unbatched: {lead_id} closed; stacked PR {pr} "
+
+        def change(text, job_id=job_id, note=note, state=state):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            if found is None or found.get("note") != note + "is still open":
+                return None, None
+            patch_job(board, job_id, {"note": note + STACKED_CLOSE_NOTES[state]})
+            return dump_board(board), None
+        cas(home, "/api/board", change)
 
 
 def close_decision(j, reason, device, earlier, outcome, pickup):
@@ -4839,7 +4881,8 @@ def close_pass(home, data, device, minutes, dry):
             continue
         pr = j.get("pr")
         if dry:
-            print(f"would close {job_id} {project}" + (f" and pull request {pr}" if pr else ""))
+            print(f"would close {job_id} {project}" + (f" and pull request {pr}" if pr else "")
+                  + "".join(f" and stacked pull request {r['pr']}" for r in open_stacked(data, job_id)))
             continue
         outcome = close_pull_request(home, j, device) if pr else None
         if outcome and outcome[0] == "closed":
@@ -4861,13 +4904,16 @@ def close_pass(home, data, device, minutes, dry):
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
             if (found is None or not closing(found) or found["close"]["at"] != at
                     or found.get("stage") in TERMINAL or blocking(found, device, "", minutes)):
-                return None, False
+                return None, (False, [])
             found.pop("claim", None)
+            stacked = open_stacked(board, job_id)
             patch_job(board, job_id, {"stage": "closed", "note": reason, "needs": None,
                                       "close": {"closed": now()}})
-            return dump_board(board), True
-        if cas(home, "/api/board", change):
+            return dump_board(board), (True, stacked)
+        done, stacked = cas(home, "/api/board", change)
+        if done:
             print(f"closed {job_id} {project}")
+            close_stacked_prs(home, job_id, stacked, device)
 
 
 def cleaned_here(j, device):
