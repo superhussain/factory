@@ -747,7 +747,7 @@ def moved_away(job, device, session):
 
 
 def moved_message(job_id, m):
-    return (f"{job_id} was moved to {m.get('to')} from the dashboard at {m.get('at')}. "
+    return (f"{job_id} was moved to {m.get('to')} at {m.get('at')}. "
             "Nothing was written. Stop this session.")
 
 
@@ -3026,7 +3026,9 @@ def pickup_host_problem(home, slug, host):
     hosts = json.loads(api(home, "GET", "/api/hosts")[2])
     if not any(isinstance(h, dict) and h.get("id") == host and h.get("state") == "active" for h in hosts):
         return f"{host} is not an active host"
-    enabled, listed, _ = pickup_config(home, slug)
+    enabled, listed, why = pickup_config(home, slug)
+    if why:
+        return why
     if not enabled or host not in listed:
         return f"{host} does not run pickup for {slug}"
     return None

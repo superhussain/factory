@@ -290,6 +290,10 @@ class ControlTest(SuggestCase):
         self.assert_refused(lambda arg: self.move(*arg), (
             (("043-sample-export", "beta"), 2, "043-sample-export cannot be moved to beta: beta does not run pickup "
              "for sample. Nothing was written."),))
+        self.pickup = "on"
+        self.assert_refused(lambda arg: self.move(*arg), (
+            (("043-sample-export", "beta"), 2, "043-sample-export cannot be moved to beta: malformed pickup in the "
+             "pipeline view. Nothing was written."),))
 
     def test_rerun_writes_a_self_move(self):
         self.claimed()
