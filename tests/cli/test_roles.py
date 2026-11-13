@@ -154,6 +154,7 @@ class RolesTest(IsolatedTestCase):
             self.assertIn("120 words", blocks[-1])
             self.assertIn("spec.md 800", blocks[-1])
             self.assertIn("<file>-evidence.md", blocks[-1])
+            self.assertIn("Never create any other `.md` file", blocks[-1])
         self.assertEqual(len(set(blocks)), 1)
         visuals = []
         for name in self.runtime.ROLE_NAMES:
