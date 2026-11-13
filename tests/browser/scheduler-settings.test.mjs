@@ -22,6 +22,7 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
     new URL("../../skills/factory/references/pickup.md", import.meta.url),
     "utf8",
   );
+  const prompt = /\n## Agent setup prompt\n[\s\S]*?\n```text\n([\s\S]*?)\n```\n/.exec(pickup)[1];
   await withBrowserFixture(async ({ browser, origin }) => {
     await seedProject(
       origin,
@@ -68,9 +69,12 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
         wait,
       );
       assert.equal(await status(), "");
+      assert.equal(await selected("scheduler-mode-tab-agent"), "true");
+      assert.equal(await page.$eval("#scheduler-mode-panel-human", (el) => el.hidden), true);
     });
 
     await t.test("scheduler K2 tabs", async () => {
+      await page.click("#scheduler-mode-tab-human");
       assert.equal(await selected("scheduler-tab-cron"), "true");
       assert.deepEqual(await visiblePanels(), ["scheduler-panel-cron"]);
       await page.focus("#scheduler-tab-cron");
@@ -107,6 +111,7 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
       const section = await page.$eval("#settings-scheduler", (el) => {
         const copy = el.cloneNode(true);
         copy.querySelector("#scheduler-not-a-prompt").remove();
+        copy.querySelector("#scheduler-mode-panel-agent").remove();
         return copy.textContent;
       });
       for (const pattern of [/paseo/i, /claude/i, /dangerously/i, /model-a/i]) {
@@ -114,9 +119,9 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
       }
     });
 
-    await t.test("scheduler K7 setup first", async () => {
+    await t.test("scheduler K7 agent tab", async () => {
       assert.equal(
-        await page.$eval("#settings-scheduler h4", (el) => el.textContent),
+        await page.$eval("#scheduler-mode-panel-human h4", (el) => el.textContent),
         "Start here",
       );
       const commands = {
@@ -130,6 +135,28 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
       assert.equal(
         await page.$eval("#scheduler-not-a-prompt", (el) => el.textContent),
         "A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the host timer runs pickup.",
+      );
+      await page.click("#scheduler-mode-tab-agent");
+      assert.equal(await page.$eval("#scheduler-agent-prompt", (el) => el.textContent), prompt);
+      assert.equal(
+        await page.$eval('button[data-copy="scheduler-agent-prompt"]', (el) =>
+          Boolean(
+            el.compareDocumentPosition(document.getElementById("scheduler-agent-prompt")) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        ),
+        true,
+      );
+      await page.click('button[data-copy="scheduler-agent-prompt"]');
+      assert.equal((await page.evaluate(() => window.copied)).at(-1), prompt);
+      await page.focus("#scheduler-mode-tab-agent");
+      await page.keyboard.press("ArrowRight");
+      assert.equal(await selected("scheduler-mode-tab-human"), "true");
+      assert.deepEqual(
+        await page.$$eval("[id^=scheduler-mode-panel-]", (els) =>
+          els.filter((el) => !el.hidden).map((el) => el.id),
+        ),
+        ["scheduler-mode-panel-human"],
       );
     });
 
@@ -184,6 +211,15 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
 
     await t.test("scheduler K5 mobile", async () => {
       await page.setViewport({ width: 390, height: 844 });
+      await page.click("#scheduler-mode-tab-agent");
+      assert.equal(
+        await page.$eval(
+          "#scheduler-agent-prompt",
+          (el) => el.parentElement.scrollWidth <= el.parentElement.clientWidth,
+        ),
+        true,
+      );
+      await page.click("#scheduler-mode-tab-human");
       await page.click("#scheduler-tab-launchd");
       assert.equal(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

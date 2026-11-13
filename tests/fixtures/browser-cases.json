@@ -163,6 +163,7 @@
   "tests/browser/scheduler-settings.test.mjs",
   "tests/browser/reference-settings.test.mjs",
   "tests/browser/home-key.test.mjs",
+  "tests/browser/retros-page.test.mjs",
   "tests/browser/needs-you-form.test.mjs",
   "tests/browser/drawer-swipe.test.mjs",
   "tests/browser/stepper-swipe.test.mjs",
