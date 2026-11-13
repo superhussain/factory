@@ -473,7 +473,8 @@ class RetroAggregateTest(RetroWorkerCase):
         today = datetime.now().date()
         self.assertEqual(printed, {
             "run": run, "from": (today - timedelta(days=6)).isoformat(), "to": today.isoformat(),
-            "hosts": ["host-a", "host-b"], "expected": ["host-a", "host-c"], "sessions": 3, "skipped": 3,
+            "hosts": ["host-a", "host-b"], "expected": ["host-a", "host-c"], "stale": ["host-a"],
+            "sessions": 3, "skipped": 3,
             "dir": str(folder),
             "aggregate": str(folder / "aggregate.json"), "digest": str(folder / "digest.jsonl"),
             "transcripts": str(self.projects), "out": str(folder / "reply.json"),
@@ -486,7 +487,8 @@ class RetroAggregateTest(RetroWorkerCase):
         self.assertEqual(agg, {
             "schema": "factory.retro-aggregate/1", "run": run, "from": printed["from"], "to": printed["to"],
             "host": "host-a", "transcripts": str(self.projects), "projects": ["factory", "sample-tools"],
-            "hosts": {"host-a": {"sessions": 2, "jobs": 1, "ad_hoc": 1}, "host-b": {"sessions": 1, "jobs": 1, "ad_hoc": 0}},
+            "hosts": {"host-a": {"sessions": 2, "jobs": 1, "ad_hoc": 1, "latest": (today - timedelta(days=1)).isoformat()},
+                      "host-b": {"sessions": 1, "jobs": 1, "ad_hoc": 0, "latest": today.isoformat()}},
             "tokens": {"main": tokens, "subagents": sub},
             "context": {"first_turn_median": 1000, "mean_per_turn_median": 2000},
             "attachments_median": {"skill_listing": 300},

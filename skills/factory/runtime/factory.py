@@ -8530,9 +8530,10 @@ def retro_aggregate(days):
     home = factory_home()
     today = datetime.now().date()
     dates = [(today - timedelta(days=back)).isoformat() for back in range(days - 1, -1, -1)]
-    rows, skipped = [], 0
+    rows, skipped, latest = [], 0, {}
     for date in dates:
         for host, text in retro_fetch(home, date):
+            latest[host] = date
             for line in text.splitlines():
                 try:
                     row = json.loads(line)
@@ -8591,8 +8592,10 @@ def retro_aggregate(days):
             retro_sum(sub, t.get("tokens"))
         for kind, size in retro_dict(row.get("first_turn_attachments")).items():
             attachments.setdefault(kind, []).append(retro_int(size))
-    for h in hosts.values():
+    for name, h in hosts.items():
         h["jobs"] = len(h["jobs"])
+        h["latest"] = latest[name]
+    stale = sorted(name for name, h in hosts.items() if h["latest"] != dates[-1])
 
     def total(key, field=None):
         return sum(retro_int(retro_dict(r.get(key)).get(field) if field else r.get(key)) for r in rows)
@@ -8629,7 +8632,7 @@ def retro_aggregate(days):
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     print(json.dumps({"run": run, "from": dates[0], "to": dates[-1], "hosts": sorted(hosts), "expected": sorted(expected),
-                      "sessions": len(rows), "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
+                      "stale": stale, "sessions": len(rows), "skipped": skipped, "dir": str(folder), "aggregate": str(folder / "aggregate.json"),
                       "digest": str(folder / "digest.jsonl"), "transcripts": agg["transcripts"],
                       "out": str(folder / "reply.json"), "findings": str(folder / "findings.md")}, indent=2))
 
