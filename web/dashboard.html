@@ -1185,6 +1185,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     loaded = true;
     drawUpdated();
     renderBoard();
+    loadHoldConfigs();
     notifyNeeds();
     if (settingsShown === 'projects') renderProjectList();
     syncDetail();
@@ -1413,12 +1414,72 @@ function waitsOnYou(j) {
 function prioritizedFirst(list) { return list.sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at)); }
 
 // Mirrors batch_hold in factory.py, plus no claim: a follow-up or triage-queued idea that no
-// person added, approved or prioritized. Change both together.
+// person added, approved or prioritized. batchState mirrors batch_holds. Change both together.
 function batchHeld(j) {
   return j.stage === 'idea' && !('capture_id' in j) && typeof j.priority?.at !== 'string' && !j.claim &&
     ((Array.isArray(j.refs) && j.refs.some((r) => r?.kind === 'follow-up-of')) || j.backlog?.by === 'triage');
 }
 const HELD_TITLE = 'Pickup holds this idea until the project has enough follow-ups or the oldest has waited long enough. Then one session builds them together. Settings, Pipeline, Batch follow-ups sets the numbers.';
+
+// How a person decided this job in chat, as { text, title }, or null when no chat decision is on it.
+function chatDecision(j) {
+  const a = j.origin?.approved, b = j.backlog;
+  const words = { approved: 'Approved', rework: 'Rework', denied: 'Denied' };
+  const d = a?.via === 'chat' ? { word: 'Approved', by: a.device, at: a.at, quote: a.quote }
+    : b?.via === 'chat' && words[b.decision] ? { word: words[b.decision], by: b.by, at: b.at, quote: b.quote } : null;
+  if (!d) return null;
+  const text = d.word + ' in chat';
+  const quote = typeof d.quote === 'string' ? d.quote.split(/\s+/).filter(Boolean).join(' ') : '';
+  return { text, title: text + (d.by ? ' by ' + d.by : '') + (d.at ? ' at ' + d.at : '') + (quote ? ': "' + quote + '"' : '') };
+}
+
+// The hold of each project's effective pipeline, filled by loadHoldConfigs. A project not loaded uses the defaults, as hold_config does.
+const HOLD_DEFAULT = { min_ideas: 5, max_wait_hours: 12 };
+const holdConfigs = new Map();
+
+async function loadHoldConfigs() {
+  const slugs = new Set(jobs.filter(batchHeld).map((j) => j.project).filter((p) => typeof p === 'string' && !holdConfigs.has(p)));
+  let set = false;
+  await Promise.all([...slugs].map(async (slug) => {
+    try {
+      const r = await fetch('./api/pipeline/effective/' + encodeURIComponent(slug), { cache: 'no-store' });
+      if (!r.ok || r.redirected) return;
+      const hold = (await r.json())?.hold;
+      if (Number.isInteger(hold?.min_ideas) && hold.min_ideas >= 1 && hold.min_ideas <= 20 &&
+        Number.isInteger(hold.max_wait_hours) && hold.max_wait_hours >= 1 && hold.max_wait_hours <= 168) {
+        holdConfigs.set(slug, { min_ideas: hold.min_ideas, max_wait_hours: hold.max_wait_hours });
+        set = true;
+      }
+    } catch {}
+  }));
+  if (set) renderBoard();
+}
+
+// A held idea pickup would group: not paused, closing, waiting on you, gated or in Tracer.
+function batchRunnable(j) {
+  return batchHeld(j) && !j.paused?.at && !j.close?.at && !waitsOnYou(j) &&
+    !(j.origin?.gate === 'human' && !j.origin?.approved) && j.tracer?.building !== true;
+}
+
+// The held chip as { text, title }, or null when the idea is not held. Mirrors batch_holds in factory.py.
+function batchState(j) {
+  if (!batchHeld(j)) return null;
+  if (!batchRunnable(j)) return { text: 'Held for batching', title: HELD_TITLE };
+  const held = jobs.filter((x) => batchRunnable(x) && x.project === j.project);
+  const { min_ideas: least, max_wait_hours: hours } = holdConfigs.get(j.project) || HOLD_DEFAULT;
+  const age = (x) => /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(String(x.updated)) ? (Date.now() - Date.parse(x.updated)) / 3600000 : hours;
+  const oldest = Math.max(...held.map(age));
+  if (held.length >= least || oldest >= hours) {
+    const lead = held[0].id;
+    return lead === j.id
+      ? { text: 'Batch ready', title: 'Pickup launches this idea next and batches the other held ideas behind it. Settings, Pipeline, Batch follow-ups sets the numbers.' }
+      : { text: 'Batches behind ' + lead, title: 'Pickup launches ' + lead + ' next and batches this idea behind it. Settings, Pipeline, Batch follow-ups sets the numbers.' };
+  }
+  return {
+    text: 'Waits for a batch (' + held.length + ' of ' + least + ', ' + Math.max(0, Math.floor(oldest)) + 'h of ' + hours + 'h)',
+    title: 'Pickup holds this idea until the project has ' + least + ' held ideas or the oldest has waited ' + hours + 'h. Settings, Pipeline, Batch follow-ups sets the numbers.',
+  };
+}
 
 // One fact on one row, with the full text in its tooltip.
 function line(cls, text) {
@@ -1447,12 +1508,14 @@ function card(j, inNeeds, archived = false) {
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const dup = duplicateOf(j);
   const dupOnBoard = dup !== null && jobs.some((x) => x.id === dup);
+  const chat = chatDecision(j), held = batchState(j);
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
   const tags = (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
     (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
     (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
     (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
-    (batchHeld(j) ? '<span class="chip" title="' + esc(HELD_TITLE) + '">Held for batching</span>' : '') +
+    (chat ? '<span class="chip chat" title="' + esc(chat.title) + '">' + esc(chat.text) + '</span>' : '') +
+    (held ? '<span class="chip held" title="' + esc(held.title) + '">' + esc(held.text) + '</span>' : '') +
     (j.babysit?.at ? '<span class="chip" title="' + esc(prLink(j) ? 'An agent is working PR #' + prLink(j).n + ' as the Babysit note asks' : 'An agent is working this PR as the Babysit note asks') + '">Babysitting</span>' : '');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
@@ -2842,6 +2905,8 @@ async function savePipelineScope(scope = $('pipeline-scope').value) {
       if (fromPage) $('pipeline-summary').value = '';
       loadPipelineHistory(scope);
       loadPipelineEffective(scope);
+      holdConfigs.clear();
+      loadHoldConfigs();
       if (scope === 'global') loadTracerSetting();
     } else if ([400,403,413,415].includes(r.status)) {
       throw new Error('Could not save: ' + text);
