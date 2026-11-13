@@ -4967,7 +4967,8 @@ async function decideBacklog(item, decision, notes, answers) {
   } finally {
     await loadBacklog();
     backlogBusy.delete(item.raw);
-    await poll();
+    // The backlog was just read. A second read from poll could land after the caller shows a failure and clear it.
+    await poll({ withBacklog: false });
   }
 }
 
