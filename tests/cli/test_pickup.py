@@ -17,6 +17,7 @@ from unittest.mock import patch
 from support import SKILL, IsolatedTestCase, invoke, load_runtime, snapshot
 
 factory = load_runtime()
+WORKTREE_PIDS = factory.worktree_pids
 DEVICE = "host-a"
 IDEA_TEXT = "$(touch pwned)"
 FAKE = """import json, os, sys, time
@@ -2168,6 +2169,38 @@ class CloseCleanupTest(PickupFixture):
         self.assertFalse(self.branch_exists())
         self.assertEqual(self.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"], [])
 
+    def test_cleanup_without_lsof_still_removes_a_merged_job(self):
+        self.git(self.repo_a, "merge", "-q", "--no-ff", "-m", "merge", "factory/042-sample-export")
+        self.board["jobs"] = [self.closed()]
+        which = factory.shutil.which
+        patch.object(factory, "worktree_pids", WORKTREE_PIDS).start()
+        patch.object(factory, "PROC_ROOT", str(self.root / "no-proc")).start()
+        patch.object(factory, "LSOF_FALLBACKS", ()).start()
+        patch.object(factory.shutil, "which",
+                     side_effect=lambda name, *a, **k: None if name == "lsof" else which(name, *a, **k)).start()
+        self.assertEqual(self.pickup(), (0, "cleaned up 042-sample-export alpha\n",
+                                         f"factory.py: lsof not found, so processes in {self.wt} were not checked\n"))
+        self.assertFalse(self.wt.exists())
+
+    @unittest.skipIf(sys.platform == "win32", "lsof is not used on Windows")
+    def test_lsof_falls_back_to_a_system_folder(self):
+        lsof = self.root / "lsof"
+        lsof.write_text("#!/bin/sh\n", encoding="utf-8")
+        lsof.chmod(0o755)
+        fallbacks = (str(self.root / "missing"), str(lsof))
+        with patch.object(factory.shutil, "which", return_value=None), \
+                patch.object(factory, "LSOF_FALLBACKS", fallbacks):
+            self.assertEqual(factory.lsof_exe(), str(lsof))
+
+    def test_a_cleanup_error_still_launches_ideas(self):
+        patch.object(factory, "cleanup_job", side_effect=RuntimeError("boom")).start()
+        self.board["jobs"] = [self.closed(), idea("001-alpha", "alpha")]
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "factory.py: pickup could not clean up 042-sample-export alpha: boom\n")
+        self.assertEqual(len(self.launched()), 1)
+        self.assertNotIn("cleanup", self.job("042-sample-export")["close"])
+
     def test_cleanup_dry_run(self):
         self.board["jobs"] = [self.closed()]
         code, out, err = self.pickup("--dry-run")
@@ -2792,6 +2825,12 @@ class PickupSetupTest(PickupFixture):
 
     def setup(self, *args):
         return invoke(factory, ["pickup", "setup", *args])
+
+    @unittest.skipIf(sys.platform == "win32", "Windows timers keep their own PATH")
+    def test_timer_path_has_system_folders(self):
+        folders = factory.timer_values(self.home)["path"].split(os.pathsep)
+        self.assertIn("/usr/sbin", folders)
+        self.assertIn("/sbin", folders)
 
     def cron_line(self):
         return factory.timer_text("cron", factory.timer_values(self.home))
