@@ -32,7 +32,7 @@ valid PR that is not a batch rider, paused, closing or already babysat. After a
 confirm it sets `babysit` and `priority` to `{at}` (an earlier `priority` stays),
 deletes `needs` and `escalated`, and sets the note `babysitting PR #<n>`. The card
 leaves needs you for pr-open with a Babysitting chip, and pickup launches
-`/factory babysit <id>`, as [pickup](pickup.md) describes.
+`/factory babysit <id>`, as [pickup](pickup.md) describes. Clearing babysit drops that priority again unless it was earlier.
 
 ## Stage-change deep links
 

@@ -396,6 +396,19 @@ class FactoryTest(IsolatedTestCase):
             factory.push(self.target)
         self.assertEqual(cas.call_count, 0)
 
+    def test_push_keeps_goal_pending_when_remote_spec_is_newer(self):
+        self.write_spec("Sample exports stay under one megabyte.\n")
+        marker = self.folder / ".goal-pending"
+        self.fail_board = True
+        with self.assertRaises(SystemExit):
+            factory.push(self.target)
+        self.fail_board = False
+        self.store["/api/jobs/sample/001-test/spec.md"] = b"# Spec: 001-test\n\n## Goal\n\nNewer remote goal.\n"
+        factory.push(self.target)
+        self.assertIn("spec.md: remote newer, run pull", self.output.getvalue())
+        self.assertTrue(marker.exists())
+        self.assertNotIn("goal", self.saved())
+
     def test_push_clears_goal_when_spec_drops_it(self):
         self.write_spec("Sample exports stay under one megabyte.\n")
         factory.push(self.target)
@@ -1599,6 +1612,21 @@ class MoveFenceTest(IsolatedTestCase):
             factory.board(self.home, "001-test")
         self.assertNotIn("babysit", self.saved())
         self.assertFalse(factory.babysitting(self.saved()))
+
+    def test_board_babysit_null_drops_the_press_priority(self):
+        at = "2026-01-02T12:00:00Z"
+        self.save(dict(self.job, babysit={"at": at}, priority={"at": at}))
+        with patch.object(factory.sys, "stdin", io.StringIO('{"babysit": null}')):
+            factory.board(self.home, "001-test")
+        self.assertNotIn("babysit", self.saved())
+        self.assertNotIn("priority", self.saved())
+
+    def test_board_babysit_null_keeps_an_earlier_priority(self):
+        self.save(dict(self.job, babysit={"at": "2026-01-02T12:00:00Z"}, priority={"at": "2026-01-01T12:00:00Z"}))
+        with patch.object(factory.sys, "stdin", io.StringIO('{"babysit": null}')):
+            factory.board(self.home, "001-test")
+        self.assertNotIn("babysit", self.saved())
+        self.assertEqual(self.saved()["priority"], {"at": "2026-01-01T12:00:00Z"})
 
     def test_board_refuses_a_stacked_patch(self):
         before = self.store["/api/board"]

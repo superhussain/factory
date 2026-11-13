@@ -17,6 +17,7 @@ from unittest.mock import patch
 from support import SKILL, IsolatedTestCase, invoke, load_runtime, snapshot
 
 factory = load_runtime()
+WORKTREE_PIDS = factory.worktree_pids
 DEVICE = "host-a"
 IDEA_TEXT = "$(touch pwned)"
 FAKE = """import json, os, sys, time
@@ -2168,6 +2169,38 @@ class CloseCleanupTest(PickupFixture):
         self.assertFalse(self.branch_exists())
         self.assertEqual(self.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"], [])
 
+    def test_cleanup_without_lsof_still_removes_a_merged_job(self):
+        self.git(self.repo_a, "merge", "-q", "--no-ff", "-m", "merge", "factory/042-sample-export")
+        self.board["jobs"] = [self.closed()]
+        which = factory.shutil.which
+        patch.object(factory, "worktree_pids", WORKTREE_PIDS).start()
+        patch.object(factory, "PROC_ROOT", str(self.root / "no-proc")).start()
+        patch.object(factory, "LSOF_FALLBACKS", ()).start()
+        patch.object(factory.shutil, "which",
+                     side_effect=lambda name, *a, **k: None if name == "lsof" else which(name, *a, **k)).start()
+        self.assertEqual(self.pickup(), (0, "cleaned up 042-sample-export alpha\n",
+                                         f"factory.py: lsof not found, so processes in {self.wt} were not checked\n"))
+        self.assertFalse(self.wt.exists())
+
+    @unittest.skipIf(sys.platform == "win32", "lsof is not used on Windows")
+    def test_lsof_falls_back_to_a_system_folder(self):
+        lsof = self.root / "lsof"
+        lsof.write_text("#!/bin/sh\n", encoding="utf-8")
+        lsof.chmod(0o755)
+        fallbacks = (str(self.root / "missing"), str(lsof))
+        with patch.object(factory.shutil, "which", return_value=None), \
+                patch.object(factory, "LSOF_FALLBACKS", fallbacks):
+            self.assertEqual(factory.lsof_exe(), str(lsof))
+
+    def test_a_cleanup_error_still_launches_ideas(self):
+        patch.object(factory, "cleanup_job", side_effect=RuntimeError("boom")).start()
+        self.board["jobs"] = [self.closed(), idea("001-alpha", "alpha")]
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "factory.py: pickup could not clean up 042-sample-export alpha: boom\n")
+        self.assertEqual(len(self.launched()), 1)
+        self.assertNotIn("cleanup", self.job("042-sample-export")["close"])
+
     def test_cleanup_dry_run(self):
         self.board["jobs"] = [self.closed()]
         code, out, err = self.pickup("--dry-run")
@@ -2673,6 +2706,123 @@ class BabysitTest(PickupFixture):
         self.assertNotIn("claim", self.job("042-sample-export"))
         self.assertTrue(factory.babysitting(self.job("042-sample-export")))
 
+    def linked(self, statuses, send=True, server="synthetic-server"):
+        """A babysat job linked to synthetic-agent, with paseo answering statuses (None: no answer)."""
+        self.board["jobs"] = [babysat("042-sample-export", "alpha",
+                                      paseo={"server": server, "agent": "synthetic-agent"})]
+        self.sent = []
+
+        def paseo_send(agent, message):
+            self.sent.append((agent, message))
+            return send
+        for name, value in (("paseo_server", "synthetic-server"), ("paseo_statuses", statuses)):
+            patcher = patch.object(factory, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch.object(factory, "paseo_send", side_effect=paseo_send)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_an_idle_or_closed_linked_agent_gets_the_babysit_command(self):
+        for status in ("idle", "closed"):
+            with self.subTest(status):
+                self.linked({"synthetic-agent": status})
+                self.assertEqual(self.pickup("--dry-run"), (0, "would send babysit 042-sample-export alpha to agent "
+                                                            f"synthetic-agent\nhost {DEVICE}: would launch 0\n", ""))
+                self.assertEqual(self.sent, [])
+                code, out, err = self.pickup()
+                tag = self.job("042-sample-export")["claim"]["session"]
+                self.assertEqual((code, err), (0, ""))
+                self.assertEqual(out, f"sent babysit 042-sample-export alpha to agent synthetic-agent session {tag}\n")
+                self.assertEqual(self.sent, [("synthetic-agent", f"/factory babysit 042-sample-export --session {tag}"
+                                                                 f"\n\n{factory.UNATTENDED}")])
+                self.assertEqual(self.launched(), [])
+                self.board["jobs"][0].pop("claim", None)
+
+    def test_a_running_linked_agent_skips_the_babysit(self):
+        self.linked({"synthetic-agent": "running"})
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("skip babysit 042-sample-export alpha: agent synthetic-agent is running\n", out)
+        self.assertEqual(self.pickup()[1], "")
+        self.assertNotIn("claim", self.job("042-sample-export"))
+        self.assertEqual((self.sent, self.launched()), ([], []))
+
+    def test_an_agent_in_any_other_state_skips_the_babysit(self):
+        self.linked({"synthetic-agent": "initializing"})
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("skip babysit 042-sample-export alpha: agent synthetic-agent is initializing\n", out)
+        self.assertEqual(self.pickup()[1], "")
+        self.assertEqual((self.sent, self.launched()), ([], []))
+
+    def test_an_agent_on_another_server_skips_the_babysit(self):
+        self.linked({"synthetic-agent": "idle"}, server="other-server")
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("skip babysit 042-sample-export alpha: agent synthetic-agent lives on server other-server\n", out)
+        self.assertEqual(self.pickup()[1], "")
+        self.assertEqual((self.sent, self.launched()), ([], []))
+
+    def test_a_failed_paseo_ls_skips_the_babysit(self):
+        self.linked(None)
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("skip babysit 042-sample-export alpha: paseo ls failed\n", out)
+        self.assertEqual(self.pickup()[1], "")
+        self.assertEqual((self.sent, self.launched()), ([], []))
+
+    def test_an_absent_agent_launches_a_new_session(self):
+        self.linked({})
+        code, out, err = self.pickup()
+        tag = self.job("042-sample-export")["claim"]["session"]
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"launched babysit 042-sample-export alpha on primary session {tag}\n")
+        self.assertEqual((self.sent, len(self.launched())), ([], 1))
+
+    def test_a_failed_send_to_an_idle_agent_releases_the_claim(self):
+        self.linked({"synthetic-agent": "idle"}, send=False)
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "")
+        self.assertEqual(err, "factory.py: pickup could not send babysit 042-sample-export to agent synthetic-agent: "
+                              "paseo send failed; the next run retries\n")
+        self.assertNotIn("claim", self.job("042-sample-export"))
+        self.assertEqual((len(self.sent), self.launched()), (1, []))
+
+    def test_a_failed_send_to_a_closed_agent_launches_a_new_session_with_the_same_tag(self):
+        self.linked({"synthetic-agent": "closed"}, send=False)
+        code, out, err = self.pickup()
+        tag = self.job("042-sample-export")["claim"]["session"]
+        self.assertEqual(code, 0)
+        self.assertEqual(out, f"launched babysit 042-sample-export alpha on primary session {tag}\n")
+        self.assertEqual(err, "factory.py: pickup could not send babysit 042-sample-export to agent synthetic-agent: "
+                              "paseo send failed; launching a new session\n")
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.launched()[0]["argv"][7], f"/factory babysit 042-sample-export --session {tag}\n\n"
+                         + factory.UNATTENDED)
+
+    def test_a_failed_send_to_a_closed_agent_with_no_route_says_so(self):
+        self.linked({"synthetic-agent": "closed"}, send=False)
+        with patch.object(factory, "pick_route", return_value=None):
+            code, out, err = self.pickup()
+        self.assertEqual((code, out), (0, ""))
+        self.assertTrue(err.endswith("factory.py: pickup could not launch babysit 042-sample-export: "
+                                     "no available route\n"), err)
+        self.assertNotIn("claim", self.job("042-sample-export"))
+
+    def test_a_new_babysit_launch_names_its_workspace_and_title(self):
+        paseo = ["/usr/bin/paseo", "run", "--no-wait", "--new-workspace", "worktree", "--title", "042 idea"]
+        self.assertEqual(factory.babysit_argv(paseo, "042-sample-export"),
+                         ["/usr/bin/paseo", "run", "--worktree-slug", "babysit-042-sample-export", "--no-wait",
+                          "--new-workspace", "worktree", "--title", "babysit 042-sample-export"])
+        named = ["paseo", "run", "--worktree-slug", "x", "--title", "t"]
+        self.assertEqual(factory.babysit_argv(named, "042-sample-export"),
+                         ["paseo", "run", "--worktree-slug", "babysit-042-sample-export", "--title",
+                          "babysit 042-sample-export"])
+        other = ["launcher", "run", "--new-workspace"]
+        self.assertEqual(factory.babysit_argv(other, "042-sample-export"), other)
+
 
 FOLLOW = [{"id": "090-alpha-old", "kind": "follow-up-of"}]
 HELD = ["101-wrap-doc-line", "102-move-comment", "103-drop-double-period", "104-fix-typo", "105-rename-flag"]
@@ -2792,6 +2942,12 @@ class PickupSetupTest(PickupFixture):
 
     def setup(self, *args):
         return invoke(factory, ["pickup", "setup", *args])
+
+    @unittest.skipIf(sys.platform == "win32", "Windows timers keep their own PATH")
+    def test_timer_path_has_system_folders(self):
+        folders = factory.timer_values(self.home)["path"].split(os.pathsep)
+        self.assertIn("/usr/sbin", folders)
+        self.assertIn("/sbin", folders)
 
     def cron_line(self):
         return factory.timer_text("cron", factory.timer_values(self.home))

@@ -24,8 +24,8 @@ def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", auto=None
                           "commits": [{"committedDate": "2026-01-01T09:00:00Z"}, {"committedDate": HEAD}]})
 
 
-def graph(queue=False, threads=(), reviews=(), entry=None):
-    return 0, json.dumps({"isInMergeQueue": queue, "mergeQueueEntry": entry, "reviewThreads": {"nodes": list(threads)},
+def graph(queue=False, threads=(), reviews=(), entry=None, merge_queue=False):
+    return 0, json.dumps({"isInMergeQueue": queue, "isMergeQueueEnabled": merge_queue, "mergeQueueEntry": entry, "reviewThreads": {"nodes": list(threads)},
                           "latestReviews": {"nodes": [author(login) for login in reviews]}})
 
 
@@ -34,7 +34,8 @@ BOTS = ("ci-helper", "lint-helper")
 
 
 def author(login):
-    return {"author": {"__typename": "Bot" if login in BOTS else "User", "login": login}}
+    return {"authorAssociation": "NONE" if login == "outsider" or login.endswith("[bot]") else "MEMBER",
+            "author": {"__typename": "Bot" if login in BOTS else "User", "login": login}}
 
 
 def thread(*logins, resolved=False):
@@ -85,7 +86,7 @@ class PrStateTest(IsolatedTestCase):
             calls.append(gh_args)
             reading = readings[min(sum(c[0] == "view" for c in calls) - 1, len(readings) - 1)]
             answer = {"view": reading[0], "checks": reading[1]}.get(gh_args[0], (reading + (graph(),))[2])
-            return answer + ("",) if stderr and answer else answer
+            return answer + ("",) if stderr and answer and len(answer) == 2 else answer
 
         with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job]}), **(routes or {})}) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
@@ -108,14 +109,15 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(json.loads(out), {"pr": 44, "state": "open", "review": "approved", "bots": 0, "checks": "pass",
                                            "queued": False, "conflict": False, "stacked": False, "base": "main",
-                                           "next": "merge", "ci_log": None})
+                                           "next": "merge", "ci_log": None, "threads": 0, "merge_queue": False})
         self.assertEqual(calls[0][:3], ("view", PR, "--json"))
         self.assertIn("baseRefName", calls[0][3])
         self.assertNotIn("isInMergeQueue", calls[0][3])
-        self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket,link"))
+        self.assertEqual(calls[1], ("checks", PR, "--required", "--json", "name,bucket,link"))
         self.assertEqual(calls[2][0], "graphql")
-        self.assertIn("pullRequest(number:$n){isInMergeQueue mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved "
-                      "comments(first:100){nodes{author{__typename login}}}}} "
+        self.assertIn("pullRequest(number:$n){isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} "
+                      "reviewThreads(last:100){nodes{isResolved "
+                      "comments(first:100){nodes{authorAssociation author{__typename login}}}}} "
                       "latestReviews(first:100){nodes{author{__typename login}}}}}}", calls[2][2])
         self.assertEqual(calls[2][3:], ("-f", "o=example", "-f", "r=sample", "-F", "n=44",
                                         "--jq", ".data.repository.pullRequest"))
@@ -129,14 +131,36 @@ class PrStateTest(IsolatedTestCase):
         code, out, _, _ = self.state([(view(), checks("pass"), two)])
         self.assertEqual((json.loads(out)["bots"], json.loads(out)["next"]), (2, "fix-reviews"))
 
-    def test_answered_resolved_and_human_threads_do_not_count(self):
+    def test_answered_resolved_and_outsider_threads_do_not_count(self):
         threads = [thread("ci-helper", resolved=True), thread("ci-helper", "pr-owner"),
-                   thread("reviewer-a"), thread("reviewer-a", "ci-helper"), thread("helper[bot]"), thread()]
+                   thread("outsider"), thread("reviewer-a", "pr-owner"), thread("helper[bot]"), thread()]
         code, out, err, _ = self.state([(view(), checks("pass"), graph(threads=threads))])
         self.assertEqual((code, err), (0, ""))
         self.assertEqual((json.loads(out)["bots"], json.loads(out)["next"]), (0, "merge"))
         bot = review("COMMENTED", login="ci-helper")
         self.assertEqual(self.next_of((view(reviews=[bot]), checks("pass"), graph(reviews=["ci-helper"]))), "merge")
+
+    def test_reviewer_threads_ask_for_fixes_under_an_approval(self):
+        reading = (view(), checks("pass"), graph(threads=[thread("reviewer-a"), thread("reviewer-b", "pr-owner"),
+                                                          thread("ci-helper")]))
+        code, out, err, _ = self.state([reading])
+        self.assertEqual((code, err), (0, ""))
+        got = json.loads(out)
+        self.assertEqual((got["review"], got["bots"], got["threads"], got["next"]), ("approved", 1, 1, "fix-reviews"))
+        only = (view(), checks("pass"), graph(threads=[thread("reviewer-a")]))
+        self.assertEqual(self.next_of(only), "fix-reviews")
+
+    def test_merge_queue_is_read_from_graphql(self):
+        for enabled in (True, False):
+            with self.subTest(enabled):
+                code, out, _, _ = self.state([(view(), checks("pass"), graph(merge_queue=enabled))])
+                self.assertEqual((code, json.loads(out)["merge_queue"]), (0, enabled))
+
+    def test_no_required_checks_reads_as_none(self):
+        code, out, err, calls = self.state([(view(rollup=[{"name": "nightly"}]),
+                                             (1, "", "no required checks reported on the 'x' branch\n"))])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((json.loads(out)["checks"], json.loads(out)["next"]), ("none", "merge"))
 
     def test_merged_and_closed(self):
         self.assertEqual(self.next_of((view("MERGED"), checks("pass"))), "merged")
@@ -166,6 +190,17 @@ class PrStateTest(IsolatedTestCase):
                 self.assertEqual(self.next_of(reading), "needs-review")
         code, out, _, _ = self.state([(view(decision=""), checks("pass"))])
         self.assertEqual(json.loads(out)["review"], "none")
+
+    def test_unapproved_pr_is_worked_before_needs_review(self):
+        required = {"decision": "REVIEW_REQUIRED"}
+        for reading, step in (((view(merge="DIRTY", **required), checks("pass")), "rebase"),
+                              ((view(**required), checks("fail")), "fix-ci"),
+                              ((view(**required), checks("pending")), "wait"),
+                              ((view(auto={"enabledAt": HEAD}, **required), checks("pass")), "needs-review"),
+                              ((view(**required), checks("pass"), graph(True)), "needs-review"),
+                              ((view(base=PARENT, **required), checks("pass")), "needs-review")):
+            with self.subTest(reading, step=step):
+                self.assertEqual(self.next_of(reading), step)
 
     def test_graphql_bot_reviews_never_count(self):
         bots = graph(reviews=["ci-helper", "reviewer-a"])
