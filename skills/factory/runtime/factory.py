@@ -4877,17 +4877,26 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
                   + ("is off" if enabled is False else f"does not list {them}") + ".\n")
     else:
         manual = ""
+    if j["close"].get("by") == "github":
+        summary = (f"GitHub reported pull request {pr} closed without merging, so factory.py pickup closed the job "
+                   f"at {at} while at stage `{stage}`.")
+        requested = f"GitHub reported the pull request closed. Pickup queued the close at {at}."
+        unreviewed = ("No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` "
+                      "ref if the work is still wanted.")
+    else:
+        summary = f"Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: {reason}."
+        requested = f"Close requested from the dashboard at {at}."
+        unreviewed = "No agent reviewed this close. The reason is the owner's own words."
     text = (f"CLOSED: {reason}\n\n"
-            f"**Summary.** Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: "
-            f"{reason}. Nothing else is owed unless Left out says so.\n\n"
+            f"**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n"
             "## Evidence\n\n"
-            f"- Close requested from the dashboard at {at}.\n"
+            f"- {requested}\n"
             f"- Stage when closed: `{stage}`, round {j.get('round', 0)}.\n"
             f"- Branch: `{j.get('branch') or 'none'}`.\n"
             f"- Pull request: {f'{pr}, {PR_EVIDENCE[state]}' if outcome else 'none'}.\n"
             f"- Written by factory.py pickup on {device}.\n\n"
             "## Left out\n\n"
-            "- No agent reviewed this close. The reason is the owner's own words.\n"
+            f"- {unreviewed}\n"
             f"{open_pr}"
             "- The next pickup run on each host that holds the worktree or branch runs "
             f"`factory.py cleanup {j['project']}/{j['id']}` there when the project's pickup is on "
@@ -4995,7 +5004,10 @@ def close_pass(home, data, device, minutes, dry):
             print(f"would close {job_id} {project}" + (f" and pull request {pr}" if pr else "")
                   + "".join(f" and stacked pull request {r['pr']}" for r in open_stacked(data, job_id)))
             continue
-        outcome = close_pull_request(home, j, device) if pr else None
+        if j["close"].get("by") == "github":
+            outcome = ("already closed", "")
+        else:
+            outcome = close_pull_request(home, j, device) if pr else None
         if outcome and outcome[0] == "closed":
             print(f"closed pull request {pr} for {job_id}")
         elif outcome and outcome[0] == "open":

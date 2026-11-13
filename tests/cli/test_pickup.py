@@ -2283,6 +2283,37 @@ class PrSyncTest(PickupFixture):
                 self.calls.clear()
                 self.assert_silent(self.pickup())
 
+    def test_closed_pr_closes_the_job(self):
+        self.board["jobs"] = [self.sample_import()]
+        self.assertEqual(self.pickup(), (0, "synced 043-sample-import alpha: PR closed on GitHub\n"
+                                            "closed 043-sample-import alpha\n", ""))
+        self.assertEqual(self.puts(), [("PUT", "/api/board"), ("PUT", self.DECISION), ("PUT", "/api/board")])
+        self.gh.assert_not_called()
+        job = self.job("043-sample-import")
+        at = job["close"]["at"]
+        self.assertEqual(self.files[self.DECISION], (
+            "CLOSED: PR closed on GitHub\n\n"
+            f"**Summary.** GitHub reported pull request {self.PR8} closed without merging, so factory.py pickup "
+            f"closed the job at {at} while at stage `pr-open`. Nothing else is owed unless Left out says so.\n\n"
+            "## Evidence\n\n"
+            f"- GitHub reported the pull request closed. Pickup queued the close at {at}.\n"
+            "- Stage when closed: `pr-open`, round 0.\n"
+            "- Branch: `factory/043-sample-import`.\n"
+            f"- Pull request: {self.PR8}, already closed.\n"
+            "- Written by factory.py pickup on host-a.\n\n"
+            "## Left out\n\n"
+            "- No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` ref "
+            "if the work is still wanted.\n"
+            "- The next pickup run on each host that holds the worktree or branch runs "
+            "`factory.py cleanup alpha/043-sample-import` there when the project's pickup is on "
+            "and lists that host. On any other host, run `factory.py cleanup alpha/043-sample-import` "
+            "by hand. It keeps a dirty worktree, and a branch that is not merged unless "
+            "origin holds the same commit.\n"))
+        self.assertEqual((job["stage"], job["note"]), ("closed", "PR closed on GitHub"))
+        self.assertEqual((set(job["close"]), job["close"]["by"]), ({"reason", "at", "by", "closed"}, "github"))
+        self.calls.clear()
+        self.assert_silent(self.pickup())
+
     def test_one_read_per_repo_across_projects(self):
         self.states = {}
         self.board["jobs"] = [self.export(), self.sample_import(project="beta")]
