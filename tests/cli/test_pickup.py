@@ -2314,6 +2314,33 @@ class PrSyncTest(PickupFixture):
         self.calls.clear()
         self.assert_silent(self.pickup())
 
+    def test_merged_job_is_cleaned_once_per_host(self):
+        patch.object(factory, "worktree_pids", return_value=[]).start()
+
+        def git(cwd, *args):
+            return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
+                                  text=True).stdout.strip()
+        git(self.repo_a, "init", "-q")
+        git(self.repo_a, "symbolic-ref", "HEAD", "refs/heads/main")
+        git(self.repo_a, "commit", "-q", "--allow-empty", "-m", "base")
+        wt = self.home / "worktrees" / "alpha" / "042-sample-export"
+        git(self.repo_a, "worktree", "add", "-q", str(wt), "-b", "factory/042-sample-export")
+        self.board["jobs"] = [self.export(port=8230)]
+        self.assertEqual(self.pickup(), (0, "synced 042-sample-export alpha: merged on GitHub\n"
+                                            "cleaned up 042-sample-export alpha\n", ""))
+        self.assertFalse(wt.exists())
+        self.assertEqual(git(self.repo_a, "branch", "--list", "factory/042-sample-export"), "")
+        job = self.job("042-sample-export")
+        self.assertEqual(set(job["github"]), {"merged", "cleanup"})
+        self.assertEqual(set(job["github"]["cleanup"]), {DEVICE})
+        self.assertEqual(job["github"]["cleanup"][DEVICE]["left"], [])
+        self.assertNotIn("port", job)
+        self.assertEqual(self.puts(), [("PUT", "/api/board"), ("PUT", "/api/board")])
+        git(self.repo_a, "worktree", "add", "-q", str(wt), "-b", "factory/042-sample-export")
+        self.calls.clear()
+        self.assert_silent(self.pickup())
+        self.assertTrue(wt.exists())
+
     def test_one_read_per_repo_across_projects(self):
         self.states = {}
         self.board["jobs"] = [self.export(), self.sample_import(project="beta")]

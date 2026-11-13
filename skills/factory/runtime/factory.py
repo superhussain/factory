@@ -5039,22 +5039,25 @@ def close_pass(home, data, device, minutes, dry):
             close_stacked_prs(home, job_id, stacked, device)
 
 
-def cleaned_here(j, device):
-    """True when this host already recorded its cleanup of a dashboard-closed job."""
-    done = j["close"].get("cleanup")
+def cleaned_here(j, device, key="close"):
+    """True when this host already recorded its cleanup of a job under j[key]: close for a dashboard-closed
+    job, github for one pickup synced as merged."""
+    done = j[key].get("cleanup")
     return isinstance(done, dict) and device in done
 
 
 def close_cleanup_pass(home, data, device, paths, settings, dry):
-    """Run cleanup once per host on each dashboard-closed job whose worktree or branch this host
-    still holds, and record what it left."""
+    """Run cleanup once per host on each dashboard-closed job, and each job pickup synced as merged, whose
+    worktree or branch this host still holds, and record what it left."""
     for j in data["jobs"]:
-        c, job_id, project = j.get("close"), j.get("id"), j.get("project")
-        if not (j.get("stage") == "closed" and isinstance(c, dict) and isinstance(c.get("closed"), str)
+        stage, job_id, project = j.get("stage"), j.get("id"), j.get("project")
+        key, field = ("github", "merged") if stage == "merged" else ("close", "closed")
+        c = j.get(key)
+        if not (stage in TERMINAL and isinstance(c, dict) and isinstance(c.get(field), str)
                 and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
                 and isinstance(project, str) and SLUG.fullmatch(project)):
             continue
-        if cleaned_here(j, device) or project not in paths or not os.path.isdir(paths[project]):
+        if cleaned_here(j, device, key) or project not in paths or not os.path.isdir(paths[project]):
             continue
         repo, wt, branch = paths[project], home / "worktrees" / project / job_id, f"factory/{job_id}"
         if not (wt.exists() or git(repo, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")):
@@ -5069,13 +5072,13 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
             continue
         _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
 
-        def change(text, job_id=job_id, closed=c["closed"], left=left):
+        def change(text, job_id=job_id, stage=stage, key=key, field=field, at=c[field], left=left):
             board = load_board(text)
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
-            if (found is None or found.get("stage") != "closed" or not isinstance(found.get("close"), dict)
-                    or found["close"].get("closed") != closed or cleaned_here(found, device)):
+            if (found is None or found.get("stage") != stage or not isinstance(found.get(key), dict)
+                    or found[key].get(field) != at or cleaned_here(found, device, key)):
                 return None, False
-            patch_job(board, job_id, {"close": {"cleanup": {device: {"at": now(), "left": left}}}, "port": None})
+            patch_job(board, job_id, {key: {"cleanup": {device: {"at": now(), "left": left}}}, "port": None})
             return dump_board(board), True
         if cas(home, "/api/board", change):
             print(f"cleaned up {job_id} {project}" + (f", left: {'; '.join(left)}" if left else ""))
