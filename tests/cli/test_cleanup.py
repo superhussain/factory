@@ -74,6 +74,48 @@ class CleanupTest(IsolatedTestCase):
         self.assertFalse(self.wt.exists())
         self.assertFalse(self.branch_exists())
 
+    def prompts(self):
+        folder = self.home / "prompts" / "sample" / "001-test"
+        folder.mkdir(parents=True)
+        (folder / "builder.txt").write_text("prompt\n")
+        return folder
+
+    def test_prompt_folder_is_removed(self):
+        self.merge()
+        folder = self.prompts()
+        code, out, _ = self.cleanup()
+        self.assertEqual(code, 0)
+        self.assertEqual(out, {"removed": [f"worktree {self.wt}", "branch factory/001-test", f"prompts {folder}"],
+                               "left": []})
+        self.assertFalse(folder.exists())
+        self.assertTrue(folder.parent.is_dir())
+
+    def test_linked_prompt_folder_is_kept(self):
+        self.merge()
+        target = self.home / "elsewhere"
+        (target / "001-test").mkdir(parents=True)
+        (target / "001-test" / "keep.txt").write_text("keep\n")
+        folder = self.home / "prompts" / "sample" / "001-test"
+        cases = {"folder": (folder, target / "001-test"), "slug": (folder.parent, target)}
+        for name, (link, points_to) in cases.items():
+            with self.subTest(link=name):
+                shutil.rmtree(self.home / "prompts", ignore_errors=True)
+                link.parent.mkdir(parents=True)
+                link.symlink_to(points_to, target_is_directory=True)
+                code, out, _ = self.cleanup()
+                self.assertEqual(code, 1)
+                self.assertEqual(out["left"], [f"prompts {folder}: a symlink or junction, left in place"])
+                self.assertEqual((target / "001-test" / "keep.txt").read_text(), "keep\n")
+
+    def test_prompt_folder_kept_beside_dirty_worktree(self):
+        self.merge()
+        folder = self.prompts()
+        (self.wt / "untracked.txt").write_text("keep me\n")
+        code, out, _ = self.cleanup()
+        self.assertEqual(code, 1)
+        self.assertEqual(out["left"][-1], f"prompts {folder}: kept because its worktree remains")
+        self.assertTrue((folder / "builder.txt").exists())
+
     def test_unmerged_branch_is_kept(self):
         code, out, _ = self.cleanup()
         self.assertEqual(code, 1)

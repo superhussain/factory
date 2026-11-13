@@ -6861,6 +6861,15 @@ def cleanup(target):
     if not repo:
         fail(f"{home / 'paths.md'} has no entry for {slug}: run /factory init in this device's checkout of it", 4)
     removed, left = cleanup_job(repo, home / "worktrees" / slug / job_id, f"factory/{job_id}")
+    folder = home / "prompts" / slug / job_id
+    if os.path.lexists(folder):
+        if any(entry.startswith("worktree ") for entry in left):
+            left.append(f"prompts {folder}: kept because its worktree remains")
+        elif any(is_link(path) for path in (home / "prompts", folder.parent, folder)):
+            left.append(f"prompts {folder}: a symlink or junction, left in place")
+        elif folder.is_dir():
+            shutil.rmtree(folder)
+            removed.append(f"prompts {folder}")
     print(json.dumps({"removed": removed, "left": left}, indent=2))
     sys.exit(1 if left else 0)
 

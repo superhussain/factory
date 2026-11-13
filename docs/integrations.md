@@ -66,14 +66,15 @@ exits 0.
 Cleanup rule: on a merged or closed job, the pipeline runs
 `factory.py archive-workspace <slug>/<id>` and `factory.py cleanup <slug>/<id>`
 without asking. They remove only worktrees this pipeline created: a `factory-<id>`
-Paseo workspace, or the job's worktree under the factory home. `archive-workspace` archives
+Paseo workspace, or the job's worktree under the factory home, and that job's private prompt folder under
+`prompts/<slug>/<id>`, refusing a link. `archive-workspace` archives
 a merged or closed job's own workspace whatever its git state and reports leftovers
 first. `cleanup` refuses a dirty worktree and keeps a branch that is not merged. Neither
 forces. A host owner who runs Claude Code in auto mode can allow them with this sample
 entry under `autoMode.allow` in their settings:
 
 ```json
-"Run factory.py archive-workspace <slug>/<id> or factory.py cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home). archive-workspace archives a merged or closed job's own factory-<id> workspace whatever its git state and reports leftovers first, cleanup refuses a dirty worktree and keeps unmerged branches, and neither forces."
+"Run factory.py archive-workspace <slug>/<id> or factory.py cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home, and that job's private prompt folder under prompts/<slug>/<id>, refusing a link). archive-workspace archives a merged or closed job's own factory-<id> workspace whatever its git state and reports leftovers first, cleanup refuses a dirty worktree and keeps unmerged branches, and neither forces."
 ```
 
 `schedules/resume.md`, `schedules/explore.md` and `schedules/retro.md` are prompt templates, not executables. Ideas are picked up by `factory.py pickup` instead (see Automatic pickup below and `references/pickup.md` in the installed skill).
