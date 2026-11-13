@@ -8197,7 +8197,7 @@ RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+"
 RETRO_HEADERS = re.compile(
     r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))"
     r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)[^\r\n'\"\\]+")
-RETRO_URL_CREDS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{0,31}://)[^/\s@]+@")
+RETRO_URL_CREDS = re.compile(r"(?i)(?<=[a-z0-9+.-])://[^/\s@]+@")
 RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
 RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)(?!=?\d+:\d+(?!\S))[^\s:]*:\S+")
 RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential"
@@ -8247,7 +8247,7 @@ def retro_secret_pair(match):
 
 def retro_redact(text):
     text = RETRO_HEADERS.sub(r"\1\2[redacted]", text)
-    text = RETRO_URL_CREDS.sub(r"\1[redacted]@", text)
+    text = RETRO_URL_CREDS.sub("://[redacted]@", text)
     text = RETRO_BEARER.sub(r"\1[redacted]", text)
     text = RETRO_USER_PASS.sub(r"\1[redacted]", text)
     for pattern in (RETRO_KEYVALUE, RETRO_FLAG, RETRO_LONG_KEYVALUE, RETRO_LONG_FLAG):
