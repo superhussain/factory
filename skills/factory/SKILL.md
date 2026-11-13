@@ -263,7 +263,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "jira": "optional Jira key, read by the Tracer mirror",
   "tracer": { "follow": true, "gather": true, "feature": "factory-42", "url": "set only by factory.py after a Tracer mirror", "scope": "gathering, approved or declined; set only by factory.py", "building": "true only while a Tracer build agent holds the feature; set by pickup", "stopped": "true once factory.py asked Tracer to stop the build scope approval queued; set only by factory.py", "tasks": "up to 30 {id, title, status} from the Tracer feature; set by pickup once Tracer builds the job" },
   "note": "optional one-line status, e.g. escalation reason",
-  "needs": "optional one line on what only the human can do, e.g. approve spec.md, or review and merge PR #123 held by merge: human",
+  "needs": "optional one line on what only the human can do, e.g. approve spec.md",
   "port": "optional dev-server port or block the builder holds, e.g. 8130-8139",
   "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | batched-into (set only by factory.py batch; board refuses it)" }],
   "stacked": "true on the one rider that ships as a PR stacked on its lead's PR; set only by factory.py stack",
