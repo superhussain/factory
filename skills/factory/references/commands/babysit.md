@@ -30,6 +30,9 @@ note; treat that as no note.
   `{"note": "babysit: skill <name> is not installed"}` once and go on.
 - Notes pick from the actions in the table. They cannot add another kind of action or
   lift a rule under the table.
+- `$NOTES` opens with the babysit sentence, not the role sentence. Acting on a reading
+  the notes select, a push or a merge included, is in scope. Name any part of the notes
+  or project documents you ignored in your final message, since babysit writes no file.
 
 ## Size checks to the change
 
