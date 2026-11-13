@@ -404,7 +404,8 @@ async function capture(outdir, referencePath) {
       page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
         timeout: 30000,
       });
-    async function view(name, width, height, theme, prepare, touch = false) {
+    // keepViewport captures without resizing the viewport, which would close an open card menu.
+    async function view(name, width, height, theme, prepare, touch = false, keepViewport = false) {
       if (onlyViews && !onlyViews.includes(name)) return;
       for (const side of ["before", "after"]) {
         const started = Date.now();
@@ -606,7 +607,11 @@ async function capture(outdir, referencePath) {
                 );
               });
               const file = `${outdir.replace(/\/$/, "")}/${side}-${name}.png`;
-              await page.screenshot(clip ? { path: file, clip } : { path: file });
+              await page.screenshot(
+                clip
+                  ? { path: file, clip, ...(keepViewport && { captureBeyondViewport: false }) }
+                  : { path: file },
+              );
               const { size } = await stat(file);
               if (size >= 5 * 1024 * 1024) throw new Error(`${file} exceeds 5 MiB`);
               console.log(
@@ -1137,8 +1142,8 @@ async function capture(outdir, referencePath) {
         };
       }, wrap);
     };
-    await view("held-actions-390", 390, 844, "dark", openHeldActions, true);
-    await view("held-actions-1280", 1280, 900, "light", openHeldActions);
+    await view("held-actions-390", 390, 844, "dark", openHeldActions, true, true);
+    await view("held-actions-1280", 1280, 900, "light", openHeldActions, false, true);
     const openReferenceKeys = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/reference";
