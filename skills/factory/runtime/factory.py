@@ -4809,10 +4809,12 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
                     if tag is None:
                         return
                     given = values(j, tag, route)
-                    ok, detail, log_path = launch_idea(home, given, route[0], launcher_argv(template, given),
+                    argv = launcher_argv(template, given)
+                    ok, detail, log_path = launch_idea(home, given, route[0], argv,
                                                        launch_env(given, route[1], route[2]))
                     if ok:
                         print(f"launched babysit {j['id']} {j['project']} on {route[0]} session {tag}")
+                        record_launch(home, j["id"], dict(launch_row(given, argv, tag), role="babysit"))
                     else:
                         launch_failed(home, route[0], j["id"], detail, log_path,
                                       lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)

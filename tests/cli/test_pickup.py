@@ -2623,6 +2623,8 @@ class BabysitTest(PickupFixture):
         self.assertEqual(job["claim"]["device"], DEVICE)
         self.assertEqual((job["stage"], job["babysit"]), ("pr-open", {"at": "2026-01-02T12:00:00Z"}))
         self.assertNotIn("claim", self.job("043-sample-export"))
+        [row] = job["agents"]
+        self.assertEqual((row["role"], row["stage"], row["session"]), ("babysit", "pr-open", first))
         records = self.launched()
         self.assertEqual(records[0]["argv"][7], f"/factory babysit 042-sample-export --session {first}\n\n"
                          + factory.UNATTENDED)
