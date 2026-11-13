@@ -545,7 +545,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
 </header>
 <main class="board" id="board"></main>
 <div class="job-actions-menu card-actions-menu" id="card-actions-menu" role="menu" aria-label="Job actions" hidden></div>
-<p class="board-status" id="board-status" role="status" hidden></p>
+<p class="board-status" id="board-status" role="status" tabindex="-1" hidden></p>
 <aside class="detail" id="detail" hidden>
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
@@ -5253,18 +5253,39 @@ function focusOpener(opener) {
 
 const BOARD_STATUS_MS = 12000, COPIED_STATUS_MS = 2000;
 let boardStatusTimer = 0;
+let boardStatusHeld = false;
 
 // A separate task sets the text after the toast empties, so a repeat is announced again.
 function showBoardStatus(text) {
   clearTimeout(boardStatusTimer);
+  if (!text) boardStatusHeld = false;
   $('board-status').textContent = '';
   $('board-status').hidden = !text;
   if (!text) return;
   boardStatusTimer = setTimeout(() => {
     $('board-status').textContent = text;
-    boardStatusTimer = setTimeout(() => showBoardStatus(''), text === 'Copied' ? COPIED_STATUS_MS : BOARD_STATUS_MS);
+    if (!boardStatusHeld) boardStatusTimer = setTimeout(() => showBoardStatus(''), text === 'Copied' ? COPIED_STATUS_MS : BOARD_STATUS_MS);
   }, 100);
 }
+
+// A tapped or focused toast stays until released, then gets its full timer again.
+function holdBoardStatus() {
+  if ($('board-status').hidden) return;
+  boardStatusHeld = true;
+  clearTimeout(boardStatusTimer);
+}
+
+function releaseBoardStatus() {
+  if (!boardStatusHeld) return;
+  boardStatusHeld = false;
+  const text = $('board-status').textContent;
+  if (text) boardStatusTimer = setTimeout(() => showBoardStatus(''), text === 'Copied' ? COPIED_STATUS_MS : BOARD_STATUS_MS);
+}
+
+$('board-status').addEventListener('pointerdown', holdBoardStatus);
+$('board-status').addEventListener('focusin', holdBoardStatus);
+$('board-status').addEventListener('focusout', releaseBoardStatus);
+document.addEventListener('pointerdown', (e) => { if (!$('board-status').contains(e.target)) releaseBoardStatus(); });
 
 function showCopyStatus(text) {
   clearCopyStatus();
