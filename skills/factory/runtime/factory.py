@@ -13,8 +13,8 @@
                                             recommendation, and questions indented under it
   factory.py backlog rework <job-id>        read a reworded feature on stdin, append it as
                                             (rework-of <job-id>), and close that rework job
-  factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes <text>]
-                         --chat-file <file> | --chat "<message>"
+  factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes-file <file>]
+                         --chat-file <file>
                                             make the dashboard's backlog decision from a person's chat
                                             message, print the job as JSON
   factory.py ideas [--limit N] [--max-inflight N] [--project <slug>]
@@ -101,12 +101,14 @@
                                             resume and allow need a human typing at a terminal
   factory.py suggest admit <file>           turn an explorer's suggestions file into idea cards that
                                             wait on a human (exit 3 when paused or none admitted)
-  factory.py suggest approve <job-id> <A|B|C> [--chat-file <file> | --chat "<message>"]
+  factory.py suggest approve <job-id> <A|B|C> [--chat-file <file>]
                                             a human at a terminal approves one option of such a card,
                                             or --chat-file records a person's chat message instead
-  factory.py control <job-id> <prioritize|unprioritize> --chat-file <file> | --chat "<message>"
-                                            make the dashboard's Prioritize or Remove priority from a
-                                            person's chat message, print the result as JSON
+  factory.py control <job-id> <prioritize|unprioritize|pause|resume> --chat-file <file>
+  factory.py control <job-id> close --reason-file <file> --chat-file <file>
+                                            make the dashboard's Prioritize, Remove priority, Pause,
+                                            Resume or Close from a person's chat message, print the
+                                            result as JSON
   factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
   factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
@@ -830,11 +832,13 @@ def board(factory, job_id):
         fail("only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's chat, "
              "run factory.py control <job-id> prioritize --chat-file <file>", 2)
     if "paused" in patch:
-        fail("only the dashboard sets paused", 2)
+        fail("only the dashboard and factory.py control set paused. To relay a person's chat, "
+             "run factory.py control <job-id> pause|resume --chat-file <file>", 2)
     if patch.get("babysit") is not None:
         fail("only the dashboard sets babysit; a session clears it with null", 2)
     if "close" in patch:
-        fail("only the dashboard and factory.py pickup set close", 2)
+        fail("only the dashboard, factory.py pickup and factory.py control set close. To relay a person's chat, "
+             "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -1810,8 +1814,8 @@ def backlog_rework(job_id):
         print(f"link: {backlog_link(home, line)}")
 
 
-BACKLOG_DECIDE_USAGE = ('usage: backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes <text>] '
-                        '--chat-file <file> | --chat "<message>"')
+BACKLOG_DECIDE_USAGE = ('usage: backlog decide <key> <approve|deny|rework> [--answers <file>] '
+                        '[--notes-file <file>] --chat-file <file>')
 BACKLOG_UNANSWERED = "answer every question to approve or deny; pass --answers with one line per question"
 
 
@@ -1905,22 +1909,23 @@ def backlog_answers(path, questions, decision):
     return "\n".join(out) if answered else ""
 
 
-def backlog_decide(key, decision, answers=None, notes=None, chat=None, chat_file=None):
+def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None):
     """Approve, deny or rework a backlog item from a person's chat message, with the dashboard's
     writes: the board job first, then the checked line. A line that changed meanwhile drops the job."""
     stored = {"approve": "approved", "deny": "denied", "rework": "rework"}.get(decision)
     if stored is None or not re.fullmatch(r"[0-9a-f]{12}", key):
         fail(BACKLOG_DECIDE_USAGE, 2)
-    quote = chat_quote(read_chat_file(chat_file), "--chat-file") if chat_file else chat_quote(chat)
-    if quote is None:
+    if chat_file is None:
         fail(BACKLOG_DECIDE_USAGE, 2)
-    note = (notes or "").strip()
-    if note:
+    quote = chat_quote(read_chat_file(chat_file))
+    note = ""
+    if notes_file is not None:
+        note = read_chat_file(notes_file, "--notes-file").strip()
         why = check_text(note, 1, 2000, multiline=True)
         if why:
-            fail(f"--notes {why}; nothing was changed", 2)
+            fail(f"--notes-file {why}; nothing was changed", 2)
     elif stored == "rework":
-        fail("rework needs --notes that say what to change", 2)
+        fail("rework needs --notes-file that says what to change", 2)
     home = factory_home()
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
     lines = [line.rstrip("\r") for line in (text if status == 200 else "").split("\n")]
@@ -1945,13 +1950,12 @@ def backlog_decide(key, decision, answers=None, notes=None, chat=None, chat_file
     local = [p.name for p in jobs.glob("*")] + [p.name for p in jobs.glob("*/*")]
     verb = {"approved": "Approved", "denied": "Denied", "rework": "Rework requested"}[stored]
 
-    def quoted(j):
+    def chat_saved(j):
         record = j.get("backlog")
-        return isinstance(record, dict) and record.get("line") == raw and record.get("via") == "chat" \
-            and record.get("quote") == quote
+        return isinstance(record, dict) and record.get("line") == raw and record.get("via") == "chat"
 
     def mine(j):
-        return quoted(j) and j["backlog"].get("decision") == stored
+        return chat_saved(j) and j["backlog"].get("decision") == stored
 
     def unstarted(j):
         return j.get("stage") == IDEA and j.get("claim") is None \
@@ -1962,12 +1966,15 @@ def backlog_decide(key, decision, answers=None, notes=None, chat=None, chat_file
         prior = next((j for j in data["jobs"] if mine(j)), None)
         if prior:
             return None, prior["id"]
-        # A run that saved another decision for this quote but never checked the line off.
-        stale = [j for j in data["jobs"] if quoted(j) and not mine(j)]
+        # A run that saved another decision for this line but never checked the line off.
+        stale = [j for j in data["jobs"] if chat_saved(j) and not mine(j)]
         for j in stale:
             if not unstarted(j):
-                fail(f"{j['id']} already holds another decision for this item and was picked up; "
-                     "nothing was changed", 6)
+                held = j["backlog"].get("decision")
+                again = {"approved": "approve", "denied": "deny", "rework": "rework"}.get(held)
+                fail(f"{j['id']} already holds the {held} decision for this item and was picked up, so nothing "
+                     f"was changed. To keep {held}, rerun backlog decide {key} {again}. To change it, decide the "
+                     f"item on the dashboard and close {j['id']} there.", 6)
         job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]], feature_slug(item),
                              archive_floor(data))
         data["jobs"] = [j for j in data["jobs"] if j not in stale]
@@ -2023,10 +2030,9 @@ def backlog_cmd(sub, item, *rest):
     if sub == "decide" and rest:
         flags = dict(zip(rest[1::2], rest[2::2]))
         if len(rest) % 2 == 0 or len(flags) != len(rest) // 2 \
-                or not set(flags) <= {"--answers", "--notes", "--chat", "--chat-file"} \
-                or {"--chat", "--chat-file"} <= set(flags):
+                or not set(flags) <= {"--answers", "--notes-file", "--chat-file"}:
             fail(BACKLOG_DECIDE_USAGE, 2)
-        return backlog_decide(item, rest[0], flags.get("--answers"), flags.get("--notes"), flags.get("--chat"),
+        return backlog_decide(item, rest[0], flags.get("--answers"), flags.get("--notes-file"),
                               flags.get("--chat-file"))
     flag, path = (rest + (None, None))[:2]
     if sub != "add" or len(rest) > 2 or flag not in (None, "--context") or (flag is None) != (path is None) \
@@ -2855,11 +2861,11 @@ def retro_backlog_admit(cards):
 
 
 CHAT_QUOTE_MAX = 500
-SUGGEST_APPROVE_USAGE = 'usage: suggest approve <job-id> <A|B|C> [--chat-file <file> | --chat "<message>"]'
+SUGGEST_APPROVE_USAGE = 'usage: suggest approve <job-id> <A|B|C> [--chat-file <file>]'
 
 
-def chat_quote(text, flag="--chat"):
-    """The stripped --chat message, None when it is missing or blank, or exit 2 when it breaks a text rule."""
+def chat_quote(text, flag="--chat-file"):
+    """The stripped chat message, None when it is blank, or exit 2 when it breaks a text rule."""
     text = (text or "").strip()
     if not text:
         return None
@@ -2869,26 +2875,26 @@ def chat_quote(text, flag="--chat"):
     return text
 
 
-def read_chat_file(path):
-    """The text of a --chat-file, refused when it is a link, empty or not UTF-8."""
+def read_chat_file(path, flag="--chat-file"):
+    """The text of a file flag that carries person text, refused when it is a link, empty or not UTF-8."""
     if is_link(path):
-        fail(f"--chat-file {path} is a symlink or junction; nothing was changed", 6)
+        fail(f"{flag} {path} is a symlink or junction; nothing was changed", 6)
     try:
         with open(path, encoding="utf-8", newline="") as f:
             text = f.read().replace("\r\n", "\n")
     except (OSError, UnicodeDecodeError):
-        fail(f"--chat-file {path}: cannot read it as UTF-8 text; nothing was changed", 2)
+        fail(f"{flag} {path}: cannot read it as UTF-8 text; nothing was changed", 2)
     if not text.strip():
-        fail(f"--chat-file {path} is empty; nothing was changed", 2)
+        fail(f"{flag} {path} is empty; nothing was changed", 2)
     return text
 
 
-def suggest_approve(job_id, option, chat=None, chat_file=None):
+def suggest_approve(job_id, option, chat_file=None):
     """A human at a terminal approves one option of a gated explorer card, or an orchestrator
     relays a person's chat message, so the ideas schedule may promote it."""
     if not JOB_ID.fullmatch(job_id) or ".." in job_id or option not in ("A", "B", "C"):
         fail(SUGGEST_APPROVE_USAGE, 2)
-    quote = chat_quote(read_chat_file(chat_file), "--chat-file") if chat_file else chat_quote(chat)
+    quote = chat_quote(read_chat_file(chat_file)) if chat_file is not None else None
     if quote is None:
         human_confirm(job_id, f"Type {job_id} to approve option {option}: ", "suggest approve")
     home = factory_home()
@@ -2932,55 +2938,74 @@ def suggest_cmd(sub, *args):
         suggest_admit(args[0])
     elif sub == "approve" and len(args) == 2:
         suggest_approve(*args)
-    elif sub == "approve" and len(args) == 4 and args[2] == "--chat":
-        suggest_approve(args[0], args[1], chat=args[3])
     elif sub == "approve" and len(args) == 4 and args[2] == "--chat-file":
         suggest_approve(args[0], args[1], chat_file=args[3])
     else:
         fail("usage: suggest admit <file> | " + SUGGEST_APPROVE_USAGE[len("usage: "):], 2)
 
 
-CONTROL_ACTIONS = ("prioritize", "unprioritize")
+CONTROL_ACTIONS = ("prioritize", "unprioritize", "pause", "resume", "close")
 PRIORITY_STAGES = (IDEA,) + IN_FLIGHT
-CONTROL_USAGE = 'usage: control <job-id> <prioritize|unprioritize> --chat-file <file> | --chat "<message>"'
+CONTROL_USAGE = ('usage: control <job-id> <prioritize|unprioritize|pause|resume> --chat-file <file> '
+                 '| control <job-id> close --reason-file <file> --chat-file <file>')
 
 
-def control_cmd(job_id, action, flag, value):
-    """Make the dashboard's Prioritize or Remove priority from a person's chat message."""
+def control_cmd(job_id, action, *flags):
+    """Make the dashboard's Prioritize, Remove priority, Pause, Resume or Close from a person's chat message."""
+    pairs = dict(zip(flags[::2], flags[1::2]))
+    want = {"--reason-file", "--chat-file"} if action == "close" else {"--chat-file"}
     if not JOB_ID.fullmatch(job_id) or ".." in job_id or action not in CONTROL_ACTIONS \
-            or flag not in ("--chat", "--chat-file"):
+            or len(flags) != 2 * len(want) or set(pairs) != want:
         fail(CONTROL_USAGE, 2)
-    quote = chat_quote(read_chat_file(value), "--chat-file") if flag == "--chat-file" else chat_quote(value)
-    if quote is None:
-        fail(CONTROL_USAGE, 2)
+    quote = chat_quote(read_chat_file(pairs["--chat-file"]))
+    if action == "close":
+        reason = read_chat_file(pairs["--reason-file"], "--reason-file").strip()
+        if not CLOSE_REASON.fullmatch(reason):
+            fail("--reason-file must be one line of 1 to 200 characters; nothing was changed", 2)
     home = factory_home()
     device = holder(home)[0]
+    record = {"via": "chat", "quote": quote, "by": device}
 
     def change(text):
         data = load_board(text)
         job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
         if job is None:
             fail(f"no job {job_id} on the board. Nothing was written.", 4)
-        if action == "prioritize":
+        stage, lead = job.get("stage"), lead_of(job)
+        if action in ("prioritize", "pause", "close"):
+            if action == "prioritize":
+                barred = stage not in PRIORITY_STAGES
+            else:
+                barred = stage in TERMINAL or action == "close" and stage == IDEA
+            why = None
             if not job.get("project"):
-                fail(f"{job_id} cannot be prioritized: it has no project. Nothing was written.", 2)
-            if job.get("stage") not in PRIORITY_STAGES:
-                fail(f"{job_id} cannot be prioritized: it is at {job.get('stage')}. Nothing was written.", 2)
-            lead = lead_of(job)
-            if lead:
-                fail(f"{job_id} cannot be prioritized: it is a rider of {lead}. Nothing was written.", 2)
-            if job.get("priority"):
-                return None, "unchanged"
-            stamp = now()
-            job["priority"] = {"at": stamp, "via": "chat", "quote": quote, "by": device}
+                why = "it has no project"
+            elif barred:
+                why = f"it is at {stage}"
+            elif lead:
+                why = f"it is a rider of {lead}"
+            if why:
+                word = {"prioritize": "prioritized", "pause": "paused", "close": "closed"}[action]
+                fail(f"{job_id} cannot be {word}: {why}. Nothing was written.", 2)
+        key = {"prioritize": "priority", "unprioritize": "priority", "pause": "paused", "resume": "paused",
+               "close": "close"}[action]
+        adding = action in ("prioritize", "pause", "close")
+        if bool(job.get(key)) == adding:
+            return None, ("unchanged", job.get(key))
+        stamp = now()
+        if action == "close":
+            job[key] = {"reason": reason, "at": stamp, **record}
+        elif adding:
+            job[key] = {"at": stamp, **record}
         else:
-            if not job.get("priority"):
-                return None, "unchanged"
-            stamp = now()
-            del job["priority"]
+            del job[key]
         job["updated"] = data["updated"] = stamp
-        return dump_board(data), action + "d"
-    print(json.dumps({"id": job_id, "action": action, "result": cas(home, "/api/board", change)}))
+        return dump_board(data), ("queued" if action == "close" else action + "d", job.get(key))
+    result, stored = cas(home, "/api/board", change)
+    out = {"id": job_id, "action": action, "result": result}
+    if action == "close":
+        out["reason"] = stored.get("reason") if isinstance(stored, dict) else None
+    print(json.dumps(out))
 
 
 def snapshot(repo, commit, dest):
@@ -8461,7 +8486,7 @@ COMMANDS["adopt-home"] = (adopt_home_cmd, 1, 1)
 COMMANDS["doctor"] = (doctor_cmd, 0, 0)
 COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
 COMMANDS["suggest"] = (suggest_cmd, 2, 5)
-COMMANDS["control"] = (control_cmd, 4, 4)
+COMMANDS["control"] = (control_cmd, 4, 6)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
 COMMANDS["experiment"] = (experiment_cmd, 2, 2)
 COMMANDS["unclaim"] = (unclaim, 1, 1)
