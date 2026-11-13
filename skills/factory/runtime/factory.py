@@ -4502,21 +4502,37 @@ def claim_babysit(home, job_id, device, minutes, paths):
     return cas(home, "/api/board", change)
 
 
+def babysit_argv(argv, job_id):
+    """argv with a workspace slug babysit-<id> and a title babysit <id>. A Paseo launcher that opens a new
+    workspace gets the slug right after run when it has none."""
+    argv = list(argv)
+    for flag, value in (("--worktree-slug", f"babysit-{job_id}"), ("--title", f"babysit {job_id}")):
+        if flag in argv[:-1]:
+            argv[argv.index(flag) + 1] = value
+    if Path(argv[0]).name == "paseo" and "--new-workspace" in argv and "--worktree-slug" not in argv \
+            and "run" in argv:
+        argv[argv.index("run") + 1:argv.index("run") + 1] = ["--worktree-slug", f"babysit-{job_id}"]
+    return argv
+
+
 def babysit_pass(home, data, device, minutes, paths, settings, dry):
-    """Run at most one /factory babysit for a job the dashboard handed to one: in the job's own idle Paseo agent when it has one on this host, else in a new session."""
-    statuses = None
+    """Run at most one /factory babysit for a job the dashboard handed to one: in the job's own Paseo agent
+    when it has one, else in a new session."""
+    statuses = ...
 
     def job_agent(j):
-        """(agent, status) of the job's Paseo agent on this host, else (None, None)."""
+        """(agent, state) for the job's Paseo link, else (None, None). state is idle, closed or running, or
+        foreign (another server), unanswered (paseo ls failed) or None (agent absent)."""
         nonlocal statuses
-        link, server = j.get("paseo"), paseo_server()
+        link = j.get("paseo")
         agent = link.get("agent") if isinstance(link, dict) else None
-        if not (server and link.get("server") == server and isinstance(agent, str)
-                and PASEO_ID.fullmatch(agent) and not agent.startswith("-")):
+        if not (isinstance(agent, str) and PASEO_ID.fullmatch(agent) and not agent.startswith("-")):
             return None, None
-        if statuses is None:
-            statuses = paseo_statuses() or {}
-        return agent, statuses.get(agent)
+        if link.get("server") != paseo_server():
+            return agent, "foreign"
+        if statuses is ...:
+            statuses = paseo_statuses()
+        return agent, "unanswered" if statuses is None else statuses.get(agent)
 
     def skip(j):
         """Why this job is not ready, or None."""
@@ -4533,9 +4549,13 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
         c = blocking(j, device, "", minutes)
         if c:
             return f"{head}: claimed by {c['device']} session {c.get('session')}"
-        agent, status = job_agent(j)
-        if status == "running":
+        agent, state = job_agent(j)
+        if state == "running":
             return f"{head}: agent {agent} is running"
+        if state == "foreign":
+            return f"{head}: agent {agent} lives on server {j['paseo'].get('server')}"
+        if state == "unanswered":
+            return f"{head}: paseo ls failed"
         reason = pickup_reason(home, project, paths, settings, device, dry)
         return f"{head}: {reason}" if reason else None
 
@@ -4551,7 +4571,7 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
             return
         template = route_launcher(home, route)
         given = values(j, tag, route)
-        ok, detail, log_path = launch_idea(home, given, route[0], launcher_argv(template, given),
+        ok, detail, log_path = launch_idea(home, given, route[0], babysit_argv(launcher_argv(template, given), j["id"]),
                                            launch_env(given, route[1], route[2]))
         if ok:
             print(f"launched babysit {j['id']} {j['project']} on {route[0]} session {tag}")
@@ -4566,9 +4586,9 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
             line = f"wait babysit {j['id']} {j['project']}: one babysit launch per run"
         elif line is None:
             ready = True
-            agent, status = job_agent(j)
+            agent, state = job_agent(j)
             route = pick_route(home)
-            if status == "idle":
+            if state in ("idle", "closed"):
                 if dry:
                     line = f"would send babysit {j['id']} {j['project']} to agent {agent}"
                 else:
@@ -4577,6 +4597,11 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
                         return
                     if paseo_send(agent, launch_prompt(f"/factory babysit {j['id']} --session {tag}")):
                         print(f"sent babysit {j['id']} {j['project']} to agent {agent} session {tag}")
+                        return
+                    if state == "idle":
+                        print(f"factory.py: pickup could not send babysit {j['id']} to agent {agent}: "
+                              "paseo send failed; the next run retries", file=sys.stderr)
+                        release_pickup_claim(home, j["id"], device, tag)
                         return
                     print(f"factory.py: pickup could not send babysit {j['id']} to agent {agent}: "
                           "paseo send failed; launching a new session", file=sys.stderr)
@@ -4591,7 +4616,8 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
                     f"{r[0]} until {active[r[0]]}" for r in read_routes(home))
             elif dry:
                 line = f"would launch babysit {j['id']} {j['project']} on {route[0]}: " \
-                    + shlex.join(launcher_argv(route_launcher(home, route), values(j, "<session>", route)))
+                    + shlex.join(babysit_argv(launcher_argv(route_launcher(home, route), values(j, "<session>", route)),
+                                          j["id"]))
             else:
                 tag = claim_babysit(home, j["id"], device, minutes, paths)
                 if tag is None:

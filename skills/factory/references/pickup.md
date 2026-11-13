@@ -50,13 +50,18 @@ Each run, in order:
   `would launch babysit ...` and `skip babysit <id> <project>: <reason>`. A failed launch
   releases the claim. This launch and babysat jobs do not count against `--limit` or the
   in-flight cap. The session follows [babysit](commands/babysit.md).
-  When the job's `paseo` link names an agent on this host's Paseo server, pickup reuses it.
-  An `idle` agent gets the command with `paseo send`: a dry run prints
-  `would send babysit <id> <project> to agent <agent>`, and a send prints
+  Every babysit goes to the job's own linked Paseo agent. On this host's Paseo server an
+  `idle` or `closed` agent gets the command with `paseo send` (a closed agent resumes): a dry
+  run prints `would send babysit <id> <project> to agent <agent>`, and a send prints
   `sent babysit <id> <project> to agent <agent> session <tag>`. A `running` agent skips the
-  job this run (`skip babysit <id> <project>: agent <agent> is running`). A `closed` or
-  missing agent, another server, or no answer from paseo launches a new session. A failed
-  send prints a stderr line and launches a new session with the same tag.
+  job this run (`skip babysit <id> <project>: agent <agent> is running`). An agent on another
+  server skips it (`agent <agent> lives on server <server>`), and so does a failed `paseo ls`
+  (`paseo ls failed`). An agent absent from `paseo ls`, or no link, launches a new session.
+  A failed send to an `idle` agent prints a stderr line, releases the claim and launches
+  nothing. A failed send to a `closed` agent prints a stderr line and launches a new session
+  with the same tag. A new babysit session gets workspace slug `babysit-<id>` and title
+  `babysit <id>`: pickup rewrites `--worktree-slug` and `--title` in the launcher, and inserts
+  `--worktree-slug` after `run` for a `paseo` launcher with `--new-workspace` that lacks it.
 - Picks the first route in `routes.md` that is not marked limited, then resolves
   the launcher for it. A config error exits 2 before anything is claimed.
 - Claims one idea at a time — the board compare-and-swap stops two hosts taking
