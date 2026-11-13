@@ -361,5 +361,6 @@ class RolesTest(IsolatedTestCase):
                        "rerun once per session", 'gh run rerun <run-id> --failed -R "$REPO"',
                        "Never merge while `stacked` is true.", '"stacked","base","next"', "Babysit pushes run hooks.",
                        '"review","bots","checks"', "A reply from the PR author answers the thread.",
+                       "still reads fix-reviews after a reply in every bot thread",
                        'git -C "$WT" fetch origin "<base>"', "merge `origin/<base>` (the reading's `base`) into `$WT`"):
             self.assertIn(phrase, babysit)

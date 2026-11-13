@@ -80,7 +80,9 @@ that line and stop. Otherwise act on `next`, then read again.
 - Reply in every thread `bots` counts, even when the code stays as it is. A reply from
   the PR author answers the thread.
 - When `fix-reviews` comes back with `review` not `changes` after you replied in every
-  bot thread and did not push, hand back.
+  bot thread and did not push, patch
+  `{"needs": "PR #<n> still reads fix-reviews after a reply in every bot thread: check the bot threads on GitHub, then press Babysit PR again", "babysit": null, "claim": null}`
+  and stop.
 - Push right after each commit. `pr-state` times its 120-second check window from the
   head commit's date, so a late push can make an empty check list read as passing.
 - Merge only with the two `gh pr merge` commands in the table.
