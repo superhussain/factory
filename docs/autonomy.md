@@ -95,7 +95,7 @@ flowchart LR
   `done` removes it.
 - **Claude only.** The `factory-explorer` role has Read, Grep and Glob only: no
   shell, write or web tool. OpenCode's installed copy carries no tool limit, so the
-  schedule stops with `no claude route` unless the picked route's `runtime` is
+  schedule stops with `no claude route: runtime <runtime>` unless the picked route's `runtime` is
   `claude`. `runtime` is the provider's base runtime, from the `extends` chain in
   this host's Paseo `config.json`, so a provider named `claude-x` that extends
   `opencode` stops.
@@ -332,7 +332,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 - **Hold.** The line waits in the backlog for a person, as before.
   The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board reads the stored verdicts of the lines it lists in one `POST /api/backlog/triage/verdicts` call per 50 lines. It reads again only when the listed lines change, and only for lines with no verdict yet. Opening a line with no verdict reads that line again. A line the Worker would refuse, such as one over 2000 characters, reads as no verdict and leaves the other lines' verdicts intact.
 - **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
-  verdict from `backlog_triage_pass`. `factory.py pickup` runs it before it claims ideas, never with `--dry-run`, and at most once every 30 minutes per host. The host's `backlog-triage-sweep.json` holds the start of the last sweep, and `factory.py pickup --triage-now` runs a sweep at once. Each sweep takes up to 20 unchecked lines in projects whose effective `triage.enabled` is true and reads their stored verdicts in one `POST /api/backlog/triage/verdicts`. A line another host already held is recorded without a post. The rest go with the indented block under each as context. Plain lines go up to 8 per `POST /api/backlog/triage/batch` call, one project per call, in file order. Lines whose context has a `## Question:` line then post alone to `POST /api/backlog/triage`. An older Worker answers the batch route with 404, and a batch it refuses whole gets a 400, so those lines post one at a time. In a batch reply, an entry the model answered unusably (502) warns and waits for the next sweep without ending it, and an entry refused with a 400 is recorded like a single 400. Held lines, and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this host never sends them again. `backlog add` records its held line there too. A 404, 409, 502 or 503 reply, or a network failure, warns and ends the sweep. That line and the rest are retried on the next sweep. Deleting the file
+  verdict from `backlog_triage_pass`. `factory.py pickup` runs it before it claims ideas, never with `--dry-run`, and at most once every 30 minutes per host. The host's `backlog-triage-sweep.json` holds the start of the last sweep, and `factory.py pickup --triage-now` runs a sweep at once. Each sweep takes up to 20 unchecked lines in projects whose effective `triage.enabled` is true and reads their stored verdicts in one `POST /api/backlog/triage/verdicts`. A line another host already held is recorded without a post. The rest go with the indented block under each as context. Plain lines go up to 8 per `POST /api/backlog/triage/batch` call, one project per call, in file order. In a live run, one batch of 8 plain lines sent 1724 input tokens against 2329 for 8 single calls, a saving of 26%. Lines whose context has a `## Question:` line then post alone to `POST /api/backlog/triage`. An older Worker answers the batch route with 404, and a batch it refuses whole gets a 400, so those lines post one at a time. In a batch reply, an entry the model answered unusably (502) warns and waits for the next sweep without ending it, and an entry refused with a 400 is recorded like a single 400. Held lines, and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this host never sends them again. `backlog add` records its held line there too. A 404, 409, 502 or 503 reply, or a network failure, warns and ends the sweep. That line and the rest are retried on the next sweep. Deleting the file
   only causes rescoring. A line whose new idea row could not be checked off or removed goes
   there too, so it is never queued twice.
 - **Failure.** A 404 from an older Worker means off. Any other error prints a warning,
@@ -383,8 +383,8 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   Workers AI usage bills against the account. Without the binding the route answers 503,
   and lines wait. In a 36-call live run, a call sent a median of 292 input tokens, which costs about
   $0.000011, or about 1 neuron. The free tier of 10,000 neurons a day covers about 9,900
-  calls. A question item with 3 questions of 4 options is an estimated 2000 to 2500 input
-  tokens, about 8 neurons. That is a guess until a live run measures it.
+  calls. In a live run, a question item with 3 questions of 4 options sent 3075 input
+  tokens, about 11 neurons, and a plain item sent 292, about 1 neuron.
 
 To stop triage, set it to Off in Settings, Pipeline. Ideas it already queued stay
 ordinary ideas, and a person can discard them.
