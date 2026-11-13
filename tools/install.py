@@ -18,7 +18,7 @@ REQUIRED = (
     "SKILL.md", "runtime/factory.py", "runtime/paseo_stalls.py", "runtime/pr_screenshots.py",
     "templates/config.md", "templates/project.md", "references/execution.md", "references/integrations.md",
     "references/pickup.md", "references/visuals.md", "references/chat-decisions.md",
-    "references/project-settings.md", "references/dashboard.md", "references/needs.md", "references/schedules.md",
+    "references/project-settings.md", "references/dashboard.md", "references/board.md", "references/needs.md", "references/schedules.md",
     "references/walkthrough.html", "schedules/explore.md", "schedules/resume.md", "schedules/retro.md",
 ) + tuple("references/commands/" + name + ".md" for name in (
     "feature", "next", "idea", "deny-notes", "babysit", "approve", "approve-spec", "rework", "recover", "build", "init", "handoff",
