@@ -277,14 +277,14 @@ changes nothing. Then install one timer per host.
 - `pickup` claims prioritized ideas before older ones, across projects too. Gates, caps and routes still apply.
 - The dashboard shows a prioritized job at the top of its column in idea, spec, build, review and approve.
 - When the job's session on this host was claimed before `priority.at` and its Paseo agent is not closed, `pickup` sends the agent one fixed nudge with `paseo send --no-wait`, then sets `priority.nudged`. A failed send is printed on stderr and retried next run.
-- Only the dashboard and `pickup` write `priority`. `board` refuses a `priority` patch with exit 2.
+- Only the dashboard, `pickup` and `factory.py control` write `priority`. `board` refuses a `priority` patch with exit 2.
 
 ## Pausing a job
 
 - The dashboard's Pause pickup item sets `paused = {at}` on a job with a project that is not merged or closed. Resume pickup deletes it.
 - `pickup` does not claim, take over or nudge a paused job, and its dry run prints `skip <id> <project>: paused` or `skip stall <agent> <id>: paused`. `stuck` does not resume it.
 - A session already running on a paused job keeps running. Pausing stops new starts only.
-- Only the dashboard writes `paused`. `board` refuses a `paused` patch with exit 2.
+- Only the dashboard and `factory.py control` write `paused`. `board` refuses a `paused` patch with exit 2.
 
 ## Closing a job
 
@@ -292,7 +292,7 @@ changes nothing. Then install one timer per host.
 - `pickup` runs its close pass right after the move stops. It writes `decision.md` with first line `CLOSED: <reason>`, keeping earlier text under `## Earlier decision`, and only then sets the stage to `closed`, the note to the reason and `close.closed`. Its dry run prints `would close <id> <project>`, or `skip close <id> <project>: claimed by <device> session <tag>` for a job with a live claim.
 - When the job has a `pr` in the project's `repo`, the close pass runs `gh pr view`, and for an open PR `gh pr close --comment`, before it writes `decision.md`. It reports a merged or closed PR as such before it checks the PR's head branch or the job's branch. It closes an open PR only when the job has a branch, and the PR's head branch equals it and lives in the project's repo, not a fork. The comment opens with the agent disclosure marker and links `<api_url>/#<id>/decision`. When gh is missing, fails or times out, the job still closes and `decision.md` says why the PR stayed open.
 - A session on a closing job is refused at its next `board` or `hold` call with exit 6. `board` first releases that session's own claim, so the next pickup can close the job.
-- Only the dashboard and `pickup` write `close`. `board` refuses a `close` patch with exit 2.
+- Only the dashboard, `pickup` and `factory.py control` write `close`. `board` refuses a `close` patch with exit 2.
 - The next pickup run on a host that still holds a closed job's worktree or `factory/<id>` branch runs `cleanup` on it when the project's pickup is on and lists that host, once per host, and records `close.cleanup.<host> = {at, left}`. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit and no worktree has it checked out. It deletes that branch with `git update-ref -d` guarded by the branch's current commit, never `git branch -D`. The kept branch's `left` entry ends with `and origin could not be reached`, `and origin has no such branch` or `and origin is at a different commit`. Its dry run prints `would clean up <id> <project>`. The close pass's `decision.md` names each host the board records as holding the job, from `claim` and every `move` holder, that the project's pickup is off for or does not list, and says which of the two it is. When it cannot read the pickup hosts, it names every recorded holder and says why it could not read them.
 
 ## Logs and limits
