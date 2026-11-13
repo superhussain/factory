@@ -5413,7 +5413,11 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
         if dry:
             print(f"would clean up {job_id} {project}")
             continue
-        _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
+        try:
+            _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
+        except Exception as e:
+            print(f"factory.py: pickup could not clean up {job_id} {project}: {e}", file=sys.stderr)
+            continue
 
         def change(text, job_id=job_id, stage=stage, key=key, field=field, at=c[field], left=left):
             board = load_board(text)
