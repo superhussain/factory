@@ -366,7 +366,7 @@ class SuggestTest(SuggestCase):
         tree = ast.parse(Path(factory.__file__).read_text())
         names = {"load_autonomy", "check_text", "check_untrusted", "check_suggestions", "fingerprint", "classify",
                  "quote", "render_card", "suggest_admit", "suggest_approve", "suggest_cmd", "chat_quote",
-                 "read_chat_file", "retro_marks", "retro_backlog_admit"}
+                 "neutralize_chat", "read_chat_file", "retro_marks", "retro_backlog_admit"}
         banned = {"subprocess", "run", "git", "git_ok", "origin_git", "system", "Popen", "paseo_session", "worktree"}
         found = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names}
         self.assertEqual(set(found), names)
@@ -578,7 +578,7 @@ class SuggestTest(SuggestCase):
         self.assertIn("--chat-file : cannot read it as UTF-8 text; nothing was changed", err)
         asked.assert_not_called()
         path = self.home / "chat.txt"
-        for message, why in (("approve A, see https://example.test/x", "must not hold a code fence or a link"),
+        for message, why in (("approve A, " + "ghp_" + "a" * 24, "looks like a secret"),
                              ("a" * 501, "must be a string of 1-500 characters")):
             with self.subTest(message=message[:20]):
                 path.write_text(message, encoding="utf-8")
@@ -614,9 +614,9 @@ class SuggestTest(SuggestCase):
         empty = self.home / "empty.txt"
         empty.write_text("  \n", encoding="utf-8")
         bad = self.home / "bad.txt"
-        bad.write_text("see https://example.test/x", encoding="utf-8")
+        bad.write_text("approve A, " + "ghp_" + "a" * 24, encoding="utf-8")
         for file, err in ((empty, f"--chat-file {empty} is empty; nothing was changed"),
-                          (bad, "--chat-file must not hold a code fence or a link; nothing was changed")):
+                          (bad, "--chat-file looks like a secret; nothing was changed")):
             with self.subTest(file=file.name):
                 code, out, asked = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat-file", str(file),
                                                   tty=True, typed=card)
@@ -630,6 +630,25 @@ class SuggestTest(SuggestCase):
         approved = self.board["jobs"][-1]["origin"]["approved"]
         self.assertEqual((approved["via"], approved["quote"]), ("chat", message))
         self.assertTrue(self.board["jobs"][-1]["idea"].endswith(f': "{message}"'))
+
+    def test_chat_file_fence_and_link_are_neutralized(self):
+        self.admit(suggestions())
+        card = self.board["jobs"][-1]["id"]
+        path = self.home / "chat.txt"
+        path.write_text("```\napprove A\n```", encoding="utf-8")
+        code, err, _ = self.run_human(factory.suggest_cmd, "approve", card, "A", "--chat-file", str(path), tty=False)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.board["jobs"][-1]["origin"]["approved"]["quote"], "approve A")
+
+    def test_neutralize_chat(self):
+        for text, want in (
+                ("approve https://factory.example.test/#/backlog/0123456789ab", "approve (link: factory.example.test)"),
+                ("see [card](https://www.x.test/a)", "see (link: x.test)"),
+                ("http://user:pw@10.0.0.1:8080/x", "(link: 10.0.0.1)"),
+                ("```text\nok", "text\nok"),
+                ("plain words", "plain words")):
+            with self.subTest(text=text):
+                self.assertEqual(factory.neutralize_chat(text), want)
 
     def test_ideas_skips_gated(self):
         self.admit(suggestions())
