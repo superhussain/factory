@@ -160,6 +160,22 @@ class BacklogDecideTests(TriageFixture):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.board()[-1]["backlog"]["answers"], "- Guard the ls alias: Interactive only, Drop the alias")
 
+    def test_answers_match_labels_with_commas(self):
+        context = ("  Recommend: approve\n  The alias crashes shells with no terminal.\n\n"
+                   "  ## Question: Revoke scope\n  Which revokes are allowed?\n  Pick: many\n"
+                   "  - Yes, confirm cross-owner revokes: Ask before each one\n"
+                   "  - Log each revoke: Keep a record\n")
+        self.files["/api/backlog"] = f"# Backlog\n{LINE}\n{context}"
+        before = dict(self.files)
+        code, _, err = self.decide("approve", "- Revoke scope: Yes, Log each revoke")
+        self.assertEqual(code, 2)
+        self.assertIn("Yes is not an option of Revoke scope", err)
+        self.unchanged(before)
+        answer = "- Revoke scope: Yes, confirm cross-owner revokes, Log each revoke"
+        code, _, err = self.decide("approve", answer)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.board()[-1]["backlog"]["answers"], answer)
+
     def test_questions_count_utf16_units(self):
         def context(reasons, header="Guard the ls alias"):
             return (f"Recommend: approve\n{reasons}\n\n## Question: {header}\nHow should the alias be guarded?\n"

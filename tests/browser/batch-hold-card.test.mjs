@@ -1,5 +1,6 @@
-// A follow-up or triage-queued idea shows "Held for batching". One a person added, prioritized
-// or a session claimed does not.
+// A held follow-up or triage-queued idea shows pickup's batch state: the first of a ready group
+// says "Batch ready", the rest batch behind it, and a group short of the hold waits. One a person
+// added, prioritized or a session claimed shows no held chip.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -7,10 +8,12 @@ import {
   withBrowserFixture,
   seedProject,
   seedBoard,
+  seedPipeline,
   blockLiveEvents,
 } from "../support/browser-server.mjs";
 
 const AT = "2026-01-02T12:00:00Z";
+const RECENT = new Date(Date.now() - 3.5 * 3600000).toISOString().replace(/\.\d{3}Z$/, "Z");
 const FOLLOW = [{ id: "090-sample-old", kind: "follow-up-of" }];
 const idea = (id, extra) => ({
   id,
@@ -31,36 +34,49 @@ const JOBS = [
   idea("104-triage-item", { backlog: { by: "triage" } }),
   idea("105-person-item", { refs: FOLLOW, capture_id: "00000000-0000-4000-8000-000000000105" }),
   idea("106-rushed-item", { refs: FOLLOW, priority: { at: AT } }),
+  idea("201-wait-a", { project: "other", refs: FOLLOW, updated: RECENT }),
+  idea("202-wait-b", { project: "other", refs: FOLLOW, updated: RECENT }),
 ];
+const project = (title) => `---\nrepo: example/sample\nbase: main\ntitle: ${title}\n---\n`;
 
 test("held for batching chip", { timeout: 120000 }, async () => {
   await prepareAssets();
   await withBrowserFixture(async ({ browser, origin }) => {
-    await seedProject(
-      origin,
-      "sample",
-      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
-    );
+    await seedProject(origin, "sample", project("Synthetic sample"));
+    await seedProject(origin, "other", project("Synthetic other"));
+    await seedPipeline(origin, { schema: 1, hold: { min_ideas: 3, max_wait_hours: 24 } });
     await seedBoard(origin, JOBS);
     const errors = [];
     const page = await browser.newPage();
     page.on("pageerror", (error) => errors.push(String(error)));
     await blockLiveEvents(page);
     await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector('.card[data-id="106-rushed-item"]');
-    const chips = await page.$$eval(".card", (cards) =>
+    await page.waitForFunction(() =>
+      document
+        .querySelector('.card[data-id="201-wait-a"] .chip.held')
+        ?.textContent.includes("of 3,"),
+    );
+    const held = await page.$$eval(".card", (cards) =>
       Object.fromEntries(
-        cards.map((c) => [
-          c.dataset.id,
-          [...c.querySelectorAll(".chip")].map((chip) => chip.textContent),
-        ]),
+        cards
+          .filter((c) => c.querySelector(".chip.held"))
+          .map((c) => [c.dataset.id, c.querySelector(".chip.held").textContent]),
       ),
     );
-    const held = Object.keys(chips).filter((id) => chips[id].includes("Held for batching"));
-    assert.deepEqual(held.sort(), ["102-move-comment", "104-triage-item"]);
+    assert.deepEqual(held, {
+      "102-move-comment": "Batch ready",
+      "104-triage-item": "Batches behind 102-move-comment",
+      "201-wait-a": "Waits for a batch (2 of 3, 3h of 24h)",
+      "202-wait-b": "Waits for a batch (2 of 3, 3h of 24h)",
+    });
     assert.match(
-      await page.$eval('.card[data-id="102-move-comment"] .chip', (el) => el.title),
+      await page.$eval('.card[data-id="102-move-comment"] .chip.held', (el) => el.title),
       /Settings, Pipeline, Batch follow-ups sets the numbers\.$/,
+    );
+    const wait = await page.$eval('.card[data-id="201-wait-a"] .chip.held', (el) => el.title);
+    assert.ok(
+      wait.startsWith("Waits for a batch (2 of 3, 3h of 24h). Pickup holds this idea"),
+      wait,
     );
     assert.deepEqual(errors, []);
   });

@@ -210,6 +210,31 @@ const CAPTURE_JOBS = [
     updated: "2026-01-02T12:00:00Z",
     refs: [{ id: "090-sample-old", kind: "follow-up-of" }],
   },
+  {
+    id: "107-held-rider",
+    project: "sample",
+    title: "Synthetic held rider",
+    stage: "idea",
+    idea: "Synthetic held rider",
+    updated: "2026-10-27T09:00:00Z",
+    refs: [{ id: "090-sample-old", kind: "follow-up-of" }],
+  },
+  {
+    id: "106-chat-approved",
+    project: "sample",
+    title: "Synthetic chat approved",
+    stage: "idea",
+    idea: "Synthetic chat approved",
+    updated: "2026-01-02T12:00:00Z",
+    backlog: {
+      line: "- [ ] sample: Synthetic chat approved",
+      decision: "approved",
+      at: "2026-01-02T12:00:00Z",
+      via: "chat",
+      quote: "Approve the export idea.",
+      by: "host-a",
+    },
+  },
 ];
 const CAPTURE_BACKLOG_CONTEXT = [
   "Recommend: approve",
@@ -1042,6 +1067,16 @@ async function capture(outdir, referencePath) {
       return clipOf(page, wrap);
     };
     await view("held-card-390", 390, 844, "dark", openHeldCard, true);
+    const openIdeaChips = async (page) => {
+      const wrap = (id) => `.card-wrap:has(.card[data-id="${id}"])`;
+      await page.evaluate(
+        (s) => document.querySelector(s).scrollIntoView({ block: "center", inline: "center" }),
+        wrap("107-held-rider"),
+      );
+      return clipOf(page, wrap("102-move-comment"), wrap("106-chat-approved"));
+    };
+    await view("idea-chips-390", 390, 844, "dark", openIdeaChips, true);
+    await view("idea-chips-1280", 1280, 900, "light", openIdeaChips);
     // The reference has no agents table, so its side shows the drawer head alone.
     const openAgentRuns = async (page, side) => {
       await page.evaluate(() => {
