@@ -3132,14 +3132,23 @@ def provider_runtime(provider):
     return seen[-1]
 
 
+def check_limit_name(home, name):
+    """True when name is the experiment, False when it is a route, else exit 2 naming what is accepted."""
+    routes = [r[0] for r in read_routes(home)]
+    experiment = read_experiment(home, routes)
+    if experiment and name == experiment["name"]:
+        return True
+    if name in routes:
+        return False
+    path = Path(home, "routes.md")
+    if experiment:
+        fail(f"unknown route or experiment {name!r}: not in {path}", 2)
+    fail(f"unknown route {name!r}: not in {path}", 2)
+
+
 def limit_route(home, name, minutes):
     """Mark one route or the experiment limited for minutes from now, and return its limited_until."""
-    valid = [r[0] for r in read_routes(home)]
-    experiment = read_experiment(home, valid)
-    if experiment:
-        valid.append(experiment["name"])
-    if name not in valid:
-        fail(f"unknown route {name!r}: not in {Path(home, 'routes.md')}", 2)
+    check_limit_name(home, name)
     stamp = now()
     limits = {n: until for n, until in read_limits(home).items() if until > stamp}
     limits[name] = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -3156,8 +3165,16 @@ def routes_cmd(sub, *args):
         routes = read_routes(home)
         active = {name: until for name, until in read_limits(home).items() if until > stamp}
         if sub == "list":
-            print(json.dumps([{"route": n, "provider": p, "model": m, **({"effort": e} if e else {}),
-                               "limited_until": active.get(n)} for n, p, m, e in routes], indent=2))
+            rows = [{"route": n, "provider": p, "model": m, **({"effort": e} if e else {}),
+                     "limited_until": active.get(n)} for n, p, m, e in routes]
+            experiment = read_experiment(home, [r[0] for r in routes])
+            if experiment:
+                rows.append({"experiment": experiment["name"], "provider": experiment["provider"],
+                             "model": experiment["model"],
+                             **({"effort": experiment["effort"]} if experiment["effort"] else {}),
+                             "percent": experiment["percent"],
+                             "limited_until": active.get(experiment["name"])})
+            print(json.dumps(rows, indent=2))
             return
         route = pick_route(home)
         if route is None:
@@ -3170,12 +3187,12 @@ def routes_cmd(sub, *args):
                               or not re.fullmatch(r"[1-9][0-9]*", args[2]) or int(args[2]) > 1440):
             fail("usage: routes limit <name> [--minutes N], with N from 1 to 1440", 2)
         name = args[0]
+        key = "experiment" if check_limit_name(home, name) else "route"
         until = limit_route(home, name, int(args[2]) if len(args) == 3 else 60)
-        print(json.dumps({"route": name, "limited_until": until}, indent=2))
+        print(json.dumps({key: name, "limited_until": until}, indent=2))
     elif sub == "clear" and len(args) == 1:
         name = args[0]
-        if name not in [r[0] for r in read_routes(home)]:
-            fail(f"unknown route {name!r}: not in {Path(home, 'routes.md')}", 2)
+        check_limit_name(home, name)
         limits = read_limits(home)
         if name in limits:
             del limits[name]
