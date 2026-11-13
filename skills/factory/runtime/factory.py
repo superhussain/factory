@@ -1821,7 +1821,7 @@ def backlog_questions(context):
     while end > top and not lines[end].strip(" \t"):
         end -= 1
     lines = lines[top:end + 1]
-    if lines[0] not in ("Recommend: approve", "Recommend: deny") or len("\n".join(lines)) > 6000:
+    if lines[0] not in ("Recommend: approve", "Recommend: deny") or utf16_len("\n".join(lines)) > 6000:
         return []
     first = next((i for i, line in enumerate(lines) if line.startswith("## Question:")), len(lines))
     if not "\n".join(lines[1:first]).strip():
@@ -1834,7 +1834,7 @@ def backlog_questions(context):
             return []
         header = head[len("## Question:"):].strip()
         picks = [line for line in sect if line.startswith("Pick:")]
-        if not 0 < len(header) <= 60 or len(picks) != 1 or picks[0] not in ("Pick: one", "Pick: many"):
+        if not 0 < utf16_len(header) <= 60 or len(picks) != 1 or picks[0] not in ("Pick: one", "Pick: many"):
             return []
         at = sect.index(picks[0])
         rows = [re.fullmatch(r"- (.+?)(?::\s+(.+))?", line) for line in sect[at + 1:] if line.strip()]

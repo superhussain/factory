@@ -148,6 +148,17 @@ class BacklogDecideTests(TriageFixture):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.board()[-1]["backlog"]["answers"], "- Guard the ls alias: Interactive only, Drop the alias")
 
+    def test_questions_count_utf16_units(self):
+        def context(reasons, header="Guard the ls alias"):
+            return (f"Recommend: approve\n{reasons}\n\n## Question: {header}\nHow should the alias be guarded?\n"
+                    "Pick: one\n- Interactive only (recommended): Alias ls only in interactive shells\n"
+                    "- Drop the alias: Remove it\n")
+        questions = self.module.backlog_questions
+        self.assertEqual(questions(context("Guard it.", "\U0001F600" * 31)), [])
+        self.assertEqual(questions(context("\U0001F600" * 2990)), [])
+        self.assertEqual(questions(context("a" * 2990)), [{"header": "Guard the ls alias", "pick": "one",
+                                                           "labels": ["Interactive only", "Drop the alias"]}])
+
     def test_unparsed_context_has_no_questions(self):
         self.files["/api/backlog"] = f"# Backlog\n{LINE}\n  Retro: from run 20261111T090000Z-a1b2c3\n"
         code, _, err = self.decide("approve", None)
