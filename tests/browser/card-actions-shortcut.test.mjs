@@ -84,6 +84,9 @@ const picker = (page) =>
     options: [...document.querySelectorAll('#job-results [role="option"] .title')].map(
       (el) => el.textContent,
     ),
+    headings: [...document.querySelectorAll("#job-results .job-section-heading")].map(
+      (el) => el.textContent,
+    ),
   }));
 
 const focused = (page, id) =>
@@ -127,6 +130,7 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
         "Open in Session app",
         "Open in Session",
       ]);
+      assert.deepEqual(state.headings, ["Actions", "Links"]);
       assert.equal(state.count, labels.length + " actions · 3 links");
       assert.ok(labels.length > 0);
       assert.equal(await page.$eval(MENU, (el) => el.hidden), true);
@@ -159,6 +163,7 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
       const idea = await picker(page);
       assert.equal(idea.heading, `Actions for ${IDEA}`);
       assert.equal(idea.list, "Actions");
+      assert.deepEqual(idea.headings, []);
       await page.keyboard.press("Escape");
       await page.waitForFunction(() => !document.getElementById("job-picker").open);
       assert.equal(await focused(page, IDEA), true);
@@ -185,6 +190,7 @@ test("card actions shortcut", { timeout: 180000 }, async (t) => {
     await t.test("switch to jumper", async () => {
       await openActions(page, ID);
       await page.keyboard.type("pau");
+      assert.deepEqual((await picker(page)).headings, ["Actions"]);
       await page.keyboard.down("Control");
       await page.keyboard.press("k");
       await page.keyboard.up("Control");

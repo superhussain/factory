@@ -6371,7 +6371,11 @@ function renderJobActionResults() {
   $('job-results').setAttribute('aria-label', linkRows.length ? 'Actions and links' : 'Actions');
   $('job-empty').textContent = !j ? 'This job is no longer on the board' : linkRows.length ? 'No matching actions or links' : 'No matching actions';
   $('job-empty').hidden = jobResults.length !== 0;
-  renderPickerRows();
+  const sections = [
+    { id: 'actions', title: 'Actions', rows: actions },
+    { id: 'links', title: 'Links', rows: links },
+  ].filter((section) => section.rows.length);
+  renderPickerRows(linkRows.length ? sections : null);
 }
 
 const cardActionItems = () => [...$('card-actions-menu').children].filter((b) => !b.hidden);
