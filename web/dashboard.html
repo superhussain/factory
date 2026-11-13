@@ -1332,7 +1332,7 @@ function renderAgentRuns(j) {
       const a = document.createElement('a'), label = factoryConfig.agent_links[kind].label;
       a.href = links[kind];
       a.textContent = label;
-      a.setAttribute('aria-label', 'Open the ' + r.role + ' run in ' + label);
+      a.setAttribute('aria-label', 'Open the ' + (r.role || 'agent') + ' run in ' + label);
       if (kind === 'web') {
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
