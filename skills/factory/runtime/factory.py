@@ -7573,7 +7573,7 @@ RETRO_HEADERS = re.compile(
     r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)[^\r\n'\"\\]+")
 RETRO_URL_CREDS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{0,31}://)[^/\s@]+@")
 RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
-RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)[^\s:]*:\S+")
+RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)(?!=?\d+:\d+(?!\S))[^\s:]*:\S+")
 RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential"
 RETRO_SECRET_WORD = re.compile(r"(?i)(?:" + RETRO_SECRET_WORDS + ")")
 RETRO_COUNT_WORD = re.compile(r"(?i)tokens")
