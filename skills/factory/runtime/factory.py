@@ -5338,6 +5338,9 @@ def pr_reading(pr, base):
         view = None
     if not isinstance(view, dict):
         fail("gh pr view printed no JSON object", 5)
+    target = view.get("baseRefName") or base
+    if not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9._/-]{1,255}", target):
+        fail("gh printed an unusable baseRefName", 5)
     listed = pr_checks(pr)[0]
     if view.get("statusCheckRollup") and not listed:
         fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5)
@@ -5371,7 +5374,7 @@ def pr_reading(pr, base):
                          "gh api graphql").strip() == "true"
     queued = in_queue or bool(view.get("autoMergeRequest"))
     conflict = view.get("mergeStateStatus") == "DIRTY"
-    stacked = bool(view.get("baseRefName")) and view.get("baseRefName") != base
+    stacked = target != base
     if state in ("merged", "closed"):
         step = state
     elif unanswered:
@@ -5391,7 +5394,7 @@ def pr_reading(pr, base):
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none",
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
-            "next": step}
+            "base": target, "next": step}
 
 
 def pr_state_cmd(target, *args):
