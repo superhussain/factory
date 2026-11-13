@@ -55,6 +55,8 @@ factory.py needs answer <job-id> --answers <file> --chat-file <file>
   question. The answer is option labels joined by `, `, and may end with
   `. Other: <text>`, or be only `Other: <text>`.
 - Rework needs `--notes-file` and accepts `no answer` for a question.
+- A rerun after a failed write reuses the job it saved. A job whose line is already
+  checked off is never reused, so a line re-added word for word gets a new job.
 - After it succeeds, tell the person the printed job id and decision.
 
 ## Needs answers

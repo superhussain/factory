@@ -120,6 +120,9 @@ The token is optional. Create a Buildkite API access token with the `read_builds
 `read_build_logs` scopes and store it as `BUILDKITE_API_TOKEN` in `<home>/.env`, never in
 `config.md`, argv or the environment. It is sent only to `https://api.buildkite.com`.
 Without it, `ci_log.problem` says what to set and the reading is otherwise unchanged.
+Add `buildkite_org: <org slug>` to the project file's frontmatter. `pr-state` reads a log
+only when the failing check's link names that org. Without the key, or for a link to
+another org, `ci_log.problem` says why and nothing is sent to Buildkite.
 
 ## Private evidence and images
 

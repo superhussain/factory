@@ -183,10 +183,10 @@ function validateProjectDocument(text) {
   if (lines[0] !== "---" || end < 0) return "project document needs closed --- frontmatter";
   const meta = new Map();
   const fieldsError =
-    "project frontmatter allows one repo, base and title, plus an optional archive";
+    "project frontmatter allows one repo, base and title, plus an optional archive and buildkite_org";
   for (const line of lines.slice(1, end)) {
     if (!line.trim() || line.trim().startsWith("#")) continue;
-    const match = /^(repo|base|title|archive):\s*(.*)$/.exec(line);
+    const match = /^(repo|base|title|archive|buildkite_org):\s*(.*)$/.exec(line);
     if (!match || meta.has(match[1])) return fieldsError;
     let value = match[2].trim();
     if (/^["']|["']$/.test(value)) {
@@ -195,7 +195,8 @@ function validateProjectDocument(text) {
     } else if (/^[\[{!&*|>]/.test(value)) return fieldsError;
     meta.set(match[1], value);
   }
-  if (meta.size !== 3 + (meta.has("archive") ? 1 : 0)) return fieldsError;
+  if (meta.size !== 3 + (meta.has("archive") ? 1 : 0) + (meta.has("buildkite_org") ? 1 : 0))
+    return fieldsError;
   const repo = meta.get("repo"),
     base = meta.get("base"),
     title = meta.get("title"),
@@ -206,6 +207,8 @@ function validateProjectDocument(text) {
       value.split("/").some((p) => p === "." || p === ".."));
   if (badRepo(repo)) return "invalid project repo";
   if (badRepo(archive)) return "invalid project archive";
+  if (meta.has("buildkite_org") && !/^[A-Za-z0-9-]{1,100}$/.test(meta.get("buildkite_org")))
+    return "invalid project buildkite_org";
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(base) ||
     base.includes("..") ||

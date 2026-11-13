@@ -238,6 +238,25 @@ class BacklogDecideTests(TriageFixture):
         self.assertEqual(self.board()[-1]["backlog"]["quote"], MESSAGE)
         self.assertIn("- [x] sample: Guard the ls alias (004-guard-the-ls)", self.files["/api/backlog"])
 
+    def test_a_readded_line_gets_a_new_job(self):
+        self.assertEqual(self.decide("approve")[0], 0)
+        self.files["/api/backlog"] += f"{LINE}\n{CONTEXT}"
+        code, out, err = self.decide("approve")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["id"], "005-guard-the-ls")
+        self.assertEqual([j["id"] for j in self.board()], ["003-old-job", "004-guard-the-ls", "005-guard-the-ls"])
+        self.assertIn("- [x] sample: Guard the ls alias (004-guard-the-ls)", self.files["/api/backlog"])
+        self.assertIn("- [x] sample: Guard the ls alias (005-guard-the-ls)", self.files["/api/backlog"])
+
+    def test_a_readded_line_keeps_the_earlier_denied_job(self):
+        self.assertEqual(self.decide("deny", "- Guard the ls alias: Drop the alias")[0], 0)
+        self.files["/api/backlog"] += f"{LINE}\n{CONTEXT}"
+        code, out, err = self.decide("approve")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["id"], "005-guard-the-ls")
+        self.assertEqual([(j["id"], j["stage"]) for j in self.board()[1:]],
+                         [("004-guard-the-ls", "closed"), ("005-guard-the-ls", "idea")])
+
     def test_chat_file(self):
         path = self.dir / "chat.txt"
         path.write_text(MESSAGE + "\n", encoding="utf-8")

@@ -67,7 +67,8 @@ class PrStateTest(IsolatedTestCase):
         self.addCleanup(temp.cleanup)
         self.home = Path(temp.name).resolve()
         (self.home / "projects").mkdir()
-        (self.home / "projects" / "sample.md").write_text("---\nrepo: example/sample\nbase: main\n---\n# Sample\n")
+        (self.home / "projects" / "sample.md").write_text(
+            "---\nrepo: example/sample\nbase: main\nbuildkite_org: example-org\n---\n# Sample\n")
         self.now = 0.0
 
     def sleep(self, seconds):
@@ -376,6 +377,25 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual(problem(env, {}, down=True), "can't reach Buildkite: refused for [token]")
         error = factory.http.client.IncompleteRead(b"")
         self.assertEqual(problem(env, {}, down=True), "can't reach Buildkite: IncompleteRead(0 bytes read)")
+
+    def test_a_link_to_another_org_reads_no_log(self):
+        (self.home / ".env").write_text(f"BUILDKITE_API_TOKEN={TOKEN}\n")
+        code, out, err, _ = self.state([(view(), buildkite("https://buildkite.com/other-org/payroll/builds/77"))])
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["next"], reading["ci_log"]["problem"]), ("fix-ci", "the check links to Buildkite "
+                         "org other-org, not the project's buildkite_org example-org"))
+        self.assertEqual(self.buildkite_requests(), [])
+
+    def test_without_buildkite_org_no_log_is_read(self):
+        (self.home / ".env").write_text(f"BUILDKITE_API_TOKEN={TOKEN}\n")
+        (self.home / "projects" / "sample.md").write_text("---\nrepo: example/sample\nbase: main\n---\n# Sample\n")
+        code, out, err, _ = self.state([(view(), buildkite())], routes={BUILD: build_jobs()})
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["next"], reading["ci_log"]["problem"]),
+                         ("fix-ci", "set buildkite_org in the project frontmatter to read Buildkite logs"))
+        self.assertEqual(self.buildkite_requests(), [])
 
     def test_a_buildkite_log_over_the_read_cap_is_no_usable_log(self):
         (self.home / ".env").write_text(f"BUILDKITE_API_TOKEN={TOKEN}\n")
