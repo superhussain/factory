@@ -87,6 +87,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   /* Touch screens get a 44px tap target. Mouse layouts keep the compact button. */
   @media (pointer: coarse) { .btn:not(.icon) { min-height: 44px; } }
   @media (pointer: coarse) { .tracer-tasks summary, .agent-runs summary { line-height: 44px; } }
+  @media (pointer: coarse) { .agent-runs td a { display: inline-block; line-height: 44px; } }
   /* --panel is white in light mode and near black in dark, so the label keeps contrast on either accent. */
   .ask { border: 1px solid var(--line); border-radius: 12px; margin: 16px 0; padding: 12px 16px; }
   .ask legend { font-weight: 600; padding: 0 6px; }
