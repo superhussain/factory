@@ -120,10 +120,17 @@ class RetroRedactTest(RetroCase):
                 self.assertLess(time.monotonic() - start, 1)
         self.assertEqual(factory.retro_redact("x" * 63 + "_token=xyz"), "x" * 63 + "_token=[redacted]")
 
+    def test_glued_scheme_redacts_in_linear_time(self):
+        text = "a" * 30000 + "https://u:p@host"
+        start = time.monotonic()
+        self.assertEqual(factory.retro_redact(text), "a" * 30000 + "https://[redacted]@host")
+        self.assertLess(time.monotonic() - start, 1)
+
     def test_closed_edge_cases(self):
         long_a = "a" * 70
         for text, out in (("x=.https://u:p@host", "x=.https://[redacted]@host"),
                           ("(-https://u:p@host", "(-https://[redacted]@host"),
+                          ("a" * 40 + "https://u:p@host", "a" * 40 + "https://[redacted]@host"),
                           (long_a + "_token=abc", long_a + "_token=[redacted]"),
                           ("my_token_" + "b" * 70 + "=abc", "my_token_" + "b" * 70 + "=[redacted]"),
                           ("--" + long_a + "-token abc", "--" + long_a + "-token [redacted]"),
@@ -146,7 +153,7 @@ class RetroRedactTest(RetroCase):
         self.assertIn("RETRO_LONG_KEYVALUE", patterns)
         self.assertIn("RETRO_LONG_FLAG", patterns)
         units = [*"aZ09-.+_:/", " ", "\t", "a.", "a-", "a+", "a1", "--a", "token", "password", "bearer ", "-u ", "://",
-                 "a=", "--a ", "_token=", "tokens", "a" * 70 + " "]
+                 "a=", "--a ", "_token=", "tokens", "a" * 70 + " ", "a" * 40 + "://", "a" * 40 + "://u:p@"]
         for unit in units:
             text = (unit * 30000)[:30000]
             for name, pattern in [*patterns.items(), ("retro_redact", None)]:
