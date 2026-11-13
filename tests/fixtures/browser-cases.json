@@ -140,6 +140,7 @@
   "tests/browser/babysit.test.mjs",
   "tests/browser/card-chips.test.mjs",
   "tests/browser/batch-hold-card.test.mjs",
+  "tests/browser/held-batch-actions.test.mjs",
   "tests/browser/chat-decision-chip.test.mjs",
   "tests/browser/pause.test.mjs",
   "tests/browser/close-job.test.mjs",
