@@ -19,7 +19,9 @@ const job = (id, stage, fingerprint, extra = {}) => ({
 const JOBS = [
   job("1490-guard-the-ls-alias", "merged", "0123456789abcdef"),
   job("1491-open-work", "build", FP(1)),
-  job("1492-denied-work", "closed", FP(2), { backlog: { line: "- [ ] x: y", decision: "denied" } }),
+  job("1492-denied-work", "closed", FP(2), {
+    backlog: { line: "- [ ] x: y", decision: "denied" },
+  }),
   job("1493-closed-work", "closed", FP(3)),
   job("1494-checked-line", "merged"),
 ];
@@ -121,9 +123,16 @@ test("retros page", { timeout: 180000 }, async (t) => {
       page.on("request", (request) => {
         const { pathname } = new URL(request.url());
         if (pathname === "/api/retros")
-          return request.respond({ ...retros, contentType: "application/json" });
+          return request.respond({
+            ...retros,
+            contentType: "application/json",
+          });
         if (pathname === "/api/backlog")
-          return request.respond({ status: 200, contentType: "text/plain", body: BACKLOG });
+          return request.respond({
+            status: 200,
+            contentType: "text/plain",
+            body: BACKLOG,
+          });
         return request.continue();
       });
       await page.goto(origin + "/" + hash, { waitUntil: "domcontentloaded" });
@@ -215,6 +224,23 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.keyboard.press("Enter");
       await page.waitForSelector("#retros-page:not([hidden])", wait);
       assert.equal(await page.evaluate(() => location.hash), "#/retros");
+      await page.browserContext().close();
+    });
+
+    await t.test("the top bar Retros link opens the page and shows it as current", async () => {
+      const { page } = await openPage("");
+      await page.waitForSelector(".card", wait);
+      await page.click("#retros-link");
+      await page.waitForSelector("#retros-page:not([hidden])", wait);
+      assert.equal(await page.evaluate(() => location.hash), "#/retros");
+      assert.equal(
+        await page.$eval("#retros-link", (el) => el.getAttribute("aria-current")),
+        "page",
+      );
+      await page.click("#retros-back");
+      await page.waitForSelector("#retros-page", { hidden: true, ...wait });
+      assert.equal(await page.$eval("#retros-link", (el) => el.getAttribute("aria-current")), null);
+      assert.equal(await page.evaluate(() => document.activeElement.id), "retros-link");
       await page.browserContext().close();
     });
 
