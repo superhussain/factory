@@ -51,8 +51,20 @@ export function decodePng(buffer) {
     for (let i = 0; i < stride; i++) {
       const a = i >= bpp ? pixels[row + i - bpp] : 0;
       const b = y ? pixels[row - stride + i] : 0;
-      const c = y && i >= bpp ? pixels[row - stride + i - bpp] : 0;
-      const predictor = [0, a, b, (a + b) >> 1, paeth(a, b, c)][filter];
+      let predictor = 0;
+      switch (filter) {
+        case 1:
+          predictor = a;
+          break;
+        case 2:
+          predictor = b;
+          break;
+        case 3:
+          predictor = (a + b) >> 1;
+          break;
+        case 4:
+          predictor = paeth(a, b, y && i >= bpp ? pixels[row - stride + i - bpp] : 0);
+      }
       pixels[row + i] = (line[i] + predictor) & 0xff;
     }
   }
