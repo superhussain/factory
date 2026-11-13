@@ -86,7 +86,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .btn:disabled { opacity: .6; cursor: default; }
   /* Touch screens get a 44px tap target. Mouse layouts keep the compact button. */
   @media (pointer: coarse) { .btn:not(.icon) { min-height: 44px; } }
-  @media (pointer: coarse) { .tracer-tasks summary { line-height: 44px; } }
+  @media (pointer: coarse) { .tracer-tasks summary, .agent-runs summary { line-height: 44px; } }
   /* --panel is white in light mode and near black in dark, so the label keeps contrast on either accent. */
   .ask { border: 1px solid var(--line); border-radius: 12px; margin: 16px 0; padding: 12px 16px; }
   .ask legend { font-weight: 600; padding: 0 6px; }
@@ -360,7 +360,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .detail-head .refs a { color: var(--accent); }
   .tracer-tasks ol { margin: 2px 0 0; padding-left: 14px; list-style: none; }
   .tracer-tasks li { padding-left: 10px; text-indent: -10px; }
-  .tracer-tasks summary { cursor: pointer; padding-left: 14px; text-indent: -14px; }
+  .tracer-tasks summary, .agent-runs summary { cursor: pointer; padding-left: 14px; text-indent: -14px; }
   .card.needs-you .note { color: var(--alert); }
   /* A needs-you ask wraps to two rows, so a touch user can read it without the tooltip. */
   .card.needs-you .note.line { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
@@ -460,13 +460,13 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .doc blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
   .doc hr { border: 0; border-top: 1px solid var(--line); }
   /* Tables scroll sideways on a phone instead of squashing columns into one-word lines. */
-  .doc .table-wrap { overflow-x: auto; margin: 1em 0; }
-  .doc table { border-collapse: collapse; }
-  .doc th, .doc td {
+  .doc .table-wrap, .agent-runs .table-wrap { overflow-x: auto; margin: 1em 0; }
+  .doc table, .agent-runs table { border-collapse: collapse; }
+  .doc th, .doc td, .agent-runs th, .agent-runs td {
     border: 1px solid var(--line); padding: 6px 10px; vertical-align: top; text-align: left;
     min-width: 9em; max-width: 28em; overflow-wrap: normal; word-break: normal;
   }
-  .doc th { background: var(--code-bg); font-weight: 600; }
+  .doc th, .agent-runs th { background: var(--code-bg); font-weight: 600; }
   .doc td code { overflow-wrap: anywhere; }
   .doc .mermaid { overflow-x: auto; margin: 1em 0; }
   .doc .mermaid svg { max-width: none; height: auto; }
@@ -516,7 +516,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head .pr-link { margin-top: 8px; }
     .detail-head .job-actions { position: static; }
     .detail-head .job-actions-menu { top: calc(100% + 4px); right: 16px; }
-    .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
+    .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact #d-agents, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
     .doc { padding: 16px 16px 40px; }
     .pager > .doc, .pager > .gallery { touch-action: pan-y pinch-zoom; }
   }
@@ -549,7 +549,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs agent-runs" id="d-agents" hidden><summary></summary><div class="table-wrap"><table><thead><tr><th scope="col">When</th><th scope="col">Stage</th><th scope="col">Round</th><th scope="col">Role</th><th scope="col">Harness</th><th scope="col">Via</th><th scope="col">Model</th><th scope="col">Effort</th></tr></thead><tbody></tbody></table></div></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>
@@ -1290,6 +1290,28 @@ function renderTracerTasks(j) {
     const li = document.createElement('li');
     li.textContent = t.id + ' ' + t.title + ': ' + t.status.replaceAll('_', ' ');
     return li;
+  }));
+}
+
+const agentRows = (j) => Array.isArray(j.agents) ? j.agents.filter((r) => r && typeof r === 'object' && !Array.isArray(r)) : [];
+function agentWhen(at) {
+  if (typeof at !== 'string') return '';
+  return /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d)?Z$/.test(at) ? at.slice(0, 10) + ' ' + at.slice(11, 16) + ' UTC' : at;
+}
+// Replaces the summary and rows only, so an opened table stays open across board polls.
+function renderAgentRuns(j) {
+  const box = $('d-agents'), rows = agentRows(j), n = rows.length;
+  box.hidden = !n;
+  if (!n) return;
+  box.querySelector('summary').textContent = 'Agents: ' + n + (n === 1 ? ' run' : ' runs');
+  box.querySelector('tbody').replaceChildren(...rows.map((r) => {
+    const tr = document.createElement('tr');
+    for (const v of [agentWhen(r.at), r.stage, r.round, r.role, r.harness, r.via, r.model, r.effort]) {
+      const td = document.createElement('td');
+      td.textContent = v == null ? '' : String(v);
+      tr.append(td);
+    }
+    return tr;
   }));
 }
 
@@ -3654,6 +3676,7 @@ async function openJob(id) {
     $('d-assign-err').hidden = true;
     walkthroughs = new Set();
     $('d-tracer-tasks').open = false;
+    $('d-agents').open = false;
   }
   syncIdeaEditor();
   // DOM properties, not markup, so the board can't inject attributes into the header.
@@ -3680,6 +3703,7 @@ async function openJob(id) {
   const scope = tracerOff ? '' : tracerScopeText(j);
   if (scope) head.append((head.childNodes.length ? ' · ' : '') + scope);
   renderTracerTasks(j);
+  renderAgentRuns(j);
   if (first) {
     activeFile = null;
     files = [];
@@ -6399,6 +6423,8 @@ function openBacklogItem(item) {
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;
+  $('d-agents').hidden = true;
+  $('d-agents').open = false;
   closeJobActions(false);
   clearCopyStatus();
   syncIdeaEditor();

@@ -161,6 +161,7 @@
   "tests/browser/stepper-swipe.test.mjs",
   "tests/browser/drawer-compact.test.mjs",
   "tests/browser/drawer-links.test.mjs",
+  "tests/browser/agent-runs.test.mjs",
   "tests/browser/backlog-triage.test.mjs",
   "tests/browser/live-events.test.mjs",
   "tests/browser/live-keepalive.test.mjs",
