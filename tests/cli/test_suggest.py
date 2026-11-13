@@ -659,6 +659,9 @@ class SuggestTest(SuggestCase):
         start = time.perf_counter()
         self.assertEqual(factory.neutralize_chat("-" * 20000 + "x.test/a"), "(link: x.test)")
         self.assertLess(time.perf_counter() - start, 0.1)
+        start = time.perf_counter()
+        self.assertEqual(factory.neutralize_chat("-" * 20000 + "@x.test/a"), "(link: x.test)")
+        self.assertLess(time.perf_counter() - start, 0.1)
 
     def test_ideas_skips_gated(self):
         self.admit(suggestions())
