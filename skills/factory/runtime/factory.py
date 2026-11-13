@@ -5765,7 +5765,7 @@ PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMerge
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
 PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
-                    "{isInMergeQueue reviewThreads(last:100){nodes{isResolved"
+                    "{isInMergeQueue mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved"
                     " comments(first:100){nodes{author{__typename login}}}}}"
                     " latestReviews(first:100){nodes{author{__typename login}}}}}}")
 PR_STATE_INTERVAL = 30
@@ -5877,7 +5877,7 @@ def pr_reading(home, pr, base):
     decision = view.get("reviewDecision") or ""
     approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
     state = str(view.get("state") or "").lower()
-    in_queue = pull.get("isInMergeQueue") is True
+    in_queue = pull.get("isInMergeQueue") is True or isinstance(pull.get("mergeQueueEntry"), dict)
     bots = 0
     for thread in (pull.get("reviewThreads") or {}).get("nodes") or []:
         if not isinstance(thread, dict) or thread.get("isResolved"):

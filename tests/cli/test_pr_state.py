@@ -24,8 +24,8 @@ def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", auto=None
                           "commits": [{"committedDate": "2026-01-01T09:00:00Z"}, {"committedDate": HEAD}]})
 
 
-def graph(queue=False, threads=(), reviews=()):
-    return 0, json.dumps({"isInMergeQueue": queue, "reviewThreads": {"nodes": list(threads)},
+def graph(queue=False, threads=(), reviews=(), entry=None):
+    return 0, json.dumps({"isInMergeQueue": queue, "mergeQueueEntry": entry, "reviewThreads": {"nodes": list(threads)},
                           "latestReviews": {"nodes": [author(login) for login in reviews]}})
 
 
@@ -113,7 +113,7 @@ class PrStateTest(IsolatedTestCase):
         self.assertNotIn("isInMergeQueue", calls[0][3])
         self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket,link"))
         self.assertEqual(calls[2][0], "graphql")
-        self.assertIn("pullRequest(number:$n){isInMergeQueue reviewThreads(last:100){nodes{isResolved "
+        self.assertIn("pullRequest(number:$n){isInMergeQueue mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved "
                       "comments(first:100){nodes{author{__typename login}}}}} "
                       "latestReviews(first:100){nodes{author{__typename login}}}}}}", calls[2][2])
         self.assertEqual(calls[2][3:], ("-f", "o=example", "-f", "r=sample", "-F", "n=44",
@@ -229,6 +229,11 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual(self.next_of((view(reviews=[reply]), checks("pass"))), "merge")
         later = review("COMMENTED", at="2026-01-02T13:00:00Z", login="reviewer-b")
         self.assertEqual(self.next_of((view(reviews=[comment, reply, later]), checks("pass"))), "fix-reviews")
+
+    def test_a_merge_queue_entry_reads_as_queued(self):
+        code, out, err, _ = self.state([(view(), checks("pass"), graph(entry={"state": "QUEUED"}))])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((json.loads(out)["queued"], json.loads(out)["next"]), (True, "wait"))
 
     def test_wait_rereads_every_30_seconds_until_next_changes(self):
         pending = (view(), checks("pending"))
