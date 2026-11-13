@@ -4785,6 +4785,7 @@ def open_stacked(data, lead_id):
     """The stacked riders of lead_id that still have a PR, read before a close clears it."""
     return [{"id": r["id"], "project": r.get("project"), "pr": r["pr"]} for r in riders_of(data, lead_id)
             if r.get("stacked") is True and isinstance(r.get("pr"), str) and r["pr"]
+            and isinstance(r.get("project"), str) and SLUG.fullmatch(r["project"])
             and r.get("stage") not in TERMINAL]
 
 

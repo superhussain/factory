@@ -558,6 +558,15 @@ class BatchTest(IsolatedTestCase):
         j = self.job(RIDER)
         self.assertEqual((j["stage"], j["note"]), ("idea", f"unbatched: {LEAD} closed; stacked PR {PR} closed with a comment"))
 
+    def test_board_close_notes_merged_stacked_pr(self):
+        self.gh_view = (0, f"MERGED false factory/{RIDER}\n")
+        self.stacked_pr_batch()
+        code, out, err = self.close_lead()
+        self.assertEqual((code, json.loads(out)["stage"]), (0, "closed"))
+        self.assertNotIn("close", [c[0] for c in self.gh_calls])
+        self.assertIn(f"factory.py: stacked pull request {PR} of {RIDER} was already merged\n", err)
+        self.assertTrue(self.job(RIDER)["note"].endswith("was already merged"))
+
     def assert_left_open(self, why):
         self.stacked_pr_batch()
         code, out, err = self.close_lead()

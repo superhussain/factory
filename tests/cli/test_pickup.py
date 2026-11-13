@@ -1982,6 +1982,12 @@ class CloseTest(PickupFixture):
             "idea", f"unbatched: 042-sample-export closed; stacked PR {self.RIDER_PR} closed with a comment"))
         self.assertNotIn("pr", job)
 
+    def test_close_skips_stacked_rider_without_project(self):
+        self.board["jobs"] = [self.closing(), {**self.stacked_rider(), "project": None}]
+        self.assertEqual(self.pickup(), (0, "closed 042-sample-export alpha\n", ""))
+        self.assertNotIn(self.RIDER_PR, [call[2] for call in self.calls if call[0] == "gh"])
+        self.assertEqual(self.job("042-sample-export")["stage"], "closed")
+
     def test_close_dry_run_names_stacked_pr(self):
         self.board["jobs"] = [self.closing(), self.stacked_rider()]
         code, out, err = self.pickup("--dry-run")
