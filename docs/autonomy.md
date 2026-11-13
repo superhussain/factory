@@ -365,6 +365,16 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   percent and reason. The drawer shows them under Held by triage. If the questions do not parse,
   the binding is missing, or the call fails or gives an unusable reply, the item gets the fixed
   hold with no `choices`.
+- **Duplicate check.** After a `queue` decision, the Worker makes one more clef-flash call per
+  single line or batch, covering only the queued items. Its candidates are the open jobs of the
+  same project on `board.json`: not `merged` or `closed`, newest `updated` first, at most 20,
+  titles cut to 80 characters. It asks one `dup.<n>` `choice` question per queued item over
+  `none` and `j1` to `j20`, and the Worker maps the pick back to an id from its own list. The
+  verdict then carries `duplicate`, which `factory.py` stores as `backlog.triage.duplicate` and
+  prints as `; possible duplicate of <id>`. While the job is an idea, its card shows
+  `possible duplicate of <id>`. The note is advisory: it never holds, closes or changes the
+  queue decision, and no candidates, a missing binding, a failed call or a pick of `none` just
+  leave it out. Holds and question items get no check.
 - **Floors.** A queued idea still goes through the spec, the reviews F2 requires, the
   approver, merge rules and any `spec-approval` gate.
 - **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.

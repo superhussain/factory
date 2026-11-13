@@ -70,7 +70,8 @@ class PrStateTest(IsolatedTestCase):
         code, out, err, calls = self.state([(view(), checks("pass", "skipping"))])
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(json.loads(out), {"pr": 44, "state": "open", "review": "approved", "checks": "pass",
-                                           "queued": False, "conflict": False, "stacked": False, "next": "merge"})
+                                           "queued": False, "conflict": False, "stacked": False, "base": "main",
+                                           "next": "merge"})
         self.assertEqual(calls[0][:3], ("view", PR, "--json"))
         self.assertIn("baseRefName", calls[0][3])
         self.assertNotIn("isInMergeQueue", calls[0][3])
@@ -171,7 +172,8 @@ class PrStateTest(IsolatedTestCase):
     def test_a_stacked_pr_waits_for_its_parent(self):
         code, out, err, _ = self.state([(view(base=PARENT), checks("pass"))])
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual((json.loads(out)["stacked"], json.loads(out)["next"]), (True, "wait-base"))
+        self.assertEqual((json.loads(out)["stacked"], json.loads(out)["base"], json.loads(out)["next"]),
+                         (True, PARENT, "wait-base"))
         self.assertEqual(self.next_of((view(base=PARENT), checks("fail"))), "fix-ci")
         self.assertEqual(self.next_of((view(base=PARENT, merge="DIRTY"), checks("pass"))), "rebase")
 
@@ -213,6 +215,18 @@ class PrStateTest(IsolatedTestCase):
                 code, out, err, _ = self.state([(view(), checks("pass"), reading)])
                 self.assertEqual((code, out), (5, ""))
                 self.assertIn(why, err)
+
+    def test_a_missing_base_reads_as_the_project_base(self):
+        code, out, err, _ = self.state([(view(base=None), checks("pass"))])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((json.loads(out)["base"], json.loads(out)["stacked"]), ("main", False))
+
+    def test_an_unusable_base_exits_5(self):
+        for base in ("main;id", "feat branch", "$(id)", "-x", "a" * 256, 7):
+            with self.subTest(base=base):
+                code, out, err, _ = self.state([(view(base=base), checks("pass"))])
+                self.assertEqual((code, out), (5, ""))
+                self.assertIn("gh printed an unusable baseRefName", err)
 
     def test_bad_wait_exits_2(self):
         for args in (["--wait", "0"], ["--wait", "601"], ["--wait"], ["--wait", "x"], ["--timeout", "5"]):

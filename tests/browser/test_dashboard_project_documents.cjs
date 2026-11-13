@@ -517,6 +517,8 @@ async function recoveryControls(url, c, legacy) {
 async function focusAndViews(c) {
   const p = c.page;
   await input(c, (await state(c, second, "notes.md")).draftText + "\nKeyboard reachability draft");
+  // Load latest reads the history beside the document, so wait for its rows before listing controls.
+  await p.waitForFunction(() => document.querySelector("#settings-history li"), { polling: 50 });
   const eligible = await p.$$eval(
     "#settings-projects select, #settings-projects textarea, #settings-projects button",
     (els) =>

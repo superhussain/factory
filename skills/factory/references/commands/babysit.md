@@ -47,15 +47,14 @@ the lower one wins.
   another.
 - Before running checks, print `check plan: <class>: <checks>`, such as
   `check plan: copy: <formatter> locales/en.json`.
-- Copy and test-only pushes use `git -C "$WT" push --no-verify`. All other fixes push
-  plainly.
+- Copy and test-only pushes use `git -C "$WT" push --no-verify`, unless the project file's Verify section has the line `Babysit pushes run hooks.`; then they push plainly. All other fixes push plainly.
 - A request for speed, such as "quickly", makes the plan the budget.
 - Babysit never runs spec, build or review rounds.
 
 ## Loop
 
 Run `python3 "$RUNTIME" pr-state "$SLUG/<id>"`. It prints one JSON line,
-`{"pr","state","review","checks","queued","conflict","stacked","next"}`. Exit 4 (bad `pr`) or 5
+`{"pr","state","review","checks","queued","conflict","stacked","base","next"}`. Exit 4 (bad `pr`) or 5
 (gh failed): patch `{"needs": "<the stderr line>", "babysit": null, "claim": null}`, report
 that line and stop. Otherwise act on `next`, then read again.
 
@@ -64,7 +63,7 @@ that line and stop. Otherwise act on `next`, then read again.
 | `merged` / `closed` | the PR state | close out, below | close out, below |
 | `fix-reviews` | a latest reviewer review is `CHANGES_REQUESTED` or `COMMENTED` after both the head commit and the PR author's latest review | fix the counted comments in `$WT`, commit, push, and reply in the review threads as the notes and the project file's PRs section say | hand back |
 | `needs-review` | GitHub shows no approval | patch `{"needs": "get a human approval on PR #<n>, then press Babysit PR again", "babysit": null, "claim": null}` and stop | patch `{"needs": "get a human approval on PR #<n>, then press Babysit PR again", "babysit": null, "claim": null}` and stop |
-| `rebase` | `mergeStateStatus` is `DIRTY` | merge `origin/$BASE` into `$WT`, fix the conflicts, commit, push | hand back |
+| `rebase` | `mergeStateStatus` is `DIRTY` | run `git -C "$WT" fetch origin "<base>"`, merge `origin/<base>` (the reading's `base`) into `$WT`, fix the conflicts, commit, push | hand back |
 | `fix-ci` | a check is `fail` or `cancel` | when the notes allow a rerun and the failed log shows a flake, rerun once as below; otherwise fix from `gh run view --log-failed`, commit, push | hand back |
 | `wait` | checks pending, no checks yet within 120 seconds of the head commit, or the PR is queued | run `pr-state "$SLUG/<id>" --wait 540`, then `hold`, then act on the new reading | run `pr-state "$SLUG/<id>" --wait 540`, then `hold`, then act on the new reading |
 | `wait-base` | `stacked` is true: the PR targets another PR's branch, not `$BASE`, and nothing else is left | run `pr-state "$SLUG/<id>" --wait 540`, then `hold`, then act on the new reading | hand back |
