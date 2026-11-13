@@ -6924,7 +6924,7 @@ def push(target):
     rels = [p.relative_to(folder).as_posix() for p in sorted(folder.rglob("*"))
             if p.is_file() and not p.is_symlink()]
     rels = [r for r in rels if JOB_REL.fullmatch(r)]
-    pushed, conflicts, spec_pushed = 0, [], False
+    pushed, conflicts, spec_pushed, spec_stale = 0, [], False, False
     for rel in rels:
         data = local_bytes(folder / rel)
         entry = manifest.get(rel)
@@ -6937,6 +6937,7 @@ def push(target):
         if entry and sha(data) == entry["sha256"]:
             if remote[rel] != entry["etag"]:
                 print(f"{rel}: remote newer, run pull")
+                spec_stale = spec_stale or rel == "spec.md"
             continue
         if not entry and rel in remote:
             # First push after upgrading: adopt R2's copy if it matches.
@@ -6960,7 +6961,8 @@ def push(target):
     goal_due = spec_pushed or pending.exists()
     save_manifest(folder, manifest)
     print(f"pushed {pushed} files")
-    if goal_due and (folder / "spec.md").exists() and "spec.md" not in conflicts:
+    if goal_due and (folder / "spec.md").exists() and "spec.md" not in conflicts \
+            and not spec_stale:
         record_goal(home, slug, job_id, spec_goal((folder / "spec.md").read_text(encoding="utf-8")))
         pending.unlink(missing_ok=True)
     if conflicts:
