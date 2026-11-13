@@ -118,6 +118,8 @@
   "tests/browser/project-history.test.mjs",
   "tests/browser/configuration.test.mjs",
   "tests/browser/dashboard-routing.test.mjs",
+  "tests/browser/scratchpad-tab.test.mjs",
+  "tests/browser/board-status-pause.test.mjs",
   "tests/browser/offline-mermaid.test.mjs",
   "tests/browser/markdown-lists.test.mjs",
   "tests/browser/markdown-links.test.mjs",
