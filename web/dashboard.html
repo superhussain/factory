@@ -4841,7 +4841,9 @@ document.addEventListener('keydown', handleBacklogKeys);
 // h goes back to the board from Settings, an open job or an open backlog item.
 function handleHomeKey(e) {
   if (e.key !== 'h' || e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
-  if (e.target.closest('input, textarea, select, [contenteditable], #d-resize')) return;
+  // The same fields as handleBacklogKeys: the radio or select a view focuses on open never blocks h, and
+  // preventDefault below keeps a select's type-ahead off it.
+  if (e.target.closest('textarea, [contenteditable], #d-resize, input:not([type=radio]):not([type=checkbox])')) return;
   if (document.querySelector('dialog[open]')) return;
   if (settingsRoute() !== null) {
     e.preventDefault();

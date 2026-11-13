@@ -1,5 +1,6 @@
 // H goes back to the board from an open job, an open backlog item and Settings, against one owned
-// local Worker. It does nothing in a text field or with a dialog open. Settings Reference lists it.
+// local Worker, with the focus each view sets on open. It does nothing in a text field or with a
+// dialog open. Settings Reference lists it.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -54,11 +55,8 @@ test("h key goes home", { timeout: 120000 }, async () => {
     await page.keyboard.press("b");
     await page.waitForSelector("#backlog-form", wait);
     assert.equal(await detailOpen(), true);
-    // The backlog drawer focuses its first decision radio, an input H leaves alone.
+    // The backlog drawer focuses its first decision radio, and H still closes it.
     assert.equal(await page.evaluate(() => document.activeElement.type), "radio");
-    await page.keyboard.press("h");
-    assert.equal(await detailOpen(), true);
-    await page.evaluate(() => document.activeElement.blur());
     await page.keyboard.press("h");
     await page.waitForSelector("#detail[hidden]", wait);
 
@@ -73,22 +71,30 @@ test("h key goes home", { timeout: 120000 }, async () => {
     await page.keyboard.press("h");
     assert.equal(await detailOpen(), true);
     await page.$eval("#home-key-field", (el) => el.remove());
+    // showModal focuses the dialog's project select; the open dialog blocks H.
     await page.$eval("#idea-dlg", (el) => el.showModal());
-    await page.evaluate(() => document.activeElement.blur());
     await page.keyboard.press("h");
     assert.equal(await detailOpen(), true);
     await page.$eval("#idea-dlg", (el) => el.close());
-    await page.evaluate(() => document.activeElement.blur());
     await page.keyboard.press("h");
     await page.waitForSelector("#detail[hidden]", wait);
 
-    await page.evaluate(() => (location.hash = "#/settings/pipeline"));
-    await page.waitForSelector("#settings-page:not([hidden])", wait);
-    // Pipeline focuses its scope select, a field H leaves alone.
-    assert.equal(await page.evaluate(() => document.activeElement.id), "pipeline-scope");
+    // Projects focuses its project select. An option starting with h proves type-ahead does not take the key.
+    await page.evaluate(() => (location.hash = "#/settings/projects"));
+    await page.waitForSelector("#settings-projects:not([hidden])", wait);
+    await page.waitForFunction(() => document.activeElement.id === "settings-project", wait);
+    const before = await page.$eval("#settings-project", (el) => {
+      el.append(new Option("home-key-trap", "home-key-trap"));
+      return el.value;
+    });
     await page.keyboard.press("h");
-    assert.equal(await page.evaluate(() => location.hash), "#/settings/pipeline");
-    await page.evaluate(() => document.activeElement.blur());
+    await page.waitForSelector("#settings-page[hidden]", wait);
+    assert.equal(await page.evaluate(() => location.hash), "");
+    assert.equal(await page.$eval("#settings-project", (el) => el.value), before);
+
+    await page.evaluate(() => (location.hash = "#/settings/pipeline"));
+    await page.waitForSelector("#settings-pipeline:not([hidden])", wait);
+    await page.waitForFunction(() => document.activeElement.id === "pipeline-scope", wait);
     await page.keyboard.press("h");
     await page.waitForSelector("#settings-page[hidden]", wait);
     assert.equal(await page.evaluate(() => location.hash), "");
