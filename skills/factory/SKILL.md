@@ -347,9 +347,9 @@ sets it, and a `/factory babysit` session clears it with `null`; `board` refuses
   dashboard shows each one on its own page's tab. Images sit beside their markdown file,
   embedded by relative path; keep the agent definitions saying so. Open every job file with a summary
   of at most 120 words after any required first line: what changed and why, status,
-  remaining gates, next action. Keep to the word budgets in the agent definitions —
-  spec 800, build run section 300, review 400, decision 200 — writing short bullets
-  or headings rather than long paragraphs, and link overflow detail to a
+  remaining gates, next action. Keep to the agent definitions' word budgets
+  (spec 800, build run section 300, review 400, decision 200) with short bullets or
+  headings, not long paragraphs, and link overflow detail to a
   `<file>-evidence.md` beside it instead of dropping it.
 - Run the agents in the background and act on each completion notification. Then
   read the agent's file. Only when a notification arrived without a valid file, run
@@ -372,7 +372,7 @@ sets it, and a `/factory babysit` session clears it with `null`; `board` refuses
 - Max `$PIPELINE.review_rounds` review rounds per build cycle (2 unless pipeline settings say otherwise, at most 5). If
   the last allowed round of a cycle still has a CHANGES verdict, the job goes to
   `needs-human` with a note naming the reviewers that still want changes. A `/factory rework` starts a new cycle, so count
-  rounds since the latest rework, not the absolute round number.
+  rounds since the latest rework.
 - The builder is named `builder-<job-id>`. Before every dispatch (initial, fix,
   approver CHANGES, rework, recovery, handoff resume), assess the remaining work
   and pick a builder tier by the selection rule below. Pass the chosen tier, its
@@ -414,8 +414,8 @@ sets it, and a `/factory babysit` session clears it with `null`; `board` refuses
   once more with `git -C "$REPO_PATH" push -u origin factory/<id>`, then open a PR
   against the job's base (`$BASE` unless the job was stacked) with
   `gh pr create -R "$REPO" --head factory/<id> --base "$BASE"`. The `-R` matters
-  because cwd may not be the repo, and a fork's checkout otherwise defaults to the
-  upstream repo. Pass the same `-R` to every `gh pr` call. Write the description per
+  because cwd may not be the repo, and a fork's checkout otherwise defaults to
+  upstream. Pass the same `-R` to every `gh pr` call. Write the description per
   the project file's PRs section: what changed and why, a testing section, the
   screenshots from `build.md`, and any device checks from `decision.md`. Set stage
   `pr-open`, `pr` to the PR URL, and `automerge` true for an APPROVE PR, in one

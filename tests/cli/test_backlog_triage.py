@@ -129,6 +129,24 @@ class BacklogTriageTests(TriageFixture):
         self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [x] {ITEM} (008-add-csv-export)\n")
         self.assertIsNone(self.cached())
 
+    def test_queue_stores_a_possible_duplicate_and_names_it(self):
+        self.triage = (200, json.dumps({**QUEUE, "duplicate": "012-sample-report-export"}))
+        code, out, err = self.add()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"added {ITEM}\n{LINK}queued {ITEM} as 004-add-csv-export: confidence 86% "
+                              "(threshold 80%); possible duplicate of 012-sample-report-export\n")
+        self.assertEqual(self.board()[-1]["backlog"]["triage"]["duplicate"], "012-sample-report-export")
+
+    def test_queue_drops_a_bad_duplicate_id(self):
+        for bad in ("../012", "", 12, "-x", "012 sample"):
+            with self.subTest(bad=bad):
+                self.files["/api/backlog"] = "# Backlog\n"
+                self.triage = (200, json.dumps({**QUEUE, "duplicate": bad}))
+                code, out, err = self.add()
+                self.assertEqual((code, err), (0, ""))
+                self.assertNotIn("possible duplicate", out)
+                self.assertNotIn("duplicate", self.board()[-1]["backlog"]["triage"])
+
     def test_queue_keeps_refs_and_sends_the_context(self):
         item = ITEM + " (sub-job-of 002-reports)"
         path = self.dir / "context.md"
