@@ -4939,7 +4939,7 @@ def closing_message(job_id):
 
 
 GH_PR = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/\d+", re.ASCII)
-GH_PR_PARTS = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)", re.ASCII)
+GH_PR_PARTS = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})", re.ASCII)
 SYNC_STAGES = ("pr-open", "needs-human")
 PR_SYNC_LIMIT = 100
 GITHUB_CLOSE_REASON = "PR closed on GitHub"
@@ -4984,7 +4984,6 @@ def gh_cli(*args, stderr=False):
     return result if stderr else result[:2]
 
 
-
 def pr_states(repo, numbers, device):
     """The states of repo's pull requests from one gh api graphql call: ({number: state}, None),
     or (None, why). A pull request GitHub returns null for is left out."""
@@ -5003,8 +5002,10 @@ def pr_states(repo, numbers, device):
     except (ValueError, KeyError, TypeError):
         found = None
     if not isinstance(found, dict):
-        return None, "gh api graphql returned no repository"
+        return None, ("gh api graphql returned no repository "
+                      f"(check the project file's repo and gh auth status on {device})")
     return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
+
 
 def close_pull_request(home, j, device, comment=None):
     """Close the job's open PR with a comment, PR_CLOSE_COMMENT unless one is given. Returns (state, why)."""
@@ -5136,7 +5137,6 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
     return text + "\n## Earlier decision\n\n" + earlier if earlier else text
 
 
-
 def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
     """Move each pr-open or needs-human job whose pull request GitHub reports merged to merged, and queue
     a close for each whose pull request GitHub reports closed. One gh api graphql call per repo."""
@@ -5207,6 +5207,7 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
             if row:
                 data["jobs"][data["jobs"].index(j)] = row
                 print(f"synced {line}")
+
 
 def close_pass(home, data, device, minutes, dry):
     """Close each job the dashboard queued a close for: decision.md first, then the stage."""

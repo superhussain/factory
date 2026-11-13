@@ -427,6 +427,7 @@ only `factory.py deny-notes` writes it.
   false and `needs` set to `review and merge PR #<n>: this project's pipeline holds
   every PR for a person`. The orchestrator never merges it. Pickup, or an agent
   seeing it first, moves it to `merged` or `closed` ([sync](references/pickup.md#syncing-pr-state)).
+  An agent that moves it runs `cleanup`.
   When `batch <project>/<id>` prints any `riders`, the description also has a
   `Batched ideas` list with one `- <id>: <title>` line per rider.
   With a stacked rider, open the job's PR first, then push `factory/<rider-id>` and run

@@ -2260,9 +2260,9 @@ class PrSyncTest(PickupFixture):
         for result, why in ((None, "gh is not installed on host-a"),
                             (("timeout", ""), "gh api graphql timed out after 60 seconds on host-a"),
                             ((1, ""), "gh api graphql exited 1 (check gh auth status on host-a)"),
-                            ((0, "not json"), "gh api graphql returned no repository"),
-                            ((0, '{"data": {"repository": null}}'), "gh api graphql returned no repository"),
-                            ((0, "[]"), "gh api graphql returned no repository")):
+                            ((0, "not json"), "gh api graphql returned no repository (check the project file's repo and gh auth status on host-a)"),
+                            ((0, '{"data": {"repository": null}}'), "gh api graphql returned no repository (check the project file's repo and gh auth status on host-a)"),
+                            ((0, "[]"), "gh api graphql returned no repository (check the project file's repo and gh auth status on host-a)")):
             with self.subTest(result=result), patch.object(factory, "gh_cli", return_value=result):
                 self.assertEqual(self.pr_states("sample/alpha", [7], DEVICE), (None, why))
 
@@ -2355,6 +2355,14 @@ class PrSyncTest(PickupFixture):
         self.assert_silent(self.pickup())
         self.assertEqual(self.reads, [("sample/alpha", [7, 8])])
 
+    def test_skips_a_pr_number_past_nine_digits(self):
+        self.board["jobs"] = [self.export(pr="https://github.com/sample/alpha/pull/9999999999"),
+                              self.sample_import()]
+        self.assertEqual(self.pickup(), (0, "synced 043-sample-import alpha: PR closed on GitHub\n"
+                                            "closed 043-sample-import alpha\n", ""))
+        self.assertEqual(self.reads, [("sample/alpha", [8])])
+        self.assertEqual(self.job("042-sample-export")["stage"], "needs-human")
+
     def test_all_open_is_silent(self):
         self.states = {7: "OPEN", 8: "OPEN"}
         self.board["jobs"] = [self.export(), self.sample_import()]
@@ -2370,7 +2378,7 @@ class PrSyncTest(PickupFixture):
     def test_a_failed_read_warns_and_later_passes_run(self):
         for why in ("gh is not installed on host-a", "gh api graphql timed out after 60 seconds on host-a",
                     "gh api graphql exited 1 (check gh auth status on host-a)",
-                    "gh api graphql returned no repository"):
+                    "gh api graphql returned no repository (check the project file's repo and gh auth status on host-a)"):
             with self.subTest(why=why):
                 self.failure = why
                 self.board["jobs"] = [self.export(), self.sample_import(),
