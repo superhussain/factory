@@ -552,6 +552,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="header-actions">
     <button class="btn icon" id="new-idea" aria-label="New idea" title="New idea (N)" aria-keyshortcuts="n" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2c.4.3.6.7.6 1.2V12h4v-1.1c0-.5.2-.9.6-1.2A4.5 4.5 0 0 0 8 1.5zM6.5 14.5h3"/></svg></button>
     <button class="btn icon" id="job-jump" aria-label="Jump to job" title="Jump to job (J, /, ⌘K or Ctrl+K)" aria-keyshortcuts="j / Meta+K Control+K"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 4 4"/></svg></button>
+    <a class="btn icon" id="retros-link" href="#/retros" aria-label="Retros" title="Retros (R)" aria-keyshortcuts="r"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2 2v2.6h2.6"/><path d="M8 5v3l2 1.5"/></svg></a>
     <a class="btn icon" id="settings-link" href="#/settings" aria-label="Settings" title="Settings (S)" aria-keyshortcuts="s"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="4.5"/><path class="teeth" d="M8 1v3M8 12v3M1 8h3M12 8h3M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12"/></svg></a>
   </div>
   <div class="status"><span id="updated">loading</span><span class="dot" id="dot" role="img" aria-label="connection" title="connection"></span></div>
@@ -2600,6 +2601,7 @@ function renderRoute() {
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
+  if (retrosOpen) $('retros-link').setAttribute('aria-current', 'page'); else $('retros-link').removeAttribute('aria-current');
   for (const name of SETTINGS_SECTIONS) {
     $('settings-' + name).hidden = name !== section;
     if (name === section) $('settings-nav-' + name).setAttribute('aria-current', 'page'); else $('settings-nav-' + name).removeAttribute('aria-current');
@@ -2612,7 +2614,7 @@ function renderRoute() {
   if (section === 'notifications' && was !== 'notifications') enterNotificationsSection();
   if (section === 'scheduler' && was !== 'scheduler') enterSchedulerSection();
   if (section === 'reference' && was !== 'reference') enterReferenceSection();
-  if (retrosWas && !retrosOpen) $('settings-link').focus();
+  if (retrosWas && !retrosOpen) $('retros-link').focus();
   if (!section && was && (focusInside || document.activeElement === document.body)) $('settings-link').focus();
 }
 function leaveSettings() {
