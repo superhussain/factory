@@ -1444,21 +1444,35 @@ function chatDecision(j) {
 // The hold of each project's effective pipeline, filled by loadHoldConfigs. A project not loaded uses the defaults, as hold_config does.
 const HOLD_DEFAULT = { min_ideas: 5, max_wait_hours: 12 };
 const holdConfigs = new Map();
+// The epoch each slug's hold fetch started in. clearHoldConfigs moves the epoch, so an older fetch's result is dropped.
+const holdLoading = new Map();
+let holdEpoch = 0;
+
+function clearHoldConfigs() {
+  holdConfigs.clear();
+  holdLoading.clear();
+  holdEpoch++;
+}
 
 async function loadHoldConfigs() {
-  const slugs = new Set(jobs.filter(batchHeld).map((j) => j.project).filter((p) => typeof p === 'string' && !holdConfigs.has(p)));
+  const slugs = new Set(jobs.filter(batchHeld).map((j) => j.project).filter((p) => typeof p === 'string' && !holdConfigs.has(p) && !holdLoading.has(p)));
   let set = false;
   await Promise.all([...slugs].map(async (slug) => {
+    const epoch = holdEpoch;
+    holdLoading.set(slug, epoch);
     try {
       const r = await fetch('./api/pipeline/effective/' + encodeURIComponent(slug), { cache: 'no-store' });
       if (!r.ok || r.redirected) return;
       const hold = (await r.json())?.hold;
+      if (epoch !== holdEpoch) return;
       if (Number.isInteger(hold?.min_ideas) && hold.min_ideas >= 1 && hold.min_ideas <= 20 &&
         Number.isInteger(hold.max_wait_hours) && hold.max_wait_hours >= 1 && hold.max_wait_hours <= 168) {
         holdConfigs.set(slug, { min_ideas: hold.min_ideas, max_wait_hours: hold.max_wait_hours });
         set = true;
       }
-    } catch {}
+    } catch {} finally {
+      if (holdLoading.get(slug) === epoch) holdLoading.delete(slug);
+    }
   }));
   if (!set) return;
   renderBoard();
@@ -2917,7 +2931,7 @@ async function savePipelineScope(scope = $('pipeline-scope').value) {
       if (fromPage) $('pipeline-summary').value = '';
       loadPipelineHistory(scope);
       loadPipelineEffective(scope);
-      holdConfigs.clear();
+      clearHoldConfigs();
       loadHoldConfigs();
       if (scope === 'global') loadTracerSetting();
     } else if ([400,403,413,415].includes(r.status)) {
