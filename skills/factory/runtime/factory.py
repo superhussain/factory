@@ -2931,7 +2931,12 @@ def neutralize_chat(text):
         token = m.group(0)
         if "://" not in token and not NOTE_LINK.search(token):
             return token
-        rest = token.split("://", 1)[-1] if "://" in token else token[NOTE_LINK.search(token).start():]
+        if "://" in token:
+            rest = token.split("://", 1)[-1]
+        else:
+            # Walk back over host characters so leading labels like docs. stay in the host.
+            head = token[:NOTE_LINK.search(token).start()]
+            rest = token[re.search(r"[A-Za-z0-9.-]*$", head).start():]
         rest = rest.split("/", 1)[0].rsplit("@", 1)[-1]
         host = re.match(r"[A-Za-z0-9.-]*", rest).group(0).lower().strip(".-")
         host = host[4:] if host.startswith("www.") else host

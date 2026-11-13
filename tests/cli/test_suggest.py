@@ -647,6 +647,7 @@ class SuggestTest(SuggestCase):
                 ("http://user:pw@10.0.0.1:8080/x", "(link: 10.0.0.1)"),
                 ("see [x](x.test/a)", "see (link: x.test)"),
                 ("(www.x.test/a)", "(link: x.test)"),
+                ("(docs.x.test/a)", "(link: docs.x.test)"),
                 ("https://deploy:s3cret-pass@x.test/a", "(link: x.test)"),
                 ("```text\nok", "text\nok"),
                 ("plain words", "plain words")):
