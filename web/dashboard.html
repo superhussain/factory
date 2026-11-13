@@ -334,6 +334,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .card .id .proj { flex: none; max-width: 50%; margin-top: 0; font-family: var(--font-sans); overflow-wrap: normal; contain: none; }
   .card .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  /* A long chip such as "Batches behind <id>" ends in an ellipsis in a narrow column; its title names the lead. */
+  .card .tags .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .card .title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
   .card .meta.branch { color: var(--info); }
   .card .meta.refs { color: var(--ref-fg); }
