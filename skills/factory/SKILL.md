@@ -274,6 +274,7 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "pipeline": { "global": 3, "project": 2 },
   "backlog": { "line": "- [ ] <slug>: <feature>", "decision": "approved | denied | rework", "at": "...", "notes": "optional", "answers": "optional", "notes_read": "..." },
   "experiment": { "name": "pilot", "arm": "a | b", "provider": "provider-b", "model": "model-b", "effort": "high" },
+  "github": { "merged": "...", "cleanup": { "<host>": { "at": "...", "left": [] } } },
   "agents": [{ "at": "...", "stage": "spec", "role": "spec", "harness": "claude", "via": "native", "model": "...", "effort": "medium", "session": "a1b2c3" }],
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
   "started": "2026-10-15T11:40:00Z",
@@ -309,6 +310,7 @@ How the dashboard's idea column, Assign project and backlog decision page behave
 
 `experiment` is set only by pickup, at first claim, for an owner-model experiment; see
 [pickup](references/pickup.md#owner-model-experiment).
+`github` is set only by pickup when it syncs a merge from GitHub.
 Only pickup and `agent record` append `agents` rows, newest 32 kept;
 `agent report` counts them.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
@@ -425,8 +427,8 @@ only `factory.py deny-notes` writes it.
   `pr-open`, `pr` to the PR URL, and `automerge` true for an APPROVE PR, in one
   patch. When `$PIPELINE.merge` is `human`, an APPROVE PR ships with `automerge`
   false and `needs` set to `review and merge PR #<n>: this project's pipeline holds
-  every PR for a person`. The orchestrator never merges it. Move the job to `merged`
-  when you see it merged. Then run `cleanup` as Rules describes.
+  every PR for a person`. The orchestrator never merges it. Pickup moves the job to
+  `merged` and cleans up when GitHub reports it merged; see [pickup](references/pickup.md#syncing-pr-state).
   When `batch <project>/<id>` prints any `riders`, the description also has a
   `Batched ideas` list with one `- <id>: <title>` line per rider.
   With a stacked rider, open the job's PR first, then push `factory/<rider-id>` and run
@@ -456,11 +458,11 @@ only `factory.py deny-notes` writes it.
   closes the rider's open PR with a disclosed comment, the same guards as a dashboard
   close, and the rider goes back to `idea`.
 - Jobs at `pr-open` from before auto-merge stay as they are and never auto-merge.
-  A human merges or closes them, and the orchestrator moves the job when it sees that.
+  A human merges or closes them, and pickup moves the job when GitHub reports it.
 - An ESCALATE PR is held. Put a `> [!WARNING]` callout at the top of the description
   listing the approver's sign-off items, set `escalated` to true, and start the board
   note with "escalated:".
-  A human reviews and merges it. Move the job to `merged` when you see it merged.
+  A human reviews and merges it. Pickup then moves the job to `merged`.
 - `needs` is the human's queue. Set it only when the next step requires
   the user: a decision, a device check or screenshots, a credential, an ESCALATE
   sign-off, a PR the pipeline holds for a person (`merge` `human`), a gate
@@ -484,7 +486,7 @@ only `factory.py deny-notes` writes it.
   | APPROVE PR #34, CI still running | `{"needs": "coordinator: merge PR #34 once CI is green"}` | `{"stage": "pr-open", "automerge": true, "note": "CI running; merges on green"}` |
   | Coordinator holds PR #33 until CI passes | `{"needs": "review CI and merge PR #33 (coordinator holds the merge)"}` | `{"note": "coordinator hold: merge PR #33 after CI"}` |
   | `$PIPELINE.merge` is `human` | `{"note": "waiting for merge"}` | `{"automerge": false, "needs": "review and merge PR #33: this project's pipeline holds every PR for a person"}` |
-- When you see a job's PR closed unmerged, move the job to `closed`, keep `pr`, put
+- When you see a job's PR closed unmerged before pickup does, move the job to `closed`, keep `pr`, put
   the reason in `note` (superseded by #N, rejected, abandoned), and run `cleanup` on
   it. A human can close a job at any stage the same way.
 - To close a job without shipping it, follow the closing rule and **Closing without shipping** in [feature](references/commands/feature.md).

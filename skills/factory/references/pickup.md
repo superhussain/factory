@@ -37,6 +37,10 @@ Each run, in order:
   `<base>` with a root commit that `origin/<base>` lacks, so a host still on
   archive history claims and launches nothing for that project. `worktree` runs
   the same check on the job branch and exits 6.
+- PR sync: right after the move stops and before the close pass, reads the state
+  of each `pr-open` or `needs-human` job's pull request from GitHub, one
+  `gh api graphql` call per repo, and moves a merged job to `merged` or queues a
+  close for a closed one. See [Syncing PR state](#syncing-pr-state).
 - Deny notes: before ideas, launches at most one `/factory deny-notes <id>` session
   for a `closed` job denied from the backlog whose `backlog.notes` are unread (no
   `backlog.notes_read`). The session gets the notes from `factory.py deny-notes <id>`
@@ -301,7 +305,21 @@ changes nothing. Then install one timer per host.
 - When the closed job has a stacked rider with an open PR, the close pass closes the rider's open PR with a disclosed comment after the board write, and rewrites the rider's note.
 - A session on a closing job is refused at its next `board` or `hold` call with exit 6. `board` first releases that session's own claim, so the next pickup can close the job.
 - Only the dashboard, `pickup` and `factory.py control` write `close`. `board` refuses a `close` patch with exit 2.
-- The next pickup run on a host that still holds a closed job's worktree or `factory/<id>` branch runs `cleanup` on it when the project's pickup is on and lists that host, once per host, and records `close.cleanup.<host> = {at, left}`. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit and no worktree has it checked out. It deletes that branch with `git update-ref -d` guarded by the branch's current commit, never `git branch -D`. The kept branch's `left` entry ends with `and origin could not be reached`, `and origin has no such branch` or `and origin is at a different commit`. Its dry run prints `would clean up <id> <project>`. The close pass's `decision.md` names each host the board records as holding the job, from `claim` and every `move` holder, that the project's pickup is off for or does not list, and says which of the two it is. When it cannot read the pickup hosts, it names every recorded holder and says why it could not read them.
+- The next pickup run on a host that still holds a closed job's worktree or `factory/<id>` branch runs `cleanup` on it when the project's pickup is on and lists that host, once per host, and records `close.cleanup.<host> = {at, left}`. It does the same for a `merged` job with `github.merged`, which the PR sync sets, and records `github.cleanup.<host> = {at, left}`. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit and no worktree has it checked out. It deletes that branch with `git update-ref -d` guarded by the branch's current commit, never `git branch -D`. The kept branch's `left` entry ends with `and origin could not be reached`, `and origin has no such branch` or `and origin is at a different commit`. Its dry run prints `would clean up <id> <project>`. The close pass's `decision.md` names each host the board records as holding the job, from `claim` and every `move` holder, that the project's pickup is off for or does not list, and says which of the two it is. When it cannot read the pickup hosts, it names every recorded holder and says why it could not read them.
+
+## Syncing PR state
+
+- `pickup` runs its PR sync pass right after the move stops and before the close pass. It never starts a launcher or calls a model.
+- A job is a candidate when its stage is `pr-open` or `needs-human`, its `pr` is a `https://github.com/<owner>/<name>/pull/<n>` URL, no close is queued, it is not a batched rider (riders follow their lead), no other session holds a live claim, the project file's `repo` equals the URL's owner and name (case-insensitive), and the project's pickup is on and lists this host.
+- Candidates are grouped by repo. Each repo gets one `gh api graphql` call that reads `state` for up to 100 pull requests in board order. With more, it prints `factory.py: pickup syncs the first 100 of <n> pull requests in <repo>` on stderr.
+- When the call fails, it prints `factory.py: pickup skips the PR sync for <repo>: <why>` on stderr and the run goes on: gh is not installed, timed out after 60 seconds, exited non-zero (check `gh auth status`), or returned no repository.
+- `MERGED`: one board write moves the job to `merged`, sets the note to `merged on GitHub` and `github = {merged}`, and removes `needs`, `automerge`, `babysit` and `claim`. It prints `synced <id> <project>: merged on GitHub`. The close cleanup then runs `cleanup` on each host that holds the worktree or branch, as for a closed job.
+- `CLOSED`: one board write queues `close = {reason: "PR closed on GitHub", at, by: "github"}` and removes `babysit`. It prints `synced <id> <project>: PR closed on GitHub`. The close pass in the same run closes the job without calling `gh pr`, and `decision.md` starts `CLOSED: PR closed on GitHub` and says GitHub reported the close.
+- Each board write re-checks every candidate condition and the same `pr`, so a second host that read the same state writes nothing.
+- An open PR, or one GitHub does not return, changes nothing and prints nothing.
+- Its dry run makes the same read and writes nothing. It prints `would sync <id> <project>: merged on GitHub` or `would sync <id> <project>: PR closed on GitHub`, and `skip sync <id> <project>: claimed by <device> session <tag>` or `skip sync <id> <project>: <reason>` for a live claim or a project whose pickup is off or does not list this host.
+- Only pickup writes `github` and `close.by`. `board` refuses a `github` patch with exit 2.
+- A synced move does not mirror Tracer, archive a Paseo workspace or post a stage-change chat line. Agents still own those.
 
 ## Logs and limits
 
