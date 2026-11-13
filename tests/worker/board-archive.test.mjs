@@ -18,6 +18,7 @@ const ROWS = [
     done: "2026-09-01T12:00:00Z",
     jira: "PLAN-9005",
     pr: "https://github.com/example/sample/pull/412",
+    goal: "Login survives a token refresh.",
   },
   {
     id: "413-old-suggestion",
@@ -296,7 +297,7 @@ test("the archive API serves id, page and q, and rejects bad queries", async () 
     total: 1,
   });
   assert.equal((await (await s.send("/api/board/archive?q=sample")).json()).total, 3);
-  for (const query of ["plan-9005", "pull/412"])
+  for (const query of ["plan-9005", "pull/412", "token%20refresh"])
     assert.deepEqual(await (await s.send("/api/board/archive?q=" + query)).json(), {
       jobs: [ROWS[0]],
       total: 1,

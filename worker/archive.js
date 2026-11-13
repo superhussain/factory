@@ -10,7 +10,7 @@ export const ARCHIVE_CRON = "17 * * * *";
 
 const DAY = 86400000;
 const ID_PREFIX = /^(\d{3,})-/;
-const SEARCH_FIELDS = ["id", "title", "project", "jira", "pr", "idea"];
+const SEARCH_FIELDS = ["id", "title", "project", "jira", "pr", "idea", "goal"];
 const terminal = (job) => job?.stage === "merged" || job?.stage === "closed";
 const doneAt = (job) => Date.parse(job?.done);
 const newestFirst = (a, b) =>
