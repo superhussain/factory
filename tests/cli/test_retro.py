@@ -216,6 +216,7 @@ class RetroDigestTest(RetroCase):
         self.assertEqual(row["subagents"]["count"], 1)
         self.assertEqual((builder["count"], builder["turns"], builder["errors"]), (1, 1, 1))
         self.assertEqual(builder["tokens"]["cache_write"], 19000)
+        self.assertEqual(builder["first_turns"], [19100])
         self.assertEqual(row["errors"]["count"], 0)
         (self.projects / SLUG / "s1/subagents/agent-b1.meta.json").unlink()
         self.assertEqual(self.digest()[0]["subagents"]["by_type"]["unknown"]["errors"], 1)

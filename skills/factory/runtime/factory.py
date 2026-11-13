@@ -8687,9 +8687,10 @@ def retro_rows(days):
                     continue
                 scanned += 1
                 t = by_type.setdefault(kind, {"count": 0, "turns": 0, "tokens": dict.fromkeys(RETRO_TOKENS, 0),
-                                              "errors": 0, "denials": 0, "models": []})
+                                              "errors": 0, "denials": 0, "models": [], "first_turns": []})
                 t["count"] += 1
                 t["turns"] += d["turns"]
+                t["first_turns"].append(d["context"]["first_turn"])
                 t["errors"] += d["errors"]["count"]
                 t["denials"] += d["denials"]["count"]
                 t["models"] = sorted(set(t["models"]) | set(d["models"]))
