@@ -1,5 +1,6 @@
 // Board writes cannot add a dashboard job control to a batch rider, nor add or drop a
-// batched-into ref or delete a rider row outside factory.py batch and the lead's close or merge. Rows are the made-up
+// batched-into ref or delete a rider row outside factory.py batch, the lead's close or merge,
+// and the dashboard's Remove from batch while the lead is at spec. Rows are the made-up
 // running example: lead 1201 owns PR #88, rider 1203 is batched into it, 1204 is an idea.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -207,6 +208,29 @@ test("refuses dropping a rider's ref while its lead is open", async () => {
   const s = setup();
   await refusedWith(s, [LEAD, UNBATCHED], unbatchRefusal(RIDER.id, LEAD.id));
   await refused(s, [LEAD, { ...UNBATCHED, close: CONTROLS.close }], "close");
+});
+
+test("allows Remove from batch while the lead is at spec", async () => {
+  const lead = { ...LEAD, stage: "spec" };
+  const rider = { ...RIDER, stage: "spec" };
+  const removed = {
+    ...UNBATCHED,
+    stage: "idea",
+    note: "unbatched: removed from 1201-sync-retry on the dashboard",
+  };
+  assert.equal((await setup([lead, rider]).write([lead, removed])).status, 200);
+});
+
+test("refuses Remove from batch outside that one case", async () => {
+  const lead = { ...LEAD, stage: "spec" };
+  const rider = { ...RIDER, stage: "spec" };
+  const removed = { ...UNBATCHED, stage: "idea" };
+  const message = unbatchRefusal(RIDER.id, LEAD.id);
+  await refusedWith(setup([LEAD, rider]), [LEAD, removed], message);
+  const stacked = { ...rider, stacked: true };
+  await refusedWith(setup([lead, stacked]), [lead, { ...removed, stacked: true }], message);
+  await refusedWith(setup([lead, rider]), [lead, { ...UNBATCHED, stage: "spec" }], message);
+  await refusedWith(setup([lead, rider]), [{ ...lead, stage: "build" }, removed], message);
 });
 
 test("drops the ref once the lead closes, merges, or is gone", async () => {
