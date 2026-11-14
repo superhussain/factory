@@ -272,6 +272,7 @@ test("archived jobs page under the terminal columns", { timeout: 180000 }, async
     });
 
     await t.test("closing an archived card's drawer focuses that card", async () => {
+      await page.mouse.move(5, 5);
       await page.focus("#d-close");
       await page.keyboard.press("Enter");
       await page.waitForSelector("#detail[hidden]", wait);
