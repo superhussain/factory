@@ -731,11 +731,15 @@ def blocking(job, device, session, minutes):
 
 
 def fresh_hold(job, device, session, paseo, take):
-    """True when hold would only refresh this session's claim, seen within CLAIM_REFRESH_MINUTES."""
+    """True when hold would only refresh this session's claim, seen within CLAIM_REFRESH_MINUTES, with no row left
+    to link."""
     c = job.get("claim") or {}
     if take or not c or not mine(c, device, session) or "started" not in job:
         return False
     if (job.get("handoff") or {}).get("state") == "ready" or job.get("paseo") != paseo:
+        return False
+    if paseo and any(isinstance(row, dict) and row.get("session") == session and "paseo" not in row
+                     for row in job.get("agents") or []):
         return False
     seen = datetime.strptime(c["seen"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     return datetime.now(timezone.utc) - seen < timedelta(minutes=CLAIM_REFRESH_MINUTES)
