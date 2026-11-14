@@ -126,7 +126,7 @@
   factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
   factory.py retro aggregate [--days N]     pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
   factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, add its cards to the backlog
-  factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>]
+  factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]
                                             append one row to the job's agents, after checking this
                                             session holds the claim, and print it as JSON
   factory.py agent report [<project-slug>]  count every job's agents rows by stage, role, harness, via,
@@ -9677,7 +9677,8 @@ def record_launch(home, job_id, row):
 
 
 AGENT_STAGES = ("idea",) + IN_FLIGHT + ("needs-human", "pr-open") + TERMINAL
-AGENT_RECORD_USAGE = "usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>]"
+AGENT_RECORD_USAGE = ("usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>] "
+                      "[--paseo-agent <agent-id>]")
 AGENT_COLUMNS = ("stage", "role", "harness", "via", "model", "effort")
 
 
@@ -9697,19 +9698,31 @@ def agent_record_problem(role, harness, via, model, effort):
 
 
 def agent_cmd(sub, *args):
+    worker = None
+    if sub == "record" and args[-2:-1] == ("--paseo-agent",):
+        args, worker = args[:-2], args[-1]
     if sub == "record" and len(args) in (5, 6):
         target, role, harness, via, model, *effort = args
         role = ROLE_ALIASES.get(role, role)
         problem = agent_record_problem(role, harness, via, model, effort[0] if effort else None)
         if problem:
             fail(f"{AGENT_RECORD_USAGE}: {problem}", 2)
+        if worker is not None:
+            if via != "paseo":
+                fail("--paseo-agent is only for via paseo", 2)
+            if not PASEO_ID.fullmatch(worker) or worker.startswith("-"):
+                fail(f'--paseo-agent "{worker}" must be 1 to 64 letters, digits, _ or -, not starting with -', 2)
+            server = paseo_server()
+            if not server:
+                fail("--paseo-agent needs this host's Paseo server id; leave it out to link the row to this session",
+                     2)
         home, slug, job_id = r2_target(target, True)
         device, session, _ = holder(home)
         row = {"role": role, "harness": harness, "via": via, "model": model}
         if effort:
             row["effort"] = effort[0]
         row["session"] = session
-        paseo = paseo_session()
+        paseo = {"server": server, "agent": worker} if worker is not None else paseo_session()
         if paseo:
             row["paseo"] = paseo
         saved = record_agent(home, job_id, row, (device, session), slug)
@@ -9773,7 +9786,7 @@ COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
-COMMANDS["agent"] = (agent_cmd, 1, 7)
+COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
 
 def main(argv=None):
