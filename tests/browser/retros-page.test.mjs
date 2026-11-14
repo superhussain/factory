@@ -120,7 +120,12 @@ test("retros page", { timeout: 180000 }, async (t) => {
     );
     await seedBoard(origin, JOBS);
     let retros = { status: 200, body: JSON.stringify(RUNS) };
-    const openPage = async (hash, viewport = { width: 1280, height: 900 }, scheme = "light") => {
+    const openPage = async (
+      hash,
+      viewport = { width: 1280, height: 900 },
+      scheme = "light",
+      hold = null,
+    ) => {
       const page = await (await browser.createBrowserContext()).newPage();
       await page.setViewport(viewport);
       await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: scheme }]);
@@ -140,6 +145,7 @@ test("retros page", { timeout: 180000 }, async (t) => {
             contentType: "text/plain",
             body: BACKLOG,
           });
+        if (hold && pathname === "/projects.json") return hold.then(() => request.continue());
         return request.continue();
       });
       await page.goto(origin + "/" + hash, { waitUntil: "domcontentloaded" });
@@ -359,6 +365,34 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.click("#settings-link");
       await page.waitForSelector("#settings-page:not([hidden])", wait);
       assert.equal(await page.evaluate(() => document.activeElement.id), "settings-project");
+      await page.browserContext().close();
+    });
+
+    await t.test("a gear click before projects load focuses the picker once they do", async () => {
+      const active = (page) => page.evaluate(() => document.activeElement.id);
+      let release;
+      let { page } = await openPage("", undefined, undefined, new Promise((r) => (release = r)));
+      await page.waitForSelector("#settings-link", wait);
+      await page.click("#settings-link");
+      await page.waitForSelector("#settings-page:not([hidden])", wait);
+      assert.equal(await active(page), "settings-link");
+      release();
+      await page.waitForFunction(() => document.querySelector("#settings-project option"), wait);
+      await mkdir(".context/shots", { recursive: true });
+      await (
+        await page.$("#settings-projects")
+      ).screenshot({ path: ".context/shots/settings-focus-after-load-1280.png" });
+      assert.equal(await active(page), "settings-project");
+      await page.browserContext().close();
+
+      ({ page } = await openPage("", undefined, undefined, new Promise((r) => (release = r))));
+      await page.waitForSelector("#settings-link", wait);
+      await page.click("#settings-link");
+      await page.waitForSelector("#settings-page:not([hidden])", wait);
+      await page.focus("#settings-nav-display");
+      release();
+      await page.waitForFunction(() => document.querySelector("#settings-project option"), wait);
+      assert.equal(await active(page), "settings-nav-display");
       await page.browserContext().close();
     });
 

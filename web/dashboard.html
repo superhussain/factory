@@ -2510,7 +2510,7 @@ function selectSettingsProject() {
   selectProjectPickup();
 }
 
-function enterProjectsSection() {
+function enterProjectsSection(focus = true) {
   const select = $('settings-project');
   const selected = soleProject() || [...(projects?.keys() || [])].sort()[0];
   select.replaceChildren();
@@ -2522,7 +2522,7 @@ function enterProjectsSection() {
   loadHosts();
   renderProjectList();
   selectSettingsProject();
-  select.focus();
+  if (focus) select.focus();
 }
 
 async function saveProjectDocument() {
@@ -7243,7 +7243,7 @@ $('notify-needs').addEventListener('change', async () => {
 });
 
 loadProjects().then(() => {
-  if (settingsShown === 'projects') enterProjectsSection();
+  if (settingsShown === 'projects') enterProjectsSection(!$('settings-page').contains(document.activeElement) || document.activeElement === $('settings-nav-projects'));
   if (settingsShown === 'pipeline') enterPipelineSection();
   if (settingsShown === 'hosts') enterHostsSection();
   if (settingsShown === 'display') enterDisplaySection();
