@@ -593,8 +593,6 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (max-width: 360px) {
     header { gap: 6px; }
     .filter { max-width: 96px; }
-  }
-  @media (max-width: 360px) {
     .status { flex: 1 1 0; min-width: 0; justify-content: flex-end; }
     .status .updated-word { display: none; }
     #updated { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3655,7 +3653,7 @@ function openCard(id) {
 let renderedBacklog = [];
 
 // Refocuses a backlog button after a re-render, or the Backlog column toggle when the item is gone or busy.
-// Returns the focused control.
+// Returns the focused control, or null.
 function focusBacklogControl(raw) {
   const same = [...$('board').querySelectorAll('[data-backlog-open]')].find((b) => b.dataset.raw === raw && !b.disabled);
   const target = same || $('board').querySelector('.column-toggle[data-stage="backlog"]');
@@ -3664,7 +3662,7 @@ function focusBacklogControl(raw) {
 }
 
 // Refocuses a closed job's card, or its column toggle when the card is not on screen.
-// Returns the focused control.
+// Returns the focused control, or null.
 function focusJobCard(id) {
   const j = jobs.find((x) => x.id === id);
   const target = $('board').querySelector('.cards:not([hidden]) .card[data-id="' + CSS.escape(id) + '"]') ||
