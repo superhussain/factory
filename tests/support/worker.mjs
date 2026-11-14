@@ -60,6 +60,7 @@ export function memoryBucket() {
         httpMetadata: options.httpMetadata,
         customMetadata: options.customMetadata,
         options,
+        uploaded: new Date(),
       };
       objects.set(key, object);
       return object;

@@ -520,6 +520,15 @@ class RetroAggregateTest(RetroWorkerCase):
                           "factory/runbook.md": {"version": 1, "text": "# Runbook\n"}}})
         self.assertFalse(any(key.startswith("sample-tools") for key in agg["documents"]))
 
+    def test_aggregate_medians_skip_runs_with_no_usage(self):
+        empty = digest_row("host-a", S2, context={"first_turn": 0, "mean_per_turn": 0})
+        empty["subagents"]["by_type"]["factory-builder"]["first_turns"] = [0]
+        code, out, _ = self.aggregate(self.window(7, {0: {"host-a": [digest_row("host-a", S1), empty]}}))
+        self.assertEqual(code, 0)
+        agg = json.loads(Path(json.loads(out)["aggregate"]).read_text(encoding="utf-8"))
+        self.assertEqual(agg["context"]["first_turn_median"], 1000)
+        self.assertEqual(agg["subagents"]["factory-builder"]["first_turn_median"], 500)
+
     def test_patterns_ranked_and_capped(self):
         many = {f"err {n:02d}": n + 1 for n in range(25)}
         rows = [digest_row("host-a", f"{n:08x}", errors={"count": 1, "benign": 0, "patterns": many}) for n in range(7)]

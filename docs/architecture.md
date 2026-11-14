@@ -149,8 +149,8 @@ date.
 | `PUT /api/pipeline/retro/<scope>` | the bound service token of a paired or active host, while autonomy runs, for an allowlisted project scope only (never `global`) | replace one stage note as the next pipeline version, saved by `retro`; see [autonomy.md](autonomy.md#retro-pipeline-edits) |
 | `PUT /api/project-retro/<slug>/<name>` | the bound service token of a paired or active host, while autonomy runs, for an allowlisted project only | splice one find-and-replace into a project file or document as the next version, saved by `retro`; see [autonomy.md](autonomy.md#retro-file-edits) |
 
-Retro runs are stored one record per run at `retro-runs/<run>.json`, outside the 35-day
-prune. `retro admit` sends a `factory.retro-run/1` record with the checked findings, each
+Retro runs are stored one record per run at `retro-runs/<run>.json`. The hourly scheduled pass deletes a record uploaded more
+than 90 days before today's UTC date; a re-admit resets that clock. `retro admit` sends a `factory.retro-run/1` record with the checked findings, each
 card's `finding` link (one number or a list; a card linked to several findings is stored under each) and its outcome. The body is at most 64 KiB, `host` must be the bound
 host, and a bad shape answers 400. A re-admit of the same run replaces the record. The
 `#/retros` dashboard page reads the newest 30 and resolves each card's status from the board and
