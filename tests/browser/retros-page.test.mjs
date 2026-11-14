@@ -585,8 +585,9 @@ test("retros page", { timeout: 180000 }, async (t) => {
     const inView = (page, selector) =>
       page.evaluate((s) => {
         const el = document.activeElement;
+        // Scroll offsets are whole pixels, so a card at a half-pixel offset can sit 0.5px above the top.
         const { top, bottom } = el.getBoundingClientRect();
-        return el.matches(s) && top >= 0 && bottom <= innerHeight;
+        return el.matches(s) && Math.round(top) >= 0 && Math.round(bottom) <= innerHeight;
       }, selector);
 
     await t.test("closing a drawer scrolls the refocused control into view", async () => {
