@@ -243,6 +243,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .settings-tabs [role="tab"] { font: inherit; font-size: 13px; white-space: nowrap; background: none; color: var(--muted); border: 0; border-bottom: 2px solid transparent; padding: 6px 12px; cursor: pointer; }
   .settings-tabs [role="tab"]:focus-visible { outline-offset: -2px; }
   .settings-tabs [aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  .settings-tabs.sub-tabs { border-bottom: 0; gap: 4px; }
+  .settings-tabs.sub-tabs [role="tab"] { font-size: 12px; padding: 4px 10px; border: 1px solid transparent; border-radius: 999px; }
+  .settings-tabs.sub-tabs [aria-selected="true"] { background: var(--code-bg); border-color: var(--line); }
   .settings-main, .settings-aside, .settings-section:not(:has(> .settings-main)) { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; min-width: 0; }
   .settings-section[hidden], .settings-section [hidden] { display: none; }
   .settings-section h3 { font-size: 15px; margin: 0 0 12px; }
@@ -926,7 +929,7 @@ A stored Paseo or Claude schedule prompt does not pick up ideas, so do not creat
       <p class="muted">This prints what pickup would launch and changes nothing.</p>
       <div class="snippet"><pre><code id="scheduler-snippet-dry-run">python3 &lt;installed-skill&gt;/runtime/factory.py pickup --dry-run</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-dry-run" aria-label="Copy dry run command">Copy</button></div></div>
       <h4>Run it every 5 minutes</h4>
-      <div class="settings-tabs" id="scheduler-tabs" role="tablist" aria-label="Scheduler platform">
+      <div class="settings-tabs sub-tabs" id="scheduler-tabs" role="tablist" aria-label="Scheduler platform">
         <button type="button" role="tab" id="scheduler-tab-cron" aria-controls="scheduler-panel-cron" aria-selected="true" tabindex="0">cron</button>
         <button type="button" role="tab" id="scheduler-tab-launchd" aria-controls="scheduler-panel-launchd" aria-selected="false" tabindex="-1">launchd</button>
         <button type="button" role="tab" id="scheduler-tab-windows" aria-controls="scheduler-panel-windows" aria-selected="false" tabindex="-1">Windows Task Scheduler</button>

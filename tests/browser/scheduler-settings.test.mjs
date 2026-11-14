@@ -90,6 +90,10 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
       assert.equal(await selected("scheduler-tab-windows"), "true");
       await page.click("#scheduler-tab-cron");
       assert.deepEqual(await visiblePanels(), ["scheduler-panel-cron"]);
+      const css = (id, prop) => page.$eval(id, (el, p) => getComputedStyle(el)[p], prop);
+      assert.equal(await css("#scheduler-tabs", "borderBottomWidth"), "0px");
+      assert.equal(await css("#scheduler-mode-tabs", "borderBottomWidth"), "1px");
+      assert.equal(await css("#scheduler-tab-cron", "borderRadius"), "999px");
     });
 
     await t.test("scheduler K3 snippets match pickup.md", async () => {
