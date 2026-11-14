@@ -70,6 +70,8 @@ test("archived jobs page under the terminal columns", { timeout: 180000 }, async
       await page.setViewport({ width: 1280, height: 900 });
       await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
       page.on("pageerror", (error) => errors.push(String(error)));
+      // The dashboard service worker hides its fetches from interception and can stall a held request, so the page skips it.
+      await page.setBypassServiceWorker(true);
       await page.setRequestInterception(true);
       page.on("request", (request) => {
         const url = new URL(request.url());

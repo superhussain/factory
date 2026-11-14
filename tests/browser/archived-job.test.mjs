@@ -103,6 +103,8 @@ test("archived jobs open read-only", { timeout: 180000 }, async (t) => {
     page.on("pageerror", (error) => errors.push(String(error)));
     const asked = [];
     let syncRetryUp = false;
+    // The dashboard service worker hides its fetches from interception and can stall a held request, so the page skips it.
+    await page.setBypassServiceWorker(true);
     await page.setRequestInterception(true);
     page.on("request", (request) => {
       const url = new URL(request.url());
