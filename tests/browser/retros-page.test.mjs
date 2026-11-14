@@ -575,10 +575,7 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await jumper.page.keyboard.press("j");
       await jumper.page.waitForSelector("#job-picker[open]", wait);
       await jumper.page.type("#job-search", "ls alias");
-      await jumper.page.waitForSelector(
-        stage === "before" ? "#job-empty:not([hidden])" : "#job-section-retro-findings",
-        wait,
-      );
+      await jumper.page.waitForSelector("#job-section-retro-findings", wait);
       await (
         await jumper.page.$("#job-picker")
       ).screenshot({ path: `${process.env.RETROS_SHOTS}/${stage}-jumper-retros.png` });
