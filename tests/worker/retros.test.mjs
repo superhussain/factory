@@ -123,6 +123,36 @@ test("a run deleted between list and get is skipped", async () => {
   );
 });
 
+test("the scheduled pass deletes retro runs uploaded more than 90 days ago", async () => {
+  const s = await setup();
+  const runs = {
+    "20260801T090000Z-aaaaaa": "2026-08-14T23:00:00Z",
+    "20260802T090000Z-bbbbbb": "2026-08-15T00:00:00Z",
+    [RUN]: "2026-11-12T09:00:00Z",
+  };
+  for (const [run, uploaded] of Object.entries(runs)) {
+    assert.equal((await s.put(record({ run }), mac, run)).status, 200);
+    s.bucket.objects.get(`retro-runs/${run}.json`).uploaded = new Date(uploaded);
+  }
+  await s.bucket.put("retro/mac/2026-11-12.jsonl", "{}\n");
+  const pending = [];
+  (await loadProduction()).default.scheduled(
+    { scheduledTime: Date.parse("2026-11-13T12:00:00Z") },
+    { BUCKET: s.bucket },
+    { waitUntil: (p) => pending.push(p) },
+  );
+  assert.deepEqual(await pending[2], {
+    status: "pruned",
+    deleted: ["retro-runs/20260801T090000Z-aaaaaa.json"],
+  });
+  await Promise.all(pending);
+  assert.deepEqual([...s.bucket.objects.keys()].filter((k) => k.startsWith("retro")).sort(), [
+    "retro-runs/20260802T090000Z-bbbbbb.json",
+    `retro-runs/${RUN}.json`,
+    "retro/mac/2026-11-12.jsonl",
+  ]);
+});
+
 test("only the bound host writes, and only its own record", async () => {
   const s = await setup();
   const stranger = { ...pc, client_id: "client-other" };

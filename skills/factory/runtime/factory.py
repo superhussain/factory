@@ -9200,7 +9200,7 @@ def retro_aggregate(days):
             retro_sum(s["tokens"], t.get("tokens"))
             retro_sum(sub, t.get("tokens"))
             firsts.setdefault(kind, []).extend(
-                v for v in (t.get("first_turns") if isinstance(t.get("first_turns"), list) else []) if type(v) is int)
+                v for v in (t.get("first_turns") if isinstance(t.get("first_turns"), list) else []) if type(v) is int and v > 0)
         for kind, size in retro_dict(row.get("first_turn_attachments")).items():
             attachments.setdefault(kind, []).append(retro_int(size))
     for kind, s in subagents.items():
@@ -9227,8 +9227,8 @@ def retro_aggregate(days):
         "schema": "factory.retro-aggregate/1", "run": run, "from": dates[0], "to": dates[-1],
         "host": retro_host(), "transcripts": str(retro_transcripts()), "projects": projects,
         "hosts": hosts, "tokens": {"main": summed("tokens"), "subagents": sub},
-        "context": {"first_turn_median": retro_median([retro_int(retro_dict(r.get("context")).get("first_turn"))
-                                                       for r in rows]),
+        "context": {"first_turn_median": retro_median([v for v in (retro_int(retro_dict(r.get("context")).get("first_turn"))
+                                                                  for r in rows) if v > 0]),
                     "mean_per_turn_median": retro_median([retro_int(retro_dict(r.get("context")).get("mean_per_turn"))
                                                           for r in rows])},
         "attachments_median": {kind: retro_median(sizes) for kind, sizes in attachments.items()},

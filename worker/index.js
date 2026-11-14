@@ -1589,6 +1589,7 @@ const RETRO_RUN_WRITE_ONLY = "retro runs are written only by a bound host's serv
 const RETRO_RUN_TAKEN = "retro run belongs to another host";
 const RETRO_RUN_BYTES = 64 << 10;
 const RETRO_RUNS_LISTED = 30;
+const RETRO_RUN_KEEP_DAYS = 90;
 const RETRO_CATEGORIES = [
   "navigation",
   "automated-checks",
@@ -1724,6 +1725,24 @@ async function pruneRetro(env, now) {
     for (const { key } of page.objects) {
       const date = key.match(RETRO_KEY)?.[1];
       if (date && date < cutoff) {
+        await env.BUCKET.delete(key);
+        deleted.push(key);
+      }
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return { status: "pruned", deleted };
+}
+
+// Deletes retro run records uploaded more than RETRO_RUN_KEEP_DAYS before now's UTC date.
+async function pruneRetroRuns(env, now) {
+  const cutoff = utcDay(now.getTime()) - RETRO_RUN_KEEP_DAYS * DAY_MS;
+  const deleted = [];
+  let cursor;
+  do {
+    const page = await env.BUCKET.list({ prefix: "retro-runs/", cursor });
+    for (const { key, uploaded } of page.objects) {
+      if (uploaded.getTime() < cutoff) {
         await env.BUCKET.delete(key);
         deleted.push(key);
       }
@@ -2202,6 +2221,7 @@ export default {
   scheduled(controller, env, ctx) {
     ctx.waitUntil(runArchive(env, new Date(controller.scheduledTime)));
     ctx.waitUntil(pruneRetro(env, new Date(controller.scheduledTime)));
+    ctx.waitUntil(pruneRetroRuns(env, new Date(controller.scheduledTime)));
   },
 };
 

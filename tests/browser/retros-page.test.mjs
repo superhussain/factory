@@ -101,6 +101,7 @@ const RUNS = [
       finding(3, "Gone and unlogged cards", [
         card("Gone card", FP(7)),
         card("Capped card", FP(8), "daily cap"),
+        card("Retry the failed uploads on slow links", FP(10), "daily cap"),
       ]),
       finding(4, "A finding with no card", [], { count: 1, cost: 100 }),
     ],
@@ -172,7 +173,7 @@ test("retros page", { timeout: 180000 }, async (t) => {
         ),
         [
           ["1 merged"],
-          ["3 merged", "1 open", "1 waiting", "1 denied", "1 closed", "1 archived", "1 not logged"],
+          ["3 merged", "1 open", "1 waiting", "1 denied", "1 closed", "1 archived", "2 not logged"],
         ],
       );
       const table = await rows(page);
@@ -191,7 +192,7 @@ test("retros page", { timeout: 180000 }, async (t) => {
         [
           "Open · buildDeniedClosedWaiting",
           "MergedWaitingMerged",
-          "ArchivedNot logged: daily cap",
+          "ArchivedNot logged: daily capNot logged: daily cap",
           "No card",
         ],
       );
@@ -234,15 +235,21 @@ test("retros page", { timeout: 180000 }, async (t) => {
       );
       const unlinked = await page.$eval("#retros-list .retro-unlinked", (el) => el.textContent);
       assert.match(unlinked, /^Not linked to a finding/);
-      assert.match(unlinked, /Loose card\s*Merged/);
+      assert.match(unlinked, /Loose card\s*1490 · Merged/);
       assert.equal(await page.$("#retros-list h4"), null);
       assert.equal(
         await page.$eval(
           "#retro-20261105T090000Z-d4e5f6-3 .retro-cards > :first-child",
           (el) => el.textContent,
         ),
-        "Gone card: Archived",
+        "Gone card: 1400 · Archived",
       );
+      const refs = (rank) =>
+        page.$$eval(`#retro-20261105T090000Z-d4e5f6-${rank} .retro-chip-ref`, (els) =>
+          els.map((el) => el.textContent),
+        );
+      assert.deepEqual(await refs(2), ["1494 · ", "Waiting card · ", "1490 · "]);
+      assert.deepEqual(await refs(3), ["1400 · ", "Capped card · ", "Retry the failed upload… · "]);
       assert.equal(await page.$("#retros-list .retro-unlinked .sr-only"), null);
       const summary = await page.$("#retros-list .retro-why summary");
       assert.equal(await summary.evaluate((el) => el.textContent), "Root cause and fix");
@@ -284,6 +291,25 @@ test("retros page", { timeout: 180000 }, async (t) => {
         "89% of estimated cost",
       );
       await page.browserContext().close();
+    });
+
+    await t.test("a long title chip stays inside its finding", async () => {
+      for (const viewport of [
+        { width: 1280, height: 900 },
+        { width: 390, height: 844 },
+      ]) {
+        const { page } = await openPage("#/retros", viewport);
+        await page.waitForSelector("#retros-list .retro-finding", wait);
+        const [chip, item] = await page.$eval(
+          "#retro-20261105T090000Z-d4e5f6-3 .retro-cards > :last-child",
+          (el) => [
+            el.getBoundingClientRect().right,
+            el.closest(".retro-finding").getBoundingClientRect().right,
+          ],
+        );
+        assert.ok(chip <= item, `${viewport.width}: chip right ${chip} past finding ${item}`);
+        await page.browserContext().close();
+      }
     });
 
     await t.test("r on the board and the Retros jumper command open the page", async () => {
