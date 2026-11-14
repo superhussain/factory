@@ -262,6 +262,12 @@ client-supplied headers.
   a five-second refresh cooldown; a still-fresh cached key can verify during a
   brief issuer outage, but missing, stale or unusable keys deny with no stale
   bypass.
+- Workers Logs is on for every deploy: the rendered config sets `observability`
+  with every request sampled and query strings removed. Each request's method,
+  path and status land in the account's Workers Logs. To trace a burst, open the
+  Worker's Observability tab in the Cloudflare dashboard, filter to the burst's
+  minutes and group by request path. Past the plan's daily event limit,
+  Cloudflare stops storing new events, but requests still succeed.
 - Drafts are bound to the origin's storage, not to any client; preserving the
   same origin across deploys preserves drafts. Legacy job-file writes without
   conditions remain possible for old clients and are unsafe under concurrent
