@@ -632,12 +632,13 @@ test("retros page", { timeout: 180000 }, async (t) => {
         await jumper.page.$("#job-picker")
       ).screenshot({ path: `${process.env.RETROS_SHOTS}/${stage}-jumper-retros.png` });
       await jumper.page.browserContext().close();
-      const board = await openPage("");
-      await board.page.waitForSelector('.card[data-id="1491-open-work"]', wait);
-      await board.page.focus('.card[data-id="1491-open-work"]');
+      const board = await openPage("#/retros");
+      await board.page.waitForSelector('#retros-list a.retro-chip[href="#1491-open-work"]', wait);
+      await board.page.focus('#retros-list a.retro-chip[href="#1491-open-work"]');
       await board.page.keyboard.press("Enter");
       await board.page.waitForSelector("#detail:not([hidden])", wait);
-      await board.page.keyboard.press("Escape");
+      await board.page.focus("#d-close");
+      await board.page.keyboard.press("Enter");
       await board.page.waitForSelector("#detail[hidden]", wait);
       await board.page.screenshot({
         path: `${process.env.RETROS_SHOTS}/${stage}-drawer-close-focus.png`,
