@@ -617,7 +617,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs agent-runs" id="d-agents" hidden><summary></summary><div class="table-wrap"><table><thead><tr><th scope="col">When</th><th scope="col">Stage</th><th scope="col">Round</th><th scope="col">Role</th><th scope="col">Harness</th><th scope="col">Via</th><th scope="col">Model</th><th scope="col">Effort</th><th scope="col">Session</th></tr></thead><tbody></tbody></table></div></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs agent-runs" id="d-agents" hidden><summary></summary><div class="table-wrap"><table><thead><tr><th scope="col">When</th><th scope="col">Role</th><th scope="col">Session</th><th scope="col">Stage</th><th scope="col">Round</th><th scope="col">Model</th><th scope="col">Effort</th><th scope="col">Harness</th><th scope="col">Via</th></tr></thead><tbody></tbody></table></div></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>
@@ -1425,11 +1425,13 @@ function renderAgentRuns(j) {
   box.querySelector('summary').textContent = 'Agents: ' + n + (n === 1 ? ' run' : ' runs');
   box.querySelector('tbody').replaceChildren(...rows.map((r) => {
     const tr = document.createElement('tr');
-    for (const v of [agentWhen(r.at), r.stage, r.round, r.role, r.harness, r.via, r.model, r.effort]) {
+    const cell = (v) => {
       const td = document.createElement('td');
       td.textContent = v == null ? '' : String(v);
       tr.append(td);
-    }
+    };
+    cell(agentWhen(r.at));
+    cell(r.role);
     const session = document.createElement('td'), links = paseoLinksFor(r.paseo) || {};
     for (const kind of ['app', 'web']) {
       if (!links[kind]) continue;
@@ -1444,6 +1446,7 @@ function renderAgentRuns(j) {
       session.append(a);
     }
     tr.append(session);
+    for (const v of [r.stage, r.round, r.model, r.effort, r.harness, r.via]) cell(v);
     return tr;
   }));
 }
