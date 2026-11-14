@@ -326,12 +326,13 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
-    await t.test("going from retros to settings does not focus the Retros link", async () => {
+    await t.test("going from retros to settings focuses the project picker", async () => {
       const { page } = await openPage("#/retros");
       await page.waitForSelector("#retros-page:not([hidden])", wait);
+      await page.waitForSelector("#idea-project option", wait);
       await page.click("#settings-link");
       await page.waitForSelector("#settings-page:not([hidden])", wait);
-      assert.notEqual(await page.evaluate(() => document.activeElement.id), "retros-link");
+      assert.equal(await page.evaluate(() => document.activeElement.id), "settings-project");
       await page.browserContext().close();
     });
 
