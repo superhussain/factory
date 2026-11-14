@@ -362,6 +362,139 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    const options = (page) =>
+      page.$$eval("#job-results .job-option", (els) =>
+        els.map((el) => [
+          el.closest(".job-section").querySelector(".job-section-heading").textContent,
+          el.querySelector(".title").textContent,
+          el.querySelector(".meta").textContent,
+        ]),
+      );
+    const count = (page) => page.$eval("#job-count", (el) => el.textContent);
+    // Presses j and resolves once the jumper's GET /api/retros has answered.
+    const openJumper = async (page) => {
+      const answered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/retros");
+      await page.keyboard.press("j");
+      await page.waitForSelector("#job-picker[open]", wait);
+      await answered;
+    };
+    const setQuery = (page, value) =>
+      page.$eval(
+        "#job-search",
+        (el, v) => {
+          el.value = v;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        },
+        value,
+      );
+
+    await t.test("jumper rows open retro runs and findings", async () => {
+      let { page, errors } = await openPage("");
+      await page.waitForSelector(".card", wait);
+      await openJumper(page);
+      await page.type("#job-search", "20261105");
+      await page.waitForSelector("#job-section-retro-findings", wait);
+      assert.deepEqual(await options(page), [
+        [
+          "Retro runs",
+          "Nov 5, 2026, 09:00 UTC",
+          "Retro run · mac · 4 findings · 20261105T090000Z-d4e5f6",
+        ],
+        ...[
+          "Reviewers re-read the same files",
+          "Checked and waiting cards",
+          "Gone and unlogged cards",
+          "A finding with no card",
+        ].map((title, i) => [
+          "Retro findings",
+          title,
+          `Retro finding ${i + 1} · tool-economy · sample-tools · 20261105T090000Z-d4e5f6`,
+        ]),
+      ]);
+      assert.equal(await count(page), "0 jobs · 5 retro results");
+      await setQuery(page, "");
+      assert.equal(await page.$("#job-section-retro-runs"), null);
+      assert.equal(await page.$("#job-section-retro-findings"), null);
+      await setQuery(page, "ls alias");
+      await page.waitForSelector("#job-section-retro-findings", wait);
+      assert.deepEqual(await options(page), [
+        [
+          "Retro findings",
+          "ls alias crashes in non-interactive shells",
+          "Retro finding 1 · tool-economy · sample-tools · 20261112T090000Z-a1b2c3",
+        ],
+      ]);
+      assert.equal(await count(page), "0 jobs · 1 retro result");
+      await page.keyboard.press("Enter");
+      await page.waitForSelector("#retro-20261112T090000Z-a1b2c3-1[aria-current]", wait);
+      assert.equal(await page.evaluate(() => location.hash), "#/retros/20261112T090000Z-a1b2c3/1");
+      assert.equal(
+        await page.$eval("#retro-20261112T090000Z-a1b2c3-1 details", (el) => el.open),
+        true,
+      );
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+
+      ({ page } = await openPage(""));
+      await page.waitForSelector(".card", wait);
+      await openJumper(page);
+      await page.type("#job-search", "20261105");
+      await page.waitForSelector("#job-section-retro-runs", wait);
+      await page.keyboard.press("Enter");
+      await page.waitForSelector("#retros-page:not([hidden])", wait);
+      assert.equal(await page.evaluate(() => location.hash), "#/retros/20261105T090000Z-d4e5f6");
+      await page.browserContext().close();
+
+      ({ page } = await openPage("#/retros"));
+      await page.waitForSelector("#retros-list .retro-finding", wait);
+      await page.keyboard.down("Control");
+      await page.keyboard.press("k");
+      await page.keyboard.up("Control");
+      await page.waitForSelector("#job-picker[open]", wait);
+      await page.type("#job-search", "ls alias");
+      await page.waitForSelector("#job-section-retro-findings", wait);
+      await page.keyboard.press("Enter");
+      await page.waitForSelector("#retro-20261112T090000Z-a1b2c3-1[aria-current]", wait);
+      assert.equal(await page.evaluate(() => location.hash), "#/retros/20261112T090000Z-a1b2c3/1");
+      assert.equal(await page.evaluate(() => document.activeElement.id), "retros-page-heading");
+      await page.browserContext().close();
+
+      retros = { status: 500, body: "boom" };
+      ({ page } = await openPage(""));
+      await page.waitForSelector(".card", wait);
+      await openJumper(page);
+      await page.type("#job-search", "ls alias");
+      assert.equal(await page.$eval("#job-empty", (el) => el.hidden), false);
+      assert.equal(await page.$eval("#job-empty", (el) => el.textContent), "No jobs found");
+      assert.equal(await count(page), "0 jobs");
+      await page.browserContext().close();
+      retros = { status: 200, body: JSON.stringify(RUNS) };
+    });
+
+    await t.test("jumper caps finding rows at 20", async () => {
+      const many = (run) => ({
+        ...RUNS[0],
+        run,
+        findings: Array.from({ length: 12 }, (_, i) =>
+          finding(i + 1, "Synthetic finding " + (i + 1), []),
+        ),
+      });
+      retros = {
+        status: 200,
+        body: JSON.stringify([many("20261001T090000Z-aaaaaa"), many("20260924T090000Z-bbbbbb")]),
+      };
+      const { page } = await openPage("");
+      await page.waitForSelector(".card", wait);
+      await openJumper(page);
+      await page.type("#job-search", "tool-economy");
+      await page.waitForSelector("#job-section-retro-findings", wait);
+      const rows = await options(page);
+      assert.equal(rows.filter(([section]) => section === "Retro findings").length, 20);
+      assert.match(await count(page), / · 20 retro results$/);
+      await page.browserContext().close();
+      retros = { status: 200, body: JSON.stringify(RUNS) };
+    });
+
     await t.test("empty and failed loads say so", async () => {
       retros = { status: 200, body: "[]" };
       let { page } = await openPage("#/retros");
@@ -387,6 +520,21 @@ test("retros page", { timeout: 180000 }, async (t) => {
     await t.test("captures", async () => {
       if (!process.env.RETROS_SHOTS) return;
       await mkdir(process.env.RETROS_SHOTS, { recursive: true });
+      const stage = process.env.RETROS_SHOT_STAGE || "after";
+      const jumper = await openPage("");
+      await jumper.page.waitForSelector(".card", wait);
+      await jumper.page.keyboard.press("j");
+      await jumper.page.waitForSelector("#job-picker[open]", wait);
+      await jumper.page.type("#job-search", "ls alias");
+      await jumper.page.waitForSelector(
+        stage === "before" ? "#job-empty:not([hidden])" : "#job-section-retro-findings",
+        wait,
+      );
+      await (
+        await jumper.page.$("#job-picker")
+      ).screenshot({ path: `${process.env.RETROS_SHOTS}/${stage}-jumper-retros.png` });
+      await jumper.page.browserContext().close();
+      if (stage === "before") return;
       for (const [name, viewport, scheme] of [
         ["desktop", { width: 1280, height: 900 }, "light"],
         ["mobile", { width: 390, height: 844 }, "light"],
