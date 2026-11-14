@@ -175,6 +175,7 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.parsers.expat
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -4499,7 +4500,7 @@ def timer_drift(scheduler, values):
         plist = timer_path(scheduler)
         try:
             have = plistlib.loads(plist.read_bytes()).get("ProgramArguments")
-        except (OSError, ValueError, AttributeError):
+        except (OSError, ValueError, AttributeError, xml.parsers.expat.ExpatError):
             return f"could not read {plist}"
         if not isinstance(have, list) or not all(isinstance(a, str) for a in have):
             return f"could not read ProgramArguments in {plist}"

@@ -3082,6 +3082,10 @@ class PickupSetupTest(PickupFixture):
         code, out, _ = self.setup()
         self.assertEqual(code, 0)
         self.assertIn(f"    note: could not read {plist}.", out)
+        plist.write_bytes(plistlib.dumps({"Label": "factory.pickup", "ProgramArguments": ["/old/python3"]})[:40])
+        code, out, _ = self.setup()
+        self.assertEqual(code, 0)
+        self.assertIn(f"    note: could not read {plist}.", out)
 
     @unittest.skipIf(sys.platform == "win32", "env launchers are POSIX")
     def test_env_launcher_adds_program_folder(self):
