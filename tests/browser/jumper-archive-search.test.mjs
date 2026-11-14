@@ -197,6 +197,13 @@ test("the jumper searches archived jobs on a pick", { timeout: 180000 }, async (
       );
     });
 
+    await t.test("closing the match's drawer focuses the jumper button", async () => {
+      await page.focus("#d-close");
+      await page.keyboard.press("Enter");
+      await page.waitForSelector("#detail[hidden]", wait);
+      assert.equal(await page.evaluate(() => document.activeElement.id), "job-jump");
+    });
+
     await t.test("zero matches say so", async () => {
       await openJumper();
       await page.type("#job-search", "zzz");

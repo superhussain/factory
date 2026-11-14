@@ -568,6 +568,41 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    const scrolledClose = async (selector, open) => {
+      const { page } = await openPage("", { width: 390, height: 844 });
+      await page.waitForSelector(selector, wait);
+      await page.evaluate(() => {
+        document.body.style.paddingBottom = "3000px";
+        scrollTo(0, document.documentElement.scrollHeight);
+      });
+      await page.evaluate(open);
+      await page.waitForSelector("#detail:not([hidden])", wait);
+      await page.focus("#d-close");
+      await page.keyboard.press("Escape");
+      await page.waitForSelector("#detail[hidden]", wait);
+      return page;
+    };
+    const inView = (page, selector) =>
+      page.evaluate((s) => {
+        const el = document.activeElement;
+        // Scroll offsets are whole pixels, so a card at a half-pixel offset can sit 0.5px above the top.
+        const { top, bottom } = el.getBoundingClientRect();
+        return el.matches(s) && Math.round(top) >= 0 && Math.round(bottom) <= innerHeight;
+      }, selector);
+
+    await t.test("closing a drawer scrolls the refocused control into view", async () => {
+      const card = '.card[data-id="1491-open-work"]';
+      let page = await scrolledClose(card, () => (location.hash = "#1491-open-work"));
+      assert.equal(await inView(page, card), true, "job card");
+      await page.browserContext().close();
+
+      page = await scrolledClose("[data-backlog-open]", () =>
+        document.querySelector("[data-backlog-open]").click(),
+      );
+      assert.equal(await inView(page, "[data-backlog-open]"), true, "backlog button");
+      await page.browserContext().close();
+    });
+
     await t.test("a gear click before projects load focuses the picker once they do", async () => {
       const active = (page) => page.evaluate(() => document.activeElement.id);
       let release;
@@ -644,6 +679,14 @@ test("retros page", { timeout: 180000 }, async (t) => {
         path: `${process.env.RETROS_SHOTS}/${stage}-drawer-close-focus.png`,
       });
       await board.page.browserContext().close();
+      const scrolled = await scrolledClose(
+        '.card[data-id="1491-open-work"]',
+        () => (location.hash = "#1491-open-work"),
+      );
+      await scrolled.screenshot({
+        path: `${process.env.RETROS_SHOTS}/${stage}-drawer-close-scroll.png`,
+      });
+      await scrolled.browserContext().close();
       if (stage === "before") return;
       for (const [name, viewport, scheme] of [
         ["desktop", { width: 1280, height: 900 }, "light"],

@@ -593,8 +593,6 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (max-width: 360px) {
     header { gap: 6px; }
     .filter { max-width: 96px; }
-  }
-  @media (max-width: 360px) and (pointer: coarse) {
     .status { flex: 1 1 0; min-width: 0; justify-content: flex-end; }
     .status .updated-word { display: none; }
     #updated { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3655,17 +3653,23 @@ function openCard(id) {
 let renderedBacklog = [];
 
 // Refocuses a backlog button after a re-render, or the Backlog column toggle when the item is gone or busy.
+// Returns the focused control, or null.
 function focusBacklogControl(raw) {
   const same = [...$('board').querySelectorAll('[data-backlog-open]')].find((b) => b.dataset.raw === raw && !b.disabled);
-  (same || $('board').querySelector('.column-toggle[data-stage="backlog"]'))?.focus({ preventScroll: true });
+  const target = same || $('board').querySelector('.column-toggle[data-stage="backlog"]');
+  target?.focus({ preventScroll: true });
+  return target;
 }
 
 // Refocuses a closed job's card, or its column toggle when the card is not on screen.
+// Returns the focused control, or null.
 function focusJobCard(id) {
   const j = jobs.find((x) => x.id === id);
-  if (!j) return;
-  const card = $('board').querySelector('.cards:not([hidden]) .card[data-id="' + CSS.escape(id) + '"]');
-  (card || $('board').querySelector('.column-toggle[data-stage="' + (waitsOnYou(j) ? 'needs-you' : j.stage) + '"]'))?.focus({ preventScroll: true });
+  const target = $('board').querySelector('.cards:not([hidden]) .card[data-id="' + CSS.escape(id) + '"]') ||
+    (j ? $('board').querySelector('.column-toggle[data-stage="' + (waitsOnYou(j) ? 'needs-you' : j.stage) + '"]')
+      : archivedJobs.has(id) ? $('job-jump') : null);
+  target?.focus({ preventScroll: true });
+  return target;
 }
 
 function visibleBacklog() {
@@ -4908,8 +4912,8 @@ function closeDetail(keepHash = false) {
   closeJobActions(false);
   syncIdeaEditor();
   renderBoard();
-  if (raw !== null) focusBacklogControl(raw);
-  else if (id && refocus) focusJobCard(id);
+  const target = raw !== null ? focusBacklogControl(raw) : id && refocus ? focusJobCard(id) : null;
+  target?.scrollIntoView({ block: 'nearest' });
   refreshPicker();
   if (!keepHash && settingsRoute() === null && retrosRoute() === null) history.replaceState(null, '', location.pathname + location.search);
 }
