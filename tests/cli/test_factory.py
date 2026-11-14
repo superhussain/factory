@@ -1238,6 +1238,19 @@ class HoldWriteSkipTest(IsolatedTestCase):
             self.assertEqual(self.board_puts(), 1)
         self.assertNotIn("paseo", self.saved())
 
+    def test_unlinked_own_row_writes(self):
+        link = {"server": "srv-a", "agent": "agent-baby"}
+        self.seed(3, paseo=link, agents=[{"role": "babysit", "session": "sender"}])
+        with patch.object(factory, "paseo_session", return_value=link):
+            self.assertEqual(self.board_puts(), 1)
+        self.assertEqual(self.saved()["agents"][0]["paseo"], link)
+        self.seed(3, agents=[{"role": "babysit", "session": "sender"}])
+        job = self.saved()
+        job.pop("paseo")
+        self.save(job)
+        with patch.object(factory, "paseo_session", return_value=None):
+            self.assertEqual(self.board_puts(), 0)
+
 
 class IdeaTest(IsolatedTestCase):
     def setUp(self):
