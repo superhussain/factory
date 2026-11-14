@@ -14,6 +14,7 @@ body defines the work and output file for other agents.
 | Paseo (optional) | Discover configured profiles/providers with native tools and create a worker in the existing job worktree, not a second branch. Resolve that host's checkout and paths first. See integrations.md. |
 
 Before each role dispatch, run `python3 "$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`.
+For via `paseo`, run it right after the Paseo worker is created, with `--paseo-agent <agent-id>` naming that worker on this host's Paseo server. The row then links to the worker. Without the flag it links to this session.
 After hold, record the orchestrator once when no orchestrator row carries this session.
 `<harness>` is the route provider or the runtime name. Leave out `<effort>` when the
 dispatch set none. `<via>` names the launch path:

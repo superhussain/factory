@@ -120,7 +120,12 @@ test("retros page", { timeout: 180000 }, async (t) => {
     );
     await seedBoard(origin, JOBS);
     let retros = { status: 200, body: JSON.stringify(RUNS) };
-    const openPage = async (hash, viewport = { width: 1280, height: 900 }, scheme = "light") => {
+    const openPage = async (
+      hash,
+      viewport = { width: 1280, height: 900 },
+      scheme = "light",
+      hold = null,
+    ) => {
       const page = await (await browser.createBrowserContext()).newPage();
       await page.setViewport(viewport);
       await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: scheme }]);
@@ -140,6 +145,7 @@ test("retros page", { timeout: 180000 }, async (t) => {
             contentType: "text/plain",
             body: BACKLOG,
           });
+        if (hold && pathname === "/projects.json") return hold.then(() => request.continue());
         return request.continue();
       });
       await page.goto(origin + "/" + hash, { waitUntil: "domcontentloaded" });
@@ -495,6 +501,49 @@ test("retros page", { timeout: 180000 }, async (t) => {
       retros = { status: 200, body: JSON.stringify(RUNS) };
     });
 
+    await t.test("a status link moves focus to the drawer close button", async () => {
+      for (const selector of [
+        'a.retro-chip[href="#1491-open-work"]',
+        'a.retro-chip[href^="#/backlog/"]',
+      ]) {
+        const { page } = await openPage("#/retros");
+        await page.waitForSelector(`#retros-list ${selector}`, wait);
+        await page.focus(`#retros-list ${selector}`);
+        await page.keyboard.press("Enter");
+        await page.waitForSelector("#detail:not([hidden])", wait);
+        assert.equal(await page.evaluate(() => document.activeElement.id), "d-close", selector);
+        await page.browserContext().close();
+      }
+    });
+
+    await t.test("a gear click before projects load focuses the picker once they do", async () => {
+      const active = (page) => page.evaluate(() => document.activeElement.id);
+      let release;
+      let { page } = await openPage("", undefined, undefined, new Promise((r) => (release = r)));
+      await page.waitForSelector("#settings-link", wait);
+      await page.click("#settings-link");
+      await page.waitForSelector("#settings-page:not([hidden])", wait);
+      assert.equal(await active(page), "settings-link");
+      release();
+      await page.waitForFunction(() => document.querySelector("#settings-project option"), wait);
+      await mkdir(".context/shots", { recursive: true });
+      await (
+        await page.$("#settings-projects")
+      ).screenshot({ path: ".context/shots/settings-focus-after-load-1280.png" });
+      assert.equal(await active(page), "settings-project");
+      await page.browserContext().close();
+
+      ({ page } = await openPage("", undefined, undefined, new Promise((r) => (release = r))));
+      await page.waitForSelector("#settings-link", wait);
+      await page.click("#settings-link");
+      await page.waitForSelector("#settings-page:not([hidden])", wait);
+      await page.focus("#settings-nav-display");
+      release();
+      await page.waitForFunction(() => document.querySelector("#settings-project option"), wait);
+      assert.equal(await active(page), "settings-nav-display");
+      await page.browserContext().close();
+    });
+
     await t.test("empty and failed loads say so", async () => {
       retros = { status: 200, body: "[]" };
       let { page } = await openPage("#/retros");
@@ -554,6 +603,15 @@ test("retros page", { timeout: 180000 }, async (t) => {
         await open.page.$("#retro-run-20261105T090000Z-d4e5f6")
       ).screenshot({ path: `${process.env.RETROS_SHOTS}/after-retros-open.png` });
       await open.page.browserContext().close();
+      const chip = await openPage("#/retros");
+      await chip.page.waitForSelector('#retros-list a.retro-chip[href="#1491-open-work"]', wait);
+      await chip.page.focus('#retros-list a.retro-chip[href="#1491-open-work"]');
+      await chip.page.keyboard.press("Enter");
+      await chip.page.waitForSelector("#detail:not([hidden])", wait);
+      await chip.page.screenshot({
+        path: `${process.env.RETROS_SHOTS}/after-retros-chip-focus.png`,
+      });
+      await chip.page.browserContext().close();
       const { page } = await openPage("#/settings/reference");
       await page.waitForSelector("#settings-reference:not([hidden])", wait);
       await (

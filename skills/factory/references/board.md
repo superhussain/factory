@@ -64,7 +64,7 @@ How the dashboard's idea column, Assign project and backlog decision page behave
 [pickup](pickup.md#owner-model-experiment).
 Only pickup and `agent record` append `agents` rows, newest 32 kept;
 `agent report` counts them.
-A row's paseo is the session that recorded it, or the session whose hold claimed its tag.
+A row's paseo is the session that recorded it, or the session whose hold claimed its tag, or the worker named by `--paseo-agent`.
 A babysit sent to the job's own agent records a babysit row linked to that agent.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.

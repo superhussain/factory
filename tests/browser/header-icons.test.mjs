@@ -37,15 +37,30 @@ test("header icons share one row and match the filter height", { timeout: 120000
       await page.setViewport(viewport);
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#new-idea:not([hidden])");
+      await page.waitForSelector(".updated-word");
       const header = await page.evaluate(() => {
         const rect = (id) => document.getElementById(id).getBoundingClientRect();
         const icons = ["new-idea", "job-jump", "retros-link", "settings-link"];
         const el = document.querySelector("header");
+        const boxes = [...el.children]
+          .map((child) => child.getBoundingClientRect())
+          .filter((box) => box.height > 0)
+          .sort((a, b) => a.top - b.top);
+        let rows = 0;
+        let bottom = -Infinity;
+        for (const box of boxes) {
+          if (box.top >= bottom) rows++;
+          bottom = Math.max(bottom, box.bottom);
+        }
         return {
           tops: icons.map((id) => Math.round(rect(id).top)),
           heights: [...icons, "filter"].map((id) => rect(id).height),
           scrollWidth: el.scrollWidth,
           clientWidth: el.clientWidth,
+          rows,
+          headerHeight: el.getBoundingClientRect().height,
+          wordShown: document.querySelector(".updated-word").getClientRects().length > 0,
+          text: document.getElementById("updated").textContent,
         };
       });
       assert.equal(new Set(header.tops).size, 1, `icon tops at ${label}: ${header.tops}`);
@@ -54,6 +69,13 @@ test("header icons share one row and match the filter height", { timeout: 120000
         header.scrollWidth <= header.clientWidth,
         `header scrolls at ${label}: ${header.scrollWidth} > ${header.clientWidth}`,
       );
+      assert.ok(header.rows <= 2, `third header row at ${label}: height ${header.headerHeight}`);
+      assert.equal(
+        header.wordShown,
+        !(viewport.width === 320 && viewport.hasTouch),
+        `updated word shown at ${label}`,
+      );
+      assert.ok(header.text.startsWith("updated "), `updated text at ${label}: ${header.text}`);
       if (viewport.width === 1280) {
         const link = await page.$eval("#retros-link", (el) => ({
           next: el.nextElementSibling.id,

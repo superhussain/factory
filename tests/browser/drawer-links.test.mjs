@@ -4,6 +4,7 @@
 // in localStorage, including on reset.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdir } from "node:fs/promises";
 import { prepareAssets } from "../../tools/assets.mjs";
 import {
   withBrowserFixture,
@@ -259,6 +260,34 @@ test("drawer header links", { timeout: 180000 }, async (t) => {
         [true, null, null],
         [true, null, null],
       ]);
+      const jumperLinks = async (id, shot) => {
+        await links(id);
+        await page.keyboard.down("Control");
+        await page.keyboard.press("k");
+        await page.keyboard.up("Control");
+        await page.waitForSelector("#job-picker[open]");
+        if (shot) {
+          await mkdir(".context/shots", { recursive: true });
+          await (await page.$("#job-picker")).screenshot({ path: shot });
+        }
+        const titles = await page.$$eval('#job-results [role="option"] .title', (els) =>
+          els
+            .map((el) => el.textContent)
+            .filter((t) => t.startsWith("Open in") || t.startsWith("Open the session")),
+        );
+        await page.keyboard.press("Escape");
+        return titles;
+      };
+      const riderTitles = await jumperLinks(
+        "091-sample-typo",
+        ".context/shots/jumper-rider-links-1280.png",
+      );
+      assert.deepEqual(riderTitles, [
+        "Open the session of 090-sample-export-csv in Session app",
+        "Open the session of 090-sample-export-csv in Session",
+      ]);
+      for (const id of ["090-sample-export-csv", "093-sample-own"])
+        assert.deepEqual(await jumperLinks(id), ["Open in Session app", "Open in Session"], id);
     });
 
     assert.deepEqual(errors, []);
