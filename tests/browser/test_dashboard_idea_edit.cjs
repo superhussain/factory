@@ -469,6 +469,7 @@ function fakeUI(fetch) {
             this.listeners[type] = fn;
           },
           setAttribute() {},
+          replaceChildren() {},
           contains() {
             return false;
           },
@@ -488,6 +489,9 @@ function fakeUI(fetch) {
       return elements.get(id);
     },
     addEventListener() {},
+    createElement() {
+      return {};
+    },
     querySelector() {
       return null;
     },
