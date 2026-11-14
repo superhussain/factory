@@ -1250,7 +1250,14 @@ let boardEtag = '';
 // client redraws this age label on its own.
 function drawUpdated() {
   if (!loaded) return;
-  $('updated').textContent = boardUpdated ? 'updated ' + ago(boardUpdated) : 'no jobs yet';
+  if (boardUpdated) {
+    const word = document.createElement('span');
+    word.className = 'updated-word';
+    word.textContent = 'updated ';
+    $('updated').replaceChildren(word, ago(boardUpdated));
+  } else {
+    $('updated').replaceChildren('no jobs yet');
+  }
   $('updated').title = boardUpdated;
 }
 
