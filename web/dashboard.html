@@ -1883,6 +1883,8 @@ function renderJobResults() {
     : { kind: 'command', key: 'command:select-project', title: 'Select project', meta: 'Command · Change the board project filter', words: 'select project command' };
   const retrosCommand = { kind: 'command', key: 'command:retros', title: 'Retros', meta: 'Command · Open retro runs and findings (R)', words: 'retros retro runs findings command' };
   const commands = [command, projectCommand, retrosCommand].filter((r) => r && tokens.every((t) => r.words.includes(t)));
+  const retroRows = retroPickerRows(tokens);
+  const retroCount = retroRows.runs.length + retroRows.findings.length;
   const jobRows = matched.map((j) => ({
     kind: 'job', key: 'job:' + j.id, job: j, title: j.title || j.id,
     meta: projectName(j) + ' · ' + j.id + ' · ' + j.stage,
@@ -1910,12 +1912,15 @@ function renderJobResults() {
     { id: 'retros', title: 'Retros', rows: commands.filter((r) => r.key === 'command:retros') },
     ...[['needs-you', 'Needs you'], ...JOB_PICKER_STAGES.map((stage) => [stage, stage === 'pr-open' ? 'PR open' : stage[0].toUpperCase() + stage.slice(1)]),
       ['other', 'Other jobs']].map(([id, title]) => ({ id, title, rows: jobRows.filter((r) => jobResultSection(r.job) === id) })),
+    { id: 'retro-runs', title: 'Retro runs', rows: retroRows.runs },
+    { id: 'retro-findings', title: 'Retro findings', rows: retroRows.findings },
     { id: 'archived', title: 'Archived jobs', rows: archiveRows },
   ].filter((section) => section.rows.length);
   jobResults = sections.flatMap((section) => section.rows);
   $('job-count').textContent = matched.length + (matched.length === 1 ? ' job' : ' jobs') +
     (actions.length ? ' · ' + actions.length + ' for ' + openId : '') +
     (commands.length ? ' · ' + commands.length + (commands.length === 1 ? ' command' : ' commands') : '') +
+    (retroCount ? ' · ' + retroCount + (retroCount === 1 ? ' retro result' : ' retro results') : '') +
     archiveCount;
   $('job-empty').textContent = openId ? 'No matching jobs or actions' : 'No jobs found';
   $('job-empty').hidden = jobResults.length !== 0;
@@ -2004,6 +2009,7 @@ function openJobPicker() {
     $('job-picker').showModal();
     $('job-search').setAttribute('aria-expanded', 'true');
     renderJobResults();
+    if (retros === null) loadRetros();
   }
   $('job-search').focus();
 }
@@ -2050,6 +2056,14 @@ function activateJobResult() {
   if (row.kind === 'archive-search') {
     if (archiveSearch?.query === row.query && archiveSearch.status === 'loading') return;
     return searchArchive(row.query);
+  }
+  if (row.kind === 'retro') {
+    closeJobPicker(true);
+    // The same hash fires no hashchange, so scroll to the anchor again here.
+    if (location.hash === row.hash) { retrosScrolled = ''; renderRetrosPage(); }
+    else location.hash = row.hash;
+    $('retros-page-heading').focus({ preventScroll: true });
+    return;
   }
   if (row.key === 'command:select-project') return openProjectPicker();
   if (row.key === 'command:retros') {
@@ -2753,6 +2767,25 @@ function retrosRoute() {
   return m ? { run: m[1] ?? null, rank: m[2] ? Number(m[2]) : null } : null;
 }
 
+// Jumper rows for retro runs and findings that hold every query token, in API order; finding rows stop at 20.
+function retroPickerRows(tokens) {
+  const runs = [], findings = [];
+  if (!tokens.length || !Array.isArray(retros)) return { runs, findings };
+  const hit = (text) => tokens.every((t) => text.toLowerCase().includes(t));
+  for (const run of retros) {
+    const hash = '#/retros/' + run.run;
+    if (hit(run.run)) runs.push({
+      kind: 'retro', key: 'retro-run:' + run.run, hash, title: retroWhen(run.run),
+      meta: 'Retro run · ' + run.host + ' · ' + run.findings.length + (run.findings.length === 1 ? ' finding' : ' findings') + ' · ' + run.run,
+    });
+    for (const f of run.findings) if (findings.length < 20 && hit([run.run, f.title, f.category, f.project].join('\n'))) findings.push({
+      kind: 'retro', key: 'retro-finding:' + run.run + '/' + f.rank, hash: hash + '/' + f.rank, title: f.title,
+      meta: 'Retro finding ' + f.rank + ' · ' + f.category + ' · ' + f.project + ' · ' + run.run,
+    });
+  }
+  return { runs, findings };
+}
+
 // Each Retro provenance line indented under a backlog line, checked or not, as factory.py retro_marks reads them.
 function retroMarks(text) {
   const marks = [];
@@ -2798,6 +2831,7 @@ async function loadRetros() {
     retrosFailed = false;
   } catch { retros = null; retrosFailed = true; }
   renderRetrosPage();
+  if ($('job-picker').open && pickerMode === 'job') renderJobResults();
 }
 
 const RETRO_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
