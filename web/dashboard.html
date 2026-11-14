@@ -3660,6 +3660,14 @@ function focusBacklogControl(raw) {
   (same || $('board').querySelector('.column-toggle[data-stage="backlog"]'))?.focus({ preventScroll: true });
 }
 
+// Refocuses a closed job's card, or its column toggle when the card is not on screen.
+function focusJobCard(id) {
+  const j = jobs.find((x) => x.id === id);
+  if (!j) return;
+  const card = $('board').querySelector('.cards:not([hidden]) .card[data-id="' + CSS.escape(id) + '"]');
+  (card || $('board').querySelector('.column-toggle[data-stage="' + (waitsOnYou(j) ? 'needs-you' : j.stage) + '"]'))?.focus({ preventScroll: true });
+}
+
 function visibleBacklog() {
   return backlog.filter((b) => isShown(b.project));
 }
@@ -4891,6 +4899,8 @@ function refreshPicker() {
 
 function closeDetail(keepHash = false) {
   const raw = openBacklogRaw;
+  const id = openId;
+  const refocus = $('detail').contains(document.activeElement) || document.activeElement === document.body;
   drawerVersion++;
   openId = null;
   openBacklogRaw = null;
@@ -4899,6 +4909,7 @@ function closeDetail(keepHash = false) {
   syncIdeaEditor();
   renderBoard();
   if (raw !== null) focusBacklogControl(raw);
+  else if (id && refocus) focusJobCard(id);
   refreshPicker();
   if (!keepHash && settingsRoute() === null && retrosRoute() === null) history.replaceState(null, '', location.pathname + location.search);
 }

@@ -516,6 +516,58 @@ test("retros page", { timeout: 180000 }, async (t) => {
       }
     });
 
+    await t.test("closing a live job's drawer focuses its card", async () => {
+      const cardSelector = '.card[data-id="1491-open-work"]';
+      const focused = (page, selector) =>
+        page.evaluate((s) => document.activeElement.matches(s), selector);
+      const openCard = async () => {
+        const { page } = await openPage("");
+        await page.waitForSelector(cardSelector, wait);
+        await page.focus(cardSelector);
+        await page.keyboard.press("Enter");
+        await page.waitForSelector("#detail:not([hidden])", wait);
+        return page;
+      };
+
+      let page = await openCard();
+      await page.keyboard.press("Escape");
+      await page.waitForSelector("#detail[hidden]", wait);
+      assert.equal(await focused(page, cardSelector), true, "Escape");
+      await page.browserContext().close();
+
+      ({ page } = await openPage("#/retros"));
+      await page.waitForSelector('#retros-list a.retro-chip[href="#1491-open-work"]', wait);
+      await page.focus('#retros-list a.retro-chip[href="#1491-open-work"]');
+      await page.keyboard.press("Enter");
+      await page.waitForSelector("#detail:not([hidden])", wait);
+      await page.click("#d-close");
+      await page.waitForSelector("#detail[hidden]", wait);
+      assert.equal(await focused(page, cardSelector), true, "chip then close button");
+      await page.browserContext().close();
+
+      ({ page } = await openPage(""));
+      await page.waitForSelector(cardSelector, wait);
+      await page.click('.column-toggle[data-stage="build"]');
+      await page.evaluate(() => (location.hash = "#1491-open-work"));
+      await page.waitForSelector("#detail:not([hidden])", wait);
+      await page.focus("#d-close");
+      await page.keyboard.press("Escape");
+      await page.waitForSelector("#detail[hidden]", wait);
+      assert.equal(
+        await focused(page, '.column-toggle[data-stage="build"]'),
+        true,
+        "collapsed column",
+      );
+      await page.browserContext().close();
+
+      page = await openCard();
+      await page.focus("#retros-link");
+      await page.keyboard.press("h");
+      await page.waitForSelector("#detail[hidden]", wait);
+      assert.equal(await focused(page, "#retros-link"), true, "h on the Retros link");
+      await page.browserContext().close();
+    });
+
     await t.test("a gear click before projects load focuses the picker once they do", async () => {
       const active = (page) => page.evaluate(() => document.activeElement.id);
       let release;
@@ -575,14 +627,23 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await jumper.page.keyboard.press("j");
       await jumper.page.waitForSelector("#job-picker[open]", wait);
       await jumper.page.type("#job-search", "ls alias");
-      await jumper.page.waitForSelector(
-        stage === "before" ? "#job-empty:not([hidden])" : "#job-section-retro-findings",
-        wait,
-      );
+      await jumper.page.waitForSelector("#job-section-retro-findings", wait);
       await (
         await jumper.page.$("#job-picker")
       ).screenshot({ path: `${process.env.RETROS_SHOTS}/${stage}-jumper-retros.png` });
       await jumper.page.browserContext().close();
+      const board = await openPage("#/retros");
+      await board.page.waitForSelector('#retros-list a.retro-chip[href="#1491-open-work"]', wait);
+      await board.page.focus('#retros-list a.retro-chip[href="#1491-open-work"]');
+      await board.page.keyboard.press("Enter");
+      await board.page.waitForSelector("#detail:not([hidden])", wait);
+      await board.page.focus("#d-close");
+      await board.page.keyboard.press("Enter");
+      await board.page.waitForSelector("#detail[hidden]", wait);
+      await board.page.screenshot({
+        path: `${process.env.RETROS_SHOTS}/${stage}-drawer-close-focus.png`,
+      });
+      await board.page.browserContext().close();
       if (stage === "before") return;
       for (const [name, viewport, scheme] of [
         ["desktop", { width: 1280, height: 900 }, "light"],
