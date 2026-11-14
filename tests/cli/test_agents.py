@@ -29,7 +29,8 @@ if sys.argv[1] == "list":
     print(json.dumps({"version": 1, "stalls": conf["stalls"]}), flush=True)
 """
 JOB = "501-retry-uploads"
-USAGE = "factory.py: usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>]\n"
+USAGE = ("factory.py: usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>] "
+         "[--paseo-agent <agent-id>]\n")
 # The made-up step 3 rows: one job that started on Claude and moved to opencode during build.
 ROWS = [
     {"at": "2026-01-01T09:00:00Z", "stage": "idea", "role": "orchestrator", "harness": "claude", "via": "paseo",
@@ -159,6 +160,30 @@ class AgentRecordTest(BoardFixture):
         [row] = self.job()["agents"]
         self.assertEqual(row["paseo"], {"server": "srv-a", "agent": "agent-orch"})
         self.assertEqual(json.loads(out), row)
+
+    def test_row_links_paseo_worker(self):
+        with patch.object(factory, "paseo_server", return_value="srv-a"), \
+                patch.object(factory, "paseo_session", return_value={"server": "srv-a", "agent": "agent-orch"}):
+            code, out, err = self.record("build", "claude", "paseo", "claude-opus-5-5", "medium",
+                                         "--paseo-agent", "agent-build")
+        self.assertEqual((code, err), (0, ""))
+        [row] = self.job()["agents"]
+        self.assertEqual(row["paseo"], {"server": "srv-a", "agent": "agent-build"})
+        self.assertEqual(json.loads(out), row)
+
+    def test_refuses_paseo_agent(self):
+        with patch.object(factory, "paseo_server", return_value="srv-a"):
+            self.assertEqual(self.record("build", "claude", "native", "claude-opus-5-5", "--paseo-agent", "agent-build"),
+                             (2, "", "factory.py: --paseo-agent is only for via paseo\n"))
+            for bad in ("bad id!", "-x"):
+                self.assertEqual(self.record("build", "claude", "paseo", "claude-opus-5-5", "--paseo-agent", bad),
+                                 (2, "", f'factory.py: --paseo-agent "{bad}" must be 1 to 64 letters, digits, _ or -, '
+                                         "not starting with -\n"), bad)
+        with patch.object(factory, "paseo_server", return_value=None):
+            self.assertEqual(self.record("build", "claude", "paseo", "claude-opus-5-5", "--paseo-agent", "agent-build"),
+                             (2, "", "factory.py: --paseo-agent needs this host's Paseo server id; leave it out to "
+                                     "link the row to this session\n"))
+        self.assertEqual((self.puts, "agents" in self.job()), (0, False))
 
 
 class AgentHoldLinkTest(BoardFixture):

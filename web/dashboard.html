@@ -594,6 +594,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     header { gap: 6px; }
     .filter { max-width: 96px; }
   }
+  @media (max-width: 360px) and (pointer: coarse) {
+    .status { flex: 1 1 0; min-width: 0; justify-content: flex-end; }
+    .status .updated-word { display: none; }
+    #updated { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status .dot { flex: none; }
+  }
   @media (pointer: coarse) { :root { --icon-size: 44px; } }
 </style>
 </head>
@@ -1250,7 +1256,14 @@ let boardEtag = '';
 // client redraws this age label on its own.
 function drawUpdated() {
   if (!loaded) return;
-  $('updated').textContent = boardUpdated ? 'updated ' + ago(boardUpdated) : 'no jobs yet';
+  if (boardUpdated) {
+    const word = document.createElement('span');
+    word.className = 'updated-word';
+    word.textContent = 'updated ';
+    $('updated').replaceChildren(word, ago(boardUpdated));
+  } else {
+    $('updated').replaceChildren('no jobs yet');
+  }
   $('updated').title = boardUpdated;
 }
 
@@ -1758,10 +1771,12 @@ function jobLinkRows(j) {
   const link = (name, title, words, tab) => rows.push({ link: name, title, words: title + ' link ' + words, tab });
   const pr = prLink(j);
   if (pr) link('pr', 'Open PR #' + pr.n, 'pr github', true);
-  const paseo = paseoLinks(j);
+  const owner = sessionJob(j);
+  const paseo = owner && paseoLinksFor(owner.paseo);
+  const open = (label) => (owner !== j ? 'Open the session of ' + owner.id + ' in ' : 'Open in ') + label;
   if (paseo) {
-    if (paseo.app) link('paseo', 'Open in ' + factoryConfig.agent_links.app.label, factoryConfig.agent_links.app.label, false);
-    if (paseo.web) link('paseo-web', 'Open in ' + factoryConfig.agent_links.web.label, factoryConfig.agent_links.web.label, true);
+    if (paseo.app) link('paseo', open(factoryConfig.agent_links.app.label), factoryConfig.agent_links.app.label, false);
+    if (paseo.web) link('paseo-web', open(factoryConfig.agent_links.web.label), factoryConfig.agent_links.web.label, true);
   }
   return rows;
 }
@@ -2508,7 +2523,7 @@ function selectSettingsProject() {
   selectProjectPickup();
 }
 
-function enterProjectsSection() {
+function enterProjectsSection(focus = true) {
   const select = $('settings-project');
   const selected = soleProject() || [...(projects?.keys() || [])].sort()[0];
   select.replaceChildren();
@@ -2520,7 +2535,7 @@ function enterProjectsSection() {
   loadHosts();
   renderProjectList();
   selectSettingsProject();
-  select.focus();
+  if (focus) select.focus();
 }
 
 async function saveProjectDocument() {
@@ -7241,7 +7256,7 @@ $('notify-needs').addEventListener('change', async () => {
 });
 
 loadProjects().then(() => {
-  if (settingsShown === 'projects') enterProjectsSection();
+  if (settingsShown === 'projects') enterProjectsSection(!$('settings-page').contains(document.activeElement) || document.activeElement === $('settings-nav-projects'));
   if (settingsShown === 'pipeline') enterPipelineSection();
   if (settingsShown === 'hosts') enterHostsSection();
   if (settingsShown === 'display') enterDisplaySection();

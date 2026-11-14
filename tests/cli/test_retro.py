@@ -141,7 +141,9 @@ class RetroRedactTest(RetroCase):
                           ("api_token=4096", "api_token=[redacted]"),
                           ("TokenSecret=123456", "TokenSecret=[redacted]"),
                           ("tokensecret: 42", "tokensecret: [redacted]"),
-                          ("secretokens=1234567", "secretokens=[redacted]")):
+                          ("secretokens=1234567", "secretokens=[redacted]"),
+                          ("git clone https://u:p@ss@host/r", "git clone https://[redacted]@host/r"),
+                          ("https://u:p@host/a@b", "https://[redacted]@host/a@b")):
             with self.subTest(text=text[:20]):
                 self.assertEqual(factory.retro_redact(text), out)
 
@@ -153,7 +155,8 @@ class RetroRedactTest(RetroCase):
         self.assertIn("RETRO_LONG_KEYVALUE", patterns)
         self.assertIn("RETRO_LONG_FLAG", patterns)
         units = [*"aZ09-.+_:/", " ", "\t", "a.", "a-", "a+", "a1", "--a", "token", "password", "bearer ", "-u ", "://",
-                 "a=", "--a ", "_token=", "tokens", "a" * 70 + " ", "a" * 40 + "://", "a" * 40 + "://u:p@"]
+                 "a=", "--a ", "_token=", "tokens", "a" * 70 + " ", "a" * 40 + "://", "a" * 40 + "://u:p@",
+                 "@", "://u:p@ss@", "a" * 40 + "://u:p@ss@"]
         for unit in units:
             text = (unit * 30000)[:30000]
             for name, pattern in [*patterns.items(), ("retro_redact", None)]:
@@ -519,6 +522,17 @@ class RetroAggregateTest(RetroWorkerCase):
                           "factory/decisions.md": {"version": 0, "text": "# Decisions\n"},
                           "factory/runbook.md": {"version": 1, "text": "# Runbook\n"}}})
         self.assertFalse(any(key.startswith("sample-tools") for key in agg["documents"]))
+
+    def test_latest_is_the_newest_kept_row(self):
+        code, out, err = self.aggregate(self.window(7, {1: {"host-a": [digest_row("host-a", S1)]},
+                                                        0: {"host-a": "not json\n",
+                                                            "host-b": [digest_row("host-b", S2)]}}))
+        self.assertEqual((code, err), (0, ""))
+        printed = json.loads(out)
+        self.assertEqual((printed["stale"], printed["skipped"]), (["host-a"], 1))
+        agg = json.loads(Path(printed["aggregate"]).read_text(encoding="utf-8"))
+        yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
+        self.assertEqual(agg["hosts"]["host-a"]["latest"], yesterday)
 
     def test_aggregate_medians_skip_runs_with_no_usage(self):
         empty = digest_row("host-a", S2, context={"first_turn": 0, "mean_per_turn": 0})
@@ -913,6 +927,11 @@ class RetroUploadTest(RetroWorkerCase):
         code, out, err, puts = self.admit(reply(), status=409, body=b"retro run belongs to another host")
         self.assertEqual((code, out), (0, f"wrote {self.folder / 'findings.md'}\nno suggestions\n"))
         self.assertEqual(err, "retro upload failed: 409 retro run belongs to another host\n")
+
+    def test_a_lost_race_prints_retry(self):
+        code, out, err, puts = self.admit(reply(), status=409, body=b"retro run changed, retry")
+        self.assertEqual((code, out), (0, f"wrote {self.folder / 'findings.md'}\nno suggestions\n"))
+        self.assertEqual(err, "retro upload failed: 409 retro run changed, retry\n")
 
     def test_a_failed_request_keeps_the_exit_code(self):
         (self.folder / "reply.json").write_text(json.dumps(reply()), encoding="utf-8")

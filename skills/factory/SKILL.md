@@ -202,7 +202,7 @@ does the same. Pass `--session <tag>` to every later `claim`, `next`, `hold`, an
 
 - Run `hold` before spawning each agent and after each one finishes, so a long
   build keeps the claim fresh. A claim goes stale after `claim_stale_minutes` in
-  `config.md` (default 120). When this session refreshed its own claim in the last 10 minutes and nothing else changes, `hold` skips the board write and prints the same lines.
+  `config.md` (default 120). When this session refreshed its own claim in the last 10 minutes and nothing else changes, including no unlinked agents row from this session, `hold` skips the board write and prints the same lines.
 - `hold` prints `elapsed <N>s`, the seconds since the job's first claim. Time matters: a correct result sooner is better. Use it to pace the job and run independent agents in parallel. It never cuts a review round, skips a reviewer, shortens WAIT FOR ALL, or relaxes a security floor.
 - Moving a job to `needs-human`, `pr-open`, `merged`, or `closed` releases the claim.
 - On `babysit requested` from `hold`, finish the board write in progress, then follow
@@ -255,7 +255,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
 
 ## Rules
 
-- Before each role dispatch, run `python3 "$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`.
+- Before each role dispatch, run `python3 "$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`. For via paseo, record after the worker exists, with `--paseo-agent <agent-id>`.
   After hold, record the orchestrator once when no orchestrator row carries this session.
 - Agents get context from files, not the conversation. Build every agent prompt with
   `python3 "$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] --out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`

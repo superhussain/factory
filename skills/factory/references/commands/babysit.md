@@ -56,10 +56,9 @@ the lower one wins.
 - A request for speed, such as "quickly", makes the plan the budget.
 - Babysit never runs spec, build, review rounds or the approver.
 - Only required checks count. A failing check that is not required never reads fix-ci and never causes a hand-back.
-- One commit, one push: on a fix-reviews or fix-ci reading, read every counted review, every thread bots or threads counts, and every failing required check once. Fix them all in one commit, push once, reply in every thread, then run pr-state "$SLUG/<id>" --wait 540 once.
+- One commit, one push: on a fix-reviews or fix-ci reading, read every counted review, every thread bots or threads counts, and every failing required check once. Fix them all in one commit, push once, reply in every thread, resolve each thread when the notes ask, then run pr-state "$SLUG/<id>" --wait 540 once.
 - For a one-file logic or cross-cutting fix, also run the project file's Babysit verify: line when its Verify section has one.
 - Change only what a counted review, thread or failing required check asks. No refactors, polish, new ideas or backlog entries, and no investigation beyond the failing log.
-- A review-comment or required-CI revision takes about 5 minutes of wall clock, not counting CI, and at most 10 for a multi-file fix.
 - Past 10 minutes, patch `{"note": "babysit stopped after 10 minutes: <why>", "needs": "PR #<n>: babysit stopped after 10 minutes, see the note", "babysit": null, "claim": null}` and stop.
 
 ## Loop
@@ -76,7 +75,7 @@ patch, or a hand-back. After a merge or queue command, read again. A queued PR r
 | `next` | Means | When the notes ask | No note |
 | --- | --- | --- | --- |
 | `merged` / `closed` | the PR state | close out, below | close out, below |
-| `fix-reviews` | a latest reviewer review is `CHANGES_REQUESTED` or `COMMENTED` after both the head commit and the PR author's latest review, or `bots` is above 0: that many unresolved review threads opened by a `Bot` account have no reply from the PR author, or `threads` is above 0: that many unresolved threads a counted reviewer opened have no reply from the PR author | fix the counted comments in `$WT`, commit, push, and reply in the review threads as the notes and the project file's PRs section say | hand back |
+| `fix-reviews` | a latest reviewer review is `CHANGES_REQUESTED` or `COMMENTED` after both the head commit and the PR author's latest review, or `bots` is above 0: that many unresolved review threads opened by a `Bot` account have no reply from the PR author, or `threads` is above 0: that many unresolved threads a counted reviewer opened have no reply from the PR author | fix the counted comments in `$WT`, commit, push, and reply in the review threads, and resolve each thread when the notes ask, as the notes and the project file's PRs section say | hand back |
 | `needs-review` | GitHub shows no approval and nothing above is left to fix | patch `{"needs": "PR #<n> is ready for review: no required check fails and every counted review has a reply. Request a review on GitHub, then press Babysit PR again once it is approved", "babysit": null, "claim": null}` and stop | patch `{"needs": "PR #<n> is ready for review: no required check fails and every counted review has a reply. Request a review on GitHub, then press Babysit PR again once it is approved", "babysit": null, "claim": null}` and stop |
 | `rebase` | `mergeStateStatus` is `DIRTY` | run `git -C "$WT" fetch origin "<base>"`, merge `origin/<base>` (the reading's `base`) into `$WT`, fix the conflicts, commit, push | hand back |
 | `fix-ci` | a required check is `fail` or `cancel` | when the notes allow a rerun and the failed log shows a flake, rerun once as below; otherwise fix from `ci_log.tail` when it is set, else from `gh run view --log-failed`, commit, push | hand back, or the `ci_log` problem patch below when `ci_log.problem` is set |
