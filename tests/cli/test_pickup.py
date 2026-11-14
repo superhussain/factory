@@ -2751,7 +2751,29 @@ class BabysitTest(PickupFixture):
                 self.assertEqual(self.sent, [("synthetic-agent", f"/factory babysit 042-sample-export --session {tag}"
                                                                  f"\n\n{factory.UNATTENDED}")])
                 self.assertEqual(self.launched(), [])
+                [row] = self.job("042-sample-export")["agents"]
+                self.assertIsInstance(row.pop("at"), str)
+                self.assertEqual(row, {"stage": "pr-open", "role": "babysit", "via": "paseo", "session": tag,
+                                       "paseo": {"server": "synthetic-server", "agent": "synthetic-agent"}})
                 self.board["jobs"][0].pop("claim", None)
+
+    def test_a_sent_babysit_copies_the_agents_route(self):
+        self.linked({"synthetic-agent": "idle"})
+        link = {"server": "synthetic-server", "agent": "synthetic-agent"}
+        self.board["jobs"][0]["agents"] = [
+            {"at": "2026-01-01T10:00:00Z", "stage": "build", "role": "orchestrator", "harness": "old",
+             "via": "paseo", "model": "model-old", "effort": "low", "paseo": link},
+            {"at": "2026-01-01T11:00:00Z", "stage": "build", "role": "orchestrator", "harness": "claude",
+             "via": "paseo", "model": "model-a", "effort": "medium", "paseo": link},
+            {"at": "2026-01-01T12:00:00Z", "stage": "review", "role": "review-ui", "harness": "other",
+             "via": "native", "model": "model-b", "effort": "high",
+             "paseo": {"server": "synthetic-server", "agent": "other-agent"}}]
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        row = self.job("042-sample-export")["agents"][-1]
+        self.assertEqual({k: row.get(k) for k in ("role", "harness", "model", "effort", "paseo")},
+                         {"role": "babysit", "harness": "claude", "model": "model-a", "effort": "medium",
+                          "paseo": link})
 
     def test_a_running_linked_agent_skips_the_babysit(self):
         self.linked({"synthetic-agent": "running"})
@@ -2802,6 +2824,7 @@ class BabysitTest(PickupFixture):
         self.assertEqual(err, "factory.py: pickup could not send babysit 042-sample-export to agent synthetic-agent: "
                               "paseo send failed; the next run retries\n")
         self.assertNotIn("claim", self.job("042-sample-export"))
+        self.assertNotIn("agents", self.job("042-sample-export"))
         self.assertEqual((len(self.sent), self.launched()), (1, []))
 
     def test_a_failed_send_to_a_closed_agent_launches_a_new_session_with_the_same_tag(self):

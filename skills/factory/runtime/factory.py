@@ -4966,6 +4966,7 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
                         return
                     if paseo_send(agent, launch_prompt(f"/factory babysit {j['id']} --session {tag}")):
                         print(f"sent babysit {j['id']} {j['project']} to agent {agent} session {tag}")
+                        record_launch(home, j["id"], sent_row(j, tag))
                         return
                     if state == "idle":
                         print(f"factory.py: pickup could not send babysit {j['id']} to agent {agent}: "
@@ -9609,6 +9610,16 @@ def launch_row(given, argv, tag):
     return {"role": "orchestrator", "harness": given["provider"],
             "via": "paseo" if Path(argv[0]).stem.lower() == "paseo" else "launcher", "model": given["model"],
             **({"effort": given["effort"]} if given["effort"] else {}), "session": tag}
+
+
+def sent_row(job, tag):
+    """The babysit row for a babysit sent to job's own Paseo agent, with the harness, model and effort
+    of the newest agents row linked to that agent."""
+    link = {"server": job["paseo"]["server"], "agent": job["paseo"]["agent"]}
+    prior = next((r for r in reversed(job.get("agents") or [])
+                  if isinstance(r, dict) and r.get("paseo") == link), {})
+    route = {k: prior[k] for k in ("harness", "model", "effort") if isinstance(prior.get(k), str)}
+    return {"role": "babysit", **route, "via": "paseo", "session": tag, "paseo": link}
 
 
 def record_agent(home, job_id, row, claimant=None, project=None):
