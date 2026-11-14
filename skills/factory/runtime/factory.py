@@ -9144,7 +9144,6 @@ def retro_aggregate(days):
     rows, skipped, latest = [], 0, {}
     for date in dates:
         for host, text in retro_fetch(home, date):
-            latest[host] = date
             for line in text.splitlines():
                 try:
                     row = json.loads(line)
@@ -9157,6 +9156,7 @@ def retro_aggregate(days):
                 if row.get("job") == "ad-hoc":
                     row["project"] = "ad-hoc"
                 rows.append(row)
+                latest[host] = date
     if not rows:
         fail(f"no host pushed a retro digest from {dates[0]} to {dates[-1]}", 3)
     projects = sorted(registered(home))

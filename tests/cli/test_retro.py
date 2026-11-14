@@ -520,6 +520,17 @@ class RetroAggregateTest(RetroWorkerCase):
                           "factory/runbook.md": {"version": 1, "text": "# Runbook\n"}}})
         self.assertFalse(any(key.startswith("sample-tools") for key in agg["documents"]))
 
+    def test_latest_is_the_newest_kept_row(self):
+        code, out, err = self.aggregate(self.window(7, {1: {"host-a": [digest_row("host-a", S1)]},
+                                                        0: {"host-a": "not json\n",
+                                                            "host-b": [digest_row("host-b", S2)]}}))
+        self.assertEqual((code, err), (0, ""))
+        printed = json.loads(out)
+        self.assertEqual((printed["stale"], printed["skipped"]), (["host-a"], 1))
+        agg = json.loads(Path(printed["aggregate"]).read_text(encoding="utf-8"))
+        yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
+        self.assertEqual(agg["hosts"]["host-a"]["latest"], yesterday)
+
     def test_aggregate_medians_skip_runs_with_no_usage(self):
         empty = digest_row("host-a", S2, context={"first_turn": 0, "mean_per_turn": 0})
         empty["subagents"]["by_type"]["factory-builder"]["first_turns"] = [0]
@@ -913,6 +924,11 @@ class RetroUploadTest(RetroWorkerCase):
         code, out, err, puts = self.admit(reply(), status=409, body=b"retro run belongs to another host")
         self.assertEqual((code, out), (0, f"wrote {self.folder / 'findings.md'}\nno suggestions\n"))
         self.assertEqual(err, "retro upload failed: 409 retro run belongs to another host\n")
+
+    def test_a_lost_race_prints_retry(self):
+        code, out, err, puts = self.admit(reply(), status=409, body=b"retro run changed, retry")
+        self.assertEqual((code, out), (0, f"wrote {self.folder / 'findings.md'}\nno suggestions\n"))
+        self.assertEqual(err, "retro upload failed: 409 retro run changed, retry\n")
 
     def test_a_failed_request_keeps_the_exit_code(self):
         (self.folder / "reply.json").write_text(json.dumps(reply()), encoding="utf-8")

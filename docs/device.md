@@ -204,7 +204,7 @@ names that work. Lines that are not digest rows count as `skipped`. So do rows
 whose `host` is not the host that pushed them or whose `session` is not a
 transcript id. It prints the run, the file paths, this host's transcripts root, and
 the `out` and `findings` paths for `/factory retro`. Each `hosts` entry carries
-`latest`, the newest date in the window that host pushed a digest for. The printed
+`latest`, the newest date in the window with a kept row from that host. The printed
 `stale` lists hosts whose `latest` is not the window's last date. A window no host
 pushed exits 3 and writes nothing. A linked `retro` or run folder exits 2.
 

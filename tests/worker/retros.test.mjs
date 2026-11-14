@@ -183,9 +183,33 @@ test("a write that loses the race to another host answers 409", async () => {
   const s = await setup();
   assert.equal((await s.put(record({ host: "pc" }), pc)).status, 200);
   const get = s.bucket.get.bind(s.bucket);
-  s.bucket.get = async (key) => (key === `retro-runs/${RUN}.json` ? null : get(key));
+  let first = true;
+  s.bucket.get = async (key) => {
+    if (key !== `retro-runs/${RUN}.json` || !first) return get(key);
+    first = false;
+    return null;
+  };
   const r = await s.put(record());
   assert.deepEqual([r.status, r.text], [409, "retro run belongs to another host"]);
+});
+
+test("a write that loses the race on its own run says retry", async () => {
+  const s = await setup();
+  const key = `retro-runs/${RUN}.json`;
+  assert.equal((await s.put(record())).status, 200);
+  const get = s.bucket.get.bind(s.bucket);
+  let first = true;
+  s.bucket.get = async (k) => {
+    const object = await get(k);
+    if (k === key && first) {
+      first = false;
+      await s.bucket.put(key, JSON.stringify(record({ rejected: 3 })));
+    }
+    return object;
+  };
+  const r = await s.put(record({ rejected: 2 }));
+  assert.deepEqual([r.status, r.text], [409, "retro run changed, retry"]);
+  assert.equal(JSON.parse(s.bucket.objects.get(key).bytes).rejected, 3);
 });
 
 test("project slugs follow the runtime's Unicode rule", async () => {
