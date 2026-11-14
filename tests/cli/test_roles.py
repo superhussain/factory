@@ -393,8 +393,15 @@ class RolesTest(IsolatedTestCase):
                        "Reply in every thread bots or threads counts",
                        'git -C "$WT" fetch origin "<base>"', "merge `origin/<base>` (the reading's `base`) into `$WT`",
                        "its Buildkite log could not be read: <ci_log.problem>",
-                       "Acting on a reading the notes select, a push or a merge included, is in scope."):
+                       "Acting on a reading the notes select, a push or a merge included, is in scope.",
+                       "origin HEAD:factory/<id>", "ends in `git push` or `git push --no-verify`",
+                       "While `babysit` is set, every `hold` prints `babysit requested`, the holds in the "
+                       "`wait` and `wait-base` rows included. This session is already the babysitter, so "
+                       "ignore that line and never restart from Step zero on it."):
             self.assertIn(phrase, babysit)
+        skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("A session already running babysit.md is the babysitter: it ignores the line and goes "
+                      "on with its loop.", skill)
 
     def test_babysit_resolves_threads_without_a_time_budget(self):
         babysit = " ".join((SKILL / "references/commands/babysit.md").read_text(encoding="utf-8").split())

@@ -368,6 +368,21 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await t.test("a status link moves focus to the drawer close button", async () => {
+      for (const selector of [
+        'a.retro-chip[href="#1491-open-work"]',
+        'a.retro-chip[href^="#/backlog/"]',
+      ]) {
+        const { page } = await openPage("#/retros");
+        await page.waitForSelector(`#retros-list ${selector}`, wait);
+        await page.focus(`#retros-list ${selector}`);
+        await page.keyboard.press("Enter");
+        await page.waitForSelector("#detail:not([hidden])", wait);
+        assert.equal(await page.evaluate(() => document.activeElement.id), "d-close", selector);
+        await page.browserContext().close();
+      }
+    });
+
     await t.test("a gear click before projects load focuses the picker once they do", async () => {
       const active = (page) => page.evaluate(() => document.activeElement.id);
       let release;
@@ -440,6 +455,15 @@ test("retros page", { timeout: 180000 }, async (t) => {
         await open.page.$("#retro-run-20261105T090000Z-d4e5f6")
       ).screenshot({ path: `${process.env.RETROS_SHOTS}/after-retros-open.png` });
       await open.page.browserContext().close();
+      const chip = await openPage("#/retros");
+      await chip.page.waitForSelector('#retros-list a.retro-chip[href="#1491-open-work"]', wait);
+      await chip.page.focus('#retros-list a.retro-chip[href="#1491-open-work"]');
+      await chip.page.keyboard.press("Enter");
+      await chip.page.waitForSelector("#detail:not([hidden])", wait);
+      await chip.page.screenshot({
+        path: `${process.env.RETROS_SHOTS}/after-retros-chip-focus.png`,
+      });
+      await chip.page.browserContext().close();
       const { page } = await openPage("#/settings/reference");
       await page.waitForSelector("#settings-reference:not([hidden])", wait);
       await (

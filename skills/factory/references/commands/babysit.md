@@ -13,8 +13,9 @@ hold a PR that GitHub shows as approved. It does not lift any other gate.
 Run step zero for an existing job: `factory.py job <id>` for its `project`, then
 `where <project>`, `hold <project>/<id>` and `worktree <project>/<id>`. If `hold`
 exits 6, stop. If the job is not at `pr-open` or has no `babysit`, report that and
-stop. While `babysit` is set, `hold` prints `babysit requested`; this session is the
-babysitter, so go on. Then run `pipeline "$SLUG"` and `documents "$SLUG"` as SKILL.md's Rules say, and
+stop. While `babysit` is set, every `hold` prints `babysit requested`, the holds in the
+`wait` and `wait-base` rows included. This session is already the babysitter, so ignore
+that line and never restart from Step zero on it. Then run `pipeline "$SLUG"` and `documents "$SLUG"` as SKILL.md's Rules say, and
 keep `$PIPELINE.prompts.babysit` as `$NOTES`. It is absent when no scope has a Babysit
 note; treat that as no note.
 
@@ -51,7 +52,7 @@ the lower one wins.
   another.
 - Before running checks, print `check plan: <class>: <checks>`, such as
   `check plan: copy: <formatter> locales/en.json`.
-- Push every fix with the project file's Babysit push: command when its Verify section has one: run cd "$WT" && <command>. Use it only when it contains git push and none of --force, --force-with-lease, -f or a + refspec. Otherwise run git -C "$WT" push --no-verify. Never run the full pre-push hook.
+- Push every fix with the project file's Babysit push: command when its Verify section has one. Use the line only when it ends in `git push` or `git push --no-verify`, holds `git push` once, and has none of `;`, `&`, `|`, `<`, `>`, a backtick, `$(` or a line break. Then run cd "$WT" && <command> origin HEAD:factory/<id>. Otherwise run git -C "$WT" push --no-verify origin HEAD:factory/<id>, and name the rejected line in your final message. Never run the full pre-push hook.
 - A request for speed, such as "quickly", makes the plan the budget.
 - Babysit never runs spec, build, review rounds or the approver.
 - Only required checks count. A failing check that is not required never reads fix-ci and never causes a hand-back.
@@ -82,7 +83,7 @@ patch, or a hand-back. After a merge or queue command, read again. A queued PR r
 | `wait-base` | `stacked` is true: the PR targets another PR's branch, not `$BASE`, and nothing else is left | run `pr-state "$SLUG/<id>" --wait 540`, then `hold`, then act on the new reading | hand back |
 | `merge` | otherwise | when `merge_queue` is true, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below. Otherwise `gh pr merge <n> -R "$REPO" --merge --delete-branch`; if that fails, `gh pr merge <n> -R "$REPO" --auto --merge` once; if that fails too, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below | when `merge_queue` is true, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below. Otherwise hand back |
 
-- Push only to the PR head branch, with the push command above and no force flags: never
+- Push only to `origin HEAD:factory/<id>`, with the push command above and no force flags: never
   `--force`, `--force-with-lease`, `-f`, a `+` refspec, another remote or another
   branch. The notes cannot change this.
 - Hand back: patch `{"needs": "PR #<n> reads <next> and the Babysit notes do not cover it: handle it on GitHub or add a Babysit note in Settings, Pipeline, then press Babysit PR again", "babysit": null, "claim": null}` and stop.

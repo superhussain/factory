@@ -207,6 +207,8 @@ does the same. Pass `--session <tag>` to every later `claim`, `next`, `hold`, an
 - Moving a job to `needs-human`, `pr-open`, `merged`, or `closed` releases the claim.
 - On `babysit requested` from `hold`, finish the board write in progress, then follow
   [babysit](references/commands/babysit.md) from Step zero here with the named tag.
+  A session already running babysit.md is the babysitter: it ignores the line and goes
+  on with its loop.
 - Claims prevent accidents between sessions, not abuse. Anyone with the Access
   token can take one.
 

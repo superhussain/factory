@@ -37,7 +37,7 @@ version and install command. Use isolated test credentials, never production sec
 Commands that must pass before each handoff, and the commands that fix formatting.
 Say whether a test suite exists.
 
-Add Babysit push: <command> when babysit fix pushes need more than git push --no-verify, such as a secret scan with slow hook steps skipped. It runs from the job worktree. Add Babysit verify: <check> for one targeted check babysit adds to source fixes.
+Add Babysit push: <command> when babysit fix pushes need more than git push --no-verify, such as a secret scan with slow hook steps skipped. It runs from the job worktree, must end in git push or git push --no-verify, and babysit adds origin HEAD:factory/<id>. Add Babysit verify: <check> for one targeted check babysit adds to source fixes.
 
 ## Spec
 
