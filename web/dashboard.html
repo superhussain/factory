@@ -1758,10 +1758,12 @@ function jobLinkRows(j) {
   const link = (name, title, words, tab) => rows.push({ link: name, title, words: title + ' link ' + words, tab });
   const pr = prLink(j);
   if (pr) link('pr', 'Open PR #' + pr.n, 'pr github', true);
-  const paseo = paseoLinks(j);
+  const owner = sessionJob(j);
+  const paseo = owner && paseoLinksFor(owner.paseo);
+  const open = (label) => (owner !== j ? 'Open the session of ' + owner.id + ' in ' : 'Open in ') + label;
   if (paseo) {
-    if (paseo.app) link('paseo', 'Open in ' + factoryConfig.agent_links.app.label, factoryConfig.agent_links.app.label, false);
-    if (paseo.web) link('paseo-web', 'Open in ' + factoryConfig.agent_links.web.label, factoryConfig.agent_links.web.label, true);
+    if (paseo.app) link('paseo', open(factoryConfig.agent_links.app.label), factoryConfig.agent_links.app.label, false);
+    if (paseo.web) link('paseo-web', open(factoryConfig.agent_links.web.label), factoryConfig.agent_links.web.label, true);
   }
   return rows;
 }
