@@ -362,6 +362,21 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await t.test("a status link moves focus to the drawer close button", async () => {
+      for (const selector of [
+        'a.retro-chip[href="#1491-open-work"]',
+        'a.retro-chip[href^="#/backlog/"]',
+      ]) {
+        const { page } = await openPage("#/retros");
+        await page.waitForSelector(`#retros-list ${selector}`, wait);
+        await page.focus(`#retros-list ${selector}`);
+        await page.keyboard.press("Enter");
+        await page.waitForSelector("#detail:not([hidden])", wait);
+        assert.equal(await page.evaluate(() => document.activeElement.id), "d-close", selector);
+        await page.browserContext().close();
+      }
+    });
+
     await t.test("empty and failed loads say so", async () => {
       retros = { status: 200, body: "[]" };
       let { page } = await openPage("#/retros");
