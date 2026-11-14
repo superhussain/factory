@@ -166,7 +166,6 @@ import socket
 import ssl
 import stat
 import statistics
-import string
 import subprocess
 import sys
 import tarfile
@@ -2948,7 +2947,7 @@ def neutralize_chat(text):
         else:
             # Walk back over host characters so leading labels like docs. stay in the host.
             head = token[:NOTE_LINK.search(token).start()]
-            rest = token[len(head.rstrip(string.ascii_letters + string.digits + ".-")):]
+            rest = token[len(head.rstrip("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")):]
         rest = rest.split("/", 1)[0].rsplit("@", 1)[-1]
         host = re.match(r"[A-Za-z0-9.-]*", rest).group(0).lower().strip(".-")
         host = host[4:] if host.startswith("www.") else host
