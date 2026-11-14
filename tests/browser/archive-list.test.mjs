@@ -271,6 +271,21 @@ test("archived jobs page under the terminal columns", { timeout: 180000 }, async
       );
     });
 
+    await t.test("closing an archived card's drawer focuses that card", async () => {
+      await page.focus("#d-close");
+      await page.keyboard.press("Enter");
+      await page.waitForSelector("#detail[hidden]", wait);
+      await (
+        await page.$(".col.merged")
+      ).screenshot({
+        path: `${SHOTS}${process.env.ARCHIVE_SHOT_STAGE || "after"}-archived-close-focus.png`,
+      });
+      assert.equal(
+        await page.evaluate(() => document.activeElement.matches('.card[data-id="412-fix-login"]')),
+        true,
+      );
+    });
+
     await t.test("a failed page can be retried", async () => {
       const fresh = await openPage();
       failNext = true;
