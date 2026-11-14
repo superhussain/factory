@@ -141,7 +141,9 @@ class RetroRedactTest(RetroCase):
                           ("api_token=4096", "api_token=[redacted]"),
                           ("TokenSecret=123456", "TokenSecret=[redacted]"),
                           ("tokensecret: 42", "tokensecret: [redacted]"),
-                          ("secretokens=1234567", "secretokens=[redacted]")):
+                          ("secretokens=1234567", "secretokens=[redacted]"),
+                          ("git clone https://u:p@ss@host/r", "git clone https://[redacted]@host/r"),
+                          ("https://u:p@host/a@b", "https://[redacted]@host/a@b")):
             with self.subTest(text=text[:20]):
                 self.assertEqual(factory.retro_redact(text), out)
 
@@ -153,7 +155,8 @@ class RetroRedactTest(RetroCase):
         self.assertIn("RETRO_LONG_KEYVALUE", patterns)
         self.assertIn("RETRO_LONG_FLAG", patterns)
         units = [*"aZ09-.+_:/", " ", "\t", "a.", "a-", "a+", "a1", "--a", "token", "password", "bearer ", "-u ", "://",
-                 "a=", "--a ", "_token=", "tokens", "a" * 70 + " ", "a" * 40 + "://", "a" * 40 + "://u:p@"]
+                 "a=", "--a ", "_token=", "tokens", "a" * 70 + " ", "a" * 40 + "://", "a" * 40 + "://u:p@",
+                 "@", "://u:p@ss@", "a" * 40 + "://u:p@ss@"]
         for unit in units:
             text = (unit * 30000)[:30000]
             for name, pattern in [*patterns.items(), ("retro_redact", None)]:
