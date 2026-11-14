@@ -13,8 +13,9 @@ hold a PR that GitHub shows as approved. It does not lift any other gate.
 Run step zero for an existing job: `factory.py job <id>` for its `project`, then
 `where <project>`, `hold <project>/<id>` and `worktree <project>/<id>`. If `hold`
 exits 6, stop. If the job is not at `pr-open` or has no `babysit`, report that and
-stop. While `babysit` is set, `hold` prints `babysit requested`; this session is the
-babysitter, so go on. Then run `pipeline "$SLUG"` and `documents "$SLUG"` as SKILL.md's Rules say, and
+stop. While `babysit` is set, every `hold` prints `babysit requested`, the holds in the
+`wait` and `wait-base` rows included. This session is already the babysitter, so ignore
+that line and never restart from Step zero on it. Then run `pipeline "$SLUG"` and `documents "$SLUG"` as SKILL.md's Rules say, and
 keep `$PIPELINE.prompts.babysit` as `$NOTES`. It is absent when no scope has a Babysit
 note; treat that as no note.
 
