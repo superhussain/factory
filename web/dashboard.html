@@ -1370,7 +1370,13 @@ function paseoLinksFor(p) {
   }
   return links;
 }
-const paseoLinks = (j) => paseoLinksFor(j.paseo);
+// The job whose session a drawer links to: its own, else its batch lead's, else null.
+function sessionJob(j) {
+  if (paseoLinksFor(j.paseo)) return j;
+  const lead = jobs.find((x) => x.id === leadOf(j));
+  return lead && paseoLinksFor(lead.paseo) ? lead : null;
+}
+const paseoLinks = (j) => { const s = sessionJob(j); return s ? paseoLinksFor(s.paseo) : null; };
 
 // The job's Tracer page, only as a plain http(s) URL with no credentials.
 function tracerLink(j) {
@@ -1485,7 +1491,7 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(sessionJob(j)?.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
 }
 
 // A holder's stop is recorded only when stopped is a string, as in factory.py.
@@ -4008,11 +4014,12 @@ function renderDrawerLinks(j) {
     $('d-pr').removeAttribute('href');
     $('d-pr').removeAttribute('aria-label');
   }
-  const paseo = paseoLinks(j);
+  const paseo = paseoLinks(j), owner = sessionJob(j);
+  const whose = owner && owner !== j ? 'the session of ' + owner.id : "this job's session";
   for (const [kind, id] of [['app', 'd-paseo'], ['web', 'd-paseo-web']]) {
     const label = factoryConfig.agent_links[kind]?.label;
     $(id).textContent = label || '';
-    setLink($(id), shown(kind, paseo?.[kind]), "Open this job's session in " + (label || ''));
+    setLink($(id), shown(kind, paseo?.[kind]), 'Open ' + whose + ' in ' + (label || ''));
   }
   setLink($('d-tracer'), tracerOff ? null : shown('tracer', tracerLink(j)), "Open this job's feature in Tracer");
 }

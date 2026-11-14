@@ -23,6 +23,39 @@ const JOB = {
   tracer: { url: "https://tracer.example.invalid/#/f/factory-42" },
   updated: "2026-01-01T00:00:00Z",
 };
+const BATCH = [
+  {
+    id: "090-sample-export-csv",
+    project: "sample",
+    title: "Synthetic lead",
+    stage: "pr-open",
+    pr: "https://github.com/example/sample/pull/90",
+    paseo: { server: "synthetic-server", agent: "synthetic-agent" },
+    updated: "2026-01-01T00:00:00Z",
+  },
+  ...[
+    ["091-sample-typo", "090-sample-export-csv", null],
+    ["093-sample-own", "090-sample-export-csv", { server: "synthetic-server", agent: "own-agent" }],
+    ["095-sample-orphan", "094-sample-no-session", null],
+  ].map(([id, lead, paseo]) => ({
+    id,
+    project: "sample",
+    title: "Synthetic rider",
+    stage: "pr-open",
+    pr: "https://github.com/example/sample/pull/90",
+    refs: [{ kind: "batched-into", id: lead }],
+    ...(paseo && { paseo }),
+    updated: "2026-01-01T00:00:00Z",
+  })),
+  {
+    id: "094-sample-no-session",
+    project: "sample",
+    title: "Synthetic lead without a session",
+    stage: "pr-open",
+    pr: "https://github.com/example/sample/pull/94",
+    updated: "2026-01-01T00:00:00Z",
+  },
+];
 const KEY = "factory-hidden-drawer-links";
 const HEAD = ["#d-pr", "#d-paseo", "#d-paseo-web", "#d-tracer", "#d-actions", "#d-close"];
 const DESKTOP = { width: 1280, height: 900 };
@@ -37,7 +70,7 @@ test("drawer header links", { timeout: 180000 }, async (t) => {
       "sample",
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
-    await seedBoard(origin, [JOB]);
+    await seedBoard(origin, [JOB, ...BATCH]);
     await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
     const page = await (await browser.createBrowserContext()).newPage();
     const errors = [];
@@ -191,6 +224,41 @@ test("drawer header links", { timeout: 180000 }, async (t) => {
       assert.equal(await visible("#d-paseo-web"), true);
       assert.equal(await visible("#detail"), true);
       assert.equal(await page.evaluate((k) => localStorage.getItem(k), KEY), null);
+    });
+
+    await t.test("rider uses the lead's session", async () => {
+      await page.setViewport(DESKTOP);
+      const links = async (id) => {
+        await page.goto("about:blank");
+        await page.goto(`${origin}/#${id}`, { waitUntil: "load" });
+        await page.waitForFunction(() => !document.getElementById("d-pr").hidden, wait);
+        return page.evaluate(() =>
+          ["d-paseo", "d-paseo-web"].map((i) => {
+            const el = document.getElementById(i);
+            return [el.hidden, el.getAttribute("href"), el.getAttribute("aria-label")];
+          }),
+        );
+      };
+      const [leadApp, leadWeb] = await links("090-sample-export-csv");
+      assert.equal(leadApp[2], "Open this job's session in Session app");
+      assert.deepEqual(await links("091-sample-typo"), [
+        [false, leadApp[1], "Open the session of 090-sample-export-csv in Session app"],
+        [false, leadWeb[1], "Open the session of 090-sample-export-csv in Session"],
+      ]);
+      const own = await links("093-sample-own");
+      assert.match(own[0][1], /own-agent/);
+      assert.match(own[1][1], /own-agent/);
+      assert.deepEqual(
+        own.map((l) => [l[0], l[2]]),
+        [
+          [false, "Open this job's session in Session app"],
+          [false, "Open this job's session in Session"],
+        ],
+      );
+      assert.deepEqual(await links("095-sample-orphan"), [
+        [true, null, null],
+        [true, null, null],
+      ]);
     });
 
     assert.deepEqual(errors, []);
