@@ -35,6 +35,8 @@ test("header icons share one row and match the filter height", { timeout: 120000
       const label = `${viewport.width}px${viewport.hasTouch ? " touch" : ""}`;
       const page = await (await browser.createBrowserContext()).newPage();
       await page.setViewport(viewport);
+      // A date west of UTC is the widest status text.
+      await page.emulateTimezone("America/New_York");
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#new-idea:not([hidden])");
       await page.waitForSelector(".updated-word");
@@ -63,6 +65,13 @@ test("header icons share one row and match the filter height", { timeout: 120000
           text: document.getElementById("updated").textContent,
         };
       });
+      if (process.env.HEADER_SHOTS && label === "320px") {
+        await (
+          await page.$("header")
+        ).screenshot({
+          path: `${process.env.HEADER_SHOTS}/${process.env.HEADER_SHOT_STAGE || "after"}-header-320.png`,
+        });
+      }
       assert.equal(new Set(header.tops).size, 1, `icon tops at ${label}: ${header.tops}`);
       assert.deepEqual(header.heights, [size, size, size, size, size], `heights at ${label}`);
       assert.ok(
@@ -70,11 +79,7 @@ test("header icons share one row and match the filter height", { timeout: 120000
         `header scrolls at ${label}: ${header.scrollWidth} > ${header.clientWidth}`,
       );
       assert.ok(header.rows <= 2, `third header row at ${label}: height ${header.headerHeight}`);
-      assert.equal(
-        header.wordShown,
-        !(viewport.width === 320 && viewport.hasTouch),
-        `updated word shown at ${label}`,
-      );
+      assert.equal(header.wordShown, viewport.width !== 320, `updated word shown at ${label}`);
       assert.ok(header.text.startsWith("updated "), `updated text at ${label}: ${header.text}`);
       if (viewport.width === 1280) {
         const link = await page.$eval("#retros-link", (el) => ({
