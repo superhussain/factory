@@ -154,7 +154,7 @@ than 90 days before today's UTC date; a re-admit resets that clock. `retro admit
 card's `finding` link (one number or a list; a card linked to several findings is stored under each) and its outcome. The body is at most 64 KiB, `host` must be the bound
 host, and a bad shape answers 400. A re-admit from the same host replaces the record. A PUT for a run another host stored answers 409 `retro run belongs to another host`. A PUT that loses a write race on its own host's run answers 409 `retro run changed, retry`; run `retro admit` again. The
 `#/retros` dashboard page reads the newest 30 and resolves each card's status from the board and
-the backlog.
+the backlog. The jumper lists matching runs under `Retro runs` and up to 20 matching findings under `Retro findings`; each row opens `#/retros/<run>` or `#/retros/<run>/<rank>`.
 
 | Route | Who | Effect |
 | --- | --- | --- |
