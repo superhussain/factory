@@ -2948,7 +2948,7 @@ def neutralize_chat(text):
         else:
             # Walk back over host characters so leading labels like docs. stay in the host.
             head = token[:NOTE_LINK.search(token).start()]
-            rest = token[re.search(r"[A-Za-z0-9.-]*$", head).start():]
+            rest = token[len(head.rstrip("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")):]
         rest = rest.split("/", 1)[0].rsplit("@", 1)[-1]
         host = re.match(r"[A-Za-z0-9.-]*", rest).group(0).lower().strip(".-")
         host = host[4:] if host.startswith("www.") else host
@@ -5071,6 +5071,9 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
         if alive:
             print(f"factory.py: pickup could not stop {job_id}: processes still running: "
                   f"{' '.join(map(str, alive))}", file=sys.stderr)
+            continue
+        if alive is None:
+            print(f"factory.py: pickup could not stop {job_id}: processes were not checked", file=sys.stderr)
             continue
 
         def change(text, job_id=job_id, ats=[x.get("at") for x in mine], archived=list(archives)):
@@ -8022,7 +8025,6 @@ def worktree_pids(wt):
         return
     exe = lsof_exe()
     if exe is None:
-        print(f"factory.py: lsof not found, so processes in {wt} were not checked", file=sys.stderr)
         return
     pid = None
     for line in run([exe, "-a", "-d", "cwd", "-Fpn"]).splitlines():
@@ -8033,6 +8035,11 @@ def worktree_pids(wt):
 
 
 def stop_pids(wt):
+    """The PIDs still running in wt after SIGTERM, or None when processes were not checked."""
+    if not WINDOWS and not os.path.isdir(PROC_ROOT) and lsof_exe() is None:
+        print(f"factory.py: lsof not found, so processes in {os.path.realpath(wt)} were not checked",
+              file=sys.stderr)
+        return None
     skip = {os.getpid(), os.getppid()}
     pids = [p for p in set(worktree_pids(os.path.realpath(wt))) if p not in skip]
     for pid in pids:
@@ -8050,7 +8057,7 @@ def stop_pids(wt):
 
 
 def stop(wt):
-    alive = stop_pids(wt)
+    alive = stop_pids(wt) or []
     for pid in alive:
         print(pid)
     sys.exit(1 if alive else 0)
@@ -8124,7 +8131,7 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
 
     removed, left = [], []
     if wt.exists():
-        alive = stop_pids(wt)
+        alive = stop_pids(wt) or []
         error = (f"processes still running: {' '.join(map(str, alive))}" if alive
                  else first_error("worktree", "remove", str(wt), timeout=None))
         if error:
@@ -9500,7 +9507,7 @@ def retro_upload(home, run, agg, kept, cards, links, outcomes):
               "sessions": sum(h["sessions"] for h in agg["hosts"].values()), "rejected": kept.count(None),
               "findings": findings, "cards": loose}
     try:
-        status, _, text = api(home, "PUT", f"/api/retros/{run}", json.dumps(record), ok=(200, 400, 403, 404, 413),
+        status, _, text = api(home, "PUT", f"/api/retros/{run}", json.dumps(record), ok=(200, 400, 403, 404, 409, 413),
                               headers={"Content-Type": "application/json"})
     except SystemExit:
         return

@@ -4,6 +4,7 @@ import io
 import json
 import re
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -653,6 +654,14 @@ class SuggestTest(SuggestCase):
                 ("plain words", "plain words")):
             with self.subTest(text=text):
                 self.assertEqual(factory.neutralize_chat(text), want)
+
+    def test_neutralize_chat_long_token_is_fast(self):
+        start = time.perf_counter()
+        self.assertEqual(factory.neutralize_chat("-" * 20000 + "x.test/a"), "(link: x.test)")
+        self.assertLess(time.perf_counter() - start, 0.1)
+        start = time.perf_counter()
+        self.assertEqual(factory.neutralize_chat("-" * 20000 + "@x.test/a"), "(link: x.test)")
+        self.assertLess(time.perf_counter() - start, 0.1)
 
     def test_ideas_skips_gated(self):
         self.admit(suggestions())

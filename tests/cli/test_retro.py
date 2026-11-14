@@ -909,6 +909,11 @@ class RetroUploadTest(RetroWorkerCase):
         self.assertEqual((code, out), (0, f"wrote {self.folder / 'findings.md'}\nno suggestions\n"))
         self.assertEqual(err, "retro upload failed: 404 Not found\n")
 
+    def test_another_hosts_run_prints_a_line(self):
+        code, out, err, puts = self.admit(reply(), status=409, body=b"retro run belongs to another host")
+        self.assertEqual((code, out), (0, f"wrote {self.folder / 'findings.md'}\nno suggestions\n"))
+        self.assertEqual(err, "retro upload failed: 409 retro run belongs to another host\n")
+
     def test_a_failed_request_keeps_the_exit_code(self):
         (self.folder / "reply.json").write_text(json.dumps(reply()), encoding="utf-8")
         with http_fixture({}) as server:

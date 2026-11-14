@@ -152,13 +152,13 @@ date.
 Retro runs are stored one record per run at `retro-runs/<run>.json`. The hourly scheduled pass deletes a record uploaded more
 than 90 days before today's UTC date; a re-admit resets that clock. `retro admit` sends a `factory.retro-run/1` record with the checked findings, each
 card's `finding` link (one number or a list; a card linked to several findings is stored under each) and its outcome. The body is at most 64 KiB, `host` must be the bound
-host, and a bad shape answers 400. A re-admit of the same run replaces the record. The
+host, and a bad shape answers 400. A re-admit from the same host replaces the record. A PUT for a run another host stored answers 409 `retro run belongs to another host`. The
 `#/retros` dashboard page reads the newest 30 and resolves each card's status from the board and
 the backlog.
 
 | Route | Who | Effect |
 | --- | --- | --- |
-| `PUT /api/retros/<run>` | the bound service token of a paired or active host | store or replace that run's record |
+| `PUT /api/retros/<run>` | the bound service token of a paired or active host | store that run's record, or replace it when this host stored it |
 | `GET /api/retros` | any verified principal | JSON array of the newest 30 run records, newest first |
 
 The status may carry `triage_failed_since`, an ISO 8601 UTC time, while

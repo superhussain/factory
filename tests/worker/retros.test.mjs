@@ -170,6 +170,36 @@ test("only the bound host writes, and only its own record", async () => {
   assert.equal((await s.send("GET", `/api/retros/${RUN}`)).status, 404);
 });
 
+test("another host cannot replace a stored run", async () => {
+  const s = await setup();
+  assert.equal((await s.put(record())).status, 200);
+  const r = await s.put(record({ host: "pc" }), pc);
+  assert.deepEqual([r.status, r.text], [409, "retro run belongs to another host"]);
+  assert.equal(JSON.parse(s.bucket.objects.get(`retro-runs/${RUN}.json`).bytes).host, "mac");
+  assert.equal((await s.put(record({ rejected: 2 }))).status, 200);
+});
+
+test("a write that loses the race to another host answers 409", async () => {
+  const s = await setup();
+  assert.equal((await s.put(record({ host: "pc" }), pc)).status, 200);
+  const get = s.bucket.get.bind(s.bucket);
+  s.bucket.get = async (key) => (key === `retro-runs/${RUN}.json` ? null : get(key));
+  const r = await s.put(record());
+  assert.deepEqual([r.status, r.text], [409, "retro run belongs to another host"]);
+});
+
+test("project slugs follow the runtime's Unicode rule", async () => {
+  const s = await setup();
+  for (const project of ["café-工具", "x".repeat(80)]) {
+    const r = await s.put(record({ findings: [finding({ project, cards: [card({ project })] })] }));
+    assert.equal(r.status, 200, project);
+  }
+  assert.equal(
+    (await s.put(record({ findings: [finding({ project: "no spaces" })] }))).status,
+    400,
+  );
+});
+
 test("a malformed record is refused with 400", async () => {
   const s = await setup();
   const long = "x".repeat(81);

@@ -250,7 +250,7 @@ test("retros page", { timeout: 180000 }, async (t) => {
         );
       assert.deepEqual(await refs(2), ["1494 · ", "Waiting card · ", "1490 · "]);
       assert.deepEqual(await refs(3), ["1400 · ", "Capped card · ", "Retry the failed upload… · "]);
-      assert.equal(await page.$("#retros-list .retro-unlinked .retro-chip-name"), null);
+      assert.equal(await page.$("#retros-list .retro-unlinked .sr-only"), null);
       const summary = await page.$("#retros-list .retro-why summary");
       assert.equal(await summary.evaluate((el) => el.textContent), "Root cause and fix");
       assert.ok(await summary.$("svg"));
@@ -352,12 +352,13 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
-    await t.test("going from retros to settings does not focus the Retros link", async () => {
+    await t.test("going from retros to settings focuses the project picker", async () => {
       const { page } = await openPage("#/retros");
       await page.waitForSelector("#retros-page:not([hidden])", wait);
+      await page.waitForSelector("#idea-project option", wait);
       await page.click("#settings-link");
       await page.waitForSelector("#settings-page:not([hidden])", wait);
-      assert.notEqual(await page.evaluate(() => document.activeElement.id), "retros-link");
+      assert.equal(await page.evaluate(() => document.activeElement.id), "settings-project");
       await page.browserContext().close();
     });
 
