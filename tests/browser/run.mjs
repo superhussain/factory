@@ -237,6 +237,15 @@ const CAPTURE_JOBS = [
       by: "host-a",
     },
   },
+  { id: "108-batch-lead", project: "sample", stage: "spec", updated: "2026-01-01T12:00:00Z" },
+  {
+    id: "109-batch-rider",
+    project: "sample",
+    stage: "spec",
+    refs: [{ id: "108-batch-lead", kind: "batched-into" }],
+    note: "batched into 108-batch-lead",
+    updated: "2026-01-01T12:00:00Z",
+  },
 ];
 const CAPTURE_BACKLOG_CONTEXT = [
   "Recommend: approve",
@@ -1131,13 +1140,13 @@ async function capture(outdir, referencePath) {
       return clipOf(page, ".detail-head");
     };
     await view("held-drawer-390", 390, 844, "dark", openHeldDrawer, true);
-    const openHeldActions = async (page) => {
-      const wrap = '.card-wrap:has(.card[data-id="107-held-rider"])';
+    const openCardActions = (id) => async (page) => {
+      const wrap = `.card-wrap:has(.card[data-id="${id}"])`;
       await page.evaluate(
         (s) => document.querySelector(s).scrollIntoView({ block: "center", inline: "center" }),
         wrap,
       );
-      await clickNow(page, '.card-actions[data-actions="107-held-rider"]');
+      await clickNow(page, `.card-actions[data-actions="${id}"]`);
       await page.waitForSelector("#card-actions-menu:not([hidden])");
       return page.evaluate((s) => {
         const a = document.querySelector(s).getBoundingClientRect();
@@ -1152,8 +1161,34 @@ async function capture(outdir, referencePath) {
         };
       }, wrap);
     };
-    await view("held-actions-390", 390, 844, "dark", openHeldActions, true, true);
-    await view("held-actions-1280", 1280, 900, "light", openHeldActions, false, true);
+    await view("held-actions-390", 390, 844, "dark", openCardActions("107-held-rider"), true, true);
+    await view(
+      "held-actions-1280",
+      1280,
+      900,
+      "light",
+      openCardActions("107-held-rider"),
+      false,
+      true,
+    );
+    await view(
+      "remove-batch-390",
+      390,
+      844,
+      "dark",
+      openCardActions("109-batch-rider"),
+      true,
+      true,
+    );
+    await view(
+      "remove-batch-1280",
+      1280,
+      900,
+      "light",
+      openCardActions("109-batch-rider"),
+      false,
+      true,
+    );
     const openReferenceKeys = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/reference";
