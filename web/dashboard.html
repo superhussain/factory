@@ -594,6 +594,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     header { gap: 6px; }
     .filter { max-width: 96px; }
   }
+  @media (max-width: 360px) and (pointer: coarse) {
+    .status { flex: 1 1 0; min-width: 0; justify-content: flex-end; }
+    .status .updated-word { display: none; }
+    #updated { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status .dot { flex: none; }
+  }
   @media (pointer: coarse) { :root { --icon-size: 44px; } }
 </style>
 </head>
