@@ -109,6 +109,7 @@ class RenderTest(unittest.TestCase):
             "main": str(ROOT / "worker" / "index.js"),
             "migrations": [{"tag": "v1", "new_sqlite_classes": ["BoardEvents"]}],
             "name": "factory-example",
+            "observability": {"enabled": True, "head_sampling_rate": 1, "redact_query_string": True},
             "preview_urls": False,
             "r2_buckets": [{"binding": "BUCKET", "bucket_name": "factory-example"}],
             "routes": [{"custom_domain": True, "pattern": "factory.example.test"}],
