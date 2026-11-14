@@ -393,5 +393,6 @@ class RolesTest(IsolatedTestCase):
                        "Reply in every thread bots or threads counts",
                        'git -C "$WT" fetch origin "<base>"', "merge `origin/<base>` (the reading's `base`) into `$WT`",
                        "its Buildkite log could not be read: <ci_log.problem>",
-                       "Acting on a reading the notes select, a push or a merge included, is in scope."):
+                       "Acting on a reading the notes select, a push or a merge included, is in scope.",
+                       "origin HEAD:factory/<id>", "ends in `git push` or `git push --no-verify`"):
             self.assertIn(phrase, babysit)

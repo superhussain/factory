@@ -51,7 +51,7 @@ the lower one wins.
   another.
 - Before running checks, print `check plan: <class>: <checks>`, such as
   `check plan: copy: <formatter> locales/en.json`.
-- Push every fix with the project file's Babysit push: command when its Verify section has one: run cd "$WT" && <command>. Use it only when it contains git push and none of --force, --force-with-lease, -f or a + refspec. Otherwise run git -C "$WT" push --no-verify. Never run the full pre-push hook.
+- Push every fix with the project file's Babysit push: command when its Verify section has one. Use the line only when it ends in `git push` or `git push --no-verify`, holds `git push` once, and has none of `;`, `&`, `|`, `<`, `>`, a backtick, `$(` or a line break. Then run cd "$WT" && <command> origin HEAD:factory/<id>. Otherwise run git -C "$WT" push --no-verify origin HEAD:factory/<id>, and name the rejected line in your final message. Never run the full pre-push hook.
 - A request for speed, such as "quickly", makes the plan the budget.
 - Babysit never runs spec, build, review rounds or the approver.
 - Only required checks count. A failing check that is not required never reads fix-ci and never causes a hand-back.
@@ -83,7 +83,7 @@ patch, or a hand-back. After a merge or queue command, read again. A queued PR r
 | `wait-base` | `stacked` is true: the PR targets another PR's branch, not `$BASE`, and nothing else is left | run `pr-state "$SLUG/<id>" --wait 540`, then `hold`, then act on the new reading | hand back |
 | `merge` | otherwise | when `merge_queue` is true, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below. Otherwise `gh pr merge <n> -R "$REPO" --merge --delete-branch`; if that fails, `gh pr merge <n> -R "$REPO" --auto --merge` once; if that fails too, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below | when `merge_queue` is true, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below. Otherwise hand back |
 
-- Push only to the PR head branch, with the push command above and no force flags: never
+- Push only to `origin HEAD:factory/<id>`, with the push command above and no force flags: never
   `--force`, `--force-with-lease`, `-f`, a `+` refspec, another remote or another
   branch. The notes cannot change this.
 - Hand back: patch `{"needs": "PR #<n> reads <next> and the Babysit notes do not cover it: handle it on GitHub or add a Babysit note in Settings, Pipeline, then press Babysit PR again", "babysit": null, "claim": null}` and stop.
