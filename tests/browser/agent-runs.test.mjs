@@ -59,6 +59,7 @@ test("agent runs table", { timeout: 120000 }, async () => {
     const page = await browser.newPage();
     page.on("pageerror", (error) => errors.push(String(error)));
     await blockLiveEvents(page);
+    await page.setViewport({ width: 1280, height: 900 });
     await page.goto(`${origin}/#${JOB.id}`, { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => !document.getElementById("d-agents").hidden);
     assert.equal(await page.$eval("#d-agents summary", (el) => el.textContent), "Agents: 3 runs");
@@ -68,19 +69,32 @@ test("agent runs table", { timeout: 120000 }, async () => {
     assert.equal(rows.length, 3);
     assert.deepEqual(rows[2], [
       "2026-01-02 13:10 UTC",
+      "review-ui",
+      "",
       "review",
       "1",
-      "review-ui",
-      "claude",
-      "native",
       "model-a",
       "medium",
-      "",
+      "claude",
+      "native",
     ]);
-    assert.equal(rows[0][2], "");
+    assert.equal(rows[0][4], "");
+    assert.deepEqual(
+      await page.$$eval("#d-agents thead th", (ths) => ths.map((th) => th.textContent)),
+      ["When", "Role", "Session", "Stage", "Round", "Model", "Effort", "Harness", "Via"],
+    );
+    await page.click("#d-agents summary");
+    const edges = await page.$eval("#d-agents .table-wrap", (wrap) => {
+      wrap.scrollLeft = 0;
+      return [
+        wrap.querySelectorAll("th")[2].getBoundingClientRect().right,
+        wrap.getBoundingClientRect().right,
+      ];
+    });
+    assert.ok(edges[0] > 0 && edges[0] <= edges[1], JSON.stringify(edges));
     const links = await page.$$eval("#d-agents tbody tr", (trs) =>
       trs.map((tr) =>
-        [...tr.cells[8].querySelectorAll("a")].map((a) => [
+        [...tr.cells[2].querySelectorAll("a")].map((a) => [
           a.getAttribute("href"),
           a.textContent,
           a.getAttribute("aria-label"),
