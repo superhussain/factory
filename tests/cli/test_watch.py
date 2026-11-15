@@ -81,6 +81,17 @@ class WatchTest(IsolatedTestCase):
         self.now = 0.0
         self.assertEqual(self.result("decision.md")["elapsed"], 540)
 
+    def test_malformed_returns_early(self):
+        self.write("decision.md", "Looks good\n")
+        self.assertEqual(self.result("decision.md"),
+                         {"event": "malformed", "files": {"decision.md": "Looks good"}, "pr": None, "elapsed": 1})
+
+    def test_malformed_fixed_in_time(self):
+        self.write("decision.md", "Looks good\n")
+        self.sleeps[1] = lambda: self.write("decision.md", "APPROVE\n")
+        self.assertEqual(self.result("decision.md"),
+                         {"event": "files", "files": {"decision.md": "APPROVE"}, "pr": None, "elapsed": 1})
+
     def test_pr_event(self):
         readings = [(view(), checks("pending"))] * 2 + [(view(), checks("pass"))]
         reading = self.result("--pr", readings=readings)
@@ -143,6 +154,7 @@ class WatchTest(IsolatedTestCase):
         self.assertIn('`python3 "$RUNTIME" watch "$SLUG/<id>" <artifact>...` with the Bash tool timeout at 600000 ms',
                       skill)
         self.assertIn('`"event": "timeout"`', skill)
+        self.assertIn('"event": "malformed"', skill)
         self.assertIn("`watch` and `wait` print those first lines.", skill)
         babysit = (SKILL / "references" / "commands" / "babysit.md").read_text(encoding="utf-8")
         self.assertNotIn("--wait 540", babysit)

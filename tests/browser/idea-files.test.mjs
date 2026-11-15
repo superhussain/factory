@@ -119,6 +119,23 @@ test("idea files", { timeout: 180000 }, async (t) => {
         const height = await page.$eval("#d-files a", (a) => a.getBoundingClientRect().height);
         assert.ok(height >= 44, String(height));
         await capture("idea-files-drawer-1280.png");
+        await look(MOBILE);
+        await page.goto("about:blank");
+        await page.goto(`${origin}/#${id}/idea`, { waitUntil: "load" });
+        await page.waitForFunction(
+          () => document.querySelectorAll("#d-files a").length === 2,
+          wait,
+        );
+        await page.evaluate(
+          () =>
+            new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        );
+        assert.equal(
+          await page.evaluate(() =>
+            getComputedStyle(document.getElementById("detail")).getPropertyValue("--head-collapse"),
+          ),
+          "0px",
+        );
       });
 
       assert.deepEqual(errors, []);
