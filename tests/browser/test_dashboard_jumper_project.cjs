@@ -75,7 +75,7 @@ function actionRowsFor(text) {
     },
   ]
     .filter((r) => tokens.every((t) => r.words.includes(t)))
-    .map(({ words, ...r }) => r);
+    .map(({ words: _words, ...r }) => r);
 }
 function commandRowsFor(text) {
   const tokens = text.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -103,7 +103,7 @@ function commandRowsFor(text) {
     },
   ]
     .filter((r) => tokens.every((t) => r.words.includes(t)))
-    .map(({ words, ...r }) => r);
+    .map(({ words: _words, ...r }) => r);
 }
 const PROJECT_NAMES = { alpha: "Synthetic Alpha", beta: "Synthetic Beta" };
 function jobRowsFor(text) {

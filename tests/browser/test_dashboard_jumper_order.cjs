@@ -56,7 +56,7 @@ function expectedRows(text, withDrawer) {
         },
       ]
         .filter((r) => tokens.every((t) => r.words.includes(t)))
-        .map(({ words, ...r }) => r);
+        .map(({ words: _words, ...r }) => r);
   const commands = [
     {
       key: commandKey,
@@ -81,7 +81,7 @@ function expectedRows(text, withDrawer) {
     },
   ]
     .filter((r) => tokens.every((t) => r.words.includes(t)))
-    .map(({ words, ...r }) => r);
+    .map(({ words: _words, ...r }) => r);
   const q = text.trim().toLowerCase();
   const matched = fixtureJobs
     .filter((j) =>
