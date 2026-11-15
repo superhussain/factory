@@ -140,6 +140,7 @@ class BatchTest(IsolatedTestCase):
             (idea("1-a", paused={"at": NOW}), "paused"),
             (idea("1-a", close={"at": NOW}), "closing"),
             (idea("1-a", idea_images=["x"]), "has pasted images"),
+            (idea("1-a", idea_files=["x"]), "has attached files"),
             (idea("1-a", tracer={}), "follows Tracer"),
             (idea("1-a", backlog={"decision": "rework"}), "marked for rework"),
             (idea("1-a", claim={"device": "d", "session": "s", "since": NOW, "seen": factory.now()}),
