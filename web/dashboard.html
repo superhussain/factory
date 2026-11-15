@@ -126,11 +126,16 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #idea-image-list li { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
   #idea-image-list li.bad { border-color: var(--alert); color: var(--alert); }
   #idea-image-list img { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; flex: none; }
+  .thumb-btn { padding: 0; border: 0; background: none; cursor: zoom-in; flex: none; line-height: 0; border-radius: 4px; }
+  .thumb-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   #idea-image-list .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   #idea-upload-row { margin: 0 0 10px; }
   .gallery { padding: 12px 20px 0; margin: 0; flex: none; max-height: 45vh; overflow-y: auto; }
   .gallery figure { margin: 0 0 10px; max-width: 100%; font-size: 12px; }
   .gallery img { display: block; max-width: 100%; max-height: 40vh; border: 1px solid var(--line); border-radius: 6px; }
+  .gallery .gallery-open { display: block; padding: 0; border: 0; background: none; cursor: zoom-in; max-width: 100%; }
+  .gallery .gallery-open[hidden] { display: none; }
+  .gallery .gallery-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .gallery .bad { color: var(--alert); margin: 0 0 6px; }
   dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
   #settings-document { font-family: var(--font-mono); height: 50dvh; min-height: 240px; resize: vertical; }
@@ -315,6 +320,16 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   #edit-idea-dlg { max-height: calc(100dvh - 32px); overflow-y: auto; }
   #job-picker { max-height: calc(100dvh - 32px); }
+  #lightbox { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: rgba(0,0,0,.92); color: #fff; }
+  #lightbox[open] { display: grid; place-items: center; }
+  #lb-img { max-width: calc(100vw - 32px); max-height: calc(100dvh - 96px); object-fit: contain; }
+  #lb-count { position: absolute; top: 16px; left: 16px; margin: 0; font-size: 13px; }
+  #lightbox .btn.icon { position: absolute; min-width: 44px; min-height: 44px; }
+  #lb-close { top: 8px; right: 8px; }
+  #lb-prev, #lb-next { top: 50%; transform: translateY(-50%); }
+  #lb-prev { left: 8px; }
+  #lb-next { right: 8px; }
+  #lb-err { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); margin: 0; color: #ff6b5e; }
   #job-search { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
   #job-results { max-height: min(50dvh, 420px); overflow-y: auto; padding: 3px; }
   .job-option { padding: 8px; border-radius: 6px; overflow-wrap: anywhere; cursor: pointer; }
@@ -541,7 +556,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .doc td code { overflow-wrap: anywhere; }
   .doc .mermaid { overflow-x: auto; margin: 1em 0; }
   .doc .mermaid svg { max-width: none; height: auto; }
-  .stepper { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 1em 0; }
+  .stepper { position: relative; border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 1em 0; }
+  .stepper.step-panning { overflow: clip; }
+  .step-panel.step-peek { position: absolute; overflow: hidden; box-sizing: border-box; }
   .step-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
   .btn.step-pill { min-width: 32px; height: 32px; padding: 0 8px; }
   .btn.step-pill[aria-current="step"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
@@ -655,6 +672,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-prioritize" role="menuitem" tabindex="-1" hidden>Prioritize</button>
         <button class="btn" id="d-run-batch" role="menuitem" tabindex="-1" title="Pickup starts this idea next and batches the project's other held ideas behind it" hidden>Run batch now</button>
         <button class="btn" id="d-start-alone" role="menuitem" tabindex="-1" title="Pickup starts this idea next by itself, with no riders" hidden>Start alone</button>
+        <button class="btn" id="d-unbatch" role="menuitem" tabindex="-1" title="Take this rider out of its lead's batch. It goes back to idea, and pickup runs it on its own." hidden>Remove from batch</button>
         <button class="btn" id="d-remove-priority" role="menuitem" tabindex="-1" hidden>Remove priority</button>
         <button class="btn" id="d-pause" role="menuitem" tabindex="-1" hidden>Pause pickup</button>
         <button class="btn" id="d-resume" role="menuitem" tabindex="-1" hidden>Resume pickup</button>
@@ -1094,6 +1112,14 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
   <div id="job-results" role="listbox" aria-label="Jobs"></div>
   <p id="job-empty" class="muted" hidden>No jobs found</p>
   <div class="actions"><button type="button" class="btn" id="job-picker-back" hidden>Back</button><button class="btn" id="job-picker-close" aria-label="Close job picker">Close</button></div>
+</dialog>
+<dialog id="lightbox" aria-label="Image viewer">
+  <img id="lb-img" alt="">
+  <p id="lb-count" aria-live="polite"></p>
+  <p class="err" id="lb-err" role="alert" hidden></p>
+  <button type="button" class="btn icon" id="lb-close" aria-label="Close image viewer"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+  <button type="button" class="btn icon" id="lb-prev" aria-label="Previous image"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M10 3 5 8l5 5"/></svg></button>
+  <button type="button" class="btn icon" id="lb-next" aria-label="Next image"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3l5 5-5 5"/></svg></button>
 </dialog>
 <script>
 // One column per stage, except needs-you, which collects every job waiting on you whatever its stage.
@@ -4080,6 +4106,15 @@ $('d-doc').addEventListener('input', (e) => { if (e.target.closest('#needs-form'
 $('d-doc').addEventListener('change', (e) => { if (e.target.closest('#needs-form')) { writeNeedsDraft(); updateNeedsBar(); } });
 $('d-doc').addEventListener('submit', (e) => { if (e.target.id === 'needs-form') { e.preventDefault(); submitNeeds(); } });
 // A same-tab job link swaps #d-doc, so focus moves to the close button once the hash changes, as in the job picker.
+// A plain click on a page image opens the viewer over every image on the page. A modified
+// click keeps the link's new-tab default.
+$('d-doc').addEventListener('click', (e) => {
+  const a = e.target.closest('a.img-link');
+  if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  const links = [...$('d-doc').querySelectorAll('a.img-link')];
+  openLightbox(links.map((l) => ({ src: l.getAttribute('href'), alt: l.querySelector('img').alt })), links.indexOf(a));
+});
 $('d-doc').addEventListener('click', (e) => {
   const a = e.target.closest('a[href^="#"]:not([target])');
   if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -4433,7 +4468,7 @@ function makeStepper(steps, saveKey) {
     const b = e.target.closest('.step-pill');
     if (b) show([...pills.children].indexOf(b));
   });
-  addStepSwipe(box, (d) => show(at + d));
+  addStepSwipe(box, panels, () => at, show);
   back.addEventListener('click', () => show(at - 1));
   next.addEventListener('click', () => show(at + 1));
   // Arrows step only while focus is inside the stepper; elsewhere they still move between tabs and cards.
@@ -4583,6 +4618,8 @@ function renderGallery(j, f) {
   box.replaceChildren();
   const names = f?.name === 'idea.md' && Array.isArray(j?.idea_images) ? j.idea_images : [];
   box.hidden = !names.length;
+  const valid = names.filter((name) => typeof name === 'string' && IDEA_IMAGE.test(name));
+  const items = valid.map((name) => ({ src: './api/idea-images/' + name, alt: 'Pasted image ' + (names.indexOf(name) + 1) }));
   names.forEach((name, i) => {
     const fig = document.createElement('figure');
     const note = document.createElement('p');
@@ -4598,20 +4635,26 @@ function renderGallery(j, f) {
     const img = new Image();
     img.alt = 'Pasted image ' + (i + 1);
     note.textContent = 'Loading image ' + (i + 1) + '…';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'gallery-open';
+    open.setAttribute('aria-label', 'View pasted image ' + (i + 1) + ' larger');
+    open.append(img);
+    open.addEventListener('click', () => openLightbox(items, valid.indexOf(name)));
     const retry = document.createElement('button');
     retry.className = 'btn';
     retry.textContent = 'Retry image ' + (i + 1);
     retry.hidden = true;
     // decode() also rejects for bytes the browser accepts as an image header but cannot decode.
     const show = () => img.decode().then(() => { note.hidden = true; }, () => {
-      img.hidden = true;
+      open.hidden = true;
       note.hidden = false;
       note.className = 'bad';
       note.textContent = 'Image ' + (i + 1) + ' failed to load or decode.';
       retry.hidden = false;
     });
     retry.addEventListener('click', () => {
-      img.hidden = false;
+      open.hidden = false;
       retry.hidden = true;
       note.className = 'muted';
       note.textContent = 'Loading image ' + (i + 1) + '…';
@@ -4620,10 +4663,62 @@ function renderGallery(j, f) {
     });
     img.src = url;
     show();
-    fig.append(note, img, retry);
+    fig.append(note, open, retry);
     box.append(fig);
   });
 }
+
+// One full-screen viewer for every image place. It cycles through that place's images and
+// hands focus back to whatever opened it.
+let lbItems = [], lbIndex = 0, lbOpener = null, lbTouch = null;
+function openLightbox(items, index) {
+  lbItems = items;
+  lbIndex = index;
+  lbOpener = document.activeElement;
+  $('lb-prev').hidden = $('lb-next').hidden = items.length === 1;
+  showLightboxImage();
+  $('lightbox').showModal();
+}
+function showLightboxImage() {
+  const { src, alt } = lbItems[lbIndex];
+  $('lb-err').hidden = true;
+  $('lb-img').alt = alt;
+  $('lb-img').src = src;
+  $('lb-count').textContent = lbItems.length === 1 ? alt : 'Image ' + (lbIndex + 1) + ' of ' + lbItems.length;
+}
+function stepLightbox(delta) {
+  lbIndex = (lbIndex + delta + lbItems.length) % lbItems.length;
+  showLightboxImage();
+}
+$('lb-img').addEventListener('error', () => {
+  if (!lbItems.length) return;
+  $('lb-err').textContent = 'Image ' + (lbIndex + 1) + ' failed to load.';
+  $('lb-err').hidden = false;
+});
+$('lb-prev').addEventListener('click', () => stepLightbox(-1));
+$('lb-next').addEventListener('click', () => stepLightbox(1));
+$('lb-close').addEventListener('click', () => $('lightbox').close());
+$('lightbox').addEventListener('click', (e) => { if (e.target === $('lightbox')) $('lightbox').close(); });
+$('lightbox').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  e.stopPropagation();
+  e.preventDefault();
+  if (lbItems.length > 1) stepLightbox(e.key === 'ArrowRight' ? 1 : -1);
+});
+$('lightbox').addEventListener('touchstart', (e) => {
+  lbTouch = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+}, { passive: true });
+$('lightbox').addEventListener('touchend', (e) => {
+  if (!lbTouch || lbItems.length < 2) return;
+  const dx = e.changedTouches[0].clientX - lbTouch.x, dy = e.changedTouches[0].clientY - lbTouch.y;
+  lbTouch = null;
+  if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy)) stepLightbox(dx < 0 ? 1 : -1);
+});
+$('lightbox').addEventListener('close', () => {
+  $('lb-img').removeAttribute('src');
+  lbItems = [];
+  lbOpener?.focus();
+});
 
 // Pinned with SRI, loaded only when a doc has a diagram. If it fails, the blocks stay readable code.
 const MERMAID_URL = '/assets/mermaid.min.js';
@@ -4764,46 +4859,100 @@ function sidewaysScroller(target, stop) {
   return false;
 }
 
-// A sideways swipe inside a stepper moves one step, like Back and Next, and never changes the page.
-function addStepSwipe(box, step) {
+// A sideways swipe inside a stepper pans to the next or previous step, like the page swipe, and never changes the page.
+function addStepSwipe(box, panels, current, go) {
   let g = null;
+  let settling = false;
+  // The neighbour step, pinned over the current one so it can slide in beside it.
+  const stepPeek = (g, d) => {
+    if (d === g.d) return;
+    if (g.peek) {
+      g.peek.removeAttribute('style');
+      g.peek.classList.remove('step-peek');
+      g.peek.setAttribute('hidden', 'until-found');
+    }
+    const cur = panels[g.at];
+    const peek = panels[(g.at + d + panels.length) % panels.length];
+    peek.style.top = cur.offsetTop + 'px';
+    peek.style.left = cur.offsetLeft + 'px';
+    peek.style.width = cur.offsetWidth + 'px';
+    peek.style.height = cur.offsetHeight + 'px';
+    peek.classList.add('step-peek');
+    peek.removeAttribute('hidden');
+    box.classList.add('step-panning');
+    g.d = d;
+    g.peek = peek;
+  };
+  const stepMove = (g, off) => {
+    const w = box.clientWidth;
+    panels[g.at].style.transition = 'none';
+    panels[g.at].style.transform = 'translateX(' + off + 'px)';
+    g.peek.style.transition = 'none';
+    g.peek.style.transform = 'translateX(' + (off + g.d * w) + 'px)';
+  };
+  const stepSettle = (g, commit) => {
+    settling = true;
+    const w = box.clientWidth;
+    const end = commit ? -g.d * w : 0;
+    const transition = 'transform ' + SWIPE_MS + 'ms ' + SWIPE_EASE;
+    panels[g.at].style.transition = transition;
+    panels[g.at].style.transform = 'translateX(' + end + 'px)';
+    g.peek.style.transition = transition;
+    g.peek.style.transform = 'translateX(' + (end + g.d * w) + 'px)';
+    setTimeout(() => {
+      for (const p of panels) {
+        // Chrome writes inline style changes to the attribute lazily; read it first, or removing it leaves style="".
+        if (p.hasAttribute('style')) p.removeAttribute('style');
+        p.classList.remove('step-peek');
+      }
+      box.classList.remove('step-panning');
+      go(commit ? panels.indexOf(g.peek) : current());
+      settling = false;
+    }, SWIPE_MS);
+  };
   box.addEventListener('touchstart', (e) => {
+    if (g?.active) stepSettle(g, false);
     g = null;
-    if (!swipeMedia.matches || e.touches.length !== 1) return;
+    if (settling || !swipeMedia.matches || e.touches.length !== 1) return;
     const t = e.touches[0];
     if (t.clientX < SWIPE_EDGE || t.clientX > innerWidth - SWIPE_EDGE) return;
     if (e.target.closest('input, textarea, select') || sidewaysScroller(e.target, box)) return;
-    g = { x0: t.clientX, y0: t.clientY, x: t.clientX, t: e.timeStamp, v: 0, active: false };
+    g = { at: current(), x0: t.clientX, y0: t.clientY, x: t.clientX, t: e.timeStamp, v: 0, active: false, d: 0, peek: null };
   }, { passive: true });
   box.addEventListener('touchmove', (e) => {
     if (!g) return;
     if (e.touches.length > 1) {
+      if (g.active) stepSettle(g, false);
       g = null;
       return;
     }
     const t = e.touches[0];
+    const dx = t.clientX - g.x0;
     if (!g.active) {
       if (Math.abs(t.clientY - g.y0) >= SWIPE_FAIL_Y) {
         g = null;
         return;
       }
-      if (Math.abs(t.clientX - g.x0) < SWIPE_ACTIVATE_X) return;
+      if (Math.abs(dx) < SWIPE_ACTIVATE_X) return;
       g.active = true;
     }
     if (e.cancelable) e.preventDefault();
     if (e.timeStamp - g.t > 0) g.v = (t.clientX - g.x) / (e.timeStamp - g.t);
     g.x = t.clientX;
     g.t = e.timeStamp;
+    stepPeek(g, dx < 0 ? 1 : -1);
+    stepMove(g, dx - Math.sign(dx) * SWIPE_ACTIVATE_X);
   }, { passive: false });
-  box.addEventListener('touchend', (e) => {
+  const end = (e) => {
     const s = g;
     g = null;
     if (!s?.active) return;
     const dx = s.x - s.x0;
     const v = e.timeStamp - s.t > 100 ? 0 : s.v;
-    if (Math.abs(dx) >= SWIPE_COMMIT_X || (Math.abs(v) >= SWIPE_COMMIT_V && Math.sign(v) === Math.sign(dx))) step(dx < 0 ? 1 : -1);
-  }, { passive: true });
-  box.addEventListener('touchcancel', () => { g = null; }, { passive: true });
+    stepSettle(s, e.type === 'touchend' && (Math.abs(dx) >= SWIPE_COMMIT_X || (Math.abs(v) >= SWIPE_COMMIT_V && Math.sign(v) === Math.sign(dx))));
+  };
+  box.addEventListener('touchend', end, { passive: true });
+  box.addEventListener('touchcancel', end, { passive: true });
 }
 
 // The neighbour page, rendered beside the current one. It is inert and carries no ids.
@@ -5804,7 +5953,7 @@ async function openIdeaEditor(ctx) {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-unbatch', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
 
 // The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
 function jobActionsFor(j) {
@@ -5819,6 +5968,7 @@ function jobActionsFor(j) {
     'd-prioritize': !rider && !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority && !batchHeld(j),
     'd-run-batch': !!j.project && batchRunnable(j) && !jobs.some((x) => batchStarter(x, j.project)),
     'd-start-alone': !!j.project && batchHeld(j),
+    'd-unbatch': canUnbatch(j),
     'd-remove-priority': !!j.priority,
     'd-pause': !rider && !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
     'd-resume': !!j.paused,
@@ -5832,7 +5982,7 @@ function jobActionsFor(j) {
 // A runner's context. The drawer writes into its own lines and drops results once another job opens.
 function drawerAction(id) {
   const version = drawerVersion;
-  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-run-batch': 'd-prioritize-err', 'd-start-alone': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
+  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-run-batch': 'd-prioritize-err', 'd-start-alone': 'd-prioritize-err', 'd-unbatch': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
   return {
     id: openId,
     card: false,
@@ -6077,6 +6227,30 @@ function babysitJob(board, id, now) {
   delete j.needs;
   delete j.escalated;
   j.note = 'babysitting PR #' + prLink(j).n;
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
+// A rider that is not stacked can leave its batch while it and its lead are at spec.
+function canUnbatch(j, rows = jobs) {
+  const lead = leadOf(j);
+  return !!lead && j.stage === 'spec' && j.stacked !== true && rows.find((x) => x.id === lead)?.stage === 'spec';
+}
+
+// Drops the batched-into ref and sends the rider back to idea, so pickup runs it on its own.
+// Returns an error message, 'unchanged', or '' once the board is changed.
+function unbatchJob(board, id, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  const lead = leadOf(j);
+  if (!lead) return 'unchanged';
+  if (!canUnbatch(j, board.jobs)) return 'This rider can no longer be removed from its batch.';
+  j.refs = j.refs.filter((r) => r.kind !== 'batched-into');
+  if (!j.refs.length) delete j.refs;
+  j.stage = 'idea';
+  j.note = 'unbatched: removed from ' + lead + ' on the dashboard';
+  delete j.needs;
   j.updated = now;
   board.updated = now;
   return '';
@@ -6466,6 +6640,25 @@ async function babysitAction(ctx) {
     if (ctx.button) ctx.button.disabled = false;
   }
 }
+async function unbatchAction(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
+  if (!j || !canUnbatch(j)) return;
+  if (!confirm('Remove ' + j.id + ' from ' + leadOf(j) + "'s batch? It goes back to idea, and pickup runs it on its own.")) return;
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = unbatchJob(board, ctx.id, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message) throw new Error(message);
+    });
+    await poll();
+  } catch (x) {
+    if (ctx.live()) ctx.report(String(x.message || x));
+  } finally {
+    if (ctx.button) ctx.button.disabled = false;
+  }
+}
 async function removePriorityAction(ctx) {
   ctx.report('');
   if (ctx.button) ctx.button.disabled = true;
@@ -6630,9 +6823,9 @@ function renderDraft() {
       btn.setAttribute('aria-label', 'Remove: ' + content);
       btn.addEventListener('click', () => {
         if (locked()) return;
-        const at = Array.from(list.querySelectorAll('button')).indexOf(btn);
+        const at = Array.from(list.querySelectorAll('button:not(.thumb-btn)')).indexOf(btn);
         remove();
-        const left = list.querySelectorAll('button');
+        const left = list.querySelectorAll('button:not(.thumb-btn)');
         (left[Math.min(at, left.length - 1)] ?? $('idea-text')).focus();
       });
       li.append(btn);
@@ -6648,7 +6841,13 @@ function renderDraft() {
     const thumb = new Image();
     thumb.src = img.url;
     thumb.alt = 'Preview of image ' + (i + 1);
-    li.prepend(thumb);
+    const view = document.createElement('button');
+    view.type = 'button';
+    view.className = 'thumb-btn';
+    view.setAttribute('aria-label', 'View image ' + (i + 1) + ' larger');
+    view.append(thumb);
+    view.addEventListener('click', () => openLightbox(draft.images.map((x, k) => ({ src: x.url, alt: 'Preview of image ' + (k + 1) })), i));
+    li.prepend(view);
     list.append(li);
   });
   for (const r of draft.rejects) {
@@ -6859,6 +7058,7 @@ const JOB_ACTION_RUN = {
   'd-prioritize': prioritizeAction,
   'd-run-batch': (ctx) => prioritizeAction(ctx, 'batch'),
   'd-start-alone': (ctx) => prioritizeAction(ctx, 'alone'),
+  'd-unbatch': unbatchAction,
   'd-remove-priority': removePriorityAction,
   'd-pause': pauseAction,
   'd-resume': resumeAction,

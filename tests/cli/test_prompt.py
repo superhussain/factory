@@ -127,6 +127,10 @@ class PromptTest(IsolatedTestCase):
                           f"Batched ideas (spec each one):\n- {RIDER}: Do the other thing.\n\n" + envelope("spec"),
                           data=board({}))
 
+    def test_spec_leaves_out_a_removed_rider(self):
+        self.assertPrompt(["spec"], self.head() + "\nFeature text:\nAdd a sample feature.\n\n" + envelope("spec"),
+                          data=board({"stage": "idea", "refs": None}))
+
     def test_bad_usage_exits_2_and_writes_nothing(self):
         out_path = str(self.home / "prompts" / "x.txt")
         cases = (["writer"], ["review-ux"], ["review-ux", "--round", "0"], ["spec", "--round", "1"],

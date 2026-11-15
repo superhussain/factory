@@ -277,6 +277,13 @@ client-supplied headers.
   the page fetches the manifest with credentials. Chrome on Android may fetch the
   icons without the Access cookie; if so, it adds a plain shortcut instead of an
   app icon.
+- No browser promises an automatic install prompt. On iPhone or iPad, open the
+  dashboard in Safari and tap Share, then Add to Home Screen. Safari never
+  prompts. On Android Chrome, open the menu and tap Add to Home screen or Install
+  app. Chrome shows its own banner only after its engagement checks pass. On
+  desktop Chrome or Edge, use the install icon in the address bar.
+  `tests/browser/pwa-install.test.mjs` checks Chrome's installability report in
+  the browser suite.
 - The service worker caches only the page, `/assets/*`, `/board.json`,
   `/projects.json` and `/jobs/*`, and never `/api/*`. Board and job reads try the
   network first and fall back to this device's saved copy under an offline

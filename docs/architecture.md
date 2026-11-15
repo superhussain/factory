@@ -82,6 +82,8 @@ conditional semantics. A board write that names the stored version also
 cannot change a row's id: one write may not drop a stored id and add a row.
 It also cannot add `move`, `priority`, `paused` or `close` to a row with a
 `batched-into` ref, since a rider follows its lead.
+Remove from batch may drop the ref from a rider that is not stacked, from
+`spec` to `idea`, while its lead is at `spec`.
 New device clients always send conditions; the blind
 write remains an honest compatibility surface, unsafe under concurrent writers.
 
