@@ -273,9 +273,13 @@ test("lightbox", { timeout: 180000 }, async (t) => {
 
       await t.test("L8 the viewer fills the viewport", async () => {
         for (const view of [MOBILE, DESKTOP]) {
-          // A change of isMobile reloads the page, so wait for the job page again.
+          // A change of isMobile reloads the page. The link has no size until its lazy
+          // image loads, so wait for the image, not just the link.
           await page.setViewport(view);
-          await page.waitForSelector("#d-doc a.img-link");
+          await page.waitForFunction(() => {
+            const img = document.querySelector("#d-doc a.img-link img");
+            return img?.complete && img.naturalWidth > 0;
+          }, wait);
           await page.click("#d-doc a.img-link");
           const rect = await page.$eval("#lightbox", (el) => {
             const r = el.getBoundingClientRect();
