@@ -78,8 +78,37 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       }
       await touch("touchEnd");
     };
+    const press = async (points, stepMs) => {
+      await touch("touchStart", points[0]);
+      for (const point of points) {
+        await touch("touchMove", point);
+        await sleep(stepMs);
+      }
+    };
     const settled = () =>
-      page.waitForFunction(() => !swipeSettling && !document.querySelector(".doc-peek"), wait);
+      page.waitForFunction(
+        () => !swipeSettling && !document.querySelector(".doc-peek, .step-peek"),
+        wait,
+      );
+    // The panel under the finger and the neighbour beside it, mid-drag.
+    const panning = () =>
+      page.evaluate(() => {
+        const cur = document.querySelector("#d-doc .step-panel:not([hidden]):not(.step-peek)");
+        const peek = document.querySelector("#d-doc .step-panel.step-peek");
+        return {
+          x: new DOMMatrix(getComputedStyle(cur).transform).m41,
+          peek: peek?.querySelector(".step-kicker").textContent,
+          side: peek
+            ? Math.sign(peek.getBoundingClientRect().left - cur.getBoundingClientRect().left)
+            : 0,
+        };
+      });
+    const clean = () =>
+      page.evaluate(() => ({
+        peeks: document.querySelectorAll(".step-peek").length,
+        panning: document.querySelectorAll(".step-panning").length,
+        styled: document.querySelectorAll("#d-doc .step-panel[style]").length,
+      }));
     const open = async () => {
       await page.setViewport(MOBILE);
       await page.goto("about:blank");
@@ -267,6 +296,54 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
         ]),
         ["undefined", "undefined", "undefined", "undefined", "undefined"],
       );
+    });
+
+    await t.test("T9 left drag pans step 2 in", async () => {
+      await open();
+      await press(line(300, 150, await stepY()), 16);
+      await capture("stepper-mid-drag.png");
+      const mid = await panning();
+      assert.ok(mid.x < 0, `current panel x ${mid.x}`);
+      assert.equal(mid.peek, "Step 2 of 3");
+      assert.equal(mid.side, 1);
+      await touch("touchEnd");
+      await settled();
+      assert.equal((await state()).kicker, "Step 2 of 3");
+      assert.deepEqual(await clean(), { peeks: 0, panning: 0, styled: 0 });
+    });
+
+    await t.test("T10 short drag snaps back to step 1", async () => {
+      await open();
+      await drag(line(300, 260, await stepY()), 120);
+      await settled();
+      assert.equal((await state()).kicker, "Step 1 of 3");
+      assert.equal(
+        await page.$$eval("#d-doc .stepper .step-panel", (ps) => ps[1].getAttribute("hidden")),
+        "until-found",
+      );
+      assert.deepEqual(await clean(), { peeks: 0, panning: 0, styled: 0 });
+    });
+
+    await t.test("T11 right drag on step 1 pans step 3 in", async () => {
+      await open();
+      await press(line(100, 250, await stepY()), 16);
+      const mid = await panning();
+      assert.ok(mid.x > 0, `current panel x ${mid.x}`);
+      assert.equal(mid.peek, "Step 3 of 3");
+      assert.equal(mid.side, -1);
+      await touch("touchEnd");
+      await settled();
+      assert.equal((await state()).kicker, "Step 3 of 3");
+      assert.deepEqual(await clean(), { peeks: 0, panning: 0, styled: 0 });
+    });
+
+    await t.test("T12 touchcancel snaps back to step 1", async () => {
+      await open();
+      await press(line(300, 150, await stepY()), 16);
+      await touches("touchCancel", []);
+      await settled();
+      assert.equal((await state()).kicker, "Step 1 of 3");
+      assert.deepEqual(await clean(), { peeks: 0, panning: 0, styled: 0 });
     });
 
     assert.deepEqual(errors, []);
