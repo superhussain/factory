@@ -189,12 +189,14 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
           errBottom: r.bottom,
           hit: err.contains(document.elementFromPoint(r.left + 4, r.top + r.height / 2)),
           inert: err.inert,
+          margin: parseFloat(getComputedStyle(err).marginTop),
           metaInert: document.getElementById("d-meta").inert,
           titleBottom: document.getElementById("d-title").getBoundingClientRect().bottom,
           tabsTop: document.getElementById("d-tabs").getBoundingClientRect().top,
         };
       });
-      near(s.errTop, s.titleBottom, "notice under title");
+      assert.ok(s.margin > 0);
+      near(s.errTop, s.titleBottom + s.margin, "notice under title");
       assert.ok(s.tabsTop >= s.errBottom, `tabs ${s.tabsTop}, notice bottom ${s.errBottom}`);
       assert.equal(s.hit, true);
       assert.equal(s.inert, false);
@@ -220,6 +222,26 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       );
       assert.equal((await state()).scrollTop, 0);
       assert.equal(await page.$eval("#d-tabs", (el) => el.style.transform), "");
+    });
+
+    await t.test("D11", async () => {
+      await open("spec", DESKTOP);
+      await page.evaluate(() => {
+        const pr = document.getElementById("d-pr");
+        pr.href = "https://github.com/example/sample/pull/1";
+        pr.textContent = "PR #1";
+        pr.hidden = false;
+      });
+      await scrollTo(300);
+      await page.focus("#d-actions");
+      await page.keyboard.down("Shift");
+      await page.keyboard.press("Tab");
+      await page.keyboard.up("Shift");
+      assert.equal(await page.evaluate(() => document.activeElement.id), "d-pr");
+      await page.evaluate(
+        () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+      );
+      assert.equal((await state()).scrollTop, 300);
     });
 
     assert.deepEqual(errors, []);

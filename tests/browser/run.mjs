@@ -686,6 +686,15 @@ async function capture(outdir, referencePath) {
         document.getElementById("d-doc").scrollTop = 40;
       });
     };
+    const openNotice = async (page, side) => {
+      await openScrolled(page, side);
+      await page.evaluate(() => {
+        const err = document.getElementById("d-rerun-err");
+        err.textContent = "Synthetic rerun failure.";
+        err.hidden = false;
+        document.getElementById("d-doc").scrollTop = 300;
+      });
+    };
     const openAnswers = async (page, side) => {
       await openDrawer(page, side);
       await page.click('.tab[data-name="answers.md"]');
@@ -774,6 +783,7 @@ async function capture(outdir, referencePath) {
     await view("drawer-mobile", 390, 844, "dark", openDrawer);
     await view("drawer-mobile-scrolled", 375, 667, "dark", openScrolled);
     await view("drawer-mobile-midscroll", 390, 844, "dark", openMidScrolled);
+    await view("drawer-mobile-notice", 390, 844, "dark", openNotice);
     await view("drawer-desktop-scrolled", 1440, 900, "light", openScrolled);
     await view("answers-desktop", 1440, 900, "light", openAnswers);
     await view("answers-mobile", 390, 844, "dark", openAnswers);
