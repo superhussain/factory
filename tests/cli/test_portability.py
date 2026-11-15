@@ -67,7 +67,7 @@ class PortabilityTest(IsolatedTestCase):
                     names = [node.module.split(".")[0]]
                 else:
                     continue
-                self.assertTrue(set(names) <= allowed | {"support", "test_factory", "test_suggest", "test_backlog_triage"}, (path.name, names))
+                self.assertTrue(set(names) <= allowed | {"support", "test_factory", "test_suggest", "test_backlog_triage", "test_pr_state"}, (path.name, names))
 
     def test_exact_bundle_and_relative_installed_references(self):
         spec = importlib.util.spec_from_file_location("installer", ROOT / "tools/install.py")
