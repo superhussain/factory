@@ -273,9 +273,13 @@ test("lightbox", { timeout: 180000 }, async (t) => {
 
       await t.test("L8 the viewer fills the viewport", async () => {
         for (const view of [MOBILE, DESKTOP]) {
-          // A change of isMobile reloads the page, so wait for the job page again.
+          // A change of isMobile reloads the page. The link has no size until its lazy
+          // image loads, so wait for the image, not just the link.
           await page.setViewport(view);
-          await page.waitForSelector("#d-doc a.img-link");
+          await page.waitForFunction(() => {
+            const img = document.querySelector("#d-doc a.img-link img");
+            return img?.complete && img.naturalWidth > 0;
+          }, wait);
           await page.click("#d-doc a.img-link");
           const rect = await page.$eval("#lightbox", (el) => {
             const r = el.getBoundingClientRect();
@@ -287,6 +291,12 @@ test("lightbox", { timeout: 180000 }, async (t) => {
       });
 
       await t.test("L9 an image that fails to load says so", async () => {
+        // The dialog's close event is a queued task. Its handler clears the image and the
+        // item list, so opening before it runs loses the error. Wait for it under load.
+        await page.waitForFunction(
+          () => !document.querySelector("#lb-img").hasAttribute("src"),
+          wait,
+        );
         await page.evaluate(() =>
           openLightbox([{ src: "./api/idea-images/" + "0".repeat(64) + ".png", alt: "x" }], 0),
         );
