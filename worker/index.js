@@ -142,12 +142,32 @@ const MAX_SIDE = 4096;
 const MAX_PIXELS = 16_000_000;
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 
-// Text types get a charset. Image types are sent exactly as given.
+// Attached idea files: content-addressed, and the extension alone picks the type.
+const IDEA_FILE = /^[0-9a-f]{64}\.(pdf|csv|txt|mp4|webm)$/;
+const IDEA_FILE_ROUTE = /^\/api\/idea-files\/([^/]+)$/;
+const IDEA_FILE_TYPES = {
+  pdf: { type: "application/pdf", max: 10 << 20, label: "PDF" },
+  csv: { type: "text/csv", max: 1 << 20, label: "CSV" },
+  txt: { type: "text/plain", max: 1 << 20, label: "text" },
+  mp4: { type: "video/mp4", max: 25 << 20, label: "MP4" },
+  webm: { type: "video/webm", max: 25 << 20, label: "WebM" },
+};
+const MAX_IDEA_FILES = 4;
+// Every idea file downloads. The sandbox CSP and nosniff stop one running as a page.
+const FILE_HEADERS = (name) => ({
+  "Content-Disposition": `attachment; filename="${name}"`,
+  "Content-Security-Policy": "default-src 'none'; sandbox",
+});
+
+// Text types get a charset. Image, video and PDF types are sent exactly as given.
 function reply(body, status = 200, type = "text/plain", headers = {}) {
   return new Response(body, {
     status,
     headers: {
-      "Content-Type": type.startsWith("image/") ? type : `${type}; charset=utf-8`,
+      "Content-Type":
+        /^(image|video)\//.test(type) || type === "application/pdf"
+          ? type
+          : `${type}; charset=utf-8`,
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
       ...headers,
@@ -348,6 +368,7 @@ async function casPut(request, env, key, type) {
     const bad =
       checkGoals(data.jobs) ??
       (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
+      (await checkIdeaFiles(env, data.jobs, stored.jobs)) ??
       (stored.etag === cond.get("If-Match")
         ? (checkRowIds(stored.jobs, data.jobs) ??
           checkArchived(stored, data) ??
@@ -2046,6 +2067,36 @@ async function checkIdeaImages(env, jobs, storedJobs) {
   return null;
 }
 
+// An error message, or null, for the idea_files field of a board write, checked like
+// idea_images: only names the stored board doesn't already carry are looked up.
+async function checkIdeaFiles(env, jobs, storedJobs) {
+  const wanted = new Set();
+  for (const j of jobs) {
+    if (typeof j !== "object" || j === null || !("idea_files" in j)) continue;
+    const names = j.idea_files;
+    if (
+      !Array.isArray(names) ||
+      names.length < 1 ||
+      names.length > MAX_IDEA_FILES ||
+      new Set(names).size !== names.length ||
+      !names.every((n) => IDEA_FILE.test(n))
+    ) {
+      return "idea_files needs 1-4 distinct <sha256>.<pdf|csv|txt|mp4|webm> names";
+    }
+    names.forEach((n) => wanted.add(n));
+  }
+  if (!wanted.size) return null;
+  try {
+    for (const j of storedJobs) for (const n of j.idea_files ?? []) wanted.delete(n);
+  } catch {} // an unreadable stored row vouches for nothing
+  if (wanted.size > MAX_NEW_REFS) return "too many new idea files in one board write";
+  for (const name of wanted) {
+    const meta = (await env.BUCKET.head(`idea-files/${name}`))?.customMetadata;
+    if (meta?.sha256 !== name.slice(0, 64)) return `idea file ${name} is not uploaded`;
+  }
+  return null;
+}
+
 // [status, message] for a body that isn't a plausible PNG, or [0, width, height]. This reads
 // only the signature and the first IHDR chunk. The browser did the decoding.
 function pngEnvelope(b) {
@@ -2080,6 +2131,48 @@ async function ideaImagePut(request, env, name) {
       height: String(h),
       length: String(body.length),
     },
+  });
+  return reply("ok");
+}
+
+const ascii = (b, at, text) => [...text].every((c, i) => b[at + i] === c.charCodeAt(0));
+
+// Whether the body starts like its type. CSV and text must be UTF-8 with no NUL byte.
+function ideaFileFormatOk(ext, b) {
+  if (ext === "pdf") return ascii(b, 0, "%PDF-");
+  if (ext === "mp4") return b.length >= 12 && ascii(b, 4, "ftyp");
+  if (ext === "webm")
+    return (
+      [0x1a, 0x45, 0xdf, 0xa3].every((v, i) => b[i] === v) &&
+      new TextDecoder("latin1").decode(b.subarray(0, 64)).includes("webm")
+    );
+  if (b.includes(0)) return false;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(b);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Create-only, like ideaImagePut, so a repeat upload of the same bytes changes nothing.
+async function ideaFilePut(request, env, name) {
+  const ext = name.slice(65);
+  const { type, max, label } = IDEA_FILE_TYPES[ext];
+  if (request.headers.get("Content-Type") !== type)
+    return reply(`Content-Type must be ${type}`, 415);
+  const body = await readCapped(request, max);
+  if (body === null) return reply(`${label} over ${max >> 20} MiB`, 413);
+  if (!body.length) return reply("empty file", 400);
+  if (!ideaFileFormatOk(ext, body))
+    return reply(`the body does not match the ${label} format`, 415);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
+  const hex = Array.from(digest, (x) => x.toString(16).padStart(2, "0")).join("");
+  if (`${hex}.${ext}` !== name) return reply("SHA-256 does not match the file name", 400);
+  await env.BUCKET.put(`idea-files/${name}`, body, {
+    onlyIf: new Headers({ "If-None-Match": "*" }),
+    httpMetadata: { contentType: type },
+    customMetadata: { sha256: hex, length: String(body.length) },
   });
   return reply("ok");
 }
@@ -2147,6 +2240,20 @@ async function api(request, env, path, principal, ctx) {
     if (!IDEA_IMAGE.test(m[1])) return notFound();
     if (method === "GET") return getFile(env, `idea-images/${m[1]}`, "image/png", IMAGE_HEADERS);
     if (method === "PUT") return ideaImagePut(request, env, m[1]);
+    return notFound();
+  }
+  m = path.match(IDEA_FILE_ROUTE);
+  if (m) {
+    if (!IDEA_FILE.test(m[1])) return notFound();
+    const name = m[1];
+    if (method === "GET")
+      return getFile(
+        env,
+        `idea-files/${name}`,
+        IDEA_FILE_TYPES[name.slice(65)].type,
+        FILE_HEADERS(name),
+      );
+    if (method === "PUT") return ideaFilePut(request, env, name);
     return notFound();
   }
   if (path === "/api/backlog/triage/batch" && method === "POST")
