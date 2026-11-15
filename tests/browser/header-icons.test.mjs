@@ -144,7 +144,8 @@ test("a failed first load shows the unreachable banner", { timeout: 120000 }, as
     ];
     for (const failure of failures) {
       const label = `${failure.status} ${failure.body}`;
-      const page = await (await browser.createBrowserContext()).newPage();
+      const context = await browser.createBrowserContext();
+      const page = await context.newPage();
       await page.setViewport({ width: 320, height: 844, ...TOUCH });
       await blockLiveEvents(page);
       await page.setBypassServiceWorker(true);
@@ -180,6 +181,7 @@ test("a failed first load shows the unreachable banner", { timeout: 120000 }, as
         true,
         `banner after a good read following ${label}`,
       );
+      await context.close();
     }
   });
 });
