@@ -133,6 +133,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .gallery { padding: 12px 20px 0; margin: 0; flex: none; max-height: 45vh; overflow-y: auto; }
   .gallery figure { margin: 0 0 10px; max-width: 100%; font-size: 12px; }
   .gallery img { display: block; max-width: 100%; max-height: 40vh; border: 1px solid var(--line); border-radius: 6px; }
+  .gallery .gallery-open { display: block; padding: 0; border: 0; background: none; cursor: zoom-in; max-width: 100%; }
+  .gallery .gallery-open[hidden] { display: none; }
   .gallery .bad { color: var(--alert); margin: 0 0 6px; }
   dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
   #settings-document { font-family: var(--font-mono); height: 50dvh; min-height: 240px; resize: vertical; }
@@ -4093,6 +4095,15 @@ $('d-doc').addEventListener('input', (e) => { if (e.target.closest('#needs-form'
 $('d-doc').addEventListener('change', (e) => { if (e.target.closest('#needs-form')) { writeNeedsDraft(); updateNeedsBar(); } });
 $('d-doc').addEventListener('submit', (e) => { if (e.target.id === 'needs-form') { e.preventDefault(); submitNeeds(); } });
 // A same-tab job link swaps #d-doc, so focus moves to the close button once the hash changes, as in the job picker.
+// A plain click on a page image opens the viewer over every image on the page. A modified
+// click keeps the link's new-tab default.
+$('d-doc').addEventListener('click', (e) => {
+  const a = e.target.closest('a.img-link');
+  if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  const links = [...$('d-doc').querySelectorAll('a.img-link')];
+  openLightbox(links.map((l) => ({ src: l.getAttribute('href'), alt: l.querySelector('img').alt })), links.indexOf(a));
+});
 $('d-doc').addEventListener('click', (e) => {
   const a = e.target.closest('a[href^="#"]:not([target])');
   if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -4595,6 +4606,8 @@ function renderGallery(j, f) {
   box.replaceChildren();
   const names = f?.name === 'idea.md' && Array.isArray(j?.idea_images) ? j.idea_images : [];
   box.hidden = !names.length;
+  const valid = names.filter((name) => typeof name === 'string' && IDEA_IMAGE.test(name));
+  const items = valid.map((name) => ({ src: './api/idea-images/' + name, alt: 'Pasted image ' + (names.indexOf(name) + 1) }));
   names.forEach((name, i) => {
     const fig = document.createElement('figure');
     const note = document.createElement('p');
@@ -4610,20 +4623,26 @@ function renderGallery(j, f) {
     const img = new Image();
     img.alt = 'Pasted image ' + (i + 1);
     note.textContent = 'Loading image ' + (i + 1) + '…';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'gallery-open';
+    open.setAttribute('aria-label', 'View pasted image ' + (i + 1) + ' larger');
+    open.append(img);
+    open.addEventListener('click', () => openLightbox(items, valid.indexOf(name)));
     const retry = document.createElement('button');
     retry.className = 'btn';
     retry.textContent = 'Retry image ' + (i + 1);
     retry.hidden = true;
     // decode() also rejects for bytes the browser accepts as an image header but cannot decode.
     const show = () => img.decode().then(() => { note.hidden = true; }, () => {
-      img.hidden = true;
+      open.hidden = true;
       note.hidden = false;
       note.className = 'bad';
       note.textContent = 'Image ' + (i + 1) + ' failed to load or decode.';
       retry.hidden = false;
     });
     retry.addEventListener('click', () => {
-      img.hidden = false;
+      open.hidden = false;
       retry.hidden = true;
       note.className = 'muted';
       note.textContent = 'Loading image ' + (i + 1) + '…';
@@ -4632,7 +4651,7 @@ function renderGallery(j, f) {
     });
     img.src = url;
     show();
-    fig.append(note, img, retry);
+    fig.append(note, open, retry);
     box.append(fig);
   });
 }
