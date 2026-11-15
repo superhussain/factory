@@ -34,14 +34,22 @@ export function memoryBucket() {
     async head(key) {
       calls.push(["head", key]);
       const object = objects.get(key);
-      return object ? { ...object, body: undefined } : null;
+      return object ? { ...object, body: undefined, size: object.bytes.length } : null;
     },
-    async get(key) {
+    async get(key, options = {}) {
       calls.push(["get", key]);
       const object = objects.get(key);
-      return object
-        ? { ...object, body: object.bytes, text: async () => object.bytes.toString() }
-        : null;
+      if (!object) return null;
+      const { range } = options;
+      return {
+        ...object,
+        size: object.bytes.length,
+        body: range
+          ? object.bytes.subarray(range.offset, range.offset + range.length)
+          : object.bytes,
+        ...(range && { range }),
+        text: async () => object.bytes.toString(),
+      };
     },
     async put(key, value, options = {}) {
       calls.push(["put", key, options]);
