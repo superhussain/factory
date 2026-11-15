@@ -4570,6 +4570,7 @@ function renderDetail() {
   renderGallery(j, f);
   renderMermaid();
   if ($('needs-form')) updateNeedsBar();
+  measureHead();
 }
 
 const IDEA_IMAGE = /^[0-9a-f]{64}\.png$/;
@@ -4696,21 +4697,39 @@ const swipeMedia = matchMedia('(max-width: 760px)');
 let swipe = null;
 let swipeSettling = false;
 
-// On a phone the job details above the tabs scroll away once the page scrolls, leaving the title and tabs.
-const COMPACT_AT = 24;
-function syncCompact() {
-  const doc = $('d-doc');
+// On a phone the job details under the title slide up with the page, one pixel per pixel,
+// until only the title and tabs remain. The pager sits under them, padded by the same height.
+const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
+let headCollapse = 0;
+let headMenuRest = 0;
+let headMenuMin = 0;
+function measureHead() {
   const detail = $('detail');
-  if (!swipeMedia.matches || doc.scrollTop <= 0) {
-    detail.classList.remove('compact');
-    return;
+  const tabs = $('d-tabs');
+  headCollapse = 0;
+  if (swipeMedia.matches && !detail.hidden && !tabs.hidden && $('d-gallery').hidden) {
+    const bar = Math.ceil($('d-title').getBoundingClientRect().bottom - detail.getBoundingClientRect().top);
+    detail.style.setProperty('--bar-h', bar + 'px');
+    headCollapse = Math.max(0, tabs.offsetTop - bar);
+    headMenuRest = detail.querySelector('.detail-head').offsetHeight;
+    headMenuMin = $('d-actions').offsetTop + $('d-actions').offsetHeight;
   }
-  if (detail.classList.contains('compact')) return;
-  const spare = $('d-tabs').offsetTop - $('d-title').offsetHeight;
-  if (doc.scrollTop > COMPACT_AT && doc.scrollHeight - doc.clientHeight > spare + COMPACT_AT) detail.classList.add('compact');
+  detail.style.setProperty('--head-collapse', headCollapse + 'px');
+  syncHeadShift();
 }
-$('d-doc').addEventListener('scroll', syncCompact, { passive: true });
-swipeMedia.addEventListener('change', syncCompact);
+function syncHeadShift() {
+  const shift = Math.min(headCollapse, Math.max(0, $('d-doc').scrollTop));
+  const gone = headCollapse > 0 && shift >= headCollapse;
+  for (const el of $('detail').querySelectorAll(HEAD_MOVERS)) {
+    el.style.transform = shift ? 'translateY(' + -shift + 'px)' : '';
+    if (el.id !== 'd-tabs') el.inert = gone;
+  }
+  $('d-actions-menu').style.top = shift ? Math.max(headMenuMin, headMenuRest - shift) + 4 + 'px' : '';
+}
+$('d-doc').addEventListener('scroll', syncHeadShift, { passive: true });
+swipeMedia.addEventListener('change', measureHead);
+const headObserver = new ResizeObserver(measureHead);
+for (const el of $('detail').children) if (!el.matches('.pager, .detail-resize')) headObserver.observe(el);
 
 // Form fields, steppers and sideways scrollers (tables, code, diagrams) keep their own touches.
 function swipeBlocked(target) {
