@@ -540,7 +540,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .doc td code { overflow-wrap: anywhere; }
   .doc .mermaid { overflow-x: auto; margin: 1em 0; }
   .doc .mermaid svg { max-width: none; height: auto; }
-  .stepper { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 1em 0; }
+  .stepper { position: relative; border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 1em 0; }
+  .stepper.step-panning { overflow: clip; }
+  .step-panel.step-peek { position: absolute; overflow: hidden; box-sizing: border-box; }
   .step-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
   .btn.step-pill { min-width: 32px; height: 32px; padding: 0 8px; }
   .btn.step-pill[aria-current="step"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
@@ -4419,7 +4421,7 @@ function makeStepper(steps, saveKey) {
     const b = e.target.closest('.step-pill');
     if (b) show([...pills.children].indexOf(b));
   });
-  addStepSwipe(box, (d) => show(at + d));
+  addStepSwipe(box, panels, () => at, show);
   back.addEventListener('click', () => show(at - 1));
   next.addEventListener('click', () => show(at + 1));
   // Arrows step only while focus is inside the stepper; elsewhere they still move between tabs and cards.
@@ -4712,46 +4714,100 @@ function sidewaysScroller(target, stop) {
   return false;
 }
 
-// A sideways swipe inside a stepper moves one step, like Back and Next, and never changes the page.
-function addStepSwipe(box, step) {
+// A sideways swipe inside a stepper pans to the next or previous step, like the page swipe, and never changes the page.
+function addStepSwipe(box, panels, current, go) {
   let g = null;
+  let settling = false;
+  // The neighbour step, pinned over the current one so it can slide in beside it.
+  const stepPeek = (g, d) => {
+    if (d === g.d) return;
+    if (g.peek) {
+      g.peek.removeAttribute('style');
+      g.peek.classList.remove('step-peek');
+      g.peek.setAttribute('hidden', 'until-found');
+    }
+    const cur = panels[g.at];
+    const peek = panels[(g.at + d + panels.length) % panels.length];
+    peek.style.top = cur.offsetTop + 'px';
+    peek.style.left = cur.offsetLeft + 'px';
+    peek.style.width = cur.offsetWidth + 'px';
+    peek.style.height = cur.offsetHeight + 'px';
+    peek.classList.add('step-peek');
+    peek.removeAttribute('hidden');
+    box.classList.add('step-panning');
+    g.d = d;
+    g.peek = peek;
+  };
+  const stepMove = (g, off) => {
+    const w = box.clientWidth;
+    panels[g.at].style.transition = 'none';
+    panels[g.at].style.transform = 'translateX(' + off + 'px)';
+    g.peek.style.transition = 'none';
+    g.peek.style.transform = 'translateX(' + (off + g.d * w) + 'px)';
+  };
+  const stepSettle = (g, commit) => {
+    settling = true;
+    const w = box.clientWidth;
+    const end = commit ? -g.d * w : 0;
+    const transition = 'transform ' + SWIPE_MS + 'ms ' + SWIPE_EASE;
+    panels[g.at].style.transition = transition;
+    panels[g.at].style.transform = 'translateX(' + end + 'px)';
+    g.peek.style.transition = transition;
+    g.peek.style.transform = 'translateX(' + (end + g.d * w) + 'px)';
+    setTimeout(() => {
+      for (const p of panels) {
+        // Chrome writes inline style changes to the attribute lazily; read it first, or removing it leaves style="".
+        if (p.hasAttribute('style')) p.removeAttribute('style');
+        p.classList.remove('step-peek');
+      }
+      box.classList.remove('step-panning');
+      go(commit ? panels.indexOf(g.peek) : current());
+      settling = false;
+    }, SWIPE_MS);
+  };
   box.addEventListener('touchstart', (e) => {
+    if (g?.active) stepSettle(g, false);
     g = null;
-    if (!swipeMedia.matches || e.touches.length !== 1) return;
+    if (settling || !swipeMedia.matches || e.touches.length !== 1) return;
     const t = e.touches[0];
     if (t.clientX < SWIPE_EDGE || t.clientX > innerWidth - SWIPE_EDGE) return;
     if (e.target.closest('input, textarea, select') || sidewaysScroller(e.target, box)) return;
-    g = { x0: t.clientX, y0: t.clientY, x: t.clientX, t: e.timeStamp, v: 0, active: false };
+    g = { at: current(), x0: t.clientX, y0: t.clientY, x: t.clientX, t: e.timeStamp, v: 0, active: false, d: 0, peek: null };
   }, { passive: true });
   box.addEventListener('touchmove', (e) => {
     if (!g) return;
     if (e.touches.length > 1) {
+      if (g.active) stepSettle(g, false);
       g = null;
       return;
     }
     const t = e.touches[0];
+    const dx = t.clientX - g.x0;
     if (!g.active) {
       if (Math.abs(t.clientY - g.y0) >= SWIPE_FAIL_Y) {
         g = null;
         return;
       }
-      if (Math.abs(t.clientX - g.x0) < SWIPE_ACTIVATE_X) return;
+      if (Math.abs(dx) < SWIPE_ACTIVATE_X) return;
       g.active = true;
     }
     if (e.cancelable) e.preventDefault();
     if (e.timeStamp - g.t > 0) g.v = (t.clientX - g.x) / (e.timeStamp - g.t);
     g.x = t.clientX;
     g.t = e.timeStamp;
+    stepPeek(g, dx < 0 ? 1 : -1);
+    stepMove(g, dx - Math.sign(dx) * SWIPE_ACTIVATE_X);
   }, { passive: false });
-  box.addEventListener('touchend', (e) => {
+  const end = (e) => {
     const s = g;
     g = null;
     if (!s?.active) return;
     const dx = s.x - s.x0;
     const v = e.timeStamp - s.t > 100 ? 0 : s.v;
-    if (Math.abs(dx) >= SWIPE_COMMIT_X || (Math.abs(v) >= SWIPE_COMMIT_V && Math.sign(v) === Math.sign(dx))) step(dx < 0 ? 1 : -1);
-  }, { passive: true });
-  box.addEventListener('touchcancel', () => { g = null; }, { passive: true });
+    stepSettle(s, e.type === 'touchend' && (Math.abs(dx) >= SWIPE_COMMIT_X || (Math.abs(v) >= SWIPE_COMMIT_V && Math.sign(v) === Math.sign(dx))));
+  };
+  box.addEventListener('touchend', end, { passive: true });
+  box.addEventListener('touchcancel', end, { passive: true });
 }
 
 // The neighbour page, rendered beside the current one. It is inert and carries no ids.
