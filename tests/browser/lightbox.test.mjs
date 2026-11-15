@@ -286,6 +286,15 @@ test("lightbox", { timeout: 180000 }, async (t) => {
         }
       });
 
+      await t.test("L9 an image that fails to load says so", async () => {
+        await page.evaluate(() =>
+          openLightbox([{ src: "./api/idea-images/" + "0".repeat(64) + ".png", alt: "x" }], 0),
+        );
+        await page.waitForSelector("#lb-err:not([hidden])");
+        assert.equal(await page.$eval("#lb-err", (e) => e.textContent), "Image 1 failed to load.");
+        await page.click("#lb-close");
+      });
+
       assert.deepEqual(errors, []);
     });
   } finally {
