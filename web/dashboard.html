@@ -137,6 +137,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .gallery .gallery-open[hidden] { display: none; }
   .gallery .gallery-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .gallery .bad { color: var(--alert); margin: 0 0 6px; }
+  .file-list { list-style: none; padding: 12px 20px 0; margin: 0; flex: none; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+  .file-list a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
+  .file-list .bad { color: var(--alert); }
   dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
   #settings-document { font-family: var(--font-mono); height: 50dvh; min-height: 240px; resize: vertical; }
   #settings-status, #pipeline-status, #project-pickup-status { overflow-wrap: anywhere; margin: 12px 0; }
@@ -691,6 +694,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <nav class="tabs" id="d-tabs"></nav>
   <div class="pager" id="d-pager">
     <div class="gallery" id="d-gallery" aria-label="Pasted images" hidden></div>
+    <ul class="file-list" id="d-files" aria-label="Attached files" hidden></ul>
     <article class="doc" id="d-doc"></article>
   </div>
 </aside>
@@ -4595,11 +4599,35 @@ function renderDetail() {
   buildSteppers($('d-doc'), openId + '/' + activeFile);
   if (f && f.name !== 'needs.md') addWalkthrough($('d-doc'), true, f.name);
   renderGallery(j, f);
+  renderFiles(j, f);
   renderMermaid();
   if ($('needs-form')) updateNeedsBar();
 }
 
 const IDEA_IMAGE = /^[0-9a-f]{64}\.png$/;
+
+// Attached files are download links only, served by the Worker as attachments.
+function renderFiles(j, f) {
+  const list = $('d-files');
+  list.replaceChildren();
+  const names = f?.name === 'idea.md' && Array.isArray(j?.idea_files) ? j.idea_files : [];
+  list.hidden = !names.length;
+  names.forEach((name, i) => {
+    const li = document.createElement('li');
+    if (typeof name !== 'string' || !IDEA_FILE.test(name)) {
+      li.className = 'bad';
+      li.textContent = 'File ' + (i + 1) + ' has an invalid name and cannot be downloaded.';
+    } else {
+      const ext = name.slice(65);
+      const a = document.createElement('a');
+      a.href = './api/idea-files/' + name;
+      a.download = 'idea-file-' + (i + 1) + '.' + ext;
+      a.textContent = 'Download file ' + (i + 1) + ' (' + FILE_TYPES[ext].label + ')';
+      li.append(a);
+    }
+    list.append(li);
+  });
+}
 
 // Pasted images sit beside the idea text, loaded only from the Worker's validated image route.
 // Each one reports a load failure and offers Retry, so none goes missing without a word.
@@ -4943,7 +4971,7 @@ function tabNamed(name) {
 
 function swipeMove(s, off) {
   const w = $('d-pager').clientWidth;
-  for (const el of [$('d-doc'), $('d-gallery')]) {
+  for (const el of [$('d-doc'), $('d-gallery'), $('d-files')]) {
     el.style.transition = 'none';
     el.style.transform = 'translateX(' + off + 'px)';
   }
@@ -4968,7 +4996,7 @@ function swipeSettle(s, commit) {
   const w = $('d-pager').clientWidth;
   const end = commit ? (s.to > s.idx ? -w : w) : 0;
   const transition = 'transform ' + SWIPE_MS + 'ms ' + SWIPE_EASE;
-  for (const el of [$('d-doc'), $('d-gallery')]) {
+  for (const el of [$('d-doc'), $('d-gallery'), $('d-files')]) {
     el.style.transition = transition;
     el.style.transform = 'translateX(' + end + 'px)';
   }
@@ -4982,7 +5010,7 @@ function swipeSettle(s, commit) {
   setTimeout(() => {
     if (commit && openId === s.id && files.some((f) => f.name === s.toName)) selectTab(s.toName);
     else placePill(null);
-    for (const el of [$('d-doc'), $('d-gallery')]) {
+    for (const el of [$('d-doc'), $('d-gallery'), $('d-files')]) {
       el.style.transition = '';
       el.style.transform = '';
     }
@@ -6815,18 +6843,18 @@ function renderDraft() {
     li.prepend(view);
     list.append(li);
   });
-  for (const r of draft.rejects) {
-    list.append(row('bad', r.msg, () => {
-      draft.rejects = draft.rejects.filter((x) => x !== r);
-      renderDraft();
-    }));
-  }
   draft.files.forEach((f, i) => {
     list.append(row('', 'File ' + (i + 1) + ': ' + f.label + ', ' + FILE_TYPES[f.ext].label + ', ' + Math.ceil(f.blob.size / 1024) + ' KiB', () => {
       draft.files = draft.files.filter((x) => x !== f);
       renderDraft();
     }));
   });
+  for (const r of draft.rejects) {
+    list.append(row('bad', r.msg, () => {
+      draft.rejects = draft.rejects.filter((x) => x !== r);
+      renderDraft();
+    }));
+  }
   const pending = draft.pending + draft.filePending;
   if (pending) list.append(row('', 'Checking ' + pending + ' attachment' + (pending > 1 ? 's' : '') + '…'));
   list.hidden = !list.children.length;
@@ -7308,6 +7336,8 @@ function openBacklogItem(item) {
   $('d-tabs').hidden = true;
   $('d-gallery').replaceChildren();
   $('d-gallery').hidden = true;
+  $('d-files').replaceChildren();
+  $('d-files').hidden = true;
   $('d-doc').innerHTML = renderBacklogDecision(item, backlogTriageHtml(backlogTriageSeen.get(item.raw)));
   updateBacklogBar();
   renderBoard();
