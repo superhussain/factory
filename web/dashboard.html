@@ -1179,6 +1179,7 @@ const CONNECTION = {
   online: ['', 'dot ok', 'Live: updates arrive as they happen'],
   offline: ["You're offline. Showing the board saved on this device. Edits won't save until you reconnect.", 'dot err', 'offline'],
   signin: ['Your sign-in has expired.', 'dot err', 'sign-in expired'],
+  unreachable: ["Can't reach the factory. The board loads when it answers.", 'dot err', 'board.json unreachable'],
 };
 function drawDot(className, label) { const dot = $('dot'); dot.className = className; dot.title = label; dot.setAttribute('aria-label', label); }
 let connState = '';
@@ -1323,6 +1324,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     drawDot('dot err', 'board.json unreachable');
     if (!loaded) $('updated').textContent = "can't reach the factory";
     if (e instanceof TypeError) setConnection('offline');
+    else if (!loaded) setConnection('unreachable');
     return false;
   }
 }
