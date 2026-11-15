@@ -1,7 +1,8 @@
 // Remove from batch on a rider's card and drawer menus while its lead is at spec, against one owned
 // local Worker. A dismissed confirm writes nothing; an accepted one sends the rider back to idea
-// with no ref. A stacked rider and a rider whose lead is at build show no item. Synthetic running
-// example: lead 108-batch-lead and rider 109-batch-rider in project sample.
+// with no ref. A stacked rider and a rider whose lead is at build show no item. When the lead
+// moves to build after the drawer menu opens, the accepted confirm shows the refusal and writes
+// nothing. Synthetic running example: lead 108-batch-lead and rider 109-batch-rider in project sample.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -10,7 +11,7 @@ import {
   withBrowserFixture,
   seedProject,
   seedBoard,
-  blockLiveEvents,
+  controlBoardPolling,
 } from "../support/browser-server.mjs";
 
 const NOW = "2026-01-01T12:00:00Z";
@@ -36,6 +37,7 @@ const CONFIRM =
   "Remove 109-batch-rider from 108-batch-lead's batch? It goes back to idea, and pickup runs it on its own.";
 const TITLE =
   "Take this rider out of its lead's batch. It goes back to idea, and pickup runs it on its own.";
+const REFUSAL = "This rider can no longer be removed from its batch.";
 
 const boardJob = async (origin, id) =>
   (await (await fetch(origin + "/api/board")).json()).jobs.find((j) => j.id === id);
@@ -58,7 +60,7 @@ test("remove from batch", { timeout: 180000 }, async () => {
       dialogs.push(d.message());
       await (answer ? d.accept() : d.dismiss());
     });
-    await blockLiveEvents(page);
+    await controlBoardPolling(page);
     const fresh = async (jobs) => {
       await seedBoard(origin, jobs);
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
@@ -109,6 +111,23 @@ test("remove from batch", { timeout: 180000 }, async () => {
     assert.equal(await cardItem(), false);
     await fresh([{ ...LEAD, stage: "build" }, RIDER]);
     assert.equal(await cardItem(), false);
+
+    answer = true;
+    await fresh([LEAD, RIDER]);
+    await page.evaluate(() => (location.hash = "#109-batch-rider"));
+    await page.waitForFunction(() =>
+      document.getElementById("d-meta").textContent.includes("109-batch-rider"),
+    );
+    await openJobActions(page);
+    assert.equal(await page.$eval("#d-unbatch", (b) => !b.hidden), true);
+    await seedBoard(origin, [{ ...LEAD, stage: "build" }, RIDER]);
+    const moved = await (await fetch(origin + "/api/board")).text();
+    await page.click("#d-unbatch");
+    await page.waitForSelector("#d-prioritize-err:not([hidden])");
+    assert.equal(await page.$eval("#d-prioritize-err", (p) => p.textContent), REFUSAL);
+    assert.equal(dialogs.length, 3);
+    assert.equal(await (await fetch(origin + "/api/board")).text(), moved);
+    assert.equal((await boardJob(origin, "109-batch-rider")).stage, "spec");
     assert.deepEqual(errors, []);
   });
 });
