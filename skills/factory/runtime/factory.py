@@ -49,6 +49,10 @@
                                             second for up to S seconds (default 60); exit 3 while one is
                                             missing, 5 while one has no valid first line; --hold runs
                                             hold first to refresh this session's claim
+  factory.py watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]
+                                            print one JSON line when every job file has a valid first
+                                            line, --pr's next leaves wait, or S seconds pass (default and
+                                            max 540); runs hold first
   factory.py checks <project-slug>/<job-id> [--timeout S]
                                             print the job PR's checks as <bucket> <name> once none is
                                             pending, checking every 10 seconds for up to S seconds
@@ -6190,6 +6194,19 @@ def wait_valid(artifact, line):
     return line in ("VERDICT: PASS", "VERDICT: CHANGES")
 
 
+def job_file_lines(folder, artifacts):
+    """Each present artifact's first line, refusing any linked file, parent or job folder."""
+    lines = {}
+    for artifact in artifacts:
+        path = folder / artifact
+        for node in (path, path.parent, folder):
+            if is_link(node):
+                fail(f"{node} is a symlink or junction; nothing was read through it", 6)
+        if path.is_file():
+            lines[artifact] = (path.read_text(encoding="utf-8", errors="replace").splitlines() or [""])[0]
+    return lines
+
+
 def wait_cmd(target, *args):
     """Print each artifact's first line once all are valid, checking once a second until --timeout."""
     home, slug, job_id = r2_target(target, True)
@@ -6219,14 +6236,7 @@ def wait_cmd(target, *args):
     folder = home / "jobs" / slug / job_id
     deadline = time.monotonic() + (60 if timeout is None else timeout)
     while True:
-        lines = {}
-        for artifact in artifacts:
-            path = folder / artifact
-            for node in (path, path.parent, folder):
-                if is_link(node):
-                    fail(f"{node} is a symlink or junction; nothing was read through it", 6)
-            if path.is_file():
-                lines[artifact] = (path.read_text(encoding="utf-8", errors="replace").splitlines() or [""])[0]
+        lines = job_file_lines(folder, artifacts)
         missing = [a for a in artifacts if a not in lines]
         malformed = [a for a in artifacts if a in lines and not wait_valid(a, lines[a])]
         if not missing and not malformed:
@@ -6239,6 +6249,63 @@ def wait_cmd(target, *args):
             fail("no valid first line: "
                  + ", ".join(f'{a} reads "{printable_line(lines[a], 60)}"' for a in malformed), 5)
         time.sleep(1)
+
+
+WATCH_TIMEOUT = 540
+WATCH_USAGE = "usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]"
+
+
+def watch_cmd(target, *args):
+    """Run hold once, then print one JSON line when every artifact has a valid first line, --pr's next
+    leaves wait, or --timeout passes, reading files once a second and the PR every 30 seconds."""
+    home, slug, job_id = r2_target(target, True)
+    artifacts, timeout, watch_pr = [], None, False
+    i = 0
+    while i < len(args):
+        if args[i] == "--pr":
+            if watch_pr:
+                fail("--pr given twice. " + WATCH_USAGE, 2)
+            watch_pr = True
+            i += 1
+        elif args[i] == "--timeout":
+            if timeout is not None or i + 1 == len(args) or not re.fullmatch(r"[0-9]+", args[i + 1]) \
+                    or not 1 <= int(args[i + 1]) <= WATCH_TIMEOUT:
+                fail("--timeout takes one value from 1 to 540 seconds. " + WATCH_USAGE, 2)
+            timeout = int(args[i + 1])
+            i += 2
+        elif WAIT_ARTIFACT.fullmatch(args[i]):
+            artifacts.append(args[i])
+            i += 1
+        else:
+            fail(f"bad artifact {args[i]!r}. " + WATCH_USAGE, 2)
+    if not artifacts and not watch_pr:
+        fail(WATCH_USAGE, 2)
+    hold(target)
+    folder = home / "jobs" / slug / job_id
+    if watch_pr:
+        pr = board_pr(home, slug, job_id)
+        meta = frontmatter(project_files(home, slug)[0])[0]
+        base = meta.get("base") or "main"
+    start = time.monotonic()
+    deadline = start + (WATCH_TIMEOUT if timeout is None else timeout)
+    reading, read_at = None, start
+    while True:
+        lines = job_file_lines(folder, artifacts)
+        if watch_pr and time.monotonic() >= read_at:
+            reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""))
+            read_at = time.monotonic() + PR_STATE_INTERVAL
+        if artifacts and all(a in lines and wait_valid(a, lines[a]) for a in artifacts):
+            event = "files"
+        elif reading and reading["next"] not in ("wait", "wait-base"):
+            event = "pr"
+        elif time.monotonic() >= deadline:
+            event = "timeout"
+        else:
+            time.sleep(1)
+            continue
+        print(json.dumps({"event": event, "files": {a: lines.get(a) for a in artifacts}, "pr": reading,
+                          "elapsed": int(time.monotonic() - start)}))
+        return
 
 
 CHECKS_USAGE = "usage: checks <project-slug>/<job-id> [--timeout S]"
@@ -9777,6 +9844,7 @@ COMMANDS["pipeline"] = (pipeline_cmd, 1, 1)
 COMMANDS["documents"] = (documents_cmd, 1, 1)
 COMMANDS["prompt"] = (prompt_cmd, 2, 8)
 COMMANDS["wait"] = (wait_cmd, 2, 23)
+COMMANDS["watch"] = (watch_cmd, 2, 24)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
 COMMANDS["pr-state"] = (pr_state_cmd, 1, 3)
 COMMANDS["pr-queue"] = (pr_queue_cmd, 1, 1)

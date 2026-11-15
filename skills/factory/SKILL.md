@@ -293,7 +293,11 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   headings, not long paragraphs, and link overflow detail to a
   `<file>-evidence.md` beside it instead of dropping it.
 - Run the agents in the background and act on each completion notification. Then
-  read the agent's file. Only when a notification arrived without a valid file, run
+  read the agent's file. While an agent runs and nothing else can move, run
+  `python3 "$RUNTIME" watch "$SLUG/<id>" <artifact>...` with the Bash tool timeout at
+  600000 ms. It refreshes this session's claim, then prints one JSON line when every
+  named file has a valid first line, or after 540 seconds with `"event": "timeout"`.
+  On a timeout, run the same watch again. Only when a notification arrived without a valid file, run
   `python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...` once. Pass `--hold` to refresh
   this session's claim first, so a re-run during a long build needs no separate
   `hold`. Never poll for job files
@@ -309,7 +313,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   the builder mid-round. Read verdicts from each file's first line: reviewers write
   `VERDICT: PASS` or `VERDICT: CHANGES`, `review-plan` writes `VERDICT: SKIPPED`
   for ux and ui, and the approver writes `APPROVE`,
-  `ESCALATE`, or `CHANGES`. `wait` prints those first lines.
+  `ESCALATE`, or `CHANGES`. `watch` and `wait` print those first lines.
 - Max `$PIPELINE.review_rounds` review rounds per build cycle (2 unless pipeline settings say otherwise, at most 5). If
   the last allowed round of a cycle still has a CHANGES verdict, the job goes to
   `needs-human` with a note naming the reviewers that still want changes. A `/factory rework` starts a new cycle, so count

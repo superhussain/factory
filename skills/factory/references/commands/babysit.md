@@ -60,7 +60,8 @@ the lower one wins.
 - A request for speed, such as "quickly", makes the plan the budget.
 - Babysit never runs spec, build, review rounds or the approver.
 - Only required checks count. A failing check that is not required never reads fix-ci and never causes a hand-back.
-- One commit, one push: on a fix-reviews or fix-ci reading, read every counted review, every thread bots or threads counts, and every failing required check once. Fix them all in one commit, push once, reply in every thread, resolve each thread when the notes ask, then run pr-state "$SLUG/<id>" --wait 540 once.
+- One commit, one push: on a fix-reviews or fix-ci reading, read every counted review, every thread bots or threads counts, and every failing required check once. Fix them all in one commit, push once, reply in every thread, resolve each thread when the notes ask, then run watch "$SLUG/<id>" --pr once.
+- Run every watch with the Bash tool timeout at 600000 ms.
 - For a one-file logic or cross-cutting fix, also run the project file's Babysit verify: line when its Verify section has one.
 - Change only what a counted review, thread or failing required check asks. No refactors, polish, new ideas or backlog entries, and no investigation beyond the failing log.
 - Past 10 minutes, patch `{"note": "babysit stopped after 10 minutes: <why>", "needs": "PR #<n>: babysit stopped after 10 minutes, see the note", "babysit": null, "claim": null}` and stop.
@@ -83,8 +84,8 @@ patch, or a hand-back. After a merge or queue command, read again. A queued PR r
 | `needs-review` | GitHub shows no approval and nothing above is left to fix | patch `{"needs": "PR #<n> is ready for review: no required check fails and every counted review has a reply. Request a review on GitHub, then press Babysit PR again once it is approved", "babysit": null, "claim": null}` and stop | patch `{"needs": "PR #<n> is ready for review: no required check fails and every counted review has a reply. Request a review on GitHub, then press Babysit PR again once it is approved", "babysit": null, "claim": null}` and stop |
 | `rebase` | `mergeStateStatus` is `DIRTY` | run `git -C "$WT" fetch origin "<base>"`, merge `origin/<base>` (the reading's `base`) into `$WT`, fix the conflicts, commit, push | hand back |
 | `fix-ci` | a required check is `fail` or `cancel` | when the notes allow a rerun and the failed log shows a flake, rerun once as below; otherwise fix from `ci_log.tail` when it is set, else from `gh run view --log-failed`, commit, push | hand back, or the `ci_log` problem patch below when `ci_log.problem` is set |
-| `wait` | required checks pending, no checks yet within 120 seconds of the head commit, or an approved PR is queued | run `pr-state "$SLUG/<id>" --wait 540`, then `hold`, then act on the new reading | run `pr-state "$SLUG/<id>" --wait 540`, then `hold`, then act on the new reading |
-| `wait-base` | `stacked` is true: the PR targets another PR's branch, not `$BASE`, and nothing else is left | run `pr-state "$SLUG/<id>" --wait 540`, then `hold`, then act on the new reading | hand back |
+| `wait` | required checks pending, no checks yet within 120 seconds of the head commit, or an approved PR is queued | run `watch "$SLUG/<id>" --pr`, then act on its pr reading | run `watch "$SLUG/<id>" --pr`, then act on its pr reading |
+| `wait-base` | `stacked` is true: the PR targets another PR's branch, not `$BASE`, and nothing else is left | run `watch "$SLUG/<id>" --pr`, then act on its pr reading | hand back |
 | `merge` | otherwise | when `merge_queue` is true, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below. Otherwise `gh pr merge <n> -R "$REPO" --merge --delete-branch`; if that fails, `gh pr merge <n> -R "$REPO" --auto --merge` once; if that fails too, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below | when `merge_queue` is true, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below. Otherwise hand back |
 
 - Push only to `origin HEAD:factory/<id>`, with the push command above and no force flags: never
