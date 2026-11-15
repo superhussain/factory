@@ -214,7 +214,7 @@ function validateProjectDocument(text) {
     if (/^["']|["']$/.test(value)) {
       if (value.length < 2 || value[0] !== value.at(-1)) return fieldsError;
       value = value.slice(1, -1);
-    } else if (/^[\[{!&*|>]/.test(value)) return fieldsError;
+    } else if (/^[[{!&*|>]/.test(value)) return fieldsError;
     meta.set(match[1], value);
   }
   if (meta.size !== 3 + (meta.has("archive") ? 1 : 0) + (meta.has("buildkite_org") ? 1 : 0))
