@@ -16,6 +16,12 @@ const FILES = {
 const MOBILE = { width: 390, height: 844, isMobile: true, hasTouch: true };
 const DESKTOP = { width: 1280, height: 900 };
 const wait = { polling: 50 };
+const AGENTS = Array.from({ length: 30 }, (_, i) => ({
+  at: `2026-01-01T10:${String(i).padStart(2, "0")}:00Z`,
+  stage: "review",
+  role: `role-${i + 1}`,
+  model: "model-a",
+}));
 
 test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
   await prepareAssets();
@@ -31,22 +37,33 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
         pr: "https://github.com/example/sample/pull/1",
         updated: "2026-01-01T00:00:00Z",
       },
+      {
+        id: "002-agents",
+        project: "sample",
+        title: "Synthetic 002-agents",
+        stage: "review",
+        branch: "factory/002-agents",
+        updated: "2026-01-01T00:00:00Z",
+        agents: AGENTS,
+      },
     ]);
-    for (const [name, body] of Object.entries(FILES)) {
-      const r = await fetch(`${origin}/api/jobs/sample/001-compact/${name}`, {
-        method: "PUT",
-        headers: { "If-None-Match": "*" },
-        body,
-      });
-      assert.equal(r.status, 200, name);
+    for (const job of ["001-compact", "002-agents"]) {
+      for (const [name, body] of Object.entries(FILES)) {
+        const r = await fetch(`${origin}/api/jobs/sample/${job}/${name}`, {
+          method: "PUT",
+          headers: { "If-None-Match": "*" },
+          body,
+        });
+        assert.equal(r.status, 200, `${job} ${name}`);
+      }
     }
     const page = await (await browser.createBrowserContext()).newPage();
     const errors = [];
     page.on("pageerror", (error) => errors.push(String(error)));
-    const open = async (tab, viewport = MOBILE) => {
+    const open = async (tab, viewport = MOBILE, job = "001-compact") => {
       await page.setViewport(viewport);
       await page.goto("about:blank");
-      await page.goto(`${origin}/#001-compact/${tab}`, { waitUntil: "load" });
+      await page.goto(`${origin}/#${job}/${tab}`, { waitUntil: "load" });
       await page.waitForFunction(
         (h) => document.querySelector("#d-doc h1")?.textContent === h,
         wait,
@@ -242,6 +259,129 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
         () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
       );
       assert.equal((await state()).scrollTop, 300);
+    });
+
+    const frames = () =>
+      page.evaluate(
+        () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+      );
+    const openAgents = async (tab, expand = true) => {
+      await open(tab, MOBILE, "002-agents");
+      await page.waitForFunction(() => !document.getElementById("d-agents").hidden, wait);
+      if (expand) await page.$eval("#d-agents", (el) => (el.open = true));
+      await frames();
+    };
+    const rows = () =>
+      page.evaluate(() => {
+        const rect = (el) => el.getBoundingClientRect();
+        const cells = document.querySelectorAll("#d-agents tbody td");
+        return {
+          scrollTop: document.getElementById("d-doc").scrollTop,
+          innerHeight,
+          titleBottom: rect(document.getElementById("d-title")).bottom,
+          summaryTop: rect(document.querySelector("#d-agents summary")).top,
+          agentsBottom: rect(document.getElementById("d-agents")).bottom,
+          tabsTop: rect(document.getElementById("d-tabs")).top,
+          tabsBottom: rect(document.getElementById("d-tabs")).bottom,
+          h1Top: rect(document.querySelector("#d-doc h1")).top,
+          cell: cells.length ? rect(cells[4]).toJSON() : null,
+          last: cells.length ? rect(cells[cells.length - 1].parentElement).toJSON() : null,
+        };
+      });
+    const drag = async (x, y, dy) => {
+      await page.touchscreen.touchStart(x, y);
+      for (let k = 1; k <= 3; k++) await page.touchscreen.touchMove(x, y - (dy * k) / 3);
+      // A pause before lifting the finger keeps the flick out of the measurement.
+      await new Promise((r) => setTimeout(r, 150));
+      await page.touchscreen.touchEnd();
+      await frames();
+    };
+
+    // A tall open agents table scrolls to its last row, even on a short page.
+    await t.test("D12", async () => {
+      await page.setViewport(MOBILE);
+      await openAgents("decision");
+      const rest = await rows();
+      assert.ok(rest.tabsBottom > rest.innerHeight, `tabs bottom ${rest.tabsBottom}`);
+      const need = Math.ceil(rest.last.bottom - rest.innerHeight + 8);
+      await scrollTo(need);
+      const s = await rows();
+      near(s.scrollTop, need, "scrollTop");
+      assert.ok(s.last.top >= s.titleBottom, `last row top ${s.last.top}`);
+      assert.ok(s.last.bottom <= s.innerHeight, `last row bottom ${s.last.bottom}`);
+    });
+
+    // A drag or wheel on the details moves them and the page together, at the same pace.
+    await t.test("D13", async () => {
+      await page.setViewport(MOBILE);
+      await openAgents("spec");
+      const rest = await rows();
+      await drag(rest.cell.x + 4, rest.cell.y + rest.cell.height / 2, 150);
+      const s = await rows();
+      // The browser keeps a few pixels of touch slop, so the drag scrolls a little under 150.
+      assert.ok(s.scrollTop > 100, `scrollTop after drag ${s.scrollTop}`);
+      near(rest.cell.y - s.cell.y, s.scrollTop, "cell after drag");
+      near(rest.h1Top - s.h1Top, s.scrollTop, "h1 after drag");
+      assert.equal(
+        await page.evaluate(() =>
+          Boolean(document.elementFromPoint(195, 500).closest("#d-agents")),
+        ),
+        true,
+      );
+      await page.mouse.move(195, 500);
+      await page.mouse.wheel({ deltaY: 100 });
+      const after = s.scrollTop + 100;
+      await page.waitForFunction(
+        (top) => document.getElementById("d-doc").scrollTop >= top,
+        wait,
+        after - 1,
+      );
+      await frames();
+      const w = await rows();
+      near(w.scrollTop, after, "scrollTop after wheel");
+      near(s.cell.y - w.cell.y, 100, "cell after wheel");
+      near(s.h1Top - w.h1Top, 100, "h1 after wheel");
+    });
+
+    // Opening or closing agents mid-scroll re-measures with no gap, overlap or jump.
+    await t.test("D14", async () => {
+      await page.setViewport(MOBILE);
+      await openAgents("spec", false);
+      await scrollTo(20);
+      const closed = await rows();
+      await page.click("#d-agents summary");
+      await frames();
+      const opened = await rows();
+      assert.equal(opened.scrollTop, 20);
+      near(opened.summaryTop, closed.summaryTop, "summary after open");
+      assert.ok(opened.tabsTop >= opened.agentsBottom, "tabs below the table");
+      near(opened.h1Top - opened.tabsBottom, closed.h1Top - closed.tabsBottom, "gap after open");
+      await page.click("#d-agents summary");
+      await frames();
+      const shut = await rows();
+      assert.equal(shut.scrollTop, 20);
+      near(shut.summaryTop, closed.summaryTop, "summary after close");
+      near(shut.h1Top - shut.tabsBottom, closed.h1Top - closed.tabsBottom, "gap after close");
+
+      // On a short page the newly opened table still scrolls to its last row. Closing it
+      // leaves nothing to scroll, so the browser settles the page back at its top with the same gap.
+      await openAgents("decision", false);
+      const rest = await rows();
+      await page.click("#d-agents summary");
+      await frames();
+      const tall = await rows();
+      const need = Math.ceil(tall.last.bottom - tall.innerHeight + 8);
+      await scrollTo(need);
+      const bottom = await rows();
+      near(bottom.scrollTop, need, "scrollTop");
+      assert.ok(bottom.last.bottom <= bottom.innerHeight, `last row bottom ${bottom.last.bottom}`);
+      await scrollTo(20);
+      await page.click("#d-agents summary");
+      await frames();
+      const back = await rows();
+      assert.equal(back.scrollTop, 0);
+      near(back.summaryTop, rest.summaryTop, "summary back at rest");
+      near(back.h1Top - back.tabsBottom, rest.h1Top - rest.tabsBottom, "gap back at rest");
     });
 
     assert.deepEqual(errors, []);

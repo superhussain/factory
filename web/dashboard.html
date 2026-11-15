@@ -597,7 +597,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     #d-meta, #d-pipeline, #d-chat, #d-held, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
-    .pager > .doc { padding-top: calc(16px + var(--head-collapse, 0px)); }
+    /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
+    .pager > .doc::before { content: ''; display: block; height: var(--head-collapse, 0px); }
     .pager > .doc, .pager > .gallery { touch-action: pan-y pinch-zoom; }
   }
   @media (max-width: 360px) {
@@ -4699,9 +4700,10 @@ let swipeSettling = false;
 
 // On a phone the job details under the title slide up with the page, one pixel per pixel,
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
-// so it pins under the title with its top margin. The pager sits under them, padded by the same height.
+// so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
 const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
 let headCollapse = 0;
+let headShift = 0;
 let headStop = null;
 let headMenuRest = 0;
 let headMenuMin = 0;
@@ -4721,20 +4723,25 @@ function measureHead() {
   syncHeadShift();
 }
 function syncHeadShift() {
-  const shift = Math.min(headCollapse, Math.max(0, $('d-doc').scrollTop));
-  const gone = headCollapse > 0 && shift >= headCollapse;
+  headShift = Math.min(headCollapse, Math.max(0, $('d-doc').scrollTop));
+  const gone = headCollapse > 0 && headShift >= headCollapse;
   for (const el of $('detail').querySelectorAll(HEAD_MOVERS)) {
-    el.style.transform = shift ? 'translateY(' + -shift + 'px)' : '';
+    el.style.transform = headShift ? 'translateY(' + -headShift + 'px)' : '';
     el.inert = gone && Boolean(el.compareDocumentPosition(headStop) & Node.DOCUMENT_POSITION_FOLLOWING);
   }
-  $('d-actions-menu').style.top = shift ? Math.max(headMenuMin, headMenuRest - shift) + 4 + 'px' : '';
+  $('d-actions-menu').style.top = headShift ? Math.max(headMenuMin, headMenuRest - headShift) + 4 + 'px' : '';
 }
 $('d-doc').addEventListener('scroll', syncHeadShift, { passive: true });
 // A keyboard user tabbing onto a detail that slides under the title band gets the page scrolled back to show it.
 $('detail').addEventListener('focusin', (e) => {
-  const shift = Math.min(headCollapse, Math.max(0, $('d-doc').scrollTop));
-  if (shift && e.target.closest(HEAD_MOVERS) && e.target.compareDocumentPosition(headStop) & Node.DOCUMENT_POSITION_FOLLOWING && e.target.matches(':focus-visible')) $('d-doc').scrollTop = 0;
+  if (headShift && e.target.closest(HEAD_MOVERS) && e.target.compareDocumentPosition(headStop) & Node.DOCUMENT_POSITION_FOLLOWING && e.target.matches(':focus-visible')) $('d-doc').scrollTop = 0;
 });
+// The details sit outside the page's scroller. A touch drag on them already scrolls it, but a wheel does not, so pass it on.
+$('detail').addEventListener('wheel', (e) => {
+  if (!headCollapse || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || !e.target.closest(HEAD_MOVERS)) return;
+  e.preventDefault();
+  $('d-doc').scrollTop += e.deltaY;
+}, { passive: false });
 swipeMedia.addEventListener('change', measureHead);
 const headObserver = new ResizeObserver(measureHead);
 for (const el of $('detail').children) if (!el.matches('.pager, .detail-resize')) headObserver.observe(el);
