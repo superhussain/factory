@@ -4630,10 +4630,10 @@ function renderDetail() {
 const IDEA_IMAGE = /^[0-9a-f]{64}\.png$/;
 
 // Attached files are download links. MP4 and WebM also get a player above the link,
-// and a re-render reuses that player so playback carries on.
+// and a re-render reuses that player, or its fallback note, so playback carries on.
 function renderFiles(j, f) {
   const list = $('d-files');
-  const kept = new Map([...list.querySelectorAll('video[data-name]')].map((v) => [v.dataset.name, v]));
+  const kept = new Map([...list.querySelectorAll('[data-name]')].map((el) => [el.dataset.name, el]));
   list.replaceChildren();
   const names = f?.name === 'idea.md' && Array.isArray(j?.idea_files) ? j.idea_files : [];
   list.hidden = !names.length;
@@ -4645,9 +4645,9 @@ function renderFiles(j, f) {
     } else {
       const ext = name.slice(65);
       if (ext === 'mp4' || ext === 'webm') {
-        let video = kept.get(name);
-        if (!video) {
-          video = document.createElement('video');
+        let player = kept.get(name);
+        if (!player) {
+          const video = document.createElement('video');
           video.controls = true;
           video.preload = 'metadata';
           video.playsInline = true;
@@ -4656,12 +4656,14 @@ function renderFiles(j, f) {
           video.addEventListener('error', () => {
             const p = document.createElement('p');
             p.className = 'bad';
+            p.dataset.name = name;
             p.textContent = 'Video ' + (i + 1) + ' cannot play here. Use its download link.';
             video.replaceWith(p);
           }, { once: true });
           video.src = './api/idea-files/' + name;
+          player = video;
         }
-        li.append(video);
+        li.append(player);
       }
       const a = document.createElement('a');
       a.href = './api/idea-files/' + name;
@@ -5202,6 +5204,7 @@ function closeDetail(keepHash = false) {
   openId = null;
   openBacklogRaw = null;
   $('detail').hidden = true;
+  for (const v of $('d-files').querySelectorAll('video')) v.pause();
   closeJobActions(false);
   syncIdeaEditor();
   renderBoard();
@@ -5233,7 +5236,7 @@ document.addEventListener('keydown', (e) => {
 function handleBoardKeys(e) {
   if (settingsRoute() !== null || retrosRoute() !== null) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
-  if (e.target.closest('input, textarea, select, [contenteditable], #d-resize')) return;
+  if (e.target.closest('input, textarea, select, [contenteditable], #d-resize, video')) return;
   if (document.querySelector('dialog[open]')) return;
   if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
     e.preventDefault();

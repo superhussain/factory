@@ -198,12 +198,41 @@ test("idea files", { timeout: 180000 }, async (t) => {
         await capture("idea-video-drawer-390.png");
 
         const before = await page.$("#d-files video");
+        const note = await page.$("#d-files p.bad");
         await page.evaluate(() => renderDetail());
         assert.ok(
           await page.evaluate(
-            (video) => video.isConnected && video === document.querySelector("#d-files video"),
+            (video, p) =>
+              video.isConnected &&
+              video === document.querySelector("#d-files video") &&
+              p === document.querySelector("#d-files p.bad"),
             before,
+            note,
           ),
+        );
+
+        await page.focus("#d-files video");
+        for (const key of ["ArrowRight", "ArrowLeft"]) {
+          await page.keyboard.press(key);
+          assert.deepEqual(
+            await page.evaluate(() => [openId, activeFile]),
+            [job.id, "idea.md"],
+            key,
+          );
+        }
+
+        await page.evaluate(async () => {
+          const video = document.querySelector("#d-files video");
+          video.muted = true;
+          await video.play();
+        });
+        await page.click("#d-close");
+        assert.deepEqual(
+          await page.$eval("#d-files video", (v) => [
+            document.getElementById("detail").hidden,
+            v.paused,
+          ]),
+          [true, true],
         );
       });
 
