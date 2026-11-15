@@ -4867,7 +4867,7 @@ function measureHead() {
     headMenuMin = $('d-actions').offsetTop + $('d-actions').offsetHeight;
   }
   detail.style.setProperty('--head-collapse', headCollapse + 'px');
-  const media = Boolean(headCollapse) && !($('d-gallery').hidden && $('d-files').hidden);
+  const media = headCollapse > 0 && [$('d-gallery'), $('d-files')].some((el) => !el.hidden);
   detail.classList.toggle('head-media', media);
   if (media !== ($('d-gallery').parentElement === $('d-doc'))) {
     if (media) $('d-doc').prepend($('d-gallery'), $('d-files'));
