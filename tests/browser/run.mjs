@@ -784,6 +784,7 @@ async function capture(outdir, referencePath) {
     await view("jumper-desktop", 1440, 900, "light", openJumper);
     await view("jumper-mobile", 390, 844, "dark", openJumper);
     await view("idea-desktop", 1440, 900, "light", openIdea);
+    await view("idea-mobile", 390, 844, "light", openIdea);
     const openFilter = async (page) => {
       await page.click("#filter");
     };
