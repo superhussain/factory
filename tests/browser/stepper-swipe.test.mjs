@@ -159,6 +159,26 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       });
       return { frame, y: Math.round(top + y) };
     };
+    const frameSettled = (frame) =>
+      frame.waitForFunction(() => !document.querySelector("#steps .peek, #steps.panning"), wait);
+    const framePan = (frame) =>
+      frame.evaluate(() => {
+        const pane = document.getElementById("pane");
+        const peek = document.querySelector("#steps .peek");
+        return {
+          x: new DOMMatrix(getComputedStyle(pane).transform).m41,
+          peek: peek ? peek.querySelector(".muted").textContent : null,
+          side: peek
+            ? Math.sign(peek.getBoundingClientRect().left - pane.getBoundingClientRect().left)
+            : 0,
+        };
+      });
+    const frameClean = (frame) =>
+      frame.evaluate(() => ({
+        peeks: document.querySelectorAll("#steps .peek").length,
+        panning: document.querySelectorAll("#steps.panning").length,
+        styled: document.querySelectorAll("#pane[style]").length,
+      }));
     const capture = (name) => captureDir && page.screenshot({ path: join(captureDir, name) });
     const stepY = () =>
       page.$eval("#d-doc .step-panel:not([hidden]) .step-title", (el) => {
@@ -217,6 +237,7 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       const before = await kicker();
       await drag(line(300, 150, y), 16);
       await settled();
+      await frameSettled(frame);
       await capture("frame-swipe.png");
       assert.match(before, /Step 1 of 2/);
       assert.match(await kicker(), /Step 2 of 2/);
@@ -258,6 +279,7 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
         await sleep(16);
       }
       await settled();
+      await frameSettled(frame);
       assert.match(await frame.$eval("#kicker", (e) => e.textContent), /Step 1 of 2/);
     });
 
@@ -272,15 +294,18 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       }
       await touches("touchCancel", []);
       await settled();
+      await frameSettled(frame);
       await frame.evaluate(() =>
         document
           .getElementById("steps")
           .dispatchEvent(new TouchEvent("touchend", { bubbles: true })),
       );
       await settled();
+      await frameSettled(frame);
       assert.match(await kicker(), /Step 1 of 2/);
       await drag(line(300, 150, y), 16);
       await settled();
+      await frameSettled(frame);
       assert.match(await kicker(), /Step 2 of 2/);
     });
 
@@ -294,8 +319,20 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
           typeof x,
           typeof swiping,
           typeof sideways,
+          typeof pan,
+          typeof settling,
+          typeof peekAt,
         ]),
-        ["undefined", "undefined", "undefined", "undefined", "undefined"],
+        [
+          "undefined",
+          "undefined",
+          "undefined",
+          "undefined",
+          "undefined",
+          "undefined",
+          "undefined",
+          "undefined",
+        ],
       );
     });
 
@@ -400,6 +437,44 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       await capture("stepper-mermaid-mid-drag.png");
       await touch("touchEnd");
       await settled();
+    });
+
+    await t.test("T15 frame left drag pans step 2 in", async () => {
+      await open();
+      const { frame, y } = await openFrame();
+      await press(line(300, 150, y), 16);
+      await capture("frame-mid-drag.png");
+      const mid = await framePan(frame);
+      assert.ok(mid.x < 0, `pane x ${mid.x}`);
+      assert.equal(mid.peek, "Step 2 of 2");
+      assert.equal(mid.side, 1);
+      await touch("touchEnd");
+      await frameSettled(frame);
+      assert.match(await frame.$eval("#kicker", (e) => e.textContent), /Step 2 of 2/);
+      assert.deepEqual(await frameClean(frame), { peeks: 0, panning: 0, styled: 0 });
+    });
+
+    await t.test("T16 frame short drag snaps back to step 1", async () => {
+      await open();
+      const { frame, y } = await openFrame();
+      await drag(line(300, 260, y), 120);
+      await frameSettled(frame);
+      assert.match(await frame.$eval("#kicker", (e) => e.textContent), /Step 1 of 2/);
+      assert.deepEqual(await frameClean(frame), { peeks: 0, panning: 0, styled: 0 });
+    });
+
+    await t.test("T17 frame right drag on step 1 pans step 2 in from the left", async () => {
+      await open();
+      const { frame, y } = await openFrame();
+      await press(line(100, 250, y), 16);
+      const mid = await framePan(frame);
+      assert.ok(mid.x > 0, `pane x ${mid.x}`);
+      assert.equal(mid.peek, "Step 2 of 2");
+      assert.equal(mid.side, -1);
+      await touch("touchEnd");
+      await frameSettled(frame);
+      assert.match(await frame.$eval("#kicker", (e) => e.textContent), /Step 2 of 2/);
+      assert.deepEqual(await frameClean(frame), { peeks: 0, panning: 0, styled: 0 });
     });
 
     assert.deepEqual(errors, []);
