@@ -267,7 +267,13 @@ async function offline() {
   const create = { jobs: [] };
   api.addIdea(
     create,
-    { project: "", text: draft, images: [], capture_id: "07500000-0000-4000-8000-000000000001" },
+    {
+      project: "",
+      text: draft,
+      images: [],
+      files: [],
+      capture_id: "07500000-0000-4000-8000-000000000001",
+    },
     now,
   );
   assert.equal(create.jobs[0].title, api.ideaTitle(draft));
@@ -277,6 +283,7 @@ async function offline() {
     project: "sample",
     text: "Export the sample report as CSV",
     images: [],
+    files: [],
     capture_id: "07500000-0000-4000-8000-000000000002",
     refs: [{ id: "042-sample-export", kind: "follow-up-of" }],
   };
@@ -1309,7 +1316,7 @@ async function browserTest(url) {
     );
     assert.equal(
       await page.$eval("#idea-images-help", (e) => e.textContent),
-      "Paste or add up to 4 images (PNG, JPEG or WebP, 5 MiB each).",
+      "Paste or add up to 4 images (PNG, JPEG or WebP, 5 MiB each) and up to 4 files (PDF 10 MiB, CSV or text 1 MiB, MP4 or WebM 25 MiB).",
     );
     assert.equal(
       await page.$eval("#idea-text", (e) => e.getAttribute("aria-describedby")),
