@@ -16,7 +16,10 @@ feature.
    builder starts from. It writes `spec.md`.
    When step 1 attached riders, build the feature text as `/factory idea` step 6
    describes, with this job's feature in place of its `idea`.
-3. Apply the spec-approval gate as Gate stages describes.
+3. Before the gate, run `batch "$SLUG/<id>" --session <tag>`. When `spec.md`
+   names a batched id missing from its `riders`, a person used Remove from batch.
+   Respawn the spec writer with a fresh `prompt` file, then apply the gate.
+   Apply the spec-approval gate as Gate stages describes.
    When `spec.md` has a `## Stacked PR` section, run
    `python3 "$RUNTIME" stack "$SLUG/<id>" <rider-id> --session <tag>` with the id on its
    line, then `git -C "$REPO_PATH" worktree add "$WORKTREES/<rider-id>" -b factory/<rider-id> factory/<id>`.

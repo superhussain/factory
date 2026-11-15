@@ -648,6 +648,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-prioritize" role="menuitem" tabindex="-1" hidden>Prioritize</button>
         <button class="btn" id="d-run-batch" role="menuitem" tabindex="-1" title="Pickup starts this idea next and batches the project's other held ideas behind it" hidden>Run batch now</button>
         <button class="btn" id="d-start-alone" role="menuitem" tabindex="-1" title="Pickup starts this idea next by itself, with no riders" hidden>Start alone</button>
+        <button class="btn" id="d-unbatch" role="menuitem" tabindex="-1" title="Take this rider out of its lead's batch. It goes back to idea, and pickup runs it on its own." hidden>Remove from batch</button>
         <button class="btn" id="d-remove-priority" role="menuitem" tabindex="-1" hidden>Remove priority</button>
         <button class="btn" id="d-pause" role="menuitem" tabindex="-1" hidden>Pause pickup</button>
         <button class="btn" id="d-resume" role="menuitem" tabindex="-1" hidden>Resume pickup</button>
@@ -5813,7 +5814,7 @@ async function openIdeaEditor(ctx) {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
+const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-unbatch', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
 
 // The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
 function jobActionsFor(j) {
@@ -5828,6 +5829,7 @@ function jobActionsFor(j) {
     'd-prioritize': !rider && !!j.project && PRIORITY_STAGES.includes(j.stage) && !j.priority && !batchHeld(j),
     'd-run-batch': !!j.project && batchRunnable(j) && !jobs.some((x) => batchStarter(x, j.project)),
     'd-start-alone': !!j.project && batchHeld(j),
+    'd-unbatch': canUnbatch(j),
     'd-remove-priority': !!j.priority,
     'd-pause': !rider && !!j.project && !TERMINAL.includes(j.stage) && !j.paused,
     'd-resume': !!j.paused,
@@ -5841,7 +5843,7 @@ function jobActionsFor(j) {
 // A runner's context. The drawer writes into its own lines and drops results once another job opens.
 function drawerAction(id) {
   const version = drawerVersion;
-  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-run-batch': 'd-prioritize-err', 'd-start-alone': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
+  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-run-batch': 'd-prioritize-err', 'd-start-alone': 'd-prioritize-err', 'd-unbatch': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
   return {
     id: openId,
     card: false,
@@ -6086,6 +6088,30 @@ function babysitJob(board, id, now) {
   delete j.needs;
   delete j.escalated;
   j.note = 'babysitting PR #' + prLink(j).n;
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
+// A rider that is not stacked can leave its batch while it and its lead are at spec.
+function canUnbatch(j, rows = jobs) {
+  const lead = leadOf(j);
+  return !!lead && j.stage === 'spec' && j.stacked !== true && rows.find((x) => x.id === lead)?.stage === 'spec';
+}
+
+// Drops the batched-into ref and sends the rider back to idea, so pickup runs it on its own.
+// Returns an error message, 'unchanged', or '' once the board is changed.
+function unbatchJob(board, id, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  const lead = leadOf(j);
+  if (!lead) return 'unchanged';
+  if (!canUnbatch(j, board.jobs)) return 'This rider can no longer be removed from its batch.';
+  j.refs = j.refs.filter((r) => r.kind !== 'batched-into');
+  if (!j.refs.length) delete j.refs;
+  j.stage = 'idea';
+  j.note = 'unbatched: removed from ' + lead + ' on the dashboard';
+  delete j.needs;
   j.updated = now;
   board.updated = now;
   return '';
@@ -6465,6 +6491,25 @@ async function babysitAction(ctx) {
   try {
     await casBoard((board) => {
       const message = babysitJob(board, ctx.id, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message) throw new Error(message);
+    });
+    await poll();
+  } catch (x) {
+    if (ctx.live()) ctx.report(String(x.message || x));
+  } finally {
+    if (ctx.button) ctx.button.disabled = false;
+  }
+}
+async function unbatchAction(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
+  if (!j || !canUnbatch(j)) return;
+  if (!confirm('Remove ' + j.id + ' from ' + leadOf(j) + "'s batch? It goes back to idea, and pickup runs it on its own.")) return;
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = unbatchJob(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
@@ -6868,6 +6913,7 @@ const JOB_ACTION_RUN = {
   'd-prioritize': prioritizeAction,
   'd-run-batch': (ctx) => prioritizeAction(ctx, 'batch'),
   'd-start-alone': (ctx) => prioritizeAction(ctx, 'alone'),
+  'd-unbatch': unbatchAction,
   'd-remove-priority': removePriorityAction,
   'd-pause': pauseAction,
   'd-resume': resumeAction,

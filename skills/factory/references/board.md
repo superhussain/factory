@@ -21,7 +21,7 @@
   "note": "optional one-line status, e.g. escalation reason",
   "needs": "optional: what only a human can do, e.g. approve spec.md",
   "port": "optional dev-server port or block the builder holds, e.g. 8130-8139",
-  "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | batched-into (set only by factory.py batch; board refuses it)" }],
+  "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | batched-into (set only by factory.py batch; dropped by the lead's close or merge, or the dashboard's Remove from batch while the lead is at spec)" }],
   "stacked": "true on the one rider that ships as a PR stacked on its lead's PR; set only by factory.py stack",
   "build": { "state": "queued | running | done | failed", "runs": ["https://github.com/<repo>/actions/runs/1"] },
   "pipeline": { "global": 3, "project": 2 },

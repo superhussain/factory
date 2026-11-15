@@ -1950,8 +1950,20 @@ function checkRiderControls(storedJobs, jobs) {
   return null;
 }
 
+// The dashboard's Remove from batch: a rider that is not stacked goes from spec to idea and
+// drops its one ref, while its lead is at spec both stored and written.
+const unbatchedAtSpec = (storedRow, row, storedLead, lead) =>
+  batchLeads(storedRow).length === 1 &&
+  batchLeads(row).length === 0 &&
+  storedRow.stage === "spec" &&
+  row.stage === "idea" &&
+  storedRow.stacked !== true &&
+  storedLead?.stage === "spec" &&
+  lead?.stage === "spec";
+
 // Only factory.py batch adds a batched-into ref, into a lead stored at spec or new in this write.
-// Only the lead's close or merge drops one or deletes its rider row. An error message, or null.
+// Only the lead's close or merge drops one or deletes its rider row, besides the dashboard's
+// Remove from batch while the lead is at spec. An error message, or null.
 function checkBatchRefs(storedJobs, jobs) {
   const firstById = (rows) => {
     const byId = new Map();
@@ -1968,7 +1980,12 @@ function checkBatchRefs(storedJobs, jobs) {
     const dropped = before.find((id) => !after.includes(id));
     if (dropped !== undefined) {
       const lead = written.get(dropped);
-      if (lead && lead.stage !== "closed" && lead.stage !== "merged")
+      if (
+        lead &&
+        lead.stage !== "closed" &&
+        lead.stage !== "merged" &&
+        !unbatchedAtSpec(storedRow, row, stored.get(dropped), lead)
+      )
         return `a board write cannot unbatch ${quoteIdCut(row.id, QUOTED_ID_MAX)}: its lead ${quoteIdCut(dropped, QUOTED_ID_MAX)} is still open. Only the lead's close or merge drops the ref. Nothing was written.`;
     }
     const added = after.find((id) => !before.includes(id));
