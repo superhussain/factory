@@ -14,6 +14,7 @@ import sys
 
 COMMANDS = ("check", "render", "dry-run", "deploy")
 COMPATIBILITY_DATE = "2026-06-01"
+OBSERVABILITY = {"enabled": True, "head_sampling_rate": 1, "redact_query_string": True}
 PROFILE_KEYS = ["version", "account_id", "worker_name", "bucket_name", "origin", "title",
                 "issuer", "audience", "image_origins", "agent_links"]
 OPTIONAL_PROFILE_KEYS = ["jira_origin"]
@@ -214,6 +215,7 @@ def project_wrangler(profile, source_root, output):
         "durable_objects": {"bindings": [{"name": "BoardEvents", "class_name": "BoardEvents"}]},
         "migrations": [{"tag": "v1", "new_sqlite_classes": ["BoardEvents"]}],
         "triggers": {"crons": ["17 * * * *"]},
+        "observability": dict(OBSERVABILITY),
         "vars": {
             "FACTORY_ORIGIN": profile["origin"],
             "FACTORY_TITLE": profile["title"],
