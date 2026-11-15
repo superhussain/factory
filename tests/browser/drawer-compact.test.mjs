@@ -1,5 +1,5 @@
-// On a phone the job details above the tabs scroll away with the page, leaving the title
-// and tabs, against one owned local Worker.
+// On a phone the job details under the title slide up with the page, one pixel per pixel,
+// leaving the title and tabs, against one owned local Worker.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -17,7 +17,7 @@ const MOBILE = { width: 390, height: 844, isMobile: true, hasTouch: true };
 const DESKTOP = { width: 1280, height: 900 };
 const wait = { polling: 50 };
 
-test("drawer compact header", { timeout: 180000 }, async (t) => {
+test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
   await prepareAssets();
   await withBrowserFixture(async ({ browser, origin }) => {
     await seedProject(origin, "sample", SEED);
@@ -59,57 +59,86 @@ test("drawer compact header", { timeout: 180000 }, async (t) => {
         () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
       );
     };
+    const MOVERS =
+      "#d-meta, #d-pipeline, #d-chat, #d-held, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs";
     const state = () =>
       page.evaluate(() => {
-        const h = (s) => document.querySelector(s).offsetHeight;
+        const rect = (s) => document.querySelector(s).getBoundingClientRect();
         return {
-          compact: document.getElementById("detail").classList.contains("compact"),
-          meta: h("#d-meta"),
-          refs: h("#d-refs"),
-          links: h(".detail-head .links"),
-          title: h("#d-title"),
+          collapse: getComputedStyle(document.getElementById("detail")).getPropertyValue(
+            "--head-collapse",
+          ),
+          meta: document.getElementById("d-meta").offsetHeight,
+          metaInert: document.getElementById("d-meta").inert,
+          tabsInert: document.getElementById("d-tabs").inert,
           scrollTop: document.getElementById("d-doc").scrollTop,
-          tabsTop: document.getElementById("d-tabs").getBoundingClientRect().top,
-          headBottom: document.querySelector(".detail-head").getBoundingClientRect().bottom,
+          titleTop: rect("#d-title").top,
+          titleBottom: rect("#d-title").bottom,
+          tabsTop: rect("#d-tabs").top,
+          tabsBottom: rect("#d-tabs").bottom,
+          metaTop: rect("#d-meta").top,
+          h1Top: rect("#d-doc h1").top,
         };
       });
+    const near = (actual, expected, label) =>
+      assert.ok(Math.abs(actual - expected) <= 1, `${label}: ${actual}, expected ${expected}`);
+    let restTabsTop;
 
-    await t.test("C1", async () => {
+    await t.test("D1", async () => {
+      await open("spec");
+      const s = await state();
+      assert.ok(s.meta > 0);
+      assert.ok(parseFloat(s.collapse) > 40, `--head-collapse ${s.collapse}`);
+      assert.ok(s.h1Top >= s.tabsBottom, `h1 ${s.h1Top}, tabs bottom ${s.tabsBottom}`);
+      restTabsTop = s.tabsTop;
+    });
+
+    await t.test("D2", async () => {
       await open("spec");
       const rest = await state();
-      assert.equal(rest.compact, false);
-      assert.ok(rest.meta > 0);
-      await scrollTo(300);
-      const s = await state();
-      assert.equal(s.compact, true);
-      assert.deepEqual([s.meta, s.refs, s.links], [0, 0, 0]);
-      assert.ok(s.title > 0);
-      assert.equal(s.tabsTop, s.headBottom);
-      assert.ok(s.tabsTop < rest.tabsTop, `tabs ${s.tabsTop}, rest ${rest.tabsTop}`);
+      for (const top of [10, 20, 40]) {
+        await scrollTo(top);
+        const s = await state();
+        assert.equal(s.scrollTop, top);
+        near(s.tabsTop, rest.tabsTop - top, `tabs at ${top}`);
+        near(s.metaTop, rest.metaTop - top, `meta at ${top}`);
+        near(s.h1Top, rest.h1Top - top, `h1 at ${top}`);
+        assert.equal(s.titleTop, rest.titleTop);
+      }
     });
 
-    await t.test("C2", async () => {
+    await t.test("D3", async () => {
       await open("spec");
       await scrollTo(300);
-      assert.equal((await state()).compact, true);
+      const s = await state();
+      near(s.tabsTop, s.titleBottom, "tabs under title");
+      assert.equal(s.metaInert, true);
+      assert.equal(s.tabsInert, false);
+    });
+
+    await t.test("D4", async () => {
+      await open("spec");
+      await scrollTo(300);
       await scrollTo(0);
-      const s = await state();
-      assert.equal(s.compact, false);
-      assert.ok(s.meta > 0);
+      const movers = await page.$$eval(MOVERS, (els) =>
+        els.map((el) => [el.style.transform, el.inert]),
+      );
+      assert.ok(movers.length > 0);
+      for (const m of movers) assert.deepEqual(m, ["", false]);
     });
 
-    await t.test("C3", async () => {
+    await t.test("D5", async () => {
       await open("spec", DESKTOP);
+      const rest = await state();
       await scrollTo(300);
       const s = await state();
-      assert.equal(s.compact, false);
-      assert.ok(s.meta > 0);
+      assert.equal(s.tabsTop, rest.tabsTop);
+      assert.equal(s.collapse, "0px");
     });
 
-    await t.test("C4", async () => {
+    await t.test("D6", async () => {
       await open("spec");
       await scrollTo(300);
-      assert.equal((await state()).compact, true);
       await page.click('.tab[data-name="build.md"]');
       await page.waitForFunction(
         () => document.querySelector("#d-doc h1")?.textContent === "Build",
@@ -119,14 +148,28 @@ test("drawer compact header", { timeout: 180000 }, async (t) => {
         () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
       );
       const s = await state();
-      assert.equal(s.compact, false);
       assert.equal(s.scrollTop, 0);
+      near(s.tabsTop, restTabsTop, "tabs back at rest");
     });
 
-    await t.test("C5", async () => {
+    await t.test("D7", async () => {
       await open("decision");
+      const rest = await state();
       await scrollTo(300);
-      assert.equal((await state()).compact, false);
+      assert.equal((await state()).tabsTop, rest.tabsTop);
+    });
+
+    await t.test("D8", async () => {
+      await open("spec");
+      await scrollTo(300);
+      await page.click("#d-actions");
+      await page.waitForFunction(() => !document.getElementById("d-actions-menu").hidden, wait);
+      const gap = await page.evaluate(
+        () =>
+          document.getElementById("d-actions-menu").getBoundingClientRect().top -
+          document.getElementById("d-actions").getBoundingClientRect().bottom,
+      );
+      near(gap, 4, "menu gap");
     });
 
     assert.deepEqual(errors, []);
