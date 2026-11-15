@@ -51,8 +51,8 @@
                                             hold first to refresh this session's claim
   factory.py watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]
                                             print one JSON line when every job file has a valid first
-                                            line, --pr's next leaves wait, or S seconds pass (default and
-                                            max 540); runs hold first
+                                            line, one keeps an invalid first line, --pr's next leaves
+                                            wait, or S seconds pass (default and max 540); runs hold first
   factory.py checks <project-slug>/<job-id> [--timeout S]
                                             print the job PR's checks as <bucket> <name> once none is
                                             pending, checking every 10 seconds for up to S seconds
@@ -6257,7 +6257,8 @@ WATCH_USAGE = "usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--ti
 
 def watch_cmd(target, *args):
     """Run hold once, then print one JSON line when every artifact has a valid first line, --pr's next
-    leaves wait, or --timeout passes, reading files once a second and the PR every 30 seconds."""
+    leaves wait, --timeout passes, or a file keeps an invalid non-empty first line for two reads,
+    reading files once a second and the PR every 30 seconds."""
     home, slug, job_id = r2_target(target, True)
     artifacts, timeout, watch_pr = [], None, False
     i = 0
@@ -6288,19 +6289,23 @@ def watch_cmd(target, *args):
         base = meta.get("base") or "main"
     start = time.monotonic()
     deadline = start + (WATCH_TIMEOUT if timeout is None else timeout)
-    reading, read_at = None, start
+    reading, read_at, bad_before = None, start, {}
     while True:
         lines = job_file_lines(folder, artifacts)
+        bad = {a: lines[a] for a in artifacts if (lines.get(a) or "").strip() and not wait_valid(a, lines[a])}
         if watch_pr and time.monotonic() >= read_at:
             reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""))
             read_at = time.monotonic() + PR_STATE_INTERVAL
         if artifacts and all(a in lines and wait_valid(a, lines[a]) for a in artifacts):
             event = "files"
+        elif any(bad_before.get(a) == line for a, line in bad.items()):
+            event = "malformed"
         elif reading and reading["next"] not in ("wait", "wait-base"):
             event = "pr"
         elif time.monotonic() >= deadline:
             event = "timeout"
         else:
+            bad_before = bad
             time.sleep(1)
             continue
         print(json.dumps({"event": event, "files": {a: lines.get(a) for a in artifacts}, "pr": reading,
