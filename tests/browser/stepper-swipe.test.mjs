@@ -107,7 +107,8 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       page.evaluate(() => ({
         peeks: document.querySelectorAll(".step-peek").length,
         panning: document.querySelectorAll(".step-panning").length,
-        styled: document.querySelectorAll("#d-doc .step-panel[style]").length,
+        styled: document.querySelectorAll("#d-doc .step-panel[style], #d-doc .stepper[style]")
+          .length,
       }));
     const open = async () => {
       await page.setViewport(MOBILE);
@@ -385,6 +386,17 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
         await page.$("#d-doc .step-panel.step-peek div.mermaid svg"),
         "the peek must hold the rendered diagram",
       );
+      const fit = await page.evaluate(() => {
+        const peek = document.querySelector("#d-doc .step-panel.step-peek");
+        const cur = document.querySelector("#d-doc .step-panel:not([hidden]):not(.step-peek)");
+        const box = peek.closest(".stepper");
+        return {
+          clipped: peek.scrollHeight > peek.clientHeight + 1,
+          inside: peek.getBoundingClientRect().bottom <= box.getBoundingClientRect().bottom,
+          taller: peek.offsetHeight > cur.offsetHeight,
+        };
+      });
+      assert.deepEqual(fit, { clipped: false, inside: true, taller: true });
       await capture("stepper-mermaid-mid-drag.png");
       await touch("touchEnd");
       await settled();

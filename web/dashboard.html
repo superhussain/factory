@@ -4852,15 +4852,19 @@ function addStepSwipe(box, panels, current, go) {
       g.peek.classList.remove('step-peek');
       g.peek.setAttribute('hidden', 'until-found');
     }
+    box.style.minHeight = '';
     const cur = panels[g.at];
     const peek = panels[(g.at + d + panels.length) % panels.length];
     peek.style.top = cur.offsetTop + 'px';
     peek.style.left = cur.offsetLeft + 'px';
     peek.style.width = cur.offsetWidth + 'px';
-    peek.style.height = cur.offsetHeight + 'px';
     peek.classList.add('step-peek');
     peek.removeAttribute('hidden');
     box.classList.add('step-panning');
+    // The peek keeps its own height, so the box grows by however much taller it is.
+    const pad = getComputedStyle(box);
+    const inner = box.clientHeight - parseFloat(pad.paddingTop) - parseFloat(pad.paddingBottom);
+    box.style.minHeight = inner + Math.max(0, peek.offsetHeight - cur.offsetHeight) + 'px';
     g.d = d;
     g.peek = peek;
   };
@@ -4886,6 +4890,7 @@ function addStepSwipe(box, panels, current, go) {
         if (p.hasAttribute('style')) p.removeAttribute('style');
         p.classList.remove('step-peek');
       }
+      if (box.hasAttribute('style')) box.removeAttribute('style');
       box.classList.remove('step-panning');
       go(commit ? panels.indexOf(g.peek) : current());
       settling = false;
