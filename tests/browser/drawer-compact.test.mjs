@@ -2,10 +2,35 @@
 // leaving the title and tabs, against one owned local Worker.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { crc32, deflateSync } from "node:zlib";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+
+function png(w, h, [r, g, b]) {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array(w).fill([r, g, b]).flat())]);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(Buffer.concat(Array(h).fill(row)))),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
 
 const SEED = "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n";
 const paras = (n) =>
@@ -15,6 +40,10 @@ const FILES = {
   "build.md": `# Build\n\n${paras(60)}\n`,
   "decision.md": "# Decision\n",
 };
+const IMAGE = png(320, 200, [33, 118, 174]);
+const PDF = "%PDF-1.4\n%%EOF\n";
+const CSV = "region,total\nnorth,12\n";
+const sha = (b) => createHash("sha256").update(b).digest("hex");
 const MOBILE = { width: 390, height: 844, isMobile: true, hasTouch: true };
 const DESKTOP = { width: 1280, height: 900 };
 const wait = { polling: 50 };
@@ -31,6 +60,18 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
   await prepareAssets();
   await withBrowserFixture(async ({ browser, origin }) => {
     await seedProject(origin, "sample", SEED);
+    for (const [path, type, body] of [
+      [`idea-images/${sha(IMAGE)}.png`, "image/png", IMAGE],
+      [`idea-files/${sha(PDF)}.pdf`, "application/pdf", PDF],
+      [`idea-files/${sha(CSV)}.csv`, "text/csv", CSV],
+    ]) {
+      const r = await fetch(`${origin}/api/${path}`, {
+        method: "PUT",
+        headers: { "Content-Type": type },
+        body,
+      });
+      assert.equal(r.status, 200, path);
+    }
     await seedBoard(origin, [
       {
         id: "001-compact",
@@ -50,8 +91,19 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
         updated: "2026-01-01T00:00:00Z",
         agents: AGENTS,
       },
+      {
+        id: "003-media",
+        project: "sample",
+        title: "Synthetic 003-media",
+        stage: "review",
+        branch: "factory/003-media",
+        updated: "2026-01-01T00:00:00Z",
+        idea: "# Idea\n\n" + paras(60) + "\n",
+        idea_images: [sha(IMAGE) + ".png"],
+        idea_files: [sha(PDF) + ".pdf", sha(CSV) + ".csv"],
+      },
     ]);
-    for (const job of ["001-compact", "002-agents"]) {
+    for (const job of ["001-compact", "002-agents", "003-media"]) {
       for (const [name, body] of Object.entries(FILES)) {
         const r = await fetch(`${origin}/api/jobs/sample/${job}/${name}`, {
           method: "PUT",
@@ -455,6 +507,162 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
         check(f, "Shift+Tab");
       }
       await page.keyboard.up("Shift");
+    });
+
+    // On a desktop a tall open agents table scrolls in its own box, so the tabs and page stay on screen.
+    await t.test("D16", async () => {
+      await open("spec", DESKTOP, "002-agents");
+      await page.waitForFunction(() => !document.getElementById("d-agents").hidden, wait);
+      await page.$eval("#d-agents", (el) => (el.open = true));
+      await frames();
+      const before = await page.$eval("#d-agents .table-wrap", (el) => ({
+        client: el.clientHeight,
+        scroll: el.scrollHeight,
+      }));
+      assert.ok(before.client <= 361, `wrap height ${before.client}`);
+      assert.ok(before.scroll > before.client + 50, `wrap scrollHeight ${before.scroll}`);
+      await page.$eval("#d-agents .table-wrap", (el) => (el.scrollTop = el.scrollHeight));
+      await frames();
+      const s = await page.evaluate(() => {
+        const rect = (el) => el.getBoundingClientRect();
+        const wrap = document.querySelector("#d-agents .table-wrap");
+        const trs = wrap.querySelectorAll("tr");
+        return {
+          wrapTop: rect(wrap).top,
+          wrapBottom: rect(wrap).bottom,
+          lastBottom: rect(trs[trs.length - 1]).bottom,
+          thTop: rect(wrap.querySelector("thead th")).top,
+          tabsBottom: rect(document.getElementById("d-tabs")).bottom,
+          docHeight: rect(document.getElementById("d-doc")).height,
+          innerHeight,
+        };
+      });
+      assert.ok(s.lastBottom <= s.wrapBottom + 1, `last row ${s.lastBottom}, wrap ${s.wrapBottom}`);
+      near(s.thTop, s.wrapTop, "sticky header");
+      assert.ok(s.tabsBottom <= s.innerHeight, `tabs bottom ${s.tabsBottom}`);
+      assert.ok(s.docHeight >= 200, `page height ${s.docHeight}`);
+      await openAgents("spec");
+      assert.equal(
+        await page.$eval("#d-agents .table-wrap", (el) => getComputedStyle(el).maxHeight),
+        "none",
+      );
+    });
+
+    const openMedia = async (viewport = MOBILE) => {
+      await open("idea", viewport, "003-media");
+      await page.waitForFunction(() => {
+        const img = document.querySelector("#d-gallery img");
+        return img && img.complete && img.naturalWidth > 0;
+      }, wait);
+      await frames();
+    };
+    const media = () =>
+      page.evaluate(() => {
+        const rect = (s) => document.querySelector(s).getBoundingClientRect().toJSON();
+        const detail = document.getElementById("detail");
+        return {
+          on: detail.classList.contains("head-media"),
+          collapse: parseFloat(getComputedStyle(detail).getPropertyValue("--head-collapse")),
+          scrollTop: document.getElementById("d-doc").scrollTop,
+          title: rect("#d-title"),
+          tabs: rect("#d-tabs"),
+          gallery: rect("#d-gallery"),
+          files: rect("#d-files"),
+          link: rect("#d-files a"),
+          open: rect("#d-gallery .gallery-open"),
+          h1: rect("#d-doc h1"),
+        };
+      });
+    const hit = (r, selector) =>
+      page.evaluate(
+        (x, y, sel) => Boolean(document.elementFromPoint(x, y)?.closest(sel)),
+        r.x + r.width / 2,
+        r.y + r.height / 2,
+        selector,
+      );
+    let mediaRest;
+
+    // On a phone an idea with images and files collapses its head; the media stack under the tabs and stay tappable.
+    await t.test("D17", async () => {
+      await openMedia();
+      const s = await media();
+      assert.equal(s.on, true);
+      assert.ok(s.collapse > 40, `--head-collapse ${s.collapse}`);
+      assert.ok(
+        s.gallery.top >= s.tabs.bottom - 1,
+        `gallery ${s.gallery.top}, tabs ${s.tabs.bottom}`,
+      );
+      assert.ok(
+        s.files.top >= s.gallery.bottom - 1,
+        `files ${s.files.top}, gallery ${s.gallery.bottom}`,
+      );
+      assert.ok(s.h1.top >= s.files.bottom - 1, `h1 ${s.h1.top}, files ${s.files.bottom}`);
+      assert.equal(await hit(s.link, "#d-files a"), true);
+      assert.equal(await hit(s.open, ".gallery-open"), true);
+      mediaRest = s;
+    });
+
+    // The head slides by at most C and pins; the media and page move with the whole scroll.
+    await t.test("D18", async () => {
+      const rest = mediaRest;
+      await scrollTo(40);
+      const a = await media();
+      near(a.tabs.top, rest.tabs.top - 40, "tabs at 40");
+      near(a.link.top, rest.link.top - 40, "link at 40");
+      near(a.h1.top, rest.h1.top - 40, "h1 at 40");
+      assert.equal(a.title.top, rest.title.top);
+      await scrollTo(300);
+      const b = await media();
+      near(b.tabs.top, rest.tabs.top - rest.collapse, "tabs at 300");
+      near(b.link.top, rest.link.top - 300, "link at 300");
+      near(b.h1.top, rest.h1.top - 300, "h1 at 300");
+    });
+
+    // A wheel on the gallery and a drag on a file link scroll the page, and the link keeps pace.
+    await t.test("D19", async () => {
+      await openMedia();
+      const rest = await media();
+      await page.mouse.move(rest.open.x + rest.open.width / 2, rest.open.y + rest.open.height / 2);
+      await page.mouse.wheel({ deltaY: 100 });
+      await page.waitForFunction(() => document.getElementById("d-doc").scrollTop >= 99, wait);
+      await frames();
+      const w = await media();
+      near(w.scrollTop, 100, "scrollTop after wheel");
+      near(rest.link.top - w.link.top, 100, "link after wheel");
+      await scrollTo(0);
+      const back = await media();
+      await drag(back.link.x + back.link.width / 2, back.link.y + back.link.height / 2, 150);
+      const d = await media();
+      assert.ok(d.scrollTop > 100, `scrollTop after drag ${d.scrollTop}`);
+      near(back.link.top - d.link.top, d.scrollTop, "link after drag");
+      near(back.h1.top - d.h1.top, d.scrollTop, "h1 after drag");
+    });
+
+    // Other tabs and the desktop drawer keep the gallery and files outside the page, as before.
+    await t.test("D20", async () => {
+      await openMedia();
+      await page.click('.tab[data-name="spec.md"]');
+      await page.waitForFunction(
+        () => document.querySelector("#d-doc h1")?.textContent === "Spec",
+        wait,
+      );
+      await frames();
+      const styles = () =>
+        page.evaluate(() => ({
+          on: document.getElementById("detail").classList.contains("head-media"),
+          parents: ["d-gallery", "d-files"].map(
+            (id) => document.getElementById(id).parentElement.id,
+          ),
+          position: getComputedStyle(document.getElementById("d-gallery")).position,
+        }));
+      const spec = await styles();
+      assert.equal(spec.on, false);
+      assert.deepEqual(spec.parents, ["d-pager", "d-pager"]);
+      await openMedia(DESKTOP);
+      const desk = await styles();
+      assert.equal(desk.on, false);
+      assert.deepEqual(desk.parents, ["d-pager", "d-pager"]);
+      assert.equal(desk.position, "static");
     });
 
     assert.deepEqual(errors, []);
