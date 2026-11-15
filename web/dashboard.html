@@ -623,10 +623,13 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
     .pager > .doc::before { content: ''; display: block; height: var(--head-collapse, 0px); }
-    /* With a gallery or file list shown, they ride over the page's spacer and scroll with it; syncHeadShift moves them. */
-    .detail.head-media .pager > .gallery, .detail.head-media .pager > .file-list { position: absolute; left: 0; right: 0; z-index: 0; }
-    .detail.head-media .pager > .gallery { max-height: none; overflow: visible; }
-    .pager > #d-doc::before { height: calc(var(--head-collapse, 0px) + var(--head-media, 0px)); }
+    /* With a gallery or file list shown, measureHead moves both to the top of the page, so they scroll with it.
+       These undo the page's padding, list indent and image size there, so they look as they do above it. */
+    .detail.head-media .doc > .gallery, .detail.head-media .doc > .file-list { margin: 0 -16px; }
+    .detail.head-media .doc > .gallery { margin-top: -16px; max-height: none; overflow: visible; }
+    .detail.head-media .doc > .gallery img { max-height: 40vh; }
+    .detail.head-media .doc > .file-list { margin-bottom: 16px; padding-left: 20px; }
+    .detail.head-media .doc > .file-list + * { margin-top: 0; }
     .pager > .doc, .pager > .gallery, .pager > .file-list { touch-action: pan-y pinch-zoom; }
   }
   @media (max-width: 360px) {
@@ -4303,7 +4306,7 @@ async function openJob(id) {
     files = [];
     filesLoading = true;
     $('d-tabs').innerHTML = '';
-    $('d-doc').innerHTML = '<p class="muted">loading files</p>';
+    setDocHtml('<p class="muted">loading files</p>');
     refreshPicker();
   }
   renderBoard();
@@ -4612,7 +4615,7 @@ function renderDetail() {
     docDir = new URL(jobBase(j), location.href).href;
     docBase = new URL(f.name, docDir).href;
   }
-  $('d-doc').innerHTML = f ? (f.name === 'needs.md' ? renderNeeds(j, f) : md(f.text)) : '<p class="muted">No files yet.</p>';
+  setDocHtml(f ? (f.name === 'needs.md' ? renderNeeds(j, f) : md(f.text)) : '<p class="muted">No files yet.</p>');
   buildSteppers($('d-doc'), openId + '/' + activeFile);
   if (f && f.name !== 'needs.md') addWalkthrough($('d-doc'), true, f.name);
   renderGallery(j, f);
@@ -4844,15 +4847,13 @@ let swipeSettling = false;
 // On a phone the job details under the title slide up with the page, one pixel per pixel,
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
 // so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
-// On an idea tab the gallery and file list ride over the page's spacer and move with the page.
+// On an idea tab the gallery and file list move into the top of the page, so they scroll with it.
 const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
-const HEAD_MEDIA = '#d-gallery, #d-files';
 let headCollapse = 0;
 let headShift = 0;
 let headStop = null;
 let headMenuRest = 0;
 let headMenuMin = 0;
-let headMedia = [];
 function measureHead() {
   const detail = $('detail');
   const tabs = $('d-tabs');
@@ -4866,16 +4867,18 @@ function measureHead() {
     headMenuMin = $('d-actions').offsetTop + $('d-actions').offsetHeight;
   }
   detail.style.setProperty('--head-collapse', headCollapse + 'px');
-  headMedia = headCollapse ? [$('d-gallery'), $('d-files')].filter((el) => !el.hidden) : [];
-  detail.classList.toggle('head-media', headMedia.length > 0);
-  let mediaTop = headCollapse;
-  for (const el of [$('d-gallery'), $('d-files')]) el.style.top = '';
-  for (const el of headMedia) {
-    el.style.top = mediaTop + 'px';
-    mediaTop += el.offsetHeight;
+  const media = Boolean(headCollapse) && !($('d-gallery').hidden && $('d-files').hidden);
+  detail.classList.toggle('head-media', media);
+  if (media !== ($('d-gallery').parentElement === $('d-doc'))) {
+    if (media) $('d-doc').prepend($('d-gallery'), $('d-files'));
+    else $('d-doc').before($('d-gallery'), $('d-files'));
   }
-  detail.style.setProperty('--head-media', mediaTop - headCollapse + 'px');
   syncHeadShift();
+}
+// Writing the page would drop the gallery and file list measureHead moved into it, so move them back out first.
+function setDocHtml(html) {
+  if ($('d-gallery').parentElement === $('d-doc')) $('d-doc').before($('d-gallery'), $('d-files'));
+  $('d-doc').innerHTML = html;
 }
 function syncHeadShift() {
   headShift = Math.min(headCollapse, Math.max(0, $('d-doc').scrollTop));
@@ -4885,14 +4888,12 @@ function syncHeadShift() {
     el.inert = gone && Boolean(el.compareDocumentPosition(headStop) & Node.DOCUMENT_POSITION_FOLLOWING);
   }
   $('d-actions-menu').style.top = headShift ? Math.max(headMenuMin, headMenuRest - headShift) + 4 + 'px' : '';
-  const top = Math.max(0, $('d-doc').scrollTop);
-  for (const el of [$('d-gallery'), $('d-files')]) el.style.translate = top && headMedia.includes(el) ? '0 ' + -top + 'px' : '';
 }
 $('d-doc').addEventListener('scroll', syncHeadShift, { passive: true });
 // The details are outside the page's scroller, so the browser cannot bring a focused one into view.
 // A keyboard user tabbing onto one gets the page scrolled far enough to show it and its focus ring between the title band and the screen bottom.
 $('detail').addEventListener('focusin', (e) => {
-  if (!headCollapse || !e.target.closest(HEAD_MOVERS + ', ' + HEAD_MEDIA) || !e.target.matches(':focus-visible')) return;
+  if (!headCollapse || !e.target.closest(HEAD_MOVERS) || !e.target.matches(':focus-visible')) return;
   const r = e.target.getBoundingClientRect();
   const top = $('d-title').getBoundingClientRect().bottom;
   // Room for the 2 px focus outline and its 2 px offset.
@@ -4902,14 +4903,13 @@ $('detail').addEventListener('focusin', (e) => {
 });
 // The details sit outside the page's scroller. A touch drag on them already scrolls it, but a wheel does not, so pass it on.
 $('detail').addEventListener('wheel', (e) => {
-  if (!headCollapse || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || !e.target.closest(HEAD_MOVERS + ', ' + HEAD_MEDIA)) return;
+  if (!headCollapse || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || !e.target.closest(HEAD_MOVERS)) return;
   e.preventDefault();
   $('d-doc').scrollTop += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? $('d-doc').clientHeight : 1);
 }, { passive: false });
 swipeMedia.addEventListener('change', measureHead);
 const headObserver = new ResizeObserver(measureHead);
 for (const el of $('detail').children) if (!el.matches('.pager, .detail-resize')) headObserver.observe(el);
-for (const el of [$('d-gallery'), $('d-files')]) headObserver.observe(el);
 
 // Form fields, steppers and sideways scrollers (tables, code, diagrams) keep their own touches.
 function swipeBlocked(target) {
@@ -5058,7 +5058,8 @@ function tabNamed(name) {
 
 function swipeMove(s, off) {
   const w = $('d-pager').clientWidth;
-  for (const el of [$('d-doc'), $('d-gallery'), $('d-files')]) {
+  // Inside the page, the gallery and file list already move with it.
+  for (const el of [$('d-doc'), $('d-gallery'), $('d-files')].filter((el) => el.parentElement === $('d-pager'))) {
     el.style.transition = 'none';
     el.style.transform = 'translateX(' + off + 'px)';
   }
@@ -5083,7 +5084,7 @@ function swipeSettle(s, commit) {
   const w = $('d-pager').clientWidth;
   const end = commit ? (s.to > s.idx ? -w : w) : 0;
   const transition = 'transform ' + SWIPE_MS + 'ms ' + SWIPE_EASE;
-  for (const el of [$('d-doc'), $('d-gallery'), $('d-files')]) {
+  for (const el of [$('d-doc'), $('d-gallery'), $('d-files')].filter((el) => el.parentElement === $('d-pager'))) {
     el.style.transition = transition;
     el.style.transform = 'translateX(' + end + 'px)';
   }
@@ -7425,7 +7426,7 @@ function openBacklogItem(item) {
   $('d-gallery').hidden = true;
   $('d-files').replaceChildren();
   $('d-files').hidden = true;
-  $('d-doc').innerHTML = renderBacklogDecision(item, backlogTriageHtml(backlogTriageSeen.get(item.raw)));
+  setDocHtml(renderBacklogDecision(item, backlogTriageHtml(backlogTriageSeen.get(item.raw))));
   updateBacklogBar();
   renderBoard();
   refreshPicker();
