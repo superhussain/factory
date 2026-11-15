@@ -596,7 +596,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     header { gap: 6px; }
     .filter { max-width: 96px; }
     .status { flex: 1 1 0; min-width: 0; justify-content: flex-end; }
-    .status .updated-word { display: none; }
+    .status .updated-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     #updated { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .status .dot { flex: none; }
   }

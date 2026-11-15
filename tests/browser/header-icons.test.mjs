@@ -66,7 +66,11 @@ test("header icons share one row and match the filter height", { timeout: 120000
           clientWidth: el.clientWidth,
           rows,
           headerHeight: el.getBoundingClientRect().height,
-          wordShown: document.querySelector(".updated-word").getClientRects().length > 0,
+          wordShown: document.querySelector(".updated-word").getBoundingClientRect().width > 1,
+          wordRead: (() => {
+            const style = getComputedStyle(document.querySelector(".updated-word"));
+            return style.display !== "none" && style.visibility !== "hidden";
+          })(),
           text: document.getElementById("updated").textContent,
         };
       });
@@ -85,6 +89,7 @@ test("header icons share one row and match the filter height", { timeout: 120000
       );
       assert.ok(header.rows <= 2, `third header row at ${label}: height ${header.headerHeight}`);
       assert.equal(header.wordShown, viewport.width !== 320, `updated word shown at ${label}`);
+      assert.equal(header.wordRead, true, `updated word read at ${label}`);
       assert.ok(header.text.startsWith("updated "), `updated text at ${label}: ${header.text}`);
       if (viewport.width === 1280) {
         const link = await page.$eval("#retros-link", (el) => ({
