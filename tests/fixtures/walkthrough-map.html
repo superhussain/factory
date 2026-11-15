@@ -51,6 +51,9 @@ h2{font-size:18px;margin:0 0 10px}
 #measured{margin:10px 0 0;font-size:13px}
 #show-map{margin-top:10px}
 .controls{display:flex;justify-content:space-between;align-items:center;margin:16px 0 4px}
+#steps{position:relative}
+#steps.panning{overflow:clip}
+#steps .peek{position:absolute;overflow:hidden;box-sizing:border-box}
 #count{font-size:13px;color:var(--text-secondary)}
 @media (max-width:720px){.map-wrap,.step{grid-template-columns:1fr}}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--radius);font-size:13px}
@@ -108,11 +111,13 @@ svg.tl .axis{stroke:var(--text-secondary);stroke-width:1.5}
 <p id="example"><span class="chip ha">Made-up example</span> <span id="example-text"></span></p>
 <section id="steps" aria-label="Steps">
 <div class="pills" id="pills"></div>
+<div id="pane">
 <p id="kicker" class="muted"></p>
 <h2 id="title"></h2>
 <div class="step">
 <div id="vis"></div>
 <div><ul id="bul"></ul><p id="measured"><span class="chip hw">Measured</span> <span id="measured-text"></span></p><button type="button" id="show-map">Show in diagram</button></div>
+</div>
 </div>
 <div class="controls"><button type="button" id="prev">Back</button><span id="count"></span><button type="button" id="next">Next</button></div>
 </section>
@@ -425,36 +430,93 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') go(-1);
   if (e.key === 'ArrowRight') go(1);
 });
-// A sideways swipe on the steps moves one step, like Back and Next. Sideways scrollers keep their touches.
+// A sideways swipe on the steps pans to the next or previous step, like the dashboard stepper. Sideways scrollers keep their touches.
 {
   const stepsEl = $('steps');
+  const SWIPE_MS = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220;
+  const SWIPE_EASE = 'cubic-bezier(.2, .8, .2, 1)';
   const sideways = (el) => {
     for (; el && el !== stepsEl; el = el.parentElement) {
       if (el.scrollWidth > el.clientWidth + 1 && ['auto', 'scroll'].includes(getComputedStyle(el).overflowX)) return true;
     }
     return false;
   };
-  let x0 = 0, y0 = 0, x = 0, swiping = null;
+  let x0 = 0, y0 = 0, x = 0, swiping = null, pan = null, settling = false;
+  // The neighbour step, rendered into a copy of the pane and pinned over it so it can slide in beside it.
+  const peekAt = (d) => {
+    if (pan && pan.d === d) return;
+    if (pan) pan.peek.remove();
+    const pane = $('pane'), keep = i, n = steps().length, k = (i + d + n) % n;
+    i = k;
+    render();
+    const peek = pane.cloneNode(true);
+    i = keep;
+    render();
+    for (const e of [peek, ...peek.querySelectorAll('#kicker,#title,#vis,#bul,#measured,#measured-text,#show-map')]) e.removeAttribute('id');
+    peek.className = 'peek';
+    peek.inert = true;
+    peek.setAttribute('aria-hidden', 'true');
+    peek.style.top = pane.offsetTop + 'px';
+    peek.style.left = pane.offsetLeft + 'px';
+    peek.style.width = pane.offsetWidth + 'px';
+    peek.style.height = pane.offsetHeight + 'px';
+    stepsEl.classList.add('panning');
+    stepsEl.append(peek);
+    pan = { d, k, tab, peek };
+  };
+  const move = (off) => {
+    const pane = $('pane'), w = stepsEl.clientWidth;
+    pane.style.transition = pan.peek.style.transition = 'none';
+    pane.style.transform = 'translateX(' + off + 'px)';
+    pan.peek.style.transform = 'translateX(' + (off + pan.d * w) + 'px)';
+  };
+  const settle = (commit) => {
+    const p = pan;
+    pan = null;
+    if (!p) return;
+    settling = true;
+    const pane = $('pane'), w = stepsEl.clientWidth, end = commit ? -p.d * w : 0;
+    const transition = 'transform ' + SWIPE_MS + 'ms ' + SWIPE_EASE;
+    pane.style.transition = p.peek.style.transition = transition;
+    pane.style.transform = 'translateX(' + end + 'px)';
+    p.peek.style.transform = 'translateX(' + (end + p.d * w) + 'px)';
+    setTimeout(() => {
+      p.peek.remove();
+      // Chrome writes inline style changes to the attribute lazily; read it first, or removing it leaves style="".
+      if (pane.hasAttribute('style')) pane.removeAttribute('style');
+      stepsEl.classList.remove('panning');
+      if (commit && tab === p.tab) {
+        i = p.k;
+        render();
+      }
+      settling = false;
+    }, SWIPE_MS);
+  };
   stepsEl.addEventListener('touchstart', (e) => {
-    swiping = e.touches.length === 1 && !e.target.closest('input,textarea,select,[contenteditable]') && !sideways(e.target) ? false : null;
+    if (pan) settle(false);
+    swiping = !settling && e.touches.length === 1 && !e.target.closest('input,textarea,select,[contenteditable]') && !sideways(e.target) ? false : null;
     x0 = x = e.touches[0].clientX;
     y0 = e.touches[0].clientY;
   }, { passive: true });
   stepsEl.addEventListener('touchmove', (e) => {
     if (swiping === null) return;
-    if (e.touches.length > 1) { swiping = null; return; }
+    if (e.touches.length > 1) { settle(false); swiping = null; return; }
     x = e.touches[0].clientX;
     if (!swiping) {
       if (Math.abs(e.touches[0].clientY - y0) >= 12) swiping = null;
       else if (Math.abs(x - x0) >= 24) swiping = true;
     }
-    if (swiping && e.cancelable) e.preventDefault();
+    if (!swiping) return;
+    if (e.cancelable) e.preventDefault();
+    const dx = x - x0;
+    peekAt(dx < 0 ? 1 : -1);
+    move(dx - Math.sign(dx) * 24);
   }, { passive: false });
   stepsEl.addEventListener('touchend', () => {
-    if (swiping && Math.abs(x - x0) >= 64) go(x < x0 ? 1 : -1);
+    if (swiping) settle(Math.abs(x - x0) >= 64);
     swiping = null;
   }, { passive: true });
-  stepsEl.addEventListener('touchcancel', () => { swiping = null; }, { passive: true });
+  stepsEl.addEventListener('touchcancel', () => { settle(false); swiping = null; }, { passive: true });
 }
 buildPills();
 render();
