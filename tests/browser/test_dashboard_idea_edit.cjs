@@ -1260,7 +1260,7 @@ async function browserTest(url) {
         );
       await decoding;
     });
-    await page.click("#idea-image-list li:nth-child(1) button");
+    await page.click("#idea-image-list li:nth-child(1) button.btn");
     assert.deepEqual(await page.evaluate(() => [draft.images.length, document.activeElement.id]), [
       0,
       "idea-text",
@@ -1315,7 +1315,7 @@ async function browserTest(url) {
       await page.$eval("#idea-text", (e) => e.getAttribute("aria-describedby")),
       "idea-ref idea-key-help idea-images-help",
     );
-    await page.click("#idea-image-list li:nth-child(3) button");
+    await page.click("#idea-image-list li:nth-child(3) button.btn");
     assert.equal(await page.evaluate(() => draft.images.length), 2);
     assert.match(
       await page.evaluate(() => document.activeElement.getAttribute("aria-label")),
