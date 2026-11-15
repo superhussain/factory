@@ -411,6 +411,7 @@ async function capture(outdir, referencePath) {
     let refBoard = false;
     let leadAgentsBoard = false;
     let tallAgentsBoard = false;
+    let ideaFilesBoard = false;
     const failed = [];
     const onlyViews = process.env.FACTORY_CAPTURE_VIEWS?.split(",");
     const waitLiveDot = (page) =>
@@ -564,9 +565,35 @@ async function capture(outdir, referencePath) {
                           ? {
                               ...j,
                               agents: Array.from(
-                                { length: 17 },
+                                { length: 30 },
                                 (_, i) => j.agents[i % j.agents.length],
                               ),
+                            }
+                          : j,
+                      ),
+                    }),
+                  });
+                }
+                if (ideaFilesBoard && target.pathname === "/board.json") {
+                  const board = await fetch(target.href);
+                  const body = await board.json();
+                  return request.respond({
+                    status: board.status,
+                    contentType: "application/json",
+                    headers: { ETag: board.headers.get("ETag") ?? "" },
+                    body: JSON.stringify({
+                      ...body,
+                      jobs: body.jobs.map((j) =>
+                        j.id === "101-wrap-doc-line"
+                          ? {
+                              ...j,
+                              idea:
+                                "# Synthetic idea\n\n" +
+                                Array.from(
+                                  { length: 40 },
+                                  (_, i) => `Synthetic idea paragraph ${i + 1}.`,
+                                ).join("\n\n"),
+                              idea_files: ["a".repeat(64) + ".pdf", "b".repeat(64) + ".csv"],
                             }
                           : j,
                       ),
@@ -1221,11 +1248,40 @@ async function capture(outdir, referencePath) {
         document.getElementById("d-doc").scrollTop = last - innerHeight + 8;
       });
     };
+    // A desktop drawer whose open agents table is scrolled to its last row.
+    const openTallAgentsDesktop = async (page) => {
+      await openLeadAgents(page);
+      await page.evaluate(() => {
+        const wrap = document.querySelector("#d-agents .table-wrap");
+        wrap.scrollTop = wrap.scrollHeight;
+      });
+    };
     tallAgentsBoard = true;
     try {
       await view("drawer-mobile-agents", 390, 844, "dark", openTallAgents, true);
+      await view("drawer-desktop-agents", 1280, 900, "light", openTallAgentsDesktop);
     } finally {
       tallAgentsBoard = false;
+    }
+    // A phone drawer on an idea with two attached files, at rest and scrolled 40 px.
+    const openIdeaFiles = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#101-wrap-doc-line/idea";
+      });
+      await page.waitForFunction(() => document.querySelectorAll("#d-files a").length === 2);
+    };
+    const openIdeaFilesMid = async (page) => {
+      await openIdeaFiles(page);
+      await page.evaluate(() => {
+        document.getElementById("d-doc").scrollTop = 40;
+      });
+    };
+    ideaFilesBoard = true;
+    try {
+      await view("drawer-mobile-idea-files", 390, 844, "dark", openIdeaFiles, true);
+      await view("drawer-mobile-idea-files-midscroll", 390, 844, "dark", openIdeaFilesMid, true);
+    } finally {
+      ideaFilesBoard = false;
     }
     const openChatDrawer = async (page) => {
       await page.evaluate(() => {

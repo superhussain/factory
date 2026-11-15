@@ -130,7 +130,7 @@ test("idea files", { timeout: 180000 }, async (t) => {
           () =>
             new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
         );
-        assert.equal(
+        assert.notEqual(
           await page.evaluate(() =>
             getComputedStyle(document.getElementById("detail")).getPropertyValue("--head-collapse"),
           ),
