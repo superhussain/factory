@@ -7120,6 +7120,7 @@ async function saveIdea() {
     // A definite failure clears the snapshot only when no earlier attempt is unresolved;
     // an older uncertain PUT may still commit, so its snapshot and token survive.
     if (!snap.uncertain) snap = null;
+    if (String(x.message).includes('is not uploaded')) uploaded.clear();
     return showErr(String(x.message || x));
   }
 }
