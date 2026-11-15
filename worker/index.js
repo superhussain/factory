@@ -268,6 +268,50 @@ async function getFile(env, key, type, headers = {}) {
   return obj ? reply(obj.body, 200, type, { ETag: obj.httpEtag, ...headers }) : notFound();
 }
 
+// MP4 and WebM play inline. Their names are content addresses, so a range never goes stale.
+const VIDEO_HEADERS = (name) => ({
+  "Content-Disposition": `inline; filename="${name}"`,
+  "Content-Security-Policy": "default-src 'none'; sandbox",
+  "Accept-Ranges": "bytes",
+});
+
+// One byte range: null sends the whole body, false is a 416, else { offset, length }.
+function byteRange(header, size) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header || "");
+  if (!m || (m[1] === "" && m[2] === "")) return null;
+  if (m[1] === "") {
+    const suffix = Number(m[2]);
+    if (suffix === 0) return false;
+    const offset = Math.max(0, size - suffix);
+    return { offset, length: size - offset };
+  }
+  const offset = Number(m[1]);
+  if (offset >= size) return false;
+  const end = m[2] === "" ? size - 1 : Math.min(Number(m[2]), size - 1);
+  return end < offset ? null : { offset, length: end - offset + 1 };
+}
+
+async function ideaVideoGet(request, env, name) {
+  const key = `idea-files/${name}`;
+  const type = IDEA_FILE_TYPES[name.slice(65)].type;
+  const head = await env.BUCKET.head(key);
+  if (!head) return notFound();
+  const range = byteRange(request.headers.get("Range"), head.size);
+  if (range === false)
+    return reply("range not satisfiable", 416, "text/plain", {
+      "Content-Range": `bytes */${head.size}`,
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+    });
+  if (!range) return getFile(env, key, type, VIDEO_HEADERS(name));
+  const obj = await env.BUCKET.get(key, { range });
+  if (!obj) return notFound();
+  return reply(obj.body, 206, type, {
+    ETag: obj.httpEtag,
+    ...VIDEO_HEADERS(name),
+    "Content-Range": `bytes ${range.offset}-${range.offset + range.length - 1}/${head.size}`,
+  });
+}
+
 // The 403 page for a walkthrough opened outside a frame, with one link back to its job.
 function frameOnly(key) {
   const parts = key.split("/");
@@ -2246,6 +2290,7 @@ async function api(request, env, path, principal, ctx) {
   if (m) {
     if (!IDEA_FILE.test(m[1])) return notFound();
     const name = m[1];
+    if (method === "GET" && /\.(mp4|webm)$/.test(name)) return ideaVideoGet(request, env, name);
     if (method === "GET")
       return getFile(
         env,
