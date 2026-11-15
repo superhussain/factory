@@ -147,7 +147,7 @@ export function renderDashboard(env) {
   const csp =
     "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:" +
     env.image_origins.map((origin) => " " + origin).join("") +
-    "; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'";
+    "; media-src 'self'; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'";
   const values = {
     __FACTORY_TITLE__: escapeHtml(env.title),
     __FACTORY_CSP__: escapeHtml(csp),
