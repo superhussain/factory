@@ -228,7 +228,19 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
         pr.textContent = "PR #1";
         pr.hidden = false;
       });
-      await scrollTo(20);
+      // Scroll until the PR link sits 4 px under the title band, short of the full slide.
+      const place = () =>
+        page.evaluate(() => ({
+          pr: document.getElementById("d-pr").getBoundingClientRect().top,
+          title: document.getElementById("d-title").getBoundingClientRect().bottom,
+          collapse: parseFloat(
+            getComputedStyle(document.getElementById("detail")).getPropertyValue("--head-collapse"),
+          ),
+        }));
+      const rest = await place();
+      const hidden = Math.ceil(rest.pr - rest.title) + 4;
+      assert.ok(hidden < rest.collapse, `shift ${hidden} under C ${rest.collapse}`);
+      await scrollTo(hidden);
       await page.focus("#d-actions");
       await page.keyboard.down("Shift");
       await page.keyboard.press("Tab");
@@ -237,8 +249,10 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       await page.evaluate(
         () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
       );
-      assert.equal((await state()).scrollTop, 0);
-      assert.equal(await page.$eval("#d-tabs", (el) => el.style.transform), "");
+      // The page scrolls back just far enough to show the link under the band.
+      const shown = await place();
+      near(shown.pr, shown.title, "PR link top");
+      near((await state()).scrollTop, rest.pr - rest.title, "scrollTop");
     });
 
     await t.test("D11", async () => {
@@ -382,6 +396,56 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       assert.equal(back.scrollTop, 0);
       near(back.summaryTop, rest.summaryTop, "summary back at rest");
       near(back.h1Top - back.tabsBottom, rest.h1Top - rest.tabsBottom, "gap back at rest");
+    });
+
+    // Tabbing through a tall agents table keeps each focused link on screen, both ways.
+    await t.test("D15", async () => {
+      await page.setViewport(MOBILE);
+      await openAgents("spec");
+      await page.evaluate(() => {
+        for (const [i, td] of document
+          .querySelectorAll("#d-agents tbody td:nth-child(3)")
+          .entries()) {
+          const a = document.createElement("a");
+          a.href = `#run-${i + 1}`;
+          a.textContent = `Run ${i + 1}`;
+          td.append(a);
+        }
+      });
+      await page.focus("#d-agents summary");
+      const seen = () =>
+        page.evaluate(() => {
+          const r = document.activeElement.getBoundingClientRect();
+          return {
+            text: document.activeElement.textContent,
+            top: r.top,
+            bottom: r.bottom,
+            titleBottom: document.getElementById("d-title").getBoundingClientRect().bottom,
+            innerHeight,
+            scrollTop: document.getElementById("d-doc").scrollTop,
+          };
+        });
+      const check = (f, label) => {
+        assert.ok(f.top >= f.titleBottom - 1, `${label} ${f.text} top ${f.top}`);
+        assert.ok(f.bottom <= f.innerHeight + 1, `${label} ${f.text} bottom ${f.bottom}`);
+      };
+      for (let i = 1; i <= 30; i++) {
+        await page.keyboard.press("Tab");
+        await frames();
+        const f = await seen();
+        assert.equal(f.text, `Run ${i}`);
+        check(f, "Tab");
+      }
+      assert.ok((await seen()).scrollTop > 0);
+      await page.keyboard.down("Shift");
+      for (let i = 29; i >= 1; i--) {
+        await page.keyboard.press("Tab");
+        await frames();
+        const f = await seen();
+        assert.equal(f.text, `Run ${i}`);
+        check(f, "Shift+Tab");
+      }
+      await page.keyboard.up("Shift");
     });
 
     assert.deepEqual(errors, []);

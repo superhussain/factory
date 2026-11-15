@@ -4732,15 +4732,20 @@ function syncHeadShift() {
   $('d-actions-menu').style.top = headShift ? Math.max(headMenuMin, headMenuRest - headShift) + 4 + 'px' : '';
 }
 $('d-doc').addEventListener('scroll', syncHeadShift, { passive: true });
-// A keyboard user tabbing onto a detail that slides under the title band gets the page scrolled back to show it.
+// The details are outside the page's scroller, so the browser cannot bring a focused one into view.
+// A keyboard user tabbing onto one gets the page scrolled just far enough to show it between the title band and the screen bottom.
 $('detail').addEventListener('focusin', (e) => {
-  if (headShift && e.target.closest(HEAD_MOVERS) && e.target.compareDocumentPosition(headStop) & Node.DOCUMENT_POSITION_FOLLOWING && e.target.matches(':focus-visible')) $('d-doc').scrollTop = 0;
+  if (!headCollapse || !e.target.closest(HEAD_MOVERS) || !e.target.matches(':focus-visible')) return;
+  const r = e.target.getBoundingClientRect();
+  const top = $('d-title').getBoundingClientRect().bottom;
+  if (r.top < top) $('d-doc').scrollTop -= top - r.top;
+  else if (r.bottom > innerHeight) $('d-doc').scrollTop += r.bottom - innerHeight;
 });
 // The details sit outside the page's scroller. A touch drag on them already scrolls it, but a wheel does not, so pass it on.
 $('detail').addEventListener('wheel', (e) => {
   if (!headCollapse || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || !e.target.closest(HEAD_MOVERS)) return;
   e.preventDefault();
-  $('d-doc').scrollTop += e.deltaY;
+  $('d-doc').scrollTop += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? $('d-doc').clientHeight : 1);
 }, { passive: false });
 swipeMedia.addEventListener('change', measureHead);
 const headObserver = new ResizeObserver(measureHead);
