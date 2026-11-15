@@ -81,7 +81,7 @@ function offlineSourceChecks() {
   for (const guard of [
     "e.metaKey || e.ctrlKey || e.altKey",
     "e.isComposing",
-    "e.target.closest('input, textarea, select, [contenteditable], #d-resize')",
+    "e.target.closest('input, textarea, select, [contenteditable], #d-resize, video')",
     "document.querySelector('dialog[open]')",
     "e.repeat",
     "$('new-idea').hidden",
