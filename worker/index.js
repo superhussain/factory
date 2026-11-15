@@ -153,7 +153,7 @@ const IDEA_FILE_TYPES = {
   webm: { type: "video/webm", max: 25 << 20, label: "WebM" },
 };
 const MAX_IDEA_FILES = 4;
-// Every idea file downloads. The sandbox CSP and nosniff stop one running as a page.
+// PDF, CSV and text download. The sandbox CSP and nosniff stop one running as a page.
 const FILE_HEADERS = (name) => ({
   "Content-Disposition": `attachment; filename="${name}"`,
   "Content-Security-Policy": "default-src 'none'; sandbox",
