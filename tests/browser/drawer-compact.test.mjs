@@ -541,6 +541,22 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       near(s.thTop, s.wrapTop, "sticky header");
       assert.ok(s.tabsBottom <= s.innerHeight, `tabs bottom ${s.tabsBottom}`);
       assert.ok(s.docHeight >= 200, `page height ${s.docHeight}`);
+      // Row 10 sits at the wrap top, under the sticky header, as Shift+Tab leaves it.
+      await page.$eval("#d-agents tbody tr:nth-child(10) td:nth-child(3)", (td) => {
+        const wrap = td.closest(".table-wrap");
+        wrap.scrollTop += td.getBoundingClientRect().top - wrap.getBoundingClientRect().top;
+        const a = document.createElement("a");
+        a.href = "#run-10";
+        a.textContent = "Run 10";
+        td.append(a);
+        a.focus();
+      });
+      await frames();
+      const f = await page.evaluate(() => ({
+        linkTop: document.activeElement.getBoundingClientRect().top,
+        theadBottom: document.querySelector("#d-agents thead th").getBoundingClientRect().bottom,
+      }));
+      assert.ok(f.linkTop >= f.theadBottom, `focused link ${f.linkTop}, header ${f.theadBottom}`);
       await openAgents("spec");
       assert.equal(
         await page.$eval("#d-agents .table-wrap", (el) => getComputedStyle(el).maxHeight),

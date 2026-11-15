@@ -557,7 +557,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .agent-runs th, .agent-runs td { min-width: 0; white-space: nowrap; }
   .agent-runs td a + a { margin-left: 8px; }
   /* A long run list scrolls in its own box, so the tabs and page stay on a desktop screen. */
-  .detail-head > #d-agents .table-wrap { max-height: 40vh; overflow-y: auto; }
+  .detail-head > #d-agents .table-wrap { max-height: 40vh; overflow-y: auto; scroll-padding-top: 2.5em; }
   .agent-runs thead th { position: sticky; top: 0; z-index: 1; }
   .doc td code { overflow-wrap: anywhere; }
   .doc .mermaid { overflow-x: auto; margin: 1em 0; }
