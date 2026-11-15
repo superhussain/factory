@@ -15,7 +15,7 @@ const WALK_HTML = await readFile(
   "utf8",
 );
 const FILES = {
-  "spec.md": `# Spec\n\n## Design\n\n#### 1. Today\n\n- Swipe flips the page.\n\n#### 2. The gap\n\n- The stepper loses the swipe.\n\n#### 3. After\n\n- The swipe moves one step.\n\n## Notes\n\n${paras(40)}\n`,
+  "spec.md": `# Spec\n\n## Design\n\n#### 1. Today\n\n- Swipe flips the page.\n\n#### 2. The gap\n\n- The stepper loses the swipe.\n\n\`\`\`mermaid\nflowchart LR\nA[finger] --> B[step 2]\n\`\`\`\n\n#### 3. After\n\n- The swipe moves one step.\n\n## Notes\n\n${paras(40)}\n`,
   "build.md": "# Build\n",
   "walkthrough.html": WALK_HTML,
 };
@@ -344,6 +344,50 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       await settled();
       assert.equal((await state()).kicker, "Step 1 of 3");
       assert.deepEqual(await clean(), { peeks: 0, panning: 0, styled: 0 });
+    });
+
+    await t.test("T13 second finger outside the stepper snaps back to step 1", async () => {
+      await open();
+      const y = await stepY();
+      const bottom = await page.$eval("#d-doc .stepper", (el) =>
+        Math.round(el.getBoundingClientRect().bottom),
+      );
+      const second = [200, bottom + 40];
+      assert.ok(
+        await page.evaluate(([x, sy]) => {
+          const hit = document.elementFromPoint(x, sy);
+          return Boolean(hit) && !hit.closest(".stepper");
+        }, second),
+        "the second finger must land outside the stepper",
+      );
+      for (const [type, points] of [
+        ["touchStart", [[300, y]]],
+        ["touchMove", [[270, y]]],
+        ["touchMove", [[240, y]]],
+        ["touchMove", [[210, y]]],
+        ["touchStart", [[210, y], second]],
+        ["touchMove", [[150, y], second]],
+        ["touchEnd", []],
+      ]) {
+        await touches(type, points);
+        await sleep(16);
+      }
+      await settled();
+      assert.equal((await state()).kicker, "Step 1 of 3");
+      assert.deepEqual(await clean(), { peeks: 0, panning: 0, styled: 0 });
+    });
+
+    await t.test("T14 mermaid in step 2 pans in mid-drag", async () => {
+      await open();
+      await page.waitForSelector("#d-doc .step-panel div.mermaid svg");
+      await press(line(300, 150, await stepY()), 16);
+      assert.ok(
+        await page.$("#d-doc .step-panel.step-peek div.mermaid svg"),
+        "the peek must hold the rendered diagram",
+      );
+      await capture("stepper-mermaid-mid-drag.png");
+      await touch("touchEnd");
+      await settled();
     });
 
     assert.deepEqual(errors, []);
