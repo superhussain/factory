@@ -4697,12 +4697,17 @@ function renderGallery(j, f) {
 }
 
 // One full-screen viewer for every image place. It cycles through that place's images and
-// hands focus back to whatever opened it.
+// hands focus back to whatever opened it. If a re-render removed it, focus goes to the same
+// place's image at that index, then to the drawer's Close button.
 let lbItems = [], lbIndex = 0, lbOpener = null, lbTouch = null;
+const LB_OPENERS = ['#d-doc a.img-link', '#d-gallery .gallery-open', '#idea-image-list .thumb-btn'];
+let lbReturn = null;
 function openLightbox(items, index) {
   lbItems = items;
   lbIndex = index;
   lbOpener = document.activeElement;
+  const sel = LB_OPENERS.find((s) => lbOpener?.matches?.(s));
+  lbReturn = sel ? { sel, at: [...document.querySelectorAll(sel)].indexOf(lbOpener) } : null;
   $('lb-prev').hidden = $('lb-next').hidden = items.length === 1;
   showLightboxImage();
   $('lightbox').showModal();
@@ -4713,6 +4718,12 @@ function showLightboxImage() {
   $('lb-img').alt = alt;
   $('lb-img').src = src;
   $('lb-count').textContent = lbItems.length === 1 ? alt : 'Image ' + (lbIndex + 1) + ' of ' + lbItems.length;
+}
+function lightboxReturnTarget() {
+  if (lbOpener?.isConnected) return lbOpener;
+  const twin = lbReturn && document.querySelectorAll(lbReturn.sel)[lbReturn.at];
+  if (twin) return twin;
+  return $('detail').hidden ? null : $('d-close');
 }
 function stepLightbox(delta) {
   lbIndex = (lbIndex + delta + lbItems.length) % lbItems.length;
@@ -4745,7 +4756,8 @@ $('lightbox').addEventListener('touchend', (e) => {
 $('lightbox').addEventListener('close', () => {
   $('lb-img').removeAttribute('src');
   lbItems = [];
-  lbOpener?.focus();
+  lightboxReturnTarget()?.focus();
+  lbOpener = lbReturn = null;
 });
 
 // Pinned with SRI, loaded only when a doc has a diagram. If it fails, the blocks stay readable code.
@@ -4856,13 +4868,15 @@ function syncHeadShift() {
 }
 $('d-doc').addEventListener('scroll', syncHeadShift, { passive: true });
 // The details are outside the page's scroller, so the browser cannot bring a focused one into view.
-// A keyboard user tabbing onto one gets the page scrolled just far enough to show it between the title band and the screen bottom.
+// A keyboard user tabbing onto one gets the page scrolled far enough to show it and its focus ring between the title band and the screen bottom.
 $('detail').addEventListener('focusin', (e) => {
   if (!headCollapse || !e.target.closest(HEAD_MOVERS) || !e.target.matches(':focus-visible')) return;
   const r = e.target.getBoundingClientRect();
   const top = $('d-title').getBoundingClientRect().bottom;
-  if (r.top < top) $('d-doc').scrollTop -= top - r.top;
-  else if (r.bottom > innerHeight) $('d-doc').scrollTop += r.bottom - innerHeight;
+  // Room for the 2 px focus outline and its 2 px offset.
+  const pad = 4;
+  if (r.top < top + pad) $('d-doc').scrollTop -= top + pad - r.top;
+  else if (r.bottom + pad > innerHeight) $('d-doc').scrollTop += r.bottom + pad - innerHeight;
 });
 // The details sit outside the page's scroller. A touch drag on them already scrolls it, but a wheel does not, so pass it on.
 $('detail').addEventListener('wheel', (e) => {
