@@ -305,6 +305,54 @@ test("lightbox", { timeout: 180000 }, async (t) => {
         await page.click("#lb-close");
       });
 
+      const openSecond = async () => {
+        await page.waitForFunction(
+          () => !document.querySelector("#lb-img").hasAttribute("src"),
+          wait,
+        );
+        await page.evaluate(() => document.querySelectorAll("#d-doc a.img-link")[1].focus());
+        await page.keyboard.press("Enter");
+        await loaded();
+        assert.equal((await viewer()).count, "Image 2 of 2");
+      };
+      const closeAfterRerender = async () => {
+        await page.keyboard.press("Escape");
+        await page.waitForFunction(
+          () =>
+            !document.getElementById("lightbox").open &&
+            !document.querySelector("#lb-img").hasAttribute("src"),
+          wait,
+        );
+      };
+
+      await t.test("L10 a re-render while open refocuses the new image 2 link", async () => {
+        await openSecond();
+        await page.evaluate(() => {
+          window.lbOld = document.querySelectorAll("#d-doc a.img-link")[1];
+          renderDetail();
+        });
+        await closeAfterRerender();
+        await capture("lightbox-refocus-1280.png");
+        assert.deepEqual(
+          await page.evaluate(() => [
+            lbOld.isConnected,
+            document.activeElement === document.querySelectorAll("#d-doc a.img-link")[1],
+          ]),
+          [false, true],
+        );
+      });
+
+      await t.test("L11 a tab switch while open focuses the drawer's Close button", async () => {
+        await openSecond();
+        await page.evaluate(() => {
+          activeFile = "idea.md";
+          renderDetail();
+        });
+        await closeAfterRerender();
+        await capture("lightbox-refocus-close-1280.png");
+        assert.equal(await page.evaluate(() => document.activeElement.id), "d-close");
+      });
+
       assert.deepEqual(errors, []);
     });
   } finally {

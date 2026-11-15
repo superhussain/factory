@@ -2,6 +2,8 @@
 // leaving the title and tabs, against one owned local Worker.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
 
@@ -16,6 +18,8 @@ const FILES = {
 const MOBILE = { width: 390, height: 844, isMobile: true, hasTouch: true };
 const DESKTOP = { width: 1280, height: 900 };
 const wait = { polling: 50 };
+const captureDir = process.env.FACTORY_CAPTURE_DIR;
+if (captureDir) await mkdir(captureDir, { recursive: true });
 const AGENTS = Array.from({ length: 30 }, (_, i) => ({
   at: `2026-01-01T10:${String(i).padStart(2, "0")}:00Z`,
   stage: "review",
@@ -249,10 +253,15 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       await page.evaluate(
         () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
       );
-      // The page scrolls back just far enough to show the link under the band.
+      await (captureDir &&
+        page.screenshot({
+          path: join(captureDir, "drawer-pr-focus-390.png"),
+          clip: { x: 0, y: 0, width: 390, height: 260 },
+        }));
+      // The page scrolls back far enough to show the link 4 px under the band.
       const shown = await place();
-      near(shown.pr, shown.title, "PR link top");
-      near((await state()).scrollTop, rest.pr - rest.title, "scrollTop");
+      near(shown.pr, shown.title + 4, "PR link top");
+      near((await state()).scrollTop, rest.pr - rest.title - 4, "scrollTop");
     });
 
     await t.test("D11", async () => {
@@ -426,8 +435,8 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
           };
         });
       const check = (f, label) => {
-        assert.ok(f.top >= f.titleBottom - 1, `${label} ${f.text} top ${f.top}`);
-        assert.ok(f.bottom <= f.innerHeight + 1, `${label} ${f.text} bottom ${f.bottom}`);
+        assert.ok(f.top >= f.titleBottom + 3, `${label} ${f.text} top ${f.top}`);
+        assert.ok(f.bottom <= f.innerHeight - 3, `${label} ${f.text} bottom ${f.bottom}`);
       };
       for (let i = 1; i <= 30; i++) {
         await page.keyboard.press("Tab");
