@@ -2,7 +2,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import {
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+  blockLiveEvents,
+} from "../support/browser-server.mjs";
 
 const JOBS = [
   {
@@ -61,7 +66,11 @@ test("header icons share one row and match the filter height", { timeout: 120000
           clientWidth: el.clientWidth,
           rows,
           headerHeight: el.getBoundingClientRect().height,
-          wordShown: document.querySelector(".updated-word").getClientRects().length > 0,
+          wordShown: document.querySelector(".updated-word").getBoundingClientRect().width > 1,
+          wordRead: (() => {
+            const style = getComputedStyle(document.querySelector(".updated-word"));
+            return style.display !== "none" && style.visibility !== "hidden";
+          })(),
           text: document.getElementById("updated").textContent,
         };
       });
@@ -80,6 +89,7 @@ test("header icons share one row and match the filter height", { timeout: 120000
       );
       assert.ok(header.rows <= 2, `third header row at ${label}: height ${header.headerHeight}`);
       assert.equal(header.wordShown, viewport.width !== 320, `updated word shown at ${label}`);
+      assert.equal(header.wordRead, true, `updated word read at ${label}`);
       assert.ok(header.text.startsWith("updated "), `updated text at ${label}: ${header.text}`);
       if (viewport.width === 1280) {
         const link = await page.$eval("#retros-link", (el) => ({
@@ -114,6 +124,62 @@ test("header icons share one row and match the filter height", { timeout: 120000
         );
         assert.equal(back, 44, `settings-back height at ${label}`);
       }
+    }
+  });
+});
+
+// A first board read that fails with a 5xx or a body that is not JSON says why in full.
+test("a failed first load shows the unreachable banner", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    await seedBoard(origin, JOBS);
+    const failures = [
+      { status: 503, contentType: "text/plain", body: "unavailable" },
+      { status: 200, contentType: "application/json", body: "not json" },
+    ];
+    for (const failure of failures) {
+      const label = `${failure.status} ${failure.body}`;
+      const page = await (await browser.createBrowserContext()).newPage();
+      await page.setViewport({ width: 320, height: 844, ...TOUCH });
+      await blockLiveEvents(page);
+      await page.setBypassServiceWorker(true);
+      await page.setRequestInterception(true);
+      let failing = true;
+      page.on("request", (request) =>
+        failing && new URL(request.url()).pathname === "/board.json"
+          ? request.respond(failure)
+          : request.continue(),
+      );
+      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#conn-banner:not([hidden])");
+      const banner = await page.evaluate(() => ({
+        text: document.getElementById("conn-text").textContent,
+        signin: document.getElementById("conn-signin").hidden,
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      assert.equal(
+        banner.text,
+        "Can't reach the factory. The board loads when it answers.",
+        `banner text after ${label}`,
+      );
+      assert.equal(banner.signin, true, `sign-in button after ${label}`);
+      assert.ok(
+        banner.scrollWidth <= banner.clientWidth,
+        `page scrolls after ${label}: ${banner.scrollWidth} > ${banner.clientWidth}`,
+      );
+      failing = false;
+      assert.equal(await page.evaluate(() => poll()), true, `poll after ${label}`);
+      assert.equal(
+        await page.$eval("#conn-banner", (el) => el.hidden),
+        true,
+        `banner after a good read following ${label}`,
+      );
     }
   });
 });

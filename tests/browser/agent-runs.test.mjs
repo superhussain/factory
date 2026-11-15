@@ -45,6 +45,15 @@ const PLAIN = {
   round: 0,
   updated: "2026-01-02T12:00:00Z",
 };
+// A lead with PR and session links in the drawer header, which narrow the title column.
+const LEAD = {
+  ...JOB,
+  id: "090-sample-export-csv",
+  title: "Synthetic lead",
+  stage: "pr-open",
+  pr: "https://github.com/example/sample/pull/90",
+  paseo: { server: "srv-a", agent: "agent-lead" },
+};
 
 test("agent runs table", { timeout: 120000 }, async () => {
   await prepareAssets();
@@ -54,7 +63,7 @@ test("agent runs table", { timeout: 120000 }, async () => {
       "sample",
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
-    await seedBoard(origin, [JOB, PLAIN]);
+    await seedBoard(origin, [JOB, PLAIN, LEAD]);
     const errors = [];
     const page = await browser.newPage();
     page.on("pageerror", (error) => errors.push(String(error)));
@@ -130,6 +139,40 @@ test("agent runs table", { timeout: 120000 }, async () => {
       PLAIN.title,
     );
     assert.equal(await page.$eval("#d-agents", (el) => el.hidden), true);
+
+    const openLead = async () => {
+      await page.evaluate((id) => (location.hash = id), LEAD.id);
+      await page.waitForFunction(
+        (title) => document.getElementById("d-title").textContent === title,
+        {},
+        LEAD.title,
+      );
+      await page.waitForSelector("#d-pr:not([hidden])", { visible: true });
+      await page.waitForSelector("#d-paseo:not([hidden])", { visible: true });
+      await page.waitForSelector("#d-agents:not([hidden])");
+      await page.evaluate(() => (document.getElementById("d-agents").open = true));
+      return page.evaluate(() => {
+        const head = document.querySelector(".detail-head");
+        const wrap = document.querySelector("#d-agents .table-wrap");
+        wrap.scrollLeft = 0;
+        const style = getComputedStyle(head);
+        return {
+          session: wrap.querySelectorAll("th")[2].getBoundingClientRect().right,
+          wrap: wrap.getBoundingClientRect().right,
+          head: head.getBoundingClientRect().right - parseFloat(style.paddingRight),
+          agentsTop: document.getElementById("d-agents").getBoundingClientRect().top,
+          linksBottom: head.querySelector(".links").getBoundingClientRect().bottom,
+        };
+      });
+    };
+    const desktop = await openLead();
+    assert.ok(desktop.session <= desktop.wrap, JSON.stringify(desktop));
+    assert.ok(Math.abs(desktop.wrap - desktop.head) <= 1, JSON.stringify(desktop));
+    assert.ok(desktop.agentsTop >= desktop.linksBottom, JSON.stringify(desktop));
+    await page.evaluate((id) => (location.hash = id), PLAIN.id);
+    await page.setViewport({ width: 390, height: 844 });
+    const mobile = await openLead();
+    assert.ok(mobile.agentsTop >= mobile.linksBottom, JSON.stringify(mobile));
     assert.deepEqual(errors, []);
   });
 });
