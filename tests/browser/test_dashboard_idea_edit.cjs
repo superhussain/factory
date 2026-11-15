@@ -470,6 +470,7 @@ function fakeUI(fetch) {
           open: false,
           textContent: id === "factory-config" ? '{"image_origins":[],"agent_links":{}}' : "",
           isConnected: true,
+          children: [],
           listeners: {},
           style: { removeProperty() {}, setProperty() {} },
           addEventListener(type, fn) {
