@@ -4669,12 +4669,17 @@ function renderGallery(j, f) {
 }
 
 // One full-screen viewer for every image place. It cycles through that place's images and
-// hands focus back to whatever opened it.
+// hands focus back to whatever opened it. If a re-render removed it, focus goes to the same
+// place's image at that index, then to the drawer's Close button.
 let lbItems = [], lbIndex = 0, lbOpener = null, lbTouch = null;
+const LB_OPENERS = ['#d-doc a.img-link', '#d-gallery .gallery-open', '#idea-image-list .thumb-btn'];
+let lbReturn = null;
 function openLightbox(items, index) {
   lbItems = items;
   lbIndex = index;
   lbOpener = document.activeElement;
+  const sel = LB_OPENERS.find((s) => lbOpener?.matches?.(s));
+  lbReturn = sel ? { sel, at: [...document.querySelectorAll(sel)].indexOf(lbOpener) } : null;
   $('lb-prev').hidden = $('lb-next').hidden = items.length === 1;
   showLightboxImage();
   $('lightbox').showModal();
@@ -4685,6 +4690,12 @@ function showLightboxImage() {
   $('lb-img').alt = alt;
   $('lb-img').src = src;
   $('lb-count').textContent = lbItems.length === 1 ? alt : 'Image ' + (lbIndex + 1) + ' of ' + lbItems.length;
+}
+function lightboxReturnTarget() {
+  if (lbOpener?.isConnected) return lbOpener;
+  const twin = lbReturn && document.querySelectorAll(lbReturn.sel)[lbReturn.at];
+  if (twin) return twin;
+  return $('detail').hidden ? null : $('d-close');
 }
 function stepLightbox(delta) {
   lbIndex = (lbIndex + delta + lbItems.length) % lbItems.length;
@@ -4717,7 +4728,8 @@ $('lightbox').addEventListener('touchend', (e) => {
 $('lightbox').addEventListener('close', () => {
   $('lb-img').removeAttribute('src');
   lbItems = [];
-  lbOpener?.focus();
+  lightboxReturnTarget()?.focus();
+  lbOpener = lbReturn = null;
 });
 
 // Pinned with SRI, loaded only when a doc has a diagram. If it fails, the blocks stay readable code.
