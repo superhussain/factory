@@ -477,6 +477,20 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       assert.deepEqual(await frameClean(frame), { peeks: 0, panning: 0, styled: 0 });
     });
 
+    await t.test("T18 a pill tap during the frame settle keeps the reader's step", async () => {
+      await open();
+      const { frame, y } = await openFrame();
+      // The three-step tab, so the tapped step differs from both the start and the pan target.
+      await frame.evaluate(() => document.querySelectorAll("#tabs button")[1].click());
+      assert.match(await frame.$eval("#kicker", (e) => e.textContent), /Step 1 of 3/);
+      await press(line(300, 150, y), 16);
+      await touch("touchEnd");
+      await frame.evaluate(() => document.querySelectorAll("#pills button")[2].click());
+      await frameSettled(frame);
+      assert.match(await frame.$eval("#kicker", (e) => e.textContent), /Step 3 of 3/);
+      assert.deepEqual(await frameClean(frame), { peeks: 0, panning: 0, styled: 0 });
+    });
+
     assert.deepEqual(errors, []);
   });
 });

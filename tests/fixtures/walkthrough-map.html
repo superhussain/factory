@@ -462,7 +462,7 @@ document.addEventListener('keydown', (e) => {
     peek.style.height = pane.offsetHeight + 'px';
     stepsEl.classList.add('panning');
     stepsEl.append(peek);
-    pan = { d, k, tab, peek };
+    pan = { d, k, tab, i: keep, peek };
   };
   const move = (off) => {
     const pane = $('pane'), w = stepsEl.clientWidth;
@@ -485,7 +485,7 @@ document.addEventListener('keydown', (e) => {
       // Chrome writes inline style changes to the attribute lazily; read it first, or removing it leaves style="".
       if (pane.hasAttribute('style')) pane.removeAttribute('style');
       stepsEl.classList.remove('panning');
-      if (commit && tab === p.tab) {
+      if (commit && tab === p.tab && i === p.i) {
         i = p.k;
         render();
       }
