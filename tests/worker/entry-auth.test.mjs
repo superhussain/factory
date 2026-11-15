@@ -28,6 +28,8 @@ const routes = [
   ["GET", "/jobs/sample/001/round-1/shot.png"],
   ["GET", `/api/idea-images/${"a".repeat(64)}.png`],
   ["PUT", `/api/idea-images/${"a".repeat(64)}.png`],
+  ["GET", `/api/idea-files/${"a".repeat(64)}.pdf`],
+  ["PUT", `/api/idea-files/${"a".repeat(64)}.pdf`],
   ["GET", "/assets/mermaid.min.js"],
   ["GET", "/assets/third-party-notices.txt"],
   ["POST", "/assets/mermaid.min.js"],
