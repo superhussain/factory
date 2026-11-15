@@ -610,7 +610,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head .job-actions-menu { top: calc(100% + 4px); right: 16px; }
     .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-chat, .detail.compact #d-held, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact #d-agents, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
     .doc { padding: 16px 16px 40px; }
-    .pager > .doc, .pager > .gallery { touch-action: pan-y pinch-zoom; }
+    .pager > .doc, .pager > .gallery, .pager > .file-list { touch-action: pan-y pinch-zoom; }
   }
   @media (max-width: 360px) {
     header { gap: 6px; }
@@ -4862,9 +4862,7 @@ function addStepSwipe(box, panels, current, go) {
     peek.removeAttribute('hidden');
     box.classList.add('step-panning');
     // The peek keeps its own height, so the box grows by however much taller it is.
-    const pad = getComputedStyle(box);
-    const inner = box.clientHeight - parseFloat(pad.paddingTop) - parseFloat(pad.paddingBottom);
-    box.style.minHeight = inner + Math.max(0, peek.offsetHeight - cur.offsetHeight) + 'px';
+    box.style.minHeight = box.offsetHeight + Math.max(0, peek.offsetHeight - cur.offsetHeight) + 'px';
     g.d = d;
     g.peek = peek;
   };
