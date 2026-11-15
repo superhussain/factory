@@ -361,6 +361,181 @@ test("board image reference counts, UUIDs, authoritative checks and stored-refer
   );
 });
 
+const ideaFiles = {
+  pdf: ["application/pdf", Buffer.from("%PDF-1.4\n%%EOF\n")],
+  csv: ["text/csv", Buffer.from("region,total\nnorth,12\n")],
+  txt: ["text/plain", Buffer.from("region,total\nnorth,12\n")],
+  mp4: [
+    "video/mp4",
+    Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypisom"), Buffer.alloc(12)]),
+  ],
+  webm: [
+    "video/webm",
+    Buffer.concat([
+      Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0x82, 0x84]),
+      Buffer.from("webm"),
+    ]),
+  ],
+};
+const ideaFilePath = (ext, bytes) => `/api/idea-files/${sha(bytes)}.${ext}`;
+
+test("idea file types", async () => {
+  const s = await setup();
+  for (const [ext, [type, bytes]] of Object.entries(ideaFiles)) {
+    const path = ideaFilePath(ext, bytes);
+    const headers = { "Content-Type": type };
+    assert.equal((await s.request(path, "PUT", bytes, headers)).status, 200, ext);
+    const before = snapshot(s.bucket);
+    assert.equal((await s.request(path, "PUT", bytes, headers)).status, 200, ext);
+    assert.deepEqual(snapshot(s.bucket), before, ext);
+    const stored = s.bucket.objects.get(`idea-files/${sha(bytes)}.${ext}`);
+    assert.deepEqual(Buffer.from(stored.bytes), bytes, ext);
+    assert.deepEqual(stored.customMetadata, { sha256: sha(bytes), length: String(bytes.length) });
+    assert.deepEqual(stored.httpMetadata, { contentType: type });
+  }
+  const puts = s.bucket.calls.filter(([op]) => op === "put");
+  assert.equal(puts.length, 10);
+  for (const [, , options] of puts) assert.equal(options.onlyIf.get("If-None-Match"), "*");
+});
+
+test("idea file refusals", async () => {
+  const s = await setup();
+  const csv = ideaFiles.csv[1];
+  const cases = [
+    ["csv", "text/plain", csv, 415, "Content-Type must be text/csv"],
+    ["csv", "text/csv", Buffer.alloc((1 << 20) + 1, 120), 413, "CSV over 1 MiB"],
+    ["pdf", "application/pdf", Buffer.alloc((10 << 20) + 1, 120), 413, "PDF over 10 MiB"],
+    ["webm", "video/webm", Buffer.alloc((25 << 20) + 1, 120), 413, "WebM over 25 MiB"],
+    ["csv", "text/csv", Buffer.alloc(0), 400, "empty file"],
+    ["pdf", "application/pdf", Buffer.from("hello"), 415, "the body does not match the PDF format"],
+    ["mp4", "video/mp4", Buffer.from("0000ftypiso"), 415, "the body does not match the MP4 format"],
+    [
+      "webm",
+      "video/webm",
+      ideaFiles.webm[1].subarray(0, 12),
+      415,
+      "the body does not match the WebM format",
+    ],
+    ["csv", "text/csv", Buffer.from("a,b\n\0\n"), 415, "the body does not match the CSV format"],
+    [
+      "txt",
+      "text/plain",
+      Buffer.from([0x68, 0xff, 0x69]),
+      415,
+      "the body does not match the text format",
+    ],
+  ];
+  for (const [ext, type, bytes, status, text] of cases) {
+    const before = snapshot(s.bucket);
+    const response = await s.request(ideaFilePath(ext, bytes), "PUT", bytes, {
+      "Content-Type": type,
+    });
+    assert.equal(response.status, status, text);
+    assert.equal(await response.text(), text);
+    assert.deepEqual(snapshot(s.bucket), before, text);
+  }
+  const before = snapshot(s.bucket);
+  const wrong = await s.request(`/api/idea-files/${"a".repeat(64)}.csv`, "PUT", csv, {
+    "Content-Type": "text/csv",
+  });
+  assert.equal(wrong.status, 400);
+  assert.equal(await wrong.text(), "SHA-256 does not match the file name");
+  assert.deepEqual(snapshot(s.bucket), before);
+});
+
+test("idea file download headers", async () => {
+  const s = await setup();
+  for (const [ext, [type, bytes]] of Object.entries(ideaFiles)) {
+    const path = ideaFilePath(ext, bytes);
+    await s.request(path, "PUT", bytes, { "Content-Type": type });
+    const response = await s.request(path);
+    assert.equal(response.status, 200);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+    const charset = ext === "csv" || ext === "txt" ? "; charset=utf-8" : "";
+    assert.equal(response.headers.get("Content-Type"), type + charset);
+    assert.equal(
+      response.headers.get("Content-Disposition"),
+      `attachment; filename="${sha(bytes)}.${ext}"`,
+    );
+    assert.equal(response.headers.get("Content-Security-Policy"), "default-src 'none'; sandbox");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  }
+  const html = Buffer.from("<script>1</script>");
+  for (const path of [`/api/idea-files/${sha(html)}.html`, ideaFilePath("PDF", ideaFiles.pdf[1])]) {
+    assert.equal((await s.request(path)).status, 404, path);
+    assert.equal((await s.request(path, "PUT", html, { "Content-Type": "text/html" })).status, 404);
+  }
+  const upper = `/api/idea-files/${sha(ideaFiles.pdf[1]).toUpperCase()}.pdf`;
+  assert.equal((await s.request(upper)).status, 404);
+});
+
+test("board idea_files counts, authoritative checks and stored-reference exemption", async () => {
+  const s = await setup();
+  const write = (jobs) =>
+    s.request(
+      "/api/board",
+      "PUT",
+      JSON.stringify({ jobs: jobs.map((j, i) => ({ id: `00${i + 1}-idea`, ...j })) }),
+      { "If-Match": s.bucket.objects.get("board.json").httpEtag },
+    );
+  const names = Array.from({ length: 9 }, (_, i) => i.toString(16).padStart(64, "0") + ".pdf");
+  const shape = "idea_files needs 1-4 distinct <sha256>.<pdf|csv|txt|mp4|webm> names";
+  for (const idea_files of [
+    [],
+    names.slice(0, 5),
+    [names[0], names[0]],
+    ["x.exe"],
+    names[0],
+    null,
+    {},
+  ]) {
+    const before = snapshot(s.bucket);
+    const response = await write([{ idea_files }]);
+    assert.equal(response.status, 400);
+    assert.equal(await response.text(), shape);
+    assert.deepEqual(snapshot(s.bucket), before);
+  }
+  assert.equal(
+    await (await write([{ idea_files: [names[0]] }])).text(),
+    `idea file ${names[0]} is not uploaded`,
+  );
+  for (const name of names)
+    await s.bucket.put("idea-files/" + name, "x", {
+      customMetadata: { sha256: name.slice(0, 64) },
+    });
+  assert.equal(
+    await (
+      await write([
+        { idea_files: names.slice(0, 4) },
+        { idea_files: names.slice(4, 8) },
+        { idea_files: names.slice(8) },
+      ])
+    ).text(),
+    "too many new idea files in one board write",
+  );
+  const [pdf, csv] = [
+    ideaFilePath("pdf", ideaFiles.pdf[1]).slice(16),
+    ideaFilePath("csv", ideaFiles.csv[1]).slice(16),
+  ];
+  await s.request("/api/idea-files/" + pdf, "PUT", ideaFiles.pdf[1], {
+    "Content-Type": "application/pdf",
+  });
+  await s.request("/api/idea-files/" + csv, "PUT", ideaFiles.csv[1], {
+    "Content-Type": "text/csv",
+  });
+  assert.equal((await write([{ idea_files: [pdf, csv] }])).status, 200);
+  s.bucket.objects.delete("idea-files/" + pdf);
+  s.bucket.calls.length = 0;
+  assert.equal((await write([{ idea_files: [pdf, csv] }])).status, 200);
+  assert.deepEqual(
+    s.bucket.calls.map(([op, key]) => [op, key]),
+    [
+      ["get", "board.json"],
+      ["put", "board.json"],
+    ],
+  );
+});
+
 test("text and binary exact caps, streamed rejection and nonmutation", async () => {
   const s = await setup();
   for (const [path, limit] of [

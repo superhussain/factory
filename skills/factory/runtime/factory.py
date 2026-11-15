@@ -2212,6 +2212,8 @@ def batch_problem(data, j, slug, device, session, minutes):
         return "closing"
     if j.get("idea_images"):
         return "has pasted images"
+    if j.get("idea_files"):
+        return "has attached files"
     if "tracer" in j:
         return "follows Tracer"
     if (j.get("backlog") or {}).get("decision") == "rework":

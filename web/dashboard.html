@@ -137,6 +137,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .gallery .gallery-open[hidden] { display: none; }
   .gallery .gallery-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .gallery .bad { color: var(--alert); margin: 0 0 6px; }
+  .file-list { list-style: none; padding: 12px 20px 0; margin: 0; flex: none; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+  .file-list a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
+  .file-list .bad { color: var(--alert); }
   dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
   #settings-document { font-family: var(--font-mono); height: 50dvh; min-height: 240px; resize: vertical; }
   #settings-status, #pipeline-status, #project-pickup-status { overflow-wrap: anywhere; margin: 12px 0; }
@@ -616,7 +619,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
     .pager > .doc::before { content: ''; display: block; height: var(--head-collapse, 0px); }
-    .pager > .doc, .pager > .gallery { touch-action: pan-y pinch-zoom; }
+    .pager > .doc, .pager > .gallery, .pager > .file-list { touch-action: pan-y pinch-zoom; }
   }
   @media (max-width: 360px) {
     header { gap: 6px; }
@@ -700,6 +703,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <nav class="tabs" id="d-tabs"></nav>
   <div class="pager" id="d-pager">
     <div class="gallery" id="d-gallery" aria-label="Pasted images" hidden></div>
+    <ul class="file-list" id="d-files" aria-label="Attached files" hidden></ul>
     <article class="doc" id="d-doc"></article>
   </div>
 </aside>
@@ -1068,9 +1072,9 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <label>Project<select id="idea-project" aria-describedby="idea-project-help"></select></label>
     <p class="muted" id="idea-project-help"></p>
     <label>Idea<textarea id="idea-text" required maxlength="4000" aria-describedby="idea-ref idea-key-help idea-images-help" placeholder="The feature, as you'd tell the spec writer. The first line becomes the title."></textarea></label>
-    <div id="idea-upload-row"><button class="btn" type="button" id="idea-upload" aria-describedby="idea-images-help">Add images</button><input type="file" id="idea-file" accept="image/png,image/jpeg,image/webp" multiple hidden></div>
-    <p class="muted"><span id="idea-key-help">Cmd+Enter adds the idea.</span> <span id="idea-images-help">Paste or add up to 4 images (PNG, JPEG or WebP, 5 MiB each).</span></p>
-    <ul id="idea-image-list" aria-label="Attached images" hidden></ul>
+    <div id="idea-upload-row"><button class="btn" type="button" id="idea-upload" aria-describedby="idea-images-help">Add files</button><input type="file" id="idea-file" accept="image/png,image/jpeg,image/webp,.pdf,.csv,.txt,.mp4,.webm,application/pdf,text/csv,text/plain,video/mp4,video/webm" multiple hidden></div>
+    <p class="muted"><span id="idea-key-help">Cmd+Enter adds the idea.</span> <span id="idea-images-help">Paste or add up to 4 images (PNG, JPEG or WebP, 5 MiB each) and up to 4 files (PDF 10 MiB, CSV or text 1 MiB, MP4 or WebM 25 MiB).</span></p>
+    <ul id="idea-image-list" aria-label="Attachments" hidden></ul>
     <p class="muted" id="idea-status" role="status"></p>
     <p class="err" id="idea-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="idea-cancel">Cancel</button><button class="btn primary" type="submit" id="idea-add">Add</button></div>
@@ -1548,7 +1552,7 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(sessionJob(j)?.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(sessionJob(j)?.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.idea_files), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
 }
 
 // A holder's stop is recorded only when stopped is a string, as in factory.py.
@@ -4604,12 +4608,36 @@ function renderDetail() {
   buildSteppers($('d-doc'), openId + '/' + activeFile);
   if (f && f.name !== 'needs.md') addWalkthrough($('d-doc'), true, f.name);
   renderGallery(j, f);
+  renderFiles(j, f);
   renderMermaid();
   if ($('needs-form')) updateNeedsBar();
   measureHead();
 }
 
 const IDEA_IMAGE = /^[0-9a-f]{64}\.png$/;
+
+// Attached files are download links only, served by the Worker as attachments.
+function renderFiles(j, f) {
+  const list = $('d-files');
+  list.replaceChildren();
+  const names = f?.name === 'idea.md' && Array.isArray(j?.idea_files) ? j.idea_files : [];
+  list.hidden = !names.length;
+  names.forEach((name, i) => {
+    const li = document.createElement('li');
+    if (typeof name !== 'string' || !IDEA_FILE.test(name)) {
+      li.className = 'bad';
+      li.textContent = 'File ' + (i + 1) + ' has an invalid name and cannot be downloaded.';
+    } else {
+      const ext = name.slice(65);
+      const a = document.createElement('a');
+      a.href = './api/idea-files/' + name;
+      a.download = 'idea-file-' + (i + 1) + '.' + ext;
+      a.textContent = 'Download file ' + (i + 1) + ' (' + FILE_TYPES[ext].label + ')';
+      li.append(a);
+    }
+    list.append(li);
+  });
+}
 
 // Pasted images sit beside the idea text, loaded only from the Worker's validated image route.
 // Each one reports a load failure and offers Retry, so none goes missing without a word.
@@ -4806,7 +4834,7 @@ function measureHead() {
   const detail = $('detail');
   const tabs = $('d-tabs');
   headCollapse = 0;
-  if (swipeMedia.matches && !detail.hidden && !tabs.hidden && $('d-gallery').hidden) {
+  if (swipeMedia.matches && !detail.hidden && !tabs.hidden && $('d-gallery').hidden && $('d-files').hidden) {
     const bar = Math.ceil($('d-title').getBoundingClientRect().bottom - detail.getBoundingClientRect().top);
     detail.style.setProperty('--bar-h', bar + 'px');
     headStop = detail.querySelector('.detail > .err:not([hidden]), .detail > .copy-status:not(:empty)') ?? tabs;
@@ -4871,15 +4899,17 @@ function addStepSwipe(box, panels, current, go) {
       g.peek.classList.remove('step-peek');
       g.peek.setAttribute('hidden', 'until-found');
     }
+    box.style.minHeight = '';
     const cur = panels[g.at];
     const peek = panels[(g.at + d + panels.length) % panels.length];
     peek.style.top = cur.offsetTop + 'px';
     peek.style.left = cur.offsetLeft + 'px';
     peek.style.width = cur.offsetWidth + 'px';
-    peek.style.height = cur.offsetHeight + 'px';
     peek.classList.add('step-peek');
     peek.removeAttribute('hidden');
     box.classList.add('step-panning');
+    // The peek keeps its own height, so the box grows by however much taller it is.
+    box.style.minHeight = box.offsetHeight + Math.max(0, peek.offsetHeight - cur.offsetHeight) + 'px';
     g.d = d;
     g.peek = peek;
   };
@@ -4905,6 +4935,7 @@ function addStepSwipe(box, panels, current, go) {
         if (p.hasAttribute('style')) p.removeAttribute('style');
         p.classList.remove('step-peek');
       }
+      if (box.hasAttribute('style')) box.removeAttribute('style');
       box.classList.remove('step-panning');
       go(commit ? panels.indexOf(g.peek) : current());
       settling = false;
@@ -4990,7 +5021,7 @@ function tabNamed(name) {
 
 function swipeMove(s, off) {
   const w = $('d-pager').clientWidth;
-  for (const el of [$('d-doc'), $('d-gallery')]) {
+  for (const el of [$('d-doc'), $('d-gallery'), $('d-files')]) {
     el.style.transition = 'none';
     el.style.transform = 'translateX(' + off + 'px)';
   }
@@ -5015,7 +5046,7 @@ function swipeSettle(s, commit) {
   const w = $('d-pager').clientWidth;
   const end = commit ? (s.to > s.idx ? -w : w) : 0;
   const transition = 'transform ' + SWIPE_MS + 'ms ' + SWIPE_EASE;
-  for (const el of [$('d-doc'), $('d-gallery')]) {
+  for (const el of [$('d-doc'), $('d-gallery'), $('d-files')]) {
     el.style.transition = transition;
     el.style.transform = 'translateX(' + end + 'px)';
   }
@@ -5029,7 +5060,7 @@ function swipeSettle(s, commit) {
   setTimeout(() => {
     if (commit && openId === s.id && files.some((f) => f.name === s.toName)) selectTab(s.toName);
     else placePill(null);
-    for (const el of [$('d-doc'), $('d-gallery')]) {
+    for (const el of [$('d-doc'), $('d-gallery'), $('d-files')]) {
       el.style.transition = '';
       el.style.transform = '';
     }
@@ -5526,9 +5557,11 @@ function ideaTitle(text) {
 // so a retry after an uncertain commit never duplicates. Throws if the token holds other content.
 function addIdea(board, snap, now) {
   const names = snap.images.map((i) => i.name);
+  const files = snap.files.map((f) => f.name);
   const prior = board.jobs.find((j) => j.capture_id === snap.capture_id);
   if (prior) {
     if (prior.idea === snap.text && JSON.stringify(prior.idea_images ?? []) === JSON.stringify(names) &&
+      JSON.stringify(prior.idea_files ?? []) === JSON.stringify(files) &&
       JSON.stringify(prior.refs ?? []) === JSON.stringify(snap.refs ?? [])) return prior.id;
     throw new Error('this capture was already saved as ' + prior.id + ' with different content, so nothing was changed.');
   }
@@ -5536,7 +5569,7 @@ function addIdea(board, snap, now) {
   const title = ideaTitle(snap.text);
   board.jobs.push({
     id, ...(snap.project ? { project: snap.project } : {}), title, idea: snap.text, stage: 'idea', updated: now,
-    ...(names.length ? { idea_images: names } : {}), ...(snap.refs?.length ? { refs: snap.refs } : {}), capture_id: snap.capture_id,
+    ...(names.length ? { idea_images: names } : {}), ...(files.length ? { idea_files: files } : {}), ...(snap.refs?.length ? { refs: snap.refs } : {}), capture_id: snap.capture_id,
   });
   board.updated = now;
   return id;
@@ -6766,7 +6799,17 @@ const MAX_SIDE = 4096;
 const MAX_PIXELS = 16000000;
 const MAX_TEXT = 4000;
 const PASTE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
-let draft = { images: [], rejects: [], pending: 0 };
+// Attached files are stored byte for byte. The Worker checks type, size and format again.
+const MAX_FILES = 4;
+const FILE_TYPES = {
+  pdf: { type: 'application/pdf', max: 10 << 20, label: 'PDF' },
+  csv: { type: 'text/csv', max: 1 << 20, label: 'CSV' },
+  txt: { type: 'text/plain', max: 1 << 20, label: 'text' },
+  mp4: { type: 'video/mp4', max: 25 << 20, label: 'MP4' },
+  webm: { type: 'video/webm', max: 25 << 20, label: 'WebM' },
+};
+const IDEA_FILE = /^[0-9a-f]{64}\.(pdf|csv|txt|mp4|webm)$/;
+let draft = { images: [], files: [], rejects: [], pending: 0, filePending: 0 };
 let decoding = Promise.resolve();
 let rejectSeq = 0;
 let inflight = false; // set synchronously by the submit listener, before any await
@@ -6785,7 +6828,7 @@ function showErr(msg) {
 
 function resetDraft() {
   draft.images.forEach((i) => URL.revokeObjectURL(i.url));
-  draft = { images: [], rejects: [], pending: 0 };
+  draft = { images: [], files: [], rejects: [], pending: 0, filePending: 0 };
   snap = null;
   ideaFollowUp = null;
   $('idea-ref').replaceChildren();
@@ -6850,13 +6893,20 @@ function renderDraft() {
     li.prepend(view);
     list.append(li);
   });
+  draft.files.forEach((f, i) => {
+    list.append(row('', 'File ' + (i + 1) + ': ' + f.label + ', ' + FILE_TYPES[f.ext].label + ', ' + Math.ceil(f.blob.size / 1024) + ' KiB', () => {
+      draft.files = draft.files.filter((x) => x !== f);
+      renderDraft();
+    }));
+  });
   for (const r of draft.rejects) {
     list.append(row('bad', r.msg, () => {
       draft.rejects = draft.rejects.filter((x) => x !== r);
       renderDraft();
     }));
   }
-  if (draft.pending) list.append(row('', 'Checking ' + draft.pending + ' image' + (draft.pending > 1 ? 's' : '') + '…'));
+  const pending = draft.pending + draft.filePending;
+  if (pending) list.append(row('', 'Checking ' + pending + ' attachment' + (pending > 1 ? 's' : '') + '…'));
   list.hidden = !list.children.length;
 }
 
@@ -6888,7 +6938,7 @@ function addPasted(file) {
     if (d === draft) renderDraft();
   };
   if (!file) return reject('a file could not be read.');
-  if (!PASTE_TYPES.includes(file.type)) return reject((file.type || 'an unknown type') + ' is not PNG, JPEG or WebP.');
+  if (!PASTE_TYPES.includes(file.type)) return addFile(file);
   if (d.images.length + d.pending >= MAX_IMAGES) return reject('an idea holds at most ' + MAX_IMAGES + ' images.');
   if (!file.size) return reject('the image is empty.');
   if (file.size > MAX_BYTES) return reject('the image is over 5 MiB.');
@@ -6904,6 +6954,36 @@ function addPasted(file) {
       reject(x.message);
     } finally {
       d.pending--;
+      if (d === draft) renderDraft();
+    }
+  });
+}
+
+// A non-image attachment, typed by its file name's extension and named by its SHA-256.
+function addFile(file) {
+  const d = draft;
+  const reject = (msg) => {
+    d.rejects.push({ msg: 'Not added: ' + msg });
+    if (d === draft) renderDraft();
+  };
+  const ext = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
+  const kind = Object.hasOwn(FILE_TYPES, ext) && file.name.includes('.') ? FILE_TYPES[ext] : null;
+  if (!kind) return reject(file.name + ' is not an image, PDF, CSV, text, MP4 or WebM file.');
+  if (d.files.length + d.filePending >= MAX_FILES) return reject('an idea holds at most ' + MAX_FILES + ' files.');
+  if (!file.size) return reject('the file is empty.');
+  if (file.size > kind.max) return reject(file.name + ' is over ' + (kind.max >> 20) + ' MiB, the ' + kind.label + ' limit.');
+  d.filePending++;
+  renderDraft();
+  decoding = decoding.then(async () => {
+    try {
+      const name = hex(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())) + '.' + ext;
+      if (d !== draft) return;
+      if (d.files.some((x) => x.name === name)) reject('that file is already attached.');
+      else d.files.push({ name, blob: file, ext, label: file.name });
+    } catch (x) {
+      reject(x.message);
+    } finally {
+      d.filePending--;
       if (d === draft) renderDraft();
     }
   });
@@ -6934,6 +7014,13 @@ async function uploadImage(img) {
   uploaded.add(img.name);
 }
 
+async function uploadIdeaFile(f) {
+  if (uploaded.has(f.name)) return;
+  const r = await fetch('./api/idea-files/' + f.name, { method: 'PUT', headers: { 'Content-Type': FILE_TYPES[f.ext].type }, body: f.blob });
+  if (!r.ok) throw new Error('uploading a file failed: ' + r.status + ' ' + (await r.text()).slice(0, 200));
+  uploaded.add(f.name);
+}
+
 // After a commit that may have landed: look for the capture_id. Returns the saved id, or null
 // with the snapshot kept for Retry. An absent GET is no proof the commit died: the original PUT
 // can still land after this read, so the token survives until a confirmed save or a definitive
@@ -6955,16 +7042,17 @@ async function reconcile(cause) {
 async function saveIdea() {
   $('idea-err').hidden = true;
   if (!snap) {
-    setStatus('Checking images…');
+    setStatus('Checking attachments…');
     await decoding;
     const text = $('idea-text').value;
     if (!text.trim()) return showErr('Write the idea first.');
     if (text.length > MAX_TEXT) return showErr('The idea is over ' + MAX_TEXT + ' characters.');
-    if (draft.rejects.length) return showErr('Remove the rejected images below first.');
+    if (draft.rejects.length) return showErr('Remove the rejected attachments below first.');
     snap = {
       project: $('idea-project').value, text, capture_id: crypto.randomUUID(),
       refs: ideaFollowUp ? [{ id: ideaFollowUp, kind: 'follow-up-of' }] : [],
       images: draft.images.map(({ name, blob }) => ({ name, blob })),
+      files: draft.files.map(({ name, blob, ext }) => ({ name, blob, ext })),
     };
   }
   renderDraft();
@@ -6972,6 +7060,10 @@ async function saveIdea() {
     for (const [i, img] of snap.images.entries()) {
       setStatus('Uploading image ' + (i + 1) + ' of ' + snap.images.length + '…');
       await uploadImage(img);
+    }
+    for (const [i, f] of snap.files.entries()) {
+      setStatus('Uploading file ' + (i + 1) + ' of ' + snap.files.length + '…');
+      await uploadIdeaFile(f);
     }
   } catch (x) {
     // A fresh upload failed before any board attempt, so nothing could have committed:
@@ -7294,6 +7386,8 @@ function openBacklogItem(item) {
   $('d-tabs').hidden = true;
   $('d-gallery').replaceChildren();
   $('d-gallery').hidden = true;
+  $('d-files').replaceChildren();
+  $('d-files').hidden = true;
   $('d-doc').innerHTML = renderBacklogDecision(item, backlogTriageHtml(backlogTriageSeen.get(item.raw)));
   updateBacklogBar();
   renderBoard();

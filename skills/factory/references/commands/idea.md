@@ -31,7 +31,7 @@ works from any directory.
    artifact. Exit 5 or 6 (a missing or mismatched image, an unresolved conflict, an
    unsafe path) stops the promotion: report it and do not patch the stage or create
    the worktree. A retry is safe and re-pushes only what changed. A job without
-   `idea_images` imports nothing.
+   `idea_images` imports nothing. `idea_files` stay on the board; nothing imports them yet.
 4. Do step one of `/factory <feature>` without the claim. Run `sync "$SLUG"`,
    then patch `{"stage": "spec", "round": 0, "rounds": [], "branch": "factory/<id>"}`,
    which keeps `project`, `title`, `idea`, and `refs`. Create the worktree with
