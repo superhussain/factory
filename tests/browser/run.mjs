@@ -1155,10 +1155,18 @@ async function capture(outdir, referencePath) {
       });
       return clipOf(page, ".detail-head");
     };
+    const openLeadAgents360 = async (page) => {
+      await openLeadAgents(page);
+      await page.evaluate(() => {
+        document.getElementById("detail").style.setProperty("--drawer-w", "360px");
+      });
+      return clipOf(page, ".detail-head");
+    };
     leadAgentsBoard = true;
     try {
       await view("agent-runs-lead-390", 390, 844, "dark", openLeadAgents, true);
       await view("agent-runs-lead-1280", 1280, 900, "light", openLeadAgents);
+      await view("agent-runs-lead-360", 1280, 900, "light", openLeadAgents360);
     } finally {
       leadAgentsBoard = false;
     }

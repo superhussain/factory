@@ -169,6 +169,7 @@
   "tests/browser/needs-you-form.test.mjs",
   "tests/browser/drawer-swipe.test.mjs",
   "tests/browser/stepper-swipe.test.mjs",
+  "tests/browser/lightbox.test.mjs",
   "tests/browser/drawer-compact.test.mjs",
   "tests/browser/drawer-links.test.mjs",
   "tests/browser/agent-runs.test.mjs",
