@@ -9,7 +9,7 @@ import {
   HOST_NAME,
   validatePipeline,
 } from "./admission.js";
-import { archiveGet, needsTriageKey, runArchive } from "./archive.js";
+import { ARCHIVE_KEY, archiveGet, needsTriageKey, runArchive } from "./archive.js";
 import {
   DASHBOARD_VERSION,
   escapeHtml,
@@ -1779,6 +1779,49 @@ async function pruneRetroRuns(env, now) {
   return { status: "pruned", deleted };
 }
 
+const IDEA_ORPHAN_GRACE_MS = 2 * DAY_MS;
+
+// Deletes idea uploads older than IDEA_ORPHAN_GRACE_MS that no board or archive row names.
+// The board is read before the archive, since runArchive writes the archive first.
+async function pruneIdeaUploads(env, now) {
+  const named = new Set();
+  for (const key of ["board.json", ARCHIVE_KEY]) {
+    const object = await env.BUCKET.get(key);
+    if (!object && key === ARCHIVE_KEY) continue;
+    let jobs;
+    try {
+      jobs = JSON.parse(await object.text()).jobs;
+    } catch {}
+    if (!Array.isArray(jobs)) {
+      console.warn(`idea upload sweep skipped: ${key} is unreadable`);
+      return { status: "skipped", deleted: [] };
+    }
+    for (const j of jobs) {
+      for (const n of j?.idea_images ?? [])
+        if (typeof n === "string") named.add(`idea-images/${n}`);
+      for (const n of j?.idea_files ?? []) if (typeof n === "string") named.add(`idea-files/${n}`);
+    }
+  }
+  const cutoff = now.getTime() - IDEA_ORPHAN_GRACE_MS;
+  const deleted = [];
+  for (const prefix of ["idea-images/", "idea-files/"]) {
+    let cursor;
+    do {
+      const page = await env.BUCKET.list({ prefix, cursor });
+      for (const { key, uploaded } of page.objects) {
+        if (named.has(key) || uploaded.getTime() >= cutoff) continue;
+        const fresh = await env.BUCKET.head(key);
+        if (fresh && fresh.uploaded.getTime() < cutoff) {
+          await env.BUCKET.delete(key);
+          deleted.push(key);
+        }
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+  }
+  return { status: "pruned", deleted };
+}
+
 // Raw image bytes, never decoded as text, or null past the cap.
 const readImage = (request) => readCapped(request, MAX_IMAGE);
 
@@ -2352,6 +2395,7 @@ export default {
     ctx.waitUntil(runArchive(env, new Date(controller.scheduledTime)));
     ctx.waitUntil(pruneRetro(env, new Date(controller.scheduledTime)));
     ctx.waitUntil(pruneRetroRuns(env, new Date(controller.scheduledTime)));
+    ctx.waitUntil(pruneIdeaUploads(env, new Date(controller.scheduledTime)));
   },
 };
 
