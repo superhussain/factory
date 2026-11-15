@@ -4840,13 +4840,15 @@ function syncHeadShift() {
 }
 $('d-doc').addEventListener('scroll', syncHeadShift, { passive: true });
 // The details are outside the page's scroller, so the browser cannot bring a focused one into view.
-// A keyboard user tabbing onto one gets the page scrolled just far enough to show it between the title band and the screen bottom.
+// A keyboard user tabbing onto one gets the page scrolled far enough to show it and its focus ring between the title band and the screen bottom.
 $('detail').addEventListener('focusin', (e) => {
   if (!headCollapse || !e.target.closest(HEAD_MOVERS) || !e.target.matches(':focus-visible')) return;
   const r = e.target.getBoundingClientRect();
   const top = $('d-title').getBoundingClientRect().bottom;
-  if (r.top < top) $('d-doc').scrollTop -= top - r.top;
-  else if (r.bottom > innerHeight) $('d-doc').scrollTop += r.bottom - innerHeight;
+  // Room for the 2 px focus outline and its 2 px offset.
+  const pad = 4;
+  if (r.top < top + pad) $('d-doc').scrollTop -= top + pad - r.top;
+  else if (r.bottom + pad > innerHeight) $('d-doc').scrollTop += r.bottom + pad - innerHeight;
 });
 // The details sit outside the page's scroller. A touch drag on them already scrolls it, but a wheel does not, so pass it on.
 $('detail').addEventListener('wheel', (e) => {
