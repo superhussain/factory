@@ -376,7 +376,8 @@ class RolesTest(IsolatedTestCase):
         babysit = " ".join((SKILL / "references/commands/babysit.md").read_text(encoding="utf-8").split())
         for text in (builder, babysit):
             for phrase in ("| copy |", "| test-only |", "| one-file logic |", "| cross-cutting |",
-                           "When two rows fit, the lower one wins.", "never another"):
+                           "When two rows fit, the lower one wins.", "never another",
+                           "Never run `npx <name>`"):
                 self.assertIn(phrase, text)
         self.assertIn("Change size: <class>; checks: <commands>", builder)
         for phrase in ("check plan: <class>: <checks>", 'git -C "$WT" push --no-verify',

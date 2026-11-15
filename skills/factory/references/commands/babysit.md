@@ -50,6 +50,10 @@ the lower one wins.
 
 - Use the formatter the repo configures (such as `biome.json` or `.prettierrc`), never
   another.
+- Run formatters, linters and other tools only through the repo's own scripts or
+  declared dependencies. Never run `npx <name>` or `pnpm dlx <name>` for a tool the
+  manifest does not declare, since that fetches and runs whatever registry package has
+  the name.
 - Before running checks, print `check plan: <class>: <checks>`, such as
   `check plan: copy: <formatter> locales/en.json`.
 - Push every fix with the project file's Babysit push: command when its Verify section has one. Use the line only when it ends in `git push` or `git push --no-verify`, holds `git push` once, and has none of `;`, `&`, `|`, `<`, `>`, a backtick, `$(` or a line break. Then run cd "$WT" && <command> origin HEAD:factory/<id>. Otherwise run git -C "$WT" push --no-verify origin HEAD:factory/<id>, and name the rejected line in your final message. Never run the full pre-push hook.

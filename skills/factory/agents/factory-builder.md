@@ -95,7 +95,10 @@ table. When two rows fit, the lower one wins.
 | cross-cutting | anything else: two or more source files, generated types, schemas, dependencies, build or CI config | the project file's Verify commands for what it touched |
 
 Use the formatter the repo configures (such as `biome.json` or `.prettierrc`), never
-another. A later run's build.md section gets `Change size: <class>; checks: <commands>`.
+another. Run formatters, linters and other tools only through the repo's own scripts or
+declared dependencies. Never run `npx <name>` or `pnpm dlx <name>` for a tool the
+manifest does not declare, since that fetches and runs whatever registry package has
+the name. A later run's build.md section gets `Change size: <class>; checks: <commands>`.
 Then run every acceptance check in the spec. Commit after the checks pass.
 
 Each implementation run permits at most two failed candidate verifications total,
