@@ -680,6 +680,12 @@ async function capture(outdir, referencePath) {
         document.getElementById("d-doc").scrollTop = 400;
       });
     };
+    const openMidScrolled = async (page, side) => {
+      await openScrolled(page, side);
+      await page.evaluate(() => {
+        document.getElementById("d-doc").scrollTop = 40;
+      });
+    };
     const openAnswers = async (page, side) => {
       await openDrawer(page, side);
       await page.click('.tab[data-name="answers.md"]');
@@ -767,6 +773,7 @@ async function capture(outdir, referencePath) {
     await view("drawer-desktop", 1440, 900, "light", openDrawer);
     await view("drawer-mobile", 390, 844, "dark", openDrawer);
     await view("drawer-mobile-scrolled", 375, 667, "dark", openScrolled);
+    await view("drawer-mobile-midscroll", 390, 844, "dark", openMidScrolled);
     await view("drawer-desktop-scrolled", 1440, 900, "light", openScrolled);
     await view("answers-desktop", 1440, 900, "light", openAnswers);
     await view("answers-mobile", 390, 844, "dark", openAnswers);
