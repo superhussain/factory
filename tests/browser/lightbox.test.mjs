@@ -287,6 +287,12 @@ test("lightbox", { timeout: 180000 }, async (t) => {
       });
 
       await t.test("L9 an image that fails to load says so", async () => {
+        // The dialog's close event is a queued task. Its handler clears the image and the
+        // item list, so opening before it runs loses the error. Wait for it under load.
+        await page.waitForFunction(
+          () => !document.querySelector("#lb-img").hasAttribute("src"),
+          wait,
+        );
         await page.evaluate(() =>
           openLightbox([{ src: "./api/idea-images/" + "0".repeat(64) + ".png", alt: "x" }], 0),
         );
