@@ -4901,7 +4901,7 @@ $('detail').addEventListener('focusin', (e) => {
   if (r.top < top + pad) $('d-doc').scrollTop -= top + pad - r.top;
   else if (r.bottom + pad > innerHeight) $('d-doc').scrollTop += r.bottom + pad - innerHeight;
 });
-// The details sit outside the page's scroller. A touch drag on them already scrolls it, but a wheel does not, so pass it on.
+// The details sit outside the page's scroller, so a wheel on them does not scroll it. Pass it on.
 $('detail').addEventListener('wheel', (e) => {
   if (!headCollapse || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || !e.target.closest(HEAD_MOVERS)) return;
   e.preventDefault();
