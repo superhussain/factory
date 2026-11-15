@@ -2144,7 +2144,7 @@ function ideaFileFormatOk(ext, b) {
   if (ext === "webm")
     return (
       [0x1a, 0x45, 0xdf, 0xa3].every((v, i) => b[i] === v) &&
-      new TextDecoder("latin1").decode(b.subarray(0, 64)).includes("webm")
+      Array.from({ length: 61 }, (_, i) => ascii(b, i, "webm")).some(Boolean)
     );
   if (b.includes(0)) return false;
   try {
