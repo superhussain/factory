@@ -264,17 +264,18 @@ test("walkthrough html: page names only, 1 MiB cap, frame loads only, sandbox CS
   }
 });
 
-test("idea image exact digest, envelope metadata and idempotent create-only upload", async () => {
+test("idea image exact digest, envelope metadata and create-only upload a repeat rewrites", async () => {
   const s = await setup();
   const bytes = png();
   const name = sha(bytes) + ".png";
   const path = "/api/idea-images/" + name;
   const headers = { "Content-Type": "image/png" };
   assert.equal((await s.request(path, "PUT", bytes, headers)).status, 200);
-  const before = snapshot(s.bucket);
+  const before = s.bucket.objects.get("idea-images/" + name);
   assert.equal((await s.request(path, "PUT", bytes, headers)).status, 200);
-  assert.deepEqual(snapshot(s.bucket), before);
   const stored = s.bucket.objects.get("idea-images/" + name);
+  assert.deepEqual(stored.bytes, before.bytes);
+  assert.equal(stored.httpEtag, before.httpEtag);
   assert.deepEqual(stored.customMetadata, {
     sha256: sha(bytes),
     width: "1",
@@ -282,10 +283,12 @@ test("idea image exact digest, envelope metadata and idempotent create-only uplo
     length: "29",
   });
   const puts = s.bucket.calls.filter(([op]) => op === "put");
-  assert.equal(puts.length, 2);
+  assert.deepEqual(
+    puts.map(([, , options]) => options.onlyIf?.get("If-None-Match")),
+    ["*", "*", undefined],
+  );
   for (const [, key, options] of puts) {
     assert.equal(key, "idea-images/" + name);
-    assert.equal(options.onlyIf.get("If-None-Match"), "*");
     assert.deepEqual(options.httpMetadata, { contentType: "image/png" });
   }
   const response = await s.request(path);
@@ -385,17 +388,19 @@ test("idea file types", async () => {
     const path = ideaFilePath(ext, bytes);
     const headers = { "Content-Type": type };
     assert.equal((await s.request(path, "PUT", bytes, headers)).status, 200, ext);
-    const before = snapshot(s.bucket);
+    const before = s.bucket.objects.get(`idea-files/${sha(bytes)}.${ext}`);
     assert.equal((await s.request(path, "PUT", bytes, headers)).status, 200, ext);
-    assert.deepEqual(snapshot(s.bucket), before, ext);
     const stored = s.bucket.objects.get(`idea-files/${sha(bytes)}.${ext}`);
+    assert.equal(stored.httpEtag, before.httpEtag, ext);
     assert.deepEqual(Buffer.from(stored.bytes), bytes, ext);
     assert.deepEqual(stored.customMetadata, { sha256: sha(bytes), length: String(bytes.length) });
     assert.deepEqual(stored.httpMetadata, { contentType: type });
   }
   const puts = s.bucket.calls.filter(([op]) => op === "put");
-  assert.equal(puts.length, 10);
-  for (const [, , options] of puts) assert.equal(options.onlyIf.get("If-None-Match"), "*");
+  assert.deepEqual(
+    puts.map(([, , options]) => options.onlyIf?.get("If-None-Match")),
+    Object.keys(ideaFiles).flatMap(() => ["*", "*", undefined]),
+  );
 });
 
 test("idea file refusals", async () => {
