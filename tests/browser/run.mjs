@@ -410,6 +410,7 @@ async function capture(outdir, referencePath) {
     let longProject = false;
     let refBoard = false;
     let leadAgentsBoard = false;
+    let tallAgentsBoard = false;
     const failed = [];
     const onlyViews = process.env.FACTORY_CAPTURE_VIEWS?.split(",");
     const waitLiveDot = (page) =>
@@ -543,6 +544,29 @@ async function capture(outdir, referencePath) {
                               stage: "pr-open",
                               pr: "https://github.com/example/sample/pull/101",
                               paseo: { server: "srv-a", agent: "agent-lead" },
+                            }
+                          : j,
+                      ),
+                    }),
+                  });
+                }
+                if (tallAgentsBoard && target.pathname === "/board.json") {
+                  const board = await fetch(target.href);
+                  const body = await board.json();
+                  return request.respond({
+                    status: board.status,
+                    contentType: "application/json",
+                    headers: { ETag: board.headers.get("ETag") ?? "" },
+                    body: JSON.stringify({
+                      ...body,
+                      jobs: body.jobs.map((j) =>
+                        j.id === "101-wrap-doc-line"
+                          ? {
+                              ...j,
+                              agents: Array.from(
+                                { length: 17 },
+                                (_, i) => j.agents[i % j.agents.length],
+                              ),
                             }
                           : j,
                       ),
@@ -689,6 +713,21 @@ async function capture(outdir, referencePath) {
         document.getElementById("d-doc").scrollTop = 400;
       });
     };
+    const openMidScrolled = async (page, side) => {
+      await openScrolled(page, side);
+      await page.evaluate(() => {
+        document.getElementById("d-doc").scrollTop = 40;
+      });
+    };
+    const openNotice = async (page, side) => {
+      await openScrolled(page, side);
+      await page.evaluate(() => {
+        const err = document.getElementById("d-rerun-err");
+        err.textContent = "Synthetic rerun failure.";
+        err.hidden = false;
+        document.getElementById("d-doc").scrollTop = 300;
+      });
+    };
     const openAnswers = async (page, side) => {
       await openDrawer(page, side);
       await page.click('.tab[data-name="answers.md"]');
@@ -776,6 +815,8 @@ async function capture(outdir, referencePath) {
     await view("drawer-desktop", 1440, 900, "light", openDrawer);
     await view("drawer-mobile", 390, 844, "dark", openDrawer);
     await view("drawer-mobile-scrolled", 375, 667, "dark", openScrolled);
+    await view("drawer-mobile-midscroll", 390, 844, "dark", openMidScrolled);
+    await view("drawer-mobile-notice", 390, 844, "dark", openNotice);
     await view("drawer-desktop-scrolled", 1440, 900, "light", openScrolled);
     await view("answers-desktop", 1440, 900, "light", openAnswers);
     await view("answers-mobile", 390, 844, "dark", openAnswers);
@@ -1169,6 +1210,21 @@ async function capture(outdir, referencePath) {
       await view("agent-runs-lead-360", 1280, 900, "light", openLeadAgents360);
     } finally {
       leadAgentsBoard = false;
+    }
+    // A phone drawer whose open agents table is taller than the screen, scrolled to its last row.
+    const openTallAgents = async (page) => {
+      await openLeadAgents(page);
+      await page.evaluate(() => {
+        const rows = document.querySelectorAll("#d-agents tbody tr");
+        const last = rows[rows.length - 1].getBoundingClientRect().bottom;
+        document.getElementById("d-doc").scrollTop = last - innerHeight + 8;
+      });
+    };
+    tallAgentsBoard = true;
+    try {
+      await view("drawer-mobile-agents", 390, 844, "dark", openTallAgents, true);
+    } finally {
+      tallAgentsBoard = false;
     }
     const openChatDrawer = async (page) => {
       await page.evaluate(() => {
