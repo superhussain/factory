@@ -1,5 +1,5 @@
 // The New idea dialog attaches PDF, CSV, text, MP4 and WebM files, and the drawer lists them
-// as download links.
+// as download links. MP4 and WebM also play in the drawer.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import { recordClip } from "../support/webm-clip.mjs";
 
 const SEED = "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n";
 const FILES = {
@@ -16,8 +17,13 @@ const FILES = {
   "evil.html": "<script>alert(1)</script>\n",
   "fake.pdf": "hello",
 };
-const name = (file) =>
-  createHash("sha256").update(FILES[file]).digest("hex") + file.slice(file.lastIndexOf("."));
+const name = (file, body = FILES[file]) =>
+  createHash("sha256").update(body).digest("hex") + file.slice(file.lastIndexOf("."));
+const BROKEN_MP4 = Buffer.concat([
+  Buffer.from([0, 0, 0, 0x18]),
+  Buffer.from("ftypisom"),
+  Buffer.alloc(12),
+]);
 const MOBILE = { width: 390, height: 844 };
 const DESKTOP = { width: 1280, height: 900 };
 const wait = { polling: 50 };
@@ -135,6 +141,69 @@ test("idea files", { timeout: 180000 }, async (t) => {
             getComputedStyle(document.getElementById("detail")).getPropertyValue("--head-collapse"),
           ),
           "0px",
+        );
+      });
+
+      await t.test("F5 the drawer plays clip.webm and falls back on broken.mp4", async () => {
+        const clip = await recordClip(browser, origin);
+        await writeFile(path("clip.webm"), clip);
+        await writeFile(path("broken.mp4"), BROKEN_MP4);
+        const clipName = name("clip.webm", clip);
+        await look(MOBILE);
+        await page.goto("about:blank");
+        await page.goto(`${origin}/`, { waitUntil: "load" });
+        await page.waitForFunction(() => !document.getElementById("new-idea").hidden, wait);
+        await page.click("#new-idea");
+        await page.type("#idea-text", "Play the attached screen clip.");
+        await add("clip.webm", "broken.mp4");
+        await page.click("#idea-add");
+        await page.waitForFunction(() => !document.getElementById("idea-dlg").open, wait);
+        const board = await (await fetch(`${origin}/api/board`)).json();
+        const job = board.jobs.find((j) => j.idea === "Play the attached screen clip.");
+        assert.deepEqual(job.idea_files, [clipName, name("broken.mp4", BROKEN_MP4)]);
+
+        const responses = [];
+        page.on("response", (response) => {
+          if (response.url().endsWith(`/api/idea-files/${clipName}`))
+            responses.push([response.status(), response.headers()["content-range"]]);
+        });
+        await page.goto("about:blank");
+        await page.goto(`${origin}/#${job.id}/idea`, { waitUntil: "load" });
+        await page.waitForFunction(
+          () =>
+            document.querySelectorAll("#d-files a").length === 2 &&
+            document.querySelector("#d-files video")?.readyState >= 1 &&
+            document.querySelector("#d-files p.bad"),
+          wait,
+        );
+        assert.deepEqual(
+          await page.$$eval("#d-files li", (items) =>
+            items.map((li) => [
+              li.firstElementChild.tagName,
+              li.firstElementChild.getAttribute("aria-label") ?? li.firstElementChild.textContent,
+              li.querySelector("a").textContent,
+            ]),
+          ),
+          [
+            ["VIDEO", "Video 1 (WebM)", "Download file 1 (WebM)"],
+            ["P", "Video 2 cannot play here. Use its download link.", "Download file 2 (MP4)"],
+          ],
+        );
+        assert.equal(await page.$$eval("#d-files video", (videos) => videos.length), 1);
+        assert.equal(await page.$eval("#d-files video", (v) => v.videoWidth), 160);
+        assert.ok(
+          responses.some(([status, range]) => status === 206 && range?.startsWith("bytes 0-")),
+          JSON.stringify(responses),
+        );
+        await capture("idea-video-drawer-390.png");
+
+        const before = await page.$("#d-files video");
+        await page.evaluate(() => renderDetail());
+        assert.ok(
+          await page.evaluate(
+            (video) => video.isConnected && video === document.querySelector("#d-files video"),
+            before,
+          ),
         );
       });
 
