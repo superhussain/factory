@@ -172,6 +172,56 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       near(gap, 4, "menu gap");
     });
 
+    await t.test("D9", async () => {
+      await open("spec");
+      await scrollTo(300);
+      await page.evaluate(() => {
+        const err = document.getElementById("d-rerun-err");
+        err.textContent = "Synthetic rerun failure.";
+        err.hidden = false;
+      });
+      await scrollTo(300);
+      const s = await page.evaluate(() => {
+        const err = document.getElementById("d-rerun-err");
+        const r = err.getBoundingClientRect();
+        return {
+          errTop: r.top,
+          errBottom: r.bottom,
+          hit: err.contains(document.elementFromPoint(r.left + 4, r.top + r.height / 2)),
+          inert: err.inert,
+          metaInert: document.getElementById("d-meta").inert,
+          titleBottom: document.getElementById("d-title").getBoundingClientRect().bottom,
+          tabsTop: document.getElementById("d-tabs").getBoundingClientRect().top,
+        };
+      });
+      near(s.errTop, s.titleBottom, "notice under title");
+      assert.ok(s.tabsTop >= s.errBottom, `tabs ${s.tabsTop}, notice bottom ${s.errBottom}`);
+      assert.equal(s.hit, true);
+      assert.equal(s.inert, false);
+      assert.equal(s.metaInert, true);
+    });
+
+    await t.test("D10", async () => {
+      await open("spec");
+      await page.evaluate(() => {
+        const pr = document.getElementById("d-pr");
+        pr.href = "https://github.com/example/sample/pull/1";
+        pr.textContent = "PR #1";
+        pr.hidden = false;
+      });
+      await scrollTo(20);
+      await page.focus("#d-actions");
+      await page.keyboard.down("Shift");
+      await page.keyboard.press("Tab");
+      await page.keyboard.up("Shift");
+      assert.equal(await page.evaluate(() => document.activeElement.id), "d-pr");
+      await page.evaluate(
+        () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+      );
+      assert.equal((await state()).scrollTop, 0);
+      assert.equal(await page.$eval("#d-tabs", (el) => el.style.transform), "");
+    });
+
     assert.deepEqual(errors, []);
   });
 });
