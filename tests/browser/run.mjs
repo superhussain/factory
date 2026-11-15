@@ -400,6 +400,7 @@ async function capture(outdir, referencePath) {
     let archiveSearchFails = false;
     let longProject = false;
     let refBoard = false;
+    let leadAgentsBoard = false;
     const failed = [];
     const onlyViews = process.env.FACTORY_CAPTURE_VIEWS?.split(",");
     const waitLiveDot = (page) =>
@@ -511,6 +512,28 @@ async function capture(outdir, referencePath) {
                                 { kind: "follow-up-of", id: "004-rework-capture" },
                                 { kind: "follow-up-of", id: "001-capture" },
                               ],
+                            }
+                          : j,
+                      ),
+                    }),
+                  });
+                }
+                if (leadAgentsBoard && target.pathname === "/board.json") {
+                  const board = await fetch(target.href);
+                  const body = await board.json();
+                  return request.respond({
+                    status: board.status,
+                    contentType: "application/json",
+                    headers: { ETag: board.headers.get("ETag") ?? "" },
+                    body: JSON.stringify({
+                      ...body,
+                      jobs: body.jobs.map((j) =>
+                        j.id === "101-wrap-doc-line"
+                          ? {
+                              ...j,
+                              stage: "pr-open",
+                              pr: "https://github.com/example/sample/pull/101",
+                              paseo: { server: "srv-a", agent: "agent-lead" },
                             }
                           : j,
                       ),
@@ -1110,6 +1133,26 @@ async function capture(outdir, referencePath) {
     };
     await view("agent-runs-390", 390, 844, "dark", openAgentRuns, true);
     await view("agent-runs-1280", 1280, 900, "light", openAgentRuns);
+    const openLeadAgents = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#101-wrap-doc-line";
+      });
+      await page.waitForFunction(
+        () => document.getElementById("d-title").textContent === "Synthetic wrap doc line",
+      );
+      await page.waitForSelector("#d-agents:not([hidden])");
+      await page.evaluate(() => {
+        document.getElementById("d-agents").open = true;
+      });
+      return clipOf(page, ".detail-head");
+    };
+    leadAgentsBoard = true;
+    try {
+      await view("agent-runs-lead-390", 390, 844, "dark", openLeadAgents, true);
+      await view("agent-runs-lead-1280", 1280, 900, "light", openLeadAgents);
+    } finally {
+      leadAgentsBoard = false;
+    }
     const openChatDrawer = async (page) => {
       await page.evaluate(() => {
         location.hash = "#106-chat-approved";
