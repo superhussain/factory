@@ -2154,7 +2154,7 @@ function pngEnvelope(b) {
   return [0, w, h];
 }
 
-// Create-only, so a repeat upload of the same bytes succeeds without rewriting the object.
+// Create-only first. A repeat upload rewrites the same bytes to reset the idea upload sweep clock.
 async function ideaImagePut(request, env, name) {
   if (request.headers.get("Content-Type") !== "image/png")
     return reply("Content-Type must be image/png", 415);
@@ -2165,8 +2165,7 @@ async function ideaImagePut(request, env, name) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
   const hex = Array.from(digest, (x) => x.toString(16).padStart(2, "0")).join("");
   if (`${hex}.png` !== name) return reply("SHA-256 does not match the file name", 400);
-  await env.BUCKET.put(`idea-images/${name}`, body, {
-    onlyIf: new Headers({ "If-None-Match": "*" }),
+  const options = {
     httpMetadata: { contentType: "image/png" },
     customMetadata: {
       sha256: hex,
@@ -2174,7 +2173,11 @@ async function ideaImagePut(request, env, name) {
       height: String(h),
       length: String(body.length),
     },
-  });
+  };
+  const key = `idea-images/${name}`;
+  const onlyIf = new Headers({ "If-None-Match": "*" });
+  if (!(await env.BUCKET.put(key, body, { ...options, onlyIf })))
+    await env.BUCKET.put(key, body, options);
   return reply("ok");
 }
 
@@ -2198,7 +2201,8 @@ function ideaFileFormatOk(ext, b) {
   }
 }
 
-// Create-only, like ideaImagePut, so a repeat upload of the same bytes changes nothing.
+// Create-only first, like ideaImagePut. A repeat upload rewrites the same bytes to reset the
+// idea upload sweep clock.
 async function ideaFilePut(request, env, name) {
   const ext = name.slice(65);
   const { type, max, label } = IDEA_FILE_TYPES[ext];
@@ -2212,11 +2216,14 @@ async function ideaFilePut(request, env, name) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
   const hex = Array.from(digest, (x) => x.toString(16).padStart(2, "0")).join("");
   if (`${hex}.${ext}` !== name) return reply("SHA-256 does not match the file name", 400);
-  await env.BUCKET.put(`idea-files/${name}`, body, {
-    onlyIf: new Headers({ "If-None-Match": "*" }),
+  const options = {
     httpMetadata: { contentType: type },
     customMetadata: { sha256: hex, length: String(body.length) },
-  });
+  };
+  const key = `idea-files/${name}`;
+  const onlyIf = new Headers({ "If-None-Match": "*" });
+  if (!(await env.BUCKET.put(key, body, { ...options, onlyIf })))
+    await env.BUCKET.put(key, body, options);
   return reply("ok");
 }
 
