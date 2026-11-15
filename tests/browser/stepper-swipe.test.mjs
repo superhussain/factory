@@ -337,6 +337,15 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       assert.deepEqual(await clean(), { peeks: 0, panning: 0, styled: 0 });
     });
 
+    await t.test("T12 touchcancel snaps back to step 1", async () => {
+      await open();
+      await press(line(300, 150, await stepY()), 16);
+      await touches("touchCancel", []);
+      await settled();
+      assert.equal((await state()).kicker, "Step 1 of 3");
+      assert.deepEqual(await clean(), { peeks: 0, panning: 0, styled: 0 });
+    });
+
     assert.deepEqual(errors, []);
   });
 });
