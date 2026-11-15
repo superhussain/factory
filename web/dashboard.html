@@ -556,6 +556,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .doc th, .agent-runs th { background: var(--code-bg); font-weight: 600; }
   .agent-runs th, .agent-runs td { min-width: 0; white-space: nowrap; }
   .agent-runs td a + a { margin-left: 8px; }
+  /* A long run list scrolls in its own box, so the tabs and page stay on a desktop screen. */
+  .detail-head > #d-agents .table-wrap { max-height: 40vh; overflow-y: auto; }
+  .agent-runs thead th { position: sticky; top: 0; z-index: 1; }
   .doc td code { overflow-wrap: anywhere; }
   .doc .mermaid { overflow-x: auto; margin: 1em 0; }
   .doc .mermaid svg { max-width: none; height: auto; }
@@ -605,6 +608,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head .close { flex: none; }
     .detail-head .links { order: 3; flex-basis: 100%; height: auto; }
     .detail-head > #d-agents { order: 4; }
+    .detail-head > #d-agents .table-wrap { max-height: none; }
     .detail-head .pr-link { margin-top: 8px; }
     .detail-head .job-actions { position: static; }
     .detail-head .job-actions-menu { top: calc(100% + 4px); right: 16px; }
