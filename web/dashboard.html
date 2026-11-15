@@ -315,6 +315,16 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   #edit-idea-dlg { max-height: calc(100dvh - 32px); overflow-y: auto; }
   #job-picker { max-height: calc(100dvh - 32px); }
+  #lightbox { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: rgba(0,0,0,.92); color: #fff; }
+  #lightbox[open] { display: grid; place-items: center; }
+  #lb-img { max-width: calc(100vw - 32px); max-height: calc(100dvh - 96px); object-fit: contain; }
+  #lb-count { position: absolute; top: 16px; left: 16px; margin: 0; font-size: 13px; }
+  #lightbox .btn.icon { position: absolute; min-width: 44px; min-height: 44px; }
+  #lb-close { top: 8px; right: 8px; }
+  #lb-prev, #lb-next { top: 50%; transform: translateY(-50%); }
+  #lb-prev { left: 8px; }
+  #lb-next { right: 8px; }
+  #lb-err { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); margin: 0; }
   #job-search { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
   #job-results { max-height: min(50dvh, 420px); overflow-y: auto; padding: 3px; }
   .job-option { padding: 8px; border-radius: 6px; overflow-wrap: anywhere; cursor: pointer; }
@@ -1087,6 +1097,14 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
   <div id="job-results" role="listbox" aria-label="Jobs"></div>
   <p id="job-empty" class="muted" hidden>No jobs found</p>
   <div class="actions"><button type="button" class="btn" id="job-picker-back" hidden>Back</button><button class="btn" id="job-picker-close" aria-label="Close job picker">Close</button></div>
+</dialog>
+<dialog id="lightbox" aria-label="Image viewer">
+  <img id="lb-img" alt="">
+  <p id="lb-count" aria-live="polite"></p>
+  <p class="err" id="lb-err" role="alert" hidden></p>
+  <button type="button" class="btn icon" id="lb-close" aria-label="Close image viewer"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+  <button type="button" class="btn icon" id="lb-prev" aria-label="Previous image"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M10 3 5 8l5 5"/></svg></button>
+  <button type="button" class="btn icon" id="lb-next" aria-label="Next image"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3l5 5-5 5"/></svg></button>
 </dialog>
 <script>
 // One column per stage, except needs-you, which collects every job waiting on you whatever its stage.
@@ -4616,6 +4634,58 @@ function renderGallery(j, f) {
     box.append(fig);
   });
 }
+
+// One full-screen viewer for every image place. It cycles through that place's images and
+// hands focus back to whatever opened it.
+let lbItems = [], lbIndex = 0, lbOpener = null, lbTouch = null;
+function openLightbox(items, index) {
+  lbItems = items;
+  lbIndex = index;
+  lbOpener = document.activeElement;
+  $('lb-prev').hidden = $('lb-next').hidden = items.length === 1;
+  showLightboxImage();
+  $('lightbox').showModal();
+}
+function showLightboxImage() {
+  const { src, alt } = lbItems[lbIndex];
+  $('lb-err').hidden = true;
+  $('lb-img').alt = alt;
+  $('lb-img').src = src;
+  $('lb-count').textContent = lbItems.length === 1 ? alt : 'Image ' + (lbIndex + 1) + ' of ' + lbItems.length;
+}
+function stepLightbox(delta) {
+  lbIndex = (lbIndex + delta + lbItems.length) % lbItems.length;
+  showLightboxImage();
+}
+$('lb-img').addEventListener('error', () => {
+  if (!lbItems.length) return;
+  $('lb-err').textContent = 'Image ' + (lbIndex + 1) + ' failed to load.';
+  $('lb-err').hidden = false;
+});
+$('lb-prev').addEventListener('click', () => stepLightbox(-1));
+$('lb-next').addEventListener('click', () => stepLightbox(1));
+$('lb-close').addEventListener('click', () => $('lightbox').close());
+$('lightbox').addEventListener('click', (e) => { if (e.target === $('lightbox')) $('lightbox').close(); });
+$('lightbox').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  e.stopPropagation();
+  e.preventDefault();
+  if (lbItems.length > 1) stepLightbox(e.key === 'ArrowRight' ? 1 : -1);
+});
+$('lightbox').addEventListener('touchstart', (e) => {
+  lbTouch = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+}, { passive: true });
+$('lightbox').addEventListener('touchend', (e) => {
+  if (!lbTouch || lbItems.length < 2) return;
+  const dx = e.changedTouches[0].clientX - lbTouch.x, dy = e.changedTouches[0].clientY - lbTouch.y;
+  lbTouch = null;
+  if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy)) stepLightbox(dx < 0 ? 1 : -1);
+});
+$('lightbox').addEventListener('close', () => {
+  $('lb-img').removeAttribute('src');
+  lbItems = [];
+  lbOpener?.focus();
+});
 
 // Pinned with SRI, loaded only when a doc has a diagram. If it fails, the blocks stay readable code.
 const MERMAID_URL = '/assets/mermaid.min.js';
