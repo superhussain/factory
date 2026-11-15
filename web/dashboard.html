@@ -588,8 +588,16 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head .pr-link { margin-top: 8px; }
     .detail-head .job-actions { position: static; }
     .detail-head .job-actions-menu { top: calc(100% + 4px); right: 16px; }
-    .detail.compact #d-meta, .detail.compact #d-pipeline, .detail.compact #d-chat, .detail.compact #d-held, .detail.compact #d-refs, .detail.compact #d-tracer-tasks, .detail.compact #d-agents, .detail.compact .detail-head .links, .detail.compact #d-assignment { display: none; }
     .doc { padding: 16px 16px 40px; }
+    /* On a phone the details under the title slide up with the page; syncHeadShift sets the shift. */
+    .detail-head { border-bottom: 0; }
+    .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
+    #d-title, .detail-head #d-babysit-bar, #d-actions, .detail-head .close { position: relative; z-index: 3; }
+    .detail-head .close { background: var(--panel); }
+    #d-meta, #d-pipeline, #d-chat, #d-held, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
+    #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
+    .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
+    .pager > .doc { padding-top: calc(16px + var(--head-collapse, 0px)); }
     .pager > .doc, .pager > .gallery { touch-action: pan-y pinch-zoom; }
   }
   @media (max-width: 360px) {
