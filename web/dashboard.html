@@ -623,6 +623,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
     .pager > .doc::before { content: ''; display: block; height: var(--head-collapse, 0px); }
+    /* With a gallery or file list shown, they ride over the page's spacer and scroll with it; syncHeadShift moves them. */
+    .detail.head-media .pager > .gallery, .detail.head-media .pager > .file-list { position: absolute; left: 0; right: 0; z-index: 0; }
+    .detail.head-media .pager > .gallery { max-height: none; overflow: visible; }
+    .pager > #d-doc::before { height: calc(var(--head-collapse, 0px) + var(--head-media, 0px)); }
     .pager > .doc, .pager > .gallery, .pager > .file-list { touch-action: pan-y pinch-zoom; }
   }
   @media (max-width: 360px) {
@@ -4840,17 +4844,20 @@ let swipeSettling = false;
 // On a phone the job details under the title slide up with the page, one pixel per pixel,
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
 // so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
+// On an idea tab the gallery and file list ride over the page's spacer and move with the page.
 const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
+const HEAD_MEDIA = '#d-gallery, #d-files';
 let headCollapse = 0;
 let headShift = 0;
 let headStop = null;
 let headMenuRest = 0;
 let headMenuMin = 0;
+let headMedia = [];
 function measureHead() {
   const detail = $('detail');
   const tabs = $('d-tabs');
   headCollapse = 0;
-  if (swipeMedia.matches && !detail.hidden && !tabs.hidden && $('d-gallery').hidden && $('d-files').hidden) {
+  if (swipeMedia.matches && !detail.hidden && !tabs.hidden) {
     const bar = Math.ceil($('d-title').getBoundingClientRect().bottom - detail.getBoundingClientRect().top);
     detail.style.setProperty('--bar-h', bar + 'px');
     headStop = detail.querySelector('.detail > .err:not([hidden]), .detail > .copy-status:not(:empty)') ?? tabs;
@@ -4859,6 +4866,15 @@ function measureHead() {
     headMenuMin = $('d-actions').offsetTop + $('d-actions').offsetHeight;
   }
   detail.style.setProperty('--head-collapse', headCollapse + 'px');
+  headMedia = headCollapse ? [$('d-gallery'), $('d-files')].filter((el) => !el.hidden) : [];
+  detail.classList.toggle('head-media', headMedia.length > 0);
+  let mediaTop = headCollapse;
+  for (const el of [$('d-gallery'), $('d-files')]) el.style.top = '';
+  for (const el of headMedia) {
+    el.style.top = mediaTop + 'px';
+    mediaTop += el.offsetHeight;
+  }
+  detail.style.setProperty('--head-media', mediaTop - headCollapse + 'px');
   syncHeadShift();
 }
 function syncHeadShift() {
@@ -4869,12 +4885,14 @@ function syncHeadShift() {
     el.inert = gone && Boolean(el.compareDocumentPosition(headStop) & Node.DOCUMENT_POSITION_FOLLOWING);
   }
   $('d-actions-menu').style.top = headShift ? Math.max(headMenuMin, headMenuRest - headShift) + 4 + 'px' : '';
+  const top = Math.max(0, $('d-doc').scrollTop);
+  for (const el of [$('d-gallery'), $('d-files')]) el.style.translate = top && headMedia.includes(el) ? '0 ' + -top + 'px' : '';
 }
 $('d-doc').addEventListener('scroll', syncHeadShift, { passive: true });
 // The details are outside the page's scroller, so the browser cannot bring a focused one into view.
 // A keyboard user tabbing onto one gets the page scrolled far enough to show it and its focus ring between the title band and the screen bottom.
 $('detail').addEventListener('focusin', (e) => {
-  if (!headCollapse || !e.target.closest(HEAD_MOVERS) || !e.target.matches(':focus-visible')) return;
+  if (!headCollapse || !e.target.closest(HEAD_MOVERS + ', ' + HEAD_MEDIA) || !e.target.matches(':focus-visible')) return;
   const r = e.target.getBoundingClientRect();
   const top = $('d-title').getBoundingClientRect().bottom;
   // Room for the 2 px focus outline and its 2 px offset.
@@ -4884,13 +4902,14 @@ $('detail').addEventListener('focusin', (e) => {
 });
 // The details sit outside the page's scroller. A touch drag on them already scrolls it, but a wheel does not, so pass it on.
 $('detail').addEventListener('wheel', (e) => {
-  if (!headCollapse || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || !e.target.closest(HEAD_MOVERS)) return;
+  if (!headCollapse || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || !e.target.closest(HEAD_MOVERS + ', ' + HEAD_MEDIA)) return;
   e.preventDefault();
   $('d-doc').scrollTop += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? $('d-doc').clientHeight : 1);
 }, { passive: false });
 swipeMedia.addEventListener('change', measureHead);
 const headObserver = new ResizeObserver(measureHead);
 for (const el of $('detail').children) if (!el.matches('.pager, .detail-resize')) headObserver.observe(el);
+for (const el of [$('d-gallery'), $('d-files')]) headObserver.observe(el);
 
 // Form fields, steppers and sideways scrollers (tables, code, diagrams) keep their own touches.
 function swipeBlocked(target) {
