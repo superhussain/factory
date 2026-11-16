@@ -2188,7 +2188,8 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
             if len(picked) == budget:
                 break
             # A job waiting on a human, or an unapproved explorer card, is never promoted.
-            if not j.get("project") or gated(j) or paused(j) or closing(j) or tracer_building(j):
+            if not j.get("project") or gated(j) or paused(j) or waiting_until(j) or closing(j) \
+                    or tracer_building(j):
                 continue
             repo = paths.get(j["project"])
             # The scheduler pastes the id into a shell command, so only well-formed ids pass.
@@ -2234,6 +2235,8 @@ def batch_problem(data, j, slug, device, session, minutes):
         return "paused"
     if closing(j):
         return "closing"
+    if waiting_until(j):
+        return f"not before {waiting_until(j)}"
     if j.get("idea_images"):
         return "has pasted images"
     if j.get("idea_files"):
@@ -3802,7 +3805,7 @@ def batch_holds(home, jobs, runnable):
     groups, starters = {}, {}
     for j in jobs:
         if j["stage"] == IDEA and prioritized(j) and j["priority"].get("batch") is True \
-                and not (gated(j) or paused(j) or closing(j) or tracer_building(j)):
+                and not (gated(j) or paused(j) or closing(j) or waiting_until(j) or tracer_building(j)):
             starters.setdefault(j["project"], j["id"])
         if batch_hold(j) and runnable(j):
             groups.setdefault(j["project"], []).append(j)
@@ -5159,6 +5162,12 @@ def paused(j):
     return isinstance(p, dict) and isinstance(p.get("at"), str)
 
 
+def waiting_until(j):
+    """The job's not_before stamp while it is still in the future, else None."""
+    t = j.get("not_before")
+    return t if isinstance(t, str) and NOT_BEFORE.fullmatch(t) and t > now() else None
+
+
 CLOSE_REASON = re.compile(r"[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}")
 
 
@@ -5692,6 +5701,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
             return f"skip {j['id']} {project}: paused"
         if closing(j):
             return f"skip {j['id']} {project}: closing"
+        if waiting_until(j):
+            return f"skip {j['id']} {project}: not before {waiting_until(j)}"
         if tracer_building(j):
             return f"skip {j['id']} {project}: building in Tracer"
         c = blocking(j, device, "", minutes)

@@ -1701,6 +1701,57 @@ class PauseTest(PickupFixture):
         self.assertEqual((self.sent, self.puts()), ([], []))
 
 
+class NotBeforeTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+
+    def test_future_stamp_is_skipped(self):
+        later = stamp(hours=10)
+        self.board["jobs"] = [idea("120-sample-digest", "alpha", not_before=later),
+                              idea("121-sample-next", "alpha")]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[0], f"skip 120-sample-digest alpha: not before {later}")
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, r"^launched 121-sample-next alpha on primary session [0-9a-f]{6}\n$")
+        self.assertNotIn("claim", self.job("120-sample-digest"))
+
+    def test_past_or_malformed_stamp_launches(self):
+        for value in (stamp(hours=-1), "soon"):
+            with self.subTest(value=value):
+                self.board["jobs"] = [idea("120-sample-digest", "alpha", not_before=value)]
+                code, out, err = self.pickup()
+                self.assertEqual((code, err), (0, ""))
+                self.assertRegex(out, r"^launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n$")
+
+    def test_claim_ideas_skips_a_deferred_job(self):
+        self.board["jobs"] = [idea("120-sample-digest", "alpha", not_before=stamp(hours=10)),
+                              idea("121-sample-next", "alpha")]
+        picked = factory.claim_ideas(self.home, DEVICE, "", 120, {"alpha": str(self.repo_a)}, 5)
+        self.assertEqual([p["id"] for p in picked], ["121-sample-next"])
+        self.assertNotIn("claim", self.job("120-sample-digest"))
+
+    def test_batch_problem_names_the_stamp(self):
+        later = stamp(hours=10)
+        j = idea("120-sample-digest", "alpha", not_before=later)
+        self.assertEqual(factory.batch_problem({"jobs": [j]}, j, "alpha", DEVICE, "tag", 120),
+                         f"not before {later}")
+
+    def test_deferred_batch_starter_holds_nothing(self):
+        later = stamp(hours=10)
+        held = [idea(job_id, "alpha", refs=FOLLOW, updated=stamp(minutes=-10)) for job_id in HELD[:3]]
+        self.board["jobs"] = held + [
+            idea("110-add-csv-export", "alpha", refs=FOLLOW, updated=stamp(minutes=-10), not_before=later,
+                 priority={"at": stamp(minutes=-1), "batch": True})]
+        code, out, err = self.pickup("--dry-run", "--max-inflight", "5")
+        self.assertEqual((code, err), (0, ""))
+        lines = out.splitlines()
+        self.assertIn(f"skip 110-add-csv-export alpha: not before {later}", lines)
+        self.assertFalse([line for line in lines if "batches behind" in line], lines)
+
+
 class CloseTest(PickupFixture):
     DECISION = "/api/jobs/alpha/042-sample-export/decision.md"
     REASON = "Duplicate of 041-sample-report"
