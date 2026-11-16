@@ -107,9 +107,24 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       page.evaluate(() => ({
         peeks: document.querySelectorAll(".step-peek").length,
         panning: document.querySelectorAll(".step-panning").length,
-        styled: document.querySelectorAll("#d-doc .step-panel[style], #d-doc .stepper[style]")
-          .length,
+        styled: document.querySelectorAll(
+          "#d-doc .step-panel[style], #d-doc .stepper[style], #d-doc .step-nav[style]",
+        ).length,
       }));
+    // The Back and Next row against the peek and the box bottom, at rest or mid-drag.
+    const navFit = () =>
+      page.evaluate(() => {
+        const box = document.querySelector("#d-doc .stepper");
+        const nav = box.querySelector(".step-nav").getBoundingClientRect();
+        const peek = box.querySelector(".step-panel.step-peek");
+        const cur = box.querySelector(".step-panel:not([hidden]):not(.step-peek)");
+        return {
+          under: Math.round(box.getBoundingClientRect().bottom - nav.bottom),
+          clipped: peek ? peek.scrollHeight > peek.clientHeight + 1 : false,
+          taller: peek ? peek.offsetHeight > cur.offsetHeight : false,
+          below: peek ? nav.top >= peek.getBoundingClientRect().bottom - 1 : true,
+        };
+      });
     const open = async () => {
       await page.setViewport(MOBILE);
       await page.goto("about:blank");
@@ -177,8 +192,23 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
       frame.evaluate(() => ({
         peeks: document.querySelectorAll("#steps .peek").length,
         panning: document.querySelectorAll("#steps.panning").length,
-        styled: document.querySelectorAll("#pane[style]").length,
+        styled: document.querySelectorAll("#pane[style], #steps[style], #steps .controls[style]")
+          .length,
       }));
+    // The same fit, for the walkthrough frame's Back and Next row.
+    const frameFit = (frame) =>
+      frame.evaluate(() => {
+        const steps = document.getElementById("steps");
+        const nav = steps.querySelector(".controls").getBoundingClientRect();
+        const peek = steps.querySelector(".peek");
+        const cur = document.getElementById("pane");
+        return {
+          under: Math.round(steps.getBoundingClientRect().bottom - nav.bottom),
+          clipped: peek ? peek.scrollHeight > peek.clientHeight + 1 : false,
+          taller: peek ? peek.offsetHeight > cur.offsetHeight : false,
+          below: peek ? nav.top >= peek.getBoundingClientRect().bottom - 1 : true,
+        };
+      });
     const capture = (name) => captureDir && page.screenshot({ path: join(captureDir, name) });
     const stepY = () =>
       page.$eval("#d-doc .step-panel:not([hidden]) .step-title", (el) => {
@@ -418,36 +448,40 @@ test("stepper swipe", { timeout: 180000 }, async (t) => {
     await t.test("T14 mermaid in step 2 pans in mid-drag", async () => {
       await open();
       await page.waitForSelector("#d-doc .step-panel div.mermaid svg");
+      const rest = await navFit();
       await press(line(300, 150, await stepY()), 16);
       assert.ok(
         await page.$("#d-doc .step-panel.step-peek div.mermaid svg"),
         "the peek must hold the rendered diagram",
       );
-      const fit = await page.evaluate(() => {
-        const peek = document.querySelector("#d-doc .step-panel.step-peek");
-        const cur = document.querySelector("#d-doc .step-panel:not([hidden]):not(.step-peek)");
-        const box = peek.closest(".stepper");
-        return {
-          clipped: peek.scrollHeight > peek.clientHeight + 1,
-          inside: peek.getBoundingClientRect().bottom <= box.getBoundingClientRect().bottom,
-          taller: peek.offsetHeight > cur.offsetHeight,
-        };
-      });
-      assert.deepEqual(fit, { clipped: false, inside: true, taller: true });
+      const fit = await navFit();
+      assert.deepEqual(
+        { clipped: fit.clipped, taller: fit.taller, below: fit.below },
+        { clipped: false, taller: true, below: true },
+      );
+      assert.ok(Math.abs(fit.under - rest.under) <= 1, `under ${fit.under}, at rest ${rest.under}`);
       await capture("stepper-mermaid-mid-drag.png");
       await touch("touchEnd");
       await settled();
+      assert.deepEqual(await clean(), { peeks: 0, panning: 0, styled: 0 });
     });
 
     await t.test("T15 frame left drag pans step 2 in", async () => {
       await open();
       const { frame, y } = await openFrame();
+      const rest = await frameFit(frame);
       await press(line(300, 150, y), 16);
       await capture("frame-mid-drag.png");
       const mid = await framePan(frame);
       assert.ok(mid.x < 0, `pane x ${mid.x}`);
       assert.equal(mid.peek, "Step 2 of 2");
       assert.equal(mid.side, 1);
+      const fit = await frameFit(frame);
+      assert.deepEqual(
+        { clipped: fit.clipped, taller: fit.taller, below: fit.below },
+        { clipped: false, taller: true, below: true },
+      );
+      assert.ok(Math.abs(fit.under - rest.under) <= 1, `under ${fit.under}, at rest ${rest.under}`);
       await touch("touchEnd");
       await frameSettled(frame);
       assert.match(await frame.$eval("#kicker", (e) => e.textContent), /Step 2 of 2/);

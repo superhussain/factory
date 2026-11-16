@@ -433,6 +433,7 @@ document.addEventListener('keydown', (e) => {
 // A sideways swipe on the steps pans to the next or previous step, like the dashboard stepper. Sideways scrollers keep their touches.
 {
   const stepsEl = $('steps');
+  const controls = stepsEl.querySelector('.controls');
   const SWIPE_MS = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220;
   const SWIPE_EASE = 'cubic-bezier(.2, .8, .2, 1)';
   const sideways = (el) => {
@@ -442,10 +443,11 @@ document.addEventListener('keydown', (e) => {
     return false;
   };
   let x0 = 0, y0 = 0, x = 0, swiping = null, pan = null, settling = false;
-  // The neighbour step, rendered into a copy of the pane and pinned over it so it can slide in beside it.
+  // The neighbour step, rendered into a copy of the pane and pinned over it at its own height so it can slide in beside it.
   const peekAt = (d) => {
     if (pan && pan.d === d) return;
     if (pan) pan.peek.remove();
+    stepsEl.style.minHeight = '';
     const pane = $('pane'), keep = i, n = steps().length, k = (i + d + n) % n;
     i = k;
     render();
@@ -459,9 +461,13 @@ document.addEventListener('keydown', (e) => {
     peek.style.top = pane.offsetTop + 'px';
     peek.style.left = pane.offsetLeft + 'px';
     peek.style.width = pane.offsetWidth + 'px';
-    peek.style.height = pane.offsetHeight + 'px';
     stepsEl.classList.add('panning');
     stepsEl.append(peek);
+    // The steps grow by however much taller the peek is, and Back and Next move down by the same amount.
+    const extra = Math.max(0, peek.offsetHeight - pane.offsetHeight);
+    stepsEl.style.minHeight = stepsEl.offsetHeight + extra + 'px';
+    controls.style.transition = 'none';
+    controls.style.transform = 'translateY(' + extra + 'px)';
     pan = { d, k, tab, i: keep, peek };
   };
   const move = (off) => {
@@ -480,10 +486,13 @@ document.addEventListener('keydown', (e) => {
     pane.style.transition = p.peek.style.transition = transition;
     pane.style.transform = 'translateX(' + end + 'px)';
     p.peek.style.transform = 'translateX(' + (end + p.d * w) + 'px)';
+    if (!commit) { controls.style.transition = transition; controls.style.transform = 'translateY(0)'; }
     setTimeout(() => {
       p.peek.remove();
       // Chrome writes inline style changes to the attribute lazily; read it first, or removing it leaves style="".
       if (pane.hasAttribute('style')) pane.removeAttribute('style');
+      if (controls.hasAttribute('style')) controls.removeAttribute('style');
+      if (stepsEl.hasAttribute('style')) stepsEl.removeAttribute('style');
       stepsEl.classList.remove('panning');
       if (commit && tab === p.tab && i === p.i) {
         i = p.k;

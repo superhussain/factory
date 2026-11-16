@@ -4485,7 +4485,7 @@ function makeStepper(steps, saveKey) {
     const b = e.target.closest('.step-pill');
     if (b) show([...pills.children].indexOf(b));
   });
-  addStepSwipe(box, panels, () => at, show);
+  addStepSwipe(box, panels, nav, () => at, show);
   back.addEventListener('click', () => show(at - 1));
   next.addEventListener('click', () => show(at + 1));
   // Arrows step only while focus is inside the stepper; elsewhere they still move between tabs and cards.
@@ -4985,7 +4985,7 @@ function sidewaysScroller(target, stop) {
 }
 
 // A sideways swipe inside a stepper pans to the next or previous step, like the page swipe, and never changes the page.
-function addStepSwipe(box, panels, current, go) {
+function addStepSwipe(box, panels, nav, current, go) {
   let g = null;
   let settling = false;
   // The neighbour step, pinned over the current one so it can slide in beside it.
@@ -5005,8 +5005,12 @@ function addStepSwipe(box, panels, current, go) {
     peek.classList.add('step-peek');
     peek.removeAttribute('hidden');
     box.classList.add('step-panning');
-    // The peek keeps its own height, so the box grows by however much taller it is.
-    box.style.minHeight = box.offsetHeight + Math.max(0, peek.offsetHeight - cur.offsetHeight) + 'px';
+    // The peek keeps its own height. The box grows by however much taller it is,
+    // and the Back and Next row moves down by the same amount, so it stays below the peek.
+    const extra = Math.max(0, peek.offsetHeight - cur.offsetHeight);
+    box.style.minHeight = box.offsetHeight + extra + 'px';
+    nav.style.transition = 'none';
+    nav.style.transform = 'translateY(' + extra + 'px)';
     g.d = d;
     g.peek = peek;
   };
@@ -5026,6 +5030,7 @@ function addStepSwipe(box, panels, current, go) {
     panels[g.at].style.transform = 'translateX(' + end + 'px)';
     g.peek.style.transition = transition;
     g.peek.style.transform = 'translateX(' + (end + g.d * w) + 'px)';
+    if (!commit) { nav.style.transition = transition; nav.style.transform = 'translateY(0)'; }
     setTimeout(() => {
       for (const p of panels) {
         // Chrome writes inline style changes to the attribute lazily; read it first, or removing it leaves style="".
@@ -5033,6 +5038,7 @@ function addStepSwipe(box, panels, current, go) {
         p.classList.remove('step-peek');
       }
       if (box.hasAttribute('style')) box.removeAttribute('style');
+      if (nav.hasAttribute('style')) nav.removeAttribute('style');
       box.classList.remove('step-panning');
       go(commit ? panels.indexOf(g.peek) : current());
       settling = false;
