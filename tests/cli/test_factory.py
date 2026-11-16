@@ -2262,6 +2262,126 @@ class IdeaImagesTest(IsolatedTestCase):
         self.assertIn(f"](idea-image-{self.name1})", md)
 
 
+class IdeaFilesTest(IsolatedTestCase):
+    """idea-files fetches attached files into the job folder, hash-checked, never pushed."""
+
+    request = IdeaImagesTest.request
+    job_file = IdeaImagesTest.job_file
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(factory, "factory_home", return_value=self.home).start()
+        (self.home / "config.md").write_text("---\ndevice: test\n---\n")
+        self.pdf = b"%PDF-1.4\n%%EOF\n"
+        self.csv = b"region,total\nnorth,12\n"
+        self.pdf_name = factory.sha(self.pdf) + ".pdf"
+        self.csv_name = factory.sha(self.csv) + ".csv"
+        self.job = {"id": "001-idea", "project": "sample", "stage": "idea",
+                    "idea": "Import the attached sales sheet.",
+                    "idea_files": [self.pdf_name, self.csv_name]}
+        self.store = {f"/api/idea-files/{self.pdf_name}": self.pdf,
+                      f"/api/idea-files/{self.csv_name}": self.csv}
+        self.set_board()
+        self.fail_one_put = 0
+        self.puts = []
+        patch.object(factory, "api", side_effect=self.request).start()
+        self.output = io.StringIO()
+        self.redirect = contextlib.redirect_stdout(self.output)
+        self.redirect.__enter__()
+        self.addCleanup(self.redirect.__exit__, None, None, None)
+
+    def set_board(self):
+        self.store["/api/board"] = factory.dump_board({"jobs": [self.job]}).encode()
+
+    def imported(self):
+        folder = self.job_file("")
+        return sorted(p.name for p in folder.glob("idea-file-*")) if folder.is_dir() else []
+
+    def test_import_writes_both_files_byte_exact_without_pushing(self):
+        factory.idea_files("sample/001-idea")
+        self.assertEqual(self.job_file(f"idea-file-{self.pdf_name}").read_bytes(), self.pdf)
+        self.assertEqual(self.job_file(f"idea-file-{self.csv_name}").read_bytes(), self.csv)
+        self.assertEqual(self.puts, [])
+        self.assertEqual(self.output.getvalue(),
+                         "imported 2 attached file(s) into sample/001-idea\n")
+
+    def test_job_without_files_writes_nothing(self):
+        del self.job["idea_files"]
+        self.set_board()
+        factory.idea_files("sample/001-idea")
+        self.assertEqual(self.output.getvalue(),
+                         "sample/001-idea has no attached files; nothing to import\n")
+        self.assertEqual(self.imported(), [])
+
+    def test_missing_or_corrupt_file_exits_5_and_writes_nothing(self):
+        del self.store[f"/api/idea-files/{self.csv_name}"]
+        with self.assertRaises(SystemExit) as raised, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            factory.idea_files("sample/001-idea")
+        self.assertEqual(raised.exception.code, 5)
+        self.assertIn(f"idea file {self.csv_name} is missing from the factory; nothing was written",
+                      err.getvalue())
+        self.assertEqual(self.imported(), [])
+        self.store[f"/api/idea-files/{self.csv_name}"] = self.csv[:-1]
+        with self.assertRaises(SystemExit) as raised, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            factory.idea_files("sample/001-idea")
+        self.assertEqual(raised.exception.code, 5)
+        self.assertIn(f"idea file {self.csv_name} does not match its name's SHA-256; "
+                      "nothing was written", err.getvalue())
+        self.assertEqual(self.imported(), [])
+
+    def test_malformed_lists_exit_6_and_write_nothing(self):
+        extra = [factory.sha(bytes([i])) + ".txt" for i in range(3)]
+        for names in (["../escape.pdf"], ["x.exe"], [self.pdf_name, self.csv_name, *extra],
+                      [self.pdf_name, self.pdf_name]):
+            self.job["idea_files"] = names
+            self.set_board()
+            with self.subTest(names=names):
+                with self.assertRaises(SystemExit) as raised, \
+                        contextlib.redirect_stderr(io.StringIO()) as err:
+                    factory.idea_files("sample/001-idea")
+                self.assertEqual(raised.exception.code, 6)
+                self.assertIn("001-idea's idea_files on the board is malformed; nothing was "
+                              "imported", err.getvalue())
+        self.assertEqual(self.imported(), [])
+        self.assertEqual(self.puts, [])
+
+    def test_differing_local_copy_exits_6_and_keeps_its_bytes(self):
+        path = self.job_file(f"idea-file-{self.csv_name}")
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"a human's edit\n")
+        with self.assertRaises(SystemExit) as raised, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            factory.idea_files("sample/001-idea")
+        self.assertEqual(raised.exception.code, 6)
+        self.assertIn(f"{path} differs from the factory's copy; nothing was overwritten. "
+                      "Inspect and delete it, then retry", err.getvalue())
+        self.assertEqual(path.read_bytes(), b"a human's edit\n")
+        self.assertEqual(self.imported(), [path.name])
+
+    def test_rerun_with_identical_files_succeeds(self):
+        factory.idea_files("sample/001-idea")
+        factory.idea_files("sample/001-idea")
+        self.assertEqual(self.job_file(f"idea-file-{self.pdf_name}").read_bytes(), self.pdf)
+        self.assertEqual(self.job_file(f"idea-file-{self.csv_name}").read_bytes(), self.csv)
+        self.assertEqual(self.puts, [])
+
+    def test_wrong_project_exits_2(self):
+        self.job["project"] = "other"
+        self.set_board()
+        with self.assertRaises(SystemExit) as raised, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            factory.idea_files("sample/001-idea")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("001-idea is not assigned to sample; project-less ideas have no job "
+                      "artifacts to import into", err.getvalue())
+        self.assertEqual(self.imported(), [])
+
+
 class ScratchpadSyncTest(IsolatedTestCase):
     """scratchpad.md travels through push and pull like any top-level job file."""
 

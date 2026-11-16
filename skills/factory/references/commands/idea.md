@@ -31,7 +31,10 @@ works from any directory.
    artifact. Exit 5 or 6 (a missing or mismatched image, an unresolved conflict, an
    unsafe path) stops the promotion: report it and do not patch the stage or create
    the worktree. A retry is safe and re-pushes only what changed. A job without
-   `idea_images` imports nothing. `idea_files` stay on the board; nothing imports them yet.
+   `idea_images` imports nothing. If the job has `idea_files`, also run
+   `python3 <this skill's dir>/runtime/factory.py idea-files <project>/<id>`. It
+   fetches each attached file by its SHA-256 name and writes `idea-file-<name>` into
+   the job folder without pushing it. Exit 5 or 6 stops the promotion the same way.
 4. Do step one of `/factory <feature>` without the claim. Run `sync "$SLUG"`,
    then patch `{"stage": "spec", "round": 0, "rounds": [], "branch": "factory/<id>"}`,
    which keeps `project`, `title`, `idea`, and `refs`. Create the worktree with
@@ -66,6 +69,7 @@ works from any directory.
    as the feature text. When the job has pasted images, also give the spec writer
    `$JOBS/<id>/idea-images.md` and its images, so the spec starts from the idea's
    image context. Keep the idea text exact; the images never rewrite it.
+   Attached files reach the spec writer as `Idea file N:` lines in its prompt.
    When step 5 attached riders, the feature text is this job's `idea`, a blank line,
    the line `Batched ideas (spec each one):`, then one `- <id>: <idea>` line per entry
    in the command's `riders`.
