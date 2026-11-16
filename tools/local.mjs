@@ -5,7 +5,6 @@ import { spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { prepareAssets } from "./assets.mjs";
 
-const root = new URL("../", import.meta.url);
 const wrangler = new URL("../node_modules/.bin/wrangler", import.meta.url).pathname;
 const LOCAL_CONFIG = new URL("../tests/support/wrangler.json", import.meta.url).pathname;
 const AUTH_CONFIG = new URL("../tests/support/auth-wrangler.json", import.meta.url).pathname;

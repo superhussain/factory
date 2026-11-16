@@ -63,7 +63,7 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
       fetch(origin + path, {
         method,
         headers: { "Content-Type": "application/json", ...headers },
-        body,
+        ...(body === undefined ? {} : { body }),
       });
     assert.equal(
       (

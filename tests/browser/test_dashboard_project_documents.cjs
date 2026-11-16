@@ -454,66 +454,6 @@ async function missingEditRecovery(url, c) {
   );
 }
 
-async function recoveryControls(url, c, legacy) {
-  const p = c.page;
-  await open(c, second, "project");
-  assert.equal(await record(c, second, "project"), JSON.stringify(legacy));
-  const original = await protect(c, second, "project");
-  assert.equal(original.baseEtag, legacy.baseEtag);
-  await p.click("#settings-save");
-  await saved(c);
-  assert.equal(writes(c)[0].headers["if-match"], legacy.baseEtag);
-  assert.equal(await record(c, second, "project"), null);
-  await open(c, sample, "decisions.md");
-  assert.equal((await state(c, sample, "decisions.md")).mode, "create");
-  assert.equal(await disabled(c, "#settings-save"), false);
-  await p.focus("#settings-save");
-  await p.keyboard.press("Enter");
-  await saved(c);
-  assert.equal(writes(c)[1].headers["if-none-match"], "*");
-  assert.equal(writes(c)[1].body || "", "");
-  assert.equal((await read(url, sample, "decisions.md")).text, "");
-  assert.equal((await state(c, sample, "decisions.md")).mode, "edit");
-  await open(c, sample, "runbook.md");
-  const held = hold(c, "PUT", endpoint(sample, "runbook.md"));
-  await p.click("#settings-save");
-  const request = await held;
-  const empty = await protect(c, sample, "runbook.md");
-  assert.equal(empty.mode, "create");
-  assert.equal(empty.blocked, "uncertain");
-  assert.equal(empty.baseEtag, null);
-  assert.equal(empty.baseText, "");
-  assert.equal(empty.draftText, "");
-  assert.equal(request.headers()["if-none-match"], "*");
-  await answer(request, 500, "synthetic uncertain response");
-  await p.waitForFunction(
-    () => projectDocuments.get("documents-sample/runbook.md").phase === "uncertain",
-    { polling: 50 },
-  );
-  await reload(c);
-  await open(c, sample, "runbook.md");
-  assert.deepEqual(await protect(c, sample, "runbook.md"), empty);
-  await p.click("#settings-copy");
-  await p.waitForFunction(
-    () => document.getElementById("settings-status").textContent === "Draft copied",
-    { polling: 50 },
-  );
-  assert.deepEqual(await p.evaluate(() => window.copiedDrafts), [""]);
-  assert.equal(await disabled(c, "#settings-save"), true);
-  await confirmLoad(c, true);
-  await p.waitForFunction(
-    () => projectDocuments.get("documents-sample/runbook.md").phase !== "loading",
-    { polling: 50 },
-  );
-  assert.deepEqual(await protect(c, sample, "runbook.md"), empty);
-  assert.equal(await disabled(c, "#settings-save"), true);
-  assert.equal(writes(c).length, 3);
-  assert.equal((await read(url, sample, "runbook.md")).status, 404);
-  console.log(
-    "PASS focused positive controls: exact legacy schema/original If-Match, successful empty expected-absent creation, pending/failed empty uncertain create survives immediate reload/Copy/404 without retry",
-  );
-}
-
 async function focusAndViews(c) {
   const p = c.page;
   await input(c, (await state(c, second, "notes.md")).draftText + "\nKeyboard reachability draft");
