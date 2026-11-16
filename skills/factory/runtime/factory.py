@@ -53,6 +53,11 @@
                                             print one JSON line when every job file has a valid first
                                             line, one keeps an invalid first line, --pr's next leaves
                                             wait, or S seconds pass (default and max 540); runs hold first
+  factory.py round-wait <project-slug>/<job-id> <round> [--timeout S]
+                                            block until all four review files of round N have a verdict
+                                            line, write each verdict to the board's rounds entry as it
+                                            lands, print one JSON line (default and max 540 seconds); runs
+                                            hold first
   factory.py checks <project-slug>/<job-id> [--timeout S]
                                             print the job PR's checks as <bucket> <name> once none is
                                             pending, checking every 10 seconds for up to S seconds
@@ -6326,6 +6331,63 @@ def watch_cmd(target, *args):
         return
 
 
+ROUND_WAIT_USAGE = "usage: round-wait <project-slug>/<job-id> <round> [--timeout S]"
+REVIEWERS = ("security", "ux", "ui", "code")
+
+
+def round_wait_cmd(target, *args):
+    """Run hold once, then wait until all four review files of round N have a valid first line,
+    writing the board's rounds entry each time its verdicts change, and print one JSON line. A file
+    that keeps an invalid non-empty first line for two reads, or --timeout passing, also ends it."""
+    home, slug, job_id = r2_target(target, True)
+    if not re.fullmatch(r"[1-9][0-9]*", args[0]):
+        fail(f"bad round {args[0]!r}. " + ROUND_WAIT_USAGE, 2)
+    n, rest, timeout = int(args[0]), args[1:], WATCH_TIMEOUT
+    if rest:
+        if len(rest) != 2 or rest[0] != "--timeout" or not re.fullmatch(r"[0-9]+", rest[1]) \
+                or not 1 <= int(rest[1]) <= WATCH_TIMEOUT:
+            fail("--timeout takes one value from 1 to 540 seconds. " + ROUND_WAIT_USAGE, 2)
+        timeout = int(rest[1])
+    hold(target)
+
+    def board_rounds():
+        job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
+        rounds = (job or {}).get("rounds")
+        if not isinstance(rounds, list) or len(rounds) < n:
+            fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
+        return list(rounds)
+
+    written = board_rounds()[n - 1]
+    folder = home / "jobs" / slug / job_id
+    artifacts = {r: f"round-{n}/review-{r}.md" for r in REVIEWERS}
+    start = time.monotonic()
+    deadline = start + timeout
+    bad_before = {}
+    while True:
+        lines = job_file_lines(folder, artifacts.values())
+        valid = {a: lines[a] for a in artifacts.values() if a in lines and wait_valid(a, lines[a])}
+        verdicts = {r: valid[a][len("VERDICT: "):] if a in valid else "pending" for r, a in artifacts.items()}
+        if verdicts != written:
+            rounds = board_rounds()
+            rounds[n - 1] = verdicts
+            board_write(home, job_id, {"rounds": rounds}, show=False)
+            written = verdicts
+        bad = {a: line for a, line in lines.items() if line.strip() and a not in valid}
+        if len(valid) == len(artifacts):
+            event = "round"
+        elif any(bad_before.get(a) == line for a, line in bad.items()):
+            event = "malformed"
+        elif time.monotonic() >= deadline:
+            event = "timeout"
+        else:
+            bad_before = bad
+            time.sleep(1)
+            continue
+        print(json.dumps({"event": event, "round": n, "verdicts": verdicts,
+                          "files": {a: lines.get(a) for a in artifacts.values()},
+                          "elapsed": int(time.monotonic() - start)}))
+        return
+
 CHECKS_USAGE = "usage: checks <project-slug>/<job-id> [--timeout S]"
 CHECKS_INTERVAL = 10
 CHECKS_REGISTER = 120
@@ -9863,6 +9925,7 @@ COMMANDS["documents"] = (documents_cmd, 1, 1)
 COMMANDS["prompt"] = (prompt_cmd, 2, 8)
 COMMANDS["wait"] = (wait_cmd, 2, 23)
 COMMANDS["watch"] = (watch_cmd, 2, 24)
+COMMANDS["round-wait"] = (round_wait_cmd, 2, 4)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
 COMMANDS["pr-state"] = (pr_state_cmd, 1, 3)
 COMMANDS["pr-queue"] = (pr_queue_cmd, 1, 1)
