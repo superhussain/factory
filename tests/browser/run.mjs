@@ -15,6 +15,7 @@ import { prepareAssets } from "../../tools/assets.mjs";
 import { startLocal } from "../../tools/local.mjs";
 import { browserExecutable } from "../support/browser-server.mjs";
 import { recordClip } from "../support/webm-clip.mjs";
+import { png } from "../support/png.mjs";
 import owned from "../support/owned-origin.cjs";
 import { clickNow } from "../support/board-ready.cjs";
 import { retryCapture } from "./capture-retry.mjs";
@@ -398,6 +399,9 @@ async function capture(outdir, referencePath) {
     const clip = await recordClip(browser, origin);
     const clipName = sha(clip) + ".webm";
     await put(origin, "/api/idea-files/" + clipName, clip, "video/webm");
+    const ideaImage = png(320, 200, [33, 118, 174]);
+    const ideaImageName = sha(ideaImage) + ".png";
+    await put(origin, "/api/idea-images/" + ideaImageName, ideaImage, "image/png");
 
     const served = await fetch(origin + "/");
     const servedCsp = served.headers.get("Content-Security-Policy");
@@ -600,6 +604,7 @@ async function capture(outdir, referencePath) {
                                   { length: 40 },
                                   (_, i) => `Synthetic idea paragraph ${i + 1}.`,
                                 ).join("\n\n"),
+                              idea_images: [ideaImageName],
                               idea_files: ["a".repeat(64) + ".pdf", "b".repeat(64) + ".csv"],
                             }
                           : j,
@@ -1347,6 +1352,10 @@ async function capture(outdir, referencePath) {
         location.hash = "#101-wrap-doc-line/idea";
       });
       await page.waitForFunction(() => document.querySelectorAll("#d-files a").length === 2);
+      await page.waitForFunction(() => {
+        const img = document.querySelector("#d-gallery img");
+        return img?.complete && img.naturalWidth > 0;
+      });
     };
     const openIdeaFilesMid = async (page) => {
       await openIdeaFiles(page);
