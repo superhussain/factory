@@ -9,7 +9,7 @@ import {
   HOST_NAME,
   validatePipeline,
 } from "./admission.js";
-import { archiveGet, needsTriageKey, runArchive } from "./archive.js";
+import { ARCHIVE_KEY, archiveGet, needsTriageKey, runArchive } from "./archive.js";
 import {
   DASHBOARD_VERSION,
   escapeHtml,
@@ -1823,6 +1823,49 @@ async function pruneRetroRuns(env, now) {
   return { status: "pruned", deleted };
 }
 
+const IDEA_ORPHAN_GRACE_MS = 2 * DAY_MS;
+
+// Deletes idea uploads older than IDEA_ORPHAN_GRACE_MS that no board or archive row names.
+// The board is read before the archive, since runArchive writes the archive first.
+async function pruneIdeaUploads(env, now) {
+  const named = new Set();
+  for (const key of ["board.json", ARCHIVE_KEY]) {
+    const object = await env.BUCKET.get(key);
+    if (!object && key === ARCHIVE_KEY) continue;
+    let jobs;
+    try {
+      jobs = JSON.parse(await object.text()).jobs;
+    } catch {}
+    if (!Array.isArray(jobs)) {
+      console.warn(`idea upload sweep skipped: ${key} is unreadable`);
+      return { status: "skipped", deleted: [] };
+    }
+    for (const j of jobs) {
+      for (const n of j?.idea_images ?? [])
+        if (typeof n === "string") named.add(`idea-images/${n}`);
+      for (const n of j?.idea_files ?? []) if (typeof n === "string") named.add(`idea-files/${n}`);
+    }
+  }
+  const cutoff = now.getTime() - IDEA_ORPHAN_GRACE_MS;
+  const deleted = [];
+  for (const prefix of ["idea-images/", "idea-files/"]) {
+    let cursor;
+    do {
+      const page = await env.BUCKET.list({ prefix, cursor });
+      for (const { key, uploaded } of page.objects) {
+        if (named.has(key) || uploaded.getTime() >= cutoff) continue;
+        const fresh = await env.BUCKET.head(key);
+        if (fresh && fresh.uploaded.getTime() < cutoff) {
+          await env.BUCKET.delete(key);
+          deleted.push(key);
+        }
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+  }
+  return { status: "pruned", deleted };
+}
+
 // Raw image bytes, never decoded as text, or null past the cap.
 const readImage = (request) => readCapped(request, MAX_IMAGE);
 
@@ -2155,7 +2198,7 @@ function pngEnvelope(b) {
   return [0, w, h];
 }
 
-// Create-only, so a repeat upload of the same bytes succeeds without rewriting the object.
+// Create-only first. A repeat upload rewrites the same bytes to reset the idea upload sweep clock.
 async function ideaImagePut(request, env, name) {
   if (request.headers.get("Content-Type") !== "image/png")
     return reply("Content-Type must be image/png", 415);
@@ -2166,8 +2209,7 @@ async function ideaImagePut(request, env, name) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
   const hex = Array.from(digest, (x) => x.toString(16).padStart(2, "0")).join("");
   if (`${hex}.png` !== name) return reply("SHA-256 does not match the file name", 400);
-  await env.BUCKET.put(`idea-images/${name}`, body, {
-    onlyIf: new Headers({ "If-None-Match": "*" }),
+  const options = {
     httpMetadata: { contentType: "image/png" },
     customMetadata: {
       sha256: hex,
@@ -2175,7 +2217,11 @@ async function ideaImagePut(request, env, name) {
       height: String(h),
       length: String(body.length),
     },
-  });
+  };
+  const key = `idea-images/${name}`;
+  const onlyIf = new Headers({ "If-None-Match": "*" });
+  if (!(await env.BUCKET.put(key, body, { ...options, onlyIf })))
+    await env.BUCKET.put(key, body, options);
   return reply("ok");
 }
 
@@ -2199,7 +2245,8 @@ function ideaFileFormatOk(ext, b) {
   }
 }
 
-// Create-only, like ideaImagePut, so a repeat upload of the same bytes changes nothing.
+// Create-only first, like ideaImagePut. A repeat upload rewrites the same bytes to reset the
+// idea upload sweep clock.
 async function ideaFilePut(request, env, name) {
   const ext = name.slice(65);
   const { type, max, label } = IDEA_FILE_TYPES[ext];
@@ -2213,11 +2260,14 @@ async function ideaFilePut(request, env, name) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
   const hex = Array.from(digest, (x) => x.toString(16).padStart(2, "0")).join("");
   if (`${hex}.${ext}` !== name) return reply("SHA-256 does not match the file name", 400);
-  await env.BUCKET.put(`idea-files/${name}`, body, {
-    onlyIf: new Headers({ "If-None-Match": "*" }),
+  const options = {
     httpMetadata: { contentType: type },
     customMetadata: { sha256: hex, length: String(body.length) },
-  });
+  };
+  const key = `idea-files/${name}`;
+  const onlyIf = new Headers({ "If-None-Match": "*" });
+  if (!(await env.BUCKET.put(key, body, { ...options, onlyIf })))
+    await env.BUCKET.put(key, body, options);
   return reply("ok");
 }
 
@@ -2397,6 +2447,7 @@ export default {
     ctx.waitUntil(runArchive(env, new Date(controller.scheduledTime)));
     ctx.waitUntil(pruneRetro(env, new Date(controller.scheduledTime)));
     ctx.waitUntil(pruneRetroRuns(env, new Date(controller.scheduledTime)));
+    ctx.waitUntil(pruneIdeaUploads(env, new Date(controller.scheduledTime)));
   },
 };
 

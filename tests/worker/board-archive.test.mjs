@@ -260,8 +260,9 @@ test("a refused archive write warns with its cause and moves nothing", async (t)
   const bytes = (s) => [...s.bucket.objects.values()].map((o) => o.bytes.toString());
   const before = bytes(bad);
   assert.deepEqual(await bad.run(), { status: "conflict", moved: [] });
+  // The idea upload sweep in the same scheduled run warns about this archive too.
   assert.deepEqual(
-    warn.mock.calls.map((c) => c.arguments),
+    warn.mock.calls.map((c) => c.arguments).filter(([m]) => m.startsWith("archive pass")),
     [
       [
         "archive pass conflict: board-archive.json is not valid JSON or appeared during the pass; nothing moved",
@@ -425,6 +426,6 @@ test("the scheduled handler runs the pass through waitUntil", async () => {
   const s = setup();
   const pending = [];
   worker.scheduled({ scheduledTime: NOW.getTime() }, s.env, { waitUntil: (p) => pending.push(p) });
-  assert.equal(pending.length, 3);
+  assert.equal(pending.length, 4);
   assert.equal((await pending[0]).status, "archived");
 });

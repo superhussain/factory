@@ -75,6 +75,8 @@ original-byte hashes, no CORS headers, no delete endpoint and no pagination
 remain unchanged. The route map and per-route behavior are asserted in
 `tests/fixtures/protocol-v1.json` and the ported suites under `tests/worker/`.
 
+The hourly scheduled pass deletes an `idea-images/` or `idea-files/` object uploaded more than 2 days ago that no row in `board.json` or `board-archive.json` names. A repeat upload of the same bytes resets that clock. The pass deletes nothing while either board document is unreadable.
+
 One deliberate exception: **job file PUTs (`/api/jobs/...`) accept absent
 conditions** for legacy-client compatibility (a blind write), while malformed
 present conditions return 428. Project files, board and backlog keep strict
