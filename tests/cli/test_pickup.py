@@ -3218,6 +3218,11 @@ class PickupSetupTest(PickupFixture):
         self.assertEqual(plist.stat().st_mtime_ns, stamp)
         self.assertFalse(any(argv[:2] == ["launchctl", "bootstrap"] for argv in self.runs))
 
+    def test_timer_path_includes_the_gh_folder(self):
+        with patch.object(factory.shutil, "which", return_value="/synthetic/brew/bin/gh"):
+            path = factory.timer_values(self.home)["path"]
+        self.assertIn("/synthetic/brew/bin", path.split(os.pathsep))
+
     def test_install_schtasks(self):
         patch.object(factory, "PICKUP_SCHEDULER", "schtasks").start()
         self.setup("--install")

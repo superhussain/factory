@@ -4452,6 +4452,9 @@ def timer_values(home):
         if template:
             folders += launcher_folders(template)
     folders.append(os.path.dirname(python))
+    gh = shutil.which("gh")
+    if gh:
+        folders.append(os.path.dirname(gh))
     if not WINDOWS:
         folders += ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
     return {"argv": [python, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
