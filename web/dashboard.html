@@ -137,6 +137,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .gallery .gallery-open[hidden] { display: none; }
   .gallery .gallery-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .gallery .bad { color: var(--alert); margin: 0 0 6px; }
+  .gallery[hidden], .file-list[hidden] { display: none; }
   .file-list { list-style: none; padding: 12px 20px 0; margin: 0; flex: none; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
   .file-list a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
   .file-list .bad { color: var(--alert); }

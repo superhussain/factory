@@ -795,6 +795,21 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       await cdp.detach();
     });
 
+    // Hidden gallery and file list take no space on a tab without media.
+    await t.test("D23", async () => {
+      await open("spec", DESKTOP);
+      const boxes = await page.evaluate(() =>
+        ["d-gallery", "d-files"].map((id) => {
+          const el = document.getElementById(id);
+          return { id, hidden: el.hidden, height: el.offsetHeight };
+        }),
+      );
+      assert.deepEqual(boxes, [
+        { id: "d-gallery", hidden: true, height: 0 },
+        { id: "d-files", hidden: true, height: 0 },
+      ]);
+    });
+
     assert.deepEqual(errors, []);
   });
 });
