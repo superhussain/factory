@@ -774,6 +774,19 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       near((await state()).scrollTop, caught, "scrollTop after the stopping touch");
       await touch("touchEnd");
 
+      // A scroll set by code mid-glide, like a tab change, stops the glide and stays put.
+      await scrollTo(0);
+      await flick(m, 30, 0);
+      await frames();
+      assert.equal(await gliding(), true, "second flick glides");
+      await page.evaluate(() => {
+        document.getElementById("d-doc").scrollTop = 0;
+      });
+      await frames();
+      await frames();
+      assert.equal(await gliding(), false, "code scroll stops the glide");
+      assert.equal((await state()).scrollTop, 0, "scrollTop after code scroll mid-glide");
+
       await scrollTo(0);
       await flick(m, -30, 0);
       await frames();
