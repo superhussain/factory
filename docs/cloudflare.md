@@ -282,6 +282,8 @@ client-supplied headers.
   prompts. On Android Chrome, open the menu and tap Add to Home screen or Install
   app. Chrome shows its own banner only after its engagement checks pass. On
   desktop Chrome or Edge, use the install icon in the address bar.
+  Settings, Display, Install app shows Chrome's install prompt when the browser
+  has offered one, and the Share hint on iPhone and iPad.
   `tests/browser/pwa-install.test.mjs` checks Chrome's installability report in
   the browser suite.
 - The service worker caches only the page, `/assets/*`, `/board.json`,

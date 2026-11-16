@@ -161,6 +161,7 @@
   "tests/browser/btn-tap-target.test.mjs",
   "tests/browser/pwa-offline.test.mjs",
   "tests/browser/pwa-install.test.mjs",
+  "tests/browser/install-app.test.mjs",
   "tests/browser/notification-settings.test.mjs",
   "tests/browser/scheduler-settings.test.mjs",
   "tests/browser/reference-settings.test.mjs",

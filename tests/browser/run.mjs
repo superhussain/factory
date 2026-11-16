@@ -15,6 +15,7 @@ import { prepareAssets } from "../../tools/assets.mjs";
 import { startLocal } from "../../tools/local.mjs";
 import { browserExecutable } from "../support/browser-server.mjs";
 import { recordClip } from "../support/webm-clip.mjs";
+import { png } from "../support/png.mjs";
 import owned from "../support/owned-origin.cjs";
 import { clickNow } from "../support/board-ready.cjs";
 import { retryCapture } from "./capture-retry.mjs";
@@ -398,6 +399,9 @@ async function capture(outdir, referencePath) {
     const clip = await recordClip(browser, origin);
     const clipName = sha(clip) + ".webm";
     await put(origin, "/api/idea-files/" + clipName, clip, "video/webm");
+    const ideaImage = png(320, 200, [33, 118, 174]);
+    const ideaImageName = sha(ideaImage) + ".png";
+    await put(origin, "/api/idea-images/" + ideaImageName, ideaImage, "image/png");
 
     const served = await fetch(origin + "/");
     const servedCsp = served.headers.get("Content-Security-Policy");
@@ -600,6 +604,7 @@ async function capture(outdir, referencePath) {
                                   { length: 40 },
                                   (_, i) => `Synthetic idea paragraph ${i + 1}.`,
                                 ).join("\n\n"),
+                              idea_images: [ideaImageName],
                               idea_files: ["a".repeat(64) + ".pdf", "b".repeat(64) + ".csv"],
                             }
                           : j,
@@ -1103,6 +1108,37 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
+    const openInstallSettings = async (page, ios) => {
+      await page.evaluate((ios) => {
+        if (ios)
+          Object.defineProperty(navigator, "userAgent", {
+            get: () =>
+              "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+          });
+        else {
+          const e = new Event("beforeinstallprompt");
+          e.prompt = async () => {};
+          e.userChoice = Promise.resolve({ outcome: "dismissed" });
+          dispatchEvent(e);
+        }
+        location.hash = "#/settings/display";
+      }, ios);
+      await page.waitForSelector("#settings-display:not([hidden])");
+      await page.evaluate(() =>
+        document.querySelector("#display-reset").scrollIntoView({ block: "start" }),
+      );
+    };
+    await view("display-install-desktop", 1280, 900, "light", (page) =>
+      openInstallSettings(page, false),
+    );
+    await view(
+      "display-install-ios",
+      390,
+      844,
+      "light",
+      (page) => openInstallSettings(page, true),
+      true,
+    );
     const openSchedulerSettings = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/scheduler";
@@ -1347,6 +1383,10 @@ async function capture(outdir, referencePath) {
         location.hash = "#101-wrap-doc-line/idea";
       });
       await page.waitForFunction(() => document.querySelectorAll("#d-files a").length === 2);
+      await page.waitForFunction(() => {
+        const img = document.querySelector("#d-gallery img");
+        return img?.complete && img.naturalWidth > 0;
+      });
     };
     const openIdeaFilesMid = async (page) => {
       await openIdeaFiles(page);

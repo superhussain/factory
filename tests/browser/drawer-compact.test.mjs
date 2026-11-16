@@ -5,32 +5,9 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { crc32, deflateSync } from "node:zlib";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
-
-function png(w, h, [r, g, b]) {
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length);
-    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
-    const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(crc32(body));
-    return Buffer.concat([len, body, crc]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(w, 0);
-  ihdr.writeUInt32BE(h, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 2;
-  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array(w).fill([r, g, b]).flat())]);
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", deflateSync(Buffer.concat(Array(h).fill(row)))),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
-}
+import { png } from "../support/png.mjs";
 
 const SEED = "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n";
 const paras = (n) =>
@@ -793,6 +770,46 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       assert.equal(await gliding(), false, "flick down at the page top glides");
       assert.equal((await state()).scrollTop, 0);
       await cdp.detach();
+    });
+
+    // Hidden gallery and file list take no space on a tab without media.
+    await t.test("D23", async () => {
+      await open("spec", DESKTOP);
+      const boxes = await page.evaluate(() =>
+        ["d-gallery", "d-files"].map((id) => {
+          const el = document.getElementById(id);
+          return { id, hidden: el.hidden, height: el.offsetHeight };
+        }),
+      );
+      assert.deepEqual(boxes, [
+        { id: "d-gallery", hidden: true, height: 0 },
+        { id: "d-files", hidden: true, height: 0 },
+      ]);
+    });
+
+    // A focused file link or gallery button keeps focus when a width change moves the media.
+    await t.test("D24", async () => {
+      await openMedia();
+      const parent = () => page.evaluate(() => document.getElementById("d-files").parentElement.id);
+      await page.focus("#d-files a");
+      assert.equal(await parent(), "d-doc");
+      await page.setViewport({ ...MOBILE, width: 1280, height: 900 });
+      await frames();
+      assert.equal(await parent(), "d-pager");
+      assert.equal(
+        await page.evaluate(() => document.activeElement === document.querySelector("#d-files a")),
+        true,
+      );
+      await page.focus("#d-gallery .gallery-open");
+      await page.setViewport(MOBILE);
+      await frames();
+      assert.equal(await parent(), "d-doc");
+      assert.equal(
+        await page.evaluate(
+          () => document.activeElement === document.querySelector("#d-gallery .gallery-open"),
+        ),
+        true,
+      );
     });
 
     assert.deepEqual(errors, []);

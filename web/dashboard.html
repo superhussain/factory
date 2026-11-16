@@ -137,6 +137,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .gallery .gallery-open[hidden] { display: none; }
   .gallery .gallery-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .gallery .bad { color: var(--alert); margin: 0 0 6px; }
+  .gallery[hidden], .file-list[hidden] { display: none; }
   .file-list { list-style: none; padding: 12px 20px 0; margin: 0; flex: none; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
   .file-list a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
   .file-list .bad { color: var(--alert); }
@@ -918,6 +919,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <p class="muted" id="display-drawer"></p>
       <p id="display-status" role="status"></p>
       <div class="actions"><button class="btn" id="display-reset">Reset to defaults</button></div>
+      <h4 id="display-install-heading" tabindex="-1">Install app</h4>
+      <p class="muted" id="display-install-hint"></p>
+      <div class="actions"><button class="btn" id="display-install" type="button" hidden>Install app</button></div>
+      <p id="display-install-status" role="status"></p>
     </section>
     <section class="settings-section" id="settings-notifications" aria-labelledby="notify-settings-heading" hidden>
       <h3 id="notify-settings-heading">Notifications</h3>
@@ -4879,6 +4884,13 @@ let headShift = 0;
 let headStop = null;
 let headMenuRest = 0;
 let headMenuMin = 0;
+// Moving a node drops its focus, so a focused gallery button or file link gets it back after the move.
+function moveMedia(intoDoc) {
+  const media = [$('d-gallery'), $('d-files')];
+  const focused = document.activeElement;
+  if (intoDoc) $('d-doc').prepend(...media); else $('d-doc').before(...media);
+  if (focused !== document.activeElement && media.some((el) => el.contains(focused))) focused.focus({ preventScroll: true });
+}
 function measureHead() {
   const detail = $('detail');
   const tabs = $('d-tabs');
@@ -4894,15 +4906,12 @@ function measureHead() {
   detail.style.setProperty('--head-collapse', headCollapse + 'px');
   const media = headCollapse > 0 && [$('d-gallery'), $('d-files')].some((el) => !el.hidden);
   detail.classList.toggle('head-media', media);
-  if (media !== ($('d-gallery').parentElement === $('d-doc'))) {
-    if (media) $('d-doc').prepend($('d-gallery'), $('d-files'));
-    else $('d-doc').before($('d-gallery'), $('d-files'));
-  }
+  if (media !== ($('d-gallery').parentElement === $('d-doc'))) moveMedia(media);
   syncHeadShift();
 }
 // Writing the page would drop the gallery and file list measureHead moved into it, so move them back out first.
 function setDocHtml(html) {
-  if ($('d-gallery').parentElement === $('d-doc')) $('d-doc').before($('d-gallery'), $('d-files'));
+  if ($('d-gallery').parentElement === $('d-doc')) moveMedia(false);
   $('d-doc').innerHTML = html;
 }
 function syncHeadShift() {
@@ -7962,8 +7971,52 @@ function renderDisplaySettings() {
   $('display-idea-project').value = projects?.has(ideaProject) ? ideaProject : '';
   const width = store.get(DRAWER_KEY);
   $('display-drawer').textContent = 'Job panel width: ' + (width ? width + ' px' : 'default') + '. Drag the panel edge to change it.';
+  renderInstall();
 }
 const displaySaved = () => { $('display-status').textContent = 'Saved in this browser.'; };
+// Browsers decide when to offer an install. Chrome's offer is kept for the Install app button;
+// it is not default-prevented, so Chrome's own banner still shows as before.
+let installPrompt = null;
+let installedHere = false;
+const INSTALL_HINT = {
+  installed: 'This dashboard is open as an installed app.',
+  ready: 'Install this dashboard as an app on this device.',
+  ios: 'Tap Share, then Add to Home Screen.',
+  none: 'This browser has not offered an install yet. In Chrome or Edge, look for Install in the address bar or the browser menu.',
+};
+function installState() {
+  if (installedHere || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true) return 'installed';
+  if (installPrompt) return 'ready';
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+  return 'none';
+}
+function renderInstall() {
+  const state = installState();
+  $('display-install-hint').textContent = INSTALL_HINT[state];
+  $('display-install').hidden = state !== 'ready';
+  $('display-install').disabled = false;
+}
+window.addEventListener('beforeinstallprompt', (e) => { installPrompt = e; renderInstall(); });
+window.addEventListener('appinstalled', () => { installPrompt = null; installedHere = true; renderInstall(); });
+$('display-install').addEventListener('click', async () => {
+  const e = installPrompt;
+  if (!e) return;
+  installPrompt = null;
+  $('display-install').disabled = true;
+  let line;
+  try {
+    await e.prompt();
+    const { outcome } = await e.userChoice;
+    line = outcome === 'accepted' ? 'Installing. Open it from your home screen or app list.' : 'Install cancelled.';
+  } catch {
+    line = 'The browser did not show its install prompt. Reload the page and try again.';
+  }
+  $('display-install-status').textContent = line;
+  renderInstall();
+  $('display-install-heading').focus();
+});
+renderInstall();
 $('display-theme').addEventListener('change', () => { theme = pickDisplay($('display-theme').value, THEMES); store.set(DISPLAY_KEYS.theme, theme); applyDisplay(); displaySaved(); });
 $('display-density').addEventListener('change', () => { density = pickDisplay($('display-density').value, DENSITIES); store.set(DISPLAY_KEYS.density, density); applyDisplay(); displaySaved(); });
 $('display-poll').addEventListener('change', () => { pollSeconds = pickDisplay(Number($('display-poll').value), POLL_SECONDS, POLL_DEFAULT); store.set(DISPLAY_KEYS.poll, pollSeconds); schedulePoll(); displaySaved(); });
