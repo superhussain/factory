@@ -791,11 +791,45 @@ async function capture(outdir, referencePath) {
       });
       await page.touchscreen.touchStart(m.x, m.y);
       for (let k = 1; k <= 3; k++) await page.touchscreen.touchMove(m.x, m.y - 50 * k);
+      // A pause before lifting the finger keeps the flick out of the capture.
+      await new Promise((r) => setTimeout(r, 150));
       await page.touchscreen.touchEnd();
       if (side === "after") {
         const top = await page.$eval("#d-doc", (el) => el.scrollTop);
         if (Math.abs(top - 150) > 1) throw new Error(`meta drag scrolled to ${top}, expected 150`);
       }
+    };
+    // A phone drawer after a flick on the job details: three 50 px moves 40 ms apart, then a lift.
+    // Before, the page stops at 150. After, it glides on and settles further down.
+    const openMetaFlicked = async (page, side) => {
+      await openDrawer(page, side);
+      await page.click('.tab[data-name="build.md"]');
+      await page.waitForFunction(
+        () => document.querySelector("#d-doc h1")?.textContent === "Synthetic build",
+      );
+      const m = await page.$eval("#d-meta", (el) => {
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      });
+      const cdp = await page.createCDPSession();
+      const t0 = Date.now();
+      const touch = (type, y, ms) =>
+        cdp.send("Input.dispatchTouchEvent", {
+          type,
+          touchPoints: type === "touchEnd" ? [] : [{ x: m.x, y }],
+          timestamp: (t0 + ms) / 1000,
+        });
+      await touch("touchStart", m.y, 0);
+      for (let k = 1; k <= 3; k++) await touch("touchMove", m.y - 50 * k, 40 * k);
+      await touch("touchEnd", 0, 120);
+      await cdp.detach();
+      await page.waitForFunction(() => typeof headGlide === "undefined" || headGlide === null);
+      await page.evaluate(
+        () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+      );
+      const top = await page.$eval("#d-doc", (el) => el.scrollTop);
+      if (side === "after" && top < 250)
+        throw new Error(`meta flick scrolled to ${top}, expected 250 or more`);
     };
     const openAnswers = async (page, side) => {
       await openDrawer(page, side);
@@ -887,6 +921,7 @@ async function capture(outdir, referencePath) {
     await view("drawer-mobile-midscroll", 390, 844, "dark", openMidScrolled);
     await view("drawer-mobile-notice", 390, 844, "dark", openNotice);
     await view("drawer-mobile-meta-drag", 390, 844, "dark", openMetaDragged, true);
+    await view("drawer-mobile-meta-flick", 390, 844, "dark", openMetaFlicked, true);
     await view("drawer-desktop-scrolled", 1440, 900, "light", openScrolled);
     await view("answers-desktop", 1440, 900, "light", openAnswers);
     await view("answers-mobile", 390, 844, "dark", openAnswers);
