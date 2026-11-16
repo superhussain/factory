@@ -810,6 +810,31 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       ]);
     });
 
+    // A focused file link or gallery button keeps focus when a width change moves the media.
+    await t.test("D24", async () => {
+      await openMedia();
+      const parent = () => page.evaluate(() => document.getElementById("d-files").parentElement.id);
+      await page.focus("#d-files a");
+      assert.equal(await parent(), "d-doc");
+      await page.setViewport({ ...MOBILE, width: 1280, height: 900 });
+      await frames();
+      assert.equal(await parent(), "d-pager");
+      assert.equal(
+        await page.evaluate(() => document.activeElement === document.querySelector("#d-files a")),
+        true,
+      );
+      await page.focus("#d-gallery .gallery-open");
+      await page.setViewport(MOBILE);
+      await frames();
+      assert.equal(await parent(), "d-doc");
+      assert.equal(
+        await page.evaluate(
+          () => document.activeElement === document.querySelector("#d-gallery .gallery-open"),
+        ),
+        true,
+      );
+    });
+
     assert.deepEqual(errors, []);
   });
 });

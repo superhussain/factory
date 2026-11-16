@@ -4884,6 +4884,13 @@ let headShift = 0;
 let headStop = null;
 let headMenuRest = 0;
 let headMenuMin = 0;
+// Moving a node drops its focus, so a focused gallery button or file link gets it back after the move.
+function moveMedia(intoDoc) {
+  const media = [$('d-gallery'), $('d-files')];
+  const focused = document.activeElement;
+  if (intoDoc) $('d-doc').prepend(...media); else $('d-doc').before(...media);
+  if (focused !== document.activeElement && media.some((el) => el.contains(focused))) focused.focus({ preventScroll: true });
+}
 function measureHead() {
   const detail = $('detail');
   const tabs = $('d-tabs');
@@ -4899,15 +4906,12 @@ function measureHead() {
   detail.style.setProperty('--head-collapse', headCollapse + 'px');
   const media = headCollapse > 0 && [$('d-gallery'), $('d-files')].some((el) => !el.hidden);
   detail.classList.toggle('head-media', media);
-  if (media !== ($('d-gallery').parentElement === $('d-doc'))) {
-    if (media) $('d-doc').prepend($('d-gallery'), $('d-files'));
-    else $('d-doc').before($('d-gallery'), $('d-files'));
-  }
+  if (media !== ($('d-gallery').parentElement === $('d-doc'))) moveMedia(media);
   syncHeadShift();
 }
 // Writing the page would drop the gallery and file list measureHead moved into it, so move them back out first.
 function setDocHtml(html) {
-  if ($('d-gallery').parentElement === $('d-doc')) $('d-doc').before($('d-gallery'), $('d-files'));
+  if ($('d-gallery').parentElement === $('d-doc')) moveMedia(false);
   $('d-doc').innerHTML = html;
 }
 function syncHeadShift() {
