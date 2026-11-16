@@ -836,6 +836,10 @@ def board(factory, job_id):
         fail(f"stdin is not JSON: {e}", 2)
     if not isinstance(patch, dict):
         fail("stdin must be a JSON object", 2)
+    board_write(factory, job_id, patch)
+
+
+def board_write(factory, job_id, patch, show=True):
     if patch.get("claim") is not None:
         fail('only hold sets a claim. {"claim": null} releases it', 2)
     if "paseo" in patch:
@@ -955,10 +959,12 @@ def board(factory, job_id):
              "holds it, or take it over with hold <project>/<id> take", 6)
     if paseo and job and job.get("paseo") == paseo:
         record_paseo_claim(home, job_id, paseo)
-    print(json.dumps(job, indent=2))
+    if show:
+        print(json.dumps(job, indent=2))
     close_stacked_prs(Path(factory), job_id, stacked, device)
     if "stage" in patch or "rounds" in patch or (patch.get("tracer") or {}).get("follow") is True:
         tracer_after_board(Path(factory), job, patch)
+    return job
 
 
 def hold(target, take=None):
