@@ -94,6 +94,9 @@
   factory.py idea-images <project-slug>/<job-id>
                                             materialize a job's pasted images and their
                                             Markdown into the job folder, then push them
+  factory.py idea-files <project-slug>/<job-id>
+                                            fetch a job's attached files into the job folder
+                                            for the spec prompt, without pushing them
   factory.py sync [<project-slug>]          pull every active job of one project
                                             or of all projects, skipping merged
                                             and closed jobs
@@ -7817,6 +7820,50 @@ def idea_images(target):
              "Pull and reconcile before promotion; the local copies were not overwritten", 6)
 
 
+# An attached file's board name: 64 lowercase hex characters plus an allowed extension,
+# matching the Worker's IDEA_FILE.
+IDEA_FILE_NAME = re.compile(r"[0-9a-f]{64}\.(pdf|csv|txt|mp4|webm)", re.ASCII)
+
+
+def idea_files(target):
+    """Fetch a job's attached files as idea-file-<sha256>.<ext> into the job folder for the
+    spec prompt. Unlike idea_images it never pushes: JOB_REL does not sync these files."""
+    home, slug, job_id = r2_target(target, True)
+    jobs = read_board(home)["jobs"]
+    job = next((j for j in jobs if j.get("id") == job_id), None)
+    if job is None:
+        fail(f"no job {target} on the board. Nothing was written.", 4)
+    if job.get("project") != slug:
+        fail(f"{job_id} is not assigned to {slug}; project-less ideas have no job artifacts "
+             "to import into", 2)
+    names = job.get("idea_files")
+    if not names:
+        print(f"{target} has no attached files; nothing to import")
+        return
+    if not (isinstance(names, list) and 1 <= len(names) <= 4 and len(set(names)) == len(names)
+            and all(isinstance(n, str) and IDEA_FILE_NAME.fullmatch(n) for n in names)):
+        fail(f"{job_id}'s idea_files on the board is malformed; nothing was imported", 6)
+    folder = safe_job_folder(home, slug, job_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    # Fetch and hash-check every file before any write, so one bad name writes nothing.
+    got = []
+    for name in names:
+        status, _, data = api(home, "GET", f"/api/idea-files/{name}", ok=(200, 404), raw=True)
+        if status == 404:
+            fail(f"idea file {name} is missing from the factory; nothing was written", 5)
+        if sha(data) != name.split(".", 1)[0]:
+            fail(f"idea file {name} does not match its name's SHA-256; nothing was written", 5)
+        got.append((folder / f"idea-file-{name}", data))
+    for path, data in got:
+        have = local_bytes(path)
+        if have is not None and have != data:
+            fail(f"{path} differs from the factory's copy; nothing was overwritten. Inspect "
+                 "and delete it, then retry", 6)
+    for path, data in got:
+        write_atomic(str(path), data)
+    print(f"imported {len(names)} attached file(s) into {target}")
+
+
 def sync(slug=None):
     """Pull every active job of one project, or of every project.
 
@@ -9945,7 +9992,7 @@ COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3)
              "hold": (hold, 1, 2), "worktree": (worktree, 1, 1), "job": (job, 1, 1),
              "handoff": (handoff, 1, 1),
             "builds": (builds, 1, 1), "ideas": (ideas, 0, 6), "stuck": (stuck, 0, 2),
-             "idea-images": (idea_images, 1, 1)}
+             "idea-images": (idea_images, 1, 1), "idea-files": (idea_files, 1, 1)}
 COMMANDS["adopt-home"] = (adopt_home_cmd, 1, 1)
 COMMANDS["doctor"] = (doctor_cmd, 0, 0)
 COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
