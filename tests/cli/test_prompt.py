@@ -201,6 +201,9 @@ class PromptTest(IsolatedTestCase):
         self.assertIn('`python3 "$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] '
                       '--out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`', skill)
         self.assertIn("`Your full prompt is in <printed path>. Read it first and follow it exactly.`", skill)
+        self.assertIn("Roles are `spec`, `build`, `review-security`, `review-ux`, `review-ui`, `review-code` and "
+                      "`approve`. Only `build` and the four reviews take `--round`, and the reviews need it. "
+                      "Only `build` takes `--port`.", skill)
         self.assertIn("`prompt` ends each prompt with `$PIPELINE.prompts.<stage>` verbatim.", skill)
         self.assertIn("the absolute path in `$DOCUMENTS`", skill)
         self.assertNotIn("same files, with the job folder", skill)
