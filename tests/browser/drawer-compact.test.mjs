@@ -681,6 +681,44 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       assert.equal(desk.position, "static");
     });
 
+    // A touch drag that starts on the job details scrolls the page both ways; a sideways drag does not.
+    await t.test("D21", async () => {
+      await open("spec");
+      // The middle of the part of #d-meta the title band does not cover, and whether a touch there lands on it.
+      const touchPoint = () =>
+        page.$eval("#d-meta", (el) => {
+          const r = el.getBoundingClientRect();
+          const top = Math.max(
+            r.top,
+            document.getElementById("d-title").getBoundingClientRect().bottom,
+          );
+          const x = r.x + r.width / 2;
+          const y = (top + r.bottom) / 2;
+          return { x, y, onMeta: el.contains(document.elementFromPoint(x, y)) };
+        });
+      const rest = await state();
+      const collapse = parseFloat(rest.collapse);
+      let m = await touchPoint();
+      assert.ok(m.onMeta, `touch at rest lands on #d-meta: ${m.x}, ${m.y}`);
+      await page.touchscreen.touchStart(m.x, m.y);
+      for (let k = 1; k <= 3; k++) await page.touchscreen.touchMove(m.x - 40 * k, m.y);
+      await page.touchscreen.touchEnd();
+      await frames();
+      assert.equal((await state()).scrollTop, 0);
+      await drag(m.x, m.y, 150);
+      const up = await state();
+      near(up.scrollTop, 150, "scrollTop after drag");
+      near(rest.h1Top - up.h1Top, 150, "h1 after drag");
+      near(up.tabsTop, rest.tabsTop - Math.min(collapse, 150), "tabs after drag");
+      await scrollTo(30);
+      m = await touchPoint();
+      assert.ok(m.onMeta, `touch at scrollTop 30 lands on #d-meta: ${m.x}, ${m.y}`);
+      await drag(m.x, m.y, -30);
+      const down = await state();
+      near(down.scrollTop, 0, "scrollTop after drag down");
+      near(down.h1Top, rest.h1Top, "h1 back at rest");
+    });
+
     assert.deepEqual(errors, []);
   });
 });
