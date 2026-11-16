@@ -840,11 +840,15 @@
    "replacements": [
     {
      "file": "tests/browser/test_dashboard_project_documents.cjs",
-     "case": "recoveryControls"
+     "case": "PASS D1 fixed slots"
+    },
+    {
+     "file": "tests/browser/test_dashboard_project_documents.cjs",
+     "case": "PASS D2 exact legacy record"
     }
    ],
    "status": "ported",
-   "reason": "Ported to the named replacement; historical-only comparison machinery was not carried over."
+   "reason": "Covered by the D1 empty If-None-Match: * create and the D2 legacy If-Match save in browserRun; the uncalled recoveryControls helper was removed."
   },
   {
    "id": "test-dashboard-project-documents-16",
