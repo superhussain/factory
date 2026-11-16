@@ -74,7 +74,8 @@ Each run, in order:
 - Also lists `build` jobs with note `spec approved in Tracer`, which Tracer scope
   approval released, and launches `/factory recover <id>` for them instead of
   `/factory idea <id>`. They follow the same skips, claim and caps as ideas.
-- Skips ideas that are gated, held by a live claim, or waiting on a human, and
+- Skips ideas that are gated, held by a live claim, waiting on a human, or whose
+  `not_before` is still in the future (`skip <id> <project>: not before <time>`), and
   projects whose effective pipeline has pickup off, does not list this host, or
   cannot be read. Each skip reason is printed once and the run goes on.
 - Holds back batchable ideas: an idea with a `follow-up-of` ref, or one backlog
@@ -155,9 +156,10 @@ Each run, in order:
   scheduler, run time, bundle stamp, doctor result, routes and checkout names.
   It is silent, calls no model, and never changes the run's output or exit code.
 
-Pickup skips an idea held by a live claim. The board `needs` field is only for
-input from a human: a coordinator that wants to park an idea must hold it with a
-claim (`hold`), never by setting `needs`.
+Pickup skips an idea held by a live claim, and any job whose `not_before` is still
+in the future. The board `needs` field is only for input from a human. A coordinator
+that parks an idea until a later time sets `not_before`, never `needs`, and does not
+keep a claim on it.
 
 ## Configure
 

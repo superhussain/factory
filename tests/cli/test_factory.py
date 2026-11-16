@@ -1573,6 +1573,34 @@ class MoveFenceTest(IsolatedTestCase):
         factory.hold(self.target, "take")
         self.assertEqual(self.saved()["claim"]["session"], "sender")
 
+    def test_board_sets_not_before_and_releases_own_claim(self):
+        for stage, kept in (("idea", False), ("build", True)):
+            with self.subTest(stage=stage):
+                self.save(dict(self.job, stage=stage))
+                with patch.object(factory.sys, "stdin", io.StringIO('{"not_before": "2026-11-17T09:00:00Z"}')):
+                    factory.board(self.home, "001-test")
+                self.assertEqual(self.saved()["not_before"], "2026-11-17T09:00:00Z")
+                self.assertEqual("claim" in self.saved(), kept)
+
+    def test_board_clears_not_before(self):
+        self.save(dict(self.job, not_before="2026-11-17T09:00:00Z"))
+        with patch.object(factory.sys, "stdin", io.StringIO('{"not_before": null}')):
+            factory.board(self.home, "001-test")
+        self.assertNotIn("not_before", self.saved())
+
+    def test_board_refuses_a_bad_not_before(self):
+        before = self.store["/api/board"]
+        for value in ("tomorrow", "2026-11-17 09:00", 5):
+            with self.subTest(value=value):
+                err = io.StringIO()
+                with patch.object(factory.sys, "stdin", io.StringIO(json.dumps({"not_before": value}))), \
+                        contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+                    factory.board(self.home, "001-test")
+                self.assertEqual(raised.exception.code, 2)
+                self.assertIn("not_before must be a UTC time like 2026-11-17T09:00:00Z, or null. Nothing was written.",
+                              err.getvalue())
+                self.assertEqual(self.store["/api/board"], before)
+
     def test_board_refuses_a_move_patch(self):
         before = self.store["/api/board"]
         err = io.StringIO()
