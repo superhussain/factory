@@ -28,9 +28,10 @@ class ChecksTest(IsolatedTestCase):
     def sleep(self, seconds):
         self.now += seconds
 
-    def checks(self, view, polls, *args, pr=PR):
+    def checks(self, view, polls, *args, pr=PR, extra=None):
         """Run checks with gh answering view first, then each poll in turn, repeating the last."""
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open"}
+        job.update(extra or {})
         if pr is not None:
             job["pr"] = pr
         calls = []
@@ -136,6 +137,39 @@ class ChecksTest(IsolatedTestCase):
                 self.assertEqual((code, out, len(calls)), (5, "", 1))
                 self.assertIn(why, err)
 
+    def decision(self, body):
+        folder = self.home / "jobs" / "sample" / JOB
+        folder.mkdir(parents=True)
+        (folder / "decision.md").write_bytes(body)
+
+    def test_escalate_decision_exits_7_before_gh(self):
+        self.decision(b"\n  ESCALATE: auth change needs a person\n")
+        code, out, err, calls = self.checks(OPEN, [listed(("pass", "test"))], extra={"automerge": True})
+        self.assertEqual((code, out, calls), (7, "", []))
+        self.assertEqual(err, f"factory.py: {JOB} has a decision.md that says ESCALATE, so a person reviews and "
+                              f"merges {PR}. Nothing merges.\n")
+
+    def test_escalated_board_row_exits_7(self):
+        for extra in ({"escalated": True}, {"note": "Escalated: approver held it"}):
+            with self.subTest(extra):
+                code, out, err, calls = self.checks(OPEN, [listed(("pass", "test"))], extra=extra)
+                self.assertEqual((code, out, calls), (7, "", []))
+                self.assertEqual(err, f"factory.py: {JOB} is escalated on the board, so a person reviews and "
+                                      f"merges {PR}. Nothing merges.\n")
+
+    def test_unreadable_decision_exits_7(self):
+        self.decision(b"\xff\n")
+        code, out, err, calls = self.checks(OPEN, [listed(("pass", "test"))])
+        self.assertEqual((code, out, calls), (7, "", []))
+        self.assertEqual(err, f"factory.py: {JOB} has a decision.md that cannot be read, so a person reviews and "
+                              f"merges {PR}. Nothing merges.\n")
+
+    def test_approve_decision_reads_checks(self):
+        self.decision(b"APPROVE\n")
+        code, out, err, calls = self.checks(OPEN, [listed(("pass", "test"))])
+        self.assertEqual((code, out, err), (0, "pass test\n", ""))
+        self.assertEqual(calls[0][:2], ("view", PR))
+
     def test_bad_timeout_exits_2(self):
         for args in (["--timeout", "601"], ["--timeout", "-1"], ["--timeout"], ["--timeout", "1", "--timeout", "1"],
                      ["--wait", "1"]):
@@ -147,6 +181,10 @@ class ChecksTest(IsolatedTestCase):
         skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
         self.assertIn('Wait for checks with `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0 means '
                       "they passed, or the repo has none. Exit 3 means they are still pending, so run it again. "
-                      "Exit 1 names the failing checks. Exit 4 means no open PR; 5 means gh never gave a usable reply. Never poll `gh pr checks` in a loop or with `--watch`.", skill)
+                      "Exit 1 names the failing checks. Exit 4 means no open PR; 5 means gh never gave a usable reply. "
+                      "Exit 7 means the approver escalated the job: the board marks it escalated or its decision.md "
+                      'says ESCALATE. Nothing merges. Patch {"automerge": false, "escalated": true, "needs": "review '
+                      'and merge PR #<n>: the approver escalated it", "note": "escalated: checks held the merge"} '
+                      "and stop. Never poll `gh pr checks` in a loop or with `--watch`.", skill)
         self.assertIn("Pass `--hold` to refresh this session's claim first, so a re-run during a long build needs "
                       "no separate `hold`.", skill)

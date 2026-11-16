@@ -387,7 +387,11 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   checks with `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0 means
   they passed, or the repo has none. Exit 3 means they are still pending, so run it
   again. Exit 1 names the failing checks. Exit 4 means no open PR; 5 means gh never
-  gave a usable reply. Never poll `gh pr checks` in a loop or with `--watch`.
+  gave a usable reply. Exit 7 means the approver escalated the job: the board marks
+  it escalated or its decision.md says ESCALATE. Nothing merges. Patch
+  {"automerge": false, "escalated": true, "needs": "review and merge PR #<n>: the
+  approver escalated it", "note": "escalated: checks held the merge"} and stop.
+  Never poll `gh pr checks` in a loop or with `--watch`.
   Immediately before every `gh pr merge`, run `factory.py pipeline "$SLUG"` again
   and use that fresh `$PIPELINE`. A non-zero exit moves the job to `needs-human` as
   Pipeline configuration describes, and nothing merges. When `$PIPELINE.merge` is
