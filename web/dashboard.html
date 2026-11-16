@@ -7977,6 +7977,7 @@ const displaySaved = () => { $('display-status').textContent = 'Saved in this br
 // Browsers decide when to offer an install. Chrome's offer is kept for the Install app button;
 // it is not default-prevented, so Chrome's own banner still shows as before.
 let installPrompt = null;
+let installedHere = false;
 const INSTALL_HINT = {
   installed: 'This dashboard is open as an installed app.',
   ready: 'Install this dashboard as an app on this device.',
@@ -7984,7 +7985,7 @@ const INSTALL_HINT = {
   none: 'This browser has not offered an install yet. In Chrome or Edge, look for Install in the address bar or the browser menu.',
 };
 function installState() {
-  if (matchMedia('(display-mode: standalone)').matches || navigator.standalone === true) return 'installed';
+  if (installedHere || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true) return 'installed';
   if (installPrompt) return 'ready';
   const ua = navigator.userAgent;
   if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
@@ -7997,7 +7998,7 @@ function renderInstall() {
   $('display-install').disabled = false;
 }
 window.addEventListener('beforeinstallprompt', (e) => { installPrompt = e; renderInstall(); });
-window.addEventListener('appinstalled', () => { installPrompt = null; renderInstall(); });
+window.addEventListener('appinstalled', () => { installPrompt = null; installedHere = true; renderInstall(); });
 $('display-install').addEventListener('click', async () => {
   const e = installPrompt;
   if (!e) return;

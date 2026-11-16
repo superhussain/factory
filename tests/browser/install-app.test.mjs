@@ -58,6 +58,8 @@ test("install app", { timeout: 180000 }, async (t) => {
         };
         e.userChoice =
           outcome === "reject" ? Promise.reject(new Error("no")) : Promise.resolve({ outcome });
+        // The page awaits userChoice only after prompt(), so mark the rejection handled until then.
+        e.userChoice.catch(() => {});
         window.lastInstall = e;
         dispatchEvent(e);
       }, outcome);
@@ -113,6 +115,27 @@ test("install app", { timeout: 180000 }, async (t) => {
       assert.equal(await text(page, "#display-install-hint"), HINT.installed);
       assert.equal(await hidden(page), true);
       await dispatch(page, "accepted");
+      assert.equal(await text(page, "#display-install-hint"), HINT.installed);
+      assert.equal(await hidden(page), true);
+    });
+
+    await t.test("install I6 rejected", async () => {
+      const page = await open();
+      await dispatch(page, "reject");
+      await page.click("#display-install");
+      await status(
+        page,
+        "The browser did not show its install prompt. Reload the page and try again.",
+      );
+      assert.equal(await hidden(page), true);
+    });
+
+    await t.test("install I7 appinstalled", async () => {
+      const page = await open();
+      await dispatch(page, "accepted");
+      await page.click("#display-install");
+      await status(page, "Installing. Open it from your home screen or app list.");
+      await page.evaluate(() => dispatchEvent(new Event("appinstalled")));
       assert.equal(await text(page, "#display-install-hint"), HINT.installed);
       assert.equal(await hidden(page), true);
     });
