@@ -6018,6 +6018,11 @@ def prompt_cmd(target, role, *flags):
             fail(f"{job_id} has no idea or title to spec", 4)
         if (folder / "idea-images.md").is_file():
             lines.append(f"Idea images: {folder / 'idea-images.md'}")
+        if isinstance(job.get("idea_files"), list):
+            for n, name in enumerate(job["idea_files"], 1):
+                if (isinstance(name, str) and IDEA_FILE_NAME.fullmatch(name)
+                        and (folder / f"idea-file-{name}").is_file()):
+                    lines.append(f"Idea file {n}: {folder / f'idea-file-{name}'}")
         lines += ["", "Feature text:", feature]
         if riders:
             lines += ["", "Batched ideas (spec each one):"]

@@ -77,6 +77,15 @@ class PromptTest(IsolatedTestCase):
         self.assertPrompt(["spec"], self.head() + f"Idea images: {self.folder / 'idea-images.md'}\n"
                           "\nFeature text:\nSample job\n\n" + envelope("spec"), data=board(idea=None))
 
+    def test_spec_lists_idea_files(self):
+        pdf, csv = "a" * 64 + ".pdf", "b" * 64 + ".csv"
+        data = board()
+        data["jobs"][0]["idea_files"] = [pdf, csv]
+        self.folder.mkdir(parents=True)
+        (self.folder / f"idea-file-{csv}").write_bytes(b"region,total\nnorth,12\n")
+        self.assertPrompt(["spec"], self.head() + f"Idea file 2: {self.folder / f'idea-file-{csv}'}\n"
+                          "\nFeature text:\nAdd a sample feature.\n\n" + envelope("spec"), data=data)
+
     def test_build(self):
         self.assertPrompt(["build"], self.head() + f"Builder name: builder-{JOB}\n\n" + envelope("build"))
         round_folder = self.folder / "round-2"
@@ -143,15 +152,15 @@ class PromptTest(IsolatedTestCase):
             with self.subTest(args):
                 code, out, _ = self.prompt(*args)
                 self.assertEqual((code, out), (2, ""))
-        help = f". {factory.PROMPT_USAGE}\n{factory.PROMPT_HELP}\n"
-        self.assertEqual(self.prompt("build", "--color", "red"), (2, "", "factory.py: unknown flag '--color'" + help))
+        usage_help = f". {factory.PROMPT_USAGE}\n{factory.PROMPT_HELP}\n"
+        self.assertEqual(self.prompt("build", "--color", "red"), (2, "", "factory.py: unknown flag '--color'" + usage_help))
         self.assertEqual(self.prompt("build", "--round", "1", "--round", "2"),
-                         (2, "", "factory.py: --round given twice" + help))
-        self.assertEqual(self.prompt("approve", "--round", "1"), (2, "", "factory.py: approve takes no --round" + help))
-        self.assertEqual(self.prompt("writer"), (2, "", "factory.py: bad role 'writer'" + help))
+                         (2, "", "factory.py: --round given twice" + usage_help))
+        self.assertEqual(self.prompt("approve", "--round", "1"), (2, "", "factory.py: approve takes no --round" + usage_help))
+        self.assertEqual(self.prompt("writer"), (2, "", "factory.py: bad role 'writer'" + usage_help))
         for args in cases[:9] + cases[10:]:
             with self.subTest(args):
-                self.assertTrue(self.prompt(*args)[2].endswith(help))
+                self.assertTrue(self.prompt(*args)[2].endswith(usage_help))
         (self.home / "config.md").unlink()
         self.assertEqual(snapshot(self.home), before)
 
