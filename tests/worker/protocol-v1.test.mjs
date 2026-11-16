@@ -445,7 +445,8 @@ test("idea file refusals", async () => {
 
 test("idea file download headers", async () => {
   const s = await setup();
-  for (const [ext, [type, bytes]] of Object.entries(ideaFiles)) {
+  for (const ext of ["pdf", "csv", "txt"]) {
+    const [type, bytes] = ideaFiles[ext];
     const path = ideaFilePath(ext, bytes);
     await s.request(path, "PUT", bytes, { "Content-Type": type });
     const response = await s.request(path);
@@ -459,7 +460,15 @@ test("idea file download headers", async () => {
     );
     assert.equal(response.headers.get("Content-Security-Policy"), "default-src 'none'; sandbox");
     assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(response.headers.get("Accept-Ranges"), null);
   }
+  const pdf = ideaFiles.pdf[1];
+  const ranged = await s.request(ideaFilePath("pdf", pdf), "GET", undefined, {
+    Range: "bytes=0-1",
+  });
+  assert.equal(ranged.status, 200);
+  assert.deepEqual(Buffer.from(await ranged.arrayBuffer()), pdf);
+  assert.equal(ranged.headers.get("Accept-Ranges"), null);
   const html = Buffer.from("<script>1</script>");
   for (const path of [`/api/idea-files/${sha(html)}.html`, ideaFilePath("PDF", ideaFiles.pdf[1])]) {
     assert.equal((await s.request(path)).status, 404, path);
@@ -467,6 +476,63 @@ test("idea file download headers", async () => {
   }
   const upper = `/api/idea-files/${sha(ideaFiles.pdf[1]).toUpperCase()}.pdf`;
   assert.equal((await s.request(upper)).status, 404);
+});
+
+test("idea video inline and ranges", async () => {
+  const s = await setup();
+  const [type, bytes] = ideaFiles.mp4;
+  const path = ideaFilePath("mp4", bytes);
+  const name = `${sha(bytes)}.mp4`;
+  await s.request(path, "PUT", bytes, { "Content-Type": type });
+  const rows = [
+    [undefined, 200, null, bytes],
+    ["bytes=4-11", 206, "bytes 4-11/24", Buffer.from("ftypisom")],
+    ["bytes=0-", 206, "bytes 0-23/24", bytes],
+    ["bytes=20-99", 206, "bytes 20-23/24", bytes.subarray(20)],
+    ["bytes=-8", 206, "bytes 16-23/24", bytes.subarray(16)],
+    ["bytes=24-", 416, "bytes */24", Buffer.from("range not satisfiable")],
+    ["bytes=-0", 416, "bytes */24", Buffer.from("range not satisfiable")],
+    ["bytes=0-1,4-5", 200, null, bytes],
+    ["bytes=5-2", 200, null, bytes],
+    ["items=0-1", 200, null, bytes],
+  ];
+  for (const [range, status, contentRange, body] of rows) {
+    s.bucket.calls.length = 0;
+    const response = await s.request(path, "GET", undefined, range ? { Range: range } : {});
+    assert.deepEqual(
+      s.bucket.calls.map(([op]) => op),
+      status === 416 ? ["head"] : ["head", "get"],
+      range,
+    );
+    assert.equal(response.status, status, range);
+    assert.equal(response.headers.get("Content-Range"), contentRange, range);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), body, range);
+    assert.equal(
+      response.headers.get("Content-Security-Policy"),
+      "default-src 'none'; sandbox",
+      range,
+    );
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff", range);
+    if (status === 416) {
+      assert.equal(response.headers.get("Accept-Ranges"), null, range);
+      assert.equal(response.headers.get("Content-Disposition"), null, range);
+      continue;
+    }
+    assert.equal(response.headers.get("Content-Type"), type, range);
+    assert.equal(response.headers.get("Content-Disposition"), `inline; filename="${name}"`, range);
+    assert.equal(response.headers.get("Accept-Ranges"), "bytes", range);
+    assert.equal(response.headers.get("ETag"), `"${sha(bytes)}"`, range);
+  }
+  const [webmType, webm] = ideaFiles.webm;
+  const webmPath = ideaFilePath("webm", webm);
+  await s.request(webmPath, "PUT", webm, { "Content-Type": webmType });
+  const whole = await s.request(webmPath);
+  assert.equal(whole.status, 200);
+  assert.deepEqual(Buffer.from(await whole.arrayBuffer()), webm);
+  assert.equal(whole.headers.get("Content-Type"), webmType);
+  assert.equal(whole.headers.get("Content-Disposition"), `inline; filename="${sha(webm)}.webm"`);
+  assert.equal(whole.headers.get("Accept-Ranges"), "bytes");
+  assert.equal(whole.headers.get("Content-Security-Policy"), "default-src 'none'; sandbox");
 });
 
 test("board idea_files counts, authoritative checks and stored-reference exemption", async () => {

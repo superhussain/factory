@@ -140,6 +140,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .file-list { list-style: none; padding: 12px 20px 0; margin: 0; flex: none; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
   .file-list a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
   .file-list .bad { color: var(--alert); }
+  .file-list video { display: block; width: 100%; max-height: 50vh; background: #000; border-radius: 8px; }
+  .file-list p.bad { margin: 0 0 4px; }
   dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
   #settings-document { font-family: var(--font-mono); height: 50dvh; min-height: 240px; resize: vertical; }
   #settings-status, #pipeline-status, #project-pickup-status { overflow-wrap: anywhere; margin: 12px 0; }
@@ -4627,9 +4629,11 @@ function renderDetail() {
 
 const IDEA_IMAGE = /^[0-9a-f]{64}\.png$/;
 
-// Attached files are download links only, served by the Worker as attachments.
+// Attached files are download links. MP4 and WebM also get a player above the link,
+// and a re-render reuses that player, or its fallback note, so playback carries on.
 function renderFiles(j, f) {
   const list = $('d-files');
+  const kept = new Map([...list.querySelectorAll('[data-name]')].map((el) => [el.dataset.name, el]));
   list.replaceChildren();
   const names = f?.name === 'idea.md' && Array.isArray(j?.idea_files) ? j.idea_files : [];
   list.hidden = !names.length;
@@ -4640,6 +4644,27 @@ function renderFiles(j, f) {
       li.textContent = 'File ' + (i + 1) + ' has an invalid name and cannot be downloaded.';
     } else {
       const ext = name.slice(65);
+      if (ext === 'mp4' || ext === 'webm') {
+        let player = kept.get(name);
+        if (!player) {
+          const video = document.createElement('video');
+          video.controls = true;
+          video.preload = 'metadata';
+          video.playsInline = true;
+          video.dataset.name = name;
+          video.setAttribute('aria-label', 'Video ' + (i + 1) + ' (' + FILE_TYPES[ext].label + ')');
+          video.addEventListener('error', () => {
+            const p = document.createElement('p');
+            p.className = 'bad';
+            p.dataset.name = name;
+            p.textContent = 'Video ' + (i + 1) + ' cannot play here. Use its download link.';
+            video.replaceWith(p);
+          }, { once: true });
+          video.src = './api/idea-files/' + name;
+          player = video;
+        }
+        li.append(player);
+      }
       const a = document.createElement('a');
       a.href = './api/idea-files/' + name;
       a.download = 'idea-file-' + (i + 1) + '.' + ext;
@@ -4911,9 +4936,9 @@ swipeMedia.addEventListener('change', measureHead);
 const headObserver = new ResizeObserver(measureHead);
 for (const el of $('detail').children) if (!el.matches('.pager, .detail-resize')) headObserver.observe(el);
 
-// Form fields, steppers and sideways scrollers (tables, code, diagrams) keep their own touches.
+// Form fields, videos, steppers and sideways scrollers (tables, code, diagrams) keep their own touches.
 function swipeBlocked(target) {
-  if (target.closest('input, textarea, select, .stepper')) return true;
+  if (target.closest('input, textarea, select, video, .stepper')) return true;
   return sidewaysScroller(target, $('d-pager'));
 }
 
@@ -4984,7 +5009,7 @@ function addStepSwipe(box, panels, current, go) {
     if (settling || !swipeMedia.matches || e.touches.length !== 1) return;
     const t = e.touches[0];
     if (t.clientX < SWIPE_EDGE || t.clientX > innerWidth - SWIPE_EDGE) return;
-    if (e.target.closest('input, textarea, select') || sidewaysScroller(e.target, box)) return;
+    if (e.target.closest('input, textarea, select, video') || sidewaysScroller(e.target, box)) return;
     g = { at: current(), x0: t.clientX, y0: t.clientY, x: t.clientX, t: e.timeStamp, v: 0, active: false, d: 0, peek: null };
   }, { passive: true });
   box.addEventListener('touchmove', (e) => {
@@ -5179,6 +5204,7 @@ function closeDetail(keepHash = false) {
   openId = null;
   openBacklogRaw = null;
   $('detail').hidden = true;
+  for (const v of $('d-files').querySelectorAll('video')) v.pause();
   closeJobActions(false);
   syncIdeaEditor();
   renderBoard();
@@ -5210,7 +5236,7 @@ document.addEventListener('keydown', (e) => {
 function handleBoardKeys(e) {
   if (settingsRoute() !== null || retrosRoute() !== null) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
-  if (e.target.closest('input, textarea, select, [contenteditable], #d-resize')) return;
+  if (e.target.closest('input, textarea, select, [contenteditable], #d-resize, video')) return;
   if (document.querySelector('dialog[open]')) return;
   if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
     e.preventDefault();

@@ -14,6 +14,7 @@ import { mkdir, readFile, stat } from "node:fs/promises";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { startLocal } from "../../tools/local.mjs";
 import { browserExecutable } from "../support/browser-server.mjs";
+import { recordClip } from "../support/webm-clip.mjs";
 import owned from "../support/owned-origin.cjs";
 import { clickNow } from "../support/board-ready.cjs";
 import { retryCapture } from "./capture-retry.mjs";
@@ -394,6 +395,9 @@ async function capture(outdir, referencePath) {
       "Original notes\n",
       "text/markdown",
     );
+    const clip = await recordClip(browser, origin);
+    const clipName = sha(clip) + ".webm";
+    await put(origin, "/api/idea-files/" + clipName, clip, "video/webm");
 
     const served = await fetch(origin + "/");
     const servedCsp = served.headers.get("Content-Security-Policy");
@@ -412,6 +416,7 @@ async function capture(outdir, referencePath) {
     let leadAgentsBoard = false;
     let tallAgentsBoard = false;
     let ideaFilesBoard = false;
+    let videoBoard = false;
     const failed = [];
     const onlyViews = process.env.FACTORY_CAPTURE_VIEWS?.split(",");
     const waitLiveDot = (page) =>
@@ -460,6 +465,8 @@ async function capture(outdir, referencePath) {
               await page.setRequestInterception(true);
               page.on("request", async (request) => {
                 const target = new URL(request.url());
+                // Chrome's own video controls draw their icons from data: URLs.
+                if (target.protocol === "data:") return request.continue();
                 if (target.origin !== origin) {
                   // The reference page requests its documented CDN; the replacement must not
                   // attempt any external request. Both are blocked either way.
@@ -596,6 +603,21 @@ async function capture(outdir, referencePath) {
                               idea_files: ["a".repeat(64) + ".pdf", "b".repeat(64) + ".csv"],
                             }
                           : j,
+                      ),
+                    }),
+                  });
+                }
+                if (videoBoard && target.pathname === "/board.json") {
+                  const board = await fetch(target.href);
+                  const body = await board.json();
+                  return request.respond({
+                    status: board.status,
+                    contentType: "application/json",
+                    headers: { ETag: board.headers.get("ETag") ?? "" },
+                    body: JSON.stringify({
+                      ...body,
+                      jobs: body.jobs.map((j) =>
+                        j.id === "003-idea" ? { ...j, idea_files: [clipName] } : j,
                       ),
                     }),
                   });
@@ -1282,6 +1304,23 @@ async function capture(outdir, referencePath) {
       await view("drawer-mobile-idea-files-midscroll", 390, 844, "dark", openIdeaFilesMid, true);
     } finally {
       ideaFilesBoard = false;
+    }
+    // A drawer on an idea with one attached WebM clip; the before side lists only its link.
+    const openIdeaVideo = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#003-idea/idea";
+      });
+      await page.waitForSelector("#d-files a");
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll("#d-files video")].every((v) => v.readyState >= 1),
+      );
+    };
+    videoBoard = true;
+    try {
+      await view("idea-video-mobile", 390, 844, "light", openIdeaVideo);
+      await view("idea-video-desktop", 1280, 900, "light", openIdeaVideo);
+    } finally {
+      videoBoard = false;
     }
     const openChatDrawer = async (page) => {
       await page.evaluate(() => {
