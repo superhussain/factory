@@ -348,6 +348,9 @@ class RolesTest(IsolatedTestCase):
                       "to it. Viewing it with `cat`, `sed`, `grep` or `head` does not count, and the edit fails with "
                       "`File has not been read yet`. For a large file, Read only the lines you will change, with "
                       "offset and limit. A new file needs no Read.", flat("agents/factory-builder.md"))
+        self.assertIn("When `decision.md` already exists from an earlier round, Read it with the Read tool before "
+                      "you Write it, or the Write fails with `File has not been read yet`.",
+                      flat("agents/factory-approver.md"))
 
     def test_open_items_are_absorbed_before_queued(self):
         def flat(name):
