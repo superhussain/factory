@@ -141,8 +141,13 @@ class BacklogContextTests(IsolatedTestCase):
         for kind, content, message in cases:
             with self.subTest(message=message):
                 result, path = self.add(content if kind == "text" else "", raw=content if kind == "raw" else None)
-                self.assertEqual(result, (2, "", f"factory.py: context file {path}: {message}\n"))
+                self.assertEqual(result, (2, "", f"factory.py: context file {path}: {message}\n"
+                                                 f"{self.module.BACKLOG_CONTEXT_EXAMPLE}\n"))
                 self.assertEqual(self.writes, [])
+
+    def test_error_example_is_a_valid_context(self):
+        example = self.module.BACKLOG_CONTEXT_EXAMPLE
+        self.assertIsNone(self.module.backlog_context_error(example.split("\n", 1)[1]))
 
     def test_bad_usage_exits_2(self):
         usage = 'factory.py: usage: backlog add "<slug>: <feature>" [--context <file>] | backlog rework <job-id> (feature on stdin)\n'

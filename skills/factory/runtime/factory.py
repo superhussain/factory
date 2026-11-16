@@ -1258,11 +1258,17 @@ def backlog_context_error(text):
     return None
 
 
+BACKLOG_CONTEXT_EXAMPLE = ("a context file looks like this:\nRecommend: approve\n\n"
+                           "Why this line is worth building, in one or more lines.\n\n"
+                           "## Question: Which option?\nWhat the person decides.\nPick: one\n"
+                           "- Option A (recommended): what it does\n- Option B: what it does")
+
+
 def backlog_context(path):
     """The normalized text of a backlog context file. Exits 2 with one message when the file does
     not fit backlog_context_error."""
     def bad(why):
-        fail(f"context file {path}: {why}", 2)
+        fail(f"context file {path}: {why}\n{BACKLOG_CONTEXT_EXAMPLE}", 2)
     try:
         with open(path, encoding="utf-8", newline="") as f:
             text = f.read()
