@@ -3029,6 +3029,11 @@ class PickupSetupTest(PickupFixture):
         self.assertIn("/usr/sbin", folders)
         self.assertIn("/sbin", folders)
 
+    @unittest.skipIf(sys.platform == "win32", "Windows timers keep their own PATH")
+    def test_timer_path_includes_the_gh_folder(self):
+        patch.object(factory.shutil, "which", return_value="/synthetic/brew/bin/gh").start()
+        self.assertIn("/synthetic/brew/bin", factory.timer_values(self.home)["path"].split(os.pathsep))
+
     def cron_line(self):
         return factory.timer_text("cron", factory.timer_values(self.home))
 
@@ -3089,6 +3094,28 @@ class PickupSetupTest(PickupFixture):
         _, out, _ = self.setup()
         self.assertIn("7. ok       timer:", out)
         self.assertIn("note: the timer runs /old/python3 /old/factory.py pickup", out)
+
+    @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
+    def test_launchd_path_drift_note(self):
+        patch.object(factory, "PICKUP_SCHEDULER", "launchd").start()
+        plist = Path.home() / "Library" / "LaunchAgents" / "factory.pickup.plist"
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        plist.write_bytes(plistlib.dumps({"Label": "factory.pickup",
+                                          "ProgramArguments": factory.timer_values(self.home)["argv"],
+                                          "EnvironmentVariables": {"PATH": "/usr/bin:/bin"}}))
+        self.loaded = True
+        _, out, _ = self.setup()
+        self.assertIn("note: the timer PATH is /usr/bin:/bin, but --install would write ", out)
+
+    @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
+    def test_launchd_current_plist_has_no_note(self):
+        patch.object(factory, "PICKUP_SCHEDULER", "launchd").start()
+        plist = Path.home() / "Library" / "LaunchAgents" / "factory.pickup.plist"
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        plist.write_text(factory.timer_text("launchd", factory.timer_values(self.home)), encoding="utf-8")
+        self.loaded = True
+        _, out, _ = self.setup()
+        self.assertNotIn("note:", out)
 
     @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
     def test_launchd_without_program_arguments_notes(self):

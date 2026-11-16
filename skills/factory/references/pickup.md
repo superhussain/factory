@@ -61,7 +61,7 @@ python3 <installed-skill>/runtime/factory.py pickup setup --install
 | schtasks | `~/.config/factory-pickup.cmd` | `schtasks /Create ... /F` | always re-created (`/F`) |
 
 The timer runs `factory.py --home <home> pickup` with `/usr/bin/python3` when that python runs the runtime, else with the python that ran `--install`. The second line of the output names the timer python and why. When a timer already exists but runs a different python or skill path than `--install` would write, check 7 stays ok and prints a `note:` line. On cron, `--install` replaces any old line that runs
-`factory.py pickup` and keeps every other line.
+`factory.py pickup` and keeps every other line. The timer `PATH` holds the launcher folders, the timer python's folder, gh's folder when `gh` is on the installing shell's `PATH`, and the system folders. On launchd, a plist whose `PATH` differs from what `--install` would write gets the same `note:` line.
 
 A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.
 
