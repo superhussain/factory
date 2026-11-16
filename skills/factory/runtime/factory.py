@@ -57,7 +57,7 @@
                                             print the job PR's checks as <bucket> <name> once none is
                                             pending, checking every 10 seconds for up to S seconds
                                             (default 300); no checks after 120 seconds exits 0, a failing
-                                            check 1, pending at the deadline 3, a bad pr 4, a gh problem 5
+                                            check 1, pending at the deadline 3, a bad pr 4, a gh problem 5, an escalated job 7
   factory.py pr-state <project-slug>/<job-id> [--wait S]
                                             print one JSON reading of the job PR for /factory babysit:
                                             pr, state, review, checks, queued, conflict and next; --wait
@@ -6338,6 +6338,24 @@ def board_pr(home, slug, job_id):
     return pr
 
 
+def escalation_hold(home, slug, job_id):
+    """Why the approver's escalation holds the job's PR from an agent merge, or None."""
+    job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
+    if job and escalated(job):
+        return "is escalated on the board"
+    decision = home / "jobs" / slug / job_id / "decision.md"
+    try:
+        if is_link(decision):
+            return "has a decision.md that cannot be read"
+        text = decision.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError):
+        return "has a decision.md that cannot be read"
+    first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    return "has a decision.md that says ESCALATE" if first.startswith("ESCALATE") else None
+
+
 def gh_answer(result, what):
     """stdout of a gh_cli result, failing with exit 5 when gh cannot answer."""
     if result is None:
@@ -6385,6 +6403,9 @@ def checks_cmd(target, *args):
         fail("--timeout takes one value from 0 to 600 seconds. " + CHECKS_USAGE, 2)
     timeout = int(args[1]) if args else 300
     pr = board_pr(home, slug, job_id)
+    why = escalation_hold(home, slug, job_id)
+    if why:
+        fail(f"{job_id} {why}, so a person reviews and merges {pr}. Nothing merges.", 7)
     state = gh_pr_view(pr, "--json", "state", "--jq", ".state").strip()
     if state != "OPEN":
         fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
