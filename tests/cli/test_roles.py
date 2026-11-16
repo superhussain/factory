@@ -341,6 +341,14 @@ class RolesTest(IsolatedTestCase):
             self.assertIn(phrase, prompt)
         self.assertNotIn("`", prompt)
 
+    def test_read_before_edit(self):
+        def flat(name):
+            return " ".join((SKILL / name).read_text(encoding="utf-8").split())
+        self.assertIn("**Read before you edit.** Open each file with the Read tool before your first Edit or Write "
+                      "to it. Viewing it with `cat`, `sed`, `grep` or `head` does not count, and the edit fails with "
+                      "`File has not been read yet`. For a large file, Read only the lines you will change, with "
+                      "offset and limit. A new file needs no Read.", flat("agents/factory-builder.md"))
+
     def test_open_items_are_absorbed_before_queued(self):
         def flat(name):
             return " ".join((SKILL / name).read_text(encoding="utf-8").split())
