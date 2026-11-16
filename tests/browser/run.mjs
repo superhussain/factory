@@ -777,6 +777,26 @@ async function capture(outdir, referencePath) {
         document.getElementById("d-doc").scrollTop = 300;
       });
     };
+    // A phone drawer after a 150 px touch drag that starts on the job details.
+    // The build tab is long enough for the page to scroll.
+    const openMetaDragged = async (page, side) => {
+      await openDrawer(page, side);
+      await page.click('.tab[data-name="build.md"]');
+      await page.waitForFunction(
+        () => document.querySelector("#d-doc h1")?.textContent === "Synthetic build",
+      );
+      const m = await page.$eval("#d-meta", (el) => {
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      });
+      await page.touchscreen.touchStart(m.x, m.y);
+      for (let k = 1; k <= 3; k++) await page.touchscreen.touchMove(m.x, m.y - 50 * k);
+      await page.touchscreen.touchEnd();
+      if (side === "after") {
+        const top = await page.$eval("#d-doc", (el) => el.scrollTop);
+        if (Math.abs(top - 150) > 1) throw new Error(`meta drag scrolled to ${top}, expected 150`);
+      }
+    };
     const openAnswers = async (page, side) => {
       await openDrawer(page, side);
       await page.click('.tab[data-name="answers.md"]');
@@ -866,6 +886,7 @@ async function capture(outdir, referencePath) {
     await view("drawer-mobile-scrolled", 375, 667, "dark", openScrolled);
     await view("drawer-mobile-midscroll", 390, 844, "dark", openMidScrolled);
     await view("drawer-mobile-notice", 390, 844, "dark", openNotice);
+    await view("drawer-mobile-meta-drag", 390, 844, "dark", openMetaDragged, true);
     await view("drawer-desktop-scrolled", 1440, 900, "light", openScrolled);
     await view("answers-desktop", 1440, 900, "light", openAnswers);
     await view("answers-mobile", 390, 844, "dark", openAnswers);
