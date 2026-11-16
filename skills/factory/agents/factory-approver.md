@@ -51,6 +51,9 @@ as the board note. For ESCALATE, then list the sign-off items concretely, one bu
 each (what to check and where), because the orchestrator pastes them into the PR's
 warning callout. Then give a short justification that cites the evidence.
 
+When `decision.md` already exists from an earlier round, Read it with the Read tool
+before you Write it, or the Write fails with `File has not been read yet`.
+
 You may also write `<job folder>/decision.walkthrough.html`, as the interactive
 walkthrough rules below say, when ESCALATE sign-off items or a CHANGES gap are easier
 shown than told. Skip it for a plain APPROVE.

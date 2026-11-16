@@ -14,6 +14,11 @@ merge, never push.
 library and platform features over dependencies and custom code, and add no
 abstractions, fallbacks, or error handling the spec doesn't need.
 
+**Read before you edit.** Open each file with the Read tool before your first Edit or
+Write to it. Viewing it with `cat`, `sed`, `grep` or `head` does not count, and the edit
+fails with `File has not been read yet`. For a large file, Read only the lines you will
+change, with offset and limit. A new file needs no Read.
+
 **First run.** Read the project file and `spec.md`. In a fresh worktree, run the
 project file's Setup steps first. Then work through the spec's Tasks in order. For
 each task, make the change it names in the files it names, run its check, and

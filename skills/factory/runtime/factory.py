@@ -1258,11 +1258,17 @@ def backlog_context_error(text):
     return None
 
 
+BACKLOG_CONTEXT_EXAMPLE = ("a context file looks like this:\nRecommend: approve\n\n"
+                           "Why this line is worth building, in one or more lines.\n\n"
+                           "## Question: Which option?\nWhat the person decides.\nPick: one\n"
+                           "- Option A (recommended): what it does\n- Option B: what it does")
+
+
 def backlog_context(path):
     """The normalized text of a backlog context file. Exits 2 with one message when the file does
     not fit backlog_context_error."""
     def bad(why):
-        fail(f"context file {path}: {why}", 2)
+        fail(f"context file {path}: {why}\n{BACKLOG_CONTEXT_EXAMPLE}", 2)
     try:
         with open(path, encoding="utf-8", newline="") as f:
             text = f.read()
@@ -5924,6 +5930,13 @@ ROLE_ALIASES = {"builder": "build", "factory-builder": "build",
                 "factory-review-security": "review-security", "factory-review-ux": "review-ux",
                 "factory-review-ui": "review-ui", "factory-review-code": "review-code"}
 PROMPT_USAGE = "usage: prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]"
+PROMPT_HELP = ("roles and flags: spec | approve | build [--round N] [--port P] | review-security, review-ux, "
+               "review-ui or review-code --round N. Every role also takes --out <path>.\n"
+               "example: prompt sample/042-sample review-code --round 2")
+
+
+def prompt_usage_error(msg):
+    fail(f"{msg}. {PROMPT_USAGE}\n{PROMPT_HELP}", 2)
 
 
 def prompt_cmd(target, role, *flags):
@@ -5931,28 +5944,28 @@ def prompt_cmd(target, role, *flags):
     role = ROLE_ALIASES.get(role, role)
     home, slug, job_id = r2_target(target, True)
     if role not in PROMPT_ROLES:
-        fail(f"bad role {role!r}: use one of {', '.join(PROMPT_ROLES)}", 2)
+        prompt_usage_error(f"bad role {role!r}")
     if len(flags) % 2:
-        fail(PROMPT_USAGE, 2)
+        prompt_usage_error("a flag is missing its value")
     options = {}
     for flag, value in zip(flags[::2], flags[1::2]):
         if flag not in ("--round", "--port", "--out"):
-            fail(f"unknown flag {flag!r}. " + PROMPT_USAGE, 2)
+            prompt_usage_error(f"unknown flag {flag!r}")
         if flag in options:
-            fail(f"{flag} given twice. " + PROMPT_USAGE, 2)
+            prompt_usage_error(f"{flag} given twice")
         options[flag] = value
     review = role.startswith("review-")
     if "--round" in options and not (role == "build" or review):
-        fail(f"{role} takes no --round", 2)
+        prompt_usage_error(f"{role} takes no --round")
     if "--port" in options and role != "build":
-        fail(f"{role} takes no --port", 2)
+        prompt_usage_error(f"{role} takes no --port")
     if review and "--round" not in options:
-        fail(f"{role} needs --round N", 2)
+        prompt_usage_error(f"{role} needs --round N")
     if "--round" in options and not re.fullmatch(r"[1-9][0-9]*", options["--round"]):
-        fail("--round must be a positive integer", 2)
+        prompt_usage_error("--round must be a positive integer")
     if "--port" in options and not (re.fullmatch(r"[1-9][0-9]*", options["--port"])
                                     and int(options["--port"]) <= 65535):
-        fail("--port must be 1 to 65535", 2)
+        prompt_usage_error("--port must be 1 to 65535")
     out = options.get("--out")
     if out is not None:
         out = Path(os.path.normpath(out))

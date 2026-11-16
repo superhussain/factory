@@ -143,10 +143,15 @@ class PromptTest(IsolatedTestCase):
             with self.subTest(args):
                 code, out, _ = self.prompt(*args)
                 self.assertEqual((code, out), (2, ""))
-        self.assertEqual(self.prompt("build", "--color", "red"),
-                         (2, "", f"factory.py: unknown flag '--color'. {factory.PROMPT_USAGE}\n"))
+        help = f". {factory.PROMPT_USAGE}\n{factory.PROMPT_HELP}\n"
+        self.assertEqual(self.prompt("build", "--color", "red"), (2, "", "factory.py: unknown flag '--color'" + help))
         self.assertEqual(self.prompt("build", "--round", "1", "--round", "2"),
-                         (2, "", f"factory.py: --round given twice. {factory.PROMPT_USAGE}\n"))
+                         (2, "", "factory.py: --round given twice" + help))
+        self.assertEqual(self.prompt("approve", "--round", "1"), (2, "", "factory.py: approve takes no --round" + help))
+        self.assertEqual(self.prompt("writer"), (2, "", "factory.py: bad role 'writer'" + help))
+        for args in cases[:9] + cases[10:]:
+            with self.subTest(args):
+                self.assertTrue(self.prompt(*args)[2].endswith(help))
         (self.home / "config.md").unlink()
         self.assertEqual(snapshot(self.home), before)
 
@@ -196,6 +201,9 @@ class PromptTest(IsolatedTestCase):
         self.assertIn('`python3 "$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] '
                       '--out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`', skill)
         self.assertIn("`Your full prompt is in <printed path>. Read it first and follow it exactly.`", skill)
+        self.assertIn("Roles are `spec`, `build`, `review-security`, `review-ux`, `review-ui`, `review-code` and "
+                      "`approve`. Only `build` and the four reviews take `--round`, and the reviews need it. "
+                      "Only `build` takes `--port`.", skill)
         self.assertIn("`prompt` ends each prompt with `$PIPELINE.prompts.<stage>` verbatim.", skill)
         self.assertIn("the absolute path in `$DOCUMENTS`", skill)
         self.assertNotIn("same files, with the job folder", skill)
