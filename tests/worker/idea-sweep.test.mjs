@@ -110,3 +110,55 @@ test("a repeat upload resets the clock", async () => {
     assert.deepEqual(s.bucket.objects.get(key).bytes, bytes, path);
   }
 });
+
+const DEMO = { id: "101-demo", idea_images: [PNG.slice(12)] };
+const STALE = { id: "102-stale", idea_files: [MP4.slice(11)] };
+const REFUSAL = `idea file ${MP4.slice(11)} is not uploaded: the upload is over a day old, so upload it again`;
+
+const boardWrite = (s, jobs) =>
+  serveFactory(
+    new Request(serverEnv.FACTORY_ORIGIN + "/api/board", {
+      method: "PUT",
+      headers: { "If-Match": s.bucket.objects.get("board.json").httpEtag },
+      body: JSON.stringify({ jobs }),
+    }),
+    { ...serverEnv, BUCKET: s.bucket },
+    { verified: true },
+  );
+
+async function setupWrites(t) {
+  t.mock.timers.enable({ apis: ["Date"], now: NOW });
+  const s = setup();
+  await s.bucket.put("board.json", JSON.stringify({ jobs: [DEMO] }));
+  for (const key of [MP4, CSV, PNG])
+    s.bucket.objects.get(key).customMetadata = { sha256: key.split("/")[1].slice(0, 64) };
+  return s;
+}
+
+test("a board write refuses an upload over a day old", async (t) => {
+  const s = await setupWrites(t);
+  const stale = await boardWrite(s, [DEMO, STALE]);
+  assert.equal(stale.status, 400);
+  assert.equal(await stale.text(), REFUSAL);
+  const fresh = await boardWrite(s, [DEMO, { id: "102-fresh", idea_files: [CSV.slice(11)] }]);
+  assert.equal(fresh.status, 200);
+});
+
+test("a board write during the sweep cannot name an upload it deletes", async (t) => {
+  const s = await setupWrites(t);
+  const list = s.bucket.list;
+  let write;
+  s.bucket.list = async (options) => {
+    if (options?.prefix?.startsWith("idea-")) {
+      write ??= boardWrite(s, [DEMO, STALE]);
+      await write;
+    }
+    return list(options);
+  };
+  assert.deepEqual(await sweep(s.env), { status: "pruned", deleted: [MP4] });
+  const response = await write;
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), REFUSAL);
+  const board = s.bucket.objects.get("board.json").bytes.toString();
+  assert.ok(!board.includes("102-stale"));
+});

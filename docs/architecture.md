@@ -75,7 +75,7 @@ original-byte hashes, no CORS headers, no delete endpoint and no pagination
 remain unchanged. The route map and per-route behavior are asserted in
 `tests/fixtures/protocol-v1.json` and the ported suites under `tests/worker/`.
 
-The hourly scheduled pass deletes an `idea-images/` or `idea-files/` object uploaded more than 2 days ago that no row in `board.json` or `board-archive.json` names. A repeat upload of the same bytes resets that clock. The pass deletes nothing while either board document is unreadable.
+The hourly scheduled pass deletes an `idea-images/` or `idea-files/` object uploaded more than 2 days ago that no row in `board.json` or `board-archive.json` names. A repeat upload of the same bytes resets that clock. The pass deletes nothing while either board document is unreadable. A board write may add a reference only to an upload made in the last 1 day, so no saved row can name an object a running pass deletes. The dashboard uploads again anything it cached more than 12 hours ago.
 
 One deliberate exception: **job file PUTs (`/api/jobs/...`) accept absent
 conditions** for legacy-client compatibility (a blind write), while malformed

@@ -3108,6 +3108,17 @@ class PickupSetupTest(PickupFixture):
         self.assertIn("note: the timer PATH is /usr/bin:/bin, but --install would write ", out)
 
     @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
+    def test_launchd_unset_path_note(self):
+        patch.object(factory, "PICKUP_SCHEDULER", "launchd").start()
+        plist = Path.home() / "Library" / "LaunchAgents" / "factory.pickup.plist"
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        plist.write_bytes(plistlib.dumps({"Label": "factory.pickup",
+                                          "ProgramArguments": factory.timer_values(self.home)["argv"]}))
+        self.loaded = True
+        _, out, _ = self.setup()
+        self.assertIn("note: the timer PATH is unset, but --install would write ", out)
+
+    @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
     def test_launchd_current_plist_has_no_note(self):
         patch.object(factory, "PICKUP_SCHEDULER", "launchd").start()
         plist = Path.home() / "Library" / "LaunchAgents" / "factory.pickup.plist"

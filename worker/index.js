@@ -1824,6 +1824,8 @@ async function pruneRetroRuns(env, now) {
 }
 
 const IDEA_ORPHAN_GRACE_MS = 2 * DAY_MS;
+// A board write may add a reference only to an upload this fresh, half the sweep's grace, so no write can name an object a running sweep deletes.
+const IDEA_REF_FRESH_MS = DAY_MS;
 
 // Deletes idea uploads older than IDEA_ORPHAN_GRACE_MS that no board or archive row names.
 // The board is read before the archive, since runArchive writes the archive first.
@@ -2148,8 +2150,11 @@ async function checkIdeaImages(env, jobs, storedJobs) {
   } catch {} // an unreadable stored row vouches for nothing
   if (wanted.size > MAX_NEW_REFS) return "too many new idea images in one board write";
   for (const name of wanted) {
-    const meta = (await env.BUCKET.head(`idea-images/${name}`))?.customMetadata;
-    if (meta?.sha256 !== name.slice(0, 64)) return `idea image ${name} is not uploaded`;
+    const head = await env.BUCKET.head(`idea-images/${name}`);
+    if (head?.customMetadata?.sha256 !== name.slice(0, 64))
+      return `idea image ${name} is not uploaded`;
+    if (head.uploaded.getTime() <= Date.now() - IDEA_REF_FRESH_MS)
+      return `idea image ${name} is not uploaded: the upload is over a day old, so upload it again`;
   }
   return null;
 }
@@ -2178,8 +2183,11 @@ async function checkIdeaFiles(env, jobs, storedJobs) {
   } catch {} // an unreadable stored row vouches for nothing
   if (wanted.size > MAX_NEW_REFS) return "too many new idea files in one board write";
   for (const name of wanted) {
-    const meta = (await env.BUCKET.head(`idea-files/${name}`))?.customMetadata;
-    if (meta?.sha256 !== name.slice(0, 64)) return `idea file ${name} is not uploaded`;
+    const head = await env.BUCKET.head(`idea-files/${name}`);
+    if (head?.customMetadata?.sha256 !== name.slice(0, 64))
+      return `idea file ${name} is not uploaded`;
+    if (head.uploaded.getTime() <= Date.now() - IDEA_REF_FRESH_MS)
+      return `idea file ${name} is not uploaded: the upload is over a day old, so upload it again`;
   }
   return null;
 }
