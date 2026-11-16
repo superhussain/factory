@@ -828,6 +828,22 @@ def check_pipeline(value):
         fail('pipeline must be {"global": <version>, "project": <version>}', 2)
 
 
+NOT_BEFORE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+
+
+def check_not_before(value):
+    """not_before is null or a UTC time like 2026-11-17T09:00:00Z."""
+    if value is None:
+        return
+    try:
+        ok = isinstance(value, str) and NOT_BEFORE.fullmatch(value) \
+            and datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        ok = False
+    if not ok:
+        fail("not_before must be a UTC time like 2026-11-17T09:00:00Z, or null. Nothing was written.", 2)
+
+
 def board(factory, job_id):
     raw = "" if sys.stdin.isatty() else sys.stdin.read().strip()
     try:
@@ -888,6 +904,7 @@ def board(factory, job_id):
     check_build(patch.get("build"))
     check_tracer(patch.get("tracer"))
     check_pipeline(patch.get("pipeline"))
+    check_not_before(patch.get("not_before"))
     device, session, minutes = holder(factory)
     paseo = paseo_session()
     home = factory_home() if paseo else None
@@ -939,6 +956,9 @@ def board(factory, job_id):
             job.pop("priority", None)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
+        elif isinstance(patch.get("not_before"), str) and job.get("stage") == IDEA \
+                and mine(job.get("claim") or {}, device, session):
+            job.pop("claim")
         elif mine(job.get("claim") or {}, device, session):
             job["claim"]["seen"] = job["updated"]
             if paseo:
