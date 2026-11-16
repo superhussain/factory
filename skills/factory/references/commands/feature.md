@@ -44,7 +44,8 @@ feature.
    branch holds the whole stack.
    Then run `python3 "$RUNTIME" round-wait "$SLUG/<id>" <N>` with the Bash tool timeout
    at 600000 ms. It records each verdict on the board. On `timeout`, run it again. On
-   `malformed`, read that file and resume its agent.
+   `malformed`, read the review file whose `files` entry is not a valid `VERDICT:`
+   line, resume its agent, then run `round-wait` again.
 5. Once `round-wait` prints `round`, any CHANGES first checks the round cap. At the cap, the job
    goes to `needs-human`. Below the cap, run
    `python3 "$RUNTIME" escalation "$SLUG/<id>" <N>`. When its decision is `escalate`,
