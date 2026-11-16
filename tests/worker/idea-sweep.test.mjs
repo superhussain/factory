@@ -149,8 +149,10 @@ test("a board write during the sweep cannot name an upload it deletes", async (t
   const list = s.bucket.list;
   let write;
   s.bucket.list = async (options) => {
-    write ??= boardWrite(s, [DEMO, STALE]);
-    await write;
+    if (options?.prefix?.startsWith("idea-")) {
+      write ??= boardWrite(s, [DEMO, STALE]);
+      await write;
+    }
     return list(options);
   };
   assert.deepEqual(await sweep(s.env), { status: "pruned", deleted: [MP4] });
