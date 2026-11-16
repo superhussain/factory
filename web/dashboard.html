@@ -6961,7 +6961,8 @@ let decoding = Promise.resolve();
 let rejectSeq = 0;
 let inflight = false; // set synchronously by the submit listener, before any await
 let snap = null; // the frozen submission, held from acceptance until confirmed save or confirmed no-commit; snap.uncertain marks an earlier PUT that may still commit and survives later failures
-const uploaded = new Set();
+const uploaded = new Map(); // name -> Date.now() at its last upload
+const UPLOAD_REUSE_MS = 12 * 60 * 60 * 1000;
 // One predicate for every draft mutation: while a save runs or a submission is unresolved,
 // the frozen snapshot is what Retry would save, so nothing may join or leave the draft.
 const locked = () => inflight || !!snap;
@@ -7155,17 +7156,17 @@ $('idea-dlg').addEventListener('keydown', (e) => {
 });
 
 async function uploadImage(img) {
-  if (uploaded.has(img.name)) return;
+  if (Date.now() - (uploaded.get(img.name) ?? -Infinity) < UPLOAD_REUSE_MS) return;
   const r = await fetch('./api/idea-images/' + img.name, { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: img.blob });
   if (!r.ok) throw new Error('uploading an image failed: ' + r.status + ' ' + (await r.text()).slice(0, 200));
-  uploaded.add(img.name);
+  uploaded.set(img.name, Date.now());
 }
 
 async function uploadIdeaFile(f) {
-  if (uploaded.has(f.name)) return;
+  if (Date.now() - (uploaded.get(f.name) ?? -Infinity) < UPLOAD_REUSE_MS) return;
   const r = await fetch('./api/idea-files/' + f.name, { method: 'PUT', headers: { 'Content-Type': FILE_TYPES[f.ext].type }, body: f.blob });
   if (!r.ok) throw new Error('uploading a file failed: ' + r.status + ' ' + (await r.text()).slice(0, 200));
-  uploaded.add(f.name);
+  uploaded.set(f.name, Date.now());
 }
 
 // After a commit that may have landed: look for the capture_id. Returns the saved id, or null
