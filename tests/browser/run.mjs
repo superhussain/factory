@@ -1108,6 +1108,37 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
+    const openInstallSettings = async (page, ios) => {
+      await page.evaluate((ios) => {
+        if (ios)
+          Object.defineProperty(navigator, "userAgent", {
+            get: () =>
+              "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+          });
+        else {
+          const e = new Event("beforeinstallprompt");
+          e.prompt = async () => {};
+          e.userChoice = Promise.resolve({ outcome: "dismissed" });
+          dispatchEvent(e);
+        }
+        location.hash = "#/settings/display";
+      }, ios);
+      await page.waitForSelector("#settings-display:not([hidden])");
+      await page.evaluate(() =>
+        document.querySelector("#display-reset").scrollIntoView({ block: "start" }),
+      );
+    };
+    await view("display-install-desktop", 1280, 900, "light", (page) =>
+      openInstallSettings(page, false),
+    );
+    await view(
+      "display-install-ios",
+      390,
+      844,
+      "light",
+      (page) => openInstallSettings(page, true),
+      true,
+    );
     const openSchedulerSettings = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/scheduler";
