@@ -4928,6 +4928,7 @@ $('detail').addEventListener('focusin', (e) => {
 });
 // The details sit outside the page's scroller, so a wheel on them does not scroll it. Pass it on.
 $('detail').addEventListener('wheel', (e) => {
+  stopHeadGlide();
   if (!headCollapse || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || !e.target.closest(HEAD_MOVERS)) return;
   e.preventDefault();
   $('d-doc').scrollTop += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? $('d-doc').clientHeight : 1);
@@ -4935,13 +4936,46 @@ $('detail').addEventListener('wheel', (e) => {
 // The details sit outside the page's scroller, so a touch drag on them does not scroll it either.
 // A drag that starts more up or down than sideways moves the page with the finger.
 // Sideways drags, form fields and sideways scrollers keep their own touches.
+// A flick on the details keeps the page moving after the finger lifts, slowing like a native page flick.
+// A new touch, a wheel, a scroll set by other code, either end of the page or a closed drawer stops it.
+const GLIDE_MS = 325;
+let headGlide = null;
+function stopHeadGlide() {
+  if (headGlide) cancelAnimationFrame(headGlide.raf);
+  headGlide = null;
+}
+// v is page pixels per millisecond, positive toward the page bottom.
+function startHeadGlide(v) {
+  const doc = $('d-doc');
+  const g = { v: Math.max(-4, Math.min(4, v)), pos: doc.scrollTop, t: performance.now(), raf: 0 };
+  const step = (now) => {
+    if (Math.abs(doc.scrollTop - g.pos) > 1) {
+      headGlide = null;
+      return;
+    }
+    const dt = Math.max(0, now - g.t);
+    g.t = now;
+    const max = doc.scrollHeight - doc.clientHeight;
+    g.pos = Math.max(0, Math.min(max, g.pos + g.v * dt));
+    g.v *= Math.exp(-dt / GLIDE_MS);
+    doc.scrollTop = g.pos;
+    if (Math.abs(g.v) < 0.02 || g.pos <= 0 || g.pos >= max || !headCollapse || $('detail').hidden) {
+      headGlide = null;
+      return;
+    }
+    g.raf = requestAnimationFrame(step);
+  };
+  headGlide = g;
+  g.raf = requestAnimationFrame(step);
+}
 let headDrag = null;
 $('detail').addEventListener('touchstart', (e) => {
+  stopHeadGlide();
   headDrag = null;
   if (!headCollapse || e.touches.length !== 1 || !e.target.closest(HEAD_MOVERS)) return;
   if (e.target.closest('input, textarea, select') || sidewaysScroller(e.target, $('detail'))) return;
   const t = e.touches[0];
-  headDrag = { x0: t.clientX, y0: t.clientY, top: $('d-doc').scrollTop, active: false };
+  headDrag = { x0: t.clientX, y0: t.clientY, top: $('d-doc').scrollTop, active: false, y: t.clientY, t: e.timeStamp, v: 0 };
 }, { passive: true });
 $('detail').addEventListener('touchmove', (e) => {
   const g = headDrag;
@@ -4962,11 +4996,19 @@ $('detail').addEventListener('touchmove', (e) => {
     g.active = true;
   }
   if (e.cancelable) e.preventDefault();
+  if (e.timeStamp - g.t > 0) g.v = (t.clientY - g.y) / (e.timeStamp - g.t);
+  g.y = t.clientY;
+  g.t = e.timeStamp;
   $('d-doc').scrollTop = g.top - dy;
 }, { passive: false });
-const endHeadDrag = () => { headDrag = null; };
-$('detail').addEventListener('touchend', endHeadDrag, { passive: true });
-$('detail').addEventListener('touchcancel', endHeadDrag, { passive: true });
+// A finger held still for 100 ms before lifting places the page, so it does not glide.
+$('detail').addEventListener('touchend', (e) => {
+  const g = headDrag;
+  headDrag = null;
+  if (!g?.active || e.timeStamp - g.t > 100 || Math.abs(g.v) < 0.1) return;
+  startHeadGlide(-g.v);
+}, { passive: true });
+$('detail').addEventListener('touchcancel', () => { headDrag = null; }, { passive: true });
 swipeMedia.addEventListener('change', measureHead);
 const headObserver = new ResizeObserver(measureHead);
 for (const el of $('detail').children) if (!el.matches('.pager, .detail-resize')) headObserver.observe(el);
