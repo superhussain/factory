@@ -42,7 +42,10 @@ feature.
    With a stacked rider, every reviewer and the approver get `$WORKTREES/<rider-id>`
    and `factory/<rider-id>` in place of the job's worktree and branch, since that
    branch holds the whole stack.
-5. Once all four are in, any CHANGES first checks the round cap. At the cap, the job
+   Then run `python3 "$RUNTIME" round-wait "$SLUG/<id>" <N>` with the Bash tool timeout
+   at 600000 ms. It records each verdict on the board. On `timeout`, run it again. On
+   `malformed`, read that file and resume its agent.
+5. Once `round-wait` prints `round`, any CHANGES first checks the round cap. At the cap, the job
    goes to `needs-human`. Below the cap, run
    `python3 "$RUNTIME" escalation "$SLUG/<id>" <N>`. When its decision is `escalate`,
    run `push "$SLUG/<id>"`, patch

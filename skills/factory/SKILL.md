@@ -316,6 +316,8 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   `VERDICT: PASS` or `VERDICT: CHANGES`, `review-plan` writes `VERDICT: SKIPPED`
   for ux and ui, and the approver writes `APPROVE`,
   `ESCALATE`, or `CHANGES`. `watch` and `wait` print those first lines.
+  `round-wait` waits for all four and records each verdict, so no hand-written
+  `rounds` patch is needed.
 - Max `$PIPELINE.review_rounds` review rounds per build cycle (2 unless pipeline settings say otherwise, at most 5). If
   the last allowed round of a cycle still has a CHANGES verdict, the job goes to
   `needs-human` with a note naming the reviewers that still want changes. A `/factory rework` starts a new cycle, so count
