@@ -371,6 +371,18 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       await page.touchscreen.touchEnd();
       await frames();
     };
+    // The middle of the part of #d-meta the title band does not cover, and whether a touch there lands on it.
+    const touchPoint = () =>
+      page.$eval("#d-meta", (el) => {
+        const r = el.getBoundingClientRect();
+        const top = Math.max(
+          r.top,
+          document.getElementById("d-title").getBoundingClientRect().bottom,
+        );
+        const x = r.x + r.width / 2;
+        const y = (top + r.bottom) / 2;
+        return { x, y, onMeta: el.contains(document.elementFromPoint(x, y)) };
+      });
 
     // A tall open agents table scrolls to its last row, even on a short page.
     await t.test("D12", async () => {
@@ -684,18 +696,6 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
     // A touch drag that starts on the job details scrolls the page both ways; a sideways drag does not.
     await t.test("D21", async () => {
       await open("spec");
-      // The middle of the part of #d-meta the title band does not cover, and whether a touch there lands on it.
-      const touchPoint = () =>
-        page.$eval("#d-meta", (el) => {
-          const r = el.getBoundingClientRect();
-          const top = Math.max(
-            r.top,
-            document.getElementById("d-title").getBoundingClientRect().bottom,
-          );
-          const x = r.x + r.width / 2;
-          const y = (top + r.bottom) / 2;
-          return { x, y, onMeta: el.contains(document.elementFromPoint(x, y)) };
-        });
       const rest = await state();
       const collapse = parseFloat(rest.collapse);
       let m = await touchPoint();
@@ -717,6 +717,69 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       const down = await state();
       near(down.scrollTop, 0, "scrollTop after drag down");
       near(down.h1Top, rest.h1Top, "h1 back at rest");
+    });
+
+    // A flick on the job details keeps the page moving after the finger lifts.
+    // A held finger does not glide, and a new touch or the page top stops the glide.
+    await t.test("D22", async () => {
+      await open("spec");
+      const cdp = await page.createCDPSession();
+      // Touches carry this clock as their timestamp, so flick speed does not depend on machine load.
+      let flickClock = Date.now();
+      const touch = (type, x, y) =>
+        cdp.send("Input.dispatchTouchEvent", {
+          type,
+          touchPoints: type === "touchEnd" ? [] : [{ x, y }],
+          timestamp: flickClock / 1000,
+        });
+      // Three moves of dy px 40 ms apart, then a lift `hold` ms after the last move.
+      const flick = async (m, dy, hold) => {
+        flickClock = Math.max(flickClock, Date.now());
+        await touch("touchStart", m.x, m.y);
+        for (let k = 1; k <= 3; k++) {
+          flickClock += 40;
+          await touch("touchMove", m.x, m.y - dy * k);
+        }
+        flickClock += hold;
+        await touch("touchEnd");
+      };
+      const gliding = () => page.evaluate(() => headGlide !== null);
+      const rest = await state();
+      const collapse = parseFloat(rest.collapse);
+      const m = await touchPoint();
+      assert.ok(m.onMeta, `touch at rest lands on #d-meta: ${m.x}, ${m.y}`);
+
+      await flick(m, 30, 150);
+      await frames();
+      assert.equal(await gliding(), false, "held finger glides");
+      near((await state()).scrollTop, 90, "scrollTop after held drag");
+
+      await scrollTo(0);
+      await flick(m, 30, 0);
+      await page.waitForFunction(() => headGlide === null, wait);
+      await frames();
+      const s = await state();
+      assert.ok(s.scrollTop > 190, `scrollTop after flick ${s.scrollTop}`);
+      near(rest.h1Top - s.h1Top, s.scrollTop, "h1 after flick");
+      near(s.tabsTop, rest.tabsTop - Math.min(collapse, s.scrollTop), "tabs after flick");
+
+      await scrollTo(0);
+      await flick(m, 30, 0);
+      await frames();
+      assert.equal(await gliding(), true, "flick glides");
+      await touch("touchStart", 195, 600);
+      assert.equal(await gliding(), false, "touch stops the glide");
+      const caught = (await state()).scrollTop;
+      await frames();
+      near((await state()).scrollTop, caught, "scrollTop after the stopping touch");
+      await touch("touchEnd");
+
+      await scrollTo(0);
+      await flick(m, -30, 0);
+      await frames();
+      assert.equal(await gliding(), false, "flick down at the page top glides");
+      assert.equal((await state()).scrollTop, 0);
+      await cdp.detach();
     });
 
     assert.deepEqual(errors, []);
