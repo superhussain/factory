@@ -4932,6 +4932,41 @@ $('detail').addEventListener('wheel', (e) => {
   e.preventDefault();
   $('d-doc').scrollTop += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? $('d-doc').clientHeight : 1);
 }, { passive: false });
+// The details sit outside the page's scroller, so a touch drag on them does not scroll it either.
+// A drag that starts more up or down than sideways moves the page with the finger.
+// Sideways drags, form fields and sideways scrollers keep their own touches.
+let headDrag = null;
+$('detail').addEventListener('touchstart', (e) => {
+  headDrag = null;
+  if (!headCollapse || e.touches.length !== 1 || !e.target.closest(HEAD_MOVERS)) return;
+  if (e.target.closest('input, textarea, select') || sidewaysScroller(e.target, $('detail'))) return;
+  const t = e.touches[0];
+  headDrag = { x0: t.clientX, y0: t.clientY, top: $('d-doc').scrollTop, active: false };
+}, { passive: true });
+$('detail').addEventListener('touchmove', (e) => {
+  const g = headDrag;
+  if (!g) return;
+  if (e.touches.length !== 1) {
+    headDrag = null;
+    return;
+  }
+  const t = e.touches[0];
+  const dx = t.clientX - g.x0;
+  const dy = t.clientY - g.y0;
+  if (!g.active) {
+    if (!e.cancelable || Math.abs(dx) > Math.abs(dy)) {
+      headDrag = null;
+      return;
+    }
+    if (!dy) return;
+    g.active = true;
+  }
+  if (e.cancelable) e.preventDefault();
+  $('d-doc').scrollTop = g.top - dy;
+}, { passive: false });
+const endHeadDrag = () => { headDrag = null; };
+$('detail').addEventListener('touchend', endHeadDrag, { passive: true });
+$('detail').addEventListener('touchcancel', endHeadDrag, { passive: true });
 swipeMedia.addEventListener('change', measureHead);
 const headObserver = new ResizeObserver(measureHead);
 for (const el of $('detail').children) if (!el.matches('.pager, .detail-resize')) headObserver.observe(el);

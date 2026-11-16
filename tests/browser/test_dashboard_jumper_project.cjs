@@ -255,11 +255,15 @@ async function enter(page) {
   await page.keyboard.press("Enter");
   return row;
 }
+// Find and click the row in one in-page call, so a picker redraw cannot detach it between the two.
 async function clickKey(page, key) {
-  const s = await state(page),
-    row = s.rows.find((r) => r.key === key);
-  assert.ok(row, key);
-  await page.click("#" + row.id);
+  const found = await page.evaluate((k) => {
+    const i = jobResults.findIndex((r) => r.key === k);
+    const row = document.querySelectorAll('#job-results [role="option"]')[i];
+    row?.click();
+    return Boolean(row);
+  }, key);
+  assert.ok(found, key);
 }
 async function options(page) {
   return (await filterState(page)).rows.map((r) => ({ value: r.key, title: r.title }));
