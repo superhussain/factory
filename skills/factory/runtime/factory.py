@@ -4452,6 +4452,9 @@ def timer_values(home):
         if template:
             folders += launcher_folders(template)
     folders.append(os.path.dirname(python))
+    gh = shutil.which("gh")
+    if gh:
+        folders.append(os.path.dirname(gh))
     if not WINDOWS:
         folders += ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
     return {"argv": [python, str(Path(HERE, "factory.py")), "--home", str(home), "pickup"],
@@ -4509,11 +4512,13 @@ def timer_drift(scheduler, values):
     if scheduler == "launchd":
         plist = timer_path(scheduler)
         try:
-            have = plistlib.loads(plist.read_bytes()).get("ProgramArguments")
+            data = plistlib.loads(plist.read_bytes())
+            have, env = data.get("ProgramArguments"), data.get("EnvironmentVariables")
         except (OSError, ValueError, AttributeError, xml.parsers.expat.ExpatError):
             return f"could not read {plist}"
         if not isinstance(have, list) or not all(isinstance(a, str) for a in have):
             return f"could not read ProgramArguments in {plist}"
+        have_path = env.get("PATH") if isinstance(env, dict) else None
     elif scheduler == "cron":
         lines = [l for l in setup_run(["crontab", "-l"])[1].splitlines() if CRON_PICKUP.search(l)]
         argvs = [cron_argv(l) for l in lines]
@@ -4528,6 +4533,8 @@ def timer_drift(scheduler, values):
             return None
         return f"{cmd} differs from what --install would write"
     if have == want:
+        if scheduler == "launchd" and have_path != values["path"]:
+            return f"the timer PATH is {have_path or 'unset'}, but --install would write {values['path']}"
         return None
     return f"the timer runs {shlex.join(have)}, but --install would write {shlex.join(want)}"
 
