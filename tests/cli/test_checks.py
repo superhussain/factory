@@ -28,9 +28,10 @@ class ChecksTest(IsolatedTestCase):
     def sleep(self, seconds):
         self.now += seconds
 
-    def checks(self, view, polls, *args, pr=PR):
+    def checks(self, view, polls, *args, pr=PR, extra=None):
         """Run checks with gh answering view first, then each poll in turn, repeating the last."""
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open"}
+        job.update(extra or {})
         if pr is not None:
             job["pr"] = pr
         calls = []
@@ -135,6 +136,39 @@ class ChecksTest(IsolatedTestCase):
                 code, out, err, calls = self.checks(view, [listed(("pass", "test"))])
                 self.assertEqual((code, out, len(calls)), (5, "", 1))
                 self.assertIn(why, err)
+
+    def decision(self, body):
+        folder = self.home / "jobs" / "sample" / JOB
+        folder.mkdir(parents=True)
+        (folder / "decision.md").write_bytes(body)
+
+    def test_escalate_decision_exits_7_before_gh(self):
+        self.decision(b"\n  ESCALATE: auth change needs a person\n")
+        code, out, err, calls = self.checks(OPEN, [listed(("pass", "test"))], extra={"automerge": True})
+        self.assertEqual((code, out, calls), (7, "", []))
+        self.assertEqual(err, f"factory.py: {JOB} has a decision.md that says ESCALATE, so a person reviews and "
+                              f"merges {PR}. Nothing merges.\n")
+
+    def test_escalated_board_row_exits_7(self):
+        for extra in ({"escalated": True}, {"note": "Escalated: approver held it"}):
+            with self.subTest(extra):
+                code, out, err, calls = self.checks(OPEN, [listed(("pass", "test"))], extra=extra)
+                self.assertEqual((code, out, calls), (7, "", []))
+                self.assertEqual(err, f"factory.py: {JOB} is escalated on the board, so a person reviews and "
+                                      f"merges {PR}. Nothing merges.\n")
+
+    def test_unreadable_decision_exits_7(self):
+        self.decision(b"\xff\n")
+        code, out, err, calls = self.checks(OPEN, [listed(("pass", "test"))])
+        self.assertEqual((code, out, calls), (7, "", []))
+        self.assertEqual(err, f"factory.py: {JOB} has a decision.md that cannot be read, so a person reviews and "
+                              f"merges {PR}. Nothing merges.\n")
+
+    def test_approve_decision_reads_checks(self):
+        self.decision(b"APPROVE\n")
+        code, out, err, calls = self.checks(OPEN, [listed(("pass", "test"))])
+        self.assertEqual((code, out, err), (0, "pass test\n", ""))
+        self.assertEqual(calls[0][:2], ("view", PR))
 
     def test_bad_timeout_exits_2(self):
         for args in (["--timeout", "601"], ["--timeout", "-1"], ["--timeout"], ["--timeout", "1", "--timeout", "1"],
