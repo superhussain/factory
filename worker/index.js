@@ -2060,7 +2060,7 @@ function checkRiderControls(storedJobs, jobs) {
   return null;
 }
 
-// The dashboard's Remove from batch: a rider that is not stacked goes from spec to idea and
+// The dashboard's Remove from batch: a rider that is not stacked, stored or written, goes from spec to idea and
 // drops its one ref, while its lead is at spec both stored and written.
 const unbatchedAtSpec = (storedRow, row, storedLead, lead) =>
   batchLeads(storedRow).length === 1 &&
@@ -2068,6 +2068,7 @@ const unbatchedAtSpec = (storedRow, row, storedLead, lead) =>
   storedRow.stage === "spec" &&
   row.stage === "idea" &&
   storedRow.stacked !== true &&
+  row.stacked !== true &&
   storedLead?.stage === "spec" &&
   lead?.stage === "spec";
 

@@ -229,6 +229,7 @@ test("refuses Remove from batch outside that one case", async () => {
   await refusedWith(setup([LEAD, rider]), [LEAD, removed], message);
   const stacked = { ...rider, stacked: true };
   await refusedWith(setup([lead, stacked]), [lead, { ...removed, stacked: true }], message);
+  await refusedWith(setup([lead, rider]), [lead, { ...removed, stacked: true }], message);
   await refusedWith(setup([lead, rider]), [lead, { ...UNBATCHED, stage: "spec" }], message);
   await refusedWith(setup([lead, rider]), [{ ...lead, stage: "build" }, removed], message);
 });
