@@ -1247,6 +1247,8 @@ const TRACER_WAIT_MS = 3000;
 let tracerSettingRead = null;
 // The backlog line open in the drawer's decision page, or null. Never set together with openId.
 let openBacklogRaw = null;
+// '#/inbox' while the open drawer was opened from the inbox, so closing it goes back there.
+let drawerReturn = null;
 // item.raw -> triage verdict object, or null when the Worker has none stored.
 const backlogTriageSeen = new Map();
 // item.raw values with a read in flight, so a second call for the same line skips it.
@@ -2878,7 +2880,7 @@ function renderRoute() {
   $('retros-page').hidden = !retrosOpen;
   $('inbox-page').hidden = !inboxOpen;
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : baseTitle;
-  if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxAnswer = null; $('inbox-page-heading').focus(); }
+  if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxFocusRow = -1; inboxAnswer = null; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
   if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); }
   else if (retrosOpen) renderRetrosPage();
@@ -3102,12 +3104,12 @@ function inboxItems() {
   const waiting = jobs.filter((j) => waitsOnYou(j) && isShown(j.project))
     .sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at) || (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
   return ['ask', 'pr', 'human'].flatMap((kind) => waiting.filter((j) => inboxKind(j) === kind).map((job) => ({ kind, job })))
-    .concat(visibleBacklog().map((item) => ({ kind: 'backlog', item })));
+    .concat(backlogLoaded ? visibleBacklog().map((item) => ({ kind: 'backlog', item })) : []);
 }
 
 function renderInboxPage() {
   if (inboxRoute() === null) return;
-  if (!loaded || !backlogLoaded) {
+  if (!loaded || (!backlogLoaded && !backlogFailed)) {
     $('inbox-status').textContent = inboxError || 'Loading the inbox\u2026';
     $('inbox-list').innerHTML = '';
     inboxHtml = '';
@@ -3115,7 +3117,8 @@ function renderInboxPage() {
   }
   const items = inboxItems();
   if (inboxAnswer && !items.some((it) => it.kind === 'ask' && it.job.id === inboxAnswer.id)) inboxAnswer = null;
-  $('inbox-status').textContent = inboxError || (items.length ? '' : 'Nothing is waiting on you.');
+  $('inbox-status').textContent = inboxError ||
+    (backlogFailed ? 'Could not load the backlog, so backlog rows may be missing or out of date.' : items.length ? '' : 'Nothing is waiting on you.');
   const link = (href, text) => '<a class="btn" href="' + esc(href) + '">' + esc(text) + '</a>';
   const html = items.map(({ kind, job: j, item }, i) => {
     let title, meta, actions;
@@ -3267,7 +3270,10 @@ $('inbox-list').addEventListener('click', (e) => {
   }
   if (e.target.closest('[data-inbox-babysit], [data-inbox-decide]')) inboxFocusRow = [...$('inbox-list').children].indexOf(e.target.closest('li'));
   const babysit = e.target.closest('[data-inbox-babysit]');
-  if (babysit) babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxRoute() !== null });
+  if (babysit) {
+    babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxRoute() !== null });
+    if (!babysit.disabled) inboxFocusRow = -1;
+  }
   const decide = e.target.closest('[data-inbox-decide]');
   if (decide) inboxDecide(decide.dataset.raw, decide.dataset.inboxDecide, decide);
 });
@@ -5636,7 +5642,10 @@ function closeDetail(keepHash = false) {
   const target = raw !== null ? focusBacklogControl(raw) : id && refocus ? focusJobCard(id) : null;
   target?.scrollIntoView({ block: 'nearest' });
   refreshPicker();
-  if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null) history.replaceState(null, '', location.pathname + location.search);
+  if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null) history.replaceState(null, '', location.pathname + location.search + (drawerReturn ?? ''));
+  const back = drawerReturn;
+  drawerReturn = null;
+  if (back && !keepHash) renderRoute();
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
@@ -5847,10 +5856,12 @@ function syncDetail() {
       (pending && candidates(j).includes(pending))) openJob(openId);
 }
 
-window.addEventListener('hashchange', () => {
+window.addEventListener('hashchange', (e) => {
   const { id } = parseHash();
   if (id !== archiveFailNoted) archiveFailNoted = '';
   const key = backlogRoute();
+  if (key || id) drawerReturn = new URL(e.oldURL).hash === '#/inbox' ? '#/inbox' : openId || openBacklogRaw !== null ? drawerReturn : null;
+  else drawerReturn = null;
   if (key) openBacklogRoute(key);
   else if (id) openJob(id);
   else if (openId || openBacklogRaw !== null) closeDetail();
@@ -6078,6 +6089,7 @@ const BACKLOG_REF = / \((rework-of|follow-up-of|sub-job-of|depends-on) (\w[\w.-]
 let backlog = [];               // parsed items from the last good read
 let backlogText = '';           // the last good read's whole text, checked lines included
 let backlogLoaded = false;      // a 200 or 404 has been read at least once
+let backlogFailed = false;      // the last read was neither a 200 nor a 404
 const backlogBusy = new Set();  // item.raw values with a decision in flight
 const backlogPending = new Map(); // item.raw -> captureId, kept until a decision settles
 
@@ -6149,10 +6161,11 @@ async function loadBacklog() {
       backlog = items;
       backlogText = text;
     } else if (r.status === 404) { backlog = []; backlogText = ''; }
-    else return;
+    else { backlogFailed = true; return; }
     backlogLoaded = true;
+    backlogFailed = false;
     pruneBacklogDrafts();
-  } catch {}
+  } catch { backlogFailed = true; }
 }
 
 // A draft whose item left the backlog can never show again, and it would hold a deploy reload forever.
