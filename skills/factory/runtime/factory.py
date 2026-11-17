@@ -307,6 +307,10 @@ UNATTENDED = (
 _HOME_OVERRIDE = None
 # Inside one main() call, the pointer-selected home already validated, keyed by pointer path.
 _LOCATED = None
+# Inside one main() call, 200 answers of READ_CACHED GETs, keyed by (api_url, path).
+_READS = None
+READ_CACHED = re.compile(r"/projects\.json|/api/pipeline/(?:global|effective/[\w-]+)")
+READ_TTL = 60
 BACKLOG_TEMPLATE = (
     "# factory backlog\n\n"
     "One feature per line, as `- [ ] <slug>: <feature>`. `factory.py backlog add` appends one,\n"
@@ -472,6 +476,12 @@ def api(factory, method, path, body=None, ok=(200,), headers=None, raw=False):
         if env.get(var):
             headers[header] = env[var]
     url = api_url(factory) + path
+    key = (api_url(factory), path)
+    cached = _READS is not None and method == "GET" and not raw and READ_CACHED.fullmatch(path)
+    if _READS is not None and method != "GET" and path.startswith(("/api/pipeline/", "/api/projects/")):
+        _READS.clear()
+    elif cached and key in _READS and time.monotonic() - _READS[key][0] < READ_TTL:
+        return _READS[key][1:]
     data = body.encode("utf-8") if isinstance(body, str) else body
     opener = urllib.request.build_opener(NoRedirect)
     for attempt in range(2):
@@ -497,6 +507,8 @@ def api(factory, method, path, body=None, ok=(200,), headers=None, raw=False):
     if status not in ok:
         detail = text if isinstance(text, str) else text.decode("utf-8", "replace")
         fail(f"{method} {url} returned {status}: {printable_line(detail, 200)}", 5)
+    if cached and status == 200:
+        _READS[key] = (time.monotonic(), status, got, text)
     return status, got, text
 
 
@@ -10086,7 +10098,7 @@ COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
 
 def main(argv=None):
-    global _HOME_OVERRIDE, _LOCATED
+    global _HOME_OVERRIDE, _LOCATED, _READS
     args = list(sys.argv[1:] if argv is None else argv)
     options, positional = {}, []
     i = 0
@@ -10137,9 +10149,10 @@ def main(argv=None):
     if session and not SLUG.fullmatch(session):
         fail("bad session tag: use letters, digits, - and _", 2)
     old_home, old_session = _HOME_OVERRIDE, os.environ.get("FACTORY_SESSION")
-    old_located = _LOCATED
+    old_located, old_reads = _LOCATED, _READS
     try:
         _LOCATED = {}
+        _READS = {}
         if home is not None:
             try:
                 _HOME_OVERRIDE = Path(home).resolve()
@@ -10156,6 +10169,7 @@ def main(argv=None):
     finally:
         _HOME_OVERRIDE = old_home
         _LOCATED = old_located
+        _READS = old_reads
         if old_session is None:
             os.environ.pop("FACTORY_SESSION", None)
         else:
