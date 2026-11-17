@@ -187,10 +187,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #inbox-page { max-width: 1040px; }
   #inbox-list { list-style: none; margin: 0; padding: 0; }
   .inbox-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 16px; padding: 12px 10px; border-bottom: 1px solid var(--line); }
-  .inbox-rank { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
   .inbox-kind { font-size: 11px; font-weight: 600; }
-  .inbox-title { margin: 4px 0 0; font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
-  .inbox-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .inbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   .inbox-actions a.btn { text-decoration: none; }
   @media (pointer: coarse) { .inbox-actions .btn { min-height: 44px; display: inline-flex; align-items: center; } }
@@ -211,9 +208,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .retro-finding { align-items: start; padding: 12px 10px; border-bottom: 1px solid var(--line); }
   .retro-finding:last-child { border-bottom: 0; }
   .retro-finding[aria-current="true"] { background: var(--accent-soft); border-radius: 10px; }
-  .retro-rank { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .retro-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
-  .retro-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+  .retro-rank, .inbox-rank { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .retro-title, .inbox-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+  .inbox-title { margin-top: 4px; }
+  .retro-meta, .inbox-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .retro-share { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .retro-share-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .retro-chip-ref { font-weight: 400; white-space: pre; }
