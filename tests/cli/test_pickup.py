@@ -1752,6 +1752,61 @@ class NotBeforeTest(PickupFixture):
         self.assertFalse([line for line in lines if "batches behind" in line], lines)
 
 
+class RetroPickupTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        session = self.root / "claude/projects/-home-u-scratch/s1.jsonl"
+        session.parent.mkdir(parents=True)
+        session.write_text(json.dumps({"timestamp": "2026-11-10T10:00:00Z", "type": "user",
+                                       "message": {"role": "user", "content": "hi"}}) + "\n", encoding="utf-8")
+        os.environ["CLAUDE_CONFIG_DIR"] = str(self.root / "claude")
+        self.date = datetime.now().date().isoformat()
+        self.retro = (200, "ok")
+
+    def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if path.startswith("/api/retro/"):
+            self.calls.append((method, path))
+            return self.retro[0], {}, self.retro[1]
+        return super().request(home, method, path, body, ok, headers, raw)
+
+    def retro_puts(self):
+        return [call for call in self.calls if call[1].startswith("/api/retro/")]
+
+    def test_first_run_of_a_day_pushes_once(self):
+        self.assertEqual(self.pickup(), (0, f"pushed 1 sessions to retro/{DEVICE}/{self.date}.jsonl\n", ""))
+        self.assertEqual(json.loads((self.home / "retro-push.json").read_text(encoding="utf-8")),
+                         {"version": 1, "date": self.date})
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(self.retro_puts(), [("PUT", f"/api/retro/{DEVICE}/{self.date}.jsonl")])
+
+    def test_an_earlier_date_pushes_again(self):
+        (self.home / "retro-push.json").write_text(json.dumps({"version": 1, "date": "2026-01-01"}),
+                                                   encoding="utf-8")
+        self.assertEqual(self.pickup(), (0, f"pushed 1 sessions to retro/{DEVICE}/{self.date}.jsonl\n", ""))
+        self.assertEqual(len(self.retro_puts()), 1)
+
+    def test_a_failed_push_warns_and_still_launches(self):
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.board["jobs"] = [idea("120-sample-digest", "alpha")]
+        self.retro = (403, "Forbidden")
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"^launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n$")
+        self.assertIn("Access rejected the service token", err)
+        self.assertTrue(err.endswith(
+            "factory.py: retro push stopped (exit 5); the next pickup run retries it\n"), err)
+        self.assertFalse((self.home / "retro-push.json").exists())
+
+    def test_no_transcripts_dir_sends_nothing(self):
+        os.environ["CLAUDE_CONFIG_DIR"] = str(self.root / "gone")
+        self.assert_silent(self.pickup())
+        self.assertEqual(self.retro_puts(), [])
+
+    def test_dry_run_never_pushes(self):
+        self.assertEqual(self.pickup("--dry-run"), (0, f"host {DEVICE}: would launch 0\n", ""))
+        self.assertEqual(self.retro_puts(), [])
+
+
 class CloseTest(PickupFixture):
     DECISION = "/api/jobs/alpha/042-sample-export/decision.md"
     REASON = "Duplicate of 041-sample-report"

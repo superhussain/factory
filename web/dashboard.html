@@ -621,7 +621,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
     #d-title, .detail-head #d-babysit-bar, #d-actions, .detail-head .close { position: relative; z-index: 3; }
     .detail-head .close { background: var(--panel); }
-    #d-meta, #d-pipeline, #d-chat, #d-held, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
+    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
@@ -669,7 +669,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="meta" id="d-not-before" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>
@@ -1717,10 +1717,20 @@ function batchState(j) {
   };
 }
 
-// The held chips' text as the board last drew it. clockTick redraws once a chip's text would change.
+// The not-before chip as { text, title } while j.not_before is still ahead, or null. Mirrors waiting_until in factory.py.
+const NOT_BEFORE_STAMP = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
+function notBefore(j) {
+  const at = j.not_before;
+  if (!NOT_BEFORE_STAMP.test(String(at)) || !(Date.parse(at) > Date.now())) return null;
+  const local = new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return { text: 'Not before ' + local, title: 'Pickup leaves this job alone until ' + local + ' (' + at + ').' };
+}
+
+// The held and not-before chips' text as the board last drew it. clockTick redraws once a chip's text would change.
 let heldDrawn = '';
 function heldChipsKey() {
-  return jobs.filter(batchHeld).map((j) => j.id + ':' + batchState(j).text).join('\n');
+  return jobs.filter(batchHeld).map((j) => j.id + ':' + batchState(j).text)
+    .concat(jobs.filter(notBefore).map((j) => j.id + ':not-before')).join('\n');
 }
 
 // One fact on one row, with the full text in its tooltip.
@@ -1750,7 +1760,7 @@ function card(j, inNeeds, archived = false) {
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const dup = duplicateOf(j);
   const dupOnBoard = dup !== null && jobs.some((x) => x.id === dup);
-  const chat = chatDecision(j), held = batchState(j);
+  const chat = chatDecision(j), held = batchState(j), later = notBefore(j);
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
   const tags = (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
     (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
@@ -1758,6 +1768,7 @@ function card(j, inNeeds, archived = false) {
     (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
     (chat ? '<span class="chip chat" title="' + esc(chat.title) + '">' + esc(chat.text) + '</span>' : '') +
     (held ? '<span class="chip held" title="' + esc(held.title) + '">' + esc(held.text) + '</span>' : '') +
+    (later ? '<span class="chip not-before" title="' + esc(later.title) + '">' + esc(later.text) + '</span>' : '') +
     (j.babysit?.at ? '<span class="chip" title="' + esc(prLink(j) ? 'An agent is working PR #' + prLink(j).n + ' as the Babysit note asks' : 'An agent is working this PR as the Babysit note asks') + '">Babysitting</span>' : '');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
@@ -4181,13 +4192,15 @@ function drawerMeta(j) {
     (j.close?.at && !TERMINAL.includes(j.stage) ? ' · closing' : '');
 }
 
-// The chat decision and held state as drawer lines, so touch, keyboard and screen reader users get what the chip titles say.
+// The chat decision, held and not-before state as drawer lines, so touch, keyboard and screen reader users get what the chip titles say.
 function renderDrawerStatus(j) {
-  const chat = chatDecision(j), held = batchState(j);
+  const chat = chatDecision(j), held = batchState(j), later = notBefore(j);
   $('d-chat').textContent = chat ? chat.title : '';
   $('d-chat').hidden = !chat;
   $('d-held').textContent = held ? held.title : '';
   $('d-held').hidden = !held;
+  $('d-not-before').textContent = later ? later.title : '';
+  $('d-not-before').hidden = !later;
 }
 
 async function loadArchivedJob(id) {
@@ -4878,7 +4891,7 @@ let swipeSettling = false;
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
 // so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
 // On an idea tab the gallery and file list move into the top of the page, so they scroll with it.
-const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
+const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
 let headCollapse = 0;
 let headShift = 0;
 let headStop = null;
@@ -7530,7 +7543,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-chat', 'd-held', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-chat', 'd-held', 'd-not-before', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
@@ -7931,7 +7944,10 @@ function clockTick() {
   if (document.hidden) return;
   drawUpdated();
   if (cardMenu || $('board').contains(document.activeElement)) return;
-  if (loaded && heldChipsKey() !== heldDrawn) renderBoard();
+  if (!loaded || heldChipsKey() === heldDrawn) return;
+  renderBoard();
+  const open = jobs.find((x) => x.id === openId);
+  if (open) renderDrawerStatus(open);
 }
 setInterval(clockTick, 30000);
 $('display-columns').append(...COLUMNS.map(s => {
