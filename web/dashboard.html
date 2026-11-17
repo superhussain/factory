@@ -5353,7 +5353,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && openId && !document.querySelector('dialog[open]')) closeDetail();
 });
 
-// Arrow navigation over cards and job pages, plus n, j or /, p, s and a single-key openers.
+// Arrow navigation over cards and job pages, plus n, j or /, p, s, r, w and a single-key openers.
 // A separate listener, so the Esc/Cmd+K handler above stays byte-identical.
 function handleBoardKeys(e) {
   if (settingsRoute() !== null || retrosRoute() !== null) return;
@@ -5404,6 +5404,11 @@ function handleBoardKeys(e) {
   } else if (e.key === 'r') {
     e.preventDefault();
     location.hash = '#/retros';
+  } else if (e.key === 'w') {
+    const j = nextWaitingJob();
+    if (!j) return;
+    e.preventDefault();
+    openCard(j.id);
   } else if (e.key === 'a' || e.key === '.') {
     if (openBacklogRaw !== null) return;
     const target = cardShortcutTarget(e);
