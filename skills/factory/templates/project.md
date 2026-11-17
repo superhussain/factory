@@ -2,6 +2,7 @@
 repo: owner/name
 base: main
 title: name
+# auto_babysit: <1 to 9>
 # buildkite_org: <org slug>
 ---
 # Factory project file
