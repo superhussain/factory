@@ -8,6 +8,11 @@ every `board` call.
 The click counts as the person's merge go-ahead, so pipeline `merge: human` does not
 hold a PR that GitHub shows as approved. It does not lift any other gate.
 
+When `babysit.via` is `pickup`, pickup started this session on its own and no person
+clicked. On a `merge` reading, merge only when `$PIPELINE.merge` is `auto`. Otherwise patch
+`{"needs": "PR #<n> is ready to merge: pickup started this babysit on its own and pipeline merge is human. Merge it on GitHub, or press Babysit PR to let babysit merge it", "babysit": null, "claim": null}`
+and stop.
+
 ## Step zero
 
 Run step zero for an existing job: `factory.py job <id>` for its `project`, then
@@ -73,7 +78,7 @@ Run `python3 "$RUNTIME" pr-state "$SLUG/<id>"`. It prints one JSON line,
 (gh failed): patch `{"needs": "<the stderr line>", "babysit": null, "claim": null}`, report
 that line and stop. Otherwise act on `next`, then read again.
 
-When the job's pr is in the project's archive repo, not $REPO, pass -R <archive> wherever this file says -R "$REPO", and treat a merge reading as its No note column: hand back.
+When the job's pr is in the project's archive repo, not $REPO, pass -R <archive> wherever this file says -R "$REPO". On a `merge` or `fix-ci` reading of an archive PR, hand back at once, whatever the notes say. Never run `pr-queue` or `checks` on it: both exit 4 for an archive PR.
 
 The session ends only after a `merged` or `closed` close-out, a `needs` or `needs-human`
 patch, or a hand-back. After a merge or queue command, read again. A queued PR reads

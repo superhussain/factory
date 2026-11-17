@@ -409,7 +409,9 @@ class RolesTest(IsolatedTestCase):
                        "origin HEAD:factory/<id>", "ends in `git push` or `git push --no-verify`",
                        "While `babysit` is set, every `hold` prints `babysit requested`, the holds in the "
                        "`wait` and `wait-base` rows included. This session is already the babysitter, so "
-                       "ignore that line and never restart from Step zero on it."):
+                       "ignore that line and never restart from Step zero on it.",
+                       "pickup started this babysit on its own and pipeline merge is human",
+                       "On a `merge` or `fix-ci` reading of an archive PR, hand back at once"):
             self.assertIn(phrase, babysit)
         skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
         self.assertIn("A session already running babysit.md is the babysitter: it ignores the line and goes "
