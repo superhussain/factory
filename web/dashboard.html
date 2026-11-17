@@ -1185,6 +1185,24 @@ function readHiddenProjects() {
   return new Set(raw.split(',').filter(Boolean));
 }
 let hiddenProjects = readHiddenProjects();
+const STARRED_KEY = 'factory-starred-jobs';
+// Saved as a JSON array of job ids. Any other value reads as no stars.
+function readStarred() {
+  try {
+    const ids = JSON.parse(store.get(STARRED_KEY));
+    if (Array.isArray(ids)) return new Set(ids.filter((id) => typeof id === 'string' && id));
+  } catch {}
+  return new Set();
+}
+let starred = readStarred();
+function saveStarred() {
+  if (starred.size) store.set(STARRED_KEY, JSON.stringify([...starred])); else store.remove(STARRED_KEY);
+}
+function toggleStar(id) {
+  if (!starred.delete(id)) starred.add(id);
+  saveStarred();
+  renderBoard();
+}
 
 // The server-rendered title, which renderBoard prefixes with the needs-you count.
 const BASE_TITLE = document.title;
@@ -7833,7 +7851,7 @@ loadProjects().then(() => {
 
 // Display settings live only in this browser. Each value is read against a fixed list,
 // so a bad stored value falls back to the default.
-const DISPLAY_KEYS = { theme:'factory-theme', density:'factory-density', columns:'factory-hidden-columns', poll:'factory-poll', cardFields:'factory-hidden-card-fields', ideaProject:'factory-idea-project', drawerLinks:'factory-hidden-drawer-links' };
+const DISPLAY_KEYS = { theme:'factory-theme', density:'factory-density', columns:'factory-hidden-columns', poll:'factory-poll', cardFields:'factory-hidden-card-fields', ideaProject:'factory-idea-project', drawerLinks:'factory-hidden-drawer-links', starred:'factory-starred-view' };
 const THEMES = ['system', 'light', 'dark'], DENSITIES = ['comfortable', 'compact'], POLL_SECONDS = [15, 30, 60], POLL_DEFAULT = 30;
 const THEME_COLORS = { light: '#f9fafb', dark: '#111827' };
 const pickDisplay = (value, list, fallback = list[0]) => list.includes(value) ? value : fallback;
@@ -7844,6 +7862,14 @@ let pollSeconds = pickDisplay(Number(store.get(DISPLAY_KEYS.poll)), POLL_SECONDS
 const hiddenColumns = new Set((store.get(DISPLAY_KEYS.columns) || '').split(',').filter(s => COLUMNS.includes(s) && s !== 'needs-you'));
 const CARD_FIELDS = [['note', 'Note'], ['meta', 'Branch, round and build line'], ['pr', 'PR link']];
 const hiddenCardFields = new Set((store.get(DISPLAY_KEYS.cardFields) || '').split(',').filter(f => CARD_FIELDS.some(([k]) => k === f)));
+const STAR_VIEWS = ['float', 'only', 'off'];
+let starView = pickDisplay(store.get(DISPLAY_KEYS.starred), STAR_VIEWS);
+function setStarView(v) {
+  starView = pickDisplay(v, STAR_VIEWS);
+  if (starView === 'float') store.remove(DISPLAY_KEYS.starred); else store.set(DISPLAY_KEYS.starred, starView);
+  $('display-starred').value = starView;
+  if (loaded) renderBoard();
+}
 const DRAWER_LINKS = [['pr', 'PR'], ...['app', 'web'].filter(k => factoryConfig.agent_links[k]).map(k => [k, factoryConfig.agent_links[k].label]), ['tracer', 'Tracer']];
 const hiddenDrawerLinks = new Set((store.get(DISPLAY_KEYS.drawerLinks) || '').split(',').filter(f => DRAWER_LINKS.some(([k]) => k === f)));
 let pollTimer = 0, pollStarted = false;
