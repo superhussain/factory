@@ -138,9 +138,11 @@ Each run, in order:
   `auto_babysit: <1 to 9>`, sets `babysit` on a `pr-open` job whose PR has an open counted
   review thread, a merge conflict or a failing required check, so the Babysit step launches
   it in the same run. It reads every candidate PR in a repo with one `gh api graphql` call,
-  only for opted-in projects, at most 20 PRs per repo. It skips a job that waits on a human,
-  is paused, closing, escalated, batched into another, already babysat or held by a live
-  claim, whose project has no Babysit note, or whose project pickup does not list this host.
+  only for opted-in projects, at most 20 PRs per repo, the oldest automatic babysit first, and
+  prints to stderr how many candidates it checked when a repo has more. It skips a job that
+  waits on a human, is paused, closing, escalated, batched into another, already babysat or
+  held by a live claim, whose project has no Babysit note, or whose project pickup does not
+  list this host.
   One board write sets `babysit = {at, via: "pickup", by, reason}`,
   `auto_babysit = {count, head, reason, at}` and the note, and prints
   `auto-babysat <id> <project>: PR #<n> <what it has> (<count> of <cap>)`. A dry run prints

@@ -84,6 +84,8 @@ class AuditFlagsTest(IsolatedTestCase):
         self.assertEqual(factory.audit_target("/home/u/app/.env"), "~/app/.env")
         self.assertEqual(factory.audit_target("ls /home/u/a /home/user2/x"), "ls ~/a /home/user2/x")
         self.assertEqual(factory.audit_target("/home/u"), "~")
+        self.assertEqual(factory.audit_target("cd /home/u && ls"), "cd ~ && ls")
+        self.assertEqual(factory.audit_target("ls \u202egnp.exe \u2066x\u2069"), "ls ?gnp.exe ?x?")
         self.assertEqual(factory.audit_target("a \n  b"), "a b")
         self.assertEqual(len(factory.audit_target("x" * 300)), 120)
         self.assertEqual(factory.audit_target("echo ok\x1b[1A\x1b[2K\rgit status\x9b"), "echo ok?[1A?[2K git status?")

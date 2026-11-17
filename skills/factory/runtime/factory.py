@@ -5620,6 +5620,12 @@ def auto_babysit_record(j):
     return (a["count"] if type(a.get("count")) is int else 0), a.get("head"), a.get("reason")
 
 
+def auto_babysit_at(j):
+    """When the job was last auto-babysat, or "" before the first, so it sorts first."""
+    a = j.get("auto_babysit")
+    return a["at"] if isinstance(a, dict) and isinstance(a.get("at"), str) else ""
+
+
 def auto_babysit_pass(home, data, device, minutes, paths, settings, dry):
     """Set babysit on each pr-open job whose PR fails a required check, has an open counted review thread
     or a merge conflict, in projects whose project file sets auto_babysit. At most auto_babysit times per
@@ -5665,6 +5671,10 @@ def auto_babysit_pass(home, data, device, minutes, paths, settings, dry):
         groups.setdefault(repo, []).append((j, int(m[3]), cap))
 
     for repo, jobs in groups.items():
+        jobs = sorted(jobs, key=lambda c: auto_babysit_at(c[0]))
+        if len(jobs) > AUTO_BABYSIT_LIMIT:
+            print(f"factory.py: pickup checks {AUTO_BABYSIT_LIMIT} of {len(jobs)} auto-babysit candidates for {repo} "
+                  "this run, oldest automatic babysit first", file=sys.stderr)
         jobs = jobs[:AUTO_BABYSIT_LIMIT]
         signals, why = pr_signals(repo, [n for _, n, _ in jobs], device)
         if signals is None:
@@ -9633,7 +9643,7 @@ AUDIT_FLAGS = (
 )
 AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
 AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
-AUDIT_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+AUDIT_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
 
 def audit_target_raw(name, inp):
@@ -9658,7 +9668,7 @@ def audit_target_raw(name, inp):
 def audit_target(raw):
     """raw as it prints: home as ~, retro-redacted, whitespace collapsed, control characters as ?,
     at most 120 characters."""
-    folded = re.sub(re.escape(str(Path.home())) + r"(?=/|$)", "~", raw)
+    folded = re.sub(re.escape(str(Path.home())) + r"(?![\w.-])", "~", raw)
     return AUDIT_CONTROL.sub("?", " ".join(retro_redact(folded).split()))[:120]
 
 

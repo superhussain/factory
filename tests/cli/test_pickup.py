@@ -3174,6 +3174,17 @@ class AutoBabysitTest(PickupFixture):
         self.assertEqual((self.reads, self.puts()), ([("sample/alpha", [7])], []))
         self.assertNotIn("babysit", self.job("042-sample-export"))
 
+    def test_over_the_limit_reads_the_oldest_first(self):
+        self.board["jobs"] = [
+            self.export(auto_babysit={"count": 1, "head": "x", "reason": "rebase", "at": "2026-01-02T00:00:00Z"}),
+            self.export("043-sample-export", n=8),
+        ]
+        with patch.object(factory, "AUTO_BABYSIT_LIMIT", 1):
+            code, out, err = self.pickup()
+        self.assertEqual((code, self.reads), (0, [("sample/alpha", [8])]))
+        self.assertEqual(err, "factory.py: pickup checks 1 of 2 auto-babysit candidates for sample/alpha this run, "
+                              "oldest automatic babysit first\n")
+
     def test_the_write_rechecks_the_job(self):
         for race in ({"babysit": {"at": "2026-01-02T12:00:00Z", "by": "dashboard"}},
                      {"auto_babysit": {"count": 3, "head": "x", "reason": "rebase"}}):

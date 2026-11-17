@@ -190,6 +190,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .inbox-kind { font-size: 11px; font-weight: 600; }
   .inbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   .inbox-actions a.btn { text-decoration: none; }
+  .inbox-answer { grid-column: 2 / -1; margin-top: 12px; }
+  .inbox-answer .ask-bar { position: static; padding: 10px 0 0; margin-bottom: 0; background: none; }
+  .inbox-answer .ask-bar .btn { flex: none; }
   @media (pointer: coarse) { .inbox-actions .btn { min-height: 44px; display: inline-flex; align-items: center; } }
   @media (max-width: 760px) {
     .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding: 12px 4px; }
@@ -1093,8 +1096,9 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
           <tr><td>N</td><td>New idea</td></tr>
           <tr><td>P</td><td>Select project</td></tr>
           <tr><td>S</td><td>Open Settings</td></tr>
-          <tr><td>H</td><td>Back to the board from a job, a backlog item, Settings or Retros</td></tr>
+          <tr><td>H</td><td>Back to the board from a job, a backlog item, Settings, Retros or the Inbox</td></tr>
           <tr><td>R</td><td>Open Retros</td></tr>
+          <tr><td>I</td><td>Open the Inbox</td></tr>
           <tr><td>W</td><td>Open the next job waiting on you</td></tr>
           <tr><td>A or .</td><td>Open the jumper with actions for the hovered or focused job card, or the open job</td></tr>
           <tr><td>B</td><td>Open the first backlog item</td></tr>
@@ -1245,6 +1249,8 @@ const TRACER_WAIT_MS = 3000;
 let tracerSettingRead = null;
 // The backlog line open in the drawer's decision page, or null. Never set together with openId.
 let openBacklogRaw = null;
+// '#/inbox' while the open drawer was opened from the inbox, so closing it goes back there.
+let drawerReturn = null;
 // item.raw -> triage verdict object, or null when the Worker has none stored.
 const backlogTriageSeen = new Map();
 // item.raw values with a read in flight, so a second call for the same line skips it.
@@ -2827,14 +2833,14 @@ function noteDeployedVersion(r) {
   reloadWhenIdle();
 }
 function unsavedWork() {
-  const typing = '#needs-form textarea, #backlog-form textarea';
+  const typing = '#needs-form textarea, #backlog-form textarea, .inbox-needs textarea';
   const blank = el => !el.value.trim();
   return !!document.querySelector('dialog[open]')
     || settingsUnsaved()
     || [...document.querySelectorAll(typing)].some(el => !blank(el))
     || [...document.querySelectorAll('#host-add input[type=text], #host-add input:not([type])')].some(el => !blank(el))
     || hostDrafts.size > 0
-    || backlogSaving || needsSaving || boardWrites > 0
+    || backlogSaving || needsSaving || inboxAnswer?.saving || boardWrites > 0
     || needsStorageFailed && [...needsMemory.values()].some(a => a.some(x => x.picked.length || x.other.trim()))
     || [...backlogDrafts.values()].some(d => d.pick || d.notes.trim() || d.answers.some(a => a.picked.length || a.other.trim()))
     || !!document.activeElement?.matches('textarea, input[type=text], input[type=search], input:not([type]), [contenteditable]');
@@ -2876,7 +2882,7 @@ function renderRoute() {
   $('retros-page').hidden = !retrosOpen;
   $('inbox-page').hidden = !inboxOpen;
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : baseTitle;
-  if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; $('inbox-page-heading').focus(); }
+  if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxFocusRow = -1; inboxAnswer = null; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
   if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); }
   else if (retrosOpen) renderRetrosPage();
@@ -3079,6 +3085,8 @@ let inboxHtml = '';
 let inboxError = '';
 // The row whose action button was clicked, for when disabling it moved focus to the body.
 let inboxFocusRow = -1;
+// The one inbox row whose needs.md form is open: { id, el, f, answersFile, saving }, or null.
+let inboxAnswer = null;
 
 function inboxRoute() {
   return location.hash === '#/inbox' ? true : null;
@@ -3098,19 +3106,21 @@ function inboxItems() {
   const waiting = jobs.filter((j) => waitsOnYou(j) && isShown(j.project))
     .sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at) || (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
   return ['ask', 'pr', 'human'].flatMap((kind) => waiting.filter((j) => inboxKind(j) === kind).map((job) => ({ kind, job })))
-    .concat(visibleBacklog().map((item) => ({ kind: 'backlog', item })));
+    .concat(backlogLoaded ? visibleBacklog().map((item) => ({ kind: 'backlog', item })) : []);
 }
 
 function renderInboxPage() {
   if (inboxRoute() === null) return;
-  if (!loaded || !backlogLoaded) {
+  if (!loaded || (!backlogLoaded && !backlogFailed)) {
     $('inbox-status').textContent = inboxError || 'Loading the inbox\u2026';
     $('inbox-list').innerHTML = '';
     inboxHtml = '';
     return;
   }
   const items = inboxItems();
-  $('inbox-status').textContent = inboxError || (items.length ? '' : 'Nothing is waiting on you.');
+  if (inboxAnswer && !items.some((it) => it.kind === 'ask' && it.job.id === inboxAnswer.id)) inboxAnswer = null;
+  $('inbox-status').textContent = inboxError ||
+    (backlogFailed ? 'Could not load the backlog, so backlog rows may be missing or out of date.' : items.length ? '' : 'Nothing is waiting on you.');
   const link = (href, text) => '<a class="btn" href="' + esc(href) + '">' + esc(text) + '</a>';
   const html = items.map(({ kind, job: j, item }, i) => {
     let title, meta, actions;
@@ -3127,7 +3137,10 @@ function renderInboxPage() {
       const pr = prLink(j);
       title = j.title || j.id;
       meta = [projectName(j), j.id].concat(asks(j.needs) ? j.needs : []);
-      actions = kind === 'ask' && j.needs.includes('#' + j.id + '/needs') ? link('#' + j.id + '/needs', 'Answer')
+      const open = inboxAnswer?.id === j.id;
+      actions = kind === 'ask' && j.needs.includes('#' + j.id + '/needs')
+        ? '<button type="button" class="btn primary" data-inbox-answer="' + esc(j.id) + '" aria-expanded="' + open + '"' +
+          (open ? ' aria-controls="inbox-answer"' : '') + '>Answer</button>' + link('#' + j.id + '/needs', 'Open job')
         : (kind === 'pr' && canBabysit(j) ? '<button type="button" class="btn primary" data-inbox-babysit="' + esc(j.id) + '">Babysit PR #' + esc(pr.n) + '</button>' : '') +
           (kind === 'pr' && pr ? '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>' : '') +
           link('#' + j.id, 'Open job');
@@ -3135,17 +3148,98 @@ function renderInboxPage() {
     return '<li class="inbox-item"><span class="inbox-rank">' + (i + 1) + '</span>' +
       '<div><span class="chip inbox-kind">' + INBOX_LABELS[kind] + '</span><p class="inbox-title">' + esc(title) + '</p>' +
       '<p class="inbox-meta">' + meta.map(esc).join(' · ') + '</p></div>' +
-      '<div class="inbox-actions">' + actions + '</div></li>';
+      '<div class="inbox-actions">' + actions + '</div>' +
+      (j && inboxAnswer?.id === j.id ? '<div id="inbox-answer"></div>' : '') + '</li>';
   }).join('');
   if (html === inboxHtml) return;
   // Replacing the rows drops focus, so keep it on the same row, or on the heading when none are left.
   const list = $('inbox-list');
   const active = document.activeElement;
-  const row = list.contains(active) ? [...list.children].indexOf(active.closest('li')) : active === document.body ? inboxFocusRow : -1;
+  // The open form moves into the new row as is, so a focused control keeps its focus and caret.
+  const controls = () => [...inboxAnswer.el.querySelectorAll('input, textarea, button')];
+  const at = inboxAnswer?.el.contains(active) ? controls().indexOf(active) : -1;
+  const { selectionStart, selectionEnd } = active;
+  const row = at >= 0 ? -1 : list.contains(active) ? [...list.children].indexOf(active.closest('li')) : active === document.body ? inboxFocusRow : -1;
   inboxFocusRow = -1;
   inboxHtml = html;
   list.innerHTML = html;
+  if (inboxAnswer) $('inbox-answer')?.replaceWith(inboxAnswer.el);
+  if (at >= 0) {
+    const el = controls()[at];
+    el.focus({ preventScroll: true });
+    if (el.tagName === 'TEXTAREA') el.setSelectionRange(selectionStart, selectionEnd);
+  }
   if (row >= 0) (list.children[Math.min(row, list.children.length - 1)]?.querySelector('.inbox-actions .btn:not(:disabled)') ?? $('inbox-page-heading')).focus();
+}
+
+// One job file as loadFiles reads it, or null.
+async function readJobFile(j, name) {
+  try {
+    const r = await fetch(jobBase(j) + name, { cache: 'no-store' });
+    return r.ok ? { name, text: await r.text(), etag: r.headers.get('ETag') } : null;
+  } catch { return null; }
+}
+
+// Loads needs.md and answers.md for the open row and draws the form, or says why it cannot.
+async function openInboxAnswer(j) {
+  const [f, answersFile] = await Promise.all([readJobFile(j, 'needs.md'), readJobFile(j, 'answers.md')]);
+  if (f) f.sha = await sha12(f.text);
+  if (inboxAnswer?.id !== j.id) return;
+  const el = inboxAnswer.el;
+  if (!f) {
+    el.textContent = 'needs.md could not be loaded. Open the job to see what it asks.';
+    return;
+  }
+  const parsed = parseNeeds(f.text);
+  if (!parsed?.ok) {
+    el.textContent = 'needs.md is not in the question format. Open the job to read it.';
+    return;
+  }
+  inboxAnswer.f = f;
+  inboxAnswer.answersFile = answersFile;
+  const questions = parsed.parts.filter((p) => p.kind === 'question');
+  el.classList.remove('muted');
+  el.innerHTML = '<form class="inbox-needs" novalidate>' + needsFieldsets(parsed, readNeedsDraft(j, f, questions), '', null) +
+    '<p class="muted inbox-ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
+    '<div class="ask-bar"><button class="btn primary" type="submit">Submit answers</button><span class="inbox-ask-status" role="status"></span></div></form>';
+  inboxNeedsBar();
+  el.querySelector('input').focus();
+}
+
+function inboxNeedsBar() {
+  const form = inboxAnswer.el.querySelector('.inbox-needs');
+  const all = collectNeeds(form);
+  const done = all.filter((a) => a.picked.length || a.other.trim()).length;
+  form.querySelector('[type=submit]').disabled = inboxAnswer.saving || done < all.length;
+  form.querySelector('.inbox-ask-status').textContent = inboxAnswer.saving ? 'Saving answers.' :
+    done < all.length ? 'Answer every question to submit. ' + done + ' of ' + all.length + ' answered.' : '';
+}
+
+async function submitInboxAnswer() {
+  const a = inboxAnswer;
+  const j = jobs.find((x) => x.id === a.id);
+  a.saving = true;
+  inboxNeedsBar();
+  inboxFocusRow = [...$('inbox-list').children].indexOf(a.el.closest('li'));
+  const result = await saveAnswers(j, a.f, a.answersFile, collectNeeds(a.el.querySelector('.inbox-needs')));
+  a.saving = false;
+  if (result.saved && !result.boardError) {
+    if (inboxAnswer === a) inboxAnswer = null;
+    inboxReport('Saved to answers.md for ' + a.id + '. The agent reads it when the job continues.');
+    await poll();
+    return;
+  }
+  // The next submit replaces the answers.md just written, so it needs that file's ETag.
+  if (result.saved) a.answersFile = await readJobFile(j, 'answers.md');
+  if (inboxAnswer !== a) return;
+  inboxNeedsBar();
+  // The disabled submit dropped focus to the body, so give it back rather than to the row's Answer button.
+  inboxFocusRow = -1;
+  const submit = a.el.querySelector('[type=submit]');
+  if (!submit.disabled) submit.focus();
+  a.el.querySelector('.inbox-ask-status').textContent = result.saved
+    ? 'Saved to answers.md, but the board still shows this job waiting on you (' + result.boardError.message + '). Submit again to retry.'
+    : result.message.replace(/ Check the answers tab before you submit again\.$/, '') + ' Use Open job to check answers.md before you submit again.';
 }
 
 function inboxReport(message) {
@@ -3169,11 +3263,43 @@ async function inboxDecide(raw, pick, button) {
 }
 
 $('inbox-list').addEventListener('click', (e) => {
+  const answer = e.target.closest('[data-inbox-answer]');
+  if (answer) {
+    const id = answer.dataset.inboxAnswer;
+    if (inboxAnswer?.id === id) {
+      inboxAnswer = null;
+      renderInboxPage();
+    } else {
+      const el = document.createElement('div');
+      el.id = 'inbox-answer';
+      el.className = 'inbox-answer muted';
+      el.textContent = 'Loading the questions\u2026';
+      inboxAnswer = { id, el, f: null, answersFile: null, saving: false };
+      renderInboxPage();
+      openInboxAnswer(jobs.find((x) => x.id === id));
+    }
+  }
   if (e.target.closest('[data-inbox-babysit], [data-inbox-decide]')) inboxFocusRow = [...$('inbox-list').children].indexOf(e.target.closest('li'));
   const babysit = e.target.closest('[data-inbox-babysit]');
-  if (babysit) babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxRoute() !== null });
+  if (babysit) {
+    babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxRoute() !== null });
+    if (!babysit.disabled) inboxFocusRow = -1;
+  }
   const decide = e.target.closest('[data-inbox-decide]');
   if (decide) inboxDecide(decide.dataset.raw, decide.dataset.inboxDecide, decide);
+});
+function inboxNeedsInput(e) {
+  const form = e.target.closest('.inbox-needs');
+  if (!form) return;
+  if (!storeNeedsDraft(jobs.find((x) => x.id === inboxAnswer.id), inboxAnswer.f, collectNeeds(form))) inboxAnswer.el.querySelector('.inbox-ask-storage').hidden = false;
+  inboxNeedsBar();
+}
+$('inbox-list').addEventListener('input', inboxNeedsInput);
+$('inbox-list').addEventListener('change', inboxNeedsInput);
+$('inbox-list').addEventListener('submit', (e) => {
+  if (!e.target.matches('.inbox-needs')) return;
+  e.preventDefault();
+  submitInboxAnswer();
 });
 $('inbox-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
 
@@ -4092,13 +4218,7 @@ function jobBase(j) {
 }
 
 async function loadFiles(j) {
-  const base = jobBase(j);
-  const results = await Promise.all(candidates(j).map(async (name) => {
-    try {
-      const r = await fetch(base + name, { cache: 'no-store' });
-      return r.ok ? { name, text: await r.text(), etag: r.headers.get('ETag') } : null;
-    } catch { return null; }
-  }));
+  const results = await Promise.all(candidates(j).map((name) => readJobFile(j, name)));
   return results.filter(Boolean);
 }
 
@@ -4184,16 +4304,21 @@ function needsFile() {
   return [j, files.find((x) => x.name === 'needs.md')];
 }
 
-function writeNeedsDraft() {
-  const [j, f] = needsFile();
-  const answers = collectNeeds($('needs-form'));
+// Keeps the draft in memory and in localStorage. false means storage failed.
+function storeNeedsDraft(j, f, answers) {
   needsMemory.set(needsKey(j, f), answers);
   try {
     localStorage.setItem(needsKey(j, f), JSON.stringify({ version: 1, answers }));
+    return true;
   } catch {
     needsStorageFailed = true;
-    $('ask-storage').hidden = false;
+    return false;
   }
+}
+
+function writeNeedsDraft() {
+  const [j, f] = needsFile();
+  if (!storeNeedsDraft(j, f, collectNeeds($('needs-form')))) $('ask-storage').hidden = false;
 }
 
 function updateNeedsBar() {
@@ -4222,11 +4347,20 @@ function renderNeeds(j, f) {
   const notes = [];
   if (!waiting) notes.push('This job is no longer waiting on you. The form is read-only.');
   if (savedNote(f)) notes.push(savedNote(f));
-  const body = parsed.parts.map((p) => {
+  return notes.map((n) => '<p class="muted">' + esc(n) + '</p>').join('') +
+    '<form id="needs-form" novalidate>' + needsFieldsets(parsed, draft, off, f.triage) +
+    '<p class="muted" id="ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
+    '<div class="ask-bar"><button class="btn primary" id="ask-submit" type="submit"' + off + '>Submit answers</button>' +
+    '<span id="ask-status" role="status"></span></div></form>';
+}
+
+// The needs.md parts as markdown and one fieldset per question, with draft answers filled in.
+function needsFieldsets(parsed, draft, off, triage) {
+  return parsed.parts.map((p) => {
     if (p.kind === 'md') return md(p.text);
     const a = draft[p.index];
     const type = p.pick === 'one' ? 'radio' : 'checkbox';
-    const c = needsPick(f.triage, p);
+    const c = needsPick(triage, p);
     return '<fieldset class="ask"><legend>' + esc(p.header) + '</legend><p>' + esc(p.prompt) + '</p>' +
       '<p class="muted">' + (p.pick === 'one' ? 'Choose one.' : 'Choose any that apply.') + '</p>' +
       (c ? '<p class="ask-model">' + esc('clef-flash picks ' + c.pick + ' at ' + c.confidence + '%.') + '</p>' : '') +
@@ -4238,11 +4372,6 @@ function renderNeeds(j, f) {
       '<label class="ask-other-label">Other, or more detail<textarea class="ask-other" maxlength="4000" rows="3"' + off +
       ' placeholder="Write your own answer, or expand on an option without choosing it.">' + esc(a.other) + '</textarea></label></fieldset>';
   }).join('');
-  return notes.map((n) => '<p class="muted">' + esc(n) + '</p>').join('') +
-    '<form id="needs-form" novalidate>' + body +
-    '<p class="muted" id="ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
-    '<div class="ask-bar"><button class="btn primary" id="ask-submit" type="submit"' + off + '>Submit answers</button>' +
-    '<span id="ask-status" role="status"></span></div></form>';
 }
 
 // clef-flash's choices for this needs.md, or null. A failed read or an older file's record gives null.
@@ -4279,45 +4408,55 @@ function needsPick(triage, p) {
     c.options.every((o, k) => o?.label === p.options[k].label && Number.isInteger(o.chance) && str(o.reason)) ? c : null;
 }
 
+// Writes answers.md, then clears the job's needs line. answersFile is the loaded answers.md or null.
+async function saveAnswers(j, f, answersFile, answers) {
+  const id = j.id;
+  const url = jobBase(j).replace('./jobs/', './api/jobs/') + 'answers.md';
+  const body = answersMarkdown(parseNeeds(f.text), answers, f.sha, isoNow());
+  const conflict = 'answers.md changed since this page loaded. Your answers are kept. Reopen the job, then submit again.';
+  try {
+    if (answersFile && !answersFile.etag) return { saved: false, message: conflict };
+    const r = await fetch(url, {
+      method: 'PUT',
+      headers: { ...(answersFile ? { 'If-Match': answersFile.etag.replace(/^W\//, '') } : { 'If-None-Match': '*' }), 'Content-Type': 'text/markdown; charset=utf-8' },
+      body,
+    });
+    if (r.status !== 200) return { saved: false, message: r.status === 412 ? conflict : 'Could not save answers (status ' + r.status + '). Your answers are kept.' };
+  } catch {
+    return { saved: false, message: 'Could not confirm the save. Your answers are kept. Check the answers tab before you submit again.' };
+  }
+  let boardError;
+  if (j.stage !== 'needs-human' && String(j.needs ?? '').includes('#' + id + '/needs')) {
+    try { await casBoard((b) => clearNeeds(b, id, isoNow())); } catch (e) { boardError = e; }
+  }
+  return { saved: true, boardError };
+}
+
 async function submitNeeds() {
   const [j, f] = needsFile();
   const id = j.id;
-  const answers = files.find((x) => x.name === 'answers.md');
-  const url = jobBase(j).replace('./jobs/', './api/jobs/') + 'answers.md';
-  const body = answersMarkdown(parseNeeds(f.text), collectNeeds($('needs-form')), f.sha, isoNow());
-  const conflict = 'answers.md changed since this page loaded. Your answers are kept. Reopen the job, then submit again.';
+  const answers = collectNeeds($('needs-form'));
   needsSaving = true;
   updateNeedsBar();
   let message;
   try {
-    if (answers && !answers.etag) message = conflict;
-    else {
-      const r = await fetch(url, {
-        method: 'PUT',
-        headers: { ...(answers ? { 'If-Match': answers.etag.replace(/^W\//, '') } : { 'If-None-Match': '*' }), 'Content-Type': 'text/markdown; charset=utf-8' },
-        body,
-      });
-      if (r.status === 200) {
-        let boardError;
-        if (j.stage !== 'needs-human' && String(j.needs ?? '').includes('#' + id + '/needs')) {
-          try { await casBoard((b) => clearNeeds(b, id, isoNow())); } catch (e) { boardError = e; }
-        }
-        await poll();
-        needsSaving = false;
-        await openJob(id);
-        const submit = $('ask-submit');
-        if (!submit) return;
-        if (submit.disabled) {
-          $('d-tabs').querySelector('.tab.active')?.focus();
-          $('ask-status').textContent = 'Saved to answers.md. This job is no longer waiting on you.';
-          return;
-        }
-        submit.focus();
-        if (boardError) $('ask-status').textContent = 'Saved to answers.md, but the board still shows this job waiting on you (' + boardError.message + '). Submit again to retry.';
+    const result = await saveAnswers(j, f, files.find((x) => x.name === 'answers.md') ?? null, answers);
+    if (result.saved) {
+      await poll();
+      needsSaving = false;
+      await openJob(id);
+      const submit = $('ask-submit');
+      if (!submit) return;
+      if (submit.disabled) {
+        $('d-tabs').querySelector('.tab.active')?.focus();
+        $('ask-status').textContent = 'Saved to answers.md. This job is no longer waiting on you.';
         return;
       }
-      message = r.status === 412 ? conflict : 'Could not save answers (status ' + r.status + '). Your answers are kept.';
+      submit.focus();
+      if (result.boardError) $('ask-status').textContent = 'Saved to answers.md, but the board still shows this job waiting on you (' + result.boardError.message + '). Submit again to retry.';
+      return;
     }
+    message = result.message;
   } catch {
     message = 'Could not confirm the save. Your answers are kept. Check the answers tab before you submit again.';
   }
@@ -5508,7 +5647,10 @@ function closeDetail(keepHash = false) {
   const target = raw !== null ? focusBacklogControl(raw) : id && refocus ? focusJobCard(id) : null;
   target?.scrollIntoView({ block: 'nearest' });
   refreshPicker();
-  if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null) history.replaceState(null, '', location.pathname + location.search);
+  if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null) history.replaceState(null, '', location.pathname + location.search + (drawerReturn ?? ''));
+  const back = drawerReturn;
+  drawerReturn = null;
+  if (back && !keepHash) renderRoute();
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
@@ -5719,10 +5861,12 @@ function syncDetail() {
       (pending && candidates(j).includes(pending))) openJob(openId);
 }
 
-window.addEventListener('hashchange', () => {
+window.addEventListener('hashchange', (e) => {
   const { id } = parseHash();
   if (id !== archiveFailNoted) archiveFailNoted = '';
   const key = backlogRoute();
+  if (key || id) drawerReturn = new URL(e.oldURL).hash === '#/inbox' ? '#/inbox' : openId || openBacklogRaw !== null ? drawerReturn : null;
+  else drawerReturn = null;
   if (key) openBacklogRoute(key);
   else if (id) openJob(id);
   else if (openId || openBacklogRaw !== null) closeDetail();
@@ -5950,6 +6094,7 @@ const BACKLOG_REF = / \((rework-of|follow-up-of|sub-job-of|depends-on) (\w[\w.-]
 let backlog = [];               // parsed items from the last good read
 let backlogText = '';           // the last good read's whole text, checked lines included
 let backlogLoaded = false;      // a 200 or 404 has been read at least once
+let backlogFailed = false;      // the last read was neither a 200 nor a 404
 const backlogBusy = new Set();  // item.raw values with a decision in flight
 const backlogPending = new Map(); // item.raw -> captureId, kept until a decision settles
 
@@ -6021,10 +6166,11 @@ async function loadBacklog() {
       backlog = items;
       backlogText = text;
     } else if (r.status === 404) { backlog = []; backlogText = ''; }
-    else return;
+    else { backlogFailed = true; return; }
     backlogLoaded = true;
+    backlogFailed = false;
     pruneBacklogDrafts();
-  } catch {}
+  } catch { backlogFailed = true; }
 }
 
 // A draft whose item left the backlog can never show again, and it would hold a deploy reload forever.
