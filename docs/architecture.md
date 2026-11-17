@@ -165,7 +165,7 @@ the backlog. The jumper lists matching runs under `Retro runs` and up to 20 matc
 | `PUT /api/retros/<run>` | the bound service token of a paired or active host | store that run's record, or replace it when this host stored it |
 | `GET /api/retros` | any verified principal | JSON array of the newest 30 run records, newest first |
 
-The `#/inbox` dashboard page ranks jobs waiting on you and backlog lines, then offers Approve, Deny or Babysit in place.
+The `#/inbox` dashboard page ranks jobs waiting on you and backlog lines, then offers Approve, Deny, Babysit or the job's needs.md questions in place.
 
 The status may carry `triage_failed_since`, an ISO 8601 UTC time, while
 backlog triage fails on that host.
