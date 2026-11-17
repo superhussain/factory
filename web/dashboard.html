@@ -1640,6 +1640,7 @@ function waitsOnYou(j) {
 
 // Prioritized jobs first, as factory.py pickup takes them. The sort is stable, so ties keep board order.
 function prioritizedFirst(list) { return list.sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at)); }
+function starredFirst(list) { return starView === 'float' ? list.sort((a, b) => Number(starred.has(b.id)) - Number(starred.has(a.id))) : list; }
 
 // Mirrors batch_hold in factory.py, plus no claim: a follow-up or triage-queued idea that no
 // person added, approved or prioritized. batchState mirrors batch_holds. Change both together.
@@ -1783,7 +1784,8 @@ function card(j, inNeeds, archived = false) {
   const dupOnBoard = dup !== null && jobs.some((x) => x.id === dup);
   const chat = chatDecision(j), held = batchState(j), later = notBefore(j);
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
-  const tags = (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
+  const tags = (!archived && starred.has(j.id) ? '<span class="chip">Starred</span>' : '') +
+    (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
     (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
     (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
     (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
@@ -3816,7 +3818,7 @@ function renderBoard() {
     return;
   }
   const noneShown = !shownProjectKeys().length;
-  const shown = jobs.filter((j) => isShown(j.project));
+  const shown = jobs.filter((j) => isShown(j.project) && (starView !== 'only' || starred.has(j.id) || waitsOnYou(j)));
   renderedBacklog = backlog;
   syncBacklogTriage();
   const lists = COLUMNS.map((s) => s === 'backlog'
@@ -3826,18 +3828,23 @@ function renderBoard() {
   // Oldest first, so the longest wait sits on top.
   waiting.sort((a, b) => (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
+  for (const s of COLUMNS) if (s !== 'backlog' && !TERMINAL.includes(s)) starredFirst(lists[COLUMNS.indexOf(s)]);
   if (!settingsShown && !retrosRoute()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
-  // The extra auto track lets the filter-empty line span the whole board.
-  $('board').style.setProperty('--cols', tracks.concat(noneShown ? ['auto'] : []).join(' '));
-  $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : '') + COLUMNS.map((s, i) => {
+  const starredOnly = starView === 'only' && !noneShown;
+  const starredLine = starredOnly ? '<p class="filter-empty" id="starred-only">' +
+    (shown.some((j) => starred.has(j.id)) ? 'Showing starred jobs only.' : 'No starred jobs yet. Star a job with the star button in its job panel.') +
+    ' <button type="button" class="btn" id="starred-show-all">Show all jobs</button></p>' : '';
+  // The extra auto track lets the filter-empty or starred-only line span the whole board.
+  $('board').style.setProperty('--cols', tracks.concat(noneShown || starredOnly ? ['auto'] : []).join(' '));
+  $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : starredLine) + COLUMNS.map((s, i) => {
     if (hiddenColumns.has(s)) return '';
     let list = lists[i];
     let more = '';
     if (TERMINAL.includes(s)) {
       const t = (j) => Date.parse(j.done || j.updated) || 0;
-      list.sort((a, b) => t(b) - t(a));
+      starredFirst(list.sort((a, b) => t(b) - t(a)));
       if (list.length > CAP) {
         const open = expanded.has(s);
         more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '">' +
@@ -3874,6 +3881,11 @@ function renderBoard() {
 }
 
 $('board').addEventListener('click', (e) => {
+  if (e.target.closest('#starred-show-all')) {
+    setStarView('float');
+    $('board').querySelector('.column-toggle')?.focus();
+    return;
+  }
   const toggle = e.target.closest('.column-toggle');
   if (toggle) {
     columnCollapsed.set(toggle.dataset.stage, toggle.getAttribute('aria-expanded') === 'true');
