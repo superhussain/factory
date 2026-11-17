@@ -14,7 +14,7 @@ of this repo. The installed factory skill owns the shared loop and agents.
 This file lives in R2 behind the factory Worker, outside the repo. `factory.py`
 caches it in `<factory-home>/projects/`. The frontmatter names the
 GitHub repo, the base branch for PRs, and a display title. `repo`, `base` and
-`title` are required. `archive` and `buildkite_org` are optional. Uncomment
+`title` are required. `archive`, `buildkite_org` and `auto_babysit` are optional. Uncomment
 `buildkite_org` so `pr-state` can read Buildkite logs. Each device keeps its own
 checkout path separately in `paths.md`; paths and credentials do not belong here.
 
