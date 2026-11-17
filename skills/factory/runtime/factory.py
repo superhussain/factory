@@ -138,6 +138,7 @@
   factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
   factory.py retro aggregate [--days N]     pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
   factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, add its cards to the backlog
+  factory.py audit <job-id>                 list this host's tool calls in the job's worktree, risky ones flagged
   factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]
                                             append one row to the job's agents, after checking this
                                             session holds the claim, and print it as JSON
@@ -9619,6 +9620,131 @@ def retro_pull(date):
         sys.stdout.write(text)
 
 
+AUDIT_FLAGS = (
+    ("force-push", re.compile(r"\bgit\b[^;&|\n]*\bpush\b[^;&|\n]*\s(?:--force(?:-with-lease)?|-f)(?=[\s=]|$)")),
+    ("hard-reset", re.compile(r"\bgit\b[^;&|\n]*\breset\b[^;&|\n]*\s--hard\b")),
+    ("branch-delete", re.compile(r"\bgit\b[^;&|\n]*\bbranch\b[^;&|\n]*\s-D(?=\s|$)")),
+    ("recursive-delete", re.compile(r"(?:^|[\s;&|(])rm\s+(?:-[A-Za-z]+\s+)*(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)(?=\s|$)")),
+    ("no-verify", re.compile(r"\bgit\b[^;&|\n]*\s--no-verify\b")),
+    ("sudo", re.compile(r"(?:^|[\s;&|(])sudo\s")),
+    ("pipe-to-shell", re.compile(r"\b(?:curl|wget)\b[^|\n]*\|\s*(?:sudo\s+)?(?:ba|z)?sh\b")),
+    ("deploy", re.compile(r"\bwrangler\s+(?:deploy|publish)\b|\bdeploy\.py\s+deploy\b")),
+    ("pr-merge", re.compile(r"\bgh\s+pr\s+merge\b")),
+)
+AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
+AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
+AUDIT_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def audit_target_raw(name, inp):
+    """The one input field that says what a tool call acted on, or "" for a tool without one."""
+    def text(key):
+        return inp.get(key) if isinstance(inp.get(key), str) else ""
+    if name == "Bash":
+        return text("command")
+    if name in AUDIT_FILE_TOOLS:
+        return text("file_path")
+    if name in ("Grep", "Glob"):
+        return text("pattern") + (f" in {text('path')}" if text("path") else "")
+    if name == "WebFetch":
+        return text("url")
+    if name == "WebSearch":
+        return text("query")
+    if name in ("Agent", "Task"):
+        return f"{text('subagent_type')}: {text('description')}"
+    return ""
+
+
+def audit_target(raw):
+    """raw as it prints: home as ~, retro-redacted, whitespace collapsed, control characters as ?,
+    at most 120 characters."""
+    folded = re.sub(re.escape(str(Path.home())) + r"(?=/|$)", "~", raw)
+    return AUDIT_CONTROL.sub("?", " ".join(retro_redact(folded).split()))[:120]
+
+
+def audit_flags(name, inp, raw, denied):
+    """The names of the risky shapes one call matches, in AUDIT_FLAGS order, then sandbox-off,
+    secret-file and denied. They match the raw target, never the redacted one."""
+    flags = [flag for flag, pattern in AUDIT_FLAGS if name == "Bash" and pattern.search(raw)]
+    if name == "Bash" and inp.get("dangerouslyDisableSandbox") is True:
+        flags.append("sandbox-off")
+    path = inp.get("path") if name == "Grep" else raw if name == "Bash" or name in AUDIT_FILE_TOOLS else None
+    if isinstance(path, str) and AUDIT_SECRET_FILE.search(path):
+        flags.append("secret-file")
+    if denied:
+        flags.append("denied")
+    return flags
+
+
+def audit_scan(path, main):
+    """[{time, tool, flags, target}] for every tool_use block in one transcript. main=True skips
+    isSidechain lines."""
+    calls, denied = [], set()
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict) or (main and e.get("isSidechain")):
+                continue
+            msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+            content = msg.get("content")
+            blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+            for b in blocks:
+                if e.get("type") == "assistant" and b.get("type") == "tool_use":
+                    stamp = e.get("timestamp") if isinstance(e.get("timestamp"), str) else ""
+                    inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                    calls.append((b.get("id"), stamp.replace("T", " ")[:19], str(b.get("name")), inp))
+                elif e.get("type") == "user" and b.get("type") == "tool_result" and b.get("is_error") is True \
+                        and any(phrase in retro_text(b.get("content")) for phrase in RETRO_DENIALS):
+                    denied.add(b.get("tool_use_id"))
+    rows = []
+    for call_id, stamp, name, inp in calls:
+        raw = audit_target_raw(name, inp)
+        rows.append({"time": stamp, "tool": name, "flags": audit_flags(name, inp, raw, call_id in denied),
+                     "target": audit_target(raw) or "-"})
+    return rows
+
+
+def audit_rows(job_id):
+    """(rows, main session count) for every transcript this host keeps from the job's worktree."""
+    root = retro_transcripts()
+    if not root.is_dir():
+        fail(f"no Claude Code transcripts at {root}", 4)
+    folder = re.compile(r"(?:^|-)factory-" + re.escape(job_id) + r"(?:-|$)")
+    rows, sessions = [], 0
+    for project in sorted(p for p in root.iterdir() if p.is_dir() and folder.search(p.name)):
+        for path in sorted(project.glob("*.jsonl")):
+            sessions += 1
+            rows += [{"session": path.stem[:8], "agent": "main", **row} for row in audit_scan(path, True)]
+            for sub in sorted((project / path.stem / "subagents").glob("*.jsonl")):
+                try:
+                    kind = str(json.loads(sub.with_suffix(".meta.json").read_text(encoding="utf-8")).get("agentType")
+                               or "unknown")
+                except (OSError, ValueError, AttributeError):
+                    kind = "unknown"
+                rows += [{"session": path.stem[:8], "agent": AUDIT_CONTROL.sub("?", kind), **row} for row in audit_scan(sub, False)]
+    if not sessions:
+        fail(f"no Claude Code session on this host ran in a factory-{job_id} worktree", 4)
+    return sorted(rows, key=lambda r: (r["time"], r["session"])), sessions
+
+
+def audit_cmd(job_id):
+    if not NEW_JOB_ID.fullmatch(job_id):
+        fail("usage: factory.py audit <job-id>, a full job id such as 1017-add-x", 2)
+    rows, sessions = audit_rows(job_id)
+    flagged = sum(1 for r in rows if r["flags"])
+    print(f"job {job_id} on {retro_host()}: {len(rows)} call{'' if len(rows) == 1 else 's'} in {sessions} session{'' if sessions == 1 else 's'}, "
+          f"{flagged} flagged")
+    columns = ("time", "session", "agent", "tool", "flags", "target")
+    lines = [columns] + [(r["time"], r["session"], r["agent"], r["tool"], ",".join(r["flags"]) or "-", r["target"])
+                         for r in rows]
+    widths = [max(len(line[i]) for line in lines) for i in range(len(columns))]
+    for line in lines:
+        print("  ".join(cell.ljust(w) for cell, w in zip(line, widths)).rstrip())
+
+
 def retro_int(value):
     return value if type(value) is int else 0
 
@@ -10303,6 +10429,7 @@ COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
+COMMANDS["audit"] = (audit_cmd, 1, 1)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
 
