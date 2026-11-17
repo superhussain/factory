@@ -184,6 +184,20 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   body[data-view="retros"] #board, body[data-view="retros"] #detail,
   body[data-view="inbox"] #board, body[data-view="inbox"] #detail { display: none; }
   #retros-page { max-width: 1040px; }
+  #inbox-page { max-width: 1040px; }
+  #inbox-list { list-style: none; margin: 0; padding: 0; }
+  .inbox-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 16px; padding: 12px 10px; border-bottom: 1px solid var(--line); }
+  .inbox-rank { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .inbox-kind { font-size: 11px; font-weight: 600; }
+  .inbox-title { margin: 4px 0 0; font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+  .inbox-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .inbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .inbox-actions a.btn { text-decoration: none; }
+  @media (pointer: coarse) { .inbox-actions .btn { min-height: 44px; display: inline-flex; align-items: center; } }
+  @media (max-width: 760px) {
+    .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding: 12px 4px; }
+    .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
+  }
   #retros-list { display: grid; gap: 20px; }
   .settings-section.retro-run { padding: 20px 20px 12px; }
   .retro-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; margin-bottom: 14px; }
@@ -1341,7 +1355,7 @@ function refreshBacklog() {
   const version = boardReadVersion;
   // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
   const seen = backlog.map((b) => b.raw).join('\n');
-  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); });
+  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); renderInboxPage(); });
 }
 
 async function poll({ ifChanged = false, withBacklog = true } = {}) {
@@ -3008,13 +3022,66 @@ $('retros-back').addEventListener('click', e => { e.preventDefault(); leaveSetti
 
 // Inbox page: the '#/inbox' view ranks every job and backlog line waiting on a person.
 let inboxHtml = '';
+let inboxError = '';
 
 function inboxRoute() {
   return location.hash === '#/inbox' ? true : null;
 }
 
+const INBOX_LABELS = { ask: 'Question', pr: 'Escalated PR', human: 'Needs recovery', backlog: 'Backlog decision' };
+
+function inboxKind(j) {
+  if (j.stage === 'needs-human') return 'human';
+  if (j.stage === 'pr-open' && (j.escalated === true || /^escalated:/i.test(String(j.note ?? '')))) return 'pr';
+  if (asks(j.needs)) return 'ask';
+  return null;
+}
+
+// Ranked by kind; within a job kind, prioritized jobs first, then the oldest. Backlog keeps file order.
+function inboxItems() {
+  const waiting = jobs.filter((j) => waitsOnYou(j) && isShown(j.project))
+    .sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at) || (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
+  return ['ask', 'pr', 'human'].flatMap((kind) => waiting.filter((j) => inboxKind(j) === kind).map((job) => ({ kind, job })))
+    .concat(visibleBacklog().map((item) => ({ kind: 'backlog', item })));
+}
+
 function renderInboxPage() {
   if (inboxRoute() === null) return;
+  if (!loaded || !backlogLoaded) {
+    $('inbox-status').textContent = inboxError || 'Loading the inbox\u2026';
+    $('inbox-list').innerHTML = '';
+    inboxHtml = '';
+    return;
+  }
+  const items = inboxItems();
+  $('inbox-status').textContent = inboxError || (items.length ? '' : 'Nothing is waiting on you.');
+  const link = (href, text) => '<a class="btn" href="' + esc(href) + '">' + esc(text) + '</a>';
+  const html = items.map(({ kind, job: j, item }, i) => {
+    let title, meta, actions;
+    if (item) {
+      const ctx = item.context === undefined ? null : parseBacklogContext(item.context);
+      const busy = backlogBusy.has(item.raw) ? ' disabled' : '';
+      const href = '#/backlog/' + item.key;
+      title = item.text;
+      meta = [projectName(item)].concat(ctx ? 'Agent recommends ' + (ctx.recommend === 'approved' ? 'approve' : 'deny') : []);
+      actions = ctx?.questions.length ? link(href, 'Answer questions')
+        : '<button type="button" class="btn primary" data-inbox-decide="approved" data-raw="' + esc(item.raw) + '"' + busy + '>Approve</button>' +
+          '<button type="button" class="btn" data-inbox-decide="denied" data-raw="' + esc(item.raw) + '"' + busy + '>Deny</button>' + link(href, 'Open');
+    } else {
+      const pr = prLink(j);
+      title = j.title || j.id;
+      meta = [projectName(j), j.id].concat(asks(j.needs) ? j.needs : []);
+      actions = kind === 'ask' && j.needs.includes('#' + j.id + '/needs') ? link('#' + j.id + '/needs', 'Answer')
+        : (kind === 'pr' && canBabysit(j) ? '<button type="button" class="btn primary" data-inbox-babysit="' + esc(j.id) + '">Babysit PR #' + esc(pr.n) + '</button>' : '') +
+          (kind === 'pr' && pr ? '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>' : '') +
+          link('#' + j.id, 'Open job');
+    }
+    return '<li class="inbox-item"><span class="inbox-rank">' + (i + 1) + '</span>' +
+      '<div><span class="chip inbox-kind">' + INBOX_LABELS[kind] + '</span><p class="inbox-title">' + esc(title) + '</p>' +
+      '<p class="inbox-meta">' + meta.map(esc).join(' · ') + '</p></div>' +
+      '<div class="inbox-actions">' + actions + '</div></li>';
+  }).join('');
+  if (html !== inboxHtml) { inboxHtml = html; $('inbox-list').innerHTML = html; }
 }
 
 // Pipeline settings: one in-memory draft per scope. Stored text is shown only through
@@ -3817,6 +3884,7 @@ function renderBoard() {
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
     renderRetrosPage();
+    renderInboxPage();
     return;
   }
   const noneShown = !shownProjectKeys().length;
@@ -3874,6 +3942,7 @@ function renderBoard() {
   }
   syncCardActions();
   renderRetrosPage();
+  renderInboxPage();
   heldDrawn = heldChipsKey();
 }
 
