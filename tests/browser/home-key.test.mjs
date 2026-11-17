@@ -125,7 +125,7 @@ test("h key goes home", { timeout: 120000 }, async () => {
     const s = rows.findIndex(([key]) => key === "S");
     assert.deepEqual(rows[s + 1], [
       "H",
-      "Back to the board from a job, a backlog item, Settings or Retros",
+      "Back to the board from a job, a backlog item, Settings, Retros or the Inbox",
     ]);
     assert.deepEqual(errors, []);
   });
