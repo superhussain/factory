@@ -6367,7 +6367,7 @@ def watch_cmd(target, *args):
     hold(target)
     folder = home / "jobs" / slug / job_id
     if watch_pr:
-        pr = board_pr(home, slug, job_id)
+        pr = board_pr(home, slug, job_id, archive=True)
         meta = frontmatter(project_files(home, slug)[0])[0]
         base = meta.get("base") or "main"
     start = time.monotonic()
@@ -6458,16 +6458,18 @@ CHECKS_INTERVAL = 10
 CHECKS_REGISTER = 120
 
 
-def board_pr(home, slug, job_id):
-    """The job's PR URL from the board, after checking it is a pull request in the project file repo."""
+def board_pr(home, slug, job_id, archive=False):
+    """The job's PR URL from the board, after checking it is a pull request in the project file repo,
+    or in its archive repo when archive is true."""
     job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
     pr = (job or {}).get("pr")
     if not isinstance(pr, str) or not pr:
         fail(f"{job_id} has no pr on the board", 4)
-    repo = frontmatter(project_files(home, slug)[0])[0].get("repo", "")
+    meta = frontmatter(project_files(home, slug)[0])[0]
+    repos = [r for r in (meta.get("repo", ""), meta.get("archive", "") if archive else "") if r]
     m = GH_PR.fullmatch(pr)
-    if not (repo and m and m[1].lower() == repo.lower()):
-        fail(f"{pr} is not a pull request in {repo or 'the project file repo'}", 4)
+    if not (m and m[1].lower() in (r.lower() for r in repos)):
+        fail(f"{pr} is not a pull request in {' or '.join(repos) or 'the project file repo'}", 4)
     return pr
 
 
@@ -6741,7 +6743,7 @@ def pr_state_cmd(target, *args):
                  or not 1 <= int(args[1]) <= 600):
         fail("--wait takes one value from 1 to 600 seconds. " + PR_STATE_USAGE, 2)
     wait = int(args[1]) if args else 0
-    pr = board_pr(home, slug, job_id)
+    pr = board_pr(home, slug, job_id, archive=True)
     meta = frontmatter(project_files(home, slug)[0])[0]
     base = meta.get("base") or "main"
     start = time.monotonic()
