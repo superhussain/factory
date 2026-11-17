@@ -913,6 +913,8 @@ def board_write(factory, job_id, patch, show=True):
              "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
     if "github" in patch:
         fail("only factory.py pickup sets github. Nothing was written.", 2)
+    if "auto_babysit" in patch:
+        fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -5247,6 +5249,11 @@ GH_PR = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/\d+", re.ASCII)
 GH_PR_PARTS = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})", re.ASCII)
 SYNC_STAGES = ("pr-open", "needs-human")
 PR_SYNC_LIMIT = 100
+AUTO_BABYSIT_LIMIT = 20
+AUTO_BABYSIT = re.compile(r"[1-9]")
+CI_FAILED = {"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "CANCELLED", "ERROR"}
+AUTO_BABYSIT_COPY = {"fix-reviews": "has an open review thread", "rebase": "has a merge conflict",
+                     "fix-ci": "has a failing required check"}
 GITHUB_CLOSE_REASON = "PR closed on GitHub"
 MERGED_NOTE = "merged on GitHub"
 PR_CLOSE_COMMENT = (
@@ -5311,6 +5318,66 @@ def pr_states(repo, numbers, device):
         return None, ("gh api graphql returned no repository "
                       f"(check the project file's repo and gh auth status on {device})")
     return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
+
+
+def pr_signals(repo, numbers, device):
+    """({number: (head oid, pr_signal)}, None) for repo's pull requests from one gh api graphql call,
+    or (None, why), as pr_states reads them."""
+    owner, name = repo.split("/")
+    q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
+         + " ".join(f"p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid author {{ login }} "
+                    "reviewThreads(last: 50) { nodes { isResolved comments(first: 20) { nodes { authorAssociation "
+                    "author { __typename login } } } } } commits(last: 1) { nodes { commit { statusCheckRollup { "
+                    "contexts(first: 50) { nodes { __typename ... on CheckRun { conclusion "
+                    f"isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ state "
+                    f"isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }}" for n in numbers)
+         + " } }")
+    r = gh_cli("api", "graphql", "-f", "query=" + q)
+    if r is None:
+        return None, f"gh is not installed on {device}"
+    if r[0] == "timeout":
+        return None, f"gh api graphql timed out after 60 seconds on {device}"
+    try:
+        found = json.loads(r[1])["data"]["repository"]
+    except (ValueError, KeyError, TypeError):
+        found = None
+    if not isinstance(found, dict):
+        if r[0]:
+            return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
+        return None, ("gh api graphql returned no repository "
+                      f"(check the project file's repo and gh auth status on {device})")
+    return {n: (found[f"p{n}"].get("headRefOid"), pr_signal(found[f"p{n}"]))
+            for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
+
+
+def pr_signal(pull):
+    """What an open pull request needs from babysit, in pr_reading's order: fix-reviews for an open
+    counted review thread, rebase for a merge conflict, fix-ci for a failed required check, else None."""
+    if pull.get("state") != "OPEN":
+        return None
+
+    def login(item):
+        return str((item.get("author") or {}).get("login") or "")
+
+    author = login(pull)
+    for thread in (pull.get("reviewThreads") or {}).get("nodes") or []:
+        if not isinstance(thread, dict) or thread.get("isResolved"):
+            continue
+        comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
+        if not comments or any(login(c) == author for c in comments):
+            continue
+        if (comments[0].get("author") or {}).get("__typename") == "Bot" \
+                or comments[0].get("authorAssociation") in PR_REVIEWERS:
+            return "fix-reviews"
+    if pull.get("mergeable") == "CONFLICTING":
+        return "rebase"
+    for node in (pull.get("commits") or {}).get("nodes") or []:
+        rollup = ((node or {}).get("commit") or {}).get("statusCheckRollup") or {}
+        for c in (rollup.get("contexts") or {}).get("nodes") or []:
+            if isinstance(c, dict) and c.get("isRequired") is True \
+                    and (c.get("conclusion") or c.get("state")) in CI_FAILED:
+                return "fix-ci"
+    return None
 
 
 def close_pull_request(home, j, device, comment=None):
@@ -5515,6 +5582,130 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
                 print(f"synced {line}")
 
 
+def auto_babysit_cap(home, slug):
+    """The project file's auto_babysit as an int from 1 to 9, else 0."""
+    md = project_files(home, slug)[0]
+    value = frontmatter(md)[0].get("auto_babysit", "") if md.exists() else ""
+    return int(value) if AUTO_BABYSIT.fullmatch(value) else 0
+
+
+def babysit_noted(home, slug):
+    """True when the project's effective pipeline has a Babysit stage note."""
+    status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+    try:
+        notes = json.loads(text).get("stage_notes") if status == 200 else None
+    except (ValueError, AttributeError):
+        notes = None
+    babysit = notes.get("babysit") if isinstance(notes, dict) else None
+    return isinstance(babysit, list) and bool(babysit)
+
+
+def auto_babysit_match(j):
+    """The PR URL match of a pr-open job pickup may babysit on its own, else None."""
+    job_id, project, pr = j.get("id"), j.get("project"), j.get("pr")
+    if not (j.get("stage") == "pr-open" and isinstance(job_id, str) and JOB_ID.fullmatch(job_id)
+            and ".." not in job_id and isinstance(project, str) and SLUG.fullmatch(project) and isinstance(pr, str)
+            and not (babysitting(j) or gated(j) or paused(j) or closing(j) or escalated(j))
+            and lead_of(j) is None):
+        return None
+    return GH_PR_PARTS.fullmatch(pr)
+
+
+def auto_babysit_record(j):
+    """(count, head, reason) of the job's last automatic babysit, (0, None, None) before the first."""
+    a = j.get("auto_babysit")
+    if not isinstance(a, dict):
+        return 0, None, None
+    return (a["count"] if type(a.get("count")) is int else 0), a.get("head"), a.get("reason")
+
+
+def auto_babysit_pass(home, data, device, minutes, paths, settings, dry):
+    """Set babysit on each pr-open job whose PR fails a required check, has an open counted review thread
+    or a merge conflict, in projects whose project file sets auto_babysit. At most auto_babysit times per
+    job, and never twice for the same head and reason. One gh api graphql call per repo."""
+    caps, repos, noted, groups = {}, {}, {}, {}
+    for j in data["jobs"]:
+        m = auto_babysit_match(j)
+        if not m:
+            continue
+        job_id, project = j["id"], j["project"]
+        if project not in caps:
+            caps[project] = auto_babysit_cap(home, project)
+        cap = caps[project]
+        if not cap:
+            continue
+        head = f"skip auto-babysit {job_id} {project}"
+        c = blocking(j, device, "", minutes)
+        if c:
+            if dry:
+                print(f"{head}: claimed by {c['device']} session {c.get('session')}")
+            continue
+        if project not in repos:
+            md = project_files(home, project)[0]
+            repos[project] = frontmatter(md)[0].get("repo", "") if md.exists() else ""
+        repo = f"{m[1]}/{m[2]}".lower()
+        if repos[project].lower() != repo:
+            continue
+        reason = pickup_reason(home, project, paths, settings, device, dry)
+        if reason:
+            if dry:
+                print(f"{head}: {reason}")
+            continue
+        if project not in noted:
+            noted[project] = babysit_noted(home, project)
+        if not noted[project]:
+            if dry:
+                print(f"{head}: no Babysit note")
+            continue
+        if auto_babysit_record(j)[0] >= cap:
+            if dry:
+                print(f"{head}: {cap} of {cap} automatic babysits used")
+            continue
+        groups.setdefault(repo, []).append((j, int(m[3]), cap))
+
+    for repo, jobs in groups.items():
+        jobs = jobs[:AUTO_BABYSIT_LIMIT]
+        signals, why = pr_signals(repo, [n for _, n, _ in jobs], device)
+        if signals is None:
+            print(f"factory.py: pickup skips auto-babysit for {repo}: {why}", file=sys.stderr)
+            continue
+        for j, n, cap in jobs:
+            head, reason = signals.get(n, (None, None))
+            if reason is None:
+                continue
+            count, last_head, last_reason = auto_babysit_record(j)
+            if (head, reason) == (last_head, last_reason):
+                if dry:
+                    print(f"skip auto-babysit {j['id']} {j['project']}: already babysat {reason} at {head[:7]}")
+                continue
+            copy = AUTO_BABYSIT_COPY[reason]
+            line = f"{j['id']} {j['project']}: PR #{n} {copy} ({count + 1} of {cap})"
+            if dry:
+                print(f"would auto-babysit {line}")
+                continue
+
+            def change(text, j=j, n=n, cap=cap, head=head, reason=reason, copy=copy):
+                board = load_board(text)
+                found = next((x for x in board["jobs"] if x.get("id") == j["id"]), None)
+                if (found is None or not auto_babysit_match(found) or found["pr"] != j["pr"]
+                        or found["project"] != j["project"] or blocking(found, device, "", minutes)):
+                    return None, None
+                count, last_head, last_reason = auto_babysit_record(found)
+                if count >= cap or (head, reason) == (last_head, last_reason):
+                    return None, None
+                stamp = now()
+                row = patch_job(board, j["id"], {
+                    "babysit": {"at": stamp, "via": "pickup", "by": device, "reason": reason},
+                    "auto_babysit": {"count": count + 1, "head": head, "reason": reason, "at": stamp},
+                    "note": f"auto-babysitting PR #{n}: it {copy}"})
+                return dump_board(board), row
+            row = cas(home, "/api/board", change)
+            if row:
+                data["jobs"][data["jobs"].index(j)] = row
+                print(f"auto-babysat {j['id']} {j['project']}: PR #{n} {copy} "
+                      f"({row['auto_babysit']['count']} of {cap})")
+
+
 def close_pass(home, data, device, minutes, dry):
     """Close each job the dashboard queued a close for: decision.md first, then the stage."""
     configs = {}
@@ -5709,6 +5900,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     close_pass(home, data, device, minutes, dry)
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
+    auto_babysit_pass(home, data, device, minutes, paths, settings, dry)
     babysit_pass(home, data, device, minutes, paths, settings, dry)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)

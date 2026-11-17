@@ -31,6 +31,7 @@ const CASES = [
   { viewport: { width: 320, height: 844 }, size: 32 },
   { viewport: { width: 390, height: 844, ...TOUCH }, size: 44 },
   { viewport: { width: 320, height: 844, ...TOUCH }, size: 44 },
+  { viewport: { width: 700, height: 1024, ...TOUCH }, size: 44 },
 ];
 
 test("header icons share one row and match the filter height", { timeout: 120000 }, async () => {
@@ -79,13 +80,15 @@ test("header icons share one row and match the filter height", { timeout: 120000
             return style.display !== "none" && style.visibility !== "hidden";
           })(),
           text: document.getElementById("updated").textContent,
+          order: getComputedStyle(document.querySelector(".header-actions")).order,
         };
       });
-      if (process.env.HEADER_SHOTS && label === "320px") {
+      const shots = { "320px": "320", "700px touch": "700-touch", "390px touch": "390-touch" };
+      if (process.env.HEADER_SHOTS && shots[label]) {
         await (
           await page.$("header")
         ).screenshot({
-          path: `${process.env.HEADER_SHOTS}/${process.env.HEADER_SHOT_STAGE || "after"}-header-320.png`,
+          path: `${process.env.HEADER_SHOTS}/${process.env.HEADER_SHOT_STAGE || "after"}-header-${shots[label]}.png`,
         });
       }
       assert.equal(new Set(header.tops).size, 1, `icon tops at ${label}: ${header.tops}`);
@@ -98,6 +101,12 @@ test("header icons share one row and match the filter height", { timeout: 120000
       assert.equal(header.wordShown, viewport.width !== 320, `updated word shown at ${label}`);
       assert.equal(header.wordRead, true, `updated word read at ${label}`);
       assert.ok(header.text.startsWith("updated "), `updated text at ${label}: ${header.text}`);
+      if (label === "700px touch") {
+        assert.equal(header.rows, 1, `header rows at ${label}: height ${header.headerHeight}`);
+        assert.equal(header.order, "0", `header-actions order at ${label}`);
+      }
+      if (label === "390px touch")
+        assert.equal(header.order, "1", `header-actions order at ${label}`);
       if (viewport.width === 1280) {
         const link = await page.$eval("#retros-link", (el) => ({
           next: el.nextElementSibling.id,

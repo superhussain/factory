@@ -134,6 +134,21 @@ Each run, in order:
   `--worktree-slug` after `run` for a `paseo` launcher with `--new-workspace` that lacks it.
   A live holder, such as a `running` agent skipped above, learns of the click from its
   next `hold`, which prints `babysit requested`.
+- Auto-babysit: right before the Babysit step, in projects whose project file sets
+  `auto_babysit: <1 to 9>`, sets `babysit` on a `pr-open` job whose PR has an open counted
+  review thread, a merge conflict or a failing required check, so the Babysit step launches
+  it in the same run. It reads every candidate PR in a repo with one `gh api graphql` call,
+  only for opted-in projects, at most 20 PRs per repo. It skips a job that waits on a human,
+  is paused, closing, escalated, batched into another, already babysat or held by a live
+  claim, whose project has no Babysit note, or whose project pickup does not list this host.
+  One board write sets `babysit = {at, via: "pickup", by, reason}`,
+  `auto_babysit = {count, head, reason, at}` and the note, and prints
+  `auto-babysat <id> <project>: PR #<n> <what it has> (<count> of <cap>)`. A dry run prints
+  `would auto-babysit ...` and `skip auto-babysit <id> <project>: <reason>`. A job gets at
+  most `auto_babysit` automatic babysits (`<cap> of <cap> automatic babysits used`), and
+  never a second one for the same head commit and reason (`already babysat <reason> at <head>`).
+  A person's Babysit PR click does not count. Only pickup sets `auto_babysit`; `board`
+  refuses it.
 - Picks the first route in `routes.md` that is not marked limited, then resolves
   the launcher for it. A config error exits 2 before anything is claimed.
 - Claims one idea at a time — the board compare-and-swap stops two hosts taking
