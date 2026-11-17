@@ -929,6 +929,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <p class="muted">Get a browser notification when a job starts waiting on you while this tab is in the background. The notification shows the job id and title only. This setting applies only to this browser.</p>
       <label for="notify-needs"><input type="checkbox" id="notify-needs" aria-describedby="notify-permission"> Notify me when a job needs me</label>
       <p class="muted" id="notify-permission"></p>
+      <label for="notify-remind">Remind me when a job still waits after<select id="notify-remind" aria-describedby="notify-remind-help"><option value="">Never</option><option value="1">1 hour</option><option value="4">4 hours</option><option value="24">1 day</option></select></label>
+      <p class="muted" id="notify-remind-help">Sends one more notification when a job has waited on you longer than this, while this tab is in the background. The wait counts from the job's last board update.</p>
       <p id="notify-status" role="status"></p>
     </section>
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
@@ -7788,7 +7790,11 @@ const NOTIFY_PERMISSION = {
   granted: 'Browser permission: allowed.',
   denied: "Notifications are blocked for this site. Allow them in your browser's site settings, then turn this on again.",
 };
+const REMIND_KEY = 'factory-notify-remind', REMIND_HOURS = [1, 4, 24], REMIND_CHECK_MS = 60000;
+const REMIND_LABEL = { 1: '1 hour', 4: '4 hours', 24: '1 day' };
 let notifyOn = store.get(NOTIFY_KEY) === 'on';
+let remindHours = Number(store.get(REMIND_KEY));
+if (!REMIND_HOURS.includes(remindHours)) remindHours = 0;
 let waitingSeen = null;
 function notifySupported() { return 'Notification' in window; }
 function notifyActive() { return notifyOn && notifySupported() && Notification.permission === 'granted'; }
@@ -7810,6 +7816,8 @@ function renderNotifySettings() {
   $('notify-needs').disabled = permission === 'unsupported';
   $('notify-needs').checked = notifyActive();
   $('notify-permission').textContent = NOTIFY_PERMISSION[permission];
+  $('notify-remind').disabled = !notifyActive();
+  $('notify-remind').value = remindHours ? String(remindHours) : '';
 }
 function enterNotificationsSection() { renderNotifySettings(); $('notify-needs').focus(); }
 $('notify-needs').addEventListener('change', async () => {
@@ -7819,6 +7827,12 @@ $('notify-needs').addEventListener('change', async () => {
   renderNotifySettings();
   syncLive(); schedulePoll();
   $('notify-status').textContent = notifyOn ? 'Notifications are on in this browser.' : 'Notifications are off.';
+});
+$('notify-remind').addEventListener('change', () => {
+  const n = Number($('notify-remind').value);
+  remindHours = REMIND_HOURS.includes(n) ? n : 0;
+  if (remindHours) store.set(REMIND_KEY, String(remindHours)); else store.remove(REMIND_KEY);
+  $('notify-status').textContent = remindHours ? 'Reminders are on: after ' + REMIND_LABEL[remindHours] + '.' : 'Reminders are off.';
 });
 
 loadProjects().then(() => {
