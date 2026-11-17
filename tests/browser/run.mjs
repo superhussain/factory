@@ -1139,6 +1139,44 @@ async function capture(outdir, referencePath) {
       (page) => openInstallSettings(page, true),
       true,
     );
+    const starCapture = async (page) => {
+      await page.evaluate(() =>
+        localStorage.setItem("factory-starred-jobs", JSON.stringify(["001-capture"])),
+      );
+      await page.reload({ waitUntil: "networkidle0" });
+      await page.waitForSelector('.card[data-id="001-capture"]');
+      await waitLiveDot(page);
+    };
+    await view("starred-board-1280", 1280, 900, "light", starCapture);
+    await view("starred-drawer-390", 390, 844, "dark", async (page, side) => {
+      await starCapture(page);
+      await openDrawer(page, side);
+      return clipOf(page, ".detail-head");
+    });
+    await view("starred-display-1280", 1280, 900, "light", async (page, side) => {
+      await starCapture(page);
+      await page.evaluate(() => {
+        location.hash = "#/settings/display";
+      });
+      await page.waitForSelector("#settings-display:not([hidden])");
+      await page.evaluate(() =>
+        document.querySelector("#display-filter").scrollIntoView({ block: "start" }),
+      );
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getElementById("settings-link")
+            .getAnimations()
+            .map((animation) => animation.finished),
+        ),
+      );
+      // The reference page has no starred setting, so its crop ends at the project filter.
+      return clipOf(
+        page,
+        "#display-filter",
+        side === "after" ? "#display-starred-help" : "#display-filter",
+      );
+    });
     const openSchedulerSettings = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/scheduler";
