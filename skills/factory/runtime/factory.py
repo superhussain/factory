@@ -2223,7 +2223,7 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
                 break
             # A job waiting on a human, or an unapproved explorer card, is never promoted.
             if not j.get("project") or gated(j) or paused(j) or waiting_until(j) or closing(j) \
-                    or tracer_building(j):
+                    or waiting_on(j, data["jobs"]) or tracer_building(j):
                 continue
             repo = paths.get(j["project"])
             # The scheduler pastes the id into a shell command, so only well-formed ids pass.
@@ -2271,6 +2271,8 @@ def batch_problem(data, j, slug, device, session, minutes):
         return "closing"
     if waiting_until(j):
         return f"not before {waiting_until(j)}"
+    if waiting_on(j, data["jobs"]):
+        return f"waits on {waiting_on(j, data['jobs'])}"
     if j.get("idea_images"):
         return "has pasted images"
     if j.get("idea_files"):
@@ -5203,6 +5205,15 @@ def waiting_until(j):
     return t if isinstance(t, str) and NOT_BEFORE.fullmatch(t) and t > now() else None
 
 
+def waiting_on(j, jobs):
+    """The first depends-on id of an idea whose job is still open on the board, else None."""
+    if j.get("stage") != IDEA:
+        return None
+    open_ids = {o.get("id") for o in jobs if o.get("stage") not in TERMINAL}
+    return next((r["id"] for r in j.get("refs") or [] if isinstance(r, dict) and r.get("kind") == "depends-on"
+                 and r.get("id") in open_ids), None)
+
+
 CLOSE_REASON = re.compile(r"[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}")
 
 
@@ -5738,6 +5749,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
             return f"skip {j['id']} {project}: closing"
         if waiting_until(j):
             return f"skip {j['id']} {project}: not before {waiting_until(j)}"
+        if waiting_on(j, data["jobs"]):
+            return f"skip {j['id']} {project}: waits on {waiting_on(j, data['jobs'])}"
         if tracer_building(j):
             return f"skip {j['id']} {project}: building in Tracer"
         c = blocking(j, device, "", minutes)
