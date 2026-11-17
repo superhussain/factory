@@ -75,7 +75,8 @@ Each run, in order:
   approval released, and launches `/factory recover <id>` for them instead of
   `/factory idea <id>`. They follow the same skips, claim and caps as ideas.
 - Skips ideas that are gated, held by a live claim, waiting on a human, or whose
-  `not_before` is still in the future (`skip <id> <project>: not before <time>`), and
+  `not_before` is still in the future (`skip <id> <project>: not before <time>`), or
+  that depend on a job still open on the board (`skip <id> <project>: waits on <dep-id>`), and
   projects whose effective pipeline has pickup off, does not list this host, or
   cannot be read. Each skip reason is printed once and the run goes on.
 - Holds back batchable ideas: an idea with a `follow-up-of` ref, or one backlog

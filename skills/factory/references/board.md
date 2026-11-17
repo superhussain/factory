@@ -22,7 +22,7 @@
   "needs": "optional: what only a human can do, e.g. approve spec.md",
   "not_before": "optional UTC time; pickup starts the job only after it, e.g. 2026-11-17T09:00:00Z",
   "port": "optional dev-server port or block the builder holds, e.g. 8130-8139",
-  "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | batched-into (set only by factory.py batch; dropped by the lead's close or merge, or the dashboard's Remove from batch while the lead is at spec)" }],
+  "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | depends-on | batched-into (set only by factory.py batch; dropped by the lead's close or merge, or the dashboard's Remove from batch while the lead is at spec)" }],
   "stacked": "true on the one rider that ships as a PR stacked on its lead's PR; set only by factory.py stack",
   "build": { "state": "queued | running | done | failed", "runs": ["https://github.com/<repo>/actions/runs/1"] },
   "pipeline": { "global": 3, "project": 2 },
@@ -43,6 +43,7 @@ job's own `$REPO`.
 `pending`, `PASS`, `CHANGES`, or `SKIPPED` (ux and ui only, written by `review-plan`). Reviewer keys are fixed: security, ux, ui, code.
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
 which ports live jobs hold. Only `factory.py` writes `claim`.
+`depends-on` holds an idea back from pickup, `ideas` and `batch` until the named job is merged, closed or off the board.
 `done` is when the job entered `merged` or `closed`, and only `factory.py` writes it.
 `started` is when the job first got a claim, and only `factory.py` writes it.
 `escalated` is set when an ESCALATE PR ships, and marks a PR that waits on a human.
