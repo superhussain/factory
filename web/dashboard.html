@@ -1976,7 +1976,8 @@ function renderJobResults() {
   const projectCommand = !projectFilter || projectFilter.hidden || projectFilter.disabled ? null
     : { kind: 'command', key: 'command:select-project', title: 'Select project', meta: 'Command · Change the board project filter', words: 'select project command' };
   const retrosCommand = { kind: 'command', key: 'command:retros', title: 'Retros', meta: 'Command · Open retro runs and findings (R)', words: 'retros retro runs findings command' };
-  const commands = [command, projectCommand, retrosCommand].filter((r) => r && tokens.every((t) => r.words.includes(t)));
+  const inboxCommand = { kind: 'command', key: 'command:inbox', title: 'Inbox', meta: 'Command · Everything waiting on you (I)', words: 'inbox waiting decisions command' };
+  const commands = [command, projectCommand, retrosCommand, inboxCommand].filter((r) => r && tokens.every((t) => r.words.includes(t)));
   const retroRows = retroPickerRows(tokens);
   const retroCount = retroRows.runs.length + retroRows.findings.length;
   const jobRows = matched.map((j) => ({
@@ -2004,6 +2005,7 @@ function renderJobResults() {
     { id: 'new-idea', title: 'New idea', rows: commands.filter((r) => r.key === 'command:new-idea') },
     { id: 'select-project', title: 'Select project', rows: commands.filter((r) => r.key === 'command:select-project') },
     { id: 'retros', title: 'Retros', rows: commands.filter((r) => r.key === 'command:retros') },
+    { id: 'inbox', title: 'Inbox', rows: commands.filter((r) => r.key === 'command:inbox') },
     ...[['needs-you', 'Needs you'], ...JOB_PICKER_STAGES.map((stage) => [stage, stage === 'pr-open' ? 'PR open' : stage[0].toUpperCase() + stage.slice(1)]),
       ['other', 'Other jobs']].map(([id, title]) => ({ id, title, rows: jobRows.filter((r) => jobResultSection(r.job) === id) })),
     { id: 'retro-runs', title: 'Retro runs', rows: retroRows.runs },
@@ -2163,6 +2165,11 @@ function activateJobResult() {
   if (row.key === 'command:retros') {
     closeJobPicker(true);
     location.hash = '#/retros';
+    return;
+  }
+  if (row.key === 'command:inbox') {
+    closeJobPicker(true);
+    location.hash = '#/inbox';
     return;
   }
   if (row.kind === 'command') {
@@ -3083,6 +3090,34 @@ function renderInboxPage() {
   }).join('');
   if (html !== inboxHtml) { inboxHtml = html; $('inbox-list').innerHTML = html; }
 }
+
+function inboxReport(message) {
+  inboxError = message;
+  renderInboxPage();
+}
+
+// The project checks and copy of submitBacklogDecision, with no notes and no answers.
+async function inboxDecide(raw, pick, button) {
+  const item = backlog.find((b) => b.raw === raw);
+  if (!item || backlogBusy.has(raw)) return;
+  if (pick !== 'denied' && !projects) return inboxReport('Could not load projects. Refresh this page to retry.');
+  if (pick !== 'denied' && !projects.has(item.project)) return inboxReport('Register project ' + item.project + ' before approving this item.');
+  inboxReport('');
+  button.disabled = true;
+  try {
+    await decideBacklog(item, pick, '', '');
+  } catch (x) {
+    inboxReport(String(x.message || x));
+  }
+}
+
+$('inbox-list').addEventListener('click', (e) => {
+  const babysit = e.target.closest('[data-inbox-babysit]');
+  if (babysit) babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxRoute() !== null });
+  const decide = e.target.closest('[data-inbox-decide]');
+  if (decide) inboxDecide(decide.dataset.raw, decide.dataset.inboxDecide, decide);
+});
+$('inbox-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
 
 // Pipeline settings: one in-memory draft per scope. Stored text is shown only through
 // value and textContent, never parsed as markup.
@@ -5481,6 +5516,9 @@ function handleBoardKeys(e) {
   } else if (e.key === 'r') {
     e.preventDefault();
     location.hash = '#/retros';
+  } else if (e.key === 'i') {
+    e.preventDefault();
+    location.hash = '#/inbox';
   } else if (e.key === 'a' || e.key === '.') {
     if (openBacklogRaw !== null) return;
     const target = cardShortcutTarget(e);
