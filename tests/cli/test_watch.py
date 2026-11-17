@@ -103,6 +103,12 @@ class WatchTest(IsolatedTestCase):
         self.assertEqual((reading["event"], reading["pr"]["next"], reading["elapsed"]), ("timeout", "wait", 45))
         self.assertEqual(sum(c[0] == "view" for c in self.gh_calls), 2)
 
+    def test_archive_pr_event(self):
+        (self.home / "projects" / "sample.md").write_text(
+            "---\nrepo: example/sample\narchive: example-upstream/sample\nbase: main\n---\n# Sample\n")
+        reading = self.result("--pr", pr="https://github.com/example-upstream/sample/pull/47")
+        self.assertEqual((reading["event"], reading["pr"]["pr"], reading["pr"]["next"]), ("pr", 47, "merge"))
+
     def test_files_win_over_pr(self):
         self.write("build.md", "Routing: synthetic\n")
         reading = self.result("build.md", "--pr")

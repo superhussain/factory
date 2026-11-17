@@ -312,6 +312,21 @@ class PrStateTest(IsolatedTestCase):
                 self.assertEqual((code, out, calls), (4, "", []))
                 self.assertIn(why, err)
 
+    def test_archive_pr_is_read(self):
+        (self.home / "projects" / "sample.md").write_text(
+            "---\nrepo: example/sample\narchive: example-upstream/sample\nbase: main\n---\n# Sample\n")
+        upstream = "https://github.com/example-upstream/sample/pull/47"
+        code, out, err, calls = self.state([(view(), checks("pass"))], pr=upstream)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((json.loads(out)["pr"], json.loads(out)["next"]), (47, "merge"))
+        self.assertEqual(calls[0][:2], ("view", upstream))
+        job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open", "pr": upstream}
+        with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job]})}) as server:
+            (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
+            code, out, err = invoke(factory, ["--home", str(self.home), "pr-queue", f"sample/{JOB}"])
+        self.assertEqual((code, out), (4, ""))
+        self.assertIn("is not a pull request in example/sample", err)
+
     def test_gh_problem_exits_5(self):
         for reading, why in ((None, "not installed"), (("timeout", ""), "timed out"), ((1, ""), "gh auth status"),
                              ((0, "not json"), "no JSON")):
