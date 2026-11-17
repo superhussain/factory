@@ -370,6 +370,8 @@ class RetroPushTest(RetroWorkerCase):
         self.assertEqual(headers["Content-Type"], "application/x-ndjson")
         self.assertEqual(body.decode("utf-8"), digest)
         self.assertEqual(json.loads(digest)["host"], "mac")
+        self.assertEqual(json.loads((self.home / "retro-push.json").read_text(encoding="utf-8")),
+                         {"version": 1, "date": date})
 
     def test_push_needs_a_paired_device(self):
         with http_fixture({}) as server:
@@ -388,6 +390,7 @@ class RetroPushTest(RetroWorkerCase):
                 code, out, err = invoke(factory, ["retro", "push"])
                 self.assertEqual((code, out), (exit_code, ""))
                 self.assertIn(message, err)
+                self.assertFalse((self.home / "retro-push.json").exists())
 
 
 class RetroPullTest(RetroWorkerCase):

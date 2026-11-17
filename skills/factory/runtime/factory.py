@@ -9071,6 +9071,7 @@ RETRO_POLLS = {"until_file": re.compile(r"\buntil \[ -[fs] "),
                "task_output": re.compile(r"/tasks/[\w-]+\.output\b"),
                "quiet_window": re.compile(r"stat -c %Y|stat -f %m")}
 RETRO_JOB = re.compile(r"factory-(\d{2,5})-")
+RETRO_PUSH_FILE = "retro-push.json"
 RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
 RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+")
 RETRO_HEADERS = re.compile(
@@ -9347,15 +9348,26 @@ def retro_push():
     hint = f"set device: in {config}; pair this host with factory.py host pair <id> <code>"
     if not HOST_NAME.fullmatch(device):
         fail(hint, 2)
-    rows = retro_rows(1)
-    key = f"retro/{device}/{datetime.now().date().isoformat()}.jsonl"
+    rows, date = retro_rows(1), datetime.now().date().isoformat()
+    key = f"retro/{device}/{date}.jsonl"
     status, _, text = api(home, "PUT", f"/api/{key}", "".join(json.dumps(row) + "\n" for row in rows),
                           ok=(200, 403), headers={"Content-Type": "application/x-ndjson"})
     if status == 403 and text.strip() == RETRO_WRITE_ONLY:
         fail(f"{RETRO_WRITE_ONLY}. {hint}", 2)
     if status == 403:
         fail(access_message(os.path.abspath(os.path.join(home, ".env"))), 5)
+    write_atomic(home / RETRO_PUSH_FILE, json.dumps({"version": 1, "date": date}) + "\n")
     print(f"pushed {len(rows)} sessions to {key}")
+
+
+def retro_pushed_today(home):
+    """Whether <home>/retro-push.json records a push for today's local date."""
+    try:
+        record = json.loads((home / RETRO_PUSH_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(record, dict) and record.get("version") == 1 \
+        and record.get("date") == datetime.now().date().isoformat()
 
 
 def retro_fetch(home, date):
