@@ -266,12 +266,16 @@ function setup({ key = true } = {}) {
   };
   const call = (path, { method = "GET", body, principal = person, headers = {}, ctx } = {}) =>
     serveFactory(
-      new Request(ORIGIN + path, {
-        method,
-        headers: { ...(body !== undefined && { "Content-Type": "application/json" }), ...headers },
-        body:
-          body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
-      }),
+      new Request(
+        ORIGIN + path,
+        body === undefined
+          ? { method, headers }
+          : {
+              method,
+              headers: { "Content-Type": "application/json", ...headers },
+              body: JSON.stringify(body),
+            },
+      ),
       env,
       principal,
       ctx,
