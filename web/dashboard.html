@@ -299,7 +299,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #display-filter, #display-columns, #display-card-fields, #display-drawer-links { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
   #display-filter legend, #display-columns legend, #display-card-fields legend, #display-drawer-links legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #display-filter label, #display-columns label, #display-card-fields label, #display-drawer-links label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); }
-  #settings-notifications label { display: flex; gap: 8px; align-items: baseline; color: var(--fg); font-size: 13px; }
+  #settings-notifications label[for="notify-needs"] { display: flex; gap: 8px; align-items: baseline; color: var(--fg); font-size: 13px; }
   .scheduler-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
   .reference-scroll { overflow-x: auto; margin: 0 0 12px; }
   .reference-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -930,7 +930,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="notify-needs"><input type="checkbox" id="notify-needs" aria-describedby="notify-permission"> Notify me when a job needs me</label>
       <p class="muted" id="notify-permission"></p>
       <label for="notify-remind">Remind me when a job still waits after<select id="notify-remind" aria-describedby="notify-remind-help"><option value="">Never</option><option value="1">1 hour</option><option value="4">4 hours</option><option value="24">1 day</option></select></label>
-      <p class="muted" id="notify-remind-help">Sends one more notification when a job has waited on you longer than this, while this tab is in the background. The wait counts from the job's last board update.</p>
+      <p class="muted" id="notify-remind-help">Sends one more notification when a job has waited on you longer than this, while this tab is in the background. The wait counts from the job's last board update. Turn on notifications above to use this.</p>
       <p id="notify-status" role="status"></p>
     </section>
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
