@@ -145,6 +145,7 @@
   "tests/browser/chat-decision-chip.test.mjs",
   "tests/browser/not-before-chip.test.mjs",
   "tests/browser/pause.test.mjs",
+  "tests/browser/starred-jobs.test.mjs",
   "tests/browser/close-job.test.mjs",
   "tests/browser/copy-link.test.mjs",
   "tests/browser/follow-up.test.mjs",
