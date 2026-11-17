@@ -192,6 +192,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .inbox-actions a.btn { text-decoration: none; }
   .inbox-answer { grid-column: 2 / -1; margin-top: 12px; }
   .inbox-answer .ask-bar { position: static; padding: 10px 0 0; margin-bottom: 0; background: none; }
+  .inbox-answer .ask-bar .btn { flex: none; }
   @media (pointer: coarse) { .inbox-actions .btn { min-height: 44px; display: inline-flex; align-items: center; } }
   @media (max-width: 760px) {
     .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding: 12px 4px; }
@@ -3197,8 +3198,9 @@ async function openInboxAnswer(j) {
   inboxAnswer.f = f;
   inboxAnswer.answersFile = answersFile;
   const questions = parsed.parts.filter((p) => p.kind === 'question');
+  el.classList.remove('muted');
   el.innerHTML = '<form class="inbox-needs" novalidate>' + needsFieldsets(parsed, readNeedsDraft(j, f, questions), '', null) +
-    '<p class="muted inbox-ask-storage" hidden>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
+    '<p class="muted inbox-ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
     '<div class="ask-bar"><button class="btn primary" type="submit">Submit answers</button><span class="inbox-ask-status" role="status"></span></div></form>';
   inboxNeedsBar();
   el.querySelector('input').focus();
@@ -3231,9 +3233,13 @@ async function submitInboxAnswer() {
   if (result.saved) a.answersFile = await readJobFile(j, 'answers.md');
   if (inboxAnswer !== a) return;
   inboxNeedsBar();
+  // The disabled submit dropped focus to the body, so give it back rather than to the row's Answer button.
+  inboxFocusRow = -1;
+  const submit = a.el.querySelector('[type=submit]');
+  if (!submit.disabled) submit.focus();
   a.el.querySelector('.inbox-ask-status').textContent = result.saved
     ? 'Saved to answers.md, but the board still shows this job waiting on you (' + result.boardError.message + '). Submit again to retry.'
-    : result.message;
+    : result.message.replace(/ Check the answers tab before you submit again\.$/, '') + ' Use Open job to check answers.md before you submit again.';
 }
 
 function inboxReport(message) {
@@ -3266,7 +3272,7 @@ $('inbox-list').addEventListener('click', (e) => {
     } else {
       const el = document.createElement('div');
       el.id = 'inbox-answer';
-      el.className = 'inbox-answer';
+      el.className = 'inbox-answer muted';
       el.textContent = 'Loading the questions\u2026';
       inboxAnswer = { id, el, f: null, answersFile: null, saving: false };
       renderInboxPage();
@@ -4212,13 +4218,7 @@ function jobBase(j) {
 }
 
 async function loadFiles(j) {
-  const base = jobBase(j);
-  const results = await Promise.all(candidates(j).map(async (name) => {
-    try {
-      const r = await fetch(base + name, { cache: 'no-store' });
-      return r.ok ? { name, text: await r.text(), etag: r.headers.get('ETag') } : null;
-    } catch { return null; }
-  }));
+  const results = await Promise.all(candidates(j).map((name) => readJobFile(j, name)));
   return results.filter(Boolean);
 }
 

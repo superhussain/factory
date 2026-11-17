@@ -348,6 +348,42 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await it("answer save fails", async () => {
+      await reset();
+      const { page, errors } = await openPage("#/inbox");
+      await page.setRequestInterception(true);
+      page.on("request", (request) =>
+        request.method() === "PUT" && request.url().endsWith("/answers.md")
+          ? request.respond({ status: 500, body: "" })
+          : request.continue(),
+      );
+      await answerForm(page);
+      assert.equal(await page.$eval("#inbox-answer", (el) => el.className), "inbox-answer");
+      await page.click('#inbox-answer input[value="0"]');
+      await page.click("#inbox-answer [type=submit]");
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#inbox-answer .inbox-ask-status").textContent ===
+          "Could not save answers (status 500). Your answers are kept. Use Open job to check answers.md before you submit again.",
+        wait,
+      );
+      const onSubmit = () =>
+        page.evaluate(() => document.activeElement.matches("#inbox-answer [type=submit]"));
+      assert.equal(await onSubmit(), true);
+      await seedBoard(origin, [
+        ...JOBS,
+        job("052-sample-bucket", "build", {
+          title: "Name the sample bucket",
+          needs: "Pick a bucket name in #052-sample-bucket/needs",
+          updated: "2026-01-04T00:00:00Z",
+        }),
+      ]);
+      await rowOf(page, "Name the sample bucket");
+      assert.equal(await onSubmit(), true);
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
     await it("answer needs the question format", async () => {
       await reset();
       await putFile(origin, "051-sample-retry", "needs.md", "# Needs\n\nPick a retry limit.\n");
@@ -362,6 +398,7 @@ test("inbox page", { timeout: 180000 }, async (t) => {
         wait,
       );
       assert.equal((await page.$('#inbox-list a[href="#051-sample-retry/needs"]')) !== null, true);
+      assert.equal(await page.$eval("#inbox-answer", (el) => el.className), "inbox-answer muted");
       await page.browserContext().close();
       await putFile(origin, "051-sample-retry", "needs.md", NEEDS);
     });
