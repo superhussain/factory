@@ -2829,7 +2829,7 @@ function renderRoute() {
   $('retros-page').hidden = !retrosOpen;
   $('inbox-page').hidden = !inboxOpen;
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : baseTitle;
-  if (inboxOpen && !inboxWas) { inboxHtml = ''; $('inbox-page-heading').focus(); }
+  if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
   if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); }
   else if (retrosOpen) renderRetrosPage();
