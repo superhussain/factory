@@ -300,6 +300,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #display-filter legend, #display-columns legend, #display-card-fields legend, #display-drawer-links legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #display-filter label, #display-columns label, #display-card-fields label, #display-drawer-links label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); }
   #settings-notifications label { display: flex; gap: 8px; align-items: baseline; color: var(--fg); font-size: 13px; }
+  .sound-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
+  .sound-kinds li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; margin: 0 0 4px; }
   .scheduler-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
   .reference-scroll { overflow-x: auto; margin: 0 0 12px; }
   .reference-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -907,7 +909,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="display-theme">Theme<select id="display-theme"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <label for="display-density">Density<select id="display-density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
       <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="15">Every 15 seconds</option><option value="30">Every 30 seconds</option><option value="60">Every 60 seconds</option></select></label>
-      <p class="muted" id="display-poll-help">If live updates drop, the board refreshes on this schedule and the backlog every 2 minutes. Refreshing pauses while the window is hidden or unfocused. With notifications on, it refreshes every 30 seconds instead.</p>
+      <p class="muted" id="display-poll-help">If live updates drop, the board refreshes on this schedule and the backlog every 2 minutes. Refreshing pauses while the window is hidden or unfocused. With notifications or sounds on, it refreshes every 30 seconds instead.</p>
       <fieldset id="display-filter"><legend>Show jobs from</legend></fieldset>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
@@ -930,6 +932,15 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="notify-needs"><input type="checkbox" id="notify-needs" aria-describedby="notify-permission"> Notify me when a job needs me</label>
       <p class="muted" id="notify-permission"></p>
       <p id="notify-status" role="status"></p>
+      <h4 id="sound-heading">Sounds</h4>
+      <label for="sound-on"><input type="checkbox" id="sound-on" aria-describedby="sound-help"> Play a sound for board events</label>
+      <p class="muted" id="sound-help"></p>
+      <ul class="sound-kinds" aria-labelledby="sound-heading">
+        <li><span>A job needs you</span><button class="btn" type="button" data-sound="needs" aria-label="Play the sound for: A job needs you">Play</button></li>
+        <li><span>A pull request opens</span><button class="btn" type="button" data-sound="pr" aria-label="Play the sound for: A pull request opens">Play</button></li>
+        <li><span>A job merges</span><button class="btn" type="button" data-sound="merged" aria-label="Play the sound for: A job merges">Play</button></li>
+      </ul>
+      <p id="sound-status" role="status"></p>
     </section>
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
       <h3 id="scheduler-settings-heading" tabindex="-1">Scheduler</h3>
