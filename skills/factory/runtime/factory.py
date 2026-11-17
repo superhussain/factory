@@ -4421,6 +4421,7 @@ def pickup(*args):
                         raise
                     failing = failing or started
                     print("factory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now", file=sys.stderr)
+            retro_pickup_push(home)
         pickup_pass(home, device, minutes, dry, limit, cap, data)
     finally:
         if not dry:
@@ -9368,6 +9369,17 @@ def retro_pushed_today(home):
         return False
     return isinstance(record, dict) and record.get("version") == 1 \
         and record.get("date") == datetime.now().date().isoformat()
+
+
+def retro_pickup_push(home):
+    """Push this host's digest on pickup's first run of a local date with no recorded push. Best
+    effort: a failed push costs one warning, and the next pickup run retries it."""
+    if retro_pushed_today(home) or not retro_transcripts().is_dir():
+        return
+    try:
+        retro_push()
+    except SystemExit as e:
+        print(f"factory.py: retro push stopped (exit {e.code}); the next pickup run retries it", file=sys.stderr)
 
 
 def retro_fetch(home, date):

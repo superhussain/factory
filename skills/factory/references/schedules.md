@@ -17,6 +17,10 @@ A failed dispatch returns its idea with `unclaim`.
 pushes its own daily with a model-free timer, weekends included. Every host that runs
 Claude Code sessions, the aggregating host included, installs it.
 
+Pickup also pushes this host's retro digest on its first run of each local date that
+`<home>/retro-push.json` does not record; a failed push prints one warning and the
+run goes on.
+
 - cron (Linux, WSL):
 
   ```
