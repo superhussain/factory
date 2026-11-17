@@ -3028,6 +3028,8 @@ $('retros-back').addEventListener('click', e => { e.preventDefault(); leaveSetti
 // Inbox page: the '#/inbox' view ranks every job and backlog line waiting on a person.
 let inboxHtml = '';
 let inboxError = '';
+// The row whose action button was clicked, for when disabling it moved focus to the body.
+let inboxFocusRow = -1;
 
 function inboxRoute() {
   return location.hash === '#/inbox' ? true : null;
@@ -3086,7 +3088,15 @@ function renderInboxPage() {
       '<p class="inbox-meta">' + meta.map(esc).join(' · ') + '</p></div>' +
       '<div class="inbox-actions">' + actions + '</div></li>';
   }).join('');
-  if (html !== inboxHtml) { inboxHtml = html; $('inbox-list').innerHTML = html; }
+  if (html === inboxHtml) return;
+  // Replacing the rows drops focus, so keep it on the same row, or on the heading when none are left.
+  const list = $('inbox-list');
+  const active = document.activeElement;
+  const row = list.contains(active) ? [...list.children].indexOf(active.closest('li')) : active === document.body ? inboxFocusRow : -1;
+  inboxFocusRow = -1;
+  inboxHtml = html;
+  list.innerHTML = html;
+  if (row >= 0) (list.children[Math.min(row, list.children.length - 1)]?.querySelector('.inbox-actions .btn:not(:disabled)') ?? $('inbox-page-heading')).focus();
 }
 
 function inboxReport(message) {
@@ -3110,6 +3120,7 @@ async function inboxDecide(raw, pick, button) {
 }
 
 $('inbox-list').addEventListener('click', (e) => {
+  if (e.target.closest('[data-inbox-babysit], [data-inbox-decide]')) inboxFocusRow = [...$('inbox-list').children].indexOf(e.target.closest('li'));
   const babysit = e.target.closest('[data-inbox-babysit]');
   if (babysit) babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxRoute() !== null });
   const decide = e.target.closest('[data-inbox-decide]');

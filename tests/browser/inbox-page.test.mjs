@@ -270,6 +270,42 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await it("focus follows the action", async () => {
+      await reset();
+      const { page } = await openPage("#/inbox");
+      const focused = () =>
+        page.evaluate(() => document.activeElement.textContent || document.activeElement.id);
+      await (
+        await rowOf(page, "Cache the sample report")
+      ).$eval('[data-inbox-decide="approved"]', (b) => b.focus());
+      await page.keyboard.press("Enter");
+      await gone(page, "Cache the sample report");
+      await page.waitForFunction(() => document.activeElement !== document.body, wait);
+      assert.equal(await focused(), "Answer questions");
+      page.on("dialog", (dialog) => dialog.accept());
+      await (
+        await rowOf(page, "Export the sample report")
+      ).$eval("[data-inbox-babysit]", (b) => b.focus());
+      await page.keyboard.press("Enter");
+      await gone(page, "Export the sample report");
+      await page.waitForFunction(() => document.activeElement !== document.body, wait);
+      assert.equal(await focused(), "Open job");
+      await page.browserContext().close();
+      await seedBoard(origin, [JOBS[1]]);
+      await seedBacklog(origin, BACKLOG.split("- [ ] sample: Trim")[0]);
+      const last = await openPage("#/inbox");
+      await (
+        await rowOf(last.page, "Cache the sample report")
+      ).$eval('[data-inbox-decide="denied"]', (b) => b.focus());
+      await last.page.keyboard.press("Enter");
+      await last.page.waitForFunction(
+        () => document.querySelector("#inbox-status").textContent === "Nothing is waiting on you.",
+        wait,
+      );
+      assert.equal(await last.page.evaluate(() => document.activeElement.id), "inbox-page-heading");
+      await last.page.browserContext().close();
+    });
+
     await it("keys and jumper", async () => {
       await reset();
       const { page } = await openPage("");
