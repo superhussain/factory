@@ -1,4 +1,4 @@
-// The four header icon buttons stay on one row and match the project filter height.
+// The five header icon buttons stay on one row and match the project filter height.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -15,6 +15,12 @@ const JOBS = [
     project: "sample",
     title: "Synthetic sample job",
     stage: "spec",
+  },
+  {
+    id: "1901-sample-a",
+    project: "sample",
+    title: "Synthetic sample A",
+    stage: "needs-human",
   },
 ].map((job) => ({ ...job, updated: "2026-01-01T00:00:00Z" }));
 
@@ -44,10 +50,11 @@ test("header icons share one row and match the filter height", { timeout: 120000
       await page.emulateTimezone("America/New_York");
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#new-idea:not([hidden])");
+      await page.waitForSelector("#next-waiting:not([hidden])");
       await page.waitForSelector(".updated-word");
       const header = await page.evaluate(() => {
         const rect = (id) => document.getElementById(id).getBoundingClientRect();
-        const icons = ["new-idea", "job-jump", "retros-link", "settings-link"];
+        const icons = ["next-waiting", "new-idea", "job-jump", "retros-link", "settings-link"];
         const el = document.querySelector("header");
         const boxes = [...el.children]
           .map((child) => child.getBoundingClientRect())
@@ -82,7 +89,7 @@ test("header icons share one row and match the filter height", { timeout: 120000
         });
       }
       assert.equal(new Set(header.tops).size, 1, `icon tops at ${label}: ${header.tops}`);
-      assert.deepEqual(header.heights, [size, size, size, size, size], `heights at ${label}`);
+      assert.deepEqual(header.heights, [size, size, size, size, size, size], `heights at ${label}`);
       assert.ok(
         header.scrollWidth <= header.clientWidth,
         `header scrolls at ${label}: ${header.scrollWidth} > ${header.clientWidth}`,

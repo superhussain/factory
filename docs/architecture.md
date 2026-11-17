@@ -251,11 +251,11 @@ sequenceDiagram
   failed announcement leaves the reply unchanged.
 - The dashboard runs its poll timer only while the socket is closed: the board on
   the Settings schedule (30 s by default) and the backlog every 2 minutes, paused
-  while the window is hidden or unfocused unless notifications are on. A dropped
+  while the window is hidden or unfocused unless notifications or sounds are on. A dropped
   socket retries with backoff (1, 2, 4 ... 30 s), then every 30 s until it opens.
   Retries stop while the sign-in has expired and resume after the next board read
   succeeds.
-  A hidden tab keeps its socket only while notifications are on. A `changed` event
+  A hidden tab keeps its socket only while notifications or sounds are on. A `changed` event
   re-reads only its key, once within 2 seconds of the first frame however many frames arrive; a frame during that read adds one more read.
 - A socket open or a poll timer tick re-reads `board.json` but redraws only when its `ETag` changed, so a focused card is not read again. A tick still reopens the job when the link names a tab or archived job that has not loaded.
   The header dot is solid while live and a ring while polling.
