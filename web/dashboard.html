@@ -930,6 +930,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="notify-needs"><input type="checkbox" id="notify-needs" aria-describedby="notify-permission"> Notify me when a job needs me</label>
       <p class="muted" id="notify-permission"></p>
       <p id="notify-status" role="status"></p>
+      <label for="notify-push"><input type="checkbox" id="notify-push" aria-describedby="push-help" disabled> Push to this device when the dashboard is closed</label>
+      <p class="muted" id="push-help"></p>
+      <p id="push-status" role="status"></p>
     </section>
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
       <h3 id="scheduler-settings-heading" tabindex="-1">Scheduler</h3>
@@ -7811,7 +7814,7 @@ function renderNotifySettings() {
   $('notify-needs').checked = notifyActive();
   $('notify-permission').textContent = NOTIFY_PERMISSION[permission];
 }
-function enterNotificationsSection() { renderNotifySettings(); $('notify-needs').focus(); }
+function enterNotificationsSection() { renderNotifySettings(); loadPushState(); $('notify-needs').focus(); }
 $('notify-needs').addEventListener('change', async () => {
   if ($('notify-needs').checked && notifySupported() && Notification.permission === 'default') await Notification.requestPermission();
   notifyOn = $('notify-needs').checked && notifySupported() && Notification.permission === 'granted';
@@ -7820,6 +7823,68 @@ $('notify-needs').addEventListener('change', async () => {
   syncLive(); schedulePoll();
   $('notify-status').textContent = notifyOn ? 'Notifications are on in this browser.' : 'Notifications are off.';
 });
+
+// Web Push reaches this device while the dashboard is closed. The Worker serves its VAPID
+// public key only when the instance has one, and stores one subscription per browser.
+const PUSH_HELP = {
+  ready: 'Sends a push when a job starts waiting on you or merges. It shows the job id and title only.',
+  unsupported: 'This browser cannot receive push. On iPhone or iPad, add the dashboard to your Home Screen and open it from there.',
+  missing: 'Push is not set up on this instance. See docs/cloudflare.md.',
+  denied: NOTIFY_PERMISSION.denied,
+};
+const PUSH_STATUS = {
+  on: 'Push is on for this device.',
+  off: 'Push is off for this device.',
+  failed: 'Push could not be turned on. Try again.',
+  full: 'This instance already has 20 push devices. Turn push off on one first.',
+};
+let pushKey = null;
+function pushSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && notifySupported(); }
+function pushKeyBytes(key) { return Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)); }
+async function loadPushState() {
+  const box = $('notify-push');
+  box.disabled = true;
+  box.checked = false;
+  if (!pushSupported()) { $('push-help').textContent = PUSH_HELP.unsupported; return; }
+  try {
+    const r = await fetch('./api/push/key', {cache:'no-store'});
+    if (r.status === 404) { $('push-help').textContent = PUSH_HELP.missing; return; }
+    if (!r.ok || r.redirected) return;
+    pushKey = (await r.json()).key;
+    const subscription = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+    box.checked = !!subscription;
+  } catch { return; }
+  box.disabled = false;
+  $('push-help').textContent = Notification.permission === 'denied' ? PUSH_HELP.denied : PUSH_HELP.ready;
+}
+async function setPush(on) {
+  const box = $('notify-push');
+  box.disabled = true;
+  const pushManager = (await navigator.serviceWorker.ready).pushManager;
+  let status = 'off';
+  if (on) {
+    if (Notification.permission === 'default') await Notification.requestPermission();
+    if (Notification.permission === 'denied') $('push-help').textContent = PUSH_HELP.denied;
+    if (Notification.permission === 'granted') {
+      try {
+        const subscription = await pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushKeyBytes(pushKey) });
+        const r = await fetch('./api/push/subscriptions', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(subscription) });
+        if (r.status === 204) status = 'on';
+        else { status = r.status === 409 ? 'full' : 'failed'; await subscription.unsubscribe(); }
+      } catch { status = 'failed'; }
+    }
+  } else {
+    const subscription = await pushManager.getSubscription();
+    if (subscription) {
+      await fetch('./api/push/subscriptions', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ endpoint: subscription.endpoint }) }).catch(() => {});
+      await subscription.unsubscribe();
+    }
+  }
+  box.checked = status === 'on';
+  box.disabled = false;
+  $('push-status').textContent = PUSH_STATUS[status];
+}
+$('notify-push').addEventListener('change', () => setPush($('notify-push').checked));
 
 loadProjects().then(() => {
   if (settingsShown === 'projects') enterProjectsSection(!$('settings-page').contains(document.activeElement) || document.activeElement === $('settings-nav-projects'));

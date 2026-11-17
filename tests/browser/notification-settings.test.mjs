@@ -32,6 +32,11 @@ const JOBS = [
   },
 ].map((job) => ({ ...job, updated: "2026-01-01T00:00:00Z" }));
 const wait = { polling: 50 };
+// A synthetic VAPID public key: 0x04 and 64 bytes.
+const PUSH_KEY = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString("base64url");
+const ENDPOINT = "https://fcm.googleapis.com/fcm/send/sample";
+const PUSH_HELP =
+  "Sends a push when a job starts waiting on you or merges. It shows the job id and title only.";
 
 test("notification settings", { timeout: 180000 }, async (t) => {
   await prepareAssets();
@@ -85,6 +90,53 @@ test("notification settings", { timeout: 180000 }, async (t) => {
         close() {}
       };
     });
+
+    // The Worker's push routes, answered here: keyStatus for the key, subStatus for writes.
+    const push = { keyStatus: 200, subStatus: 204, requests: [] };
+    await page.setRequestInterception(true);
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (path === "/api/push/key")
+        return request.respond(
+          push.keyStatus === 200
+            ? {
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ key: PUSH_KEY }),
+              }
+            : { status: push.keyStatus, body: "not found" },
+        );
+      if (path === "/api/push/subscriptions") {
+        push.requests.push([request.method(), JSON.parse(request.postData())]);
+        return request.respond({ status: push.subStatus, body: "" });
+      }
+      return request.continue();
+    });
+    await page.evaluateOnNewDocument((endpoint) => {
+      window.pushCalls = [];
+      window.PushManager = class {};
+      let current = null;
+      const pushManager = {
+        getSubscription: async () => current,
+        subscribe: async ({ userVisibleOnly, applicationServerKey }) => {
+          window.pushCalls.push(["subscribe", userVisibleOnly, [...applicationServerKey]]);
+          current = {
+            endpoint,
+            toJSON: () => ({ endpoint, expirationTime: null, keys: { p256dh: "p", auth: "a" } }),
+            unsubscribe: async () => {
+              window.pushCalls.push(["unsubscribe"]);
+              current = null;
+              return true;
+            },
+          };
+          return current;
+        },
+      };
+      Object.defineProperty(navigator, "serviceWorker", {
+        configurable: true,
+        value: { register: async () => ({}), ready: Promise.resolve({ pushManager }) },
+      });
+    }, ENDPOINT);
 
     const liveTimers = () => page.evaluate(() => [...window.pollTimers.values()]);
     const setHidden = (hidden) =>
@@ -210,6 +262,94 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await toHash("#/settings/display", "#settings-display:not([hidden])");
     });
 
+    await t.test("notify P1 push toggle subscribes and unsubscribes", async () => {
+      const pushText = (help, status) =>
+        page.waitForFunction(
+          (h, st) =>
+            document.getElementById("push-help").textContent === h &&
+            document.getElementById("push-status").textContent === st,
+          wait,
+          help,
+          status,
+        );
+      const pushCalls = () => page.evaluate(() => window.pushCalls.splice(0));
+      await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
+      await page.waitForSelector("#notify-push:not([disabled])", wait);
+      assert.equal(
+        await text('label[for="notify-push"]'),
+        " Push to this device when the dashboard is closed",
+      );
+      assert.equal(await text("#push-help"), PUSH_HELP);
+      assert.equal(await page.$eval("#notify-push", (el) => el.checked), false);
+
+      await page.click("#notify-push");
+      await pushText(PUSH_HELP, "Push is on for this device.");
+      assert.equal(await page.$eval("#notify-push", (el) => el.checked), true);
+      assert.deepEqual(await pushCalls(), [
+        ["subscribe", true, [...Buffer.from(PUSH_KEY, "base64url")]],
+      ]);
+      assert.deepEqual(push.requests.splice(0), [
+        ["PUT", { endpoint: ENDPOINT, expirationTime: null, keys: { p256dh: "p", auth: "a" } }],
+      ]);
+
+      await page.click("#notify-push");
+      await pushText(PUSH_HELP, "Push is off for this device.");
+      assert.equal(await page.$eval("#notify-push", (el) => el.checked), false);
+      assert.deepEqual(await pushCalls(), [["unsubscribe"]]);
+      assert.deepEqual(push.requests.splice(0), [["DELETE", { endpoint: ENDPOINT }]]);
+
+      for (const [status, line] of [
+        [409, "This instance already has 20 push devices. Turn push off on one first."],
+        [500, "Push could not be turned on. Try again."],
+      ]) {
+        push.subStatus = status;
+        await page.click("#notify-push");
+        await pushText(PUSH_HELP, line);
+        assert.equal(await page.$eval("#notify-push", (el) => el.checked), false);
+        assert.deepEqual(
+          (await pushCalls()).map(([name]) => name),
+          ["subscribe", "unsubscribe"],
+        );
+        assert.equal(push.requests.splice(0).length, 1);
+      }
+      push.subStatus = 204;
+
+      const reenter = async () => {
+        await toHash("#/settings/display", "#settings-display:not([hidden])");
+        await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
+      };
+      push.keyStatus = 404;
+      await reenter();
+      await page.waitForFunction(
+        () =>
+          document.getElementById("push-help").textContent ===
+          "Push is not set up on this instance. See docs/cloudflare.md.",
+        wait,
+      );
+      assert.equal(await page.$eval("#notify-push", (el) => el.disabled), true);
+      push.keyStatus = 200;
+
+      await page.evaluate(() => {
+        window.Notification.permission = "denied";
+      });
+      await reenter();
+      await page.waitForFunction(
+        (denied) => document.getElementById("push-help").textContent === denied,
+        wait,
+        "Notifications are blocked for this site. Allow them in your browser's site settings, then turn this on again.",
+      );
+      await page.click("#notify-push");
+      await page.waitForFunction(
+        () => document.getElementById("push-status").textContent === "Push is off for this device.",
+        wait,
+      );
+      assert.deepEqual(await pushCalls(), []);
+      await page.evaluate(() => {
+        window.Notification.permission = "granted";
+      });
+      await toHash("#/settings/display", "#settings-display:not([hidden])");
+    });
+
     await t.test("notify C1 card detail toggles", async () => {
       for (const f of ["note", "meta", "pr"]) await page.click("#display-card-field-" + f);
       assert.equal(await storage("factory-hidden-card-fields"), "note,meta,pr");
@@ -297,6 +437,11 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(
         await text("#notify-permission"),
         "This browser does not support notifications.",
+      );
+      assert.equal(await page.$eval("#notify-push", (el) => el.disabled), true);
+      assert.equal(
+        await text("#push-help"),
+        "This browser cannot receive push. On iPhone or iPad, add the dashboard to your Home Screen and open it from there.",
       );
     });
 
