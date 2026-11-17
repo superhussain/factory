@@ -9427,6 +9427,59 @@ def retro_pull(date):
         sys.stdout.write(text)
 
 
+AUDIT_FLAGS = (
+    ("force-push", re.compile(r"\bgit\b[^;&|\n]*\bpush\b[^;&|\n]*\s(?:--force(?:-with-lease)?|-f)(?=[\s=]|$)")),
+    ("hard-reset", re.compile(r"\bgit\b[^;&|\n]*\breset\b[^;&|\n]*\s--hard\b")),
+    ("branch-delete", re.compile(r"\bgit\b[^;&|\n]*\bbranch\b[^;&|\n]*\s-D(?=\s|$)")),
+    ("recursive-delete", re.compile(r"(?:^|[\s;&|(])rm\s+(?:-[A-Za-z]+\s+)*(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)(?=\s|$)")),
+    ("no-verify", re.compile(r"\bgit\b[^;&|\n]*\s--no-verify\b")),
+    ("sudo", re.compile(r"(?:^|[\s;&|(])sudo\s")),
+    ("pipe-to-shell", re.compile(r"\b(?:curl|wget)\b[^|\n]*\|\s*(?:sudo\s+)?(?:ba|z)?sh\b")),
+    ("deploy", re.compile(r"\bwrangler\s+(?:deploy|publish)\b|\bdeploy\.py\s+deploy\b")),
+    ("pr-merge", re.compile(r"\bgh\s+pr\s+merge\b")),
+)
+AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
+AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
+
+
+def audit_target_raw(name, inp):
+    """The one input field that says what a tool call acted on, or "" for a tool without one."""
+    def text(key):
+        return inp.get(key) if isinstance(inp.get(key), str) else ""
+    if name == "Bash":
+        return text("command")
+    if name in AUDIT_FILE_TOOLS:
+        return text("file_path")
+    if name in ("Grep", "Glob"):
+        return text("pattern") + (f" in {text('path')}" if text("path") else "")
+    if name == "WebFetch":
+        return text("url")
+    if name == "WebSearch":
+        return text("query")
+    if name in ("Agent", "Task"):
+        return f"{text('subagent_type')}: {text('description')}"
+    return ""
+
+
+def audit_target(raw):
+    """raw as it prints: home as ~, retro-redacted, whitespace collapsed, at most 120 characters."""
+    return " ".join(retro_redact(raw.replace(str(Path.home()), "~")).split())[:120]
+
+
+def audit_flags(name, inp, raw, denied):
+    """The names of the risky shapes one call matches, in AUDIT_FLAGS order, then sandbox-off,
+    secret-file and denied. They match the raw target, never the redacted one."""
+    flags = [flag for flag, pattern in AUDIT_FLAGS if name == "Bash" and pattern.search(raw)]
+    if name == "Bash" and inp.get("dangerouslyDisableSandbox") is True:
+        flags.append("sandbox-off")
+    path = inp.get("path") if name == "Grep" else raw if name == "Bash" or name in AUDIT_FILE_TOOLS else None
+    if isinstance(path, str) and AUDIT_SECRET_FILE.search(path):
+        flags.append("secret-file")
+    if denied:
+        flags.append("denied")
+    return flags
+
+
 def retro_int(value):
     return value if type(value) is int else 0
 
