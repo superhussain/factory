@@ -3171,15 +3171,17 @@ function renderInboxPage() {
   if (row >= 0) (list.children[Math.min(row, list.children.length - 1)]?.querySelector('.inbox-actions .btn:not(:disabled)') ?? $('inbox-page-heading')).focus();
 }
 
+// One job file as loadFiles reads it, or null.
+async function readJobFile(j, name) {
+  try {
+    const r = await fetch(jobBase(j) + name, { cache: 'no-store' });
+    return r.ok ? { name, text: await r.text(), etag: r.headers.get('ETag') } : null;
+  } catch { return null; }
+}
+
 // Loads needs.md and answers.md for the open row and draws the form, or says why it cannot.
 async function openInboxAnswer(j) {
-  const read = async (name) => {
-    try {
-      const r = await fetch(jobBase(j) + name, { cache: 'no-store' });
-      return r.ok ? { name, text: await r.text(), etag: r.headers.get('ETag') } : null;
-    } catch { return null; }
-  };
-  const [f, answersFile] = await Promise.all([read('needs.md'), read('answers.md')]);
+  const [f, answersFile] = await Promise.all([readJobFile(j, 'needs.md'), readJobFile(j, 'answers.md')]);
   if (f) f.sha = await sha12(f.text);
   if (inboxAnswer?.id !== j.id) return;
   const el = inboxAnswer.el;
@@ -3225,6 +3227,8 @@ async function submitInboxAnswer() {
     await poll();
     return;
   }
+  // The next submit replaces the answers.md just written, so it needs that file's ETag.
+  if (result.saved) a.answersFile = await readJobFile(j, 'answers.md');
   if (inboxAnswer !== a) return;
   inboxNeedsBar();
   a.el.querySelector('.inbox-ask-status').textContent = result.saved
