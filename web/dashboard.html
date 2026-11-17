@@ -4184,16 +4184,21 @@ function needsFile() {
   return [j, files.find((x) => x.name === 'needs.md')];
 }
 
-function writeNeedsDraft() {
-  const [j, f] = needsFile();
-  const answers = collectNeeds($('needs-form'));
+// Keeps the draft in memory and in localStorage. false means storage failed.
+function storeNeedsDraft(j, f, answers) {
   needsMemory.set(needsKey(j, f), answers);
   try {
     localStorage.setItem(needsKey(j, f), JSON.stringify({ version: 1, answers }));
+    return true;
   } catch {
     needsStorageFailed = true;
-    $('ask-storage').hidden = false;
+    return false;
   }
+}
+
+function writeNeedsDraft() {
+  const [j, f] = needsFile();
+  if (!storeNeedsDraft(j, f, collectNeeds($('needs-form')))) $('ask-storage').hidden = false;
 }
 
 function updateNeedsBar() {
@@ -4222,11 +4227,20 @@ function renderNeeds(j, f) {
   const notes = [];
   if (!waiting) notes.push('This job is no longer waiting on you. The form is read-only.');
   if (savedNote(f)) notes.push(savedNote(f));
-  const body = parsed.parts.map((p) => {
+  return notes.map((n) => '<p class="muted">' + esc(n) + '</p>').join('') +
+    '<form id="needs-form" novalidate>' + needsFieldsets(parsed, draft, off, f.triage) +
+    '<p class="muted" id="ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
+    '<div class="ask-bar"><button class="btn primary" id="ask-submit" type="submit"' + off + '>Submit answers</button>' +
+    '<span id="ask-status" role="status"></span></div></form>';
+}
+
+// The needs.md parts as markdown and one fieldset per question, with draft answers filled in.
+function needsFieldsets(parsed, draft, off, triage) {
+  return parsed.parts.map((p) => {
     if (p.kind === 'md') return md(p.text);
     const a = draft[p.index];
     const type = p.pick === 'one' ? 'radio' : 'checkbox';
-    const c = needsPick(f.triage, p);
+    const c = needsPick(triage, p);
     return '<fieldset class="ask"><legend>' + esc(p.header) + '</legend><p>' + esc(p.prompt) + '</p>' +
       '<p class="muted">' + (p.pick === 'one' ? 'Choose one.' : 'Choose any that apply.') + '</p>' +
       (c ? '<p class="ask-model">' + esc('clef-flash picks ' + c.pick + ' at ' + c.confidence + '%.') + '</p>' : '') +
@@ -4238,11 +4252,6 @@ function renderNeeds(j, f) {
       '<label class="ask-other-label">Other, or more detail<textarea class="ask-other" maxlength="4000" rows="3"' + off +
       ' placeholder="Write your own answer, or expand on an option without choosing it.">' + esc(a.other) + '</textarea></label></fieldset>';
   }).join('');
-  return notes.map((n) => '<p class="muted">' + esc(n) + '</p>').join('') +
-    '<form id="needs-form" novalidate>' + body +
-    '<p class="muted" id="ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
-    '<div class="ask-bar"><button class="btn primary" id="ask-submit" type="submit"' + off + '>Submit answers</button>' +
-    '<span id="ask-status" role="status"></span></div></form>';
 }
 
 // clef-flash's choices for this needs.md, or null. A failed read or an older file's record gives null.
@@ -4279,45 +4288,55 @@ function needsPick(triage, p) {
     c.options.every((o, k) => o?.label === p.options[k].label && Number.isInteger(o.chance) && str(o.reason)) ? c : null;
 }
 
+// Writes answers.md, then clears the job's needs line. answersFile is the loaded answers.md or null.
+async function saveAnswers(j, f, answersFile, answers) {
+  const id = j.id;
+  const url = jobBase(j).replace('./jobs/', './api/jobs/') + 'answers.md';
+  const body = answersMarkdown(parseNeeds(f.text), answers, f.sha, isoNow());
+  const conflict = 'answers.md changed since this page loaded. Your answers are kept. Reopen the job, then submit again.';
+  try {
+    if (answersFile && !answersFile.etag) return { saved: false, message: conflict };
+    const r = await fetch(url, {
+      method: 'PUT',
+      headers: { ...(answersFile ? { 'If-Match': answersFile.etag.replace(/^W\//, '') } : { 'If-None-Match': '*' }), 'Content-Type': 'text/markdown; charset=utf-8' },
+      body,
+    });
+    if (r.status !== 200) return { saved: false, message: r.status === 412 ? conflict : 'Could not save answers (status ' + r.status + '). Your answers are kept.' };
+  } catch {
+    return { saved: false, message: 'Could not confirm the save. Your answers are kept. Check the answers tab before you submit again.' };
+  }
+  let boardError;
+  if (j.stage !== 'needs-human' && String(j.needs ?? '').includes('#' + id + '/needs')) {
+    try { await casBoard((b) => clearNeeds(b, id, isoNow())); } catch (e) { boardError = e; }
+  }
+  return { saved: true, boardError };
+}
+
 async function submitNeeds() {
   const [j, f] = needsFile();
   const id = j.id;
-  const answers = files.find((x) => x.name === 'answers.md');
-  const url = jobBase(j).replace('./jobs/', './api/jobs/') + 'answers.md';
-  const body = answersMarkdown(parseNeeds(f.text), collectNeeds($('needs-form')), f.sha, isoNow());
-  const conflict = 'answers.md changed since this page loaded. Your answers are kept. Reopen the job, then submit again.';
+  const answers = collectNeeds($('needs-form'));
   needsSaving = true;
   updateNeedsBar();
   let message;
   try {
-    if (answers && !answers.etag) message = conflict;
-    else {
-      const r = await fetch(url, {
-        method: 'PUT',
-        headers: { ...(answers ? { 'If-Match': answers.etag.replace(/^W\//, '') } : { 'If-None-Match': '*' }), 'Content-Type': 'text/markdown; charset=utf-8' },
-        body,
-      });
-      if (r.status === 200) {
-        let boardError;
-        if (j.stage !== 'needs-human' && String(j.needs ?? '').includes('#' + id + '/needs')) {
-          try { await casBoard((b) => clearNeeds(b, id, isoNow())); } catch (e) { boardError = e; }
-        }
-        await poll();
-        needsSaving = false;
-        await openJob(id);
-        const submit = $('ask-submit');
-        if (!submit) return;
-        if (submit.disabled) {
-          $('d-tabs').querySelector('.tab.active')?.focus();
-          $('ask-status').textContent = 'Saved to answers.md. This job is no longer waiting on you.';
-          return;
-        }
-        submit.focus();
-        if (boardError) $('ask-status').textContent = 'Saved to answers.md, but the board still shows this job waiting on you (' + boardError.message + '). Submit again to retry.';
+    const result = await saveAnswers(j, f, files.find((x) => x.name === 'answers.md') ?? null, answers);
+    if (result.saved) {
+      await poll();
+      needsSaving = false;
+      await openJob(id);
+      const submit = $('ask-submit');
+      if (!submit) return;
+      if (submit.disabled) {
+        $('d-tabs').querySelector('.tab.active')?.focus();
+        $('ask-status').textContent = 'Saved to answers.md. This job is no longer waiting on you.';
         return;
       }
-      message = r.status === 412 ? conflict : 'Could not save answers (status ' + r.status + '). Your answers are kept.';
+      submit.focus();
+      if (result.boardError) $('ask-status').textContent = 'Saved to answers.md, but the board still shows this job waiting on you (' + result.boardError.message + '). Submit again to retry.';
+      return;
     }
+    message = result.message;
   } catch {
     message = 'Could not confirm the save. Your answers are kept. Check the answers tab before you submit again.';
   }
