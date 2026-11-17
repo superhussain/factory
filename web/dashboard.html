@@ -190,6 +190,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .inbox-kind { font-size: 11px; font-weight: 600; }
   .inbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   .inbox-actions a.btn { text-decoration: none; }
+  .inbox-answer { grid-column: 2 / -1; margin-top: 12px; }
+  .inbox-answer .ask-bar { position: static; padding: 10px 0 0; margin-bottom: 0; background: none; }
   @media (pointer: coarse) { .inbox-actions .btn { min-height: 44px; display: inline-flex; align-items: center; } }
   @media (max-width: 760px) {
     .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding: 12px 4px; }
@@ -2827,14 +2829,14 @@ function noteDeployedVersion(r) {
   reloadWhenIdle();
 }
 function unsavedWork() {
-  const typing = '#needs-form textarea, #backlog-form textarea';
+  const typing = '#needs-form textarea, #backlog-form textarea, .inbox-needs textarea';
   const blank = el => !el.value.trim();
   return !!document.querySelector('dialog[open]')
     || settingsUnsaved()
     || [...document.querySelectorAll(typing)].some(el => !blank(el))
     || [...document.querySelectorAll('#host-add input[type=text], #host-add input:not([type])')].some(el => !blank(el))
     || hostDrafts.size > 0
-    || backlogSaving || needsSaving || boardWrites > 0
+    || backlogSaving || needsSaving || inboxAnswer?.saving || boardWrites > 0
     || needsStorageFailed && [...needsMemory.values()].some(a => a.some(x => x.picked.length || x.other.trim()))
     || [...backlogDrafts.values()].some(d => d.pick || d.notes.trim() || d.answers.some(a => a.picked.length || a.other.trim()))
     || !!document.activeElement?.matches('textarea, input[type=text], input[type=search], input:not([type]), [contenteditable]');
@@ -2876,7 +2878,7 @@ function renderRoute() {
   $('retros-page').hidden = !retrosOpen;
   $('inbox-page').hidden = !inboxOpen;
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : baseTitle;
-  if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; $('inbox-page-heading').focus(); }
+  if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxAnswer = null; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
   if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); }
   else if (retrosOpen) renderRetrosPage();
@@ -3079,6 +3081,8 @@ let inboxHtml = '';
 let inboxError = '';
 // The row whose action button was clicked, for when disabling it moved focus to the body.
 let inboxFocusRow = -1;
+// The one inbox row whose needs.md form is open: { id, el, f, answersFile, saving }, or null.
+let inboxAnswer = null;
 
 function inboxRoute() {
   return location.hash === '#/inbox' ? true : null;
@@ -3110,6 +3114,7 @@ function renderInboxPage() {
     return;
   }
   const items = inboxItems();
+  if (inboxAnswer && !items.some((it) => it.kind === 'ask' && it.job.id === inboxAnswer.id)) inboxAnswer = null;
   $('inbox-status').textContent = inboxError || (items.length ? '' : 'Nothing is waiting on you.');
   const link = (href, text) => '<a class="btn" href="' + esc(href) + '">' + esc(text) + '</a>';
   const html = items.map(({ kind, job: j, item }, i) => {
@@ -3127,7 +3132,10 @@ function renderInboxPage() {
       const pr = prLink(j);
       title = j.title || j.id;
       meta = [projectName(j), j.id].concat(asks(j.needs) ? j.needs : []);
-      actions = kind === 'ask' && j.needs.includes('#' + j.id + '/needs') ? link('#' + j.id + '/needs', 'Answer')
+      const open = inboxAnswer?.id === j.id;
+      actions = kind === 'ask' && j.needs.includes('#' + j.id + '/needs')
+        ? '<button type="button" class="btn primary" data-inbox-answer="' + esc(j.id) + '" aria-expanded="' + open + '"' +
+          (open ? ' aria-controls="inbox-answer"' : '') + '>Answer</button>' + link('#' + j.id + '/needs', 'Open job')
         : (kind === 'pr' && canBabysit(j) ? '<button type="button" class="btn primary" data-inbox-babysit="' + esc(j.id) + '">Babysit PR #' + esc(pr.n) + '</button>' : '') +
           (kind === 'pr' && pr ? '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>' : '') +
           link('#' + j.id, 'Open job');
@@ -3135,17 +3143,89 @@ function renderInboxPage() {
     return '<li class="inbox-item"><span class="inbox-rank">' + (i + 1) + '</span>' +
       '<div><span class="chip inbox-kind">' + INBOX_LABELS[kind] + '</span><p class="inbox-title">' + esc(title) + '</p>' +
       '<p class="inbox-meta">' + meta.map(esc).join(' · ') + '</p></div>' +
-      '<div class="inbox-actions">' + actions + '</div></li>';
+      '<div class="inbox-actions">' + actions + '</div>' +
+      (j && inboxAnswer?.id === j.id ? '<div id="inbox-answer"></div>' : '') + '</li>';
   }).join('');
   if (html === inboxHtml) return;
   // Replacing the rows drops focus, so keep it on the same row, or on the heading when none are left.
   const list = $('inbox-list');
   const active = document.activeElement;
-  const row = list.contains(active) ? [...list.children].indexOf(active.closest('li')) : active === document.body ? inboxFocusRow : -1;
+  // The open form moves into the new row as is, so a focused control keeps its focus and caret.
+  const controls = () => [...inboxAnswer.el.querySelectorAll('input, textarea, button')];
+  const at = inboxAnswer?.el.contains(active) ? controls().indexOf(active) : -1;
+  const { selectionStart, selectionEnd } = active;
+  const row = at >= 0 ? -1 : list.contains(active) ? [...list.children].indexOf(active.closest('li')) : active === document.body ? inboxFocusRow : -1;
   inboxFocusRow = -1;
   inboxHtml = html;
   list.innerHTML = html;
+  if (inboxAnswer) $('inbox-answer')?.replaceWith(inboxAnswer.el);
+  if (at >= 0) {
+    const el = controls()[at];
+    el.focus({ preventScroll: true });
+    if (el.tagName === 'TEXTAREA') el.setSelectionRange(selectionStart, selectionEnd);
+  }
   if (row >= 0) (list.children[Math.min(row, list.children.length - 1)]?.querySelector('.inbox-actions .btn:not(:disabled)') ?? $('inbox-page-heading')).focus();
+}
+
+// Loads needs.md and answers.md for the open row and draws the form, or says why it cannot.
+async function openInboxAnswer(j) {
+  const read = async (name) => {
+    try {
+      const r = await fetch(jobBase(j) + name, { cache: 'no-store' });
+      return r.ok ? { name, text: await r.text(), etag: r.headers.get('ETag') } : null;
+    } catch { return null; }
+  };
+  const [f, answersFile] = await Promise.all([read('needs.md'), read('answers.md')]);
+  if (f) f.sha = await sha12(f.text);
+  if (inboxAnswer?.id !== j.id) return;
+  const el = inboxAnswer.el;
+  if (!f) {
+    el.textContent = 'needs.md could not be loaded. Open the job to see what it asks.';
+    return;
+  }
+  const parsed = parseNeeds(f.text);
+  if (!parsed?.ok) {
+    el.textContent = 'needs.md is not in the question format. Open the job to read it.';
+    return;
+  }
+  inboxAnswer.f = f;
+  inboxAnswer.answersFile = answersFile;
+  const questions = parsed.parts.filter((p) => p.kind === 'question');
+  el.innerHTML = '<form class="inbox-needs" novalidate>' + needsFieldsets(parsed, readNeedsDraft(j, f, questions), '', null) +
+    '<p class="muted inbox-ask-storage" hidden>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
+    '<div class="ask-bar"><button class="btn primary" type="submit">Submit answers</button><span class="inbox-ask-status" role="status"></span></div></form>';
+  inboxNeedsBar();
+  el.querySelector('input').focus();
+}
+
+function inboxNeedsBar() {
+  const form = inboxAnswer.el.querySelector('.inbox-needs');
+  const all = collectNeeds(form);
+  const done = all.filter((a) => a.picked.length || a.other.trim()).length;
+  form.querySelector('[type=submit]').disabled = inboxAnswer.saving || done < all.length;
+  form.querySelector('.inbox-ask-status').textContent = inboxAnswer.saving ? 'Saving answers.' :
+    done < all.length ? 'Answer every question to submit. ' + done + ' of ' + all.length + ' answered.' : '';
+}
+
+async function submitInboxAnswer() {
+  const a = inboxAnswer;
+  const j = jobs.find((x) => x.id === a.id);
+  a.saving = true;
+  inboxNeedsBar();
+  inboxFocusRow = [...$('inbox-list').children].indexOf(a.el.closest('li'));
+  const result = await saveAnswers(j, a.f, a.answersFile, collectNeeds(a.el.querySelector('.inbox-needs')));
+  a.saving = false;
+  if (result.saved && !result.boardError) {
+    if (inboxAnswer === a) inboxAnswer = null;
+    inboxReport('Saved to answers.md for ' + a.id + '. The agent reads it when the job continues.');
+    await poll();
+    return;
+  }
+  if (inboxAnswer !== a) return;
+  inboxNeedsBar();
+  a.el.querySelector('.inbox-ask-status').textContent = result.saved
+    ? 'Saved to answers.md, but the board still shows this job waiting on you (' + result.boardError.message + '). Submit again to retry.'
+    : result.message;
 }
 
 function inboxReport(message) {
@@ -3169,11 +3249,40 @@ async function inboxDecide(raw, pick, button) {
 }
 
 $('inbox-list').addEventListener('click', (e) => {
+  const answer = e.target.closest('[data-inbox-answer]');
+  if (answer) {
+    const id = answer.dataset.inboxAnswer;
+    if (inboxAnswer?.id === id) {
+      inboxAnswer = null;
+      renderInboxPage();
+    } else {
+      const el = document.createElement('div');
+      el.id = 'inbox-answer';
+      el.className = 'inbox-answer';
+      el.textContent = 'Loading the questions\u2026';
+      inboxAnswer = { id, el, f: null, answersFile: null, saving: false };
+      renderInboxPage();
+      openInboxAnswer(jobs.find((x) => x.id === id));
+    }
+  }
   if (e.target.closest('[data-inbox-babysit], [data-inbox-decide]')) inboxFocusRow = [...$('inbox-list').children].indexOf(e.target.closest('li'));
   const babysit = e.target.closest('[data-inbox-babysit]');
   if (babysit) babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxRoute() !== null });
   const decide = e.target.closest('[data-inbox-decide]');
   if (decide) inboxDecide(decide.dataset.raw, decide.dataset.inboxDecide, decide);
+});
+function inboxNeedsInput(e) {
+  const form = e.target.closest('.inbox-needs');
+  if (!form) return;
+  if (!storeNeedsDraft(jobs.find((x) => x.id === inboxAnswer.id), inboxAnswer.f, collectNeeds(form))) inboxAnswer.el.querySelector('.inbox-ask-storage').hidden = false;
+  inboxNeedsBar();
+}
+$('inbox-list').addEventListener('input', inboxNeedsInput);
+$('inbox-list').addEventListener('change', inboxNeedsInput);
+$('inbox-list').addEventListener('submit', (e) => {
+  if (!e.target.matches('.inbox-needs')) return;
+  e.preventDefault();
+  submitInboxAnswer();
 });
 $('inbox-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
 
