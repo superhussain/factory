@@ -453,8 +453,9 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   become follow-ups. The approver weighs what is still open before APPROVE.
 - A merged or closed job stays that way. New work on it is a new job with `refs`
   pointing back, so the board shows what is open. Use `rework-of` to fix
-  or redo it, `follow-up-of` for work it surfaced, and `sub-job-of` for a slice
-  split off a larger feature. Prefer several small jobs to one large one.
+  or redo it, `follow-up-of` for work it surfaced, `sub-job-of` for a slice
+  split off a larger feature, and `depends-on` for a job that must wait until
+  another merges. Prefer several small jobs to one large one.
 - Never push to `$BASE` or force-push. Merge only APPROVE PRs, and only as above.
 - At each stage change, send one line with the event and a deep link to the file
   that explains it, as in

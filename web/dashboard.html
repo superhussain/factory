@@ -1181,7 +1181,7 @@ const store = {
 // board.json is agent-written and the dashboard is public, so only exact PR URLs for a registered project's repo or archive become links.
 const prUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/pull/(\\d+)$');
 const runUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/actions/runs/(\\d+)$');
-const REF_KINDS = { 'rework-of': 'rework of', 'follow-up-of': 'follow-up of', 'sub-job-of': 'sub-job of', 'batched-into': 'batched into' };
+const REF_KINDS = { 'rework-of': 'rework of', 'follow-up-of': 'follow-up of', 'sub-job-of': 'sub-job of', 'batched-into': 'batched into', 'depends-on': 'depends on' };
 const BUILD_STATES = ['queued', 'running', 'done', 'failed'];
 // The stages factory.py mirrors into Tracer.
 const TRACER_STAGES = ['spec', 'build', 'review', 'approve', 'needs-human', 'pr-open', 'merged'];
@@ -5798,7 +5798,7 @@ function addIdea(board, snap, now) {
 
 // factory.py BACKLOG_LINE, and the (kind id) suffix /factory next turns into refs.
 const BACKLOG_LINE = /^- \[ \] ([\w-]+): (\S.*)$/;
-const BACKLOG_REF = / \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$/;
+const BACKLOG_REF = / \((rework-of|follow-up-of|sub-job-of|depends-on) (\w[\w.-]*)\)$/;
 let backlog = [];               // parsed items from the last good read
 let backlogText = '';           // the last good read's whole text, checked lines included
 let backlogLoaded = false;      // a 200 or 404 has been read at least once
