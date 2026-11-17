@@ -49,6 +49,7 @@ const KEYS = [
   ["S", "Open Settings"],
   ["H", "Back to the board from a job, a backlog item, Settings or Retros"],
   ["R", "Open Retros"],
+  ["W", "Open the next job waiting on you"],
   ["A or .", "Open the jumper with actions for the hovered or focused job card, or the open job"],
   ["B", "Open the first backlog item"],
   ["A or D", "Approve or deny the open backlog item"],

@@ -1601,6 +1601,24 @@ class MoveFenceTest(IsolatedTestCase):
                               err.getvalue())
                 self.assertEqual(self.store["/api/board"], before)
 
+    def test_board_stores_a_dependency(self):
+        refs = [{"id": "201-sample-csv-api", "kind": "depends-on"}]
+        with patch.object(factory.sys, "stdin", io.StringIO(json.dumps({"refs": refs}))):
+            factory.board(self.home, "001-test")
+        self.assertEqual(self.saved()["refs"], refs)
+
+    def test_board_refuses_a_self_dependency(self):
+        before = self.store["/api/board"]
+        err = io.StringIO()
+        body = json.dumps({"refs": [{"id": "001-test", "kind": "depends-on"}]})
+        with patch.object(factory.sys, "stdin", io.StringIO(body)), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            factory.board(self.home, "001-test")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("a job cannot depend on itself: drop the depends-on ref to 001-test. Nothing was written.",
+                      err.getvalue())
+        self.assertEqual(self.store["/api/board"], before)
+
     def test_board_refuses_a_move_patch(self):
         before = self.store["/api/board"]
         err = io.StringIO()
@@ -1920,6 +1938,10 @@ class BacklogReworkTest(IsolatedTestCase):
     def test_suffix_guard_is_ascii(self):
         self.assertTrue(factory.BACKLOG_SUFFIX.search("Add (rework-of 001-x)"))
         self.assertIsNone(factory.BACKLOG_SUFFIX.search("Add (rework-of 001-é)"))
+
+    def test_suffix_takes_depends_on(self):
+        ref = factory.BACKLOG_SUFFIX.search("sample: Add CSV button (depends-on 201-sample-csv-api)")
+        self.assertEqual(factory.suffix_refs(ref), [{"id": "201-sample-csv-api", "kind": "depends-on"}])
 
     def test_close_skip_says_why(self):
         approved = dict(self.job, backlog=dict(self.job["backlog"], decision="approved"))

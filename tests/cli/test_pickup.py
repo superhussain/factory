@@ -1752,6 +1752,48 @@ class NotBeforeTest(PickupFixture):
         self.assertFalse([line for line in lines if "batches behind" in line], lines)
 
 
+DEPENDS = [{"id": "201-sample-csv-api", "kind": "depends-on"}]
+
+
+class DependsOnTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+
+    def api_row(self, stage):
+        return {"id": "201-sample-csv-api", "stage": stage, "project": "alpha", "title": "Add a CSV API",
+                "updated": "2026-01-01T00:00:00Z"}
+
+    def test_open_dependency_is_skipped(self):
+        self.board["jobs"] = [self.api_row("build"), idea("202-sample-csv-button", "alpha", refs=DEPENDS)]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("skip 202-sample-csv-button alpha: waits on 201-sample-csv-api", out.splitlines())
+        self.pickup()
+        self.assertEqual(self.launched(), [])
+        self.assertNotIn("claim", self.job("202-sample-csv-button"))
+
+    def test_merged_closed_or_missing_dependency_launches(self):
+        for rows in ([self.api_row("merged")], [self.api_row("closed")], []):
+            with self.subTest(rows=rows):
+                self.board["jobs"] = rows + [idea("202-sample-csv-button", "alpha", refs=DEPENDS)]
+                code, out, err = self.pickup()
+                self.assertEqual((code, err), (0, ""))
+                self.assertRegex(out, r"launched 202-sample-csv-button alpha on primary session [0-9a-f]{6}\n$")
+
+    def test_claim_ideas_skips_a_waiting_job(self):
+        self.board["jobs"] = [self.api_row("build"), idea("202-sample-csv-button", "alpha", refs=DEPENDS),
+                              idea("203-sample-next", "alpha")]
+        picked = factory.claim_ideas(self.home, DEVICE, "", 120, {"alpha": str(self.repo_a)}, 5)
+        self.assertEqual([p["id"] for p in picked], ["203-sample-next"])
+        self.assertNotIn("claim", self.job("202-sample-csv-button"))
+
+    def test_batch_problem_names_the_dependency(self):
+        j = idea("202-sample-csv-button", "alpha", refs=DEPENDS)
+        self.assertEqual(factory.batch_problem({"jobs": [self.api_row("build"), j]}, j, "alpha", DEVICE, "tag", 120),
+                         "waits on 201-sample-csv-api")
+
+
 class RetroPickupTest(PickupFixture):
     def setUp(self):
         super().setUp()

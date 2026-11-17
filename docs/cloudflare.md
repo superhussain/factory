@@ -286,6 +286,11 @@ client-supplied headers.
   has offered one, and the Share hint on iPhone and iPad.
   `tests/browser/pwa-install.test.mjs` checks Chrome's installability report in
   the browser suite.
+- An installed dashboard shows the needs-you count as its icon badge, the same
+  number as the tab title. The badge clears at zero and when sign-in expires. It
+  updates only while the app is open. Browsers without the Badging API show no
+  badge. iPhone and iPad show it only after the Home Screen app is allowed to
+  send notifications.
 - The service worker caches only the page, `/assets/*`, `/board.json`,
   `/projects.json` and `/jobs/*`, and never `/api/*`. Board and job reads try the
   network first and fall back to this device's saved copy under an offline
