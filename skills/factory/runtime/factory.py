@@ -6305,7 +6305,7 @@ def wait_cmd(target, *args):
     if refresh:
         hold(target)
     folder = home / "jobs" / slug / job_id
-    deadline = time.monotonic() + (60 if timeout is None else timeout)
+    deadline = time.monotonic() + (WATCH_TIMEOUT if timeout is None else timeout)
     while True:
         lines = job_file_lines(folder, artifacts)
         missing = [a for a in artifacts if a not in lines]

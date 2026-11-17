@@ -302,7 +302,8 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   It prints `"event": "malformed"` once a named file keeps an invalid first line for
   two checks; read that file and resume its agent to fix the first line.
   On a timeout, run the same watch again. Only when a notification arrived without a valid file, run
-  `python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...` once. Pass `--hold` to refresh
+  `python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...` once, with the Bash tool timeout at
+  600000 ms. Pass `--hold` to refresh
   this session's claim first, so a re-run during a long build needs no separate
   `hold`. Never poll for job files
   with `until` or `while` loops, `sleep`, file mtimes, quiet windows, Monitor or a
