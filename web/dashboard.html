@@ -7900,7 +7900,7 @@ $('sound-on').addEventListener('change', () => {
   syncLive(); schedulePoll();
   $('sound-status').textContent = soundOn ? 'Sounds are on in this browser.' : 'Sounds are off.';
 });
-document.querySelector('.sound-kinds').addEventListener('click', (e) => {
+$('settings-notifications').addEventListener('click', (e) => {
   const b = e.target.closest('[data-sound]');
   if (b) playSound(b.dataset.sound);
 });
