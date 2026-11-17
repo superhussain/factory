@@ -1188,6 +1188,14 @@ let hiddenProjects = readHiddenProjects();
 
 // The server-rendered title, which renderBoard prefixes with the needs-you count.
 const BASE_TITLE = document.title;
+// The installed app's icon badge carries the needs-you count from the tab title. An expired sign-in clears it.
+let appBadge = null;
+function syncAppBadge(count) {
+  const n = connState === 'signin' ? 0 : count;
+  if (n === appBadge || !('setAppBadge' in navigator)) return;
+  appBadge = n;
+  (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+}
 
 let jobs = [];
 let openId = null;
@@ -1252,6 +1260,7 @@ function setConnection(state) {
   const label = polling ? cadence + (liveNote && '. ' + liveNote) : title;
   drawDot(polling ? dot + ' polling' : dot, label);
   if (was === 'signin' && state !== 'signin') syncLive();
+  if (state === 'signin') syncAppBadge(0);
 }
 function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
 // Keepalive: an open socket sends "ping" every 25 s and the room's auto-response answers "pong", so proxies that drop quiet connections keep it. No pong for 60 s closes it. liveNote names how the last socket closed, for the polling dot.
@@ -3789,6 +3798,7 @@ function renderBoard() {
       (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
     if (!settingsShown && !retrosRoute()) document.title = BASE_TITLE;
+    syncAppBadge(0);
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
     renderRetrosPage();
@@ -3806,6 +3816,7 @@ function renderBoard() {
   waiting.sort((a, b) => (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   if (!settingsShown && !retrosRoute()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
+  syncAppBadge(waiting.length);
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
   // The extra auto track lets the filter-empty line span the whole board.
