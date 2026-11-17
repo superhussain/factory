@@ -1381,6 +1381,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     renderBoard();
     loadHoldConfigs();
     notifyNeeds();
+    boardSound();
     if (settingsShown === 'projects') renderProjectList();
     syncDetail();
     syncBacklogRoute();
@@ -7822,7 +7823,7 @@ function renderNotifySettings() {
   $('notify-needs').checked = notifyActive();
   $('notify-permission').textContent = NOTIFY_PERMISSION[permission];
 }
-function enterNotificationsSection() { renderNotifySettings(); $('notify-needs').focus(); }
+function enterNotificationsSection() { renderNotifySettings(); renderSoundSettings(); $('notify-needs').focus(); }
 $('notify-needs').addEventListener('change', async () => {
   if ($('notify-needs').checked && notifySupported() && Notification.permission === 'default') await Notification.requestPermission();
   notifyOn = $('notify-needs').checked && notifySupported() && Notification.permission === 'granted';
@@ -7831,6 +7832,79 @@ $('notify-needs').addEventListener('change', async () => {
   syncLive(); schedulePoll();
   $('notify-status').textContent = notifyOn ? 'Notifications are on in this browser.' : 'Notifications are off.';
 });
+
+// Board sounds are opt-in per browser and play in a visible or hidden tab. One read plays
+// at most one tone, the first kind in SOUND_ORDER that fired.
+const SOUND_KEY = 'factory-sound';
+const SOUNDS = { needs: [880, 660, 880], pr: [523, 659], merged: [523, 659, 784] };
+const SOUND_ORDER = ['needs', 'pr', 'merged'];
+const SOUND_HELP = 'Each event has its own sound. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.';
+let soundOn = store.get(SOUND_KEY) === 'on';
+let soundSeen = null;
+let audio = null;
+function soundSupported() { return 'AudioContext' in window; }
+function soundActive() { return soundOn && soundSupported(); }
+function watchAway() { return notifyActive() || soundActive(); }
+// Browsers keep an AudioContext suspended until the page gets a click or key.
+function wakeAudio() {
+  try {
+    audio ||= new AudioContext();
+    if (audio.state === 'suspended') audio.resume();
+  } catch {}
+}
+function playSound(kind) {
+  wakeAudio();
+  try {
+    SOUNDS[kind].forEach((hz, i) => {
+      const at = audio.currentTime + 0.02 + i * 0.15;
+      const osc = audio.createOscillator();
+      const gain = audio.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = hz;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(0.2, at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.14);
+      osc.connect(gain).connect(audio.destination);
+      osc.start(at);
+      osc.stop(at + 0.15);
+    });
+  } catch {}
+}
+// The first read only fills soundSeen. pr and merged need a previous entry for the job.
+function boardSound() {
+  const seen = new Map(jobs.map((j) => [j.id, { stage: j.stage, waits: waitsOnYou(j) }]));
+  const prev = soundSeen;
+  soundSeen = seen;
+  if (!prev || !soundActive()) return;
+  const fired = new Set();
+  for (const [id, now] of seen) {
+    const was = prev.get(id);
+    if (now.waits && !was?.waits) fired.add('needs');
+    if (was && now.stage === 'pr-open' && was.stage !== 'pr-open' && !now.waits) fired.add('pr');
+    if (was && now.stage === 'merged' && was.stage !== 'merged') fired.add('merged');
+  }
+  const kind = SOUND_ORDER.find((k) => fired.has(k));
+  if (kind) playSound(kind);
+}
+function renderSoundSettings() {
+  const supported = soundSupported();
+  $('sound-on').disabled = !supported;
+  $('sound-on').checked = soundActive();
+  for (const b of document.querySelectorAll('[data-sound]')) b.disabled = !supported;
+  $('sound-help').textContent = supported ? SOUND_HELP : 'This browser cannot play sounds.';
+}
+$('sound-on').addEventListener('change', () => {
+  soundOn = $('sound-on').checked;
+  if (soundOn) store.set(SOUND_KEY, 'on'); else store.remove(SOUND_KEY);
+  wakeAudio();
+  syncLive(); schedulePoll();
+  $('sound-status').textContent = soundOn ? 'Sounds are on in this browser.' : 'Sounds are off.';
+});
+document.querySelector('.sound-kinds').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sound]');
+  if (b) playSound(b.dataset.sound);
+});
+for (const type of ['pointerdown', 'keydown']) document.addEventListener(type, () => { if (soundActive() && audio?.state !== 'running') wakeAudio(); });
 
 loadProjects().then(() => {
   if (settingsShown === 'projects') enterProjectsSection(!$('settings-page').contains(document.activeElement) || document.activeElement === $('settings-nav-projects'));
@@ -7869,11 +7943,11 @@ function applyDisplay() {
   for (const f of document.querySelectorAll('.html-stepper-frame')) f.contentWindow.location.replace(f.src.replace(/#.*$/, '') + walkthroughHash());
 }
 // The board timer runs only while the live socket is closed. Hidden or unfocused windows
-// never poll unless notifications are on. Returning to the window refreshes at once.
+// never poll unless notifications or sounds are on. Returning to the window refreshes at once.
 // A tick reads the backlog only when the last read is 2 minutes old.
 function pollTick() { return poll({ ifChanged: true, withBacklog: Date.now() - backlogReadAt >= BACKLOG_POLL_MS }); }
 // Seconds between fallback ticks now, or 0 while a hidden or unfocused window waits.
-function pollEvery() { const away = document.hidden || !document.hasFocus(); return !away ? pollSeconds : notifyActive() ? 30 : 0; }
+function pollEvery() { const away = document.hidden || !document.hasFocus(); return !away ? pollSeconds : watchAway() ? 30 : 0; }
 function schedulePoll() {
   clearInterval(pollTimer);
   const ms = !pollStarted || liveOpen ? 0 : pollEvery() * 1000;
@@ -7889,7 +7963,7 @@ const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000;
 let liveSocket = null, liveOpen = false, liveRetries = 0, liveRetryTimer = 0;
 const LIVE_READ_MS = 2000;
 const liveReads = { 'board.json': { timer: 0, busy: false, again: false }, 'backlog.md': { timer: 0, busy: false, again: false } };
-function liveWanted() { return pollStarted && navigator.onLine && connState !== 'signin' && (!document.hidden || notifyActive()); }
+function liveWanted() { return pollStarted && navigator.onLine && connState !== 'signin' && (!document.hidden || watchAway()); }
 function openLive() {
   clearTimeout(liveRetryTimer);
   liveRetryTimer = 0;
