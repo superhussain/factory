@@ -240,6 +240,93 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await toHash("#/settings/display", "#settings-display:not([hidden])");
     });
 
+    await t.test("notify N6 reminder setting", async () => {
+      await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
+      assert.deepEqual(
+        await page.$$eval("#notify-remind option", (els) =>
+          els.map((el) => [el.value, el.textContent]),
+        ),
+        [
+          ["", "Never"],
+          ["1", "1 hour"],
+          ["4", "4 hours"],
+          ["24", "1 day"],
+        ],
+      );
+      assert.equal(await page.$eval("#notify-remind", (el) => el.value), "");
+      assert.equal(await page.$eval("#notify-remind", (el) => el.disabled), false);
+      await page.click("#notify-needs");
+      await page.waitForFunction(() => document.getElementById("notify-remind").disabled, wait);
+      await page.click("#notify-needs");
+      await page.waitForFunction(() => !document.getElementById("notify-remind").disabled, wait);
+      await page.select("#notify-remind", "4");
+      assert.equal(await storage("factory-notify-remind"), "4");
+      assert.equal(await text("#notify-status"), "Reminders are on: after 4 hours.");
+      await page.select("#notify-remind", "");
+      assert.equal(await storage("factory-notify-remind"), null);
+      assert.equal(await text("#notify-status"), "Reminders are off.");
+    });
+
+    await t.test("notify N7 reminder fires once per wait", async () => {
+      await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
+      await page.select("#notify-remind", "1");
+      const fresh = new Date(Date.now() - 30 * 60000).toISOString();
+      const waiting = (needs, since) => [
+        ...JOBS.filter((j) => j.id !== "005-sample-needs"),
+        { ...JOBS[2], updated: needs },
+        {
+          id: "006-sample-wait",
+          project: "sample",
+          title: "Synthetic waiting job",
+          stage: "needs-human",
+          updated: since,
+        },
+      ];
+      const remind = async () => {
+        await page.evaluate(() => {
+          window.shown = [];
+        });
+        await page.evaluate(() => poll());
+        await setHidden(true);
+        await page.evaluate(() => remindWaiting());
+        return shown();
+      };
+      await seedBoard(origin, waiting("2026-01-01T00:00:00Z", fresh));
+      assert.deepEqual(await remind(), [
+        {
+          title: "Still needs you: 005-sample-needs",
+          body: "Synthetic needs job",
+          tag: "factory-remind",
+        },
+      ]);
+      await page.evaluate(() => remindWaiting());
+      assert.equal((await shown()).length, 1);
+      await setHidden(false);
+      await seedBoard(origin, waiting("2026-01-01T01:00:00Z", "2026-01-01T00:00:00Z"));
+      assert.deepEqual(await remind(), [
+        {
+          title: "Still needs you: 2 jobs",
+          body: "006-sample-wait, 005-sample-needs",
+          tag: "factory-remind",
+        },
+      ]);
+      await setHidden(false);
+      await seedBoard(origin, waiting("2026-01-01T02:00:00Z", fresh));
+      await page.evaluate(() => {
+        window.shown = [];
+      });
+      await page.evaluate(() => poll());
+      await page.evaluate(() => remindWaiting());
+      assert.deepEqual(await shown(), []);
+      await page.select("#notify-remind", "");
+      await setHidden(true);
+      await page.evaluate(() => remindWaiting());
+      assert.deepEqual(await shown(), []);
+      await setHidden(false);
+      await page.select("#notify-remind", "1");
+      await toHash("#/settings/display", "#settings-display:not([hidden])");
+    });
+
     await t.test("sound S1 block copy, off by default, and Play buttons", async () => {
       await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
       assert.equal(await text("#sound-heading"), "Sounds");
@@ -411,6 +498,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(await storage("factory-idea-project"), null);
       assert.equal(await storage("factory-notify"), "on");
       assert.equal(await storage("factory-sound"), "on");
+      assert.equal(await storage("factory-notify-remind"), "1");
       assert.equal(
         await page.$$eval("#display-card-fields input", (els) => els.every((el) => el.checked)),
         true,
