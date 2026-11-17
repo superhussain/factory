@@ -7831,6 +7831,7 @@ const PUSH_HELP = {
   unsupported: 'This browser cannot receive push. On iPhone or iPad, add the dashboard to your Home Screen and open it from there.',
   missing: 'Push is not set up on this instance. See docs/cloudflare.md.',
   denied: NOTIFY_PERMISSION.denied,
+  failed: 'Push status could not be loaded. Check your connection or sign in again, then reopen this page.',
 };
 const PUSH_STATUS = {
   on: 'Push is on for this device.',
@@ -7849,36 +7850,42 @@ async function loadPushState() {
   try {
     const r = await fetch('./api/push/key', {cache:'no-store'});
     if (r.status === 404) { $('push-help').textContent = PUSH_HELP.missing; return; }
-    if (!r.ok || r.redirected) return;
+    if (!r.ok || r.redirected) throw new Error('push key ' + r.status);
     pushKey = (await r.json()).key;
     const subscription = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
     box.checked = !!subscription;
-  } catch { return; }
+  } catch { $('push-help').textContent = PUSH_HELP.failed; return; }
   box.disabled = false;
   $('push-help').textContent = Notification.permission === 'denied' ? PUSH_HELP.denied : PUSH_HELP.ready;
 }
 async function setPush(on) {
   const box = $('notify-push');
   box.disabled = true;
-  const pushManager = (await navigator.serviceWorker.ready).pushManager;
   let status = 'off';
-  if (on) {
-    if (Notification.permission === 'default') await Notification.requestPermission();
-    if (Notification.permission === 'denied') $('push-help').textContent = PUSH_HELP.denied;
-    if (Notification.permission === 'granted') {
-      try {
+  try {
+    const pushManager = (await navigator.serviceWorker.ready).pushManager;
+    if (on) {
+      if (Notification.permission === 'default') await Notification.requestPermission();
+      if (Notification.permission === 'denied') $('push-help').textContent = PUSH_HELP.denied;
+      if (Notification.permission === 'granted') {
         const subscription = await pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushKeyBytes(pushKey) });
         const r = await fetch('./api/push/subscriptions', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(subscription) });
         if (r.status === 204) status = 'on';
         else { status = r.status === 409 ? 'full' : 'failed'; await subscription.unsubscribe(); }
-      } catch { status = 'failed'; }
+      }
+    } else {
+      const subscription = await pushManager.getSubscription();
+      if (subscription) {
+        await fetch('./api/push/subscriptions', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ endpoint: subscription.endpoint }) }).catch(() => {});
+        await subscription.unsubscribe();
+      }
     }
-  } else {
-    const subscription = await pushManager.getSubscription();
-    if (subscription) {
-      await fetch('./api/push/subscriptions', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ endpoint: subscription.endpoint }) }).catch(() => {});
-      await subscription.unsubscribe();
-    }
+  } catch {
+    // A failed turn-on reports it. A failed turn-off leaves the box on and the status as it was.
+    box.checked = !on;
+    box.disabled = false;
+    if (on) $('push-status').textContent = PUSH_STATUS.failed;
+    return;
   }
   box.checked = status === 'on';
   box.disabled = false;

@@ -124,6 +124,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
             endpoint,
             toJSON: () => ({ endpoint, expirationTime: null, keys: { p256dh: "p", auth: "a" } }),
             unsubscribe: async () => {
+              if (window.unsubscribeFails) throw new Error("synthetic failure");
               window.pushCalls.push(["unsubscribe"]);
               current = null;
               return true;
@@ -314,6 +315,23 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       }
       push.subStatus = 204;
 
+      await page.click("#notify-push");
+      await pushText(PUSH_HELP, "Push is on for this device.");
+      await page.evaluate(() => {
+        window.unsubscribeFails = true;
+      });
+      await page.click("#notify-push");
+      await page.waitForSelector("#notify-push:not([disabled])", wait);
+      assert.equal(await page.$eval("#notify-push", (el) => el.checked), true);
+      assert.equal(await text("#push-status"), "Push is on for this device.");
+      await page.evaluate(() => {
+        window.unsubscribeFails = false;
+      });
+      await page.click("#notify-push");
+      await pushText(PUSH_HELP, "Push is off for this device.");
+      await pushCalls();
+      push.requests.splice(0);
+
       const reenter = async () => {
         await toHash("#/settings/display", "#settings-display:not([hidden])");
         await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
@@ -324,6 +342,15 @@ test("notification settings", { timeout: 180000 }, async (t) => {
         () =>
           document.getElementById("push-help").textContent ===
           "Push is not set up on this instance. See docs/cloudflare.md.",
+        wait,
+      );
+      assert.equal(await page.$eval("#notify-push", (el) => el.disabled), true);
+      push.keyStatus = 500;
+      await reenter();
+      await page.waitForFunction(
+        () =>
+          document.getElementById("push-help").textContent ===
+          "Push status could not be loaded. Check your connection or sign in again, then reopen this page.",
         wait,
       );
       assert.equal(await page.$eval("#notify-push", (el) => el.disabled), true);
