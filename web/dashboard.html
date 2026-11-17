@@ -1189,8 +1189,10 @@ let hiddenProjects = readHiddenProjects();
 // The server-rendered title, which renderBoard prefixes with the needs-you count.
 const BASE_TITLE = document.title;
 // The installed app's icon badge carries the needs-you count from the tab title. An expired sign-in clears it.
-let appBadge = null;
+// badgeCount keeps the last requested count, so leaving signin restores it without a fresh render.
+let appBadge = null, badgeCount = 0;
 function syncAppBadge(count) {
+  badgeCount = count;
   const n = connState === 'signin' ? 0 : count;
   if (n === appBadge || !('setAppBadge' in navigator)) return;
   appBadge = n;
@@ -1259,8 +1261,8 @@ function setConnection(state) {
   const cadence = every ? 'Polling every ' + every + ' seconds until live updates reconnect' : 'Polling paused while this window is hidden or unfocused';
   const label = polling ? cadence + (liveNote && '. ' + liveNote) : title;
   drawDot(polling ? dot + ' polling' : dot, label);
-  if (was === 'signin' && state !== 'signin') syncLive();
-  if (state === 'signin') syncAppBadge(0);
+  if (was === 'signin' && state !== 'signin') { syncLive(); syncAppBadge(badgeCount); }
+  if (state === 'signin') syncAppBadge(badgeCount);
 }
 function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
 // Keepalive: an open socket sends "ping" every 25 s and the room's auto-response answers "pong", so proxies that drop quiet connections keep it. No pong for 60 s closes it. liveNote names how the last socket closed, for the polling dot.

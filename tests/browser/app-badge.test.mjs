@@ -80,23 +80,30 @@ test("app badge", { timeout: 180000 }, async (t) => {
       await context.close();
     });
 
-    await t.test("badge B4 an expired sign-in clears the badge", async () => {
-      await seedBoard(origin, JOBS);
-      const { context, page, errors } = await open();
-      await page.setRequestInterception(true);
-      page.on("request", (request) => {
-        if (new URL(request.url()).pathname === "/board.json")
-          return request.respond({ status: 401, body: "" });
-        return request.continue();
-      });
-      assert.equal(await page.evaluate(() => poll()), false);
-      assert.deepEqual(await calls(page), [["set", 2], ["clear"]]);
-      assert.deepEqual(
-        errors.filter((e) => !e.includes("401")),
-        [],
-      );
-      await context.close();
-    });
+    await t.test(
+      "badge B4 an expired sign-in clears the badge until sign-in recovers",
+      async () => {
+        await seedBoard(origin, JOBS);
+        const { context, page, errors } = await open();
+        let expired = true;
+        await page.setRequestInterception(true);
+        page.on("request", (request) => {
+          if (expired && new URL(request.url()).pathname === "/board.json")
+            return request.respond({ status: 401, body: "" });
+          return request.continue();
+        });
+        assert.equal(await page.evaluate(() => poll()), false);
+        assert.deepEqual(await calls(page), [["set", 2], ["clear"]]);
+        expired = false;
+        assert.equal(await page.evaluate(() => poll({ ifChanged: true })), true);
+        assert.deepEqual(await calls(page), [["set", 2], ["clear"], ["set", 2]]);
+        assert.deepEqual(
+          errors.filter((e) => !e.includes("401")),
+          [],
+        );
+        await context.close();
+      },
+    );
 
     await t.test("badge B5 a browser without the Badging API renders the board", async () => {
       const { context, page, errors } = await open(false);
