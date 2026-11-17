@@ -1179,8 +1179,6 @@ async function capture(outdir, referencePath) {
         ),
       );
     };
-    await view("notification-sounds-desktop", 1280, 900, "light", openNotificationSettings);
-    await view("notification-sounds-mobile", 390, 844, "light", openNotificationSettings, true);
     await view("notify-settings-desktop", 1280, 900, "light", openNotificationSettings);
     await view("notify-settings-mobile", 390, 844, "light", openNotificationSettings, true);
     const settleArchiveSettings = async (page, name) => {
