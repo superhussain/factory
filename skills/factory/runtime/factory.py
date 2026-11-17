@@ -9643,7 +9643,7 @@ AUDIT_FLAGS = (
 )
 AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
 AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
-AUDIT_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+AUDIT_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
 
 def audit_target_raw(name, inp):
@@ -9668,7 +9668,7 @@ def audit_target_raw(name, inp):
 def audit_target(raw):
     """raw as it prints: home as ~, retro-redacted, whitespace collapsed, control characters as ?,
     at most 120 characters."""
-    folded = re.sub(re.escape(str(Path.home())) + r"(?=/|$)", "~", raw)
+    folded = re.sub(re.escape(str(Path.home())) + r"(?![\w.-])", "~", raw)
     return AUDIT_CONTROL.sub("?", " ".join(retro_redact(folded).split()))[:120]
 
 
