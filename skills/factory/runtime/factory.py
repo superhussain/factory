@@ -5234,6 +5234,11 @@ GH_PR = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/\d+", re.ASCII)
 GH_PR_PARTS = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})", re.ASCII)
 SYNC_STAGES = ("pr-open", "needs-human")
 PR_SYNC_LIMIT = 100
+AUTO_BABYSIT_LIMIT = 20
+AUTO_BABYSIT = re.compile(r"[1-9]")
+CI_FAILED = {"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "CANCELLED", "ERROR"}
+AUTO_BABYSIT_COPY = {"fix-reviews": "has an open review thread", "rebase": "has a merge conflict",
+                     "fix-ci": "has a failing required check"}
 GITHUB_CLOSE_REASON = "PR closed on GitHub"
 MERGED_NOTE = "merged on GitHub"
 PR_CLOSE_COMMENT = (
@@ -5298,6 +5303,66 @@ def pr_states(repo, numbers, device):
         return None, ("gh api graphql returned no repository "
                       f"(check the project file's repo and gh auth status on {device})")
     return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
+
+
+def pr_signals(repo, numbers, device):
+    """({number: (head oid, pr_signal)}, None) for repo's pull requests from one gh api graphql call,
+    or (None, why), as pr_states reads them."""
+    owner, name = repo.split("/")
+    q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
+         + " ".join(f"p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid author {{ login }} "
+                    "reviewThreads(last: 50) { nodes { isResolved comments(first: 20) { nodes { authorAssociation "
+                    "author { __typename login } } } } } commits(last: 1) { nodes { commit { statusCheckRollup { "
+                    "contexts(first: 50) { nodes { __typename ... on CheckRun { conclusion "
+                    f"isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ state "
+                    f"isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }}" for n in numbers)
+         + " } }")
+    r = gh_cli("api", "graphql", "-f", "query=" + q)
+    if r is None:
+        return None, f"gh is not installed on {device}"
+    if r[0] == "timeout":
+        return None, f"gh api graphql timed out after 60 seconds on {device}"
+    try:
+        found = json.loads(r[1])["data"]["repository"]
+    except (ValueError, KeyError, TypeError):
+        found = None
+    if not isinstance(found, dict):
+        if r[0]:
+            return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
+        return None, ("gh api graphql returned no repository "
+                      f"(check the project file's repo and gh auth status on {device})")
+    return {n: (found[f"p{n}"].get("headRefOid"), pr_signal(found[f"p{n}"]))
+            for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
+
+
+def pr_signal(pull):
+    """What an open pull request needs from babysit, in pr_reading's order: fix-reviews for an open
+    counted review thread, rebase for a merge conflict, fix-ci for a failed required check, else None."""
+    if pull.get("state") != "OPEN":
+        return None
+
+    def login(item):
+        return str((item.get("author") or {}).get("login") or "")
+
+    author = login(pull)
+    for thread in (pull.get("reviewThreads") or {}).get("nodes") or []:
+        if not isinstance(thread, dict) or thread.get("isResolved"):
+            continue
+        comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
+        if not comments or any(login(c) == author for c in comments):
+            continue
+        if (comments[0].get("author") or {}).get("__typename") == "Bot" \
+                or comments[0].get("authorAssociation") in PR_REVIEWERS:
+            return "fix-reviews"
+    if pull.get("mergeable") == "CONFLICTING":
+        return "rebase"
+    for node in (pull.get("commits") or {}).get("nodes") or []:
+        rollup = ((node or {}).get("commit") or {}).get("statusCheckRollup") or {}
+        for c in (rollup.get("contexts") or {}).get("nodes") or []:
+            if isinstance(c, dict) and c.get("isRequired") is True \
+                    and (c.get("conclusion") or c.get("state")) in CI_FAILED:
+                return "fix-ci"
+    return None
 
 
 def close_pull_request(home, j, device, comment=None):

@@ -3004,6 +3004,66 @@ class BabysitTest(PickupFixture):
         self.assertEqual(factory.babysit_argv(other, "042-sample-export"), other)
 
 
+HEAD = "abc1234" + "0" * 33
+
+
+def pull(state="OPEN", threads=(), mergeable="MERGEABLE", contexts=()):
+    """A pull request node as pr_signals reads it, by author bot-author."""
+    return {"state": state, "mergeable": mergeable, "headRefOid": HEAD, "author": {"login": "bot-author"},
+            "reviewThreads": {"nodes": [{"isResolved": False, "comments": {"nodes": t}} for t in threads]},
+            "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": list(contexts)}}}}]}}
+
+
+def comment(login, association="NONE", kind="User"):
+    return {"authorAssociation": association, "author": {"__typename": kind, "login": login}}
+
+
+FAILED = {"__typename": "CheckRun", "conclusion": "FAILURE", "isRequired": True}
+
+
+class AutoBabysitTest(PickupFixture):
+    def frag(n):
+        return (f"p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid author {{ login }} "
+                "reviewThreads(last: 50) { nodes { isResolved comments(first: 20) { nodes { authorAssociation "
+                "author { __typename login } } } } } commits(last: 1) { nodes { commit { statusCheckRollup { "
+                "contexts(first: 50) { nodes { __typename ... on CheckRun { conclusion "
+                f"isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ state "
+                f"isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }}")
+
+    QUERY = 'query { repository(owner: "sample", name: "alpha") { ' + frag(7) + " " + frag(8) + " } }"
+    pr_signals = staticmethod(factory.pr_signals)
+
+    def test_pr_signals_sends_one_query_per_repo(self):
+        answer = json.dumps({"data": {"repository": {"p7": pull(contexts=[FAILED]), "p8": None}}})
+        with patch.object(factory, "gh_cli", return_value=(0, answer)) as gh:
+            self.assertEqual(self.pr_signals("sample/alpha", [7, 8], DEVICE), ({7: (HEAD, "fix-ci")}, None))
+        gh.assert_called_once_with("api", "graphql", "-f", "query=" + self.QUERY)
+        for result, why in ((None, "gh is not installed on host-a"),
+                            (("timeout", ""), "gh api graphql timed out after 60 seconds on host-a"),
+                            ((1, ""), "gh api graphql exited 1 (check gh auth status on host-a)"),
+                            ((0, "[]"), "gh api graphql returned no repository (check the project file's repo "
+                                        "and gh auth status on host-a)")):
+            with self.subTest(result=result), patch.object(factory, "gh_cli", return_value=result):
+                self.assertEqual(self.pr_signals("sample/alpha", [7], DEVICE), (None, why))
+
+    def test_pr_signals_follow_the_reading_order(self):
+        reviewer = [comment("reviewer-a", "MEMBER")]
+        bot = [comment("review-bot", kind="Bot")]
+        for node, reason in (
+                (pull(threads=[reviewer], mergeable="CONFLICTING", contexts=[FAILED]), "fix-reviews"),
+                (pull(threads=[bot]), "fix-reviews"),
+                (pull(mergeable="CONFLICTING", contexts=[FAILED]), "rebase"),
+                (pull(contexts=[FAILED]), "fix-ci"),
+                (pull(contexts=[{"__typename": "StatusContext", "state": "ERROR", "isRequired": True}]), "fix-ci"),
+                (pull(threads=[reviewer + [comment("bot-author", "OWNER")]]), None),
+                (pull(threads=[[comment("stranger-a")]]), None),
+                (pull(contexts=[dict(FAILED, isRequired=False)]), None),
+                (pull(contexts=[dict(FAILED, conclusion="SUCCESS")]), None),
+                (pull(state="MERGED", mergeable="CONFLICTING", contexts=[FAILED]), None)):
+            with self.subTest(node=node):
+                self.assertEqual(factory.pr_signal(node), reason)
+
+
 FOLLOW = [{"id": "090-alpha-old", "kind": "follow-up-of"}]
 HELD = ["101-wrap-doc-line", "102-move-comment", "103-drop-double-period", "104-fix-typo", "105-rename-flag"]
 
