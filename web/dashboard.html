@@ -7834,7 +7834,6 @@ function showReminder(due) {
     }
   } catch {}
 }
-setInterval(remindWaiting, REMIND_CHECK_MS);
 function renderNotifySettings() {
   const permission = notifySupported() ? Notification.permission : 'unsupported';
   $('notify-needs').disabled = permission === 'unsupported';
@@ -7868,6 +7867,7 @@ loadProjects().then(() => {
   referenceReady = true; if (settingsShown === 'reference') loadReferenceEffective();
   pollStarted = true; loadHosts(); poll(); syncLive(); schedulePoll();
 });
+setInterval(remindWaiting, REMIND_CHECK_MS);
 
 // Display settings live only in this browser. Each value is read against a fixed list,
 // so a bad stored value falls back to the default.
