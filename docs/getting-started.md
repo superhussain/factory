@@ -91,7 +91,7 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | Keep project notes, decisions and a runbook | Settings, Projects, document tabs | [configuration.md](configuration.md) |
 | Deploy every merge to main | `deploy-main` workflow | [cloudflare.md](cloudflare.md#8-continuous-deployment-from-main) |
 | PR screenshots, Paseo, Tracer | device config | [integrations.md](integrations.md) |
-| Browser notifications and display | Settings, Notifications and Display | none |
+| Browser notifications, sounds and display | Settings, Notifications and Display | none |
 | Upgrade later | `git pull` here, then `install.py --replace` on each host | [upgrade.md](upgrade.md) |
 
 Automatic pickup: run `python3 <installed-skill>/runtime/factory.py pickup setup` on each host and fix each missing line until it prints 7 of 7 ok. A stored Paseo or Claude schedule prompt does not pick up ideas.

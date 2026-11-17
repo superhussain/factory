@@ -1162,6 +1162,25 @@ async function capture(outdir, referencePath) {
       await openSchedulerSettings(page);
       await page.evaluate(() => document.getElementById("scheduler-mode-tab-human")?.click());
     });
+    const openNotificationSettings = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/notifications";
+      });
+      await page.waitForSelector("#settings-notifications:not([hidden])");
+      await page.evaluate(() =>
+        document.querySelector("#notify-settings-heading").scrollIntoView({ block: "start" }),
+      );
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getElementById("settings-link")
+            .getAnimations()
+            .map((animation) => animation.finished),
+        ),
+      );
+    };
+    await view("notification-sounds-desktop", 1280, 900, "light", openNotificationSettings);
+    await view("notification-sounds-mobile", 390, 844, "light", openNotificationSettings, true);
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
