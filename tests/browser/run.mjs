@@ -1108,22 +1108,6 @@ async function capture(outdir, referencePath) {
       );
     };
     await view("display-poll-settings", 1280, 900, "light", openPollSettings);
-    const openNotifySettings = async (page) => {
-      await page.evaluate(() => {
-        location.hash = "#/settings/notifications";
-      });
-      await page.waitForSelector("#settings-notifications:not([hidden])");
-      await page.evaluate(() =>
-        Promise.all(
-          document
-            .getElementById("settings-link")
-            .getAnimations()
-            .map((animation) => animation.finished),
-        ),
-      );
-    };
-    await view("notify-settings-desktop", 1280, 900, "light", openNotifySettings);
-    await view("notify-settings-mobile", 390, 844, "light", openNotifySettings, true);
     const openInstallSettings = async (page, ios) => {
       await page.evaluate((ios) => {
         if (ios)
@@ -1178,6 +1162,27 @@ async function capture(outdir, referencePath) {
       await openSchedulerSettings(page);
       await page.evaluate(() => document.getElementById("scheduler-mode-tab-human")?.click());
     });
+    const openNotificationSettings = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/notifications";
+      });
+      await page.waitForSelector("#settings-notifications:not([hidden])");
+      await page.evaluate(() =>
+        document.querySelector("#notify-settings-heading").scrollIntoView({ block: "start" }),
+      );
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getElementById("settings-link")
+            .getAnimations()
+            .map((animation) => animation.finished),
+        ),
+      );
+    };
+    await view("notification-sounds-desktop", 1280, 900, "light", openNotificationSettings);
+    await view("notification-sounds-mobile", 390, 844, "light", openNotificationSettings, true);
+    await view("notify-settings-desktop", 1280, 900, "light", openNotificationSettings);
+    await view("notify-settings-mobile", 390, 844, "light", openNotificationSettings, true);
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {

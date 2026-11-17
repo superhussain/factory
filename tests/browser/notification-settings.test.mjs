@@ -1,5 +1,6 @@
 // Notifications section and the Display card details and New idea project additions,
-// against one owned local Worker. A stub Notification class stands in for the browser's.
+// against one owned local Worker. Stub Notification and AudioContext classes stand in for
+// the browser's.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -85,6 +86,34 @@ test("notification settings", { timeout: 180000 }, async (t) => {
         close() {}
       };
     });
+    await page.evaluateOnNewDocument(() => {
+      if (sessionStorage.getItem("no-audio")) {
+        delete window.AudioContext;
+        return;
+      }
+      window.tones = [];
+      const param = () => ({ value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} });
+      window.AudioContext = class {
+        state = "suspended";
+        currentTime = 0;
+        destination = {};
+        async resume() {
+          this.state = "running";
+        }
+        createGain() {
+          return { gain: param(), connect: (node) => node };
+        }
+        createOscillator() {
+          const osc = {
+            frequency: param(),
+            connect: (node) => node,
+            start: () => window.tones.push(osc.frequency.value),
+            stop() {},
+          };
+          return osc;
+        }
+      };
+    });
 
     const liveTimers = () => page.evaluate(() => [...window.pollTimers.values()]);
     const setHidden = (hidden) =>
@@ -107,6 +136,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await page.waitForSelector(selector, wait);
       await page.waitForFunction(() => window.pollTimers.size > 0, wait);
     };
+    const tones = () => page.evaluate(() => window.tones);
     const shown = () =>
       page.evaluate(() => window.shown.map(({ title, body, tag }) => ({ title, body, tag })));
 
@@ -297,6 +327,119 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await toHash("#/settings/display", "#settings-display:not([hidden])");
     });
 
+    await t.test("sound S1 block copy, off by default, and Play buttons", async () => {
+      await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
+      assert.equal(await text("#sound-heading"), "Sounds");
+      assert.equal(await text('label[for="sound-on"]'), " Play a sound for board events");
+      assert.equal(
+        await text("#sound-help"),
+        "Each event has its own sound. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.",
+      );
+      assert.equal(await page.$eval("#sound-on", (el) => el.checked), false);
+      assert.equal(await storage("factory-sound"), null);
+      assert.deepEqual(
+        await page.$$eval(".sound-kinds li", (els) =>
+          els.map((li) => [
+            li.querySelector("span").textContent,
+            li.querySelector("button").textContent,
+            li.querySelector("button").getAttribute("aria-label"),
+          ]),
+        ),
+        [
+          ["A job needs you", "Play", "Play the sound for: A job needs you"],
+          ["A pull request opens", "Play", "Play the sound for: A pull request opens"],
+          ["A job merges", "Play", "Play the sound for: A job merges"],
+        ],
+      );
+      for (const [kind, expected] of [
+        ["pr", [523, 659]],
+        ["needs", [880, 660, 880]],
+        ["merged", [523, 659, 784]],
+      ]) {
+        await page.evaluate(() => {
+          window.tones = [];
+        });
+        await page.click(`[data-sound="${kind}"]`);
+        assert.deepEqual(await tones(), expected);
+      }
+      assert.equal(await page.evaluate(() => audio.state), "running");
+    });
+
+    await t.test("sound S2 checkbox stores the setting", async () => {
+      await page.click("#sound-on");
+      await page.waitForFunction(
+        () =>
+          document.getElementById("sound-status").textContent === "Sounds are on in this browser.",
+        wait,
+      );
+      assert.equal(await storage("factory-sound"), "on");
+      await page.click("#sound-on");
+      await page.waitForFunction(
+        () => document.getElementById("sound-status").textContent === "Sounds are off.",
+        wait,
+      );
+      assert.equal(await storage("factory-sound"), null);
+    });
+
+    await t.test("sound S3 hidden tab polls while sounds are on", async () => {
+      await page.click("#notify-needs");
+      await page.waitForFunction(
+        () => document.getElementById("notify-status").textContent === "Notifications are off.",
+        wait,
+      );
+      await setHidden(true);
+      assert.deepEqual(await liveTimers(), []);
+      await page.click("#sound-on");
+      assert.deepEqual(await liveTimers(), [30000]);
+      await page.click("#sound-on");
+      assert.deepEqual(await liveTimers(), []);
+      await page.click("#sound-on");
+      await page.click("#notify-needs");
+      await page.waitForFunction(
+        () =>
+          document.getElementById("notify-status").textContent ===
+          "Notifications are on in this browser.",
+        wait,
+      );
+      await setHidden(false);
+    });
+
+    await t.test("sound S4 one tone per board read", async () => {
+      await seedBoard(origin, JOBS);
+      await reload("#settings-notifications:not([hidden])");
+      await page.waitForFunction(() => soundSeen !== null, wait);
+      assert.equal(await page.$eval("#sound-on", (el) => el.checked), true);
+      assert.deepEqual(await tones(), []);
+      const moved = JOBS.map((j) =>
+        j.id === "001-sample"
+          ? { ...j, stage: "pr-open" }
+          : j.id === "004-sample-pr"
+            ? { ...j, stage: "merged" }
+            : j,
+      );
+      await seedBoard(origin, [
+        ...moved,
+        {
+          id: "006-sample-wait",
+          project: "sample",
+          title: "Synthetic waiting job",
+          stage: "needs-human",
+          updated: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      await page.evaluate(() => poll());
+      assert.deepEqual(await tones(), [880, 660, 880]);
+      await seedBoard(
+        origin,
+        moved.map((j) => (j.id === "001-sample" ? { ...j, stage: "merged" } : j)),
+      );
+      await page.evaluate(() => poll());
+      assert.deepEqual(await tones(), [880, 660, 880, 523, 659, 784]);
+      await page.evaluate(() => poll());
+      assert.deepEqual(await tones(), [880, 660, 880, 523, 659, 784]);
+      await toHash("#/settings/display", "#settings-display:not([hidden])");
+    });
+
     await t.test("notify C1 card detail toggles", async () => {
       for (const f of ["note", "meta", "pr"]) await page.click("#display-card-field-" + f);
       assert.equal(await storage("factory-hidden-card-fields"), "note,meta,pr");
@@ -354,6 +497,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(await storage("factory-hidden-card-fields"), null);
       assert.equal(await storage("factory-idea-project"), null);
       assert.equal(await storage("factory-notify"), "on");
+      assert.equal(await storage("factory-sound"), "on");
       assert.equal(await storage("factory-notify-remind"), "1");
       assert.equal(
         await page.$$eval("#display-card-fields input", (els) => els.every((el) => el.checked)),
@@ -386,6 +530,20 @@ test("notification settings", { timeout: 180000 }, async (t) => {
         await text("#notify-permission"),
         "This browser does not support notifications.",
       );
+    });
+
+    await t.test("sound S5 no Web Audio", async () => {
+      await page.evaluate(() => sessionStorage.setItem("no-audio", "1"));
+      await reload("#settings-notifications:not([hidden])");
+      assert.equal(await page.evaluate(() => "AudioContext" in window), false);
+      assert.equal(await page.$eval("#sound-on", (el) => el.disabled), true);
+      assert.equal(await page.$eval("#sound-on", (el) => el.checked), false);
+      assert.deepEqual(await page.$$eval("[data-sound]", (els) => els.map((el) => el.disabled)), [
+        true,
+        true,
+        true,
+      ]);
+      assert.equal(await text("#sound-help"), "This browser cannot play sounds.");
     });
 
     assert.deepEqual(errors, []);
