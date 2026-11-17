@@ -2,6 +2,8 @@
 // routes, and one encrypted, VAPID-signed POST per subscription after a committed board write.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { importJWK, jwtVerify } from "jose";
+import { loadProduction, memoryBucket } from "../support/worker.mjs";
 import {
   boardPushes,
   encryptWith,
@@ -76,6 +78,9 @@ test("boardPushes finds new waits and merges only", () => {
     row("046-sample-new", "spec", { needs: "Pick one" }),
     row("047-sample-fresh", "merged"),
     row("048-sample-closed", "closed", { needs: "Old ask" }),
+    null,
+    { stage: "needs-human" },
+    { id: 7, stage: "needs-human" },
   ];
   assert.deepEqual(boardPushes(before, after), [
     { kind: "needs", id: "042-sample-retry", title: "Synthetic 042-sample-retry" },
@@ -173,4 +178,282 @@ test("pushKey reads a P-256 private JWK or returns null", async () => {
   assert.equal(pushKey({ FACTORY_VAPID_KEY: JSON.stringify(jwk) }), raw.toString("base64url"));
   for (const value of [undefined, "", "not json", JSON.stringify({ ...jwk, crv: "P-384" })])
     assert.equal(pushKey({ FACTORY_VAPID_KEY: value }), null);
+});
+
+const { serveFactory } = await loadProduction();
+const ORIGIN = "https://factory.example.test";
+const person = { verified: true, kind: "user", email: "person@example.test" };
+const device = { verified: true, kind: "service", client_id: "client-aaaa" };
+const ecdh = { name: "ECDH", namedCurve: "P-256" };
+const VAPID = await crypto.subtle.exportKey(
+  "jwk",
+  (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign"]))
+    .privateKey,
+);
+const RETRY = row("042-sample-retry", "build", { title: "Synthetic retry job" });
+const RETRY_WAITS = { ...RETRY, stage: "needs-human", needs: "Approve the spec" };
+
+// A browser's subscription: its ECDH key pair, auth secret and the toJSON() body.
+async function browser(endpoint) {
+  const pair = await crypto.subtle.generateKey(ecdh, true, ["deriveBits"]);
+  const auth = crypto.getRandomValues(new Uint8Array(16));
+  const p256dh = Buffer.from(await crypto.subtle.exportKey("raw", pair.publicKey));
+  return {
+    pair,
+    auth,
+    p256dh,
+    body: {
+      endpoint,
+      keys: { p256dh: p256dh.toString("base64url"), auth: Buffer.from(auth).toString("base64url") },
+    },
+  };
+}
+
+// The user agent side of RFC 8291: one record, padding delimiter 0x02.
+async function decrypt(ua, bytes) {
+  const salt = bytes.subarray(0, 16);
+  assert.equal(bytes.readUInt32BE(16), 4096);
+  const asPublic = bytes.subarray(21, 21 + bytes[20]);
+  const as = await crypto.subtle.importKey("raw", asPublic, ecdh, false, []);
+  const secret = new Uint8Array(
+    await crypto.subtle.deriveBits({ name: "ECDH", public: as }, ua.pair.privateKey, 256),
+  );
+  const hkdf = async (s, ikm, info, n) =>
+    new Uint8Array(
+      await crypto.subtle.deriveBits(
+        { name: "HKDF", hash: "SHA-256", salt: s, info: Buffer.from(info) },
+        await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]),
+        n * 8,
+      ),
+    );
+  const ikm = await hkdf(
+    ua.auth,
+    secret,
+    Buffer.concat([Buffer.from("WebPush: info\0"), ua.p256dh, asPublic]),
+    32,
+  );
+  const cek = await hkdf(salt, ikm, "Content-Encoding: aes128gcm\0", 16);
+  const nonce = await hkdf(salt, ikm, "Content-Encoding: nonce\0", 12);
+  const key = await crypto.subtle.importKey("raw", cek, "AES-GCM", false, ["decrypt"]);
+  const plain = Buffer.from(
+    await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: nonce },
+      key,
+      bytes.subarray(21 + bytes[20]),
+    ),
+  );
+  assert.equal(plain.at(-1), 2);
+  return JSON.parse(plain.subarray(0, -1).toString());
+}
+
+// Records every outbound fetch and answers each with status(url).
+function stubFetch(t, status = () => 201) {
+  const saved = globalThis.fetch;
+  t.after(() => (globalThis.fetch = saved));
+  const sent = [];
+  globalThis.fetch = async (url, init) => {
+    sent.push({ url, ...init, body: Buffer.from(init.body) });
+    return new Response(null, { status: status(url) });
+  };
+  return sent;
+}
+
+function setup({ key = true } = {}) {
+  const env = {
+    BUCKET: memoryBucket(),
+    config: { origin: ORIGIN },
+    ...(key && { FACTORY_VAPID_KEY: JSON.stringify(VAPID) }),
+  };
+  const call = (path, { method = "GET", body, principal = person, headers = {}, ctx } = {}) =>
+    serveFactory(
+      new Request(ORIGIN + path, {
+        method,
+        headers: { ...(body !== undefined && { "Content-Type": "application/json" }), ...headers },
+        body:
+          body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
+      }),
+      env,
+      principal,
+      ctx,
+    );
+  const writeBoard = async (jobs, etag, ctx) =>
+    call("/api/board", {
+      method: "PUT",
+      body: { jobs },
+      headers: etag ? { "If-Match": etag } : { "If-None-Match": "*" },
+      principal: device,
+      ctx,
+    });
+  return { env, call, writeBoard };
+}
+
+test("the key route serves the public key to a person, else 404", async () => {
+  const { call } = setup();
+  const response = await call("/api/push/key");
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    key: pushKey({ FACTORY_VAPID_KEY: JSON.stringify(VAPID) }),
+  });
+  assert.equal((await setup({ key: false }).call("/api/push/key")).status, 404);
+  assert.equal((await call("/api/push/key", { method: "POST" })).status, 404);
+});
+
+test("a board write that makes 042-sample-retry wait sends one signed push per device", async (t) => {
+  const sent = stubFetch(t);
+  const { env, call, writeBoard } = setup();
+  const phones = [
+    await browser("https://fcm.googleapis.com/fcm/send/sample-one"),
+    await browser("https://web.push.apple.com/sample-two"),
+  ];
+  for (const phone of phones)
+    assert.equal(
+      (await call("/api/push/subscriptions", { method: "PUT", body: phone.body })).status,
+      204,
+    );
+  const stored = [...env.BUCKET.objects.keys()].filter((k) => k.startsWith("push/"));
+  assert.equal(stored.length, 2);
+  for (const k of stored) {
+    assert.match(k, /^push\/[0-9a-f]{64}\.json$/);
+    assert.deepEqual(Object.keys(JSON.parse(env.BUCKET.objects.get(k).bytes)), [
+      "endpoint",
+      "keys",
+      "created",
+    ]);
+  }
+  const etag = (await writeBoard([RETRY])).headers.get("ETag");
+  assert.equal(sent.length, 0);
+  const waits = [];
+  const response = await writeBoard([RETRY_WAITS], etag, { waitUntil: (p) => waits.push(p) });
+  assert.equal(response.status, 200);
+  assert.equal(waits.length, 1);
+  await Promise.all(waits);
+  assert.deepEqual(sent.map((s) => s.url).sort(), phones.map((p) => p.body.endpoint).sort());
+  const publicKey = await importJWK({ kty: "EC", crv: "P-256", x: VAPID.x, y: VAPID.y }, "ES256");
+  for (const request of sent) {
+    const phone = phones.find((p) => p.body.endpoint === request.url);
+    const { Authorization, ...rest } = request.headers;
+    assert.equal(request.method, "POST");
+    assert.deepEqual(rest, {
+      TTL: "86400",
+      Urgency: "high",
+      "Content-Encoding": "aes128gcm",
+      "Content-Type": "application/octet-stream",
+    });
+    const [, jwt, k] = Authorization.match(/^vapid t=([^,]+), k=(.+)$/);
+    assert.equal(k, pushKey(env));
+    const { payload, protectedHeader } = await jwtVerify(jwt, publicKey, {
+      audience: new URL(request.url).origin,
+    });
+    assert.equal(protectedHeader.alg, "ES256");
+    assert.equal(payload.sub, ORIGIN);
+    assert.ok(Math.abs(payload.exp - (Date.now() / 1000 + 3600)) < 60);
+    assert.deepEqual(await decrypt(phone, request.body), {
+      title: "Needs you: 042-sample-retry",
+      body: "Synthetic retry job",
+      tag: "factory-needs-042-sample-retry",
+      url: "/#042-sample-retry",
+    });
+  }
+});
+
+test("a merge and a five-event write push their payloads", async (t) => {
+  const sent = stubFetch(t);
+  const { call, writeBoard } = setup();
+  const phone = await browser("https://updates.push.services.mozilla.com/wpush/v2/sample");
+  await call("/api/push/subscriptions", { method: "PUT", body: phone.body });
+  const pr = row("043-sample-pr", "pr-open", { title: "Synthetic PR job" });
+  let etag = (await writeBoard([pr])).headers.get("ETag");
+  etag = (await writeBoard([{ ...pr, stage: "merged" }], etag)).headers.get("ETag");
+  assert.deepEqual(await decrypt(phone, sent[0].body), {
+    title: "Merged: 043-sample-pr",
+    body: "Synthetic PR job",
+    tag: "factory-merged-043-sample-pr",
+    url: "/#043-sample-pr",
+  });
+  const ids = ["050-a", "051-b", "052-c", "053-d", "054-e"];
+  await writeBoard([{ ...pr, stage: "merged" }, ...ids.map((id) => row(id, "needs-human"))], etag);
+  assert.equal(sent.length, 2);
+  assert.deepEqual(await decrypt(phone, sent[1].body), {
+    title: "5 factory updates",
+    body: "Needs you: 050-a\nNeeds you: 051-b\nNeeds you: 052-c\nand 2 more",
+    tag: "factory-updates",
+    url: "/",
+  });
+});
+
+test("no key, a 412 write or no subscriptions sends nothing and the reply is unchanged", async (t) => {
+  const sent = stubFetch(t);
+  const replies = [];
+  for (const [key, subscribe] of [
+    [true, true],
+    [false, true],
+    [true, false],
+  ]) {
+    const { call, writeBoard } = setup({ key });
+    if (subscribe)
+      await call("/api/push/subscriptions", {
+        method: "PUT",
+        body: (await browser("https://fcm.googleapis.com/fcm/send/sample")).body,
+      });
+    const etag = (await writeBoard([RETRY])).headers.get("ETag");
+    const stale = await writeBoard([RETRY_WAITS], '"stale"');
+    assert.equal(stale.status, 412);
+    assert.equal(await stale.text(), "precondition failed");
+    const response = await writeBoard([RETRY_WAITS], etag);
+    replies.push([response.status, await response.text(), response.headers.get("ETag")]);
+  }
+  assert.equal(sent.length, 1);
+  assert.deepEqual(replies[1], replies[0]);
+  assert.deepEqual(replies[2], replies[0]);
+  assert.equal(replies[0][0], 200);
+  assert.equal(replies[0][1], "ok");
+});
+
+test("a 410 drops the record, a bad host gets 400, a 21st device 409, a service 404", async (t) => {
+  stubFetch(t, (url) => (url.endsWith("/gone") ? 410 : 201));
+  const { env, call, writeBoard } = setup();
+  const records = () => [...env.BUCKET.objects.keys()].filter((k) => k.startsWith("push/"));
+  const put = (body, principal) =>
+    call("/api/push/subscriptions", { method: "PUT", body, principal });
+  const gone = await browser("https://fcm.googleapis.com/fcm/send/gone");
+  const live = await browser("https://fcm.googleapis.com/fcm/send/live");
+  await put(gone.body);
+  await put(live.body);
+  const etag = (await writeBoard([RETRY])).headers.get("ETag");
+  await writeBoard([RETRY_WAITS], etag);
+  assert.equal(records().length, 1);
+  assert.equal(JSON.parse(env.BUCKET.objects.get(records()[0]).bytes).endpoint, live.body.endpoint);
+
+  const bad = await put((await browser("https://evil.example.test/push")).body);
+  assert.equal(bad.status, 400);
+  assert.equal(await bad.text(), "push endpoint host is not allowed");
+
+  for (let i = 0; records().length < 20; i++)
+    assert.equal(
+      (await put((await browser(`https://fcm.googleapis.com/fcm/send/d${i}`)).body)).status,
+      204,
+    );
+  const full = await put((await browser("https://fcm.googleapis.com/fcm/send/extra")).body);
+  assert.equal(full.status, 409);
+  assert.equal(await full.text(), "push device limit reached (20)");
+  assert.equal((await put(live.body)).status, 204);
+  assert.equal(
+    (
+      await call("/api/push/subscriptions", {
+        method: "DELETE",
+        body: { endpoint: live.body.endpoint },
+      })
+    ).status,
+    204,
+  );
+  assert.equal(records().length, 19);
+
+  const before = records().length;
+  for (const [path, method, body] of [
+    ["/api/push/key", "GET"],
+    ["/api/push/subscriptions", "PUT", live.body],
+    ["/api/push/subscriptions", "DELETE", { endpoint: gone.body.endpoint }],
+  ])
+    assert.equal((await call(path, { method, body, principal: device })).status, 404);
+  assert.equal(records().length, before);
 });

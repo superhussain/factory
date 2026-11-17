@@ -29,6 +29,7 @@ import {
   REVIEWERS,
 } from "./escalation.js";
 import { announce, connectEvents, EVENTS_PATH } from "./events.js";
+import { boardPushes, pushKey, sendPushes, validSubscription } from "./push.js";
 import {
   newPairingCode,
   OFFLINE_MINUTES,
@@ -395,20 +396,20 @@ const needsCondition = () => reply('PUT needs If-Match: "<etag>" or If-None-Matc
 
 // Board and backlog writes must name the exact version they replace, or create the
 // file only if it's absent, so no device clobbers another.
-async function casPut(request, env, key, type) {
+async function casPut(request, env, key, type, ctx) {
   const cond = condition(request);
   if (!cond) return needsCondition();
   const body = await readBody(request, MAX_BOARD);
   if (body === null) return reply("body over 4 MiB", 413);
+  let data, stored;
   if (key === "board.json") {
-    let data;
     try {
       data = JSON.parse(body);
     } catch {
       return reply("body is not JSON", 400);
     }
     if (!Array.isArray(data?.jobs)) return reply("body needs a jobs array", 400);
-    const stored = await storedBoard(env);
+    stored = await storedBoard(env);
     const bad =
       checkGoals(data.jobs) ??
       (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
@@ -427,6 +428,15 @@ async function casPut(request, env, key, type) {
     httpMetadata: { contentType: type },
   });
   if (obj) await announce(env, key);
+  // The stored board is the true prior version only when the write named its ETag.
+  if (obj && stored && cond.has("If-Match") && stored.etag === cond.get("If-Match")) {
+    const events = boardPushes(stored.jobs, data.jobs);
+    if (events.length) {
+      const send = sendPushes(env, events).catch(() => {});
+      if (ctx) ctx.waitUntil(send);
+      else await send;
+    }
+  }
   return obj
     ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
     : reply("precondition failed", 412);
@@ -2280,6 +2290,38 @@ async function ideaFilePut(request, env, name) {
   return reply("ok");
 }
 
+const MAX_PUSH_BODY = 4 << 10;
+const MAX_PUSH_DEVICES = 20;
+const pushRecordKey = async (endpoint) =>
+  `push/${await sha256(new TextEncoder().encode(endpoint))}.json`;
+
+function pushKeyGet(env) {
+  const key = pushKey(env);
+  return key ? reply(JSON.stringify({ key }), 200, "application/json") : notFound();
+}
+
+// One record per browser, keyed by its endpoint's hash, so a repeat subscribe replaces it.
+async function pushSubscribe(request, env) {
+  const body = await readJson(request, MAX_PUSH_BODY);
+  if (body instanceof Response) return body;
+  const record = validSubscription(body);
+  if (typeof record === "string") return reply(record, 400);
+  const key = await pushRecordKey(record.endpoint);
+  const { objects } = await env.BUCKET.list({ prefix: "push/" });
+  if (objects.length >= MAX_PUSH_DEVICES && !objects.some((o) => o.key === key))
+    return reply(`push device limit reached (${MAX_PUSH_DEVICES})`, 409);
+  await env.BUCKET.put(key, JSON.stringify(record), JSON_TYPE);
+  return reply(null, 204);
+}
+
+async function pushUnsubscribe(request, env) {
+  const body = await readJson(request, MAX_PUSH_BODY);
+  if (body instanceof Response) return body;
+  if (typeof body?.endpoint !== "string") return reply("body needs an endpoint", 400);
+  await env.BUCKET.delete(await pushRecordKey(body.endpoint));
+  return reply(null, 204);
+}
+
 async function api(request, env, path, principal, ctx) {
   const method = request.method;
   if (path.startsWith("/api/pipeline/retro/")) {
@@ -2369,11 +2411,18 @@ async function api(request, env, path, principal, ctx) {
   if (path === "/api/review/escalation" && method === "POST") return reviewEscalation(request, env);
   if (path === "/api/board/archive")
     return method === "GET" ? archiveGet(request, env) : notFound();
+  if (path === "/api/push/key" || path === "/api/push/subscriptions") {
+    if (principal.kind !== "user") return notFound();
+    if (path === "/api/push/key") return method === "GET" ? pushKeyGet(env) : notFound();
+    if (method === "PUT") return pushSubscribe(request, env);
+    if (method === "DELETE") return pushUnsubscribe(request, env);
+    return notFound();
+  }
   if (path === "/api/board" || path === "/api/backlog") {
     const [key, type] =
       path === "/api/board" ? ["board.json", "application/json"] : ["backlog.md", "text/markdown"];
     if (method === "GET") return getFile(env, key, type);
-    if (method === "PUT") return casPut(request, env, key, type);
+    if (method === "PUT") return casPut(request, env, key, type, ctx);
     return notFound();
   }
   m = path.match(PROJECT_RETRO);

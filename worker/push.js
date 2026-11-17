@@ -104,11 +104,14 @@ export function waitsOnYou(j) {
   );
 }
 
-/** The needs and merged changes between two board job lists, in new board order. */
+const hasId = (j) => typeof j?.id === "string";
+
+/** The needs and merged changes between two board job lists, in new board order. Rows without
+ * a string id are skipped, as the board checks skip them. */
 export function boardPushes(before, after) {
-  const old = new Map(before.map((j) => [j.id, j]));
+  const old = new Map(before.filter(hasId).map((j) => [j.id, j]));
   const events = [];
-  for (const j of after) {
+  for (const j of after.filter(hasId)) {
     const prev = old.get(j.id);
     if (waitsOnYou(j) && !(prev && waitsOnYou(prev)))
       events.push({ kind: "needs", id: j.id, title: j.title });
