@@ -912,6 +912,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="15">Every 15 seconds</option><option value="30">Every 30 seconds</option><option value="60">Every 60 seconds</option></select></label>
       <p class="muted" id="display-poll-help">If live updates drop, the board refreshes on this schedule and the backlog every 2 minutes. Refreshing pauses while the window is hidden or unfocused. With notifications on, it refreshes every 30 seconds instead.</p>
       <fieldset id="display-filter"><legend>Show jobs from</legend></fieldset>
+      <label for="display-starred">Starred jobs<select id="display-starred" aria-describedby="display-starred-help"><option value="float">Float to the top of each column</option><option value="only">Show only starred jobs</option><option value="off">Keep board order</option></select></label>
+      <p class="muted" id="display-starred-help">Star a job with the star button in its job panel. Stars are saved in this browser. The needs you column always shows its jobs.</p>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
       <p class="muted" id="display-card-fields-help">Cards in the needs you column always show what the job is waiting on.</p>
@@ -8027,6 +8029,7 @@ function renderDisplaySettings() {
   $('display-theme').value = theme;
   $('display-density').value = density;
   $('display-poll').value = String(pollSeconds);
+  $('display-starred').value = starView;
   for (const box of $('display-columns').querySelectorAll('input')) box.checked = !hiddenColumns.has(box.dataset.stage);
   for (const box of $('display-card-fields').querySelectorAll('input')) box.checked = !hiddenCardFields.has(box.dataset.field);
   for (const box of $('display-drawer-links').querySelectorAll('input')) box.checked = !hiddenDrawerLinks.has(box.dataset.link);
@@ -8082,6 +8085,7 @@ $('display-install').addEventListener('click', async () => {
 renderInstall();
 $('display-theme').addEventListener('change', () => { theme = pickDisplay($('display-theme').value, THEMES); store.set(DISPLAY_KEYS.theme, theme); applyDisplay(); displaySaved(); });
 $('display-density').addEventListener('change', () => { density = pickDisplay($('display-density').value, DENSITIES); store.set(DISPLAY_KEYS.density, density); applyDisplay(); displaySaved(); });
+$('display-starred').addEventListener('change', () => { setStarView($('display-starred').value); displaySaved(); });
 $('display-poll').addEventListener('change', () => { pollSeconds = pickDisplay(Number($('display-poll').value), POLL_SECONDS, POLL_DEFAULT); store.set(DISPLAY_KEYS.poll, pollSeconds); schedulePoll(); displaySaved(); });
 $('display-columns').addEventListener('change', e => {
   const s = e.target.dataset.stage;
@@ -8113,7 +8117,7 @@ $('display-idea-project').addEventListener('change', () => {
 $('display-reset').addEventListener('click', () => {
   for (const key of [...Object.values(DISPLAY_KEYS), PROJECTS_HIDDEN_KEY, 'factory-project']) store.remove(key);
   resetDrawerWidth();
-  theme = 'system'; density = 'comfortable'; pollSeconds = POLL_DEFAULT;
+  theme = 'system'; density = 'comfortable'; pollSeconds = POLL_DEFAULT; starView = 'float';
   hiddenProjects.clear();
   hiddenColumns.clear();
   hiddenCardFields.clear();
