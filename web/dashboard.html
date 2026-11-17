@@ -4957,7 +4957,7 @@ $('detail').addEventListener('wheel', (e) => {
 }, { passive: false });
 // The details sit outside the page's scroller, so a touch drag on them does not scroll it either.
 // A drag that starts more up or down than sideways moves the page with the finger.
-// Sideways drags, form fields and sideways scrollers keep their own touches.
+// Form fields keep their own touches. A drag that starts more sideways than up or down is left to the browser, so a sideways scroller such as the agents table still pans.
 // A flick on the details keeps the page moving after the finger lifts, slowing like a native page flick.
 // A new touch, a wheel, a scroll set by other code, either end of the page or a closed drawer stops it.
 const GLIDE_MS = 325;
@@ -4995,7 +4995,7 @@ $('detail').addEventListener('touchstart', (e) => {
   stopHeadGlide();
   headDrag = null;
   if (!headCollapse || e.touches.length !== 1 || !e.target.closest(HEAD_MOVERS)) return;
-  if (e.target.closest('input, textarea, select') || sidewaysScroller(e.target, $('detail'))) return;
+  if (e.target.closest('input, textarea, select')) return;
   const t = e.touches[0];
   headDrag = { x0: t.clientX, y0: t.clientY, top: $('d-doc').scrollTop, active: false, y: t.clientY, t: e.timeStamp, v: 0 };
 }, { passive: true });
