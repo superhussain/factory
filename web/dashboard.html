@@ -8043,7 +8043,7 @@ async function setPush(on) {
     }
   } catch {
     // A failed turn-on drops any local subscription and reports it. A failed turn-off leaves the box on and the status as it was.
-    if (on) await (await pushManager?.getSubscription())?.unsubscribe().catch(() => {});
+    if (on) await pushManager?.getSubscription().then((s) => s?.unsubscribe()).catch(() => {});
     box.checked = !on;
     box.disabled = false;
     if (on) $('push-status').textContent = PUSH_STATUS.failed;
