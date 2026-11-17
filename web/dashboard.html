@@ -7796,6 +7796,7 @@ let notifyOn = store.get(NOTIFY_KEY) === 'on';
 let remindHours = Number(store.get(REMIND_KEY));
 if (!REMIND_HOURS.includes(remindHours)) remindHours = 0;
 let waitingSeen = null;
+const reminded = new Set();
 function notifySupported() { return 'Notification' in window; }
 function notifyActive() { return notifyOn && notifySupported() && Notification.permission === 'granted'; }
 function notifyNeeds() {
@@ -7804,6 +7805,7 @@ function notifyNeeds() {
     for (const j of jobs) if (waiting.has(j.id) && !waitingSeen.has(j.id)) showNeedsNotification(j);
   }
   waitingSeen = waiting;
+  remindWaiting();
 }
 function showNeedsNotification(j) {
   try {
@@ -7811,6 +7813,28 @@ function showNeedsNotification(j) {
     n.onclick = () => { window.focus(); openCard(j.id); n.close(); };
   } catch {}
 }
+// One reminder per wait: the key changes when the job's updated time does.
+function remindWaiting() {
+  if (!remindHours || !document.hidden || !notifyActive()) return;
+  const due = jobs.filter((j) => waitsOnYou(j) && Date.now() - Date.parse(j.updated) >= remindHours * 3600000 && !reminded.has(j.id + '@' + j.updated))
+    .sort((a, b) => Date.parse(a.updated) - Date.parse(b.updated));
+  if (!due.length) return;
+  for (const j of due) reminded.add(j.id + '@' + j.updated);
+  showReminder(due);
+}
+function showReminder(due) {
+  try {
+    if (due.length === 1) {
+      const [j] = due;
+      const n = new Notification('Still needs you: ' + String(j.id).slice(0, 80), { body: String(j.title || j.id).slice(0, 120), tag: 'factory-remind' });
+      n.onclick = () => { window.focus(); openCard(j.id); n.close(); };
+    } else {
+      const n = new Notification('Still needs you: ' + due.length + ' jobs', { body: due.map((j) => j.id).join(', ').slice(0, 120), tag: 'factory-remind' });
+      n.onclick = () => { window.focus(); n.close(); };
+    }
+  } catch {}
+}
+setInterval(remindWaiting, REMIND_CHECK_MS);
 function renderNotifySettings() {
   const permission = notifySupported() ? Notification.permission : 'unsupported';
   $('notify-needs').disabled = permission === 'unsupported';
