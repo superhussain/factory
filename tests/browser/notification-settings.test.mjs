@@ -339,6 +339,8 @@ test("notification settings", { timeout: 180000 }, async (t) => {
         push.subStatus = status;
         await page.click("#notify-push");
         await pushText(PUSH_HELP, line);
+        // The abort line repeats the 500 line, so also wait for setPush to finish.
+        await page.waitForSelector("#notify-push:not([disabled])", wait);
         assert.equal(await page.$eval("#notify-push", (el) => el.checked), false);
         assert.deepEqual(
           (await pushCalls()).map(([name]) => name),
