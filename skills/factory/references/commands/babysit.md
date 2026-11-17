@@ -73,6 +73,8 @@ Run `python3 "$RUNTIME" pr-state "$SLUG/<id>"`. It prints one JSON line,
 (gh failed): patch `{"needs": "<the stderr line>", "babysit": null, "claim": null}`, report
 that line and stop. Otherwise act on `next`, then read again.
 
+When the job's pr is in the project's archive repo, not $REPO, pass -R <archive> wherever this file says -R "$REPO", and treat a merge reading as its No note column: hand back.
+
 The session ends only after a `merged` or `closed` close-out, a `needs` or `needs-human`
 patch, or a hand-back. After a merge or queue command, read again. A queued PR reads
 `wait`, so keep reading until it merges.

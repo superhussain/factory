@@ -158,6 +158,7 @@ Handoff requires a quiescent checkpoint, clean published branch and the
 owning session. It uploads artifacts before releasing the claim. Resume follows
 the installed [execution guide](../skills/factory/references/execution.md), never
 an automatic takeover or reset of review/approval counters.
+Within one command, the runtime reuses a 200 answer from /projects.json, /api/pipeline/global or /api/pipeline/effective/<slug> for up to 60 seconds. A pipeline or project write clears it.
 
 ## Session retro digest
 
