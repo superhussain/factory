@@ -218,7 +218,7 @@ RELEASE = ("needs-human", "pr-open", "merged", "closed")
 # Stages a job finishes in. Entering one stamps done, leaving one clears it.
 TERMINAL = ("merged", "closed")
 # How one job relates to another, in a job's refs.
-REF_KINDS = ("rework-of", "follow-up-of", "sub-job-of", "batched-into")
+REF_KINDS = ("rework-of", "follow-up-of", "sub-job-of", "batched-into", "depends-on")
 # A rider is an idea that ships inside another job. It follows that lead's stage and PR.
 BATCH_REF = "batched-into"
 MAX_RIDERS = 20
@@ -925,6 +925,8 @@ def board_write(factory, job_id, patch, show=True):
     if patch.get("needs") is not None and not isinstance(patch["needs"], str):
         fail("needs must be a string or null", 2)
     check_refs(patch.get("refs"))
+    if {"id": job_id, "kind": "depends-on"} in (patch.get("refs") or []):
+        fail(f"a job cannot depend on itself: drop the depends-on ref to {job_id}. Nothing was written.", 2)
     check_build(patch.get("build"))
     check_tracer(patch.get("tracer"))
     check_pipeline(patch.get("pipeline"))
@@ -1823,7 +1825,7 @@ def queue_backlog_item(home, slug, feature, verdict, context=None):
     return left
 
 
-BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$", re.ASCII)
+BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of|depends-on) (\w[\w.-]*)\)$", re.ASCII)
 
 
 def suffix_refs(ref):
