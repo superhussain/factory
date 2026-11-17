@@ -341,7 +341,7 @@ async function browserRun(origin) {
           actions = Object.values(contextual).flat().length;
         assert.equal(
           s.count,
-          `${jobs} ${jobs === 1 ? "job" : "jobs"}${actions ? " · " + actions + " for 092-context" : ""}${text === "" ? " · 3 commands" : matchingCommand ? " · 1 command" : ""}`,
+          `${jobs} ${jobs === 1 ? "job" : "jobs"}${actions ? " · " + actions + " for 092-context" : ""}${text === "" ? " · 4 commands" : matchingCommand ? " · 1 command" : ""}`,
         );
         assert.equal(s.empty, !s.rows.length);
         assert.equal(s.emptyText, withDrawer ? "No matching jobs or actions" : "No jobs found");
