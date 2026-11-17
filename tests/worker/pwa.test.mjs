@@ -196,6 +196,15 @@ test("service worker shows a push and opens only same-origin URLs on click", asy
   ];
   await click("/#042-sample-retry");
   await click("https://evil.example.test/#042-sample-retry");
+  windows = [
+    {
+      focus: async () => calls.push(["focus uncontrolled"]),
+      navigate: async () => {
+        throw new TypeError("not controlled");
+      },
+    },
+  ];
+  await click("/#042-sample-retry");
   windows = [];
   await click("/#042-sample-retry");
   const options = { type: "window", includeUncontrolled: true };
@@ -208,6 +217,10 @@ test("service worker shows a push and opens only same-origin URLs on click", asy
     ["matchAll", options],
     ["focus"],
     ["navigate", "/"],
+    ["close"],
+    ["matchAll", options],
+    ["focus uncontrolled"],
+    ["open", serverEnv.FACTORY_ORIGIN + "/#042-sample-retry"],
     ["close"],
     ["matchAll", options],
     ["open", serverEnv.FACTORY_ORIGIN + "/#042-sample-retry"],

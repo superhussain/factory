@@ -111,7 +111,8 @@ export function serviceWorker() {
       self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async ([win]) => {
         if (!win) return self.clients.openWindow(url);
         await win.focus();
-        return win.navigate(url);
+        // navigate rejects for a tab this worker does not control, so open the job instead.
+        return win.navigate(url).catch(() => self.clients.openWindow(url));
       }),
     );
   });
