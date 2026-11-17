@@ -236,6 +236,47 @@ whether it was admitted or why it was skipped, even when nothing was admitted. I
 `retro upload failed: <status> <text>` to stderr and never changes the exit code. A Worker
 without the route answers 404. The `#/retros` dashboard page lists the runs.
 
+## Tool-call audit
+
+```text
+python3 <installed-skill>/runtime/factory.py audit <job-id>
+```
+
+`audit` lists every tool call that this host's Claude Code sessions made in a
+job's worktree, one row per call, oldest first. It reads the transcript folders
+under `~/.claude/projects`, or `$CLAUDE_CONFIG_DIR/projects`, whose name holds
+`factory-<job-id>`, with each main session and its subagents. Each row shows the
+time, the first 8 characters of the main session, the agent (`main` or the
+subagent type), the tool, its flags and its target. It covers this host only:
+sessions on other hosts, and sessions started outside the job's worktree, do not
+show. It writes nothing and makes no network call.
+
+Flags name risky calls. They are heuristics that inform a reader and block nothing.
+
+| Flag | Tools | Example hit |
+| --- | --- | --- |
+| `force-push` | Bash | `git push --force origin factory/1017-add-x` |
+| `hard-reset` | Bash | `git reset --hard HEAD~1` |
+| `branch-delete` | Bash | `git branch -D old` |
+| `recursive-delete` | Bash | `rm -rf build` |
+| `no-verify` | Bash | `git commit --no-verify -m x` |
+| `sudo` | Bash | `sudo chown u x` |
+| `pipe-to-shell` | Bash | `curl ... \| sh` |
+| `deploy` | Bash | `wrangler deploy` |
+| `pr-merge` | Bash | `gh pr merge 7` |
+| `sandbox-off` | Bash | input `dangerouslyDisableSandbox: true` |
+| `secret-file` | Bash, Read, Edit, Write, Grep `path` | `Read ~/app/.env` |
+| `denied` | any | the call's result is an error that holds a denial phrase |
+
+Flags print in this order, joined by `,`; a call with none prints `-`. Flags
+match the raw target in memory. The printed target has the home path folded to
+`~`, then the same redaction as `retro digest`, so header values, bearer tokens
+and secret-named values print as `[redacted]`. It is then cut to 120 characters.
+
+A bad job id exits 2. A missing projects directory exits 4 with
+`no Claude Code transcripts at <path>`. No session in the job's worktree exits 4
+with `no Claude Code session on this host ran in a factory-<job-id> worktree`.
+
 ## Exit recovery
 
 | Exit | Action |
