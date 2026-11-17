@@ -1785,6 +1785,21 @@ class RetroPickupTest(PickupFixture):
         self.assertEqual(self.pickup(), (0, f"pushed 1 sessions to retro/{DEVICE}/{self.date}.jsonl\n", ""))
         self.assertEqual(len(self.retro_puts()), 1)
 
+    def test_a_malformed_record_pushes_again(self):
+        (self.home / "retro-push.json").write_text("{not json", encoding="utf-8")
+        self.assertEqual(self.pickup(), (0, f"pushed 1 sessions to retro/{DEVICE}/{self.date}.jsonl\n", ""))
+        self.assertEqual(len(self.retro_puts()), 1)
+        self.assertEqual(json.loads((self.home / "retro-push.json").read_text(encoding="utf-8")),
+                         {"version": 1, "date": self.date})
+
+    def test_an_unknown_version_pushes_again(self):
+        (self.home / "retro-push.json").write_text(json.dumps({"version": 2, "date": self.date}),
+                                                   encoding="utf-8")
+        self.assertEqual(self.pickup(), (0, f"pushed 1 sessions to retro/{DEVICE}/{self.date}.jsonl\n", ""))
+        self.assertEqual(len(self.retro_puts()), 1)
+        self.assertEqual(json.loads((self.home / "retro-push.json").read_text(encoding="utf-8")),
+                         {"version": 1, "date": self.date})
+
     def test_a_failed_push_warns_and_still_launches(self):
         self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
         self.board["jobs"] = [idea("120-sample-digest", "alpha")]
