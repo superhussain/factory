@@ -138,7 +138,7 @@
   factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
   factory.py retro aggregate [--days N]     pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
   factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, add its cards to the backlog
-  factory.py audit <job-id>  list this host's tool calls in the job's worktree, risky ones flagged
+  factory.py audit <job-id>                 list this host's tool calls in the job's worktree, risky ones flagged
   factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]
                                             append one row to the job's agents, after checking this
                                             session holds the claim, and print it as JSON
@@ -9441,6 +9441,7 @@ AUDIT_FLAGS = (
 )
 AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
 AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
+AUDIT_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
 def audit_target_raw(name, inp):
@@ -9463,8 +9464,10 @@ def audit_target_raw(name, inp):
 
 
 def audit_target(raw):
-    """raw as it prints: home as ~, retro-redacted, whitespace collapsed, at most 120 characters."""
-    return " ".join(retro_redact(raw.replace(str(Path.home()), "~")).split())[:120]
+    """raw as it prints: home as ~, retro-redacted, whitespace collapsed, control characters as ?,
+    at most 120 characters."""
+    folded = re.sub(re.escape(str(Path.home())) + r"(?=/|$)", "~", raw)
+    return AUDIT_CONTROL.sub("?", " ".join(retro_redact(folded).split()))[:120]
 
 
 def audit_flags(name, inp, raw, denied):
@@ -9529,7 +9532,7 @@ def audit_rows(job_id):
                                or "unknown")
                 except (OSError, ValueError, AttributeError):
                     kind = "unknown"
-                rows += [{"session": path.stem[:8], "agent": kind, **row} for row in audit_scan(sub, False)]
+                rows += [{"session": path.stem[:8], "agent": AUDIT_CONTROL.sub("?", kind), **row} for row in audit_scan(sub, False)]
     if not sessions:
         fail(f"no Claude Code session on this host ran in a factory-{job_id} worktree", 4)
     return sorted(rows, key=lambda r: (r["time"], r["session"])), sessions
@@ -9540,7 +9543,7 @@ def audit_cmd(job_id):
         fail("usage: factory.py audit <job-id>, a full job id such as 1017-add-x", 2)
     rows, sessions = audit_rows(job_id)
     flagged = sum(1 for r in rows if r["flags"])
-    print(f"job {job_id} on {retro_host()}: {len(rows)} calls in {sessions} session{'' if sessions == 1 else 's'}, "
+    print(f"job {job_id} on {retro_host()}: {len(rows)} call{'' if len(rows) == 1 else 's'} in {sessions} session{'' if sessions == 1 else 's'}, "
           f"{flagged} flagged")
     columns = ("time", "session", "agent", "tool", "flags", "target")
     lines = [columns] + [(r["time"], r["session"], r["agent"], r["tool"], ",".join(r["flags"]) or "-", r["target"])

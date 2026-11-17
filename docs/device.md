@@ -271,7 +271,8 @@ Flags name risky calls. They are heuristics that inform a reader and block nothi
 Flags print in this order, joined by `,`; a call with none prints `-`. Flags
 match the raw target in memory. The printed target has the home path folded to
 `~`, then the same redaction as `retro digest`, so header values, bearer tokens
-and secret-named values print as `[redacted]`. It is then cut to 120 characters.
+and secret-named values print as `[redacted]`. Control characters in the target
+and the agent name print as `?`, and the target is cut to 120 characters.
 
 A bad job id exits 2. A missing projects directory exits 4 with
 `no Claude Code transcripts at <path>`. No session in the job's worktree exits 4
