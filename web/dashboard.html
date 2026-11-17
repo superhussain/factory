@@ -181,8 +181,20 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (pointer: coarse) { .filter-menu label { min-height: 44px; } .filter-menu .filter-title { white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; } }
   .header-actions { display: flex; gap: inherit; }
   body[data-view="settings"] #board, body[data-view="settings"] #detail,
-  body[data-view="retros"] #board, body[data-view="retros"] #detail { display: none; }
+  body[data-view="retros"] #board, body[data-view="retros"] #detail,
+  body[data-view="inbox"] #board, body[data-view="inbox"] #detail { display: none; }
   #retros-page { max-width: 1040px; }
+  #inbox-page { max-width: 1040px; }
+  #inbox-list { list-style: none; margin: 0; padding: 0; }
+  .inbox-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 16px; padding: 12px 10px; border-bottom: 1px solid var(--line); }
+  .inbox-kind { font-size: 11px; font-weight: 600; }
+  .inbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .inbox-actions a.btn { text-decoration: none; }
+  @media (pointer: coarse) { .inbox-actions .btn { min-height: 44px; display: inline-flex; align-items: center; } }
+  @media (max-width: 760px) {
+    .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding: 12px 4px; }
+    .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
+  }
   #retros-list { display: grid; gap: 20px; }
   .settings-section.retro-run { padding: 20px 20px 12px; }
   .retro-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; margin-bottom: 14px; }
@@ -196,9 +208,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .retro-finding { align-items: start; padding: 12px 10px; border-bottom: 1px solid var(--line); }
   .retro-finding:last-child { border-bottom: 0; }
   .retro-finding[aria-current="true"] { background: var(--accent-soft); border-radius: 10px; }
-  .retro-rank { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .retro-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
-  .retro-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+  .retro-rank, .inbox-rank { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .retro-title, .inbox-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+  .inbox-title { margin-top: 4px; }
+  .retro-meta, .inbox-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .retro-share { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .retro-share-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .retro-chip-ref { font-weight: 400; white-space: pre; }
@@ -1100,6 +1113,14 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
   <p class="muted" id="retros-status" role="status"></p>
   <div id="retros-list"></div>
 </div>
+<div class="settings-page" id="inbox-page" role="region" aria-labelledby="inbox-page-heading" hidden>
+  <div class="settings-head">
+    <a class="btn icon" id="inbox-back" href="#" aria-label="Back to board" title="Back to board (H)" aria-keyshortcuts="h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
+    <h2 id="inbox-page-heading" tabindex="-1">Inbox</h2>
+  </div>
+  <p class="muted" id="inbox-status" role="status"></p>
+  <ol id="inbox-list"></ol>
+</div>
 <dialog id="idea-dlg" aria-labelledby="idea-h">
   <form id="idea-form">
     <h2 id="idea-h">New idea</h2>
@@ -1360,7 +1381,7 @@ function refreshBacklog() {
   const version = boardReadVersion;
   // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
   const seen = backlog.map((b) => b.raw).join('\n');
-  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); });
+  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); renderInboxPage(); });
 }
 
 async function poll({ ifChanged = false, withBacklog = true } = {}) {
@@ -1995,7 +2016,8 @@ function renderJobResults() {
   const projectCommand = !projectFilter || projectFilter.hidden || projectFilter.disabled ? null
     : { kind: 'command', key: 'command:select-project', title: 'Select project', meta: 'Command · Change the board project filter', words: 'select project command' };
   const retrosCommand = { kind: 'command', key: 'command:retros', title: 'Retros', meta: 'Command · Open retro runs and findings (R)', words: 'retros retro runs findings command' };
-  const commands = [command, projectCommand, retrosCommand].filter((r) => r && tokens.every((t) => r.words.includes(t)));
+  const inboxCommand = { kind: 'command', key: 'command:inbox', title: 'Inbox', meta: 'Command · Everything waiting on you (I)', words: 'inbox waiting decisions command' };
+  const commands = [command, projectCommand, retrosCommand, inboxCommand].filter((r) => r && tokens.every((t) => r.words.includes(t)));
   const retroRows = retroPickerRows(tokens);
   const retroCount = retroRows.runs.length + retroRows.findings.length;
   const jobRows = matched.map((j) => ({
@@ -2023,6 +2045,7 @@ function renderJobResults() {
     { id: 'new-idea', title: 'New idea', rows: commands.filter((r) => r.key === 'command:new-idea') },
     { id: 'select-project', title: 'Select project', rows: commands.filter((r) => r.key === 'command:select-project') },
     { id: 'retros', title: 'Retros', rows: commands.filter((r) => r.key === 'command:retros') },
+    { id: 'inbox', title: 'Inbox', rows: commands.filter((r) => r.key === 'command:inbox') },
     ...[['needs-you', 'Needs you'], ...JOB_PICKER_STAGES.map((stage) => [stage, stage === 'pr-open' ? 'PR open' : stage[0].toUpperCase() + stage.slice(1)]),
       ['other', 'Other jobs']].map(([id, title]) => ({ id, title, rows: jobRows.filter((r) => jobResultSection(r.job) === id) })),
     { id: 'retro-runs', title: 'Retro runs', rows: retroRows.runs },
@@ -2182,6 +2205,11 @@ function activateJobResult() {
   if (row.key === 'command:retros') {
     closeJobPicker(true);
     location.hash = '#/retros';
+    return;
+  }
+  if (row.key === 'command:inbox') {
+    closeJobPicker(true);
+    location.hash = '#/inbox';
     return;
   }
   if (row.kind === 'command') {
@@ -2834,10 +2862,15 @@ function renderRoute() {
   const retrosWas = $('retros-page').hidden === false;
   settingsShown = section;
   const retrosOpen = !section && retrosRoute() !== null;
-  document.body.dataset.view = section ? 'settings' : retrosOpen ? 'retros' : 'board';
+  const inboxWas = $('inbox-page').hidden === false;
+  const inboxOpen = !section && inboxRoute() !== null;
+  document.body.dataset.view = section ? 'settings' : retrosOpen ? 'retros' : inboxOpen ? 'inbox' : 'board';
   $('settings-page').hidden = !section;
   $('retros-page').hidden = !retrosOpen;
-  document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : baseTitle;
+  $('inbox-page').hidden = !inboxOpen;
+  document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : baseTitle;
+  if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; $('inbox-page-heading').focus(); }
+  if (inboxOpen) renderInboxPage();
   if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
@@ -3033,6 +3066,109 @@ function renderRetrosPage() {
 }
 
 $('retros-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
+
+// Inbox page: the '#/inbox' view ranks every job and backlog line waiting on a person.
+let inboxHtml = '';
+let inboxError = '';
+// The row whose action button was clicked, for when disabling it moved focus to the body.
+let inboxFocusRow = -1;
+
+function inboxRoute() {
+  return location.hash === '#/inbox' ? true : null;
+}
+
+const INBOX_LABELS = { ask: 'Question', pr: 'Escalated PR', human: 'Needs recovery', backlog: 'Backlog decision' };
+
+function inboxKind(j) {
+  if (j.stage === 'needs-human') return 'human';
+  if (j.stage === 'pr-open' && (j.escalated === true || /^escalated:/i.test(String(j.note ?? '')))) return 'pr';
+  if (asks(j.needs)) return 'ask';
+  return null;
+}
+
+// Ranked by kind; within a job kind, prioritized jobs first, then the oldest. Backlog keeps file order.
+function inboxItems() {
+  const waiting = jobs.filter((j) => waitsOnYou(j) && isShown(j.project))
+    .sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at) || (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
+  return ['ask', 'pr', 'human'].flatMap((kind) => waiting.filter((j) => inboxKind(j) === kind).map((job) => ({ kind, job })))
+    .concat(visibleBacklog().map((item) => ({ kind: 'backlog', item })));
+}
+
+function renderInboxPage() {
+  if (inboxRoute() === null) return;
+  if (!loaded || !backlogLoaded) {
+    $('inbox-status').textContent = inboxError || 'Loading the inbox\u2026';
+    $('inbox-list').innerHTML = '';
+    inboxHtml = '';
+    return;
+  }
+  const items = inboxItems();
+  $('inbox-status').textContent = inboxError || (items.length ? '' : 'Nothing is waiting on you.');
+  const link = (href, text) => '<a class="btn" href="' + esc(href) + '">' + esc(text) + '</a>';
+  const html = items.map(({ kind, job: j, item }, i) => {
+    let title, meta, actions;
+    if (item) {
+      const ctx = item.context === undefined ? null : parseBacklogContext(item.context);
+      const busy = backlogBusy.has(item.raw) ? ' disabled' : '';
+      const href = '#/backlog/' + item.key;
+      title = item.text;
+      meta = [projectName(item)].concat(ctx ? 'Agent recommends ' + (ctx.recommend === 'approved' ? 'approve' : 'deny') : []);
+      actions = ctx?.questions.length ? link(href, 'Answer questions')
+        : '<button type="button" class="btn primary" data-inbox-decide="approved" data-raw="' + esc(item.raw) + '"' + busy + '>Approve</button>' +
+          '<button type="button" class="btn" data-inbox-decide="denied" data-raw="' + esc(item.raw) + '"' + busy + '>Deny</button>' + link(href, 'Open');
+    } else {
+      const pr = prLink(j);
+      title = j.title || j.id;
+      meta = [projectName(j), j.id].concat(asks(j.needs) ? j.needs : []);
+      actions = kind === 'ask' && j.needs.includes('#' + j.id + '/needs') ? link('#' + j.id + '/needs', 'Answer')
+        : (kind === 'pr' && canBabysit(j) ? '<button type="button" class="btn primary" data-inbox-babysit="' + esc(j.id) + '">Babysit PR #' + esc(pr.n) + '</button>' : '') +
+          (kind === 'pr' && pr ? '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>' : '') +
+          link('#' + j.id, 'Open job');
+    }
+    return '<li class="inbox-item"><span class="inbox-rank">' + (i + 1) + '</span>' +
+      '<div><span class="chip inbox-kind">' + INBOX_LABELS[kind] + '</span><p class="inbox-title">' + esc(title) + '</p>' +
+      '<p class="inbox-meta">' + meta.map(esc).join(' · ') + '</p></div>' +
+      '<div class="inbox-actions">' + actions + '</div></li>';
+  }).join('');
+  if (html === inboxHtml) return;
+  // Replacing the rows drops focus, so keep it on the same row, or on the heading when none are left.
+  const list = $('inbox-list');
+  const active = document.activeElement;
+  const row = list.contains(active) ? [...list.children].indexOf(active.closest('li')) : active === document.body ? inboxFocusRow : -1;
+  inboxFocusRow = -1;
+  inboxHtml = html;
+  list.innerHTML = html;
+  if (row >= 0) (list.children[Math.min(row, list.children.length - 1)]?.querySelector('.inbox-actions .btn:not(:disabled)') ?? $('inbox-page-heading')).focus();
+}
+
+function inboxReport(message) {
+  inboxError = message;
+  renderInboxPage();
+}
+
+// The project checks and copy of submitBacklogDecision, with no notes and no answers.
+async function inboxDecide(raw, pick, button) {
+  const item = backlog.find((b) => b.raw === raw);
+  if (!item || backlogBusy.has(raw)) return;
+  if (pick !== 'denied' && !projects) return inboxReport('Could not load projects. Refresh this page to retry.');
+  if (pick !== 'denied' && !projects.has(item.project)) return inboxReport('Register project ' + item.project + ' before approving this item.');
+  inboxReport('');
+  button.disabled = true;
+  try {
+    await decideBacklog(item, pick, '', '');
+  } catch (x) {
+    inboxReport(String(x.message || x));
+  }
+}
+
+$('inbox-list').addEventListener('click', (e) => {
+  if (e.target.closest('[data-inbox-babysit], [data-inbox-decide]')) inboxFocusRow = [...$('inbox-list').children].indexOf(e.target.closest('li'));
+  const babysit = e.target.closest('[data-inbox-babysit]');
+  if (babysit) babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxRoute() !== null });
+  const decide = e.target.closest('[data-inbox-decide]');
+  if (decide) inboxDecide(decide.dataset.raw, decide.dataset.inboxDecide, decide);
+});
+$('inbox-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
 
 // Pipeline settings: one in-memory draft per scope. Stored text is shown only through
 // value and textContent, never parsed as markup.
@@ -3831,12 +3967,13 @@ function renderBoard() {
       '<p>Jobs show up here as they move through the loop.</p>' +
       (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
-    if (!settingsShown && !retrosRoute()) document.title = BASE_TITLE;
+    if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = BASE_TITLE;
     syncAppBadge(0);
     $('next-waiting').hidden = true;
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
     renderRetrosPage();
+    renderInboxPage();
     return;
   }
   const noneShown = !shownProjectKeys().length;
@@ -3851,7 +3988,7 @@ function renderBoard() {
   waiting.splice(0, waiting.length, ...waitingJobs());
   $('next-waiting').hidden = !waiting.length;
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
-  if (!settingsShown && !retrosRoute()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
+  if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
@@ -3896,6 +4033,7 @@ function renderBoard() {
   }
   syncCardActions();
   renderRetrosPage();
+  renderInboxPage();
   heldDrawn = heldChipsKey();
 }
 
@@ -5363,7 +5501,7 @@ function closeDetail(keepHash = false) {
   const target = raw !== null ? focusBacklogControl(raw) : id && refocus ? focusJobCard(id) : null;
   target?.scrollIntoView({ block: 'nearest' });
   refreshPicker();
-  if (!keepHash && settingsRoute() === null && retrosRoute() === null) history.replaceState(null, '', location.pathname + location.search);
+  if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null) history.replaceState(null, '', location.pathname + location.search);
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
@@ -5386,7 +5524,7 @@ document.addEventListener('keydown', (e) => {
 // Arrow navigation over cards and job pages, plus n, j or /, p, s, r, w and a single-key openers.
 // A separate listener, so the Esc/Cmd+K handler above stays byte-identical.
 function handleBoardKeys(e) {
-  if (settingsRoute() !== null || retrosRoute() !== null) return;
+  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
   if (e.target.closest('input, textarea, select, [contenteditable], #d-resize, video')) return;
   if (document.querySelector('dialog[open]')) return;
@@ -5434,6 +5572,9 @@ function handleBoardKeys(e) {
   } else if (e.key === 'r') {
     e.preventDefault();
     location.hash = '#/retros';
+  } else if (e.key === 'i') {
+    e.preventDefault();
+    location.hash = '#/inbox';
   } else if (e.key === 'w') {
     const j = nextWaitingJob();
     if (!j) return;
@@ -5451,7 +5592,7 @@ document.addEventListener('keydown', handleBoardKeys);
 
 // b opens the first backlog item. a and d approve or deny the open one, which opens the next.
 function handleBacklogKeys(e) {
-  if (settingsRoute() !== null || retrosRoute() !== null) return;
+  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || e.repeat) return;
   if (e.target.closest('textarea, select, [contenteditable], #d-resize, input:not([type=radio]):not([type=checkbox])')) return;
   if (document.querySelector('dialog[open]')) return;
@@ -5485,7 +5626,7 @@ function handleHomeKey(e) {
   // preventDefault below keeps a select's type-ahead off it.
   if (e.target.closest('textarea, [contenteditable], #d-resize, input:not([type=radio]):not([type=checkbox])')) return;
   if (document.querySelector('dialog[open]')) return;
-  if (settingsRoute() !== null || retrosRoute() !== null) {
+  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null) {
     e.preventDefault();
     leaveSettings();
   } else if (openId || openBacklogRaw !== null) {
