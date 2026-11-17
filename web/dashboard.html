@@ -7862,8 +7862,9 @@ async function setPush(on) {
   const box = $('notify-push');
   box.disabled = true;
   let status = 'off';
+  let pushManager;
   try {
-    const pushManager = (await navigator.serviceWorker.ready).pushManager;
+    pushManager = (await navigator.serviceWorker.ready).pushManager;
     if (on) {
       if (Notification.permission === 'default') await Notification.requestPermission();
       if (Notification.permission === 'denied') $('push-help').textContent = PUSH_HELP.denied;
@@ -7876,12 +7877,13 @@ async function setPush(on) {
     } else {
       const subscription = await pushManager.getSubscription();
       if (subscription) {
-        await fetch('./api/push/subscriptions', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ endpoint: subscription.endpoint }) }).catch(() => {});
         await subscription.unsubscribe();
+        await fetch('./api/push/subscriptions', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ endpoint: subscription.endpoint }) }).catch(() => {});
       }
     }
   } catch {
-    // A failed turn-on reports it. A failed turn-off leaves the box on and the status as it was.
+    // A failed turn-on drops any local subscription and reports it. A failed turn-off leaves the box on and the status as it was.
+    if (on) await (await pushManager?.getSubscription())?.unsubscribe().catch(() => {});
     box.checked = !on;
     box.disabled = false;
     if (on) $('push-status').textContent = PUSH_STATUS.failed;

@@ -108,6 +108,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
         );
       if (path === "/api/push/subscriptions") {
         push.requests.push([request.method(), JSON.parse(request.postData())]);
+        if (push.subStatus === "abort") return request.abort();
         return request.respond({ status: push.subStatus, body: "" });
       }
       return request.continue();
@@ -299,9 +300,11 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.deepEqual(await pushCalls(), [["unsubscribe"]]);
       assert.deepEqual(push.requests.splice(0), [["DELETE", { endpoint: ENDPOINT }]]);
 
+      // "abort" makes the PUT throw after a good subscribe; the local subscription must go too.
       for (const [status, line] of [
         [409, "This instance already has 20 push devices. Turn push off on one first."],
         [500, "Push could not be turned on. Try again."],
+        ["abort", "Push could not be turned on. Try again."],
       ]) {
         push.subStatus = status;
         await page.click("#notify-push");
@@ -324,6 +327,10 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await page.waitForSelector("#notify-push:not([disabled])", wait);
       assert.equal(await page.$eval("#notify-push", (el) => el.checked), true);
       assert.equal(await text("#push-status"), "Push is on for this device.");
+      // Unsubscribe runs before the DELETE, so a failed unsubscribe keeps the server record.
+      assert.deepEqual(push.requests.splice(0), [
+        ["PUT", { endpoint: ENDPOINT, expirationTime: null, keys: { p256dh: "p", auth: "a" } }],
+      ]);
       await page.evaluate(() => {
         window.unsubscribeFails = false;
       });
