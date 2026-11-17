@@ -3047,10 +3047,16 @@ class AutoBabysitTest(PickupFixture):
             self.views[slug] = (200, dict(effective(slug, {"pickup": pickup}), stage_notes=notes))
         self.signals = {}
         self.reads = []
+        self.failure = None
+        self.race = None
         patch.object(factory, "pr_signals", side_effect=self.read).start()
 
     def read(self, repo, numbers, device):
         self.reads.append((repo, list(numbers)))
+        if self.race:
+            self.job("042-sample-export").update(self.race)
+        if self.failure:
+            return None, self.failure
         return {n: self.signals[n] for n in numbers if n in self.signals}, None
 
     def export(self, job_id="042-sample-export", project="alpha", n=7, **extra):
@@ -3116,6 +3122,27 @@ class AutoBabysitTest(PickupFixture):
         self.assertNotIn("auto-babysat", out)
         self.assertNotIn("auto_babysit", self.job("044-sample-export"))
         self.assertEqual(self.reads, [])
+
+    def test_a_failed_read_skips_the_repo(self):
+        self.board["jobs"] = [self.export()]
+        self.signals = {7: (HEAD, "fix-ci")}
+        self.failure = "gh is not installed on host-a"
+        self.assertEqual(self.pickup(), (0, "", "factory.py: pickup skips auto-babysit for sample/alpha: "
+                                                "gh is not installed on host-a\n"))
+        self.assertEqual((self.reads, self.puts()), ([("sample/alpha", [7])], []))
+        self.assertNotIn("babysit", self.job("042-sample-export"))
+
+    def test_the_write_rechecks_the_job(self):
+        for race in ({"babysit": {"at": "2026-01-02T12:00:00Z", "by": "dashboard"}},
+                     {"auto_babysit": {"count": 3, "head": "x", "reason": "rebase"}}):
+            with self.subTest(race=race):
+                self.calls.clear()
+                self.board["jobs"] = [self.export()]
+                self.signals = {7: (HEAD, "fix-ci")}
+                self.race = race
+                self.assertEqual(self.pickup(), (0, "", ""))
+                self.assertEqual(self.puts(), [])
+                self.assertEqual(self.job("042-sample-export"), self.export(**race))
 
     def test_board_refuses_the_field(self):
         self.board["jobs"] = [self.export()]
