@@ -247,6 +247,7 @@ async function browserRun(origin) {
           "New idea": [command],
           "Select project": ["command:select-project"],
           Retros: ["command:retros"],
+          Inbox: ["command:inbox"],
           ...expectedJobs,
         };
       assert.deepEqual(
@@ -319,7 +320,11 @@ async function browserRun(origin) {
           ...contextual,
           ...(matchingCommand ? { "New idea": [command] } : {}),
           ...(text === ""
-            ? { "Select project": ["command:select-project"], Retros: ["command:retros"] }
+            ? {
+                "Select project": ["command:select-project"],
+                Retros: ["command:retros"],
+                Inbox: ["command:inbox"],
+              }
             : {}),
           ...matchingJobs,
         };

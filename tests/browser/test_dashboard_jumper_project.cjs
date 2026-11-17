@@ -101,6 +101,13 @@ function commandRowsFor(text) {
       kind: "command",
       words: "retros retro runs findings command",
     },
+    {
+      key: "command:inbox",
+      title: "Inbox",
+      meta: "Command · Everything waiting on you (I)",
+      kind: "command",
+      words: "inbox waiting decisions command",
+    },
   ]
     .filter((r) => tokens.every((t) => r.words.includes(t)))
     .map(({ words: _words, ...r }) => r);
@@ -384,7 +391,7 @@ async function browserRun(origin) {
         const s = await state(page);
         const commandKeys =
           text === "" || text === "command"
-            ? ["command:new-idea", command, "command:retros"]
+            ? ["command:new-idea", command, "command:retros", "command:inbox"]
             : text === "new id"
               ? ["command:new-idea"]
               : text === "zz-no-match"
@@ -414,7 +421,13 @@ async function browserRun(origin) {
           ...(actions.some((r) => r.kind === "page") ? ["Pages"] : []),
           ...(actions.some((r) => r.kind === "link") ? ["Links"] : []),
           ...commandKeys.map((k) =>
-            k === command ? "Select project" : k === "command:retros" ? "Retros" : "New idea",
+            k === command
+              ? "Select project"
+              : k === "command:retros"
+                ? "Retros"
+                : k === "command:inbox"
+                  ? "Inbox"
+                  : "New idea",
           ),
           ...(text === ""
             ? ["Idea", "Build", "PR open", "Merged"]

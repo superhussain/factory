@@ -132,14 +132,15 @@ test("inbox page", { timeout: 180000 }, async (t) => {
         els.map((el) => [el.tagName, el.textContent, el.getAttribute("href")]),
       );
 
-    await t.test("before capture", { skip: !BEFORE || !SHOTS }, async () => {
-      await mkdir(SHOTS, { recursive: true });
-      const { page } = await openPage("");
-      await page.waitForSelector(".card", wait);
-      await page.waitForSelector(".backlog-card, [data-backlog-open]", wait);
-      await page.screenshot({ path: `${SHOTS}/before-board-needs.png` });
-      await page.browserContext().close();
-    });
+    if (BEFORE && SHOTS)
+      await t.test("before capture", async () => {
+        await mkdir(SHOTS, { recursive: true });
+        const { page } = await openPage("");
+        await page.waitForSelector(".card", wait);
+        await page.waitForSelector(".backlog-card, [data-backlog-open]", wait);
+        await page.screenshot({ path: `${SHOTS}/before-board-needs.png` });
+        await page.browserContext().close();
+      });
 
     const it = (name, fn) => t.test(name, { skip: BEFORE }, fn);
 
