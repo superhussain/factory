@@ -644,6 +644,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .status .updated-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     #updated { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .status .dot { flex: none; }
+    /* The job actions button drops under the star, so the title keeps the width it had before the star. */
+    .detail-head #d-star:not([hidden]) + #d-actions-wrap { margin-left: calc(-1 * (var(--icon-size) + 12px)); margin-top: calc(var(--icon-size) + 12px); }
   }
   @media (pointer: coarse) { :root { --icon-size: 44px; } }
 </style>
