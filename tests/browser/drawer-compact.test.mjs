@@ -274,7 +274,7 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       const hidden = Math.ceil(rest.pr - rest.title) + 4;
       assert.ok(hidden < rest.collapse, `shift ${hidden} under C ${rest.collapse}`);
       await scrollTo(hidden);
-      await page.focus("#d-actions");
+      await page.focus("#d-star");
       await page.keyboard.down("Shift");
       await page.keyboard.press("Tab");
       await page.keyboard.up("Shift");
@@ -302,7 +302,7 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
         pr.hidden = false;
       });
       await scrollTo(300);
-      await page.focus("#d-actions");
+      await page.focus("#d-star");
       await page.keyboard.down("Shift");
       await page.keyboard.press("Tab");
       await page.keyboard.up("Shift");
