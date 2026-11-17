@@ -646,8 +646,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .status .dot { flex: none; }
   }
   @media (pointer: coarse) { :root { --icon-size: 44px; } }
-  /* Five 44px icons and the status no longer share a phone row, so the status moves up beside the filter. */
-  @media (pointer: coarse) and (min-width: 361px) and (max-width: 760px) { .header-actions { order: 1; } }
+  /* Only when the icons and the status cannot share one row, the status moves up beside the filter. syncHeaderWrap sets wraps. */
+  @media (pointer: coarse) and (min-width: 361px) and (max-width: 760px) { header.wraps .header-actions { order: 1; } }
 </style>
 </head>
 <body>
@@ -2200,6 +2200,13 @@ function activateJobResult() {
 }
 
 $('job-jump').addEventListener('click', openJobPicker);
+function syncHeaderWrap() {
+  const header = document.querySelector('header');
+  header.classList.remove('wraps');
+  if (header.querySelector('.status').getBoundingClientRect().top >= header.querySelector('h1').getBoundingClientRect().bottom) header.classList.add('wraps');
+}
+const headerObserver = new ResizeObserver(syncHeaderWrap);
+for (const el of [document.querySelector('header'), $('filter-wrap'), document.querySelector('.header-actions'), document.querySelector('.status')]) headerObserver.observe(el);
 $('job-picker-close').addEventListener('click', () => closeJobPicker());
 $('job-picker-back').addEventListener('click', backToJobPicker);
 $('job-picker').addEventListener('cancel', (e) => { e.preventDefault(); cancelJobPicker(); });
