@@ -187,7 +187,7 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
 
 The board appears inside Paseo on web and desktop only. On iOS and Android the screen links to
 the dashboard in the browser instead. A browser that blocks third-party cookies cannot show the
-frame; the screen then offers **Sign in** and **Reload**. The first time, the screen shows a card with three sign-in steps; once the board has loaded on that device, it shows a short card instead. Sign in opens the dashboard in a small popup inside Paseo, so the desktop app signs in with its own cookies. When the board loads there, the popup closes and the frame reloads.
+frame; the screen then offers **Sign in**, **Reload** and **Open in a browser tab**. The first time, the screen shows a card with three sign-in steps; once the board has loaded on that device, it shows a short card instead. Sign in opens the dashboard in a small popup inside Paseo, so the desktop app signs in with its own cookies. When the board loads there, the popup closes and the frame reloads. In Safari, or another browser that blocks third-party cookies, the frame cannot load even after sign-in. Use **Open in a browser tab** there. It opens the board, or the linked job, in a normal tab outside Paseo.
 
 ### Inbox badge
 
