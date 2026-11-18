@@ -1251,6 +1251,25 @@ def feature_slug(feature):
     return "-".join(re.findall(r"[a-z0-9]+", feature.lower())[:3])[:40].strip("-") or "item"
 
 
+def context_below(lines, i):
+    """The indented block under lines[i], with its indent and blank edge lines removed."""
+    held = []
+    for below in lines[i + 1:]:
+        if below and not below.startswith("  "):
+            break
+        held.append(below[2:])
+    while held and not held[0].strip():
+        held.pop(0)
+    while held and not held[-1].strip():
+        held.pop()
+    return "\n".join(held)
+
+
+def open_job_ids(jobs):
+    """The ids of the board jobs not merged or closed."""
+    return {j.get("id") for j in jobs if j.get("stage") not in TERMINAL}
+
+
 def first_item(text, projects, paths, skipped, open_ids=frozenset):
     """(raw line, slug, feature, refs) for the first unchecked line this device can run, or None.
     Lines for a project with no checkout here are skipped, and their slugs added to skipped. A line whose
@@ -1274,12 +1293,7 @@ def first_item(text, projects, paths, skipped, open_ids=frozenset):
                 skipped.add(slug)
                 print(f"skipping {slug}: no checkout on this device", file=sys.stderr)
             continue
-        held = []
-        for below in lines[i + 1:]:
-            if below and not below.startswith("  "):
-                break
-            held.append(below[2:])
-        context, feature = "\n".join(held), m.group(2).rstrip()
+        context, feature = context_below(lines, i), m.group(2).rstrip()
         depends, _ = backlog_depends(text, context)
         refs, why = backlog_waits(text, context, open_ids() if depends else frozenset())
         if why is None:
@@ -1303,7 +1317,7 @@ def next_item():
 
         def open_ids():
             if "ids" not in board:
-                board["ids"] = {j.get("id") for j in read_board(home)["jobs"] if j.get("stage") not in TERMINAL}
+                board["ids"] = open_job_ids(read_board(home)["jobs"])
             return board["ids"]
         item = first_item(text if status == 200 else "", projects, paths, skipped, open_ids)
         if item is None:
@@ -1524,16 +1538,7 @@ def unchecked_lines(text):
         m = BACKLOG_LINE.match(line)
         if not m:
             continue
-        held = []
-        for below in lines[i + 1:]:
-            if below and not below.startswith("  "):
-                break
-            held.append(below[2:])
-        while held and not held[0].strip():
-            held.pop(0)
-        while held and not held[-1].strip():
-            held.pop()
-        found.append((line, m.group(1), m.group(2), "\n".join(held)))
+        found.append((line, m.group(1), m.group(2), context_below(lines, i)))
     return found
 
 
@@ -2418,7 +2423,7 @@ def batch_cmd(target, *idea_ids):
         if lead is None:
             fail(f"no job {lead_id} on the board. Nothing was written.", 4)
         alone = isinstance(lead.get("priority"), dict) and lead["priority"].get("alone") is True
-        open_ids = {j.get("id") for j in data["jobs"] if j.get("stage") not in TERMINAL}
+        open_ids = open_job_ids(data["jobs"])
         together = {lead_id} | {j.get("id") for j in riders_of(data, lead_id)}
         depends = {}
         if idea_ids:
@@ -5314,7 +5319,7 @@ def waiting_on(j, jobs):
     """The first depends-on id of an idea whose job is still open on the board, else None."""
     if j.get("stage") != IDEA:
         return None
-    open_ids = {o.get("id") for o in jobs if o.get("stage") not in TERMINAL}
+    open_ids = open_job_ids(jobs)
     return next((r["id"] for r in j.get("refs") or [] if isinstance(r, dict) and r.get("kind") == "depends-on"
                  and r.get("id") in open_ids), None)
 
