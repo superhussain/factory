@@ -921,6 +921,8 @@ async function capture(outdir, referencePath) {
     await view("board-desktop", 1440, 900, "light", async () => {});
     await view("board-desktop-dark", 1440, 900, "dark", async () => {});
     await view("board-mobile", 390, 844, "dark", async () => {});
+    await view("header-inbox-dark-390", 390, 844, "dark", (page) => clipOf(page, "header"));
+    await view("header-inbox-dark-1440", 1440, 900, "dark", (page) => clipOf(page, "header"));
     await view("drawer-desktop", 1440, 900, "light", openDrawer);
     await view("drawer-mobile", 390, 844, "dark", openDrawer);
     await view("drawer-mobile-scrolled", 375, 667, "dark", openScrolled);
