@@ -339,6 +339,14 @@ class PrStateTest(IsolatedTestCase):
         reading = json.loads(out)
         self.assertEqual((reading["base"], reading["stacked"], reading["next"]), ("trunk", False, "merge"))
 
+    def test_archive_pr_unusable_default_branch_exits_5(self):
+        (self.home / "projects" / "sample.md").write_text(
+            "---\nrepo: example/sample\narchive: example-upstream/sample\nbase: main\n---\n# Sample\n")
+        upstream = "https://github.com/example-upstream/sample/pull/47"
+        code, out, err, _ = self.state([(view(), checks("pass"))], pr=upstream, upstream_base="-bad")
+        self.assertEqual((code, out), (5, ""))
+        self.assertIn("gh printed an unusable default_branch", err)
+
     def test_gh_problem_exits_5(self):
         for reading, why in ((None, "not installed"), (("timeout", ""), "timed out"), ((1, ""), "gh auth status"),
                              ((0, "not json"), "no JSON")):
