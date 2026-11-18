@@ -1,16 +1,26 @@
 import type { PluginClientContext, PluginScreenProps } from "@getpaseo/plugin/client";
 import { openExternalUrl, useSettings } from "@getpaseo/plugin/client";
 import { ExternalLink, Icon, Loading, ScrollView, useToast } from "@getpaseo/plugin/client/ui";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
-import { dashboardSrc, parseDashboardOrigin, type EmbedMessage } from "../shared/embed";
+import { parseDashboardOrigin, type EmbedMessage } from "../shared/embed";
+import { frameUrl, startUrl } from "../shared/location";
+import type { Reload } from "../shared/reload";
 import { factorySettings } from "../shared/settings";
 import { setFrameInboxCount } from "./frame-inbox";
-import { DashboardFrame, hasLoadedBefore, markLoaded, paseoOrigin, useSignInPopup } from "./web";
+import {
+  DashboardFrame,
+  hasLoadedBefore,
+  markLoaded,
+  paseoOrigin,
+  saveLocation,
+  savedLocation,
+  useSignInPopup,
+} from "./web";
 
 const READY_TIMEOUT_MS = 4000;
 
-export function dashboardScreen(client: PluginClientContext) {
+export function dashboardScreen(client: PluginClientContext, reload: Reload) {
   return function DashboardScreen({ theme, layout, params, navigation }: PluginScreenProps) {
     const settings = useSettings(factorySettings);
     const toast = useToast();
@@ -19,14 +29,25 @@ export function dashboardScreen(client: PluginClientContext) {
     const [stalled, setStalled] = useState(false);
     const origin =
       settings.status === "ready" ? parseDashboardOrigin(settings.values.origin) : null;
-    const signIn = useSignInPopup(origin ?? "", () => setLoad((n) => n + 1));
+    const [src, setSrc] = useState<string | null>(null);
+    useEffect(() => {
+      if (origin) setSrc(startUrl(origin, params.job, savedLocation(origin)));
+    }, [origin, params.job]);
+    const reloadFrame = () => {
+      if (origin) setSrc(frameUrl(origin, savedLocation(origin)));
+      setLoad((n) => n + 1);
+    };
+    const reloadRef = useRef(reloadFrame);
+    reloadRef.current = reloadFrame;
+    useEffect(() => reload.listen(() => reloadRef.current()), []);
+    const signIn = useSignInPopup(origin ?? "", reloadFrame);
     useEffect(() => {
       if (!origin || Platform.OS !== "web") return;
       setReady(false);
       setStalled(false);
       const timer = setTimeout(() => setStalled(true), READY_TIMEOUT_MS);
       return () => clearTimeout(timer);
-    }, [origin, load]);
+    }, [origin, load, src]);
     useEffect(() => () => setFrameInboxCount(null), [origin, load]);
 
     const styles = {
@@ -125,7 +146,7 @@ export function dashboardScreen(client: PluginClientContext) {
           {button("Open settings", () => client.openSettings("dashboard"))}
         </View>
       );
-    const src = dashboardSrc(origin, params.job);
+    if (!src) return <Loading />;
     if (Platform.OS !== "web")
       return (
         <View style={[styles.screen, styles.body]}>
@@ -138,6 +159,7 @@ export function dashboardScreen(client: PluginClientContext) {
 
     const onMessage = (message: EmbedMessage) => {
       if (message.type === "factory-inbox-count") setFrameInboxCount(message.count);
+      else if (message.type === "factory-embed-location") saveLocation(origin, message.hash);
       else if (message.type === "factory-embed-ready") {
         markLoaded(origin);
         setReady(true);
@@ -181,7 +203,7 @@ export function dashboardScreen(client: PluginClientContext) {
                 )}
                 <View style={styles.actions}>
                   {button("Sign in", signIn, "LogIn")}
-                  {button("Reload", () => setLoad((n) => n + 1), "RotateCw", true)}
+                  {button("Reload", reloadFrame, "RotateCw", true)}
                   {button(
                     "Open in a browser tab",
                     () => void openExternalUrl(src),
