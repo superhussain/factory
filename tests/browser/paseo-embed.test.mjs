@@ -147,7 +147,8 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
 
     await t.test("unlisted origin", async () => {
       const other = await framedPage(browser, origin, UNLISTED);
-      await signInPopup(other, origin, UNLISTED);
+      const popup = await signInPopup(other, origin, UNLISTED);
+      await popup.waitForSelector("#board");
       await new Promise((resolve) => setTimeout(resolve, 3000));
       const board = await childFrame(other)
         .evaluate(() => document.querySelector("#board") !== null)

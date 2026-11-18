@@ -1,6 +1,6 @@
 import type { PluginClientContext, PluginScreenProps } from "@getpaseo/plugin/client";
 import { useSettings } from "@getpaseo/plugin/client";
-import { ExternalLink, Icon, Loading, useToast } from "@getpaseo/plugin/client/ui";
+import { ExternalLink, Icon, Loading, ScrollView, useToast } from "@getpaseo/plugin/client/ui";
 import { useEffect, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import { dashboardSrc, parseDashboardOrigin, type EmbedMessage } from "../shared/embed";
@@ -38,11 +38,18 @@ export function dashboardScreen(client: PluginClientContext) {
         left: 0,
         right: 0,
         bottom: 0,
+        backgroundColor: theme.colors.surface0,
+      },
+      overlayContent: {
+        flexGrow: 1,
         alignItems: "center" as const,
         justifyContent: "center" as const,
         padding: layout.compact ? 16 : 24,
-        backgroundColor: theme.colors.surface0,
       },
+      stepLabel: { color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "600" as const },
+      stepText: { color: theme.colors.foreground, flex: 1, lineHeight: 22 },
+      body22: { color: theme.colors.foregroundMuted, lineHeight: 22 },
+      footnote: { color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 18 },
       card: {
         width: "100%" as const,
         maxWidth: 520,
@@ -102,9 +109,9 @@ export function dashboardScreen(client: PluginClientContext) {
     const step = (n: number, text: string) => (
       <View key={n} style={styles.step}>
         <View style={styles.stepNumber}>
-          <Text style={[styles.muted, { fontSize: 12, fontWeight: "600" }]}>{n}</Text>
+          <Text style={styles.stepLabel}>{n}</Text>
         </View>
-        <Text style={[styles.text, { flex: 1, lineHeight: 22 }]}>{text}</Text>
+        <Text style={styles.stepText}>{text}</Text>
       </View>
     );
 
@@ -144,16 +151,16 @@ export function dashboardScreen(client: PluginClientContext) {
           <DashboardFrame key={load} src={src} origin={origin} onMessage={onMessage} />
         </View>
         {ready ? null : (
-          <View style={styles.overlay}>
+          <ScrollView style={styles.overlay} contentContainerStyle={styles.overlayContent}>
             {stalled ? (
               <View style={styles.card}>
-                <Icon name="factory" size={28} color={theme.colors.accent} />
+                <Icon name="Factory" size={28} color={theme.colors.accent} />
                 <Text style={styles.title}>
-                  {returning ? "Your factory session ended" : "Sign in to your factory"}
+                  {returning ? "Factory did not load" : "Sign in to your factory"}
                 </Text>
-                <Text style={[styles.muted, { lineHeight: 22 }]}>
+                <Text style={styles.body22}>
                   {returning
-                    ? "Sign in again to keep using your board here."
+                    ? "Your session may have ended, or the dashboard is unreachable. Sign in again, or reload once you are back online."
                     : `Paseo shows your factory dashboard from ${origin.replace("https://", "")} right here. It sits behind Cloudflare Access, so this device needs to sign in once.`}
                 </Text>
                 {returning ? null : (
@@ -165,15 +172,15 @@ export function dashboardScreen(client: PluginClientContext) {
                     {step(2, "Enter your email, then the code Cloudflare sends you.")}
                     {step(
                       3,
-                      "Close that window once your board shows. This page reloads on its own.",
+                      "That window closes once your board shows, and this page reloads. If it stays open, close it.",
                     )}
                   </View>
                 )}
                 <View style={styles.actions}>
-                  {button("Sign in", signIn, "log-in")}
-                  {button("Reload", () => setLoad((n) => n + 1), "rotate-cw", true)}
+                  {button("Sign in", signIn, "LogIn")}
+                  {button("Reload", () => setLoad((n) => n + 1), "RotateCw", true)}
                 </View>
-                <Text style={[styles.muted, { fontSize: 12, lineHeight: 18 }]}>
+                <Text style={styles.footnote}>
                   {`Signed in and still blank? Ask your factory operator to add ${here ?? "this Paseo origin"} to embed_origins.`}
                 </Text>
               </View>
@@ -183,7 +190,7 @@ export function dashboardScreen(client: PluginClientContext) {
                 <Text style={styles.muted}>Connecting to your factory</Text>
               </View>
             )}
-          </View>
+          </ScrollView>
         )}
       </View>
     );
