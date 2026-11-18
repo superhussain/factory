@@ -117,6 +117,7 @@
   "tests/browser/project-document-recovery.test.mjs",
   "tests/browser/project-history.test.mjs",
   "tests/browser/configuration.test.mjs",
+  "tests/browser/paseo-embed.test.mjs",
   "tests/browser/dashboard-routing.test.mjs",
   "tests/browser/scratchpad-tab.test.mjs",
   "tests/browser/board-status-pause.test.mjs",
