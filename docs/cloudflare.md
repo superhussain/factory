@@ -305,7 +305,9 @@ client-supplied headers.
   `node tools/vapid-key.mjs 2>/dev/null | pnpm exec wrangler secret put FACTORY_VAPID_KEY --name <worker name>`.
   Each person then turns on Settings, Notifications, Push to this device when the
   dashboard is closed, once per browser. The Worker pushes when a board write
-  makes a job wait on you or merges it, with the job id and title only. Removing
+  makes a job wait on you or merges it, with the job id and title only. The
+  hourly cron also pushes "Stuck: <id>" once for a spec, build, review or approve
+  job whose claim went stale 240 minutes earlier. Removing
   the secret turns push off: the key route answers 404 and nothing is sent.
   After a key rotation, each browser must turn push off and on again to
   subscribe with the new key. iPhone and iPad receive push only in the dashboard

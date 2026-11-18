@@ -275,7 +275,8 @@ An open dashboard socket sends `ping` every 25 s. The room answers `pong` throug
 `worker/push.js` sends a push to each subscribed browser when a committed board write makes
 a job wait on you or merges it, so an installed dashboard hears about it while closed. Push
 is off until the Worker has the `FACTORY_VAPID_KEY` secret (see
-[cloudflare.md](cloudflare.md) §7).
+[cloudflare.md](cloudflare.md) §7). The hourly cron also pushes "Stuck: <id>" once for a
+spec, build, review or approve job whose claim went stale 240 minutes earlier.
 
 ```mermaid
 sequenceDiagram
