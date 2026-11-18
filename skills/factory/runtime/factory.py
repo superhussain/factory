@@ -111,6 +111,7 @@
   factory.py worktree <project-slug>/<job-id>
                                             create or fast-forward the job's worktree from origin
   factory.py job <job-id>                   print one job's board entry as JSON
+  factory.py waiting                        print the jobs waiting on a person as JSON
   factory.py builds <project-slug>          print the project's build queue and in-flight jobs as JSON
   factory.py stuck [--limit N]              claim up to N (default 1) jobs a dead session left mid-loop,
                                             print them as JSON for the resume schedule
@@ -3445,6 +3446,13 @@ def waits_on_you(j):
         return False
     return j.get("stage") == "needs-human" or isinstance(j.get("needs"), str) and bool(j["needs"].strip()) \
         or j.get("stage") == "pr-open" and escalated(j)
+
+
+def waiting():
+    """Print the jobs waiting on a person, as the dashboard's waitsOnYou reads them, in board order."""
+    jobs = [j for j in read_board(factory_home())["jobs"] if isinstance(j.get("id"), str) and waits_on_you(j)]
+    print(json.dumps({"jobs": [{"id": j["id"], "project": str(j.get("project") or ""),
+                                "title": str(j.get("title") or "")} for j in jobs]}))
 
 
 def needs_answers_markdown(questions, picks, sha12, stamp, device, quote):
@@ -10713,6 +10721,7 @@ COMMANDS["retro"] = (retro_cmd, 1, 3)
 COMMANDS["audit"] = (audit_cmd, 1, 2)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
+COMMANDS["waiting"] = (waiting, 0, 0)
 
 def main(argv=None):
     global _HOME_OVERRIDE, _LOCATED, _READS
