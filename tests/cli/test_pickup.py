@@ -2506,6 +2506,17 @@ class PrSyncTest(PickupFixture):
                 self.calls.clear()
                 self.assert_silent(self.pickup())
 
+    def test_two_merged_prs_make_one_board_write(self):
+        self.states = {7: "MERGED", 8: "MERGED"}
+        self.board["jobs"] = [self.export(), self.sample_import()]
+        code, out, _ = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertIn("synced 042-sample-export alpha: merged on GitHub\n"
+                      "synced 043-sample-import alpha: merged on GitHub\n", out)
+        self.assertEqual(self.puts().count(("PUT", "/api/board")), 1)
+        self.assertEqual((self.job("042-sample-export")["stage"], self.job("043-sample-import")["stage"]),
+                         ("merged", "merged"))
+
     def test_closed_pr_closes_the_job(self):
         self.board["jobs"] = [self.sample_import()]
         self.assertEqual(self.pickup(), (0, "synced 043-sample-import alpha: PR closed on GitHub\n"
