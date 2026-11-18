@@ -58,6 +58,9 @@
                                             line, write each verdict to the board's rounds entry as it
                                             lands, print one JSON line (default and max 540 seconds); runs
                                             hold first
+  factory.py verdict <project-slug>/<job-id> <round> <reviewer> <verdict>
+                                            set one reviewer's verdict in the board's rounds entry, print it
+                                            as JSON
   factory.py checks <project-slug>/<job-id> [--timeout S]
                                             print the job PR's checks as <bucket> <name> once none is
                                             pending, checking every 10 seconds for up to S seconds
@@ -899,7 +902,7 @@ def board(factory, job_id):
     board_write(factory, job_id, patch)
 
 
-def board_write(factory, job_id, patch, show=True):
+def board_write(factory, job_id, patch, show=True, verdict=None):
     if patch.get("claim") is not None:
         fail('only hold sets a claim. {"claim": null} releases it', 2)
     if "paseo" in patch:
@@ -967,6 +970,15 @@ def board_write(factory, job_id, patch, show=True):
         data = load_board(text)
         before = load_board(text)
         found = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if verdict:
+            slug, n, reviewer, value = verdict
+            if found is not None and found.get("project") != slug:
+                fail(f"{job_id} belongs to {found.get('project')}, not {slug}", 2)
+            rounds = (found or {}).get("rounds")
+            if not isinstance(rounds, list) or len(rounds) < n or not isinstance(rounds[n - 1], dict):
+                fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
+            patch["rounds"] = list(rounds)
+            patch["rounds"][n - 1] = {**rounds[n - 1], reviewer: value}
         if found is None:
             m = re.match(r"(\d{3,})-", job_id)
             floor = archive_floor(data)
@@ -6811,6 +6823,22 @@ def round_wait_cmd(target, *args):
                           "elapsed": int(time.monotonic() - start)}))
         return
 
+
+VERDICT_USAGE = "usage: verdict <project-slug>/<job-id> <round> <reviewer> <PASS|CHANGES|SKIPPED|pending>"
+
+
+def verdict_cmd(target, round_text, reviewer, value):
+    """Set one reviewer's verdict in the board's rounds entry N in one CAS write, keeping the rest."""
+    if not re.fullmatch(r"[1-9][0-9]*", round_text) or reviewer not in REVIEWERS \
+            or value not in ("PASS", "CHANGES", "pending", "SKIPPED") \
+            or value == "SKIPPED" and reviewer not in ("ux", "ui"):
+        fail(VERDICT_USAGE, 2)
+    home, slug, job_id = r2_target(target, True)
+    n = int(round_text)
+    job = board_write(home, job_id, {}, show=False, verdict=(slug, n, reviewer, value))
+    print(json.dumps({"round": n, "verdicts": job["rounds"][n - 1]}))
+
+
 CHECKS_USAGE = "usage: checks <project-slug>/<job-id> [--timeout S]"
 CHECKS_INTERVAL = 10
 CHECKS_REGISTER = 120
@@ -10790,6 +10818,7 @@ COMMANDS["prompt"] = (prompt_cmd, 2, 8)
 COMMANDS["wait"] = (wait_cmd, 2, 23)
 COMMANDS["watch"] = (watch_cmd, 2, 24)
 COMMANDS["round-wait"] = (round_wait_cmd, 2, 4)
+COMMANDS["verdict"] = (verdict_cmd, 4, 4)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
 COMMANDS["pr-state"] = (pr_state_cmd, 1, 3)
 COMMANDS["pr-queue"] = (pr_queue_cmd, 1, 1)
