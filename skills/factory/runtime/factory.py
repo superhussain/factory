@@ -4425,6 +4425,27 @@ def bundle_stamp():
     return None
 
 
+def bundle_behind_since(home, commit):
+    """When the first merge on origin's base that commit lacks landed, as UTC, from the first
+    pickup checkout holding commit. None when commit is current or no checkout holds it."""
+    for slug, repo in sorted(read_paths(Path(home)).items()):
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", slug) or not os.path.isdir(repo):
+            continue
+        try:
+            project = project_files(home, slug)[0]
+        except SystemExit:
+            continue
+        base = frontmatter(project)[0].get("base", "main") if project.exists() else "main"
+        if check_path(base) or base.startswith("-"):
+            continue
+        origin = f"refs/remotes/origin/{base}"
+        if git(repo, "merge-base", commit, origin) != commit:
+            continue
+        times = git(repo, "log", "--first-parent", "--format=%ct", f"{commit}..{origin}").split()
+        return datetime.fromtimestamp(int(times[-1]), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if times else None
+    return None
+
+
 def cached_status(home):
     """(scheduler, last_pickup, triage_failed_since) from the last status pickup sent, else
     ("none", None, None)."""
@@ -4466,6 +4487,9 @@ def host_status(home, report, scheduler, last_pickup, triage_failed_since=None):
                    and WORKER_MODEL.fullmatch(model)][:16],
         "checkouts": sorted(slug for slug, path in paths.items()
                             if re.fullmatch(r"[A-Za-z0-9_-]+", slug) and os.path.isdir(path))[:64]}
+    behind = body["bundle"] and bundle_behind_since(home, body["bundle"]["commit"])
+    if behind:
+        body["bundle_behind_since"] = behind
     if triage_failed_since:
         body["triage_failed_since"] = triage_failed_since
     return body

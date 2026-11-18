@@ -4230,6 +4230,7 @@ function hostCard(h) {
     const alertLine = (cls, text) => make('p', {className:cls + ' host-alert'}, make('span', {className:'host-alert-icon', ariaHidden:'true', textContent:'⚠︎'}), make('span', {className:'sr-only', textContent:'Warning: '}), text);
     if (st.doctor !== 'ok') li.append(alertLine('host-doctor', 'Doctor failed: ' + st.doctor.join(', ') + '.'));
     if (st.triage_failed_since) li.append(alertLine('host-triage', 'Backlog triage failing since ' + hostUtc(st.triage_failed_since) + '. Pickup still launches ideas. See the host\'s pickup log for the error.'));
+    if (st.bundle_behind_since && Date.now() - Date.parse(st.bundle_behind_since) > 86400000) li.append(alertLine('host-bundle', 'Bundle ' + (st.bundle?.commit?.slice(0, 7) ?? 'unknown') + ' is over a day behind origin. It lacks merges since ' + hostUtc(st.bundle_behind_since) + '. Reinstall it as docs/upgrade.md step 4 says.'));
     if (st.routes.length === 0) li.append(make('p', {className:'muted host-routes-empty', textContent:'No routes reported.'}));
     else {
       const heads = ['Route', 'Provider', 'Model', 'Effort', 'Limited until'];
