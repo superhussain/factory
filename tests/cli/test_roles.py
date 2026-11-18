@@ -391,7 +391,11 @@ class RolesTest(IsolatedTestCase):
                       flat("references/commands/feature.md"))
         self.assertIn("Approving a backlog line turns each `Depends on: <slug>: <feature>` context line into this "
                       "ref, and is refused while that line is unchecked.", flat("references/board.md"))
-        self.assertIn("`next` and `batch` do not read `Depends on:` lines yet.", flat("references/commands/next.md"))
+        self.assertIn("`next` and `batch` skip a line whose `Depends on:` line names an unchecked line or a job still "
+                      "open on the board.", flat("references/commands/next.md"))
+        self.assertIn("`next` and `batch` skip such a line while its prerequisite is unchecked or still open, and add "
+                      "this ref to the job they make. `batch` allows a prerequisite that is the lead or one of its "
+                      "riders.", flat("references/board.md"))
         self.assertIn("Name only viewports and data the project's capture tool supports, as its project file or docs "
                       "list them. When it lacks one, add a task that extends the tool.",
                       flat("agents/factory-spec-writer.md"))

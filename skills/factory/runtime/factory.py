@@ -1202,8 +1202,9 @@ def next_job_id(names, feature_slug, floor=0):
     return f"{max(used + [floor], default=0) + 1:03d}-{feature_slug}"
 
 
-def claim_id(factory, feature_slug, project_slug):
-    """Ids are unique across the whole factory, so `#<id>` links and board lookups stay unambiguous."""
+def claim_id(factory, feature_slug, project_slug, refs=None):
+    """Ids are unique across the whole factory, so `#<id>` links and board lookups stay unambiguous.
+    refs, when given, go on the stub."""
     for slug in (feature_slug, project_slug):
         if not SLUG.fullmatch(slug):
             fail(f"bad slug {slug!r}: use letters, digits, - and _", 2)
@@ -1226,6 +1227,8 @@ def claim_id(factory, feature_slug, project_slug):
                 "started": data["updated"], "claim": new_claim(device, session)}
         if paseo:
             stub["paseo"] = paseo
+        if refs:
+            stub["refs"] = refs
         data["jobs"].append(stub)
         return dump_board(data), job_id
     job_id = cas(factory, "/api/board", add)
@@ -1244,11 +1247,13 @@ def feature_slug(feature):
     return "-".join(re.findall(r"[a-z0-9]+", feature.lower())[:3])[:40].strip("-") or "item"
 
 
-def first_item(text, projects, paths, skipped):
-    """(raw line, slug, feature) for the first unchecked line this device can run, or None.
-    Lines for a project with no checkout here are skipped, and their slugs added to skipped."""
-    for line in text.split("\n"):
-        line = line.rstrip("\r")
+def first_item(text, projects, paths, skipped, open_ids=frozenset):
+    """(raw line, slug, feature, refs) for the first unchecked line this device can run, or None.
+    Lines for a project with no checkout here are skipped, and their slugs added to skipped. A line whose
+    Depends on: prerequisite is unchecked or still open is skipped, and its raw line added to skipped.
+    open_ids() gives the open board ids, and is called only for a line with Depends on: refs."""
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    for i, line in enumerate(lines):
         if not line.startswith("- [ ] "):
             continue
         if line.splitlines() != [line]:
@@ -1260,11 +1265,24 @@ def first_item(text, projects, paths, skipped):
         if slug not in projects:
             fail(f"backlog line {line!r} names unknown project {slug}. Known projects: "
                  f"{', '.join(sorted(projects)) or 'none'}", 4)
-        if paths.get(slug):
-            return line, slug, m.group(2).rstrip()
-        if slug not in skipped:
-            skipped.add(slug)
-            print(f"skipping {slug}: no checkout on this device", file=sys.stderr)
+        if not paths.get(slug):
+            if slug not in skipped:
+                skipped.add(slug)
+                print(f"skipping {slug}: no checkout on this device", file=sys.stderr)
+            continue
+        held = []
+        for below in lines[i + 1:]:
+            if below and not below.startswith("  "):
+                break
+            held.append(below[2:])
+        context, feature = "\n".join(held), m.group(2).rstrip()
+        depends, _ = backlog_depends(text, context)
+        refs, why = backlog_waits(text, context, open_ids() if depends else frozenset())
+        if why is None:
+            return line, slug, feature, suffix_refs(BACKLOG_SUFFIX.search(feature)) + refs
+        if line not in skipped:
+            skipped.add(line)
+            print(f'skipping "{slug}: {feature}": {why}', file=sys.stderr)
     return None
 
 
@@ -1277,11 +1295,17 @@ def next_item():
     paths, skipped = read_paths(home), set()
     for _ in range(20):
         status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
-        item = first_item(text if status == 200 else "", projects, paths, skipped)
+        board = {}
+
+        def open_ids():
+            if "ids" not in board:
+                board["ids"] = {j.get("id") for j in read_board(home)["jobs"] if j.get("stage") not in TERMINAL}
+            return board["ids"]
+        item = first_item(text if status == 200 else "", projects, paths, skipped, open_ids)
         if item is None:
             fail("nothing this device can run in the backlog" if skipped else "backlog is empty", 3)
-        raw, slug, feature = item
-        job_id = claim_id(home, feature_slug(feature), slug)
+        raw, slug, feature, refs = item
+        job_id = claim_id(home, feature_slug(feature), slug, refs)
 
         def mark(text):
             lines = (text or "").split("\n")
@@ -1510,7 +1534,7 @@ def unchecked_lines(text):
 
 
 def backlog_candidates(text, slug):
-    """{"backlog:<key>": (raw, feature, ref, entry)} for the project's unchecked backlog lines, in
+    """{"backlog:<key>": (raw, feature, ref, entry, context)} for the project's unchecked backlog lines, in
     file order. entry is the batch candidate {"id", "title", "idea"}; ref is the suffix match or None."""
     found = {}
     for raw, line_slug, feature, context in unchecked_lines(text):
@@ -1521,7 +1545,7 @@ def backlog_candidates(text, slug):
         ref = BACKLOG_SUFFIX.search(feature)
         body = (feature[:ref.start()] if ref else feature).strip()
         found[key] = (raw, feature, ref, {"id": key, "title": body[:80],
-                                          "idea": f"{body}\n\n{context}" if context else body})
+                                          "idea": f"{body}\n\n{context}" if context else body}, context)
     return found
 
 
@@ -1878,6 +1902,16 @@ def backlog_depends(text, context):
         if job_id and JOB_ID.fullmatch(job_id) and ".." not in job_id:
             refs.append({"id": job_id, "kind": "depends-on"})
     return refs, waiting
+
+
+def backlog_waits(text, context, open_ids, together=frozenset()):
+    """(refs, why) for a line's Depends on: context: its depends-on refs, and why it must wait (None when it can
+    start). It waits on an unchecked prerequisite line or a prerequisite job still open, unless that job is in together."""
+    refs, waiting = backlog_depends(text, context)
+    if waiting:
+        return refs, f'it depends on "{waiting}", which is still unchecked'
+    held = next((r["id"] for r in refs if r["id"] in open_ids and r["id"] not in together), None)
+    return refs, (f"it depends on {held}, which is still open" if held else None)
 
 
 def suffix_refs(ref):
@@ -2360,7 +2394,8 @@ def batch_cmd(target, *idea_ids):
             fail(f"bad job id {idea_id!r}: a job id is letters, digits, dots, dashes and underscores, "
                  "like 003-rate-limiting. Nothing was written.", 2)
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
-    lines = backlog_candidates(text if status == 200 else "", slug)
+    backlog_text = text if status == 200 else ""
+    lines = backlog_candidates(backlog_text, slug)
     line_picks = [i for i in idea_ids if BACKLOG_PICK.fullmatch(i)]
     job_picks = [i for i in idea_ids if not BACKLOG_PICK.fullmatch(i)]
     for pick in line_picks:
@@ -2379,6 +2414,9 @@ def batch_cmd(target, *idea_ids):
         if lead is None:
             fail(f"no job {lead_id} on the board. Nothing was written.", 4)
         alone = isinstance(lead.get("priority"), dict) and lead["priority"].get("alone") is True
+        open_ids = {j.get("id") for j in data["jobs"] if j.get("stage") not in TERMINAL}
+        together = {lead_id} | {j.get("id") for j in riders_of(data, lead_id)}
+        depends = {}
         if idea_ids:
             if not mine(lead.get("claim") or {}, device, session):
                 fail(f"{lead_id} is not held by this session. Nothing was written.", 6)
@@ -2390,6 +2428,10 @@ def batch_cmd(target, *idea_ids):
                 fail(f"cannot batch into {lead_id}: follows Tracer", 2)
             if len(riders_of(data, lead_id)) + len(idea_ids) > MAX_RIDERS:
                 fail(f"a batch holds at most {MAX_RIDERS} riders", 2)
+            for pick in line_picks:
+                depends[pick], why = backlog_waits(backlog_text, lines[pick][4], open_ids, together)
+                if why:
+                    fail(f"cannot batch {pick}: {why}. Nothing was written.", 2)
             picked = []
             for idea_id in job_picks:
                 j = next((x for x in data["jobs"] if x.get("id") == idea_id), None)
@@ -2405,17 +2447,18 @@ def batch_cmd(target, *idea_ids):
                                           "refs": [*(j.get("refs") or []), {"id": lead_id, "kind": BATCH_REF}]})
         made = {}
         for pick in line_picks:
-            _, _, ref, candidate = lines[pick]
+            _, _, ref, candidate, _ = lines[pick]
             job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]],
                                  feature_slug(candidate["title"]), archive_floor(data))
-            refs = suffix_refs(ref) + [{"id": lead_id, "kind": BATCH_REF}]
+            refs = suffix_refs(ref) + depends[pick] + [{"id": lead_id, "kind": BATCH_REF}]
             patch_job(data, job_id, {"project": slug, "title": candidate["title"], "idea": candidate["idea"],
                                      "stage": "spec", "note": f"batched into {lead_id}", "refs": refs})
             made[pick] = job_id
         candidates = [entry(j) for j in data["jobs"]
                       if j.get("id") != lead_id and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
                       and batch_problem(data, j, slug, device, session, minutes) is None]
-        candidates += [v[3] for k, v in lines.items() if k not in line_picks]
+        candidates += [v[3] for k, v in lines.items() if k not in line_picks
+                       and backlog_waits(backlog_text, v[4], open_ids, together)[1] is None]
         if alone:
             candidates = []
         result = {"lead": lead_id, "riders": [entry(j) for j in riders_of(data, lead_id)],
