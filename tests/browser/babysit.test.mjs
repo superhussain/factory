@@ -42,7 +42,13 @@ const JOBS = [
   prOpen("050-sample-rider", 43, { refs: [{ id: "043-sample-filter", kind: "batched-into" }] }),
   prOpen("051-sample-closing", 51, { close: { reason: "not needed", at: AT.at } }),
   prOpen("052-sample-other-repo", 52, { pr: "https://github.com/example/other/pull/52" }),
+  prOpen("047-sample-auto", 47, {
+    babysit: { ...AT, via: "pickup", reason: "fix-ci" },
+    auto_babysit: { count: 2 },
+  }),
 ];
+const AUTO =
+  "Pickup started this babysit because PR #47 has a failing required check. Automatic babysit 2 of 3.";
 const VIEWPORTS = [
   { width: 390, height: 844, isMobile: true, hasTouch: true, theme: "dark" },
   { width: 1280, height: 900, theme: "light" },
@@ -86,7 +92,7 @@ test("babysit", { timeout: 240000 }, async (t) => {
     await seedProject(
       origin,
       "sample",
-      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\nauto_babysit: 3\n---\n",
     );
     const errors = [];
     for (const { theme, ...viewport } of VIEWPORTS) {
@@ -132,6 +138,19 @@ test("babysit", { timeout: 240000 }, async (t) => {
           await page.$eval('.card[data-id="049-sample-babysat"] .chip', (el) => el.title),
           "An agent is working PR #49 as the Babysit note asks",
         );
+      });
+
+      await t.test(`a pickup babysit says so on the card and in the drawer ${width}`, async () => {
+        assert.deepEqual(await chipsOf(page, "047-sample-auto"), ["Auto-babysitting"]);
+        assert.equal(
+          await page.$eval('.card[data-id="047-sample-auto"] .chip', (el) => el.title),
+          AUTO,
+        );
+        await openDrawer(page, "047-sample-auto");
+        assert.equal(await shown(page, "#d-auto-babysit"), true);
+        assert.equal(await page.$eval("#d-auto-babysit", (el) => el.textContent), AUTO);
+        await openDrawer(page, "049-sample-babysat");
+        assert.equal(await shown(page, "#d-auto-babysit"), false);
       });
 
       await t.test(`a dismissed confirm writes nothing ${width}`, async () => {
