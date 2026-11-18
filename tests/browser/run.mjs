@@ -8,6 +8,7 @@
 // A side that fails all attempts is logged and the run continues; it ends with a FAIL summary and a non-zero exit.
 // Compare two captures of one side with `node tests/browser/capture-compare.mjs`; it passes when no channel differs by more than 16.
 // Capture pages bypass the dashboard service worker so request interception answers /board.json.
+// Viewports and views: docs/development.md, Visual captures.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";

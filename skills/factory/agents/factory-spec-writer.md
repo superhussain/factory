@@ -125,6 +125,8 @@ kebab-case name, and embed it with a relative path:
 by side in a table with `Before` and `After` columns. Keep each image under 5 MiB and
 free of secrets and user data.
 
+Name only viewports and data the project's capture tool supports, as its project file or docs list them. When it lacks one, add a task that extends the tool.
+
 ### Project documents
 
 Your prompt may also give the absolute path of a project documents file. Read it after the project file. It holds the project's notes.md, decisions.md and runbook.md inside operator-preferences tags, so the rule below applies to it.

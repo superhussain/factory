@@ -136,6 +136,23 @@ not part of the `affected` selection; `tools/verify.py` still
 runs them directly with no Node. Job 108 adds
 the lint and format targets later; `nx.json` deliberately declares none.
 
+## Visual captures
+
+`node tests/browser/run.mjs --capture <outdir> --reference-html <absolute path>`
+records matched before and after views. Each `view(...)` line in
+`tests/browser/run.mjs` sets one view's name, viewport and theme.
+
+| Viewport | Used by |
+| --- | --- |
+| 1440x900 | desktop views |
+| 1280x900 | settings, archive and agent-run views |
+| 390x844 | mobile views |
+| 375x667 | `drawer-mobile-scrolled` |
+
+- Board data is the fixed `CAPTURE_JOBS` and `CAPTURE_BACKLOG` fixtures.
+- `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
+- A spec that needs another size or state adds a task for a new `view(...)` line.
+
 ## Pre-commit checks
 
 Every `git commit` runs the `.husky/pre-commit` hook (installed by the

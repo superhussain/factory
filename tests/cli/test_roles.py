@@ -392,6 +392,9 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("Approving a backlog line turns each `Depends on: <slug>: <feature>` context line into this "
                       "ref, and is refused while that line is unchecked.", flat("references/board.md"))
         self.assertIn("`next` and `batch` do not read `Depends on:` lines yet.", flat("references/commands/next.md"))
+        self.assertIn("Name only viewports and data the project's capture tool supports, as its project file or docs "
+                      "list them. When it lacks one, add a task that extends the tool.",
+                      flat("agents/factory-spec-writer.md"))
 
     def test_checks_are_sized_to_the_change(self):
         builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
