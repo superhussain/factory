@@ -181,7 +181,10 @@ Each run, in order:
   pickup catches up a missed weekday retro: from 09:30 local, when no retro run
   folder carries today's date and `<home>/retro-catchup.json` does not record
   today, it launches that prompt once through the first route's launcher as
-  `retro-<YYYYMMDD>`.
+  `retro-<YYYYMMDD>`. While no route or checkout is available, it prints why it
+  waits once per local date and reason, recorded in
+  `<home>/retro-catchup-wait.json`. `pickup --dry-run` prints it every time and
+  records nothing.
 - Pushes this host's audit rows for each job at spec, build, review, approve or
   pr-open whose transcripts here changed since `<home>/audit-push.json` records;
   a failed push prints one warning and the run goes on.

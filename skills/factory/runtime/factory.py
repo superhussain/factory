@@ -9581,6 +9581,7 @@ RETRO_JOB = re.compile(r"factory-(\d{2,5})-")
 RETRO_PUSH_FILE = "retro-push.json"
 RETRO_PROMPT_FILE = "retro-schedule-prompt.md"
 RETRO_CATCHUP_FILE = "retro-catchup.json"
+RETRO_WAIT_FILE = "retro-catchup-wait.json"
 RETRO_CATCHUP_AFTER = (9, 30)
 RETRO_RUN_NAME = re.compile(r"(\d{8}T\d{6}Z)-[0-9a-f]{6}")
 RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
@@ -9966,6 +9967,22 @@ def retro_catchup_due(home, local):
     return True
 
 
+def retro_catchup_wait(home, local, reason, dry):
+    """Print why the retro catch-up waits, once per local date and reason. A dry run prints every
+    time and records nothing."""
+    record = {"version": 1, "date": local.date().isoformat(), "reason": reason}
+    path = home / RETRO_WAIT_FILE
+    if not dry:
+        try:
+            if json.loads(path.read_text(encoding="utf-8")) == record:
+                return
+        except (OSError, ValueError):
+            pass
+    print(f"factory.py: retro catch-up waits: {reason}", file=sys.stderr)
+    if not dry:
+        write_atomic(path, json.dumps(record) + "\n")
+
+
 def retro_pickup_catchup(home, dry):
     """Launch the stored retro schedule prompt once on a weekday whose 09:00 slot left no run.
     The record is written before the launch, so a failed or stopped session is not retried today."""
@@ -9976,11 +9993,11 @@ def retro_pickup_catchup(home, dry):
         job_id = "retro-" + local.strftime("%Y%m%d")
         route = pick_route(home)
         if route is None:
-            print("factory.py: retro catch-up waits: no available route", file=sys.stderr)
+            retro_catchup_wait(home, local, "no available route", dry)
             return
         checkout = next(((slug, path) for slug, path in read_paths(home).items() if os.path.isdir(path)), None)
         if checkout is None:
-            print("factory.py: retro catch-up waits: no checkout in paths.md", file=sys.stderr)
+            retro_catchup_wait(home, local, "no checkout in paths.md", dry)
             return
         template = route_launcher(home, route)
         if dry:
