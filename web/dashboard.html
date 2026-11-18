@@ -2895,6 +2895,7 @@ function renderRoute() {
   if (!retrosOpen) retrosScrolled = '';
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
   if (retrosOpen) $('retros-link').setAttribute('aria-current', 'page'); else $('retros-link').removeAttribute('aria-current');
+  if (inboxOpen) $('inbox-link').setAttribute('aria-current', 'page'); else $('inbox-link').removeAttribute('aria-current');
   for (const name of SETTINGS_SECTIONS) {
     $('settings-' + name).hidden = name !== section;
     if (name === section) $('settings-nav-' + name).setAttribute('aria-current', 'page'); else $('settings-nav-' + name).removeAttribute('aria-current');
@@ -3115,7 +3116,15 @@ function inboxItems() {
     .concat(backlogLoaded ? visibleBacklog().map((item) => ({ kind: 'backlog', item })) : []);
 }
 
+function syncInboxLink() {
+  const n = loaded && (backlogLoaded || backlogFailed) ? inboxItems().length : 0;
+  $('inbox-count').textContent = n > 99 ? '99+' : String(n);
+  $('inbox-count').hidden = !n;
+  $('inbox-link').setAttribute('aria-label', n ? 'Inbox, ' + n + ' waiting' : 'Inbox');
+}
+
 function renderInboxPage() {
+  syncInboxLink();
   if (inboxRoute() === null) return;
   if (!loaded || (!backlogLoaded && !backlogFailed)) {
     $('inbox-status').textContent = inboxError || 'Loading the inbox\u2026';
@@ -4037,7 +4046,6 @@ function visibleCards() {
 function openCard(id) {
   location.hash = encodeURIComponent(id);
 }
-$('next-waiting').addEventListener('click', () => { const j = nextWaitingJob(); if (j) openCard(j.id); });
 
 // The backlog the cards on screen were drawn from. poll() replaces backlog before it re-renders,
 // so a click resolves data-index against this, never against a newer list.
@@ -4108,7 +4116,6 @@ function renderBoard() {
     $('board').style.removeProperty('--cols');
     if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = BASE_TITLE;
     syncAppBadge(0);
-    $('next-waiting').hidden = true;
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
     renderRetrosPage();
@@ -4125,7 +4132,6 @@ function renderBoard() {
   const waiting = lists[COLUMNS.indexOf('needs-you')];
   // Oldest first, so the longest wait sits on top.
   waiting.splice(0, waiting.length, ...waitingJobs());
-  $('next-waiting').hidden = !waiting.length;
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
