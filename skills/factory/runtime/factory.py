@@ -1011,7 +1011,7 @@ def board_write(factory, job_id, patch, show=True):
             job.pop("priority", None)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
-        elif isinstance(patch.get("not_before"), str) and job.get("stage") == IDEA \
+        elif isinstance(patch.get("not_before"), str) and job.get("stage") not in TERMINAL \
                 and mine(job.get("claim") or {}, device, session):
             job.pop("claim")
         elif mine(job.get("claim") or {}, device, session):
@@ -2274,8 +2274,8 @@ def backlog_cmd(sub, item, *rest):
 
 def inflight_count(data, project, minutes, device=None):
     """Fresh in-flight jobs on the board: of one project, or of all when project is None,
-    and only this device's claims when device is set. A job waiting on a human, or handed to a
-    babysit session, never counts."""
+    and only this device's claims when device is set. A job waiting on a human, handed to a
+    babysit session, or parked by not_before never counts."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     count = 0
     for j in data["jobs"]:
@@ -2283,7 +2283,7 @@ def inflight_count(data, project, minutes, device=None):
             continue
         if device and (j.get("claim") or {}).get("device") != device:
             continue
-        if gated(j) or lead_of(j) or babysitting(j):
+        if gated(j) or lead_of(j) or babysitting(j) or waiting_until(j):
             continue
         stage = j.get("stage")
         if stage == IDEA or tracer_start(j):
@@ -8538,7 +8538,7 @@ def stuck(*args):
         return agents is not None and agents.get(link.get("agent"), "closed") == "closed"
 
     def is_stuck(job):
-        if paused(job) or closing(job) or lead_of(job):
+        if paused(job) or closing(job) or lead_of(job) or waiting_until(job):
             return False
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
