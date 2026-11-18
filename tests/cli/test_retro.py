@@ -836,6 +836,60 @@ class RetroAdmitTest(RetroCase):
                 if name in ("reply.json", "aggregate.json"):
                     path.write_bytes(body)
 
+    def merged(self, *starts):
+        """Adds 1700-guard-the-ls, merged 2026-11-15T12:30:00Z, and a digest row per (ref, start)."""
+        path = self.folder / "aggregate.json"
+        agg = json.loads(path.read_text(encoding="utf-8"))
+        agg["merged"] = [{"id": "1700-guard-the-ls", "project": "sample-tools", "title": "Guard the ls alias",
+                          "merged": "2026-11-15T12:30:00Z"}]
+        path.write_text(json.dumps(agg), encoding="utf-8")
+        rows = [digest_row(ref.split("/")[0], ref.split("/")[1], start=start) for ref, start in starts]
+        (self.folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+    def test_fixed_finding_dropped(self):
+        self.merged((REF, "2026-11-14T09:00:00Z"))
+        code, out, err = self.admit(reply(finding(fixed_by="1700-guard-the-ls"), finding(title="Kept")))
+        findings = self.folder / "findings.md"
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"wrote {findings}\n"
+                              "fixed findings[0]: 1700-guard-the-ls merged 2026-11-15T12:30:00Z\nno suggestions\n")
+        text = findings.read_text(encoding="utf-8")
+        self.assertIn("· 40 sessions · ranked by count x cost · 1 fixed\n", text)
+        self.assertIn("| 1 | Kept |", text)
+        self.assertNotIn("| 2 |", text)
+        self.assertIn("\n".join([
+            "## Fixed findings", "",
+            "A merged job fixed these before every session they cite started.", "",
+            "| Finding | Title | Fixed by | Merged |", "| --- | --- | --- | --- |",
+            "| 0 | ls alias crashes in non-interactive shells | 1700-guard-the-ls | 2026-11-15T12:30:00Z |", ""]), text)
+        self.assertNotIn("## 2.", text)
+
+    def test_finding_recurring_after_merge_kept(self):
+        later = "pc/0123abcd"
+        for starts, sessions in ((((REF, "2026-11-14T09:00:00Z"), (later, "2026-11-16T09:00:00Z")), [REF, later]),
+                                 (((REF, "2026-11-14T09:00:00Z"),), [REF, later]),
+                                 (((REF, "not a time"),), [REF])):
+            with self.subTest(sessions=sessions, starts=starts):
+                self.merged(*starts)
+                code, out, err = self.admit(reply(finding(fixed_by="1700-guard-the-ls", sessions=sessions)))
+                self.assertEqual((code, err), (0, ""))
+                self.assertNotIn("fixed findings", out)
+                text = (self.folder / "findings.md").read_text(encoding="utf-8")
+                self.assertIn("| 1 | ls alias crashes in non-interactive shells |", text)
+                self.assertIn("Fixed by: `1700-guard-the-ls`, but a session started after its merge.\n", text)
+                self.assertNotIn("## Fixed findings", text)
+
+    def test_unknown_fixed_by_rejected(self):
+        self.merged((REF, "2026-11-14T09:00:00Z"))
+        code, out, err = self.admit(reply(finding(fixed_by="1699-other"), finding(title="Kept")))
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("rejected findings[0].fixed_by: must be a job id from merged in aggregate.json\n", out)
+        text = (self.folder / "findings.md").read_text(encoding="utf-8")
+        self.assertIn("| 1 | Kept |", text)
+        self.assertIn("· 1 rejected\n", text)
+        self.assertEqual(factory.check_finding(finding(fixed_by="1700-guard-the-ls"), ["sample-tools"]),
+                         ("fixed_by", "must be a job id from merged in aggregate.json"))
+
     def test_env_value_writes_nothing(self):
         token = "cfsample0123456789abcdef"
         (self.home / ".env").write_text(f"CLOUDFLARE_API_TOKEN={token}\nMODE=short\n")
