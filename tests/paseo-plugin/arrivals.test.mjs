@@ -7,6 +7,7 @@ import {
   needsBody,
   needsTitle,
 } from "../../paseo-plugin/shared/arrivals.ts";
+import { factoryInbox } from "../../paseo-plugin/shared/inbox.ts";
 
 const OLD = { id: "041-old", project: "sample", title: "Old" };
 const JOB = { id: "042-sample-links", project: "sample", title: "Sample links" };
@@ -35,4 +36,8 @@ test("inbox store alerts only on arrivals after the first snapshot", () => {
   const ten = Array.from({ length: 10 }, (_, i) => ({ id: `05${i}-new`, project: "", title: "" }));
   inbox.apply({ count: 14, jobs: [OLD, JOB, ...ten] });
   assert.deepEqual(alerts.slice(1), ["050-new", "051-new", "052-new"]);
+});
+
+test("inbox event defaults a missing jobs list to empty", () => {
+  assert.deepEqual(factoryInbox.event.parse({ count: 2 }), { count: 2, jobs: [] });
 });

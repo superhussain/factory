@@ -3484,8 +3484,9 @@ def inbox():
     home = factory_home()
     jobs = read_board(home)["jobs"]
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
-    waiting = [{"id": j["id"], "project": str(j.get("project") or ""), "title": str(j.get("title") or "")}
-               for j in jobs if isinstance(j.get("id"), str) and waits_on_you(j)]
+    waiting = [{"id": j["id"], "project": str(j.get("project") or "")[:128], "title": str(j.get("title") or "")[:200]}
+               for j in jobs if isinstance(j.get("id"), str) and re.fullmatch(r"[A-Za-z0-9-]{1,128}", j["id"])
+               and waits_on_you(j)][:500]
     print(json.dumps({"count": inbox_count(jobs, text if status == 200 else ""), "jobs": waiting}))
 
 

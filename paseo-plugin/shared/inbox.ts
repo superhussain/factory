@@ -1,6 +1,6 @@
 import { defineSubscription } from "@getpaseo/plugin";
 import { z } from "zod";
-import { JOB_ID } from "./embed";
+import { JOB_ID } from "./embed.ts";
 
 export const factoryInbox = defineSubscription({
   name: "factory.inbox",
@@ -15,7 +15,8 @@ export const factoryInbox = defineSubscription({
           title: z.string().max(200),
         }),
       )
-      .max(500),
+      .max(500)
+      .default([]),
   }),
 });
 

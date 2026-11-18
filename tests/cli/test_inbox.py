@@ -41,6 +41,15 @@ class InboxTest(IsolatedTestCase):
         self.assertEqual((code, json.loads(out)),
                          (0, {"count": 2, "jobs": [{"id": "043-asked", "project": "", "title": ""}]}))
 
+    def test_rows_are_cut_to_the_plugin_limits(self):
+        jobs = [{"id": "043-asked", "stage": "needs-human", "title": "x" * 300, "project": "p" * 200},
+                {"id": "bad id!", "stage": "needs-human"}]
+        with patch.object(factory, "read_board", return_value={"jobs": jobs}), \
+                patch.object(factory, "api", lambda *a, **k: (404, {}, "")):
+            _, out, _ = invoke(factory, ["inbox"])
+        self.assertEqual(json.loads(out)["jobs"],
+                         [{"id": "043-asked", "project": "p" * 128, "title": "x" * 200}])
+
     def test_empty_board(self):
         self.assertEqual(factory.inbox_count([], ""), 0)
 

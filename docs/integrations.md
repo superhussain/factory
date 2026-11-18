@@ -214,7 +214,7 @@ At most three alerts fire per minute; the badge still counts the rest.
 - Alerts come from the same once-a-minute poll, so one can arrive up to a minute late.
 - They fire only while a Paseo window is open. iOS and Android get no alerts; the dashboard's
   own Web Push still covers them and closed windows.
-- Each host needs the reinstalled factory skill and `paseo plugin update factory` before alerts
+- Each host needs the factory skill reinstalled, then `paseo plugin update factory`, before alerts
   start. Two hosts that report the same job show one notification, because both use the tag
   `factory-needs-<job-id>`.
 

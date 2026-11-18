@@ -17,7 +17,9 @@ declare const window: {
   focus(): void;
   open(url: string, target: string, features: string): SignInWindow | null;
   addEventListener(type: "message", listener: (event: FrameMessage) => void): void;
+  addEventListener(type: "focus", listener: () => void): void;
   removeEventListener(type: "message", listener: (event: FrameMessage) => void): void;
+  removeEventListener(type: "focus", listener: () => void): void;
 };
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -145,6 +147,11 @@ export type NotificationState = Permission | "unsupported";
 export function notificationState(): NotificationState {
   if (Platform.OS !== "web" || typeof Notification === "undefined") return "unsupported";
   return Notification.permission;
+}
+
+export function onWindowFocus(listener: () => void): () => void {
+  window.addEventListener("focus", listener);
+  return () => window.removeEventListener("focus", listener);
 }
 
 export async function requestNotifications(): Promise<NotificationState> {

@@ -8,11 +8,11 @@ import {
   SettingsSection,
   useToast,
 } from "@getpaseo/plugin/client/ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Text } from "react-native";
 import { parseDashboardOrigin } from "../shared/embed";
 import { factorySettings } from "../shared/settings";
-import { notificationState, requestNotifications, type NotificationState } from "./web";
+import { notificationState, onWindowFocus, requestNotifications, type NotificationState } from "./web";
 
 const NOTIFICATION_HINTS: Record<Exclude<NotificationState, "unsupported">, string> = {
   default: "Get a desktop notification when a factory job needs you.",
@@ -26,6 +26,10 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
   const [value, setValue] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [permission, setPermission] = useState(notificationState);
+  useEffect(() => {
+    const refresh = () => setPermission(notificationState());
+    return onWindowFocus(refresh);
+  }, []);
   if (settings.status === "loading") return <Loading />;
   if (settings.status !== "ready")
     return <Text style={{ color: theme.colors.foregroundMuted }}>{settings.error}</Text>;

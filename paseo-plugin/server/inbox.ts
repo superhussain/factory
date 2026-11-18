@@ -18,19 +18,34 @@ export function findRuntime(home = homedir()): string | null {
   return null;
 }
 
-// On Windows `python3` is often the Microsoft Store stub, so fall back to the `py` launcher.
+// On Windows `python3` is often the Microsoft Store stub. Fall back to the `py` launcher only when
+// `python3` fails to start; a run that exits non-zero or prints bad output is not retried.
 const PYTHONS = process.platform === "win32" ? [["python3"], ["py", "-3"]] : [["python3"]];
+
+// A string code (ENOENT) is a spawn error. 9009 is cmd.exe's "command not found", which the Store stub also returns.
+export function isStartFailure(error: unknown): boolean {
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" || code === 9009;
+}
 
 export async function readInbox(runtime: string): Promise<InboxEvent | null> {
   for (const [command, ...args] of PYTHONS) {
+    let stdout: string;
     try {
-      const { stdout } = await execCommand(command, [...args, runtime, "inbox"], {
+      ({ stdout } = await execCommand(command, [...args, runtime, "inbox"], {
         timeout: 30_000,
         maxBuffer: 1_048_576,
-      });
+      }));
+    } catch (error) {
+      if (isStartFailure(error)) continue;
+      return null;
+    }
+    try {
       const parsed = factoryInbox.event.safeParse(JSON.parse(stdout));
       return parsed.success ? parsed.data : null;
-    } catch {}
+    } catch {
+      return null;
+    }
   }
   return null;
 }
