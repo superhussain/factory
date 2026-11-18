@@ -5566,7 +5566,8 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
 
 def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
     """Move each pr-open or needs-human job whose pull request GitHub reports merged to merged, and queue
-    a close for each whose pull request GitHub reports closed. One gh api graphql call per repo."""
+    a close for each whose pull request GitHub reports closed. One gh api graphql call per repo, and one board write
+    for the whole pass."""
     def match(j):
         job_id, project, pr = j.get("id"), j.get("project"), j.get("pr")
         if not (j.get("stage") in SYNC_STAGES and isinstance(pr, str) and not closing(j) and lead_of(j) is None
@@ -5599,6 +5600,7 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
             continue
         groups.setdefault(repo, []).append((j, int(m[3])))
 
+    pending = []
     for repo, jobs in groups.items():
         if len(jobs) > PR_SYNC_LIMIT:
             print(f"factory.py: pickup syncs the first {PR_SYNC_LIMIT} of {len(jobs)} pull requests in {repo}",
@@ -5621,19 +5623,23 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
                          "note": MERGED_NOTE, "github": {"merged": now()}}
             else:
                 patch = {"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "via": "github"}, "babysit": None}
+            pending.append((j, patch, line))
+    if not pending:
+        return
 
-            def change(text, j=j, patch=patch):
-                board = load_board(text)
-                found = next((x for x in board["jobs"] if x.get("id") == j["id"]), None)
-                if (found is None or not match(found) or found["pr"] != j["pr"]
-                        or found["project"] != j["project"] or blocking(found, device, "", minutes)):
-                    return None, None
-                row = patch_job(board, j["id"], patch)
-                return dump_board(board), row
-            row = cas(home, "/api/board", change)
-            if row:
-                data["jobs"][data["jobs"].index(j)] = row
-                print(f"synced {line}")
+    def change(text):
+        board = load_board(text)
+        rows = []
+        for j, patch, line in pending:
+            found = next((x for x in board["jobs"] if x.get("id") == j["id"]), None)
+            if (found is None or not match(found) or found["pr"] != j["pr"]
+                    or found["project"] != j["project"] or blocking(found, device, "", minutes)):
+                continue
+            rows.append((j, patch_job(board, j["id"], patch), line))
+        return (dump_board(board) if rows else None), rows
+    for j, row, line in cas(home, "/api/board", change):
+        data["jobs"][data["jobs"].index(j)] = row
+        print(f"synced {line}")
 
 
 def auto_babysit_cap(home, slug):
