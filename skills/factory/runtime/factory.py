@@ -162,7 +162,6 @@ The board, backlog, and project files live in R2 behind the factory Worker at
 
 import contextlib
 import fnmatch
-import functools
 import http.client
 import hashlib
 import io
@@ -1295,8 +1294,12 @@ def next_item():
     paths, skipped = read_paths(home), set()
     for _ in range(20):
         status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
-        open_ids = functools.cache(lambda: {j.get("id") for j in read_board(home)["jobs"]
-                                            if j.get("stage") not in TERMINAL})
+        board = {}
+
+        def open_ids():
+            if "ids" not in board:
+                board["ids"] = {j.get("id") for j in read_board(home)["jobs"] if j.get("stage") not in TERMINAL}
+            return board["ids"]
         item = first_item(text if status == 200 else "", projects, paths, skipped, open_ids)
         if item is None:
             fail("nothing this device can run in the backlog" if skipped else "backlog is empty", 3)
