@@ -354,6 +354,19 @@ class RolesTest(IsolatedTestCase):
                       "you Write it, or the Write fails with `File has not been read yet`.",
                       flat("agents/factory-approver.md"))
 
+    def test_role_openers_name_files_not_globs(self):
+        def flat(name):
+            return " ".join((SKILL / name).read_text(encoding="utf-8").split())
+        for name in ("ui", "ux"):
+            review = flat(f"agents/factory-review-{name}.md")
+            self.assertIn("List the job folder with `ls <job folder>`", review)
+            self.assertIn("zsh stops with `no matches found`", review)
+            self.assertNotIn("View every image in", review)
+        builder = flat("agents/factory-builder.md")
+        self.assertIn("List the round folder with `ls <round folder>`", builder)
+        self.assertIn("unless `ls <job folder>` shows `before-` shots", builder)
+        self.assertNotIn("`before-*`", builder)
+
     def test_open_items_are_absorbed_before_queued(self):
         def flat(name):
             return " ".join((SKILL / name).read_text(encoding="utf-8").split())
