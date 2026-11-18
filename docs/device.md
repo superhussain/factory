@@ -198,6 +198,8 @@ run goes on. On the host that keeps `<home>/retro-schedule-prompt.md`, pickup
 catches up a missed weekday retro: from 09:30 local, when no retro run folder
 carries today's date and `<home>/retro-catchup.json` does not record today, it
 launches that prompt once through the first route's launcher as `retro-<YYYYMMDD>`.
+While no route or checkout is available, it prints why it waits once per local date
+and reason, recorded in `<home>/retro-catchup-wait.json`.
 `retro pull YYYY-MM-DD` reads `GET /api/retro/<date>` and prints each listed
 host's lines in list order. A day
 no host pushed prints a note on stderr and exits 0. Raw transcripts never leave
