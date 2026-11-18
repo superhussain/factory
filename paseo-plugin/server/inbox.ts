@@ -22,10 +22,10 @@ export function findRuntime(home = homedir()): string | null {
 // `python3` fails to start; a run that exits non-zero or prints bad output is not retried.
 const PYTHONS = process.platform === "win32" ? [["python3"], ["py", "-3"]] : [["python3"]];
 
-// A string code (ENOENT) is a spawn error. 9009 is cmd.exe's "command not found", which the Store stub also returns.
+// ENOENT is a spawn error. 9009 is cmd.exe's "command not found", which the Store stub also returns.
 export function isStartFailure(error: unknown): boolean {
   const code = (error as { code?: unknown }).code;
-  return typeof code === "string" || code === 9009;
+  return code === "ENOENT" || code === 9009;
 }
 
 export async function readInbox(runtime: string): Promise<InboxEvent | null> {

@@ -50,6 +50,13 @@ class InboxTest(IsolatedTestCase):
         self.assertEqual(json.loads(out)["jobs"],
                          [{"id": "043-asked", "project": "p" * 128, "title": "x" * 200}])
 
+    def test_rows_are_cut_by_utf16_length_without_splitting_a_pair(self):
+        jobs = [{"id": "043-asked", "stage": "needs-human", "title": "x" * 199 + "\U0001F600" * 3}]
+        with patch.object(factory, "read_board", return_value={"jobs": jobs}), \
+                patch.object(factory, "api", lambda *a, **k: (404, {}, "")):
+            _, out, _ = invoke(factory, ["inbox"])
+        self.assertEqual(json.loads(out)["jobs"][0]["title"], "x" * 199)
+
     def test_empty_board(self):
         self.assertEqual(factory.inbox_count([], ""), 0)
 

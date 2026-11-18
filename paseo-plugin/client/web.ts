@@ -150,6 +150,7 @@ export function notificationState(): NotificationState {
 }
 
 export function onWindowFocus(listener: () => void): () => void {
+  if (Platform.OS !== "web") return () => {};
   window.addEventListener("focus", listener);
   return () => window.removeEventListener("focus", listener);
 }

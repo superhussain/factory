@@ -3478,13 +3478,18 @@ def inbox_count(jobs, backlog_text):
         sum(1 for _, slug, _, _ in unchecked_lines(backlog_text) if slug.isascii())
 
 
+def utf16_cut(text, limit):
+    """text cut to at most limit UTF-16 code units, the plugin schema's length, without half a surrogate pair."""
+    return text.encode("utf-16-le")[:limit * 2].decode("utf-16-le", "ignore")
+
+
 def inbox():
     """Print the dashboard Inbox count across all projects, and the jobs waiting on a person in
     board order, as JSON."""
     home = factory_home()
     jobs = read_board(home)["jobs"]
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
-    waiting = [{"id": j["id"], "project": str(j.get("project") or "")[:128], "title": str(j.get("title") or "")[:200]}
+    waiting = [{"id": j["id"], "project": utf16_cut(str(j.get("project") or ""), 128), "title": utf16_cut(str(j.get("title") or ""), 200)}
                for j in jobs if isinstance(j.get("id"), str) and re.fullmatch(r"[A-Za-z0-9-]{1,128}", j["id"])
                and waits_on_you(j)][:500]
     print(json.dumps({"count": inbox_count(jobs, text if status == 200 else ""), "jobs": waiting}))
