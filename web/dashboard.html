@@ -3341,6 +3341,12 @@ function renderInboxPage() {
   if (current >= 0) list.children[current].scrollIntoView({ block: 'nearest' });
 }
 
+// Focus the first enabled action of the row for a job id or backlog raw line, else the heading.
+function focusInboxRow(id, raw) {
+  const at = inboxItems().findIndex((it) => it.item ? it.item.raw === raw : it.job.id === id);
+  ($('inbox-list').children[at]?.querySelector('.inbox-actions .btn:not(:disabled)') ?? $('inbox-page-heading')).focus();
+}
+
 // Right and Left step the drawer through the inbox rows; Left on the first row closes it.
 function handleInboxArrows(e) {
   if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
@@ -5891,6 +5897,7 @@ function closeDetail(keepHash = false) {
   const back = drawerReturn;
   drawerReturn = null;
   if (back && !keepHash) renderRoute();
+  if (back === '#/inbox' && !keepHash) focusInboxRow(id, raw);
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
@@ -8193,7 +8200,8 @@ function openBacklogItem(item) {
   updateBacklogBar();
   renderBoard();
   refreshPicker();
-  $('d-doc').querySelector('input[type=radio]').focus();
+  // Beside the Inbox, focus stays on the list so Right and Left keep stepping its rows.
+  if (!inboxSplit()) $('d-doc').querySelector('input[type=radio]').focus();
   if (backlogTriageSeen.get(item.raw) == null) fetchBacklogTriage([item]);
   fetchReworkHistory(item);
 }
