@@ -1,3 +1,5 @@
+packages:
+  - "."
 nodeLinker: isolated
 lockfileIncludeTarballUrl: true
 strictDepBuilds: true

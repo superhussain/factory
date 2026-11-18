@@ -74,6 +74,7 @@ test("toolchain pins and installation safeguards agree", async () => {
   );
   assert.equal(await read(".npmrc"), `registry=${REGISTRY}\n`);
   assert.deepEqual(parse(await read("pnpm-workspace.yaml")), {
+    packages: ["."],
     nodeLinker: "isolated",
     lockfileIncludeTarballUrl: true,
     strictDepBuilds: true,
