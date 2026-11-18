@@ -44,6 +44,7 @@ job's own `$REPO`.
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
 which ports live jobs hold. Only `factory.py` writes `claim`.
 `depends-on` holds an idea back from pickup, `ideas` and `batch` until the named job is merged, closed or off the board.
+Approving a backlog line turns each `Depends on: <slug>: <feature>` context line into this ref, and is refused while that line is unchecked.
 `done` is when the job entered `merged` or `closed`, and only `factory.py` writes it.
 `started` is when the job first got a claim, and only `factory.py` writes it.
 `escalated` is set when an ESCALATE PR ships, and marks a PR that waits on a human.
