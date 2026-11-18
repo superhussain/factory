@@ -1984,6 +1984,33 @@ class RetroCatchupTest(PickupFixture):
         self.assertEqual(self.pickup(), (0, "", "factory.py: retro catch-up waits: no available route\n"))
         self.assertFalse(self.record.exists())
 
+    def test_no_checkout_waits_without_a_record(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        patch.object(factory, "read_paths", return_value={}).start()
+        self.assertEqual(self.pickup(), (0, "", "factory.py: retro catch-up waits: no checkout in paths.md\n"))
+        self.assertFalse(self.record.exists())
+        self.assertEqual(self.launched(), [])
+
+    def test_a_config_error_stops_the_catch_up_and_the_idea_still_launches(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.board["jobs"] = [idea("120-sample-digest", "alpha")]
+        real, calls = factory.route_launcher, []
+
+        def launcher(home, route):
+            calls.append(route[0])
+            if len(calls) == 1:
+                raise SystemExit(2)
+            return real(home, route)
+
+        patch.object(factory, "route_launcher", side_effect=launcher).start()
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"^launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n$")
+        self.assertEqual(err, "factory.py: retro catch-up stopped (exit 2); the next pickup run retries it\n")
+        self.assertFalse(self.record.exists())
+        self.assertEqual([r["argv"][0] for r in self.launched()], ["120-sample-digest"])
+
 
 class AuditPickupTest(PickupFixture):
     def setUp(self):
