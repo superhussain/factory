@@ -666,6 +666,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail.head-media .doc > .file-list { margin-bottom: 16px; padding-left: 20px; }
     .detail.head-media .doc > .file-list + * { margin-top: 0; }
     .pager > .doc, .pager > .gallery, .pager > .file-list { touch-action: pan-y pinch-zoom; }
+    /* On a phone each audit row is a card: a label column, then the value. */
+    .doc table.audit, .doc table.audit tbody, .doc table.audit tr { display: block; }
+    .doc table.audit thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .doc table.audit tr { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 4px 0; }
+    .doc table.audit td, .doc table.audit td:first-child, .doc table.audit td:last-child { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); column-gap: 10px; border: 0; padding: 3px 10px; min-width: 0; max-width: none; white-space: normal; }
+    .doc table.audit td::before { content: attr(data-label); color: var(--muted); font-weight: 600; }
   }
   @media (max-width: 360px) {
     header { gap: 6px; }
