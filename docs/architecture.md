@@ -169,7 +169,8 @@ tab reads the merged rows.
 Each audit push also rewrites that job and host's rows in the red-flag index
 `audit-flags.json`. The index keeps every row whose `flags` is a non-empty list
 of strings and whose `time` is a `YYYY-MM-DD HH:MM:SS` UTC time no more than one
-day ahead of the Worker clock, as `{time, job, host, agent, tool, flags, target}`.
+day ahead of the Worker clock, as `{time, job, host, agent, tool, flags, target}`, plus an optional
+`paseo: {server, agent}` kept only when both ids match `[A-Za-z0-9_-]{1,64}`.
 `agent`, `tool` and `target` are cut to 120 code points, and `flags` to its first
 16 names of 32 code points each. The host file keeps the full row. Rows sort by
 `time` descending, then `job`, `host` and `agent` ascending. Each host keeps

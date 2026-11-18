@@ -210,8 +210,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #retros-page { max-width: 1040px; }
   .retros-runs-heading { font-size: 15px; margin: 24px 0 12px; }
   #audit-flags td a { color: var(--accent); }
+  #audit-flags td a { white-space: nowrap; }
+  #audit-flags td a + a { margin-left: 8px; }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #audit-flags td:last-child { min-width: 14em; }
+  .audit-flags-pager { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+  #audit-flags-pager[hidden] { display: none; }
   #inbox-page { max-width: 1040px; }
   #inbox-list { list-style: none; margin: 0; padding: 0; }
   .inbox-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 16px; padding: 12px 10px; border-bottom: 1px solid var(--line); }
@@ -1187,9 +1191,14 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <p class="muted" id="audit-flags-status" role="status"></p>
     <div class="reference-scroll" id="audit-flags-wrap" tabindex="0" role="region" aria-label="Red flags" hidden>
       <table class="reference-table">
-        <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Job</th><th scope="col">Host</th><th scope="col">Agent</th><th scope="col">Tool</th><th scope="col">Flags</th><th scope="col">Target</th></tr></thead>
+        <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Job</th><th scope="col">Host</th><th scope="col">Agent</th><th scope="col">Session</th><th scope="col">Tool</th><th scope="col">Flags</th><th scope="col">Target</th></tr></thead>
         <tbody id="audit-flags-rows"></tbody>
       </table>
+    </div>
+    <div class="audit-flags-pager" id="audit-flags-pager" hidden>
+      <button class="btn" type="button" id="audit-flags-prev">Newer</button>
+      <span id="audit-flags-page" aria-live="polite"></span>
+      <button class="btn" type="button" id="audit-flags-next">Older</button>
     </div>
   </section>
   <h3 class="retros-runs-heading" id="retros-runs-heading">Retro runs</h3>
@@ -3171,9 +3180,11 @@ async function loadRetros() {
 }
 
 // Red flags: the flagged tool calls of every job, newest first, from the Worker's index.
-let auditFlags = null, auditFlagsFailed = false;
+const AUDIT_FLAGS_PAGE = 10;
+let auditFlags = null, auditFlagsFailed = false, auditFlagsPage = 0;
 
 async function loadAuditFlags() {
+  auditFlagsPage = 0;
   renderAuditFlags();
   try {
     const r = await fetch('./api/audit-flags', { cache: 'no-store' });
@@ -3194,10 +3205,60 @@ function renderAuditFlags() {
     : rows.length + (rows.length === 1 ? ' flagged call' : ' flagged calls') + ' across ' + jobCount + (jobCount === 1 ? ' job' : ' jobs')
       + ', newest first. Each host redacted its targets before upload.';
   $('audit-flags-wrap').hidden = !rows.length;
-  $('audit-flags-rows').innerHTML = rows.map((row) => '<tr><td>' + esc(row.time) + '</td><td><a href="#' + esc(encodeURIComponent(row.job)) + '">'
-    + esc(row.job) + '</a></td><td>' + esc(row.host) + '</td><td>' + esc(row.agent) + '</td><td>' + esc(row.tool) + '</td><td>'
-    + esc(row.flags.join(', ')) + '</td><td><code>' + esc(row.target) + '</code></td></tr>').join('');
+  const pages = Math.ceil(rows.length / AUDIT_FLAGS_PAGE);
+  auditFlagsPage = Math.max(0, Math.min(auditFlagsPage, pages - 1));
+  const start = auditFlagsPage * AUDIT_FLAGS_PAGE, shown = rows.slice(start, start + AUDIT_FLAGS_PAGE);
+  $('audit-flags-rows').replaceChildren(...shown.map((row) => {
+    const tr = document.createElement('tr'), label = hostName(row.host);
+    const cell = (text) => {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.append(td);
+      return td;
+    };
+    cell(row.time);
+    const job = document.createElement('a');
+    job.href = '#' + encodeURIComponent(row.job);
+    job.textContent = row.job;
+    cell('').append(job);
+    const host = cell(label);
+    if (label !== row.host) host.title = row.host;
+    cell(row.agent);
+    const session = document.createElement('td'), links = paseoLinksFor(row.paseo) || {};
+    for (const kind of ['app', 'web']) {
+      if (!links[kind]) continue;
+      const a = document.createElement('a'), linkLabel = factoryConfig.agent_links[kind].label;
+      a.href = links[kind];
+      a.textContent = linkLabel;
+      a.setAttribute('aria-label', 'Open the ' + (row.agent || 'agent') + ' session in ' + linkLabel);
+      if (kind === 'web') {
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+      }
+      session.append(a);
+    }
+    tr.append(session);
+    cell(row.tool);
+    cell(row.flags.join(', '));
+    const code = document.createElement('code');
+    code.textContent = row.target;
+    cell('').append(code);
+    return tr;
+  }));
+  const prev = $('audit-flags-prev'), next = $('audit-flags-next');
+  $('audit-flags-pager').hidden = pages < 2;
+  $('audit-flags-page').textContent = 'Rows ' + (start + 1) + ' to ' + (start + shown.length) + ' of ' + rows.length;
+  prev.disabled = auditFlagsPage === 0;
+  next.disabled = auditFlagsPage >= pages - 1;
 }
+
+function auditFlagsMove(step, button, other) {
+  auditFlagsPage += step;
+  renderAuditFlags();
+  if (button.disabled) other.focus();
+}
+$('audit-flags-prev').addEventListener('click', () => auditFlagsMove(-1, $('audit-flags-prev'), $('audit-flags-next')));
+$('audit-flags-next').addEventListener('click', () => auditFlagsMove(1, $('audit-flags-next'), $('audit-flags-prev')));
 
 const RETRO_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // "Nov 13, 2026, 22:43 UTC" from a run id that starts with its UTC timestamp, else the id.
@@ -4186,6 +4247,7 @@ async function loadHosts() {
   if (loaded) renderBoard();
   const open = jobs.find((x) => x.id === openId);
   if (open) $('d-meta').textContent = drawerMeta(open);
+  if (!$('retros-page').hidden) renderAuditFlags();
 }
 
 async function loadHostProjects() {

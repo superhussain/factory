@@ -10108,6 +10108,20 @@ def audit_scan(path, main):
     return rows
 
 
+def audit_paseo_agents():
+    """{Claude session id: Paseo agent id} from the agent files on this host. Skips files it cannot read."""
+    agents = {}
+    for path in Path(os.environ.get("PASEO_HOME") or Path.home() / ".paseo", "agents").glob("*/*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            session, agent = data["persistence"]["sessionId"], data["id"]
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if isinstance(session, str) and isinstance(agent, str) and PASEO_ID.fullmatch(agent):
+            agents[session] = agent
+    return agents
+
+
 def audit_folders(job_id):
     """The sorted transcript folders this host keeps from the job's worktrees."""
     folder = re.compile(r"(?:^|-)factory-" + re.escape(job_id) + r"(?:-|$)")
@@ -10120,17 +10134,20 @@ def audit_rows(job_id):
     if not root.is_dir():
         fail(f"no Claude Code transcripts at {root}", 4)
     rows, sessions = [], 0
+    server, agents = paseo_server(), audit_paseo_agents()
     for project in audit_folders(job_id):
         for path in sorted(project.glob("*.jsonl")):
             sessions += 1
-            rows += [{"session": path.stem[:8], "agent": "main", **row} for row in audit_scan(path, True)]
+            link = {"paseo": {"server": server, "agent": agents[path.stem]}} if server and path.stem in agents else {}
+            rows += [{"session": path.stem[:8], "agent": "main", **row, **link} for row in audit_scan(path, True)]
             for sub in sorted((project / path.stem / "subagents").glob("*.jsonl")):
                 try:
                     kind = str(json.loads(sub.with_suffix(".meta.json").read_text(encoding="utf-8")).get("agentType")
                                or "unknown")
                 except (OSError, ValueError, AttributeError):
                     kind = "unknown"
-                rows += [{"session": path.stem[:8], "agent": AUDIT_CONTROL.sub("?", kind), **row} for row in audit_scan(sub, False)]
+                rows += [{"session": path.stem[:8], "agent": AUDIT_CONTROL.sub("?", kind), **row, **link}
+                         for row in audit_scan(sub, False)]
     if not sessions:
         fail(f"no Claude Code session on this host ran in a factory-{job_id} worktree", 4)
     return sorted(rows, key=lambda r: (r["time"], r["session"])), sessions

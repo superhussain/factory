@@ -113,6 +113,21 @@ test("a push indexes its flagged calls newest first with seven fields", async ()
   assert.deepEqual((await s.flags())[0], flagged(7, "", "", ["sudo"], ""));
 });
 
+test("a valid paseo link is kept and a bad one is dropped", async () => {
+  const s = await setup();
+  const paseo = { server: "srv-a", agent: "agent-build" };
+  const rows = [
+    call(1, "main", "Bash", ["sudo"], "sudo a", { paseo }),
+    call(2, "main", "Bash", ["sudo"], "sudo b", { paseo: { server: "srv-a", agent: "bad id" } }),
+    call(3, "main", "Bash", ["sudo"], "sudo c", { paseo: { server: "srv-a" } }),
+    call(4, "main", "Bash", ["sudo"], "sudo d", { paseo: "srv-a/agent-build" }),
+  ];
+  assert.equal((await s.put(rows)).status, 200);
+  const kept = await s.flags();
+  assert.deepEqual(kept.find((r) => r.target === "sudo a").paseo, paseo);
+  assert.equal(kept.filter((r) => "paseo" in r).length, 1);
+});
+
 test("a re-push replaces only its job and host, and jobs interleave", async () => {
   const s = await setup();
   await s.put(SIX);

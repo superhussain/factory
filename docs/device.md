@@ -302,7 +302,8 @@ python3 <installed-skill>/runtime/factory.py audit push <job-id>
 and prints `pushed 6 calls to audit/1017-add-x/example-host.jsonl`. A re-push
 replaces this host's file. The body is capped at 1 MiB: past that, the oldest rows
 are dropped and the line reads `pushed 5 of 6 calls to ...; the oldest 1 did not
-fit in 1 MiB`. The job drawer's `audit` tab shows every host's pushed rows.
+fit in 1 MiB`. Rows gain `paseo: {server, agent}` when a Paseo agent file on this
+host (`$PASEO_HOME/agents/*/<id>.json`) names the session. The job drawer's `audit` tab shows every host's pushed rows.
 
 `audit push` with no valid `device:` exits 2 with the pairing hint, as does a 403
 `audit rows are written only by the host's bound service token`. Any other 403

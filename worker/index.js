@@ -1736,6 +1736,18 @@ function auditFlagTime(time, now) {
   );
 }
 
+// A row's Paseo link when both ids are well formed, else null.
+function auditFlagPaseo(p) {
+  const id = /^[A-Za-z0-9_-]{1,64}$/;
+  return p &&
+    typeof p.server === "string" &&
+    typeof p.agent === "string" &&
+    id.test(p.server) &&
+    id.test(p.agent)
+    ? { server: p.server, agent: p.agent }
+    : null;
+}
+
 // The flagged calls of one job and host with a host-shaped UTC time, each field capped.
 function auditFlagRows(rows, job, host) {
   const now = Date.now();
@@ -1749,17 +1761,21 @@ function auditFlagRows(rows, job, host) {
         row.flags.length > 0 &&
         row.flags.every((flag) => typeof flag === "string"),
     )
-    .map((row) => ({
-      time: row.time,
-      job,
-      host,
-      agent: cap(row.agent, AUDIT_FLAGS_TEXT_MAX),
-      tool: cap(row.tool, AUDIT_FLAGS_TEXT_MAX),
-      flags: row.flags
-        .slice(0, AUDIT_FLAGS_FLAGS_MAX)
-        .map((flag) => cap(flag, AUDIT_FLAGS_FLAG_MAX)),
-      target: cap(row.target, AUDIT_FLAGS_TEXT_MAX),
-    }));
+    .map((row) => {
+      const paseo = auditFlagPaseo(row.paseo);
+      return {
+        time: row.time,
+        job,
+        host,
+        agent: cap(row.agent, AUDIT_FLAGS_TEXT_MAX),
+        tool: cap(row.tool, AUDIT_FLAGS_TEXT_MAX),
+        flags: row.flags
+          .slice(0, AUDIT_FLAGS_FLAGS_MAX)
+          .map((flag) => cap(flag, AUDIT_FLAGS_FLAG_MAX)),
+        target: cap(row.target, AUDIT_FLAGS_TEXT_MAX),
+        ...(paseo && { paseo }),
+      };
+    });
 }
 
 // Newest first, then job, host and agent.
