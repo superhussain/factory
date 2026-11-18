@@ -162,7 +162,7 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
 | --- | --- | --- |
 | Factory dashboard URL | Paseo, Settings, Plugins, Factory | Paseo user, per host |
 | `embed_origins` | `deploy/profile.json` | Server operator |
-| SameSite None on the Access cookie | Cloudflare Zero Trust, Access application | Server operator |
+| SameSite None on the Access cookie | Cloudflare Access application, set by `tools/bootstrap.py up` | Server operator |
 
 1. Install the plugin on the daemon host: `paseo plugin install <checkout>/paseo-plugin`.
    Check it with `paseo plugin ls`, which shows `factory running`.
@@ -172,9 +172,10 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
    `deploy/profile.json`, for example `"embed_origins": ["https://app.paseo.sh"]`, then render
    and deploy as [config-changes.md](config-changes.md) describes. The dashboard sends
    `frame-ancestors 'self'` plus these origins, so no other site can frame it.
-4. In the Access application, open the cookie settings and set the SameSite attribute to
-   `None`. With the default Lax cookie, the frame gets the Access login page, not the board.
-   `tools/bootstrap.py` keeps this setting on a rerun.
+4. Rerun `mise exec -- python3 tools/bootstrap.py up`. With `embed_origins` set, it sets the
+   Access application's cookie SameSite attribute to `None`. With the default Lax cookie, the
+   frame gets the Access login page, not the board. If bootstrap did not create your Access
+   application, set the attribute to `None` by hand in its cookie settings.
 
 The board appears inside Paseo on web and desktop only. On iOS and Android the screen links to
 the dashboard in the browser instead. A browser that blocks third-party cookies cannot show the
