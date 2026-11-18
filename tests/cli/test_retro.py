@@ -128,7 +128,8 @@ class RetroRedactTest(RetroCase):
                           ("SSHPASS=hunter2 sshpass -e ssh h", "SSHPASS=[redacted] sshpass -e ssh h"),  # gitleaks:allow synthetic credentials
                           ("REDISCLI_AUTH=hunter2 redis-cli ping", "REDISCLI_AUTH=[redacted] redis-cli ping"),  # gitleaks:allow synthetic credentials
                           ("redis-cli -a hunter2 ping && ls -a /tmp",  # gitleaks:allow synthetic credentials
-                           "redis-cli -a [redacted] ping && ls -a /tmp")):
+                           "redis-cli -a [redacted] ping && ls -a /tmp"),
+                          ("curl -H Authorization:\\ Bearer\\ abc\\$x", "curl -H Authorization:\\[redacted]")):
             with self.subTest(text=text):
                 self.assertEqual(factory.retro_redact(text), out)
 
@@ -195,7 +196,7 @@ class RetroRedactTest(RetroCase):
                  "a=", "--a ", "_token=", "tokens", "a" * 70 + " ", "a" * 40 + "://", "a" * 40 + "://u:p@",
                  "@", "://u:p@ss@", "a" * 40 + "://u:p@ss@", "mysql ", "sshpass ", "mysql -p\"", "mysql -p'", " -p",
                  "sshpass -p \"", "Authorization:\\ ", "redis-cli ", "redis-cli -a ", "docker login ", "openssl ",
-                 " -passin pass:", "SSHPASS="]
+                 " -passin pass:", "SSHPASS=", "Authorization:\\$", "\\$"]
         for unit in units:
             text = (unit * 30000)[:30000]
             for name, pattern in [*patterns.items(), ("retro_redact", None)]:

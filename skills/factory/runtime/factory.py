@@ -9368,7 +9368,7 @@ RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
 RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+")
 RETRO_HEADERS = re.compile(
     r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))"
-    r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)(?:\\[ \t]|[^\r\n'\"\\])+")
+    r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)(?:\\[^\r\n'\"]|[^\r\n'\"\\])+")
 RETRO_URL_CREDS = re.compile(r"(?i)(?<=[a-z0-9+.-])://[^/\s]+@")
 RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
 RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)(?!=?\d+:\d+(?!\S))[^\s:]*:\S+")
