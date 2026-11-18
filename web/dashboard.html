@@ -3650,7 +3650,11 @@ function renderNotificationsMenu(items) {
     '<span class="inbox-title">' + esc(it.job.title || it.job.id) + '</span><span class="inbox-meta">' + esc(it.job.id) + ' · ' + esc(ago(it.at)) + '</span></a></li>').join('');
   if (html === notificationsMenuHtml) return;
   notificationsMenuHtml = html;
-  $('notifications-menu-list').innerHTML = html;
+  // Rewriting drops focus, so return it to the row with the same href.
+  const list = $('notifications-menu-list');
+  const href = list.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
+  list.innerHTML = html;
+  if (href !== null) [...list.querySelectorAll('a')].find((a) => a.getAttribute('href') === href)?.focus();
 }
 function notificationActions(it) {
   const j = it.job, pr = prLink(j), paseo = paseoLinks(j), owner = sessionJob(j);
