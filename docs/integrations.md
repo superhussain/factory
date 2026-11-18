@@ -185,13 +185,18 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
    If bootstrap did not create your Access application, set the attribute to `None` by hand in its
    cookie settings.
 
-### Inbox badge
-
-The Factory row shows the same number as the dashboard's Inbox badge: jobs waiting on you plus unchecked backlog lines, across all projects. The plugin runs `factory.py inbox` from the installed factory skill (`~/.claude/skills/factory` or `~/.agents/skills/factory`) once a minute, so the badge can trail the dashboard by up to a minute. It ignores the dashboard's per-browser project filter. A host without the factory skill, or with a skill older than `factory.py inbox`, shows no badge.
-
 The board appears inside Paseo on web and desktop only. On iOS and Android the screen links to
 the dashboard in the browser instead. A browser that blocks third-party cookies cannot show the
 frame; the screen then offers **Sign in**, which opens the dashboard in a tab, and **Reload**.
+
+### Inbox badge
+
+The Factory row shows the same number as the dashboard's Inbox badge: jobs waiting on you plus
+unchecked backlog lines, across all projects. The plugin runs `factory.py inbox` from the installed
+factory skill (`~/.claude/skills/factory` or `~/.agents/skills/factory`) once a minute, so the
+badge can trail the dashboard by up to a minute. It ignores the dashboard's per-browser project
+filter. A host without the factory skill, or with a skill older than `factory.py inbox`, shows no
+badge.
 
 ## Tracer mirror
 
