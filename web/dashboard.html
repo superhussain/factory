@@ -1560,7 +1560,8 @@ function paseoLinksFor(p) {
 const EMBED_ORIGINS = Array.isArray(factoryConfig.embed_origins) ? factoryConfig.embed_origins : [];
 let embedParent = null;
 // Opened as a sign-in popup by a listed Paseo origin: say sign-in finished.
-if (window.opener && window.parent === window) for (const o of EMBED_ORIGINS) window.opener.postMessage({ type: 'factory-embed-signed-in', v: 1 }, o);
+// Chrome throws on a non-http target such as paseo://app, so each origin is tried alone.
+if (window.opener && window.parent === window) for (const o of EMBED_ORIGINS) try { window.opener.postMessage({ type: 'factory-embed-signed-in', v: 1 }, o); } catch {}
 function appLinkIds(href) {
   const template = factoryConfig.agent_links.app?.template;
   if (!template) return null;

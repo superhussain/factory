@@ -120,7 +120,6 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       await popup.waitForFunction(() => document.body.innerText.includes("Synthetic linked job"), {
         timeout: 8000,
       });
-      await popup.screenshot({ path: process.env.J + "/after-sign-in-popup.png" });
       await page.waitForFunction(
         () => window.received.some((m) => m?.type === "factory-embed-signed-in" && m.v === 1),
         { timeout: 5000, polling: 50 },
