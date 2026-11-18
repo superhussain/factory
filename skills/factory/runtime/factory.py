@@ -162,6 +162,7 @@ The board, backlog, and project files live in R2 behind the factory Worker at
 
 import contextlib
 import fnmatch
+import functools
 import http.client
 import hashlib
 import io
@@ -1201,8 +1202,9 @@ def next_job_id(names, feature_slug, floor=0):
     return f"{max(used + [floor], default=0) + 1:03d}-{feature_slug}"
 
 
-def claim_id(factory, feature_slug, project_slug):
-    """Ids are unique across the whole factory, so `#<id>` links and board lookups stay unambiguous."""
+def claim_id(factory, feature_slug, project_slug, refs=None):
+    """Ids are unique across the whole factory, so `#<id>` links and board lookups stay unambiguous.
+    refs, when given, go on the stub."""
     for slug in (feature_slug, project_slug):
         if not SLUG.fullmatch(slug):
             fail(f"bad slug {slug!r}: use letters, digits, - and _", 2)
@@ -1225,6 +1227,8 @@ def claim_id(factory, feature_slug, project_slug):
                 "started": data["updated"], "claim": new_claim(device, session)}
         if paseo:
             stub["paseo"] = paseo
+        if refs:
+            stub["refs"] = refs
         data["jobs"].append(stub)
         return dump_board(data), job_id
     job_id = cas(factory, "/api/board", add)
@@ -1243,11 +1247,13 @@ def feature_slug(feature):
     return "-".join(re.findall(r"[a-z0-9]+", feature.lower())[:3])[:40].strip("-") or "item"
 
 
-def first_item(text, projects, paths, skipped):
-    """(raw line, slug, feature) for the first unchecked line this device can run, or None.
-    Lines for a project with no checkout here are skipped, and their slugs added to skipped."""
-    for line in text.split("\n"):
-        line = line.rstrip("\r")
+def first_item(text, projects, paths, skipped, open_ids=frozenset):
+    """(raw line, slug, feature, refs) for the first unchecked line this device can run, or None.
+    Lines for a project with no checkout here are skipped, and their slugs added to skipped. A line whose
+    Depends on: prerequisite is unchecked or still open is skipped, and its raw line added to skipped.
+    open_ids() gives the open board ids, and is called only for a line with Depends on: refs."""
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    for i, line in enumerate(lines):
         if not line.startswith("- [ ] "):
             continue
         if line.splitlines() != [line]:
@@ -1259,11 +1265,24 @@ def first_item(text, projects, paths, skipped):
         if slug not in projects:
             fail(f"backlog line {line!r} names unknown project {slug}. Known projects: "
                  f"{', '.join(sorted(projects)) or 'none'}", 4)
-        if paths.get(slug):
-            return line, slug, m.group(2).rstrip()
-        if slug not in skipped:
-            skipped.add(slug)
-            print(f"skipping {slug}: no checkout on this device", file=sys.stderr)
+        if not paths.get(slug):
+            if slug not in skipped:
+                skipped.add(slug)
+                print(f"skipping {slug}: no checkout on this device", file=sys.stderr)
+            continue
+        held = []
+        for below in lines[i + 1:]:
+            if below and not below.startswith("  "):
+                break
+            held.append(below[2:])
+        context, feature = "\n".join(held), m.group(2).rstrip()
+        depends, _ = backlog_depends(text, context)
+        refs, why = backlog_waits(text, context, open_ids() if depends else frozenset())
+        if why is None:
+            return line, slug, feature, suffix_refs(BACKLOG_SUFFIX.search(feature)) + refs
+        if line not in skipped:
+            skipped.add(line)
+            print(f'skipping "{slug}: {feature}": {why}', file=sys.stderr)
     return None
 
 
@@ -1276,11 +1295,13 @@ def next_item():
     paths, skipped = read_paths(home), set()
     for _ in range(20):
         status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
-        item = first_item(text if status == 200 else "", projects, paths, skipped)
+        open_ids = functools.cache(lambda: {j.get("id") for j in read_board(home)["jobs"]
+                                            if j.get("stage") not in TERMINAL})
+        item = first_item(text if status == 200 else "", projects, paths, skipped, open_ids)
         if item is None:
             fail("nothing this device can run in the backlog" if skipped else "backlog is empty", 3)
-        raw, slug, feature = item
-        job_id = claim_id(home, feature_slug(feature), slug)
+        raw, slug, feature, refs = item
+        job_id = claim_id(home, feature_slug(feature), slug, refs)
 
         def mark(text):
             lines = (text or "").split("\n")

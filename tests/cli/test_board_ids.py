@@ -172,6 +172,15 @@ class ArchiveFloorTest(IsolatedTestCase):
             self.assertEqual(factory.claim_id(self.home, "new-thing", "sample"), "417-new-thing")
         self.assertEqual(self.ids()[-1], "417-new-thing")
 
+    def test_claim_puts_refs_on_the_stub(self):
+        refs = [{"id": "041-recipe-import", "kind": "sub-job-of"}, {"id": "052-parse-recipe-urls", "kind": "depends-on"}]
+        with patch.dict(os.environ, {"FACTORY_SESSION": "tag", "PASEO_AGENT_ID": ""}):
+            factory.claim_id(self.home, "store-imported-recipes", "sample", refs)
+            factory.claim_id(self.home, "no-refs", "sample", [])
+        stub, bare = json.loads(self.files["/api/board"])["jobs"][-2:]
+        self.assertEqual((stub["id"], stub["refs"], "stage" in stub), ("417-store-imported-recipes", refs, False))
+        self.assertNotIn("refs", bare)
+
     def test_backlog_triage_queues_above_the_floor(self):
         verdict = {"model": "m", "confidence": 90, "threshold": 80, "reason": "Small."}
         with contextlib.redirect_stdout(io.StringIO()):
