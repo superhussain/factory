@@ -1897,15 +1897,19 @@ BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of|depends-on) 
 DEPENDS_ON = re.compile(r"^Depends on: ([\w-]+: \S.*)$", re.M)
 
 
-def backlog_depends(text, context):
-    """(refs, waiting) for the Depends on: lines in context: a depends-on ref per item checked off as a job,
-    and the first item whose backlog line is still unchecked, or None. A missing item adds nothing."""
+def backlog_depends(text, context, same_call=None):
+    """(refs, waiting) for the Depends on: lines in context: a depends-on ref per item checked off as a job
+    or picked in the same call (same_call maps an item to its new job id), and the first other item whose
+    backlog line is still unchecked, or None. A missing item adds nothing."""
     lines = [line.rstrip() for line in text.split("\n")]
     refs, waiting = [], None
     for item in DEPENDS_ON.findall(context):
         item = item.rstrip()
         if f"- [ ] {item}" in lines:
-            waiting = waiting or item
+            if same_call and item in same_call:
+                refs.append({"id": same_call[item], "kind": "depends-on"})
+            else:
+                waiting = waiting or item
             continue
         done = re.compile(rf"- \[x\] {re.escape(item)} \(([^()]+)\)")
         job_id = next((m.group(1) for m in map(done.fullmatch, lines) if m), None)
@@ -1914,10 +1918,11 @@ def backlog_depends(text, context):
     return refs, waiting
 
 
-def backlog_waits(text, context, open_ids, together=frozenset()):
+def backlog_waits(text, context, open_ids, together=frozenset(), same_call=None):
     """(refs, why) for a line's Depends on: context: its depends-on refs, and why it must wait (None when it can
-    start). It waits on an unchecked prerequisite line or a prerequisite job still open, unless that job is in together."""
-    refs, waiting = backlog_depends(text, context)
+    start). It waits on an unchecked prerequisite line not in same_call or a prerequisite job still open, unless
+    that job is in together."""
+    refs, waiting = backlog_depends(text, context, same_call)
     if waiting:
         return refs, f'it depends on "{waiting}", which is still unchecked'
     held = next((r["id"] for r in refs if r["id"] in open_ids and r["id"] not in together), None)
@@ -2426,7 +2431,11 @@ def batch_cmd(target, *idea_ids):
         alone = isinstance(lead.get("priority"), dict) and lead["priority"].get("alone") is True
         open_ids = open_job_ids(data["jobs"])
         together = {lead_id} | {j.get("id") for j in riders_of(data, lead_id)}
-        depends = {}
+        depends, made = {}, {}
+        for pick in line_picks:
+            made[pick] = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]] + list(made.values()),
+                                     feature_slug(lines[pick][3]["title"]), archive_floor(data))
+        same_call = {lines[p][0][6:].rstrip(): made[p] for p in line_picks}
         if idea_ids:
             if not mine(lead.get("claim") or {}, device, session):
                 fail(f"{lead_id} is not held by this session. Nothing was written.", 6)
@@ -2439,7 +2448,7 @@ def batch_cmd(target, *idea_ids):
             if len(riders_of(data, lead_id)) + len(idea_ids) > MAX_RIDERS:
                 fail(f"a batch holds at most {MAX_RIDERS} riders", 2)
             for pick in line_picks:
-                depends[pick], why = backlog_waits(backlog_text, lines[pick][4], open_ids, together)
+                depends[pick], why = backlog_waits(backlog_text, lines[pick][4], open_ids, together, same_call)
                 if why:
                     fail(AUDIT_CONTROL.sub("?", f"cannot batch {pick}: {why}. Nothing was written."), 2)
             picked = []
@@ -2455,15 +2464,11 @@ def batch_cmd(target, *idea_ids):
                 j.pop("claim", None)
                 patch_job(data, j["id"], {"stage": "spec", "note": f"batched into {lead_id}",
                                           "refs": [*(j.get("refs") or []), {"id": lead_id, "kind": BATCH_REF}]})
-        made = {}
         for pick in line_picks:
             _, _, ref, candidate, _ = lines[pick]
-            job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]],
-                                 feature_slug(candidate["title"]), archive_floor(data))
             refs = suffix_refs(ref) + depends[pick] + [{"id": lead_id, "kind": BATCH_REF}]
-            patch_job(data, job_id, {"project": slug, "title": candidate["title"], "idea": candidate["idea"],
-                                     "stage": "spec", "note": f"batched into {lead_id}", "refs": refs})
-            made[pick] = job_id
+            patch_job(data, made[pick], {"project": slug, "title": candidate["title"], "idea": candidate["idea"],
+                                         "stage": "spec", "note": f"batched into {lead_id}", "refs": refs})
         candidates = [entry(j) for j in data["jobs"]
                       if j.get("id") != lead_id and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
                       and batch_problem(data, j, slug, device, session, minutes) is None]
