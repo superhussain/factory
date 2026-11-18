@@ -189,6 +189,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   body[data-view="retros"] #board, body[data-view="retros"] #detail,
   body[data-view="inbox"] #board, body[data-view="inbox"] #detail { display: none; }
   #retros-page { max-width: 1040px; }
+  #audit-flags .table-wrap { overflow-x: auto; }
+  #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #inbox-page { max-width: 1040px; }
   #inbox-list { list-style: none; margin: 0; padding: 0; }
   .inbox-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 16px; padding: 12px 10px; border-bottom: 1px solid var(--line); }
@@ -1132,6 +1134,16 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <a class="btn icon" id="retros-back" href="#" aria-label="Back to board" title="Back to board (H)" aria-keyshortcuts="h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
     <h2 id="retros-page-heading" tabindex="-1">Retros</h2>
   </div>
+  <section class="settings-section" id="audit-flags" aria-labelledby="audit-flags-heading">
+    <h3 id="audit-flags-heading">Red flags</h3>
+    <p class="muted" id="audit-flags-status" role="status"></p>
+    <div class="table-wrap" id="audit-flags-wrap" hidden>
+      <table class="reference-table">
+        <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Job</th><th scope="col">Host</th><th scope="col">Agent</th><th scope="col">Tool</th><th scope="col">Flags</th><th scope="col">Target</th></tr></thead>
+        <tbody id="audit-flags-rows"></tbody>
+      </table>
+    </div>
+  </section>
   <p class="muted" id="retros-status" role="status"></p>
   <div id="retros-list"></div>
 </div>
@@ -2975,7 +2987,7 @@ function renderRoute() {
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : baseTitle;
   if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxFocusRow = -1; inboxAnswer = null; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
-  if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); }
+  if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
@@ -3083,6 +3095,35 @@ async function loadRetros() {
   } catch { retros = null; retrosFailed = true; }
   renderRetrosPage();
   if ($('job-picker').open && pickerMode === 'job') renderJobResults();
+}
+
+// Red flags: the flagged tool calls of every job, newest first, from the Worker's index.
+let auditFlags = null, auditFlagsFailed = false;
+
+async function loadAuditFlags() {
+  renderAuditFlags();
+  try {
+    const r = await fetch('./api/audit-flags', { cache: 'no-store' });
+    if (r.status === 404) auditFlags = [];
+    else if (r.status !== 200) throw new Error(String(r.status));
+    else auditFlags = (await r.json()).rows;
+    auditFlagsFailed = false;
+  } catch { auditFlags = null; auditFlagsFailed = true; }
+  renderAuditFlags();
+}
+
+function renderAuditFlags() {
+  const rows = auditFlags ?? [];
+  const jobCount = new Set(rows.map((row) => row.job)).size;
+  $('audit-flags-status').textContent = auditFlagsFailed ? 'Could not load red flags. Reload to try again.'
+    : auditFlags === null ? 'Loading red flags\u2026'
+    : !rows.length ? 'No flagged tool calls yet. Each audit push adds its job\'s flagged calls here.'
+    : rows.length + (rows.length === 1 ? ' flagged call' : ' flagged calls') + ' across ' + jobCount + (jobCount === 1 ? ' job' : ' jobs')
+      + ', newest first. Each host redacted its targets before upload.';
+  $('audit-flags-wrap').hidden = !rows.length;
+  $('audit-flags-rows').innerHTML = rows.map((row) => '<tr><td>' + esc(row.time) + '</td><td><a href="#' + esc(encodeURIComponent(row.job)) + '">'
+    + esc(row.job) + '</a></td><td>' + esc(row.host) + '</td><td>' + esc(row.agent) + '</td><td>' + esc(row.tool) + '</td><td>'
+    + esc(row.flags.join(', ')) + '</td><td><code>' + esc(row.target) + '</code></td></tr>').join('');
 }
 
 const RETRO_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
