@@ -14,6 +14,7 @@ Access. The apply step hands off to the operator gates in
 | `image_origins` (image publication) | `deploy/profile.json` | Server operator |
 | `agent_links` (agent app and web links) | `deploy/profile.json` | Server operator |
 | `jira_origin` (Jira key links) | `deploy/profile.json` | Server operator |
+| `embed_origins` (sites that may frame the dashboard) | `deploy/profile.json` | Server operator |
 | `title` | `deploy/profile.json` | Server operator |
 | `origin` (instance URL) | `deploy/profile.json`, then each device's `config.md` `api_url` | Server operator, then each device host |
 

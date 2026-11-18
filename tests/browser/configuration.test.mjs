@@ -27,6 +27,7 @@ function config(overrides = {}) {
     issuer: "https://example-team.cloudflareaccess.com",
     audience: "example-application-audience",
     image_origins: [],
+    embed_origins: [],
     agent_links: {},
     ...overrides,
   };
@@ -69,7 +70,7 @@ test("renderDashboard injects the configured policy, CSP and escapes", () => {
     const meta = html
       .match(/http-equiv="Content-Security-Policy" content="([^"]*)"/)[1]
       .replaceAll("&#x27;", "'");
-    assert.equal(meta, csp);
+    assert.equal(meta + "; frame-ancestors 'self'", csp);
     assert.ok(!html.includes("</script> \"&'"), "title markup cannot escape the page");
     assert.match(html, /Factory &lt;\/script&gt;/);
     const injected = JSON.parse(html.match(/id="factory-config">([^<]*)<\/script>/)[1]);
@@ -98,6 +99,37 @@ test("jira_origin is optional, https only, and injected only when set", async ()
     );
   assert.ok(!("jira_origin" in (await injected(config({ jira_origin: null })))));
   assert.equal((await injected(config({ jira_origin: jira }))).jira_origin, jira);
+});
+
+test("embed_origins is optional, https only, and sets frame-ancestors", async () => {
+  const base = {
+    FACTORY_ORIGIN: "https://factory.example.test",
+    FACTORY_TITLE: "Factory",
+    ACCESS_ISSUER: "https://example-team.cloudflareaccess.com",
+    ACCESS_AUDIENCE: "aud",
+  };
+  assert.deepEqual(assets.readServerConfig(base).embed_origins, []);
+  const paseo = "https://paseo.example.test";
+  const read = assets.readServerConfig({ ...base, FACTORY_EMBED_ORIGINS: JSON.stringify([paseo]) });
+  assert.deepEqual(read.embed_origins, [paseo]);
+  assert.throws(() =>
+    assets.readServerConfig({ ...base, FACTORY_EMBED_ORIGINS: '["http://paseo.example.test"]' }),
+  );
+  assert.throws(() =>
+    assets.readServerConfig({ ...base, FACTORY_EMBED_ORIGINS: JSON.stringify([paseo, paseo]) }),
+  );
+  const rendered = assets.renderDashboard(config({ embed_origins: [paseo] }));
+  assert.ok(
+    rendered.headers
+      .get("Content-Security-Policy")
+      .endsWith("; frame-ancestors 'self' https://paseo.example.test"),
+  );
+  const html = await rendered.text();
+  const meta = html.match(/http-equiv="Content-Security-Policy" content="([^"]*)"/)[1];
+  assert.ok(!meta.includes("frame-ancestors"));
+  const injected = (page) => JSON.parse(page.match(/id="factory-config">([^<]*)<\/script>/)[1]);
+  assert.deepEqual(injected(html).embed_origins, [paseo]);
+  assert.ok(!("embed_origins" in injected(await assets.renderDashboard(config()).text())));
 });
 
 const JOB = {

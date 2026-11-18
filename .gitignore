@@ -1,4 +1,5 @@
 /node_modules/
+/paseo-plugin/node_modules/
 /.build/
 /.context/
 .wrangler/

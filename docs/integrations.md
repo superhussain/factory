@@ -154,6 +154,32 @@ step and cause, such as `source read: timed out after 300 s`. `plan` skips, and 
 rejects, any key with a `.` or `..` segment. Run it from the main checkout, never a job
 worktree, so the token only runs merged code.
 
+## Paseo plugin
+
+The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo sidebar. The row opens your dashboard on a Paseo screen, and a Session app link in it opens the agent in the same Paseo window.
+
+| Setting | Where | Owner |
+| --- | --- | --- |
+| Factory dashboard URL | Paseo, Settings, Plugins, Factory | Paseo user, per host |
+| `embed_origins` | `deploy/profile.json` | Server operator |
+| SameSite None on the Access cookie | Cloudflare Zero Trust, Access application | Server operator |
+
+1. Install the plugin on the daemon host: `paseo plugin install <checkout>/paseo-plugin`.
+   Check it with `paseo plugin ls`, which shows `factory running`.
+2. In Paseo, open Settings, Plugins, Factory and enter your dashboard origin, such as
+   `https://factory.example.com`.
+3. Add each Paseo web origin that frames the board to `embed_origins` in
+   `deploy/profile.json`, for example `"embed_origins": ["https://app.paseo.sh"]`, then render
+   and deploy as [config-changes.md](config-changes.md) describes. The dashboard sends
+   `frame-ancestors 'self'` plus these origins, so no other site can frame it.
+4. In the Access application, open the cookie settings and set the SameSite attribute to
+   `None`. With the default Lax cookie, the frame gets the Access login page, not the board.
+   `tools/bootstrap.py` keeps this setting on a rerun.
+
+The board appears inside Paseo on web and desktop only. On iOS and Android the screen links to
+the dashboard in the browser instead. A browser that blocks third-party cookies cannot show the
+frame; the screen then offers **Sign in**, which opens the dashboard in a tab, and **Reload**.
+
 ## Tracer mirror
 
 An optional, one-way mirror shows a job's tasks, progress and review outcomes in a Tracer instance. It is off until Settings, Pipeline, Tracer integration is On and `<home>/tracer.json` lists the project. Delete the entry to turn it off.

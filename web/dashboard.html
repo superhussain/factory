@@ -1542,6 +1542,34 @@ function paseoLinksFor(p) {
   }
   return links;
 }
+// Framed by a listed Paseo origin, app links go to the parent instead of the OS handler.
+const EMBED_ORIGINS = Array.isArray(factoryConfig.embed_origins) ? factoryConfig.embed_origins : [];
+let embedParent = null;
+function appLinkIds(href) {
+  const template = factoryConfig.agent_links.app?.template;
+  if (!template) return null;
+  const pattern = template.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace('\\{server\\}', '([A-Za-z0-9_-]{1,64})').replace('\\{agent\\}', '([A-Za-z0-9_-]{1,64})');
+  const m = new RegExp('^' + pattern + '$').exec(href);
+  if (!m) return null;
+  return template.indexOf('{server}') < template.indexOf('{agent}')
+    ? { server: m[1], agent: m[2] } : { server: m[2], agent: m[1] };
+}
+window.addEventListener('message', (e) => {
+  if (!(window.parent !== window && e.source === window.parent && EMBED_ORIGINS.includes(e.origin) &&
+        e.data?.type === 'factory-embed-hello' && e.data.v === 1)) return;
+  embedParent = e.origin;
+  window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, e.origin);
+});
+document.addEventListener('click', (e) => {
+  if (!embedParent) return;
+  const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
+  const ids = a && appLinkIds(a.getAttribute('href'));
+  if (!ids) return;
+  e.preventDefault();
+  window.parent.postMessage({ type: 'factory-open-agent', v: 1, ...ids }, embedParent);
+}, true);
+
 // The session link a job carries: the one that claimed it, else the last Paseo session that wrote it unclaimed.
 function sessionLink(j) {
   if (paseoLinksFor(j.paseo)) return j.paseo;

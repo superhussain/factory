@@ -6,7 +6,7 @@ import { APPLE_TOUCH_ICON, ICON_192, ICON_512 } from "./icons.js";
 import { manifest, serviceWorker } from "./pwa.js";
 
 /** @typedef {{origin:string, title:string, issuer:string, audience:string,
- * image_origins:string[], agent_links:Record<string,{label:string,template:string}>,
+ * image_origins:string[], embed_origins:string[], agent_links:Record<string,{label:string,template:string}>,
  * jira_origin:string|null}} ServerConfig */
 // oxlint-disable-next-line no-control-regex -- this pattern exists to reject control characters.
 const controls = /[\x00-\x1f\x7f-\x9f]/u;
@@ -69,7 +69,12 @@ export function readServerConfig(env) {
     throw new Error("invalid issuer");
   const title = text(env.FACTORY_TITLE, 160);
   const audience = text(env.ACCESS_AUDIENCE);
-  for (const name of ["FACTORY_IMAGE_ORIGINS", "FACTORY_AGENT_LINKS", "FACTORY_JIRA_ORIGIN"]) {
+  for (const name of [
+    "FACTORY_IMAGE_ORIGINS",
+    "FACTORY_EMBED_ORIGINS",
+    "FACTORY_AGENT_LINKS",
+    "FACTORY_JIRA_ORIGIN",
+  ]) {
     if (env[name] !== undefined && typeof env[name] !== "string")
       throw new Error("invalid configuration");
   }
@@ -80,6 +85,11 @@ export function readServerConfig(env) {
   if (!Array.isArray(image_origins) || new Set(image_origins).size !== image_origins.length)
     throw new Error("invalid images");
   image_origins.forEach(httpsOrigin);
+  const embed_origins =
+    env.FACTORY_EMBED_ORIGINS === undefined ? [] : JSON.parse(env.FACTORY_EMBED_ORIGINS);
+  if (!Array.isArray(embed_origins) || new Set(embed_origins).size !== embed_origins.length)
+    throw new Error("invalid embed origins");
+  embed_origins.forEach(httpsOrigin);
   if (!agent_links || typeof agent_links !== "object" || Array.isArray(agent_links))
     throw new Error("invalid links");
   for (const [kind, link] of Object.entries(agent_links)) {
@@ -109,7 +119,16 @@ export function readServerConfig(env) {
     env.FACTORY_JIRA_ORIGIN === undefined
       ? null
       : (httpsOrigin(env.FACTORY_JIRA_ORIGIN), env.FACTORY_JIRA_ORIGIN);
-  return { origin, title, issuer, audience, image_origins, agent_links, jira_origin };
+  return {
+    origin,
+    title,
+    issuer,
+    audience,
+    image_origins,
+    embed_origins,
+    agent_links,
+    jira_origin,
+  };
 }
 
 // FNV-1a 32 of the dashboard source: a tab compares it with the version it loaded.
@@ -139,9 +158,11 @@ function response(body, type, headers = {}) {
 
 /** @param {ServerConfig} env */
 export function renderDashboard(env) {
+  const embed = env.embed_origins;
   const config = jsonScript({
     image_origins: env.image_origins,
     agent_links: env.agent_links,
+    ...(embed.length ? { embed_origins: embed } : {}),
     ...(env.jira_origin ? { jira_origin: env.jira_origin } : {}),
   });
   const csp =
@@ -159,7 +180,10 @@ export function renderDashboard(env) {
     /__FACTORY_(?:TITLE|CSP|CONFIG|REFERENCE|VERSION)__/g,
     (token) => values[token],
   );
-  return response(html, "text/html", { "Content-Security-Policy": csp });
+  return response(html, "text/html", {
+    "Content-Security-Policy":
+      csp + "; frame-ancestors 'self'" + embed.map((origin) => " " + origin).join(""),
+  });
 }
 
 const icons = {
