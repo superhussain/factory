@@ -208,7 +208,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding: 12px 4px; }
     .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
   }
-  .inbox-item[aria-current="true"] { background: var(--line); box-shadow: inset 3px 0 0 var(--accent); }
+  .inbox-item[aria-current="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
   @media (min-width: 761px) {
     body[data-inbox-split] #inbox-page { max-width: none; margin: 0 min(var(--drawer-w, 760px), 100%) 0 0; }
     body[data-inbox-split] .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; }
@@ -3240,6 +3240,8 @@ let inboxHtml = '';
 let inboxError = '';
 // The row whose action button was clicked, for when disabling it moved focus to the body.
 let inboxFocusRow = -1;
+// The row href an arrow step opened, so the next render focuses that row's link.
+let inboxStepHref = '';
 // The one inbox row whose needs.md form is open: { id, el, f, answersFile, saving }, or null.
 let inboxAnswer = null;
 
@@ -3349,6 +3351,10 @@ function renderInboxPage() {
     if (el.tagName === 'TEXTAREA') el.setSelectionRange(selectionStart, selectionEnd);
   }
   if (row >= 0) (list.children[Math.min(row, list.children.length - 1)]?.querySelector('.inbox-actions .btn:not(:disabled)') ?? $('inbox-page-heading')).focus();
+  if (current >= 0 && inboxStepHref === inboxHref(items[current])) {
+    [...list.children[current].querySelectorAll('a.btn')].find((a) => a.getAttribute('href') === inboxStepHref).focus({ preventScroll: true });
+    inboxStepHref = '';
+  }
   if (current >= 0) list.children[current].scrollIntoView({ block: 'nearest' });
 }
 
@@ -3370,8 +3376,8 @@ function handleInboxArrows(e) {
   const at = inboxSplit() ? inboxOpenIndex(items) : -1;
   if (e.key === 'ArrowRight') {
     const next = items[at + 1];
-    if (next) location.hash = inboxHref(next);
-  } else if (at > 0) location.hash = inboxHref(items[at - 1]);
+    if (next) location.hash = inboxStepHref = inboxHref(next);
+  } else if (at > 0) location.hash = inboxStepHref = inboxHref(items[at - 1]);
   else if (at === 0) closeDetail();
 }
 document.addEventListener('keydown', handleInboxArrows);
