@@ -58,7 +58,7 @@ function helpers(fetch, extra = {}) {
     ) +
       script.slice(script.indexOf("function ideaSlug("), script.indexOf("let ideaEditor =")) +
       "\nthis.api = { backlogItems, parseBacklogContext, backlogAnswersText, loadBacklog, ideaWithContext, addBacklogJob, backlogReworkHistory, markBacklogLine, removeBacklogJob," +
-      " casBacklog, decideBacklog, boardSaveError, backlogBusy, backlogPending, BOARD_UNCHANGED, get backlog() { return backlog; } };",
+      " casBacklog, decideBacklog, backlogDepends, boardSaveError, backlogBusy, backlogPending, BOARD_UNCHANGED, get backlog() { return backlog; } };",
     context,
   );
   return { api: context.api, context };
@@ -373,6 +373,59 @@ async function offline() {
     message: "001-first-item was saved, but its backlog line changed elsewhere. Check backlog.md.",
   });
   assert.equal(s.board.jobs.length, 1, "a claimed job is kept");
+
+  // Depends on: a checked item adds a depends-on ref, an unchecked one refuses approve, deny ignores it.
+  const parse = "sample: Parse recipe URLs (sub-job-of 041-recipe-import)";
+  const storeLine = "- [ ] sample: Store imported recipes (sub-job-of 041-recipe-import)";
+  const dependsText = (parseLine) =>
+    `# Backlog\n${parseLine}\n${storeLine}\n  Recommend: approve\n  Depends on: ${parse}\n`;
+  const subJob = { id: "041-recipe-import", kind: "sub-job-of" };
+  assert.deepEqual(
+    clone(
+      api.backlogDepends(
+        `Depends on: ${parse}`,
+        dependsText(`- [x] ${parse} (052-parse-recipe-urls)`),
+      ),
+    ),
+    {
+      refs: [{ id: "052-parse-recipe-urls", kind: "depends-on" }],
+      waiting: null,
+    },
+  );
+  for (const parseLine of ["- [ ] sample: Something else", `- [x] ${parse} (052..x)`]) {
+    assert.deepEqual(clone(api.backlogDepends(`Depends on: ${parse}`, dependsText(parseLine))), {
+      refs: [],
+      waiting: null,
+    });
+  }
+  const decideStore = async (parseLine, decision) => {
+    const st = store({ updated: "old", jobs: [] }, dependsText(parseLine));
+    const h = helpers(st.fetch).api;
+    await h.loadBacklog();
+    return {
+      st,
+      run: h.decideBacklog(
+        h.backlog.find((b) => b.raw === storeLine),
+        decision,
+        "",
+        "",
+      ),
+    };
+  };
+  let dep = await decideStore(`- [x] ${parse} (052-parse-recipe-urls)`, "approved");
+  await dep.run;
+  assert.deepEqual(dep.st.board.jobs[0].refs, [
+    subJob,
+    { id: "052-parse-recipe-urls", kind: "depends-on" },
+  ]);
+  dep = await decideStore(`- [ ] ${parse}`, "approved");
+  await assert.rejects(dep.run, {
+    message: `Approve "${parse}" first. Its backlog line is still unchecked.`,
+  });
+  assert.deepEqual(dep.st.puts, [], "a refused approve writes nothing");
+  dep = await decideStore(`- [ ] ${parse}`, "denied");
+  await dep.run;
+  assert.deepEqual(dep.st.board.jobs[0].refs, [subJob]);
 
   // Rework: an idea job with trimmed, required notes; history follows rework-of links.
   const csv = item(

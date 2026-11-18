@@ -6133,6 +6133,25 @@ function backlogItems(text) {
   return items;
 }
 
+// factory.py backlog_depends: a depends-on ref per Depends on: item checked off as a job, and the
+// first item whose backlog line is still unchecked. A missing item adds nothing.
+function backlogDepends(context, text) {
+  const lines = text.split('\n').map((l) => l.trimEnd());
+  const refs = [];
+  let waiting = null;
+  for (const m of context.matchAll(/^Depends on: ([\w-]+: \S.*)$/gm)) {
+    const dep = m[1].trimEnd();
+    if (lines.includes('- [ ] ' + dep)) {
+      waiting ??= dep;
+      continue;
+    }
+    const done = '- [x] ' + dep + ' ';
+    const id = lines.map((l) => l.startsWith(done) && /^\(([^()]+)\)$/.exec(l.slice(done.length))?.[1]).find(Boolean);
+    if (id && /^\w[\w.-]*$/.test(id) && !id.includes('..')) refs.push({ id, kind: 'depends-on' });
+  }
+  return { refs, waiting };
+}
+
 // factory.py backlog_context rules. null means the text is not in the backlog context format.
 function parseBacklogContext(text) {
   const lines = trimBlankEdges(text.replace(/\r\n?/g, '\n')).split('\n');
@@ -6343,6 +6362,11 @@ async function decideBacklog(item, decision, notes, answers) {
   backlogBusy.add(item.raw);
   renderBoard();
   try {
+    if (decision === 'approved') {
+      const { refs, waiting } = backlogDepends(item.context ?? '', backlogText);
+      if (waiting) throw new Error('Approve "' + waiting + '" first. Its backlog line is still unchecked.');
+      item = { ...item, refs: [...item.refs, ...refs] };
+    }
     const now = isoNow();
     const id = await casBoard((board) => addBacklogJob(board, item, decision, notes, answers, captureId, now));
     if (await casBacklog((text) => markBacklogLine(text, item, id)) === 'gone') {
