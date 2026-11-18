@@ -1487,6 +1487,13 @@ class IdeaTest(IsolatedTestCase):
         factory.ideas("--max-inflight", "1")
         self.assertEqual([p["id"] for p in json.loads(self.output.getvalue())], ["005-ready"])
 
+    def test_ideas_max_inflight_skips_a_job_before_not_before(self):
+        self.board["jobs"] += [{"id": "004-parked", "stage": "spec", "project": "sample",
+                                "updated": self.stamp(), "not_before": self.stamp(hours=10)},
+                               {"id": "005-ready", "stage": "idea", "project": "sample"}]
+        factory.ideas("--max-inflight", "1")
+        self.assertEqual([p["id"] for p in json.loads(self.output.getvalue())], ["005-ready"])
+
     def test_ideas_max_inflight_and_limit_compose_in_either_order(self):
         for argv in (("--limit", "1", "--max-inflight", "2"), ("--max-inflight", "2", "--limit", "1")):
             with self.subTest(args=argv):
@@ -1667,7 +1674,7 @@ class MoveFenceTest(IsolatedTestCase):
         self.assertEqual(self.saved()["claim"]["session"], "sender")
 
     def test_board_sets_not_before_and_releases_own_claim(self):
-        for stage, kept in (("idea", False), ("build", True)):
+        for stage, kept in (("idea", False), ("build", False), ("merged", True)):
             with self.subTest(stage=stage):
                 self.save(dict(self.job, stage=stage))
                 with patch.object(factory.sys, "stdin", io.StringIO('{"not_before": "2026-11-17T09:00:00Z"}')):
@@ -1883,6 +1890,20 @@ class MoveFenceTest(IsolatedTestCase):
         self.assertEqual(raised.exception.code, 3)
         self.assertEqual(self.store["/api/board"], before)
         self.save(stale)
+        factory.stuck()
+        self.assertEqual([j["id"] for j in json.loads(self.output.getvalue())], ["001-test"])
+
+    def test_stuck_skips_a_stale_job_before_not_before(self):
+        (self.home / "paths.md").write_text(f"---\nsample: {self.home / 'sample'}\n---\n")
+        patch.object(factory, "paseo_server", return_value="").start()
+        stale = dict(self.job, claim=dict(self.job["claim"], seen="2020-01-01T00:00:00Z"))
+        self.save(dict(stale, not_before="2099-01-01T09:00:00Z"))
+        before = self.store["/api/board"]
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            factory.stuck()
+        self.assertEqual(raised.exception.code, 3)
+        self.assertEqual(self.store["/api/board"], before)
+        self.save(dict(stale, not_before="2020-01-01T09:00:00Z"))
         factory.stuck()
         self.assertEqual([j["id"] for j in json.loads(self.output.getvalue())], ["001-test"])
 
