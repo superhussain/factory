@@ -6587,7 +6587,7 @@ def watch_cmd(target, *args):
     if watch_pr:
         pr = board_pr(home, slug, job_id, archive=True)
         meta = frontmatter(project_files(home, slug)[0])[0]
-        base = meta.get("base") or "main"
+        base = pr_base(meta, pr)
     start = time.monotonic()
     deadline = start + (WATCH_TIMEOUT if timeout is None else timeout)
     reading, read_at, bad_before = None, start, {}
@@ -6689,6 +6689,18 @@ def board_pr(home, slug, job_id, archive=False):
     if not (m and m[1].lower() in (r.lower() for r in repos)):
         fail(f"{pr} is not a pull request in {' or '.join(repos) or 'the project file repo'}", 4)
     return pr
+
+
+def pr_base(meta, pr):
+    """The branch a job's PR should target: the project base, or the archive repo's default branch for an archive PR."""
+    repo = GH_PR.fullmatch(pr)[1]
+    archive = meta.get("archive", "")
+    if not archive or repo.lower() != archive.lower() or repo.lower() == meta.get("repo", "").lower():
+        return meta.get("base") or "main"
+    base = gh_answer(gh_cli("api", f"repos/{repo}", "--jq", ".default_branch"), "gh api repos").strip()
+    if not re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", base):
+        fail("gh printed an unusable default_branch", 5)
+    return base
 
 
 def escalation_hold(home, slug, job_id):
@@ -6963,7 +6975,7 @@ def pr_state_cmd(target, *args):
     wait = int(args[1]) if args else 0
     pr = board_pr(home, slug, job_id, archive=True)
     meta = frontmatter(project_files(home, slug)[0])[0]
-    base = meta.get("base") or "main"
+    base = pr_base(meta, pr)
     start = time.monotonic()
     while True:
         reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""))
