@@ -5489,7 +5489,9 @@ def open_stacked(data, lead_id):
 
 
 def close_stacked_prs(home, lead_id, riders, device):
-    """Close each stacked rider's open PR after its lead closed, and rewrite the rider's note to say so."""
+    """Close each stacked rider's open PR after its lead closed, then rewrite the note of every rider whose PR
+    is no longer open in one board write."""
+    done = []
     for r in riders:
         job_id, pr = r["id"], r["pr"]
         state, why = close_pull_request(home, {**r, "branch": f"factory/{job_id}"}, device,
@@ -5498,17 +5500,21 @@ def close_stacked_prs(home, lead_id, riders, device):
             print(f"factory.py: leaves stacked pull request {pr} of {job_id} open: {why}", file=sys.stderr)
             continue
         print(f"factory.py: stacked pull request {pr} of {job_id} {STACKED_CLOSE_NOTES[state]}", file=sys.stderr)
-        note = f"unbatched: {lead_id} closed; stacked PR {pr} "
+        done.append((job_id, f"unbatched: {lead_id} closed; stacked PR {pr} ", state))
+    if not done:
+        return
 
-        def change(text, job_id=job_id, note=note, state=state):
-            board = load_board(text)
+    def change(text):
+        board = load_board(text)
+        hit = False
+        for job_id, note, state in done:
             found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
             if found is None or found.get("note") != note + "is still open":
-                return None, None
+                continue
             patch_job(board, job_id, {"note": note + STACKED_CLOSE_NOTES[state]})
-            return dump_board(board), None
-        cas(home, "/api/board", change)
-
+            hit = True
+        return (dump_board(board) if hit else None), None
+    cas(home, "/api/board", change)
 
 def close_decision(j, reason, device, earlier, outcome, pickup):
     """decision.md for a job closed from the dashboard. earlier is the decision.md it replaces, or None.
