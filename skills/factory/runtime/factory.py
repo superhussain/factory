@@ -5688,7 +5688,8 @@ def auto_babysit_at(j):
 def auto_babysit_pass(home, data, device, minutes, paths, settings, dry):
     """Set babysit on each pr-open job whose PR fails a required check, has an open counted review thread
     or a merge conflict, in projects whose project file sets auto_babysit. At most auto_babysit times per
-    job, and never twice for the same head and reason. One gh api graphql call per repo."""
+    job, and never twice for the same head and reason. One gh api graphql call per repo, and one board write for
+    the whole pass."""
     caps, repos, noted, groups = {}, {}, {}, {}
     for j in data["jobs"]:
         m = auto_babysit_match(j)
@@ -5729,6 +5730,7 @@ def auto_babysit_pass(home, data, device, minutes, paths, settings, dry):
             continue
         groups.setdefault(repo, []).append((j, int(m[3]), cap))
 
+    pending = []
     for repo, jobs in groups.items():
         jobs = sorted(jobs, key=lambda c: auto_babysit_at(c[0]))
         if len(jobs) > AUTO_BABYSIT_LIMIT:
@@ -5753,27 +5755,30 @@ def auto_babysit_pass(home, data, device, minutes, paths, settings, dry):
             if dry:
                 print(f"would auto-babysit {line}")
                 continue
+            pending.append((j, n, cap, head, reason, copy))
+    if not pending:
+        return
 
-            def change(text, j=j, n=n, cap=cap, head=head, reason=reason, copy=copy):
-                board = load_board(text)
-                found = next((x for x in board["jobs"] if x.get("id") == j["id"]), None)
-                if (found is None or not auto_babysit_match(found) or found["pr"] != j["pr"]
-                        or found["project"] != j["project"] or blocking(found, device, "", minutes)):
-                    return None, None
-                count, last_head, last_reason = auto_babysit_record(found)
-                if count >= cap or (head, reason) == (last_head, last_reason):
-                    return None, None
-                stamp = now()
-                row = patch_job(board, j["id"], {
-                    "babysit": {"at": stamp, "via": "pickup", "by": device, "reason": reason},
-                    "auto_babysit": {"count": count + 1, "head": head, "reason": reason, "at": stamp},
-                    "note": f"auto-babysitting PR #{n}: it {copy}"})
-                return dump_board(board), row
-            row = cas(home, "/api/board", change)
-            if row:
-                data["jobs"][data["jobs"].index(j)] = row
-                print(f"auto-babysat {j['id']} {j['project']}: PR #{n} {copy} "
-                      f"({row['auto_babysit']['count']} of {cap})")
+    def change(text):
+        board = load_board(text)
+        rows = []
+        for j, n, cap, head, reason, copy in pending:
+            found = next((x for x in board["jobs"] if x.get("id") == j["id"]), None)
+            if (found is None or not auto_babysit_match(found) or found["pr"] != j["pr"]
+                    or found["project"] != j["project"] or blocking(found, device, "", minutes)):
+                continue
+            count, last_head, last_reason = auto_babysit_record(found)
+            if count >= cap or (head, reason) == (last_head, last_reason):
+                continue
+            stamp = now()
+            rows.append((j, n, cap, copy, patch_job(board, j["id"], {
+                "babysit": {"at": stamp, "via": "pickup", "by": device, "reason": reason},
+                "auto_babysit": {"count": count + 1, "head": head, "reason": reason, "at": stamp},
+                "note": f"auto-babysitting PR #{n}: it {copy}"})))
+        return (dump_board(board) if rows else None), rows
+    for j, n, cap, copy, row in cas(home, "/api/board", change):
+        data["jobs"][data["jobs"].index(j)] = row
+        print(f"auto-babysat {j['id']} {j['project']}: PR #{n} {copy} ({row['auto_babysit']['count']} of {cap})")
 
 
 def close_pass(home, data, device, minutes, dry):
