@@ -58,6 +58,9 @@
                                             line, write each verdict to the board's rounds entry as it
                                             lands, print one JSON line (default and max 540 seconds); runs
                                             hold first
+  factory.py verdict <project-slug>/<job-id> <round> <reviewer> <verdict>
+                                            set one reviewer's verdict in the board's rounds entry, print it
+                                            as JSON
   factory.py checks <project-slug>/<job-id> [--timeout S]
                                             print the job PR's checks as <bucket> <name> once none is
                                             pending, checking every 10 seconds for up to S seconds
@@ -901,7 +904,7 @@ def board(factory, job_id):
     board_write(factory, job_id, patch)
 
 
-def board_write(factory, job_id, patch, show=True):
+def board_write(factory, job_id, patch, show=True, verdict=None):
     if patch.get("claim") is not None:
         fail('only hold sets a claim. {"claim": null} releases it', 2)
     if "paseo" in patch:
@@ -969,6 +972,15 @@ def board_write(factory, job_id, patch, show=True):
         data = load_board(text)
         before = load_board(text)
         found = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if verdict:
+            slug, n, reviewer, value = verdict
+            if found is not None and found.get("project") != slug:
+                fail(f"{job_id} belongs to {found.get('project')}, not {slug}", 2)
+            rounds = (found or {}).get("rounds")
+            if not isinstance(rounds, list) or len(rounds) < n or not isinstance(rounds[n - 1], dict):
+                fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
+            patch["rounds"] = list(rounds)
+            patch["rounds"][n - 1] = {**rounds[n - 1], reviewer: value}
         if found is None:
             m = re.match(r"(\d{3,})-", job_id)
             floor = archive_floor(data)
@@ -1013,7 +1025,7 @@ def board_write(factory, job_id, patch, show=True):
             job.pop("priority", None)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
-        elif isinstance(patch.get("not_before"), str) and job.get("stage") == IDEA \
+        elif isinstance(patch.get("not_before"), str) and job.get("stage") not in TERMINAL \
                 and mine(job.get("claim") or {}, device, session):
             job.pop("claim")
         elif mine(job.get("claim") or {}, device, session):
@@ -2276,8 +2288,8 @@ def backlog_cmd(sub, item, *rest):
 
 def inflight_count(data, project, minutes, device=None):
     """Fresh in-flight jobs on the board: of one project, or of all when project is None,
-    and only this device's claims when device is set. A job waiting on a human, or handed to a
-    babysit session, never counts."""
+    and only this device's claims when device is set. A job waiting on a human, handed to a
+    babysit session, or parked by not_before never counts."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     count = 0
     for j in data["jobs"]:
@@ -2285,7 +2297,7 @@ def inflight_count(data, project, minutes, device=None):
             continue
         if device and (j.get("claim") or {}).get("device") != device:
             continue
-        if gated(j) or lead_of(j) or babysitting(j):
+        if gated(j) or lead_of(j) or babysitting(j) or waiting_until(j):
             continue
         stage = j.get("stage")
         if stage == IDEA or tracer_start(j):
@@ -4591,6 +4603,7 @@ def pickup(*args):
                     print("factory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now", file=sys.stderr)
             retro_pickup_push(home)
             audit_pickup_push(home, data)
+        retro_pickup_catchup(home, dry)
         pickup_pass(home, device, minutes, dry, limit, cap, data)
     finally:
         if not dry:
@@ -5448,12 +5461,13 @@ def gh_cli(*args, stderr=False):
 
 
 def pr_states(repo, numbers, device):
-    """The states of repo's pull requests from one gh api graphql call: ({number: state}, None),
-    or (None, why). A pull request GitHub returns null for is left out. A non-zero exit whose answer
-    still holds data.repository, as a partial GraphQL error gives, returns the states that resolved."""
+    """The states and head commits of repo's pull requests from one gh api graphql call:
+    ({number: (state, head oid)}, None), or (None, why). A pull request GitHub returns null for is left out.
+    A non-zero exit whose answer still holds data.repository, as a partial GraphQL error gives, returns the
+    states that resolved."""
     owner, name = repo.split("/")
     q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
-         + "".join(f"p{n}: pullRequest(number: {n}) {{ state }} " for n in numbers) + "} }")
+         + "".join(f"p{n}: pullRequest(number: {n}) {{ state headRefOid }} " for n in numbers) + "} }")
     r = gh_cli("api", "graphql", "-f", "query=" + q)
     if r is None:
         return None, f"gh is not installed on {device}"
@@ -5468,7 +5482,8 @@ def pr_states(repo, numbers, device):
             return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
         return None, ("gh api graphql returned no repository "
                       f"(check the project file's repo and gh auth status on {device})")
-    return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
+    return {n: (found[f"p{n}"]["state"], found[f"p{n}"].get("headRefOid"))
+            for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
 def pr_signals(repo, numbers, device):
@@ -5714,7 +5729,7 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
             print(f"factory.py: pickup skips the PR sync for {repo}: {why}", file=sys.stderr)
             continue
         for j, n in jobs:
-            state = states.get(n)
+            state, head = states.get(n, (None, None))
             if state not in ("MERGED", "CLOSED"):
                 continue
             line = f"{j['id']} {j['project']}: " + (MERGED_NOTE if state == "MERGED" else GITHUB_CLOSE_REASON)
@@ -5723,7 +5738,9 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
                 continue
             if state == "MERGED":
                 patch = {"stage": "merged", "needs": None, "automerge": None, "babysit": None, "claim": None,
-                         "note": MERGED_NOTE, "github": {"merged": now()}}
+                         "note": MERGED_NOTE,
+                         "github": {"merged": now(),
+                                    **({"head": head} if isinstance(head, str) and COMMIT.fullmatch(head) else {})}}
             else:
                 patch = {"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "via": "github"}, "babysit": None}
             pending.append((j, patch, line))
@@ -5976,7 +5993,9 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
             print(f"would clean up {job_id} {project}")
             continue
         try:
-            _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
+            merged_head = (c.get("head") if key == "github" and isinstance(c.get("head"), str)
+                           and COMMIT.fullmatch(c["head"]) else None)
+            _, left = cleanup_job(repo, wt, branch, drop_pushed=True, merged_head=merged_head)
         except Exception as e:
             print(f"factory.py: pickup could not clean up {job_id} {project}: {e}", file=sys.stderr)
             continue
@@ -6372,6 +6391,7 @@ ROLE_ALIASES = {"builder": "build", "factory-builder": "build",
                 "approver": "approve", "factory-approver": "approve",
                 "factory-review-security": "review-security", "factory-review-ux": "review-ux",
                 "factory-review-ui": "review-ui", "factory-review-code": "review-code"}
+VIA_ALIASES = {"subagent": "native"}
 PROMPT_USAGE = "usage: prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]"
 PROMPT_HELP = ("roles and flags: spec | approve | build [--round N] [--port P] | review-security, review-ux, "
                "review-ui or review-code --round N. Every role also takes --out <path>.\n"
@@ -6647,13 +6667,13 @@ def review_plan_cmd(target, round_text):
                       "reason": reason}))
 
 
-WAIT_ARTIFACT = re.compile(r"spec\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
+WAIT_ARTIFACT = re.compile(r"spec\.md|spec-evidence\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
 WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]"
 
 
 def wait_valid(artifact, line):
     """True when line is a finished first line for artifact."""
-    if artifact in ("spec.md", "build.md"):
+    if artifact in ("spec.md", "spec-evidence.md", "build.md"):
         return bool(line.strip())
     if artifact == "decision.md":
         return line in ("APPROVE", "ESCALATE", "CHANGES") or line.startswith("CLOSED: ")
@@ -6837,6 +6857,22 @@ def round_wait_cmd(target, *args):
                           "files": {a: lines.get(a) for a in artifacts.values()},
                           "elapsed": int(time.monotonic() - start)}))
         return
+
+
+VERDICT_USAGE = "usage: verdict <project-slug>/<job-id> <round> <reviewer> <PASS|CHANGES|SKIPPED|pending>"
+
+
+def verdict_cmd(target, round_text, reviewer, value):
+    """Set one reviewer's verdict in the board's rounds entry N in one CAS write, keeping the rest."""
+    if not re.fullmatch(r"[1-9][0-9]*", round_text) or reviewer not in REVIEWERS \
+            or value not in ("PASS", "CHANGES", "pending", "SKIPPED") \
+            or value == "SKIPPED" and reviewer not in ("ux", "ui"):
+        fail(VERDICT_USAGE, 2)
+    home, slug, job_id = r2_target(target, True)
+    n = int(round_text)
+    job = board_write(home, job_id, {}, show=False, verdict=(slug, n, reviewer, value))
+    print(json.dumps({"round": n, "verdicts": job["rounds"][n - 1]}))
+
 
 CHECKS_USAGE = "usage: checks <project-slug>/<job-id> [--timeout S]"
 CHECKS_INTERVAL = 10
@@ -8565,7 +8601,7 @@ def stuck(*args):
         return agents is not None and agents.get(link.get("agent"), "closed") == "closed"
 
     def is_stuck(job):
-        if paused(job) or closing(job) or lead_of(job):
+        if paused(job) or closing(job) or lead_of(job) or waiting_until(job):
             return False
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
@@ -8745,12 +8781,35 @@ def stop(wt):
     sys.exit(1 if alive else 0)
 
 
+def board_merged_head(home, slug, job_id):
+    """The board's github.head for a merged job, or None. An unreadable board warns and returns None."""
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(captured):
+            jobs = read_board(home)["jobs"]
+    except SystemExit:
+        reason = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error"
+    except ValueError:
+        reason = "malformed board"
+    else:
+        job = next((j for j in jobs if j.get("id") == job_id and j.get("project") == slug), {})
+        github = job.get("github")
+        if (job.get("stage") == "merged" and isinstance(github, dict) and isinstance(github.get("merged"), str)
+                and isinstance(github.get("head"), str) and COMMIT.fullmatch(github["head"])):
+            return github["head"]
+        return None
+    print(f"factory.py: cleanup could not read the board ({reason}), so it keeps a branch HEAD does not contain",
+          file=sys.stderr)
+    return None
+
+
 def cleanup(target):
     home, slug, job_id = r2_target(target, True)
     repo = read_paths(home).get(slug)
     if not repo:
         fail(f"{home / 'paths.md'} has no entry for {slug}: run /factory init in this device's checkout of it", 4)
-    removed, left = cleanup_job(repo, home / "worktrees" / slug / job_id, f"factory/{job_id}")
+    removed, left = cleanup_job(repo, home / "worktrees" / slug / job_id, f"factory/{job_id}",
+                                merged_head=board_merged_head(home, slug, job_id))
     folder = home / "prompts" / slug / job_id
     if os.path.lexists(folder):
         if any(entry.startswith("worktree ") for entry in left):
@@ -8764,8 +8823,8 @@ def cleanup(target):
     sys.exit(1 if left else 0)
 
 
-def cleanup_job(repo, wt, branch, drop_pushed=False):
-    """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. (removed, left)."""
+def cleanup_job(repo, wt, branch, drop_pushed=False, merged_head=None):
+    """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. With merged_head, also delete a branch whose tip that commit contains and no worktree has checked out. (removed, left)."""
     def run_git(*args, timeout=20):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
@@ -8803,6 +8862,10 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             return not_merged("origin has no such branch")
         if out.split() != [tip, ref]:
             return not_merged("origin is at a different commit")
+        return delete_unless_checked_out(tip)
+
+    def delete_unless_checked_out(tip):
+        """None after deleting the branch, guarded by tip, unless a worktree has it checked out."""
         path = None
         for line in run_git("worktree", "list", "--porcelain")[1].splitlines():
             if line.startswith("worktree "):
@@ -8810,6 +8873,13 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             elif line == f"branch refs/heads/{branch}":
                 return f"checked out in {path}"
         return first_error("update-ref", "-d", f"refs/heads/{branch}", tip)
+
+    def merged_head_error():
+        """None after deleting a branch whose tip merged_head contains, else today's reason it stays."""
+        tip = run_git("rev-parse", f"refs/heads/{branch}")[1]
+        if tip and run_git("merge-base", "--is-ancestor", tip, merged_head)[0] == 0:
+            return delete_unless_checked_out(tip)
+        return pushed_tip_error() if drop_pushed else not_merged()
 
     removed, left = [], []
     if wt.exists():
@@ -8830,7 +8900,8 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             if code is None:
                 error = err
             elif code:
-                error = pushed_tip_error() if drop_pushed else not_merged()
+                error = (merged_head_error() if merged_head
+                         else pushed_tip_error() if drop_pushed else not_merged())
             elif run_git("config", "--get", f"branch.{branch}.merge")[1]:
                 error = first_error("branch", "--unset-upstream", branch) or first_error("branch", "-d", branch)
             else:
@@ -9484,6 +9555,10 @@ RETRO_POLLS = {"until_file": re.compile(r"\buntil \[ -[fs] "),
                "quiet_window": re.compile(r"stat -c %Y|stat -f %m")}
 RETRO_JOB = re.compile(r"factory-(\d{2,5})-")
 RETRO_PUSH_FILE = "retro-push.json"
+RETRO_PROMPT_FILE = "retro-schedule-prompt.md"
+RETRO_CATCHUP_FILE = "retro-catchup.json"
+RETRO_CATCHUP_AFTER = (9, 30)
+RETRO_RUN_NAME = re.compile(r"(\d{8}T\d{6}Z)-[0-9a-f]{6}")
 RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
 RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+")
 RETRO_HEADERS = re.compile(
@@ -9835,6 +9910,72 @@ def retro_pickup_push(home):
         retro_push()
     except SystemExit as e:
         print(f"factory.py: retro push stopped (exit {e.code}); the next pickup run retries it", file=sys.stderr)
+
+
+def retro_catchup_due(home, local):
+    """Whether this retro host missed today's weekday retro: it keeps the stored schedule prompt, local
+    is a weekday at or after RETRO_CATCHUP_AFTER, no catch-up is recorded for today, and no retro run
+    folder carries today's local date."""
+    prompt = home / RETRO_PROMPT_FILE
+    if prompt.is_symlink() or not prompt.is_file():
+        return False
+    if local.weekday() > 4 or (local.hour, local.minute) < RETRO_CATCHUP_AFTER:
+        return False
+    today = local.date()
+    try:
+        record = json.loads((home / RETRO_CATCHUP_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        record = None
+    if record == {"version": 1, "date": today.isoformat()}:
+        return False
+    folder = home / "retro"
+    for entry in folder.iterdir() if folder.is_dir() else ():
+        match = RETRO_RUN_NAME.fullmatch(entry.name)
+        if not match or not entry.is_dir():
+            continue
+        try:
+            stamp = datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ")
+        except ValueError:
+            continue
+        if stamp.replace(tzinfo=timezone.utc).astimezone(local.tzinfo).date() == today:
+            return False
+    return True
+
+
+def retro_pickup_catchup(home, dry):
+    """Launch the stored retro schedule prompt once on a weekday whose 09:00 slot left no run.
+    The record is written before the launch, so a failed or stopped session is not retried today."""
+    try:
+        local = datetime.now().astimezone()
+        if not retro_catchup_due(home, local):
+            return
+        job_id = "retro-" + local.strftime("%Y%m%d")
+        route = pick_route(home)
+        if route is None:
+            print("factory.py: retro catch-up waits: no available route", file=sys.stderr)
+            return
+        checkout = next(((slug, path) for slug, path in read_paths(home).items() if os.path.isdir(path)), None)
+        if checkout is None:
+            print("factory.py: retro catch-up waits: no checkout in paths.md", file=sys.stderr)
+            return
+        template = route_launcher(home, route)
+        if dry:
+            print(f"would launch retro catch-up {job_id} on {route[0]}")
+            return
+        name, provider, model, effort = route
+        given = {"id": job_id, "project": checkout[0], "repo_path": checkout[1], "session": secrets.token_hex(3),
+                 "provider": provider, "model": model, "effort": effort or "",
+                 "prompt": (home / RETRO_PROMPT_FILE).read_text(encoding="utf-8")}
+        write_atomic(home / RETRO_CATCHUP_FILE, json.dumps({"version": 1, "date": local.date().isoformat()}) + "\n")
+        ok, detail, log_path = launch_idea(home, given, name, launcher_argv(template, given),
+                                           launch_env(given, provider, model))
+        if ok:
+            print(f"launched retro catch-up {job_id} on {name} session {given['session']}")
+        else:
+            print(f"factory.py: retro catch-up {job_id} failed to launch ({detail}); see {log_path}; no retry today",
+                  file=sys.stderr)
+    except SystemExit as e:
+        print(f"factory.py: retro catch-up stopped (exit {e.code}); the next pickup run retries it", file=sys.stderr)
 
 
 def retro_fetch(home, date):
@@ -10748,6 +10889,7 @@ def agent_cmd(sub, *args):
     if sub == "record" and len(args) in (5, 6):
         target, role, harness, via, model, *effort = args
         role = ROLE_ALIASES.get(role, role)
+        via = VIA_ALIASES.get(via, via)
         problem = agent_record_problem(role, harness, via, model, effort[0] if effort else None)
         if problem:
             fail(f"{AGENT_RECORD_USAGE}: {problem}", 2)
@@ -10817,6 +10959,7 @@ COMMANDS["prompt"] = (prompt_cmd, 2, 8)
 COMMANDS["wait"] = (wait_cmd, 2, 23)
 COMMANDS["watch"] = (watch_cmd, 2, 24)
 COMMANDS["round-wait"] = (round_wait_cmd, 2, 4)
+COMMANDS["verdict"] = (verdict_cmd, 4, 4)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
 COMMANDS["pr-state"] = (pr_state_cmd, 1, 3)
 COMMANDS["pr-queue"] = (pr_queue_cmd, 1, 1)

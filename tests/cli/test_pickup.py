@@ -116,7 +116,7 @@ class PickupFixture(IsolatedTestCase):
         self.sweep = patch.object(factory, "backlog_triage_pass").start()
         self.checkout = patch.object(factory, "checkout_problem", return_value=None).start()
         patch.object(factory, "pr_states",
-                     side_effect=lambda repo, numbers, device: ({n: "OPEN" for n in numbers}, None)).start()
+                     side_effect=lambda repo, numbers, device: ({n: ("OPEN", None) for n in numbers}, None)).start()
 
     def configure(self, line="started", code=0, sleep=0):
         (self.root / "fake.json").write_text(json.dumps({"line": line, "code": code, "sleep": sleep}),
@@ -1865,6 +1865,153 @@ class RetroPickupTest(PickupFixture):
         self.assertEqual(self.retro_puts(), [])
 
 
+class RetroCatchupTest(PickupFixture):
+    ZONE = timezone(timedelta(hours=-5))
+    PROMPT = "Run the weekday retro.\n\nStanding instruction: work unattended.\n"
+
+    def setUp(self):
+        super().setUp()
+        self.prompt = self.home / "retro-schedule-prompt.md"
+        self.prompt.write_text(self.PROMPT, encoding="utf-8")
+        self.record = self.home / "retro-catchup.json"
+        self.id = "retro-" + datetime.now().strftime("%Y%m%d")
+
+    def due(self, day=18, hour=10, minute=15):
+        return factory.retro_catchup_due(self.home, datetime(2026, 11, day, hour, minute, tzinfo=self.ZONE))
+
+    def run_folder(self, name):
+        (self.home / "retro" / name).mkdir(parents=True)
+
+    def test_weekday_after_the_grace_is_due(self):
+        self.assertTrue(self.due())
+        self.assertTrue(self.due(hour=9, minute=30))
+
+    def test_before_the_grace_is_not_due(self):
+        self.assertFalse(self.due(hour=9, minute=29))
+
+    def test_weekend_is_not_due(self):
+        self.assertFalse(self.due(day=21))
+        self.assertFalse(self.due(day=22))
+
+    def test_missing_prompt_file_is_not_due(self):
+        self.prompt.unlink()
+        self.assertFalse(self.due())
+
+    def test_linked_prompt_file_is_not_due(self):
+        target = self.root / "prompt.md"
+        self.prompt.rename(target)
+        os.symlink(target, self.prompt)
+        self.assertFalse(self.due())
+
+    def test_a_run_folder_from_today_is_not_due(self):
+        self.run_folder("20261118T140034Z-c3ac38")
+        self.assertFalse(self.due())
+
+    def test_a_late_utc_stamp_counts_by_local_date(self):
+        self.run_folder("20261119T030000Z-0a1b2c")
+        self.assertFalse(self.due())
+
+    def test_a_run_folder_from_yesterday_is_due(self):
+        self.run_folder("20261117T140034Z-c3ac38")
+        self.run_folder("20261118-notes")
+        self.assertTrue(self.due())
+
+    def test_a_record_for_today_is_not_due(self):
+        self.record.write_text(json.dumps({"version": 1, "date": "2026-11-18"}), encoding="utf-8")
+        self.assertFalse(self.due())
+
+    def test_an_older_or_unknown_record_is_due(self):
+        for record in ({"version": 1, "date": "2026-11-17"}, {"version": 2, "date": "2026-11-18"}):
+            self.record.write_text(json.dumps(record), encoding="utf-8")
+            self.assertTrue(self.due())
+        self.record.write_text("{not json", encoding="utf-8")
+        self.assertTrue(self.due())
+
+    def test_a_due_pickup_launches_once(self):
+        due = patch.object(factory, "retro_catchup_due", return_value=True)
+        due.start()
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, rf"^launched retro catch-up {self.id} on primary session [0-9a-f]{{6}}\n$")
+        [record] = self.launched()
+        self.assertEqual(record["cwd"], str(self.repo_a))
+        self.assertEqual(record["argv"][:4], [self.id, "alpha", str(self.repo_a), out.split()[-1]])
+        self.assertEqual(record["argv"][7], self.PROMPT)
+        self.assertEqual(record["env"]["FACTORY_PROMPT"], self.PROMPT)
+        self.assertEqual(json.loads(self.record.read_text(encoding="utf-8")),
+                         {"version": 1, "date": datetime.now().date().isoformat()})
+        due.stop()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(len(self.launched()), 1)
+
+    def test_a_second_run_the_same_day_launches_nothing(self):
+        self.record.write_text(json.dumps({"version": 1, "date": datetime.now().date().isoformat()}),
+                               encoding="utf-8")
+        self.assert_silent(self.pickup())
+
+    def test_dry_run_launches_nothing(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        self.assertEqual(self.pickup("--dry-run"),
+                         (0, f"would launch retro catch-up {self.id} on primary\nhost {DEVICE}: would launch 0\n", ""))
+        self.assertEqual(self.launched(), [])
+        self.assertFalse(self.record.exists())
+
+    def test_a_failed_launch_warns_and_the_idea_still_launches(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.board["jobs"] = [idea("120-sample-digest", "alpha")]
+        self.configure(code=1)
+        real = factory.launch_idea
+
+        def launch(*args):
+            result = real(*args)
+            self.configure()
+            return result
+
+        patch.object(factory, "launch_idea", side_effect=launch).start()
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"^launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n$")
+        [log] = (self.home / "logs" / "pickup").glob(f"{self.id}-*.log")
+        self.assertEqual(err, f"factory.py: retro catch-up {self.id} failed to launch (exit 1); see {log}; "
+                              "no retry today\n")
+        self.assertEqual([r["argv"][0] for r in self.launched()], [self.id, "120-sample-digest"])
+        self.assertTrue(self.record.exists())
+
+    def test_no_route_waits_without_a_record(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        patch.object(factory, "pick_route", return_value=None).start()
+        self.assertEqual(self.pickup(), (0, "", "factory.py: retro catch-up waits: no available route\n"))
+        self.assertFalse(self.record.exists())
+
+    def test_no_checkout_waits_without_a_record(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        patch.object(factory, "read_paths", return_value={}).start()
+        self.assertEqual(self.pickup(), (0, "", "factory.py: retro catch-up waits: no checkout in paths.md\n"))
+        self.assertFalse(self.record.exists())
+        self.assertEqual(self.launched(), [])
+
+    def test_a_config_error_stops_the_catch_up_and_the_idea_still_launches(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.board["jobs"] = [idea("120-sample-digest", "alpha")]
+        real, calls = factory.route_launcher, []
+
+        def launcher(home, route):
+            calls.append(route[0])
+            if len(calls) == 1:
+                raise SystemExit(2)
+            return real(home, route)
+
+        patch.object(factory, "route_launcher", side_effect=launcher).start()
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"^launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n$")
+        self.assertEqual(err, "factory.py: retro catch-up stopped (exit 2); the next pickup run retries it\n")
+        self.assertFalse(self.record.exists())
+        self.assertEqual([r["argv"][0] for r in self.launched()], ["120-sample-digest"])
+
+
 class AuditPickupTest(PickupFixture):
     def setUp(self):
         super().setUp()
@@ -2376,6 +2523,26 @@ class CloseCleanupTest(PickupFixture):
         self.assertEqual(len(left), 1)
         self.assertTrue(left[0].startswith("branch factory/042-sample-export: checked out in "))
 
+    def test_merged_head_keeps_a_branch_ahead_of_the_pr(self):
+        merged = self.git(self.wt, "rev-parse", "HEAD")
+        (self.wt / "more.txt").write_text("more\n")
+        self.git(self.wt, "add", "more.txt")
+        self.git(self.wt, "commit", "-q", "-m", "more")
+        self.assertEqual(factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export", drop_pushed=True,
+                                             merged_head=merged), ([f"worktree {self.wt}"], [self.UNREACHABLE]))
+        self.assertTrue(self.branch_exists())
+
+    def test_merged_head_keeps_a_branch_checked_out_elsewhere(self):
+        merged = self.git(self.wt, "rev-parse", "HEAD")
+        self.git(self.repo_a, "worktree", "remove", "--force", str(self.wt))
+        elsewhere = self.home / "elsewhere"
+        self.git(self.repo_a, "worktree", "add", "-q", str(elsewhere), "factory/042-sample-export")
+        removed, left = factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export", drop_pushed=True,
+                                            merged_head=merged)
+        self.assertEqual((removed, len(left)), ([], 1))
+        self.assertTrue(left[0].startswith("branch factory/042-sample-export: checked out in "))
+        self.assertTrue(self.branch_exists())
+
     def test_cleanup_job_keeps_a_pushed_branch_by_default(self):
         self.with_origin()
         self.assertEqual(factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export"),
@@ -2488,8 +2655,9 @@ class CloseCleanupTest(PickupFixture):
 
 
 class PrSyncTest(PickupFixture):
-    QUERY = ('query { repository(owner: "sample", name: "alpha") { p7: pullRequest(number: 7) { state } '
-             'p8: pullRequest(number: 8) { state } } }')
+    QUERY = ('query { repository(owner: "sample", name: "alpha") { p7: pullRequest(number: 7) { state headRefOid } '
+             'p8: pullRequest(number: 8) { state headRefOid } } }')
+    OID = "a1b2" * 10
     PR7 = "https://github.com/sample/alpha/pull/7"
     PR8 = "https://github.com/sample/alpha/pull/8"
     DECISION = "/api/jobs/alpha/043-sample-import/decision.md"
@@ -2505,6 +2673,7 @@ class PrSyncTest(PickupFixture):
             (self.home / "projects" / f"{slug}.md").write_text("---\nrepo: Sample/Alpha\n---\n", encoding="utf-8")
         self.files = {}
         self.states = {7: "MERGED", 8: "CLOSED"}
+        self.heads = {}
         self.failure = None
         self.reads = []
         patch.object(factory, "pr_states", side_effect=self.read).start()
@@ -2514,7 +2683,7 @@ class PrSyncTest(PickupFixture):
         self.reads.append((repo, list(numbers)))
         if self.failure:
             return None, self.failure
-        return {n: self.states[n] for n in numbers if n in self.states}, None
+        return {n: (self.states[n], self.heads.get(n)) for n in numbers if n in self.states}, None
 
     def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
         if not path.endswith("/decision.md"):
@@ -2535,14 +2704,14 @@ class PrSyncTest(PickupFixture):
                      "branch": "factory/043-sample-import", "updated": "2026-01-01T00:00:00Z"}, **extra)
 
     def test_pr_states_sends_one_query_and_parses_it(self):
-        answer = json.dumps({"data": {"repository": {"p7": {"state": "MERGED"}, "p8": None}}})
+        answer = json.dumps({"data": {"repository": {"p7": {"state": "MERGED", "headRefOid": self.OID}, "p8": None}}})
         with patch.object(factory, "gh_cli", return_value=(0, answer)) as gh:
-            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: "MERGED"}, None))
+            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: ("MERGED", self.OID)}, None))
         gh.assert_called_once_with("api", "graphql", "-f", "query=" + self.QUERY)
-        partial = json.dumps({"data": {"repository": {"p7": {"state": "MERGED"}, "p8": None}},
+        partial = json.dumps({"data": {"repository": {"p7": {"state": "MERGED", "headRefOid": self.OID}, "p8": None}},
                               "errors": [{"type": "NOT_FOUND", "path": ["repository", "p8"]}]})
         with patch.object(factory, "gh_cli", return_value=(1, partial)):
-            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: "MERGED"}, None))
+            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: ("MERGED", self.OID)}, None))
         for result, why in ((None, "gh is not installed on host-a"),
                             (("timeout", ""), "gh api graphql timed out after 60 seconds on host-a"),
                             ((1, ""), "gh api graphql exited 1 (check gh auth status on host-a)"),
@@ -2569,6 +2738,16 @@ class PrSyncTest(PickupFixture):
                     self.assertNotIn(key, job)
                 self.calls.clear()
                 self.assert_silent(self.pickup())
+
+    def test_merged_pr_records_the_head(self):
+        for head, github in ((self.OID, {"merged", "head"}), ("not-a-sha", {"merged"})):
+            with self.subTest(head=head):
+                self.heads[7] = head
+                self.board["jobs"] = [self.export()]
+                self.assertEqual(self.pickup(), (0, "synced 042-sample-export alpha: merged on GitHub\n", ""))
+                job = self.job("042-sample-export")
+                self.assertEqual(set(job["github"]), github)
+                self.assertEqual(job["github"].get("head"), head if "head" in github else None)
 
     def test_two_merged_prs_make_one_board_write(self):
         self.states = {7: "MERGED", 8: "MERGED"}
@@ -2646,6 +2825,30 @@ class PrSyncTest(PickupFixture):
         self.calls.clear()
         self.assert_silent(self.pickup())
         self.assertTrue(wt.exists())
+
+    def test_merged_job_deletes_a_branch_main_lacks(self):
+        patch.object(factory, "worktree_pids", return_value=[]).start()
+
+        def git(cwd, *args):
+            return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
+                                  text=True).stdout.strip()
+        git(self.repo_a, "init", "-q")
+        git(self.repo_a, "symbolic-ref", "HEAD", "refs/heads/main")
+        git(self.repo_a, "commit", "-q", "--allow-empty", "-m", "base")
+        wt = self.home / "worktrees" / "alpha" / "042-sample-export"
+        git(self.repo_a, "worktree", "add", "-q", str(wt), "-b", "factory/042-sample-export")
+        (wt / "work.txt").write_text("work\n")
+        git(wt, "add", "work.txt")
+        git(wt, "commit", "-q", "-m", "work")
+        self.heads[7] = git(wt, "rev-parse", "HEAD")
+        self.board["jobs"] = [self.export(port=8230)]
+        self.assertEqual(self.pickup(), (0, "synced 042-sample-export alpha: merged on GitHub\n"
+                                            "cleaned up 042-sample-export alpha\n", ""))
+        self.assertFalse(wt.exists())
+        self.assertEqual(git(self.repo_a, "branch", "--list", "factory/042-sample-export"), "")
+        job = self.job("042-sample-export")
+        self.assertEqual(job["github"]["head"], self.heads[7])
+        self.assertEqual(job["github"]["cleanup"][DEVICE]["left"], [])
 
     def test_board_refuses_a_github_patch(self):
         self.board["jobs"] = [self.export()]

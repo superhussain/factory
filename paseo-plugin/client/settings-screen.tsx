@@ -12,7 +12,12 @@ import { useEffect, useState } from "react";
 import { Text } from "react-native";
 import { parseDashboardOrigin } from "../shared/embed";
 import { factorySettings } from "../shared/settings";
-import { notificationState, onWindowFocus, requestNotifications, type NotificationState } from "./web";
+import {
+  notificationState,
+  onWindowFocus,
+  requestNotifications,
+  type NotificationState,
+} from "./web";
 
 const NOTIFICATION_HINTS: Record<Exclude<NotificationState, "unsupported">, string> = {
   default: "Get a desktop notification when a factory job needs you.",

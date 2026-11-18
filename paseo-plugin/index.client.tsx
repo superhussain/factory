@@ -3,20 +3,25 @@ import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { useSyncExternalStore } from "react";
 import { InboxBadge } from "./client/inbox-badge";
 import { dashboardScreen } from "./client/dashboard-screen";
+import { useFrameInboxCount } from "./client/frame-inbox";
 import { SettingsScreen } from "./client/settings-screen";
 import { showNeedsNotification } from "./client/web";
 import { createInbox, type Inbox } from "./shared/arrivals";
+import { shownInboxCount } from "./shared/badge";
 import { factoryInbox } from "./shared/inbox";
 
 function factoryItem(inbox: Inbox) {
   return function FactoryItem({ currentScreen, openScreen, theme }: PluginSidebarItemProps) {
     const count = useSyncExternalStore(inbox.listen, inbox.get);
+    const frame = useFrameInboxCount();
+    const active = currentScreen?.screenId === "dashboard";
+    const shown = shownInboxCount(count, frame, active);
     return (
       <SidebarRow
         icon="Factory"
-        active={currentScreen?.screenId === "dashboard"}
+        active={active}
         onPress={() => openScreen({ screenId: "dashboard" })}
-        trailing={count > 0 ? <InboxBadge count={count} theme={theme} /> : undefined}
+        trailing={shown > 0 ? <InboxBadge count={shown} theme={theme} /> : undefined}
       />
     );
   };

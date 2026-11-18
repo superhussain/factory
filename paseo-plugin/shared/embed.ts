@@ -7,7 +7,8 @@ export const JOB_ID = /^[A-Za-z0-9-]{1,128}$/;
 
 export type EmbedMessage =
   | { type: "factory-embed-ready" }
-  | { type: "factory-open-agent"; server: string; agent: string };
+  | { type: "factory-open-agent"; server: string; agent: string }
+  | { type: "factory-inbox-count"; count: number };
 
 export function parseDashboardOrigin(value: string): string | null {
   const match = ORIGIN.exec(value.trim());
@@ -26,7 +27,13 @@ export function readSignedInMessage(data: unknown): boolean {
 
 export function readEmbedMessage(data: unknown): EmbedMessage | null {
   if (!data || typeof data !== "object") return null;
-  const message = data as { type?: unknown; v?: unknown; server?: unknown; agent?: unknown };
+  const message = data as {
+    type?: unknown;
+    v?: unknown;
+    server?: unknown;
+    agent?: unknown;
+    count?: unknown;
+  };
   if (message.v !== 1) return null;
   if (message.type === "factory-embed-ready") return { type: "factory-embed-ready" };
   if (
@@ -37,5 +44,12 @@ export function readEmbedMessage(data: unknown): EmbedMessage | null {
     EMBED_ID.test(message.agent)
   )
     return { type: "factory-open-agent", server: message.server, agent: message.agent };
+  if (
+    message.type === "factory-inbox-count" &&
+    typeof message.count === "number" &&
+    Number.isSafeInteger(message.count) &&
+    message.count >= 0
+  )
+    return { type: "factory-inbox-count", count: message.count };
   return null;
 }

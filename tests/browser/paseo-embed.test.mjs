@@ -3,6 +3,7 @@
 // the frame. An unlisted parent is refused by frame-ancestors. Every https://*.example.test
 // request is fulfilled here; the dashboard origin proxies to the owned local origin.
 // A sign-in popup opened by a listed parent posts factory-embed-signed-in to it; an unlisted parent gets nothing.
+// A listed parent also gets the Inbox count, which follows the frame's project filter.
 // The config also lists paseo://app, the desktop origin; Chrome here cannot load that scheme, so this proves the extra source leaves https framing intact.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -18,6 +19,20 @@ const JOB = {
   title: "Synthetic linked job",
   stage: "pr-open",
   paseo: { server: "synthetic-server", agent: "synthetic-agent" },
+  updated: "2026-01-01T00:00:00Z",
+};
+const ASK_SAMPLE = {
+  id: "043-sample-ask",
+  project: "sample",
+  title: "Synthetic sample ask",
+  stage: "needs-human",
+  updated: "2026-01-01T00:00:00Z",
+};
+const ASK_OTHER = {
+  id: "044-other-ask",
+  project: "other",
+  title: "Synthetic other ask",
+  stage: "needs-human",
   updated: "2026-01-01T00:00:00Z",
 };
 const PARENT = `<!doctype html><title>Synthetic Paseo</title>
@@ -98,7 +113,12 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       "sample",
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
-    await seedBoard(origin, [JOB]);
+    await seedProject(
+      origin,
+      "other",
+      "---\nrepo: example/other\nbase: main\ntitle: Synthetic other\n---\n",
+    );
+    await seedBoard(origin, [JOB, ASK_SAMPLE, ASK_OTHER]);
 
     const page = await framedPage(browser, origin, LISTED);
     await t.test("listed origin ready", async () => {
@@ -111,6 +131,35 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
           window.received.some((m) => m?.type === "factory-embed-signed-in"),
         ),
         false,
+      );
+    });
+
+    await t.test("inbox count follows the project filter", async () => {
+      const counts = () =>
+        page.evaluate(() => window.received.filter((m) => m?.type === "factory-inbox-count"));
+      await page.waitForFunction(
+        () => window.received.some((m) => m?.type === "factory-inbox-count"),
+        { timeout: 8000, polling: 50 },
+      );
+      for (const m of await counts())
+        assert.deepEqual(m, { type: "factory-inbox-count", v: 1, count: 2 });
+      await page.evaluate(() => {
+        window.received = [];
+      });
+      await childFrame(page).evaluate(() => {
+        localStorage.setItem("factory-projects-hidden", JSON.stringify(["other"]));
+        setTimeout(() => location.reload(), 0);
+      });
+      await page.waitForFunction(
+        () => {
+          const c = window.received.filter((m) => m?.type === "factory-inbox-count");
+          return c.length > 0 && c[c.length - 1].count === 1;
+        },
+        { timeout: 8000, polling: 50 },
+      );
+      await childFrame(page).waitForFunction(
+        () => document.querySelector("#inbox-count")?.textContent === "1",
+        { timeout: 5000, polling: 50 },
       );
     });
 

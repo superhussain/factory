@@ -585,6 +585,15 @@ test("inbox page", { timeout: 180000 }, async (t) => {
             ),
             beside:
               inbox.getBoundingClientRect().right <= detail.getBoundingClientRect().left + 0.5,
+            background: (() => {
+              const probe = document.createElement("div");
+              probe.style.background = "var(--accent-soft)";
+              document.body.append(probe);
+              const soft = getComputedStyle(probe).backgroundColor;
+              probe.remove();
+              const row = document.querySelector('#inbox-list [aria-current="true"]');
+              return getComputedStyle(row).backgroundColor === soft;
+            })(),
           };
         }),
         {
@@ -594,6 +603,7 @@ test("inbox page", { timeout: 180000 }, async (t) => {
           detail: true,
           current: ["Recover the sample host"],
           beside: true,
+          background: true,
         },
       );
       if (SHOTS) {
@@ -607,6 +617,17 @@ test("inbox page", { timeout: 180000 }, async (t) => {
         await phone.page.screenshot({ path: `${SHOTS}/after-inbox-split-mobile.png` });
         await phone.page.browserContext().close();
       }
+      const focusesOpenRowLink = async () =>
+        assert.ok(
+          await page.evaluate(() => {
+            const a = document.activeElement;
+            return (
+              a.matches("a.btn") &&
+              a.getAttribute("href") === location.hash &&
+              a.closest('[aria-current="true"]')?.parentElement.id === "inbox-list"
+            );
+          }),
+        );
       await page.keyboard.press("ArrowRight");
       await page.waitForFunction(
         () =>
@@ -614,16 +635,19 @@ test("inbox page", { timeout: 180000 }, async (t) => {
           document.querySelector("#d-title").textContent === "Backlog item",
         wait,
       );
+      await focusesOpenRowLink();
       await page.keyboard.press("ArrowLeft");
       await page.waitForFunction(
         () => document.querySelector("#d-meta")?.textContent.includes("046-sample-human"),
         wait,
       );
+      await focusesOpenRowLink();
       await page.keyboard.press("ArrowLeft");
       await page.waitForFunction(
         () => document.querySelector("#d-meta")?.textContent.includes("042-sample-export"),
         wait,
       );
+      await focusesOpenRowLink();
       assert.equal(await page.evaluate(() => location.hash), "#042-sample-export");
       await page.keyboard.press("Escape");
       await page.waitForFunction(() => location.hash === "#/inbox", wait);
@@ -636,6 +660,50 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       );
       assert.deepEqual(errors, []);
       await page.browserContext().close();
+    });
+    await it("a stale arrow step does not pull focus later", async () => {
+      await reset();
+      const { page, errors } = await openPage("#/inbox");
+      await openRow3(page);
+      // A step whose row never rendered as the open one, then a render that drops it.
+      await page.evaluate(() => {
+        inboxStepHref = "#042-sample-export";
+        renderInboxPage();
+        document.querySelector("#inbox-page-heading").focus();
+        location.hash = "#042-sample-export";
+      });
+      await page.waitForFunction(
+        () => document.querySelector("#d-meta")?.textContent.includes("042-sample-export"),
+        wait,
+      );
+      assert.equal(await page.evaluate(() => document.activeElement.id), "inbox-page-heading");
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
+    await it("split inbox keeps 400px at 800 to 1100", async () => {
+      await reset();
+      for (const width of [800, 900, 1100, 1280]) {
+        const { page, errors } = await openPage("#/inbox", { width, height: 900 });
+        await openRow3(page);
+        const box = await page.evaluate(() => {
+          const inbox = document.querySelector("#inbox-page").getBoundingClientRect();
+          const detail = document.querySelector("#detail").getBoundingClientRect();
+          return {
+            inbox: inbox.width,
+            detail: detail.width,
+            beside: inbox.right <= detail.left + 0.5,
+          };
+        });
+        if (width === 1280) assert.equal(box.detail, 760, `drawer at ${width}`);
+        else {
+          assert.ok(box.inbox >= 360, `inbox at ${width}: ${box.inbox}`);
+          assert.ok(box.detail >= 360, `drawer at ${width}: ${box.detail}`);
+          assert.ok(box.beside, `overlap at ${width}`);
+        }
+        assert.deepEqual(errors, []);
+        await page.browserContext().close();
+      }
     });
 
     if (SHOTS) await it("reference capture", () => shotKeys("after-reference-keys.png"));

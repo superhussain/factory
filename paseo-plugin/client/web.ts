@@ -8,6 +8,7 @@ import {
   type EmbedMessage,
 } from "../shared/embed";
 import { needsBody, needsTitle, type WaitingJob } from "../shared/arrivals";
+import * as firstLogin from "../shared/first-login";
 
 // This plugin typechecks without the DOM library. Declare only what this module uses.
 type MessageSource = { postMessage(message: unknown, targetOrigin: string): void };
@@ -39,27 +40,22 @@ declare const Notification: {
   };
 };
 
-const SEEN_KEY = "factory-plugin:loaded:";
+const WEB: firstLogin.WebGlobals = { storage: () => localStorage, origin: () => location.origin };
 
-// True once the board has loaded on this device for this origin, so the screen can skip onboarding.
+function webGlobals() {
+  return Platform.OS === "web" ? WEB : null;
+}
+
 export function hasLoadedBefore(origin: string): boolean {
-  if (Platform.OS !== "web") return false;
-  try {
-    return localStorage.getItem(SEEN_KEY + origin) === "1";
-  } catch {
-    return false;
-  }
+  return firstLogin.hasLoadedBefore(webGlobals(), origin);
 }
 
 export function markLoaded(origin: string): void {
-  if (Platform.OS !== "web") return;
-  try {
-    localStorage.setItem(SEEN_KEY + origin, "1");
-  } catch {}
+  firstLogin.markLoaded(webGlobals(), origin);
 }
 
 export function paseoOrigin(): string | null {
-  return Platform.OS === "web" ? location.origin : null;
+  return firstLogin.paseoOrigin(webGlobals());
 }
 
 const SANDBOX =

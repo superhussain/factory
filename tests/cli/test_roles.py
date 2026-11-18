@@ -371,7 +371,8 @@ class RolesTest(IsolatedTestCase):
         review = " ".join((SKILL / "agents/factory-review-ux.md").read_text(encoding="utf-8").split())
         for phrase in ("**Keyboard focus probe.** In round 1", "scrollIntoView", "### Keyboard focus",
                        "lost, trapped or scrolled out of view is CHANGES",
-                       "Keyboard focus: no focus or scroll change."):
+                       "Keyboard focus: no focus or scroll change.", "':!*.md' ':!tests/'",
+                       "leaves out markdown and test files"):
             self.assertIn(phrase, review)
 
     def test_open_items_are_absorbed_before_queued(self):

@@ -69,7 +69,7 @@ without asking. They remove only worktrees this pipeline created: a `factory-<id
 Paseo workspace, or the job's worktree under the factory home, and that job's private prompt folder under
 `prompts/<slug>/<id>`, refusing a link. `archive-workspace` archives
 a merged or closed job's own workspace whatever its git state and reports leftovers
-first. `cleanup` refuses a dirty worktree and keeps a branch that is not merged. Neither
+first. `cleanup` refuses a dirty worktree and keeps a branch that is not merged into HEAD or, for a `merged` job, the board's `github.head`. Neither
 forces. A host owner who runs Claude Code in auto mode can allow them with this sample
 entry under `autoMode.allow` in their settings:
 
@@ -187,16 +187,17 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
 
 The board appears inside Paseo on web and desktop only. On iOS and Android the screen links to
 the dashboard in the browser instead. A browser that blocks third-party cookies cannot show the
-frame; the screen then offers **Sign in** and **Reload**. The first time, the screen shows a card with three sign-in steps; once the board has loaded on that device, it shows a short card instead. Sign in opens the dashboard in a small popup inside Paseo, so the desktop app signs in with its own cookies. When the board loads there, the popup closes and the frame reloads.
+frame; the screen then offers **Sign in**, **Reload** and **Open in a browser tab**. The first time, the screen shows a card with three sign-in steps; once the board has loaded on that device, it shows a short card instead. Sign in opens the dashboard in a small popup inside Paseo, so the desktop app signs in with its own cookies. When the board loads there, the popup closes and the frame reloads. In Safari, or another browser that blocks third-party cookies, the frame cannot load even after sign-in. Use **Open in a browser tab** there. It opens the board, or the linked job, in a normal tab outside Paseo.
 
 ### Inbox badge
 
 The Factory row shows the same number as the dashboard's Inbox badge: jobs waiting on you plus
-unchecked backlog lines, across all projects. The plugin runs `factory.py inbox` from the installed
-factory skill (`~/.claude/skills/factory` or `~/.agents/skills/factory`) once a minute, so the
-badge can trail the dashboard by up to a minute. It ignores the dashboard's per-browser project
-filter. A host without the factory skill, or with a skill older than `factory.py inbox`, shows no
-badge.
+unchecked backlog lines. While the Factory screen shows your board, the framed dashboard sends its
+own Inbox count to the Paseo origin that framed it, so the badge matches what you see, including
+the per-browser project filter. Otherwise the plugin runs `factory.py inbox` from the installed
+factory skill (`~/.claude/skills/factory` or `~/.agents/skills/factory`) once a minute. That count
+covers all projects and can trail the dashboard by up to a minute. A host without the factory
+skill, or with a skill older than `factory.py inbox`, shows a badge only while the board is open.
 
 On Windows the plugin runs `python3`, and if that fails, `py -3`, because `python3` there is often
 the Microsoft Store stub.
