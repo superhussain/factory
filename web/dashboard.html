@@ -1258,6 +1258,10 @@ function toggleStar(id) {
   saveStarred();
   renderBoard();
 }
+function syncStarButton(id) {
+  $('d-star').setAttribute('aria-pressed', String(starred.has(id)));
+  $('d-star').title = starred.has(id) ? 'Unstar job' : 'Star job';
+}
 
 // The server-rendered title, which renderBoard prefixes with the needs-you count.
 const BASE_TITLE = document.title;
@@ -4191,7 +4195,9 @@ function renderBoard() {
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
   const starredOnly = starView === 'only' && !noneShown;
   const starredLine = starredOnly ? '<p class="filter-empty" id="starred-only">' +
-    (shown.some((j) => starred.has(j.id)) ? 'Showing starred jobs only.' : 'No starred jobs yet. Star a job with the star button in its job panel.') +
+    (shown.some((j) => starred.has(j.id)) ? 'Showing starred jobs only.'
+      : jobs.some((j) => starred.has(j.id)) ? 'The project filter hides every starred job.'
+      : 'No starred jobs yet. Star a job with the star button in its job panel.') +
     ' <button type="button" class="btn" id="starred-show-all">Show all jobs</button></p>' : '';
   // The extra auto track lets the filter-empty or starred-only line span the whole board.
   $('board').style.setProperty('--cols', tracks.concat(noneShown || starredOnly ? ['auto'] : []).join(' '));
@@ -4682,7 +4688,7 @@ async function openJob(id) {
   const shown = jobActionsFor(j);
   for (const id of JOB_ACTIONS) $(id).hidden = !shown.includes(id);
   $('d-star').hidden = archived;
-  $('d-star').setAttribute('aria-pressed', String(starred.has(id)));
+  syncStarButton(id);
   $('d-babysit-bar').hidden = archived || !shown.includes('d-babysit');
   if (archived) for (const b of $('d-actions-menu').querySelectorAll('button')) b.hidden = b.id !== 'd-copy-link';
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
@@ -7784,7 +7790,7 @@ const JOB_ACTION_RUN = {
 for (const id of JOB_ACTIONS) $(id).addEventListener('click', () => JOB_ACTION_RUN[id](drawerAction(id)));
 $('d-star').addEventListener('click', () => {
   toggleStar(openId);
-  $('d-star').setAttribute('aria-pressed', String(starred.has(openId)));
+  syncStarButton(openId);
 });
 $('d-babysit-bar').addEventListener('click', () => babysitAction({ ...drawerAction('d-babysit'), button: $('d-babysit-bar') }));
 
