@@ -7,7 +7,7 @@ const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const MOVES = { paired: ["active", "retired"], pending: ["retired"], active: ["retired"] };
 const SCHEDULERS = ["launchd", "cron", "schtasks", "none"];
 const STATUS_KEYS = ["os", "scheduler", "last_pickup", "bundle", "doctor", "routes", "checkouts"];
-const OPTIONAL_STATUS_KEYS = ["triage_failed_since"];
+const OPTIONAL_STATUS_KEYS = ["triage_failed_since", "bundle_behind_since"];
 const ROUTE_KEYS = ["name", "provider", "model", "effort", "limited_until"];
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const SHA = /^[0-9a-f]{7,64}$/;
@@ -128,6 +128,8 @@ export function validateHostStatus(body) {
     return "checkouts: must be a list of at most 64 project slugs";
   if ("triage_failed_since" in body && !isIso(body.triage_failed_since))
     return "triage_failed_since: must be an ISO 8601 UTC time";
+  if ("bundle_behind_since" in body && !isIso(body.bundle_behind_since))
+    return "bundle_behind_since: must be an ISO 8601 UTC time";
   return null;
 }
 
