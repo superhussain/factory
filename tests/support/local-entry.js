@@ -14,7 +14,7 @@ const config = {
   issuer: "https://example-team.cloudflareaccess.com",
   audience: "example-application-audience",
   image_origins: [],
-  embed_origins: ["https://paseo.example.test"],
+  embed_origins: ["https://paseo.example.test", "paseo://app"],
   jira_origin: "https://jira.example.test",
   agent_links: {
     app: { label: "Session app", template: "session://h/{server}/agent/{agent}" },

@@ -2,6 +2,7 @@
 // gets a ready reply to its hello, and a Session app click posts the ids instead of leaving
 // the frame. An unlisted parent is refused by frame-ancestors. Every https://*.example.test
 // request is fulfilled here; the dashboard origin proxies to the owned local origin.
+// The config also lists paseo://app, the desktop origin; Chrome here cannot load that scheme, so this proves the extra source leaves https framing intact.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
