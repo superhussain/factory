@@ -3,7 +3,7 @@ Factory shows your factory dashboard on its own Paseo screen. A Factory row in t
 ## Setup
 
 - In Settings, Plugins, Factory, enter your factory dashboard URL, such as `https://factory.example.com`. Each host keeps its own URL.
-- Your factory server must list this Paseo origin in its `embed_origins` profile key. Without it, the dashboard refuses to load inside Paseo.
+- Your factory server must list this Paseo origin in its `embed_origins` profile key. Without it, the dashboard refuses to load inside Paseo. The desktop app's origin is `paseo://app`; the web app's is the address in your browser.
 - Your factory runs behind Cloudflare Access. Set the Access application's cookie SameSite attribute to None, or the framed board shows the Access login instead of your jobs.
 
 ## What it reads and sends
