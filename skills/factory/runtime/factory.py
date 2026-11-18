@@ -1831,6 +1831,26 @@ def queue_backlog_item(home, slug, feature, verdict, context=None):
 BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of|depends-on) (\w[\w.-]*)\)$", re.ASCII)
 
 
+DEPENDS_ON = re.compile(r"^Depends on: ([\w-]+: \S.*)$", re.M)
+
+
+def backlog_depends(text, context):
+    """(refs, waiting) for the Depends on: lines in context: a depends-on ref per item checked off as a job,
+    and the first item whose backlog line is still unchecked, or None. A missing item adds nothing."""
+    lines = [line.rstrip() for line in text.split("\n")]
+    refs, waiting = [], None
+    for item in DEPENDS_ON.findall(context):
+        item = item.rstrip()
+        if f"- [ ] {item}" in lines:
+            waiting = waiting or item
+            continue
+        done = re.compile(rf"- \[x\] {re.escape(item)} \(([^()]+)\)")
+        job_id = next((m.group(1) for m in map(done.fullmatch, lines) if m), None)
+        if job_id and JOB_ID.fullmatch(job_id) and ".." not in job_id:
+            refs.append({"id": job_id, "kind": "depends-on"})
+    return refs, waiting
+
+
 def suffix_refs(ref):
     """The refs a BACKLOG_SUFFIX match carries: none when there is no match or its id contains ".."."""
     return [{"id": ref.group(2), "kind": ref.group(1)}] if ref and ".." not in ref.group(2) else []
@@ -2068,6 +2088,11 @@ def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None)
             break
         held.append(line[2:])
     answered = backlog_answers(answers, backlog_questions("\n".join(held)), stored)
+    depends = []
+    if stored == "approved":
+        depends, waiting = backlog_depends("\n".join(lines), "\n".join(held))
+        if waiting:
+            fail(f'approve "{waiting}" first: its backlog line is still unchecked. Nothing was changed.', 2)
     if stored != "denied" and slug not in registered(home):
         fail(f"register project {slug} before deciding this item", 4)
     device = holder(home)[0]
@@ -2122,7 +2147,7 @@ def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None)
         else:
             job = {"id": job_id, "project": slug, "title": title, "idea": item + footer, "stage": "closed",
                    "updated": at, "done": at, "note": "denied from the backlog", "backlog": record}
-        refs = suffix_refs(ref)
+        refs = suffix_refs(ref) + depends
         if refs:
             job["refs"] = refs
         data["jobs"].append(job)
