@@ -25,31 +25,6 @@ these permissions:
 `up` reads the token from `CLOUDFLARE_API_TOKEN`, or asks with a hidden prompt.
 It never writes the token to a file or prints it.
 
-### Device token
-
-Keep the same token on each device that manages the instance. Agents there can then rerun `up`, or change one setting such as the Access cookie SameSite attribute the [Paseo plugin](integrations.md#paseo-plugin) needs, without asking you for a token. PR screenshot uploads read the same key.
-
-1. Mint it once. In the Cloudflare dashboard open My Profile, API Tokens, Create Token, then Create Custom Token. Name it `factory operator`. Add exactly the permissions above. Under Account Resources pick the factory account, and under Zone Resources the factory zone. Copy the value once.
-2. Store it as `CLOUDFLARE_API_TOKEN` in the factory home `.env`, the path `factory.py init` printed as `factory home:`. This command asks with a hidden prompt, replaces any `CLOUDFLARE_API_TOKEN` line, keeps every other line and leaves the file at mode `0600`:
-
-   ```sh
-   python3 -c 'import getpass, os, sys; p = sys.argv[1]; t = getpass.getpass("Cloudflare API token: "); old = open(p, encoding="utf-8").read().splitlines() if os.path.exists(p) else []; keep = [l for l in old if l.partition("=")[0].strip() != "CLOUDFLARE_API_TOKEN"]; fd = os.open(p + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600); os.write(fd, ("\n".join(keep + ["CLOUDFLARE_API_TOKEN=" + t]) + "\n").encode()); os.close(fd); os.replace(p + ".tmp", p); os.chmod(p, 0o600)' "<factory-home>/.env"
-   ```
-
-   On Windows use `py -3`. Never paste the token into chat, a commit, argv or a log.
-3. Use it. `up` reads `CLOUDFLARE_API_TOKEN` from the environment, not from `.env`, so load it for one command:
-
-   ```sh
-   CLOUDFLARE_API_TOKEN="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "<factory-home>/.env")" mise exec -- python3 tools/bootstrap.py up
-   ```
-
-   `pr_screenshots.py` reads the key from `.env` itself. The Workers R2 Storage Edit permission covers its uploads.
-4. Revoke the old token. If `.env` held a narrower token before, delete it under My Profile, API Tokens after one screenshot upload and one `up` rerun pass with the new token.
-
-Roll the token in My Profile, API Tokens on any suspected exposure, then repeat step 2 on each device that holds it and rerun `up` to check. This token can delete the Worker, DNS records and Access policies, so keep it only on devices you trust with the instance.
-
-The `deploy-main` workflow keeps its own narrower token ([section 8](#8-continuous-deployment-from-main)). Do not reuse this one there.
-
 **Inputs.** `up` asks four questions and saves the answers in the ignored
 `deploy/bootstrap.json`. A short hint before each prompt says where to find the
 value. Each prompt shows the saved value as its default.
@@ -102,6 +77,31 @@ the service tokens. It deletes only Access names that start with
 you can rerun it after a failure. It keeps an application under another name. It deletes the
 bucket only when it is empty, and never lists or deletes objects. Local files
 stay; the output names the ones that now point at a deleted instance.
+
+### Device token
+
+Keep the same token on each device that manages the instance. Agents there can then rerun `up`, or change one setting such as the Access cookie SameSite attribute the [Paseo plugin](integrations.md#paseo-plugin) needs, without asking you for a token. PR screenshot uploads read the same key.
+
+1. Mint it once. In the Cloudflare dashboard open My Profile, API Tokens, Create Token, then Create Custom Token. Name it `factory operator`. Add exactly the permissions above. Under Account Resources pick the factory account, and under Zone Resources the factory zone. Copy the value once.
+2. Store it as `CLOUDFLARE_API_TOKEN` in the factory home `.env`, the path `factory.py init` printed as `factory home:`. This command asks with a hidden prompt, replaces any `CLOUDFLARE_API_TOKEN` line, keeps every other line and leaves the file at mode `0600` on POSIX:
+
+   ```sh
+   python3 -c 'import getpass, os, sys; p = sys.argv[1]; t = getpass.getpass("Cloudflare API token: ").strip(); t or sys.exit("no token entered, .env unchanged"); old = open(p, encoding="utf-8").read().splitlines() if os.path.exists(p) else []; keep = [l for l in old if l.partition("=")[0].strip() != "CLOUDFLARE_API_TOKEN"]; tmp = p + "." + str(os.getpid()) + ".tmp"; fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600); os.write(fd, ("\n".join(keep + ["CLOUDFLARE_API_TOKEN=" + t]) + "\n").encode()); os.close(fd); os.replace(tmp, p); os.chmod(p, 0o600)' "<factory-home>/.env"
+   ```
+
+   On Windows use `py -3`. Never paste the token into chat, a commit, argv or a log.
+3. Use it. `up` reads `CLOUDFLARE_API_TOKEN` from the environment, not from `.env`, so load it for one command:
+
+   ```sh
+   CLOUDFLARE_API_TOKEN="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "<factory-home>/.env")" mise exec -- python3 tools/bootstrap.py up
+   ```
+
+   `pr_screenshots.py` reads the key from `.env` itself. The Workers R2 Storage Edit permission covers its uploads.
+4. Revoke the old token. If `.env` held a narrower token before, delete it under My Profile, API Tokens after one screenshot upload and one `up` rerun pass with the new token.
+
+Roll the token in My Profile, API Tokens on any suspected exposure, then repeat step 2 on each device that holds it and rerun `up` to check. This token can delete the Worker, DNS records and Access policies, so keep it only on devices you trust with the instance.
+
+The `deploy-main` workflow keeps its own narrower token ([section 8](#8-continuous-deployment-from-main)). Do not reuse this one there.
 
 After `up`, continue with [getting-started.md](getting-started.md).
 
