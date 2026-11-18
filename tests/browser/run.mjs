@@ -294,7 +294,6 @@ const CAPTURE_BUILD =
   "\n";
 const CAPTURE_ANSWERS =
   "# Answers\n\n## Question 1: Browser evidence\n\nPick: one\n\n- [ ] Ship on unit tests (recommended): open the PR now.\n- [x] Free a slot first: re-run the builder for screenshots.\n\nOther: none\n";
-// The archived running example: answered by interception, never on the board.
 const auditCall = (second, agent, tool, flags, target) => ({
   host: "example-host",
   job: "001-capture",
@@ -319,6 +318,7 @@ const CAPTURE_AUDIT = [
   auditCall(5, "factory-builder", "Bash", ["recursive-delete", "denied"], "rm -rf build"),
   auditCall(6, "factory-builder", "Edit", [], "~/app/src/main.py"),
 ];
+// The archived running example: answered by interception, never on the board.
 const CAPTURE_ARCHIVED = {
   id: "412-fix-login",
   project: "sample",
@@ -1433,6 +1433,14 @@ async function capture(outdir, referencePath) {
       if (side !== "after") return;
       await page.click('.tab[data-name="audit.md"]');
       await page.waitForSelector("#d-doc table.audit");
+      await page.waitForFunction(() => {
+        const pill = document.getElementById("d-tab-pill");
+        const tab = document.querySelector("#d-tabs .tab.active");
+        const style = getComputedStyle(pill);
+        return (
+          parseFloat(style.left) === tab.offsetLeft && parseFloat(style.width) === tab.offsetWidth
+        );
+      });
     };
     auditBoard = true;
     try {
