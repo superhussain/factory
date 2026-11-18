@@ -766,8 +766,30 @@ def fresh_hold(job, device, session, paseo, take):
     if paseo and any(isinstance(row, dict) and row.get("session") == session and "paseo" not in row
                      for row in job.get("agents") or []):
         return False
+    return seen_recently(c)
+
+
+def seen_recently(c):
+    """True when the claim's seen stamp is under CLAIM_REFRESH_MINUTES old."""
     seen = datetime.strptime(c["seen"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     return datetime.now(timezone.utc) - seen < timedelta(minutes=CLAIM_REFRESH_MINUTES)
+
+
+def same_board(before, after, device, session):
+    """True when after differs from before only in updated stamps, and in claim.seen on rows this
+    session holds whose stored claim was seen under CLAIM_REFRESH_MINUTES ago."""
+    fresh = {j.get("id") for j in before["jobs"] if isinstance(j.get("claim"), dict)
+             and mine(j["claim"], device, session) and seen_recently(j["claim"])}
+
+    def quiet(data):
+        rows = []
+        for j in data["jobs"]:
+            j = {k: v for k, v in j.items() if k != "updated"}
+            if j.get("id") in fresh and isinstance(j.get("claim"), dict):
+                j["claim"] = {k: v for k, v in j["claim"].items() if k != "seen"}
+            rows.append(j)
+        return {**{k: v for k, v in data.items() if k != "updated"}, "jobs": rows}
+    return quiet(before) == quiet(after)
 
 
 def earlier_moves(m):
@@ -940,6 +962,7 @@ def board_write(factory, job_id, patch, show=True):
 
     def change(text):
         data = load_board(text)
+        before = load_board(text)
         found = next((j for j in data["jobs"] if j.get("id") == job_id), None)
         if found is None:
             m = re.match(r"(\d{3,})-", job_id)
@@ -995,6 +1018,8 @@ def board_write(factory, job_id, patch, show=True):
         if tracer_gate_passed(job, patch):
             job.update(stage="build", note=TRACER_APPROVED_NOTE)
             job.pop("needs", None)
+        if same_board(before, data, device, session):
+            return None, (next(j for j in before["jobs"] if j.get("id") == job_id), None, [])
         return dump_board(data), (job, None, stacked)
     job, held, stacked = cas(factory, "/api/board", change)
     if held == "closing":
