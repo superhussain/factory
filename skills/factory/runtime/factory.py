@@ -5450,12 +5450,13 @@ def gh_cli(*args, stderr=False):
 
 
 def pr_states(repo, numbers, device):
-    """The states of repo's pull requests from one gh api graphql call: ({number: state}, None),
-    or (None, why). A pull request GitHub returns null for is left out. A non-zero exit whose answer
-    still holds data.repository, as a partial GraphQL error gives, returns the states that resolved."""
+    """The states and head commits of repo's pull requests from one gh api graphql call:
+    ({number: (state, head oid)}, None), or (None, why). A pull request GitHub returns null for is left out.
+    A non-zero exit whose answer still holds data.repository, as a partial GraphQL error gives, returns the
+    states that resolved."""
     owner, name = repo.split("/")
     q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
-         + "".join(f"p{n}: pullRequest(number: {n}) {{ state }} " for n in numbers) + "} }")
+         + "".join(f"p{n}: pullRequest(number: {n}) {{ state headRefOid }} " for n in numbers) + "} }")
     r = gh_cli("api", "graphql", "-f", "query=" + q)
     if r is None:
         return None, f"gh is not installed on {device}"
@@ -5470,7 +5471,8 @@ def pr_states(repo, numbers, device):
             return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
         return None, ("gh api graphql returned no repository "
                       f"(check the project file's repo and gh auth status on {device})")
-    return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
+    return {n: (found[f"p{n}"]["state"], found[f"p{n}"].get("headRefOid"))
+            for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
 def pr_signals(repo, numbers, device):
@@ -5716,7 +5718,7 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
             print(f"factory.py: pickup skips the PR sync for {repo}: {why}", file=sys.stderr)
             continue
         for j, n in jobs:
-            state = states.get(n)
+            state, head = states.get(n, (None, None))
             if state not in ("MERGED", "CLOSED"):
                 continue
             line = f"{j['id']} {j['project']}: " + (MERGED_NOTE if state == "MERGED" else GITHUB_CLOSE_REASON)

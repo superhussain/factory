@@ -116,7 +116,7 @@ class PickupFixture(IsolatedTestCase):
         self.sweep = patch.object(factory, "backlog_triage_pass").start()
         self.checkout = patch.object(factory, "checkout_problem", return_value=None).start()
         patch.object(factory, "pr_states",
-                     side_effect=lambda repo, numbers, device: ({n: "OPEN" for n in numbers}, None)).start()
+                     side_effect=lambda repo, numbers, device: ({n: ("OPEN", None) for n in numbers}, None)).start()
 
     def configure(self, line="started", code=0, sleep=0):
         (self.root / "fake.json").write_text(json.dumps({"line": line, "code": code, "sleep": sleep}),
@@ -2488,8 +2488,9 @@ class CloseCleanupTest(PickupFixture):
 
 
 class PrSyncTest(PickupFixture):
-    QUERY = ('query { repository(owner: "sample", name: "alpha") { p7: pullRequest(number: 7) { state } '
-             'p8: pullRequest(number: 8) { state } } }')
+    QUERY = ('query { repository(owner: "sample", name: "alpha") { p7: pullRequest(number: 7) { state headRefOid } '
+             'p8: pullRequest(number: 8) { state headRefOid } } }')
+    OID = "a1b2" * 10
     PR7 = "https://github.com/sample/alpha/pull/7"
     PR8 = "https://github.com/sample/alpha/pull/8"
     DECISION = "/api/jobs/alpha/043-sample-import/decision.md"
@@ -2505,6 +2506,7 @@ class PrSyncTest(PickupFixture):
             (self.home / "projects" / f"{slug}.md").write_text("---\nrepo: Sample/Alpha\n---\n", encoding="utf-8")
         self.files = {}
         self.states = {7: "MERGED", 8: "CLOSED"}
+        self.heads = {}
         self.failure = None
         self.reads = []
         patch.object(factory, "pr_states", side_effect=self.read).start()
@@ -2514,7 +2516,7 @@ class PrSyncTest(PickupFixture):
         self.reads.append((repo, list(numbers)))
         if self.failure:
             return None, self.failure
-        return {n: self.states[n] for n in numbers if n in self.states}, None
+        return {n: (self.states[n], self.heads.get(n)) for n in numbers if n in self.states}, None
 
     def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
         if not path.endswith("/decision.md"):
@@ -2535,14 +2537,14 @@ class PrSyncTest(PickupFixture):
                      "branch": "factory/043-sample-import", "updated": "2026-01-01T00:00:00Z"}, **extra)
 
     def test_pr_states_sends_one_query_and_parses_it(self):
-        answer = json.dumps({"data": {"repository": {"p7": {"state": "MERGED"}, "p8": None}}})
+        answer = json.dumps({"data": {"repository": {"p7": {"state": "MERGED", "headRefOid": self.OID}, "p8": None}}})
         with patch.object(factory, "gh_cli", return_value=(0, answer)) as gh:
-            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: "MERGED"}, None))
+            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: ("MERGED", self.OID)}, None))
         gh.assert_called_once_with("api", "graphql", "-f", "query=" + self.QUERY)
-        partial = json.dumps({"data": {"repository": {"p7": {"state": "MERGED"}, "p8": None}},
+        partial = json.dumps({"data": {"repository": {"p7": {"state": "MERGED", "headRefOid": self.OID}, "p8": None}},
                               "errors": [{"type": "NOT_FOUND", "path": ["repository", "p8"]}]})
         with patch.object(factory, "gh_cli", return_value=(1, partial)):
-            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: "MERGED"}, None))
+            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: ("MERGED", self.OID)}, None))
         for result, why in ((None, "gh is not installed on host-a"),
                             (("timeout", ""), "gh api graphql timed out after 60 seconds on host-a"),
                             ((1, ""), "gh api graphql exited 1 (check gh auth status on host-a)"),
