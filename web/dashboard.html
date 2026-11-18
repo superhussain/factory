@@ -576,6 +576,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .doc th, .agent-runs th { background: var(--code-bg); font-weight: 600; }
   .agent-runs th, .agent-runs td { min-width: 0; white-space: nowrap; }
+  .doc table.audit th, .doc table.audit td { min-width: 0; white-space: nowrap; }
+  .doc table.audit td:last-child { min-width: 16em; white-space: normal; }
   .agent-runs td a + a { margin-left: 8px; }
   /* A long run list scrolls in its own box, so the tabs and page stay on a desktop screen. */
   .detail-head > #d-agents .table-wrap { max-height: 40vh; overflow-y: auto; scroll-padding-top: 2.5em; }
@@ -4257,7 +4259,7 @@ function renderAudit(f) {
     return '<tr><td>' + [r.time, r.host, r.session, r.agent, r.tool].map(esc).join('</td><td>') + '</td><td>' + flags + '</td><td><code>' + esc(r.target) + '</code></td></tr>';
   }).join('');
   return '<p>' + n(rows.length, 'call') + ' from ' + n(hosts, 'host') + ', ' + flagged + ' flagged. Each host redacted its targets before upload.</p>' +
-    '<div class="table-wrap"><table class="audit"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+    '<div class="table-wrap" tabindex="0" role="region" aria-label="Audit rows"><table class="audit"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
 }
 
 const sha12 = async (text) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))).slice(0, 12);
