@@ -1,0 +1,138 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { prepareAssets } from "../../tools/assets.mjs";
+import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+
+const call = (time, agent, tool, flags, target) => ({
+  host: "example-host",
+  job: "1017-add-x",
+  session: "3f2a9c1d",
+  agent,
+  time: `2026-11-10 10:00:0${time}`,
+  tool,
+  flags,
+  target,
+});
+const ROWS = [
+  call(2, "main", "Bash", ["force-push"], "git push --force origin factory/1017-add-x"),
+  call(1, "main", "Bash", [], "git status"),
+  call(3, "main", "Read", ["secret-file"], "~/app/.env"),
+  call(
+    4,
+    "main",
+    "Bash",
+    ["pipe-to-shell"],
+    "curl -H 'Authorization: [redacted]' https://get.example.test/i.sh | sh",
+  ),
+  call(5, "factory-builder", "Bash", ["recursive-delete", "denied"], "rm -rf build"),
+  call(6, "factory-builder", "Edit", [], "<img src=x>"),
+];
+
+async function seed(origin) {
+  await seedProject(
+    origin,
+    "sample",
+    "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+  );
+  await seedBoard(
+    origin,
+    ["1017-add-x", "1018-no-audit"].map((id) => ({
+      id,
+      project: "sample",
+      title: "Synthetic " + id,
+      stage: "review",
+      updated: "2026-01-01T00:00:00Z",
+    })),
+  );
+  for (const id of ["1017-add-x", "1018-no-audit"]) {
+    const response = await fetch(origin + `/api/jobs/sample/${id}/spec.md`, {
+      method: "PUT",
+      headers: { "If-None-Match": "*", "Content-Type": "text/markdown" },
+      body: `# Spec ${id}\n`,
+    });
+    assert.equal(response.status, 200);
+  }
+}
+
+test("the audit tab lists every pushed call as text", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seed(origin);
+    const context = await browser.createBrowserContext();
+    try {
+      const page = await context.newPage();
+      await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await page.setRequestInterception(true);
+      page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (path === "/api/audit/1017-add-x")
+          return request.respond({
+            status: 200,
+            contentType: "application/x-ndjson",
+            body: ROWS.map((r) => JSON.stringify(r) + "\n").join("") + "not json\n",
+          });
+        if (path === "/api/audit/1018-no-audit")
+          return request.respond({ status: 200, contentType: "application/x-ndjson", body: "" });
+        return request.continue();
+      });
+      await page.goto(origin + "/#1017-add-x/audit", { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#d-doc table.audit");
+      assert.equal(
+        await page.$eval("#d-tabs .tab.active", (tab) => tab.textContent.trim()),
+        "audit",
+      );
+      assert.equal(new URL(page.url()).hash, "#1017-add-x/audit");
+      const table = await page.$eval("#d-doc", (doc) => ({
+        summary: doc.querySelector("p").textContent,
+        headers: [...doc.querySelectorAll("table.audit th[scope=col]")].map((th) => th.textContent),
+        rows: [...doc.querySelectorAll("table.audit tbody tr")].map((tr) =>
+          [...tr.cells].map((td) => td.textContent),
+        ),
+        strong: [...doc.querySelectorAll("table.audit strong")].map((s) => s.textContent),
+        images: doc.querySelectorAll("img").length,
+      }));
+      assert.equal(
+        table.summary,
+        "6 calls from 1 host, 4 flagged. Each host redacted its targets before upload.",
+      );
+      assert.deepEqual(table.headers, [
+        "Time (UTC)",
+        "Host",
+        "Session",
+        "Agent",
+        "Tool",
+        "Flags",
+        "Target",
+      ]);
+      assert.equal(table.rows.length, 6);
+      assert.deepEqual(table.rows[0], [
+        "2026-11-10 10:00:01",
+        "example-host",
+        "3f2a9c1d",
+        "main",
+        "Bash",
+        "-",
+        "git status",
+      ]);
+      assert.deepEqual(table.rows[4].slice(5), ["recursive-delete, denied", "rm -rf build"]);
+      assert.equal(table.rows[5][6], "<img src=x>");
+      assert.deepEqual(table.strong, [
+        "force-push",
+        "secret-file",
+        "pipe-to-shell",
+        "recursive-delete, denied",
+      ]);
+      assert.equal(table.images, 0);
+      await page.goto(origin + "/#1018-no-audit", { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() =>
+        document.getElementById("d-doc").textContent.includes("Spec 1018-no-audit"),
+      );
+      assert.equal(await page.$('#d-tabs .tab[data-name="audit.md"]'), null);
+      assert.deepEqual(errors, [], "no page errors");
+    } finally {
+      await context.close();
+    }
+  });
+});
