@@ -10172,7 +10172,7 @@ def render_findings(agg, doc, rejected=(), edits=(), fixed=(), cards=()):
     if fixed:
         lines += ["", "## Fixed findings", "", "A merged job fixed these before every session they cite started.", "",
                   "| Finding | Title | Fixed by | Merged |", "| --- | --- | --- | --- |"]
-        lines += [f"| {i} | {cell(f['title'])} | {job} | {cell(at)} |" for i, f, job, at in fixed]
+        lines += [f"| {i} | {cell(f['title'])} | {cell(job)} | {cell(at)} |" for i, f, job, at in fixed]
     if cards:
         lines += ["", "## Rejected cards", "",
                   "Admission dropped these cards. Their text is not shown; read reply.json to see it.", "",

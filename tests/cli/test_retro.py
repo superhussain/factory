@@ -701,6 +701,12 @@ class RetroAdmitTest(RetroCase):
             (self.folder / "reply.json").write_bytes(raw)
         return invoke(factory, ["retro", "admit", run])
 
+    def test_fixed_job_id_escaped(self):
+        text = factory.render_findings({"from": "2026-11-10", "to": "2026-11-16", "hosts": {"pc": {"sessions": 1}}},
+                                       {"run": "r1", "findings": []},
+                                       fixed=[(0, {"title": "t"}, "1700|legacy", "2026-11-15T12:30:00Z")])
+        self.assertIn("| 0 | t | 1700\\|legacy | 2026-11-15T12:30:00Z |", text)
+
     def test_session_refs_still_validate(self):
         self.assertIsNone(factory.check_session_refs([REF]))
         self.assertEqual(factory.check_session_refs(["host-a/not-hex"]), "must be host/session refs")
