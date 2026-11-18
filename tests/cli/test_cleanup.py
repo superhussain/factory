@@ -38,10 +38,9 @@ class CleanupTest(IsolatedTestCase):
                               capture_output=True, text=True).stdout.strip()
 
     def board(self, stage, head):
-        job = {"id": "001-test", "project": "sample", "stage": stage}
-        if stage == "merged":
-            job["github"] = {"merged": "2026-11-18T00:00:00Z", "head": head}
-        else:
+        job = {"id": "001-test", "project": "sample", "stage": stage,
+               "github": {"merged": "2026-11-18T00:00:00Z", "head": head}}
+        if stage == "closed":
             job["close"] = {"closed": "2026-11-18T00:00:00Z"}
         self.read_board.return_value = {"updated": "", "jobs": [job]}
 
