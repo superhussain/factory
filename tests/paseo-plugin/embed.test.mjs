@@ -87,3 +87,14 @@ test("signed in", () => {
     assert.equal(readSignedInMessage(data), false, JSON.stringify(data));
   assert.equal(readEmbedMessage(signedIn), null);
 });
+
+test("location", () => {
+  const base = { type: "factory-embed-location", v: 1 };
+  for (const hash of ["", "#/settings/display"])
+    assert.deepEqual(readEmbedMessage({ ...base, hash }), {
+      type: "factory-embed-location",
+      hash,
+    });
+  for (const data of [{ ...base, hash: "#a b" }, base, { ...base, hash: "#/x", v: 2 }])
+    assert.equal(readEmbedMessage(data), null, JSON.stringify(data));
+});
