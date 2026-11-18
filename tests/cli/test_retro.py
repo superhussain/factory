@@ -119,7 +119,17 @@ class RetroRedactTest(RetroCase):
                           ("curl -H Authorization:\\ Bearer\\ abc123 x", "curl -H Authorization:\\[redacted]"),
                           ("mariadb-dump -phunter2 db", "mariadb-dump -p[redacted] db"),  # gitleaks:allow synthetic credentials
                           ('mysql -p"hunter 2" db', "mysql -p[redacted] db"),  # gitleaks:allow synthetic credentials
-                          ("sshpass -phunter2 ssh host", "sshpass -p[redacted] ssh host")):  # gitleaks:allow synthetic credentials
+                          ("sshpass -phunter2 ssh host", "sshpass -p[redacted] ssh host"),  # gitleaks:allow synthetic credentials
+                          ("redis-cli -a hunter2 ping", "redis-cli -a [redacted] ping"),  # gitleaks:allow synthetic credentials
+                          ("redis-cli --pass hunter2 ping", "redis-cli --pass [redacted] ping"),  # gitleaks:allow synthetic credentials
+                          ("docker login -u me -p hunter2 ghcr.io",  # gitleaks:allow synthetic credentials
+                           "docker login -u me -p [redacted] ghcr.io"),
+                          ("openssl rsa -passin pass:hunter2", "openssl rsa -passin pass:[redacted]"),  # gitleaks:allow synthetic credentials
+                          ("SSHPASS=hunter2 sshpass -e ssh h", "SSHPASS=[redacted] sshpass -e ssh h"),  # gitleaks:allow synthetic credentials
+                          ("REDISCLI_AUTH=hunter2 redis-cli ping", "REDISCLI_AUTH=[redacted] redis-cli ping"),  # gitleaks:allow synthetic credentials
+                          ("redis-cli -a hunter2 ping && ls -a /tmp",  # gitleaks:allow synthetic credentials
+                           "redis-cli -a [redacted] ping && ls -a /tmp"),
+                          ("curl -H Authorization:\\ Bearer\\ abc\\$x", "curl -H Authorization:\\[redacted]")):
             with self.subTest(text=text):
                 self.assertEqual(factory.retro_redact(text), out)
 
@@ -131,6 +141,11 @@ class RetroRedactTest(RetroCase):
                           ("sshpass -f pw.txt ssh -p 2222 host", "sshpass -f pw.txt ssh -p [redacted] host")):
             with self.subTest(text=text):
                 self.assertEqual(factory.retro_redact(text), out)
+        for text in ("redis-cli -h h -p 6379 ping", "docker run -p 8080:80 nginx", "docker login ghcr.io",
+                     "openssl rsa -passin env:KEY_PW", "openssl rsa -passin file:pw.txt", "sshpass -e ssh host",
+                     "export SSHPASS"):
+            with self.subTest(text=text):
+                self.assertEqual(factory.retro_redact(text), text)
 
     def test_long_name_run_redacts_in_linear_time(self):
         for text in ("a" * 30000, "-" * 30000, "a1" * 15000, "--" + "a" * 30000):
@@ -174,12 +189,14 @@ class RetroRedactTest(RetroCase):
         self.assertIn("RETRO_SESSION_REF", patterns)
         self.assertIn("RETRO_LONG_KEYVALUE", patterns)
         self.assertIn("RETRO_LONG_FLAG", patterns)
-        for name in ("RETRO_MYSQL", "RETRO_MYSQL_PASS", "RETRO_SSHPASS", "RETRO_SSHPASS_PASS"):
+        for name in ("RETRO_MYSQL", "RETRO_MYSQL_PASS", "RETRO_SSHPASS", "RETRO_SSHPASS_PASS", "RETRO_REDIS",
+                     "RETRO_REDIS_PASS", "RETRO_DOCKER_LOGIN", "RETRO_OPENSSL", "RETRO_OPENSSL_PASS"):
             self.assertIn(name, patterns)
         units = [*"aZ09-.+_:/", " ", "\t", "a.", "a-", "a+", "a1", "--a", "token", "password", "bearer ", "-u ", "://",
                  "a=", "--a ", "_token=", "tokens", "a" * 70 + " ", "a" * 40 + "://", "a" * 40 + "://u:p@",
                  "@", "://u:p@ss@", "a" * 40 + "://u:p@ss@", "mysql ", "sshpass ", "mysql -p\"", "mysql -p'", " -p",
-                 "sshpass -p \"", "Authorization:\\ "]
+                 "sshpass -p \"", "Authorization:\\ ", "redis-cli ", "redis-cli -a ", "docker login ", "openssl ",
+                 " -passin pass:", "SSHPASS=", "Authorization:\\$", "\\$"]
         for unit in units:
             text = (unit * 30000)[:30000]
             for name, pattern in [*patterns.items(), ("retro_redact", None)]:

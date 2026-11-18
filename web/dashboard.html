@@ -581,6 +581,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .doc th, .agent-runs th { background: var(--code-bg); font-weight: 600; }
   .agent-runs th, .agent-runs td { min-width: 0; white-space: nowrap; }
+  /* The audit table fits the desktop drawer: smaller type, only Time and the headers stay on one line, Target keeps a floor. */
+  .doc table.audit { font-size: 13px; }
+  .doc table.audit th, .doc table.audit td { min-width: 0; }
+  .doc table.audit th, .doc table.audit td:first-child { white-space: nowrap; }
+  .doc table.audit td:last-child { min-width: 14em; }
   .agent-runs td a + a { margin-left: 8px; }
   /* A long run list scrolls in its own box, so the tabs and page stay on a desktop screen. */
   .detail-head > #d-agents .table-wrap { max-height: 40vh; overflow-y: auto; scroll-padding-top: 2.5em; }
@@ -4290,6 +4295,41 @@ async function loadFiles(j) {
   return results.filter(Boolean);
 }
 
+// Every host's pushed audit rows for the job. Unparsable lines are skipped; any failure gives [].
+async function loadAudit(j) {
+  try {
+    const r = await fetch('./api/audit/' + encodeURIComponent(j.id), { cache: 'no-store' });
+    if (!r.ok) return [];
+    const rows = [];
+    for (const line of (await r.text()).split('\n')) {
+      try {
+        const row = JSON.parse(line);
+        if (row && typeof row === 'object' && !Array.isArray(row)) rows.push(row);
+      } catch {}
+    }
+    return rows;
+  } catch { return []; }
+}
+
+// The audit tab: one row per tool call, every cell escaped, never rendered as markdown.
+function renderAudit(f) {
+  const key = (r) => [r.time, r.host, r.session].map((v) => String(v ?? ''));
+  const rows = [...f.rows].sort((a, b) => {
+    const [x, y] = [key(a), key(b)];
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+  const hosts = new Set(rows.map((r) => r.host)).size;
+  const flagged = rows.filter((r) => Array.isArray(r.flags) && r.flags.length).length;
+  const n = (count, word) => count + ' ' + word + (count === 1 ? '' : 's');
+  const head = ['Time (UTC)', 'Host', 'Session', 'Agent', 'Tool', 'Flags', 'Target'].map((h) => '<th scope="col">' + h + '</th>').join('');
+  const body = rows.map((r) => {
+    const flags = Array.isArray(r.flags) && r.flags.length ? '<strong>' + esc(r.flags.join(', ')) + '</strong>' : '-';
+    return '<tr><td>' + [r.time, r.host, r.session, r.agent, r.tool].map(esc).join('</td><td>') + '</td><td>' + flags + '</td><td><code>' + esc(r.target) + '</code></td></tr>';
+  }).join('');
+  return '<p>' + n(rows.length, 'call') + ' from ' + n(hosts, 'host') + ', ' + flagged + ' flagged. Each host redacted its targets before upload.</p>' +
+    '<div class="table-wrap" tabindex="0" role="region" aria-label="Audit rows"><table class="audit"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+}
+
 const sha12 = async (text) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))).slice(0, 12);
 
 // needs.md is a markdown file with 1 to 4 "## Question:" sections. null means no questions (plain markdown).
@@ -4735,10 +4775,11 @@ async function openJob(id) {
   }
   renderBoard();
   // An idea has no job files yet.
-  const [got, walk] = j.stage === 'idea' || !j.project ? [[], new Set()] : await Promise.all([loadFiles(j), listWalkthroughs(j)]);
+  const [got, walk, rows] = j.stage === 'idea' || !j.project ? [[], new Set(), []] : await Promise.all([loadFiles(j), listWalkthroughs(j), loadAudit(j)]);
   if (openId !== id) return;
   // The idea text shows as its own tab, rendered through md() like any job file.
   if (typeof j.idea === 'string' && j.idea) got.unshift({ name: 'idea.md', text: j.idea });
+  if (rows.length) got.push({ name: 'audit.md', text: '', rows });
   const needsFile = got.find((f) => f.name === 'needs.md');
   if (needsFile) needsFile.sha = await sha12(needsFile.text);
   if (openId !== id) return;
@@ -5039,7 +5080,7 @@ function renderDetail() {
     docDir = new URL(jobBase(j), location.href).href;
     docBase = new URL(f.name, docDir).href;
   }
-  setDocHtml(f ? (f.name === 'needs.md' ? renderNeeds(j, f) : md(f.text)) : '<p class="muted">No files yet.</p>');
+  setDocHtml(f ? (f.name === 'needs.md' ? renderNeeds(j, f) : f.name === 'audit.md' ? renderAudit(f) : md(f.text)) : '<p class="muted">No files yet.</p>');
   buildSteppers($('d-doc'), openId + '/' + activeFile);
   if (f && f.name !== 'needs.md') addWalkthrough($('d-doc'), true, f.name);
   renderGallery(j, f);
@@ -5576,7 +5617,7 @@ function swipePeek(s, to) {
   peek.style.height = $('d-doc').offsetHeight + 'px';
   const base = docBase;
   docBase = docDir ? new URL(f.name, docDir).href : null;
-  peek.innerHTML = f.name === 'needs.md' ? renderNeeds(j, f) : md(f.text);
+  peek.innerHTML = f.name === 'needs.md' ? renderNeeds(j, f) : f.name === 'audit.md' ? renderAudit(f) : md(f.text);
   docBase = base;
   peek.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
   buildSteppers(peek, null);

@@ -153,6 +153,19 @@ date.
 | `PUT /api/pipeline/retro/<scope>` | the bound service token of a paired or active host, while autonomy runs, for an allowlisted project scope only (never `global`) | replace one stage note as the next pipeline version, saved by `retro`; see [autonomy.md](autonomy.md#retro-pipeline-edits) |
 | `PUT /api/project-retro/<slug>/<name>` | the bound service token of a paired or active host, while autonomy runs, for an allowlisted project only | splice one find-and-replace into a project file or document as the next version, saved by `retro`; see [autonomy.md](autonomy.md#retro-file-edits) |
 
+Audit routes store one JSON-lines file per host per job at
+`audit/<job>/<host>.jsonl`, written by `factory.py audit push`. The bound host
+owns its file and a re-push replaces it. The body is at most 1 MiB of UTF-8, and
+each line is a JSON object whose `host` and `job` are the route's. A job id that
+does not match `^\d+-[a-z0-9]+(?:-[a-z0-9]+)*$`, a bad host id or any other method
+answers 404. No route deletes or prunes `audit/` keys. The job drawer's `audit`
+tab reads the merged rows.
+
+| Route | Who | Effect |
+| --- | --- | --- |
+| `PUT /api/audit/<job>/<host>.jsonl` | the bound service token of `<host>` | store or replace that host's rows |
+| `GET /api/audit/<job>` | any verified principal | each host record's file in host order, as `application/x-ndjson`, `""` when none |
+
 Retro runs are stored one record per run at `retro-runs/<run>.json`. The hourly scheduled pass deletes a record uploaded more
 than 90 days before today's UTC date; a re-admit resets that clock. `retro admit` sends a `factory.retro-run/1` record with the checked findings, each
 card's `finding` link (one number or a list; a card linked to several findings is stored under each) and its outcome. The body is at most 64 KiB, `host` must be the bound
