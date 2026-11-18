@@ -33,7 +33,22 @@ const JOBS = [
     needs: "Pick a format.",
     updated: NOW,
   },
-  { id: "044-closed", project: "sample", title: "Closed job", stage: "closed", updated: NOW },
+  {
+    id: "044-closed",
+    project: "sample",
+    title: "Closed job",
+    stage: "closed",
+    updated: NOW,
+    done: "2026-01-01T00:00:00Z",
+  },
+  {
+    id: "047-closed-newer",
+    project: "sample",
+    title: "Newer closed job",
+    stage: "closed",
+    updated: NOW,
+    done: NOW,
+  },
 ];
 const ARCHIVED = {
   id: "040-sample-archived",
@@ -133,6 +148,9 @@ test("starred jobs", { timeout: 240000 }, async (t) => {
         await openDrawer(page, "043-sample-import");
         assert.equal(await page.$eval(STAR, (el) => el.hidden), false);
         assert.equal(await pressed(page), "false");
+        await openDrawer(page, "044-closed");
+        await activate(STAR);
+        assert.equal(await stored(page, STARRED), '["042-sample-export","044-closed"]');
         await showBoard(page);
       });
 
@@ -148,6 +166,7 @@ test("starred jobs", { timeout: 240000 }, async (t) => {
           "041-sample-cleanup",
           "043-sample-import",
         ]);
+        assert.deepEqual(await column(page, "closed"), ["044-closed", "047-closed-newer"]);
         await openDisplay(page);
         assert.equal(await page.$eval("#display-starred", (el) => el.value), "float");
         await page.select("#display-starred", "off");
@@ -162,6 +181,7 @@ test("starred jobs", { timeout: 240000 }, async (t) => {
           "043-sample-import",
           "042-sample-export",
         ]);
+        assert.deepEqual(await column(page, "closed"), ["047-closed-newer", "044-closed"]);
       });
 
       await t.test(`only shows starred and needs-you jobs ${width}`, async () => {
