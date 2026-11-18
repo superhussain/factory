@@ -15,9 +15,12 @@ manifest, the affected areas, and the code the feature touches.
 Unless the project file names a test suite, every acceptance criterion needs a
 concrete way to check it: a command, a grep, a type that must compile, or a short
 manual step. Keep the feature small. If the request is more than one reviewable PR,
-spec the smallest useful slice and list each remaining slice under **Sub-jobs**, one
-`- <feature>` line each, written so it stands alone as a feature request. The
-orchestrator queues them as their own jobs. Fold small fixes the job's own files need
+spec the smallest useful slice and list each remaining slice under **Sub-jobs** as a
+numbered list, one `<n>. <feature>` item each, written so it stands alone as a feature
+request. A sub-job that must wait for others adds an indented `   - Depends on: <n>[, <n>]`
+bullet that points only at earlier items, so list order is a valid queue order. When
+any `Depends on:` bullet exists, draw the graph as a ```` ```mermaid ```` flowchart under
+the list. The orchestrator queues them as their own jobs. Fold small fixes the job's own files need
 into Tasks rather than Sub-jobs. Sub-jobs are for slices that need their own PR.
 
 The builder executes the spec and is told not to make design decisions, so
