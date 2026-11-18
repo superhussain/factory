@@ -454,6 +454,7 @@ async function capture(outdir, referencePath) {
     let archiveSearchFails = false;
     let longProject = false;
     let refBoard = false;
+    let notifyBoard = false;
     let auditBoard = false;
     let refusalBacklog = false;
     let leadAgentsBoard = false;
@@ -605,6 +606,30 @@ async function capture(outdir, referencePath) {
                             }
                           : j,
                       ),
+                    }),
+                  });
+                }
+                if (notifyBoard && target.pathname === "/board.json") {
+                  const board = await fetch(target.href);
+                  const body = await board.json();
+                  return request.respond({
+                    status: board.status,
+                    contentType: "application/json",
+                    headers: { ETag: board.headers.get("ETag") ?? "" },
+                    body: JSON.stringify({
+                      ...body,
+                      jobs: [
+                        ...body.jobs,
+                        {
+                          id: "120-sample-merged",
+                          project: "sample",
+                          title: "Synthetic merged export",
+                          stage: "merged",
+                          updated: "2026-10-27T10:00:00Z",
+                          done: "2026-10-27T10:00:00Z",
+                          pr: "https://github.com/example/sample/pull/120",
+                        },
+                      ],
                     }),
                   });
                 }
@@ -1080,6 +1105,50 @@ async function capture(outdir, referencePath) {
       await view("card-ref-focus-mobile", 390, 844, "dark", focusSecondRef);
     } finally {
       refBoard = false;
+    }
+    // The reference page has no bell or notifications route, so its menu and page views show the board.
+    const openNotificationsMenu = (press) => async (page, side) => {
+      if (side === "before") return;
+      await page[press]("#notifications-button");
+      await page.waitForSelector("#notifications-menu-list .notification-link");
+    };
+    const openNotificationsPage = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#/notifications";
+      });
+      if (side === "after") await page.waitForSelector("#notifications-list .inbox-item");
+    };
+    const openInboxSplit = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/inbox";
+      });
+      await page.waitForSelector('#inbox-list a[href="#002-needs"]');
+      await page.click('#inbox-list a[href="#002-needs"]');
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#d-meta")?.textContent.includes("002-needs") &&
+          document.querySelector("#d-doc").textContent !== "loading files",
+        { timeout: 30000 },
+      );
+    };
+    notifyBoard = true;
+    try {
+      await view("notifications-menu-1280", 1280, 900, "light", openNotificationsMenu("click"));
+      await view("notifications-menu-390", 390, 844, "dark", openNotificationsMenu("tap"), true);
+      await view("notifications-page-1280", 1280, 900, "light", openNotificationsPage);
+      await view("notifications-page-390", 390, 844, "dark", openNotificationsPage);
+      await view(
+        "header-notifications-320",
+        320,
+        844,
+        "dark",
+        (page) => clipOf(page, "header"),
+        true,
+      );
+      await view("inbox-split-900", 900, 900, "light", openInboxSplit);
+      await view("inbox-split-1280", 1280, 900, "light", openInboxSplit);
+    } finally {
+      notifyBoard = false;
     }
     const focusSecondMenuItem = async (page) => {
       await page.focus('.card-actions[data-actions="001-capture"]');

@@ -148,6 +148,8 @@ records matched before and after views. Each `view(...)` line in
 | 1280x900 | settings, archive and agent-run views |
 | 390x844 | mobile views |
 | 375x667 | `drawer-mobile-scrolled` |
+| 320x844 | `header-notifications-320` |
+| 900x900 | `inbox-split-900` |
 
 - Board data is the fixed `CAPTURE_JOBS` and `CAPTURE_BACKLOG` fixtures.
 - `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
