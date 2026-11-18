@@ -8,6 +8,7 @@
 // A side that fails all attempts is logged and the run continues; it ends with a FAIL summary and a non-zero exit.
 // Compare two captures of one side with `node tests/browser/capture-compare.mjs`; it passes when no channel differs by more than 16.
 // Capture pages bypass the dashboard service worker so request interception answers /board.json.
+// Viewports and views: docs/development.md, Visual captures.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";
@@ -1200,6 +1201,25 @@ async function capture(outdir, referencePath) {
       await openSchedulerSettings(page);
       await page.evaluate(() => document.getElementById("scheduler-mode-tab-human")?.click());
     });
+    const openNotificationSettings = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/notifications";
+      });
+      await page.waitForSelector("#settings-notifications:not([hidden])");
+      await page.evaluate(() =>
+        document.querySelector("#notify-settings-heading").scrollIntoView({ block: "start" }),
+      );
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getElementById("settings-link")
+            .getAnimations()
+            .map((animation) => animation.finished),
+        ),
+      );
+    };
+    await view("notify-settings-desktop", 1280, 900, "light", openNotificationSettings);
+    await view("notify-settings-mobile", 390, 844, "light", openNotificationSettings, true);
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
@@ -1658,6 +1678,22 @@ async function capture(outdir, referencePath) {
     await view("backlog-answered-mobile", 390, 844, "dark", openAnswered);
     await view("backlog-rework-desktop", 1440, 900, "light", openRework);
     await view("backlog-rework-mobile", 390, 844, "dark", openRework);
+    // Both sides refuse the approve. Only the after side shows the link.
+    const openRefusal = async (page) => {
+      await page.click('.backlog-card[data-index="2"]');
+      await page.waitForSelector("#backlog-form");
+      await page.evaluate(() => {
+        backlog.find((b) => b.raw.includes("weekly report")).context =
+          "Depends on: sample: Synthetic follow-on slice (sub-job-of 001-capture)";
+      });
+      await page.click("input[value=approved]");
+      await page.click("#backlog-submit");
+      await page.waitForFunction(() =>
+        document.getElementById("backlog-status").textContent.includes("first."),
+      );
+    };
+    await view("backlog-refusal-desktop", 1440, 900, "light", openRefusal);
+    await view("backlog-refusal-mobile", 390, 844, "dark", openRefusal);
     if (failed.length) {
       console.log(JSON.stringify({ result: "FAIL", failed, external }));
       throw new Error(

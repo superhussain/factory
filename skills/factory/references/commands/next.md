@@ -5,6 +5,7 @@ Works from any directory. The backlog is `backlog.md` in R2, one
 project has a checkout on this device, and skips the rest with a `skipping <slug>`
 line on stderr. An item may be followed by indented context lines that
 `backlog add --context` wrote. `next` ignores them.
+`next` and `batch` do not read `Depends on:` lines yet.
 
 1. Run `python3 <this skill's dir>/runtime/factory.py sync`, with no slug, since the
    project isn't known yet. Conflicts don't block, as in the Claims table.

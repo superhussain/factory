@@ -382,6 +382,20 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("First list the job folder with `ls -R <job folder>`", approver)
         self.assertIn("rather than Sub-jobs", flat("agents/factory-spec-writer.md"))
 
+    def test_sub_jobs_carry_depends_on_lines(self):
+        def flat(name):
+            return " ".join((SKILL / name).read_text(encoding="utf-8").split())
+        self.assertIn("Depends on: <n>[, <n>]` bullet that points only at earlier items",
+                      flat("agents/factory-spec-writer.md"))
+        self.assertIn("write one `Depends on: <slug>: <feature> (sub-job-of <id>)` line per prerequisite",
+                      flat("references/commands/feature.md"))
+        self.assertIn("Approving a backlog line turns each `Depends on: <slug>: <feature>` context line into this "
+                      "ref, and is refused while that line is unchecked.", flat("references/board.md"))
+        self.assertIn("`next` and `batch` do not read `Depends on:` lines yet.", flat("references/commands/next.md"))
+        self.assertIn("Name only viewports and data the project's capture tool supports, as its project file or docs "
+                      "list them. When it lacks one, add a task that extends the tool.",
+                      flat("agents/factory-spec-writer.md"))
+
     def test_checks_are_sized_to_the_change(self):
         builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
         babysit = " ".join((SKILL / "references/commands/babysit.md").read_text(encoding="utf-8").split())
@@ -409,7 +423,9 @@ class RolesTest(IsolatedTestCase):
                        "origin HEAD:factory/<id>", "ends in `git push` or `git push --no-verify`",
                        "While `babysit` is set, every `hold` prints `babysit requested`, the holds in the "
                        "`wait` and `wait-base` rows included. This session is already the babysitter, so "
-                       "ignore that line and never restart from Step zero on it."):
+                       "ignore that line and never restart from Step zero on it.",
+                       "pickup started this babysit on its own and pipeline merge is human",
+                       "babysit only reads archive PRs, so handle it on GitHub"):
             self.assertIn(phrase, babysit)
         skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
         self.assertIn("A session already running babysit.md is the babysitter: it ignores the line and goes "

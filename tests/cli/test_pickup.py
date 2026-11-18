@@ -1752,6 +1752,48 @@ class NotBeforeTest(PickupFixture):
         self.assertFalse([line for line in lines if "batches behind" in line], lines)
 
 
+DEPENDS = [{"id": "201-sample-csv-api", "kind": "depends-on"}]
+
+
+class DependsOnTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+
+    def api_row(self, stage):
+        return {"id": "201-sample-csv-api", "stage": stage, "project": "alpha", "title": "Add a CSV API",
+                "updated": "2026-01-01T00:00:00Z"}
+
+    def test_open_dependency_is_skipped(self):
+        self.board["jobs"] = [self.api_row("build"), idea("202-sample-csv-button", "alpha", refs=DEPENDS)]
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("skip 202-sample-csv-button alpha: waits on 201-sample-csv-api", out.splitlines())
+        self.pickup()
+        self.assertEqual(self.launched(), [])
+        self.assertNotIn("claim", self.job("202-sample-csv-button"))
+
+    def test_merged_closed_or_missing_dependency_launches(self):
+        for rows in ([self.api_row("merged")], [self.api_row("closed")], []):
+            with self.subTest(rows=rows):
+                self.board["jobs"] = rows + [idea("202-sample-csv-button", "alpha", refs=DEPENDS)]
+                code, out, err = self.pickup()
+                self.assertEqual((code, err), (0, ""))
+                self.assertRegex(out, r"launched 202-sample-csv-button alpha on primary session [0-9a-f]{6}\n$")
+
+    def test_claim_ideas_skips_a_waiting_job(self):
+        self.board["jobs"] = [self.api_row("build"), idea("202-sample-csv-button", "alpha", refs=DEPENDS),
+                              idea("203-sample-next", "alpha")]
+        picked = factory.claim_ideas(self.home, DEVICE, "", 120, {"alpha": str(self.repo_a)}, 5)
+        self.assertEqual([p["id"] for p in picked], ["203-sample-next"])
+        self.assertNotIn("claim", self.job("202-sample-csv-button"))
+
+    def test_batch_problem_names_the_dependency(self):
+        j = idea("202-sample-csv-button", "alpha", refs=DEPENDS)
+        self.assertEqual(factory.batch_problem({"jobs": [self.api_row("build"), j]}, j, "alpha", DEVICE, "tag", 120),
+                         "waits on 201-sample-csv-api")
+
+
 class RetroPickupTest(PickupFixture):
     def setUp(self):
         super().setUp()
@@ -2464,6 +2506,17 @@ class PrSyncTest(PickupFixture):
                 self.calls.clear()
                 self.assert_silent(self.pickup())
 
+    def test_two_merged_prs_make_one_board_write(self):
+        self.states = {7: "MERGED", 8: "MERGED"}
+        self.board["jobs"] = [self.export(), self.sample_import()]
+        code, out, _ = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertIn("synced 042-sample-export alpha: merged on GitHub\n"
+                      "synced 043-sample-import alpha: merged on GitHub\n", out)
+        self.assertEqual(self.puts().count(("PUT", "/api/board")), 1)
+        self.assertEqual((self.job("042-sample-export")["stage"], self.job("043-sample-import")["stage"]),
+                         ("merged", "merged"))
+
     def test_closed_pr_closes_the_job(self):
         self.board["jobs"] = [self.sample_import()]
         self.assertEqual(self.pickup(), (0, "synced 043-sample-import alpha: PR closed on GitHub\n"
@@ -3002,6 +3055,195 @@ class BabysitTest(PickupFixture):
                           "babysit 042-sample-export"])
         other = ["launcher", "run", "--new-workspace"]
         self.assertEqual(factory.babysit_argv(other, "042-sample-export"), other)
+
+
+HEAD = "abc1234" + "0" * 33
+
+
+def pull(state="OPEN", threads=(), mergeable="MERGEABLE", contexts=()):
+    """A pull request node as pr_signals reads it, by author bot-author."""
+    return {"state": state, "mergeable": mergeable, "headRefOid": HEAD, "author": {"login": "bot-author"},
+            "reviewThreads": {"nodes": [{"isResolved": False, "comments": {"nodes": t}} for t in threads]},
+            "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": list(contexts)}}}}]}}
+
+
+def comment(login, association="NONE", kind="User"):
+    return {"authorAssociation": association, "author": {"__typename": kind, "login": login}}
+
+
+FAILED = {"__typename": "CheckRun", "conclusion": "FAILURE", "isRequired": True}
+
+
+class AutoBabysitTest(PickupFixture):
+    def frag(n):
+        return (f"p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid author {{ login }} "
+                "reviewThreads(last: 50) { nodes { isResolved comments(first: 20) { nodes { authorAssociation "
+                "author { __typename login } } } } } commits(last: 1) { nodes { commit { statusCheckRollup { "
+                "contexts(first: 50) { nodes { __typename ... on CheckRun { conclusion "
+                f"isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ state "
+                f"isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }}")
+
+    QUERY = 'query { repository(owner: "sample", name: "alpha") { ' + frag(7) + " " + frag(8) + " } }"
+    pr_signals = staticmethod(factory.pr_signals)
+    NOTE = {"babysit": [{"source": "pipeline:alpha@1", "text": "Fix the failing check."}]}
+
+    def setUp(self):
+        super().setUp()
+        (self.home / "projects").mkdir()
+        for slug, extra, pickup, notes in (("alpha", "auto_babysit: 3\n", ON, self.NOTE),
+                                           ("beta", "", ON, self.NOTE),
+                                           ("echo", "auto_babysit: 3\n", ON, {}),
+                                           ("fox", "auto_babysit: 3\n", {"enabled": True, "hosts": ["other-host"]},
+                                            self.NOTE)):
+            (self.home / "projects" / f"{slug}.md").write_text(f"---\nrepo: Sample/Alpha\n{extra}---\n",
+                                                              encoding="utf-8")
+            self.views[slug] = (200, dict(effective(slug, {"pickup": pickup}), stage_notes=notes))
+        self.signals = {}
+        self.reads = []
+        self.failure = None
+        self.race = None
+        patch.object(factory, "pr_signals", side_effect=self.read).start()
+
+    def read(self, repo, numbers, device):
+        self.reads.append((repo, list(numbers)))
+        if self.race:
+            self.job("042-sample-export").update(self.race)
+        if self.failure:
+            return None, self.failure
+        return {n: self.signals[n] for n in numbers if n in self.signals}, None
+
+    def export(self, job_id="042-sample-export", project="alpha", n=7, **extra):
+        return dict({"id": job_id, "stage": "pr-open", "project": project,
+                     "pr": f"https://github.com/sample/alpha/pull/{n}", "branch": f"factory/{job_id}",
+                     "note": "PR open", "updated": "2026-01-01T00:00:00Z"}, **extra)
+
+    def test_dry_run_and_launch(self):
+        self.board["jobs"] = [self.export(priority={"at": "2026-01-01T00:00:00Z"})]
+        self.signals = {7: (HEAD, "fix-ci")}
+        idle = f"host {DEVICE}: would launch 0\n"
+        line = "042-sample-export alpha: PR #7 has a failing required check (1 of 3)"
+        self.assertEqual(self.pickup("--dry-run"), (0, f"would auto-babysit {line}\n{idle}", ""))
+        self.assertEqual((self.puts(), self.reads), ([], [("sample/alpha", [7])]))
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        job = self.job("042-sample-export")
+        tag = job["claim"]["session"]
+        self.assertEqual(out, f"auto-babysat {line}\nlaunched babysit 042-sample-export alpha on primary session {tag}\n")
+        at = job["babysit"]["at"]
+        self.assertEqual(job["babysit"], {"at": at, "via": "pickup", "by": DEVICE, "reason": "fix-ci"})
+        self.assertEqual(job["auto_babysit"], {"count": 1, "head": HEAD, "reason": "fix-ci", "at": at})
+        self.assertEqual(job["note"], "auto-babysitting PR #7: it has a failing required check")
+        self.assertEqual(job["priority"], {"at": "2026-01-01T00:00:00Z"})
+        self.assertNotIn("needs", job)
+        self.assertIn("/factory babysit 042-sample-export", self.launched()[0]["argv"][7])
+        del job["babysit"], job["claim"]
+        self.calls.clear()
+        self.assertEqual(self.pickup("--dry-run"), (0, "skip auto-babysit 042-sample-export alpha: "
+                                                       "already babysat fix-ci at abc1234\n" + idle, ""))
+        self.assertEqual((self.pickup(), self.puts()), ((0, "", ""), []))
+        self.signals = {7: ("def5678" + "0" * 33, "fix-ci")}
+        self.assertEqual(self.pickup("--dry-run"), (0, "would auto-babysit 042-sample-export alpha: "
+                                                       "PR #7 has a failing required check (2 of 3)\n" + idle, ""))
+
+    def test_guards(self):
+        escalated = self.export("047-sample-export", n=17, escalated=True)
+        self.board["jobs"] = [
+            self.export("043-sample-export", n=13, auto_babysit={"count": 3, "head": "x", "reason": "rebase"}),
+            self.export("044-sample-export", n=14, needs="approve PR #14"),
+            self.export("045-sample-export", n=15, paused={"at": "2026-01-02T12:00:00Z"}),
+            self.export("046-sample-export", n=16, close={"reason": "x", "at": "2026-01-02T12:00:00Z"},
+                        claim=held("other-host")),
+            escalated,
+            self.export("048-sample-export", n=18, refs=[{"id": "042-sample-export", "kind": "batched-into"}]),
+            self.export("049-sample-export", n=19, claim=held("other-host")),
+            self.export("050-sample-export", n=20, babysit={"at": "2026-01-02T12:00:00Z"}),
+            self.export("051-sample-export", n=21, stage="needs-human"),
+            self.export("052-sample-export", n=22, pr="https://github.com/sample/alpha-private/pull/22"),
+            self.export("053-sample-export", "beta", n=23),
+            self.export("054-sample-export", "echo", n=24),
+            self.export("055-sample-export", "fox", n=25)]
+        self.signals = {n: (HEAD, "fix-ci") for n in range(13, 26)}
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([line for line in out.splitlines() if "auto-babysit" in line], [
+            "skip auto-babysit 043-sample-export alpha: 3 of 3 automatic babysits used",
+            "skip auto-babysit 049-sample-export alpha: claimed by other-host session s1",
+            "skip auto-babysit 054-sample-export echo: no Babysit note",
+            f"skip auto-babysit 055-sample-export fox: pickup does not list host {DEVICE}"])
+        self.assertEqual((self.reads, self.puts()), ([], []))
+        code, out, err = self.pickup()
+        self.assertNotIn("auto-babysat", out)
+        self.assertNotIn("auto_babysit", self.job("044-sample-export"))
+        self.assertEqual(self.reads, [])
+
+    def test_a_failed_read_skips_the_repo(self):
+        self.board["jobs"] = [self.export()]
+        self.signals = {7: (HEAD, "fix-ci")}
+        self.failure = "gh is not installed on host-a"
+        self.assertEqual(self.pickup(), (0, "", "factory.py: pickup skips auto-babysit for sample/alpha: "
+                                                "gh is not installed on host-a\n"))
+        self.assertEqual((self.reads, self.puts()), ([("sample/alpha", [7])], []))
+        self.assertNotIn("babysit", self.job("042-sample-export"))
+
+    def test_over_the_limit_reads_the_oldest_first(self):
+        self.board["jobs"] = [
+            self.export(auto_babysit={"count": 1, "head": "x", "reason": "rebase", "at": "2026-01-02T00:00:00Z"}),
+            self.export("043-sample-export", n=8),
+        ]
+        with patch.object(factory, "AUTO_BABYSIT_LIMIT", 1):
+            code, out, err = self.pickup()
+        self.assertEqual((code, self.reads), (0, [("sample/alpha", [8])]))
+        self.assertEqual(err, "factory.py: pickup checks 1 of 2 auto-babysit candidates for sample/alpha this run, "
+                              "oldest automatic babysit first\n")
+
+    def test_the_write_rechecks_the_job(self):
+        for race in ({"babysit": {"at": "2026-01-02T12:00:00Z", "by": "dashboard"}},
+                     {"auto_babysit": {"count": 3, "head": "x", "reason": "rebase"}}):
+            with self.subTest(race=race):
+                self.calls.clear()
+                self.board["jobs"] = [self.export()]
+                self.signals = {7: (HEAD, "fix-ci")}
+                self.race = race
+                self.assertEqual(self.pickup(), (0, "", ""))
+                self.assertEqual(self.puts(), [])
+                self.assertEqual(self.job("042-sample-export"), self.export(**race))
+
+    def test_board_refuses_the_field(self):
+        self.board["jobs"] = [self.export()]
+        with patch.object(factory.sys, "stdin", io.StringIO('{"auto_babysit": {"count": 0}}')):
+            result = invoke(factory, ["board", str(self.home), "042-sample-export"])
+        self.assertEqual(result, (2, "", "factory.py: only factory.py pickup sets auto_babysit. Nothing was written.\n"))
+        self.assertEqual(self.puts(), [])
+
+    def test_pr_signals_sends_one_query_per_repo(self):
+        answer = json.dumps({"data": {"repository": {"p7": pull(contexts=[FAILED]), "p8": None}}})
+        with patch.object(factory, "gh_cli", return_value=(0, answer)) as gh:
+            self.assertEqual(self.pr_signals("sample/alpha", [7, 8], DEVICE), ({7: (HEAD, "fix-ci")}, None))
+        gh.assert_called_once_with("api", "graphql", "-f", "query=" + self.QUERY)
+        for result, why in ((None, "gh is not installed on host-a"),
+                            (("timeout", ""), "gh api graphql timed out after 60 seconds on host-a"),
+                            ((1, ""), "gh api graphql exited 1 (check gh auth status on host-a)"),
+                            ((0, "[]"), "gh api graphql returned no repository (check the project file's repo "
+                                        "and gh auth status on host-a)")):
+            with self.subTest(result=result), patch.object(factory, "gh_cli", return_value=result):
+                self.assertEqual(self.pr_signals("sample/alpha", [7], DEVICE), (None, why))
+
+    def test_pr_signals_follow_the_reading_order(self):
+        reviewer = [comment("reviewer-a", "MEMBER")]
+        bot = [comment("review-bot", kind="Bot")]
+        for node, reason in (
+                (pull(threads=[reviewer], mergeable="CONFLICTING", contexts=[FAILED]), "fix-reviews"),
+                (pull(threads=[bot]), "fix-reviews"),
+                (pull(mergeable="CONFLICTING", contexts=[FAILED]), "rebase"),
+                (pull(contexts=[FAILED]), "fix-ci"),
+                (pull(contexts=[{"__typename": "StatusContext", "state": "ERROR", "isRequired": True}]), "fix-ci"),
+                (pull(threads=[reviewer + [comment("bot-author", "OWNER")]]), None),
+                (pull(threads=[[comment("stranger-a")]]), None),
+                (pull(contexts=[dict(FAILED, isRequired=False)]), None),
+                (pull(contexts=[dict(FAILED, conclusion="SUCCESS")]), None),
+                (pull(state="MERGED", mergeable="CONFLICTING", contexts=[FAILED]), None)):
+            with self.subTest(node=node):
+                self.assertEqual(factory.pr_signal(node), reason)
 
 
 FOLLOW = [{"id": "090-alpha-old", "kind": "follow-up-of"}]

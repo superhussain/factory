@@ -165,6 +165,8 @@ the backlog. The jumper lists matching runs under `Retro runs` and up to 20 matc
 | `PUT /api/retros/<run>` | the bound service token of a paired or active host | store that run's record, or replace it when this host stored it |
 | `GET /api/retros` | any verified principal | JSON array of the newest 30 run records, newest first |
 
+The `#/inbox` dashboard page ranks jobs waiting on you and backlog lines, then offers Approve, Deny, Babysit or the job's needs.md questions in place.
+
 The status may carry `triage_failed_since`, an ISO 8601 UTC time, while
 backlog triage fails on that host.
 
@@ -249,11 +251,11 @@ sequenceDiagram
   failed announcement leaves the reply unchanged.
 - The dashboard runs its poll timer only while the socket is closed: the board on
   the Settings schedule (30 s by default) and the backlog every 2 minutes, paused
-  while the window is hidden or unfocused unless notifications are on. A dropped
+  while the window is hidden or unfocused unless notifications or sounds are on. A dropped
   socket retries with backoff (1, 2, 4 ... 30 s), then every 30 s until it opens.
   Retries stop while the sign-in has expired and resume after the next board read
   succeeds.
-  A hidden tab keeps its socket only while notifications are on. A `changed` event
+  A hidden tab keeps its socket only while notifications or sounds are on. A `changed` event
   re-reads only its key, once within 2 seconds of the first frame however many frames arrive; a frame during that read adds one more read.
 - A socket open or a poll timer tick re-reads `board.json` but redraws only when its `ETag` changed, so a focused card is not read again. A tick still reopens the job when the link names a tab or archived job that has not loaded.
   The header dot is solid while live and a ring while polling.
@@ -267,6 +269,43 @@ sequenceDiagram
 | user, same origin, upgrade | 101 from the room |
 
 An open dashboard socket sends `ping` every 25 s. The room answers `pong` through `setWebSocketAutoResponse`, which does not wake it, so proxies that close quiet connections keep the socket. A socket with no `pong` for 60 s is closed and the tab polls. While polling, the dot's title names how the last socket closed: code, reason and time open, or that it never opened.
+
+## Web Push
+
+`worker/push.js` sends a push to each subscribed browser when a committed board write makes
+a job wait on you or merges it, so an installed dashboard hears about it while closed. Push
+is off until the Worker has the `FACTORY_VAPID_KEY` secret (see
+[cloudflare.md](cloudflare.md) §7). The hourly cron also pushes "Stuck: <id>" once for a
+stuck spec, build, review or approve job whose claim went stale 240 minutes earlier.
+
+```mermaid
+sequenceDiagram
+  participant B as dashboard
+  participant D as device
+  participant W as Worker
+  participant P as push service
+  participant S as service worker
+  B->>W: GET /api/push/key
+  W-->>B: 200 {"key": public key}
+  B->>W: PUT /api/push/subscriptions
+  W-->>B: 204, push/sha256(endpoint).json
+  D->>W: PUT /api/board with If-Match
+  W-->>D: 200 ETag (unchanged)
+  W->>P: POST aes128gcm body, vapid Authorization
+  P-->>S: push event
+  S->>S: showNotification
+```
+
+- Only a `user` principal reaches `/api/push/*`. A service token gets 404, and so does the
+  key route when the secret is absent.
+- An endpoint must be `https:` on an allowed push service host, at most 1024 characters.
+  The Worker never fetches any other URL a person supplies. One instance holds at most 20
+  subscriptions, and a record holds the endpoint, its two keys and a timestamp.
+- The diff runs only when the write's `If-Match` equals the stored board's ETag, so the
+  stored board is the true prior version. `ctx.waitUntil` carries the sends, and a push
+  service 404 or 410 deletes that record.
+- Payloads carry the job id and title only, encrypted per RFC 8291 and signed with an ES256
+  VAPID JWT per RFC 8292. A notification's tag matches the in-tab one, so a job shows once.
 
 ## Draft preservation
 

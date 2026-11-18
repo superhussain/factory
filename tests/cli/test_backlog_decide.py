@@ -329,3 +329,50 @@ class BacklogDecideTests(TriageFixture):
                 self.assertEqual(code, 2)
                 self.assertIn(err, out)
                 self.unchanged(before)
+
+
+PARSE = "sample: Parse recipe URLs (sub-job-of 041-recipe-import)"
+STORE = "- [ ] sample: Store imported recipes (sub-job-of 041-recipe-import)"
+STORE_CONTEXT = f"  Recommend: approve\n  Depends on: {PARSE}\n"
+
+
+class BacklogDependsTests(TriageFixture):
+    def setUp(self):
+        super().setUp()
+        (self.dir / "config.md").write_text("---\ndevice: wsl\n---\n", encoding="utf-8")
+
+    text = BacklogDecideTests.text
+    unchanged = BacklogDecideTests.unchanged
+
+    def store(self, decision, parse_line, answers=None, *extra):
+        self.files["/api/backlog"] = f"# Backlog\n{parse_line}\n{STORE}\n{STORE_CONTEXT}"
+        key = self.module.backlog_key(STORE)
+        args = ["backlog", "decide", key, decision]
+        if answers is not None:
+            args += ["--answers", self.text(answers, "answers.md")]
+        return invoke(self.module, args + list(extra) + ["--chat-file", self.text(MESSAGE)])
+
+    def test_approve_adds_a_depends_on_ref_for_a_checked_item(self):
+        code, _, err = self.store("approve", f"- [x] {PARSE} (052-parse-recipe-urls)")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.board()[-1]["refs"], [{"id": "041-recipe-import", "kind": "sub-job-of"},
+                                                    {"id": "052-parse-recipe-urls", "kind": "depends-on"}])
+
+    def test_approve_is_refused_while_the_item_is_unchecked(self):
+        self.files["/api/backlog"] = f"# Backlog\n- [ ] {PARSE}\n{STORE}\n{STORE_CONTEXT}"
+        before = dict(self.files)
+        code, out, err = self.store("approve", f"- [ ] {PARSE}")
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(err, f'factory.py: approve "{PARSE}" first: its backlog line is still unchecked. '
+                              "Nothing was changed.\n")
+        self.unchanged(before)
+        code, _, err = self.store("deny", f"- [ ] {PARSE}")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.board()[-1]["refs"], [{"id": "041-recipe-import", "kind": "sub-job-of"}])
+
+    def test_a_missing_or_unsafe_item_adds_no_ref(self):
+        for parse_line in ("- [ ] sample: Something else", f"- [x] {PARSE} (052..x)"):
+            with self.subTest(parse_line=parse_line):
+                code, _, err = self.store("approve", parse_line)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(self.board()[-1]["refs"], [{"id": "041-recipe-import", "kind": "sub-job-of"}])

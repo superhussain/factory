@@ -75,7 +75,8 @@ Each run, in order:
   approval released, and launches `/factory recover <id>` for them instead of
   `/factory idea <id>`. They follow the same skips, claim and caps as ideas.
 - Skips ideas that are gated, held by a live claim, waiting on a human, or whose
-  `not_before` is still in the future (`skip <id> <project>: not before <time>`), and
+  `not_before` is still in the future (`skip <id> <project>: not before <time>`), or
+  that depend on a job still open on the board (`skip <id> <project>: waits on <dep-id>`), and
   projects whose effective pipeline has pickup off, does not list this host, or
   cannot be read. Each skip reason is printed once and the run goes on.
 - Holds back batchable ideas: an idea with a `follow-up-of` ref, or one backlog
@@ -133,6 +134,23 @@ Each run, in order:
   `--worktree-slug` after `run` for a `paseo` launcher with `--new-workspace` that lacks it.
   A live holder, such as a `running` agent skipped above, learns of the click from its
   next `hold`, which prints `babysit requested`.
+- Auto-babysit: right before the Babysit step, in projects whose project file sets
+  `auto_babysit: <1 to 9>`, sets `babysit` on a `pr-open` job whose PR has an open counted
+  review thread, a merge conflict or a failing required check, so the Babysit step launches
+  it in the same run. It reads every candidate PR in a repo with one `gh api graphql` call,
+  only for opted-in projects, at most 20 PRs per repo, the oldest automatic babysit first, and
+  prints to stderr how many candidates it checked when a repo has more. It skips a job that
+  waits on a human, is paused, closing, escalated, batched into another, already babysat or
+  held by a live claim, whose project has no Babysit note, or whose project pickup does not
+  list this host.
+  One board write sets `babysit = {at, via: "pickup", by, reason}`,
+  `auto_babysit = {count, head, reason, at}` and the note, and prints
+  `auto-babysat <id> <project>: PR #<n> <what it has> (<count> of <cap>)`. A dry run prints
+  `would auto-babysit ...` and `skip auto-babysit <id> <project>: <reason>`. A job gets at
+  most `auto_babysit` automatic babysits (`<cap> of <cap> automatic babysits used`), and
+  never a second one for the same head commit and reason (`already babysat <reason> at <head>`).
+  A person's Babysit PR click does not count. Only pickup sets `auto_babysit`; `board`
+  refuses it.
 - Picks the first route in `routes.md` that is not marked limited, then resolves
   the launcher for it. A config error exits 2 before anything is claimed.
 - Claims one idea at a time — the board compare-and-swap stops two hosts taking
@@ -405,9 +423,9 @@ changes nothing. Then install one timer per host.
 - A job is a candidate when its stage is `pr-open` or `needs-human`, its `pr` is a `https://github.com/<owner>/<name>/pull/<n>` URL with `<n>` at most 9 digits, no close is queued, it is not a batched rider (riders follow their lead), no other session holds a live claim, the project file's `repo` equals the URL's owner and name (case-insensitive), and the project's pickup is on and lists this host.
 - Candidates are grouped by repo. Each repo gets one `gh api graphql` call that reads `state` for up to 100 pull requests in board order. With more, it prints `factory.py: pickup syncs the first 100 of <n> pull requests in <repo>` on stderr.
 - When the call fails, it prints `factory.py: pickup skips the PR sync for <repo>: <why>` on stderr and the run goes on: gh is not installed, timed out after 60 seconds, exited non-zero (check `gh auth status`), or returned no repository (check the project file's `repo` and `gh auth status`). A non-zero exit whose answer still holds `data.repository` syncs the pull requests that resolved.
-- `MERGED`: one board write moves the job to `merged`, sets the note to `merged on GitHub` and `github = {merged}`, and removes `needs`, `automerge`, `babysit` and `claim`. It prints `synced <id> <project>: merged on GitHub`. The close cleanup then runs `cleanup` on each host that holds the worktree or branch, as for a closed job.
-- `CLOSED`: one board write queues `close = {reason: "PR closed on GitHub", at, via: "github"}` and removes `babysit`. It prints `synced <id> <project>: PR closed on GitHub`. The close pass in the same run closes the job without calling `gh pr`, and `decision.md` starts `CLOSED: PR closed on GitHub` and says GitHub reported the close.
-- Each board write re-checks every candidate condition and the same `pr`, so a second host that read the same state writes nothing.
+- `MERGED`: the pass's board write moves the job to `merged`, sets the note to `merged on GitHub` and `github = {merged}`, and removes `needs`, `automerge`, `babysit` and `claim`. It prints `synced <id> <project>: merged on GitHub`. The close cleanup then runs `cleanup` on each host that holds the worktree or branch, as for a closed job.
+- `CLOSED`: the pass's board write queues `close = {reason: "PR closed on GitHub", at, via: "github"}` and removes `babysit`. It prints `synced <id> <project>: PR closed on GitHub`. The close pass in the same run closes the job without calling `gh pr`, and `decision.md` starts `CLOSED: PR closed on GitHub` and says GitHub reported the close.
+- The pass puts every row it syncs in one run into a single board write. That write re-checks every candidate condition and the same `pr` for each row, so a second host that read the same state writes nothing for it.
 - An open PR, or one GitHub does not return, changes nothing and prints nothing.
 - Its dry run makes the same read and writes nothing. It prints `would sync <id> <project>: merged on GitHub` or `would sync <id> <project>: PR closed on GitHub`, and `skip sync <id> <project>: claimed by <device> session <tag>` or `skip sync <id> <project>: <reason>` for a live claim or a project whose pickup is off or does not list this host.
 - Only pickup writes `github` and `close.via = "github"`. `board` refuses a `github` patch with exit 2.

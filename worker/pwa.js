@@ -88,6 +88,35 @@ export function serviceWorker() {
     );
   });
 
+  // A push carries {title, body, tag, url}. The tag matches the in-tab notification's, so
+  // one job shows once.
+  self.addEventListener("push", (event) => {
+    const { title, body, tag, url } = event.data?.json() ?? {};
+    event.waitUntil(
+      self.registration.showNotification(title || "Factory", {
+        body,
+        tag,
+        data: { url },
+        icon: "/assets/icon-192.png",
+      }),
+    );
+  });
+
+  // Opens only a dashboard URL: anything from another origin opens the board instead.
+  self.addEventListener("notificationclick", (event) => {
+    event.notification.close();
+    const target = new URL(event.notification.data?.url || "/", location.origin);
+    const url = target.origin === location.origin ? target.href : "/";
+    event.waitUntil(
+      self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async ([win]) => {
+        if (!win) return self.clients.openWindow(url);
+        await win.focus();
+        // navigate rejects for a tab this worker does not control, so open the job instead.
+        return win.navigate(url).catch(() => self.clients.openWindow(url));
+      }),
+    );
+  });
+
   self.addEventListener("fetch", (event) => {
     const request = event.request;
     const url = new URL(request.url);

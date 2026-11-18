@@ -1,4 +1,4 @@
-// The four header icon buttons stay on one row and match the project filter height.
+// The five header icon buttons stay on one row and match the project filter height.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -16,6 +16,12 @@ const JOBS = [
     title: "Synthetic sample job",
     stage: "spec",
   },
+  {
+    id: "1901-sample-a",
+    project: "sample",
+    title: "Synthetic sample A",
+    stage: "needs-human",
+  },
 ].map((job) => ({ ...job, updated: "2026-01-01T00:00:00Z" }));
 
 const TOUCH = { isMobile: true, hasTouch: true };
@@ -25,6 +31,7 @@ const CASES = [
   { viewport: { width: 320, height: 844 }, size: 32 },
   { viewport: { width: 390, height: 844, ...TOUCH }, size: 44 },
   { viewport: { width: 320, height: 844, ...TOUCH }, size: 44 },
+  { viewport: { width: 700, height: 1024, ...TOUCH }, size: 44 },
 ];
 
 test("header icons share one row and match the filter height", { timeout: 120000 }, async () => {
@@ -44,10 +51,11 @@ test("header icons share one row and match the filter height", { timeout: 120000
       await page.emulateTimezone("America/New_York");
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#new-idea:not([hidden])");
+      await page.waitForSelector("#next-waiting:not([hidden])");
       await page.waitForSelector(".updated-word");
       const header = await page.evaluate(() => {
         const rect = (id) => document.getElementById(id).getBoundingClientRect();
-        const icons = ["new-idea", "job-jump", "retros-link", "settings-link"];
+        const icons = ["next-waiting", "new-idea", "job-jump", "retros-link", "settings-link"];
         const el = document.querySelector("header");
         const boxes = [...el.children]
           .map((child) => child.getBoundingClientRect())
@@ -72,17 +80,19 @@ test("header icons share one row and match the filter height", { timeout: 120000
             return style.display !== "none" && style.visibility !== "hidden";
           })(),
           text: document.getElementById("updated").textContent,
+          order: getComputedStyle(document.querySelector(".header-actions")).order,
         };
       });
-      if (process.env.HEADER_SHOTS && label === "320px") {
+      const shots = { "320px": "320", "700px touch": "700-touch", "390px touch": "390-touch" };
+      if (process.env.HEADER_SHOTS && shots[label]) {
         await (
           await page.$("header")
         ).screenshot({
-          path: `${process.env.HEADER_SHOTS}/${process.env.HEADER_SHOT_STAGE || "after"}-header-320.png`,
+          path: `${process.env.HEADER_SHOTS}/${process.env.HEADER_SHOT_STAGE || "after"}-header-${shots[label]}.png`,
         });
       }
       assert.equal(new Set(header.tops).size, 1, `icon tops at ${label}: ${header.tops}`);
-      assert.deepEqual(header.heights, [size, size, size, size, size], `heights at ${label}`);
+      assert.deepEqual(header.heights, [size, size, size, size, size, size], `heights at ${label}`);
       assert.ok(
         header.scrollWidth <= header.clientWidth,
         `header scrolls at ${label}: ${header.scrollWidth} > ${header.clientWidth}`,
@@ -91,6 +101,12 @@ test("header icons share one row and match the filter height", { timeout: 120000
       assert.equal(header.wordShown, viewport.width !== 320, `updated word shown at ${label}`);
       assert.equal(header.wordRead, true, `updated word read at ${label}`);
       assert.ok(header.text.startsWith("updated "), `updated text at ${label}: ${header.text}`);
+      if (label === "700px touch") {
+        assert.equal(header.rows, 1, `header rows at ${label}: height ${header.headerHeight}`);
+        assert.equal(header.order, "0", `header-actions order at ${label}`);
+      }
+      if (label === "390px touch")
+        assert.equal(header.order, "1", `header-actions order at ${label}`);
       if (viewport.width === 1280) {
         const link = await page.$eval("#retros-link", (el) => ({
           next: el.nextElementSibling.id,

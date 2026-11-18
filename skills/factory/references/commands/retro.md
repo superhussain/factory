@@ -19,8 +19,15 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    means the agent found nothing, autonomy is paused, or every card was a duplicate,
    over a cap or unusable. In the last two cases `findings.md` is written,
    so still report its path. A rejected findings[N] line means admission dropped that finding;
-   findings.md lists it under Rejected findings without its text. Exit 2 after a wrote
-   line means the cards failed: findings.md is written and no card was admitted.
+   findings.md lists it under Rejected findings without its text. A
+   `fixed findings[N]: <id> merged <time>` line means a merged job named in that finding's
+   `fixed_by` merged after every session it cites started; findings.md lists it under Fixed
+   findings. A `rejected suggestions[N]` line means admission dropped that card; findings.md
+   lists it under Rejected cards without its text, and the clean cards still go through. A
+   `skipped suggestions[N]: finding fixed by <id>` line means every finding the card links was
+   fixed, so the card is not admitted. Exit 2 after a wrote line means every card failed:
+   findings.md is written and no card was admitted. Exit 3 with `every clean card's finding is
+   already fixed` means every clean card was skipped.
    An `edited <scope> stage_notes.<stage> to version N: <summary>` line means that
    edit is saved; a `skipped edits[i]` line or `autonomy is paused; no pipeline edit`
    means it is not. findings.md lists each under Pipeline edits. Edits never change

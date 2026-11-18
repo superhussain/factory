@@ -1252,6 +1252,52 @@ class HoldWriteSkipTest(IsolatedTestCase):
             self.assertEqual(self.board_puts(), 0)
 
 
+class BoardNoopWriteTest(IsolatedTestCase):
+    setUp = FactoryTest.setUp
+    api = FactoryTest.api
+    git = FactoryTest.git
+    saved = FactoryTest.saved
+    save = FactoryTest.save
+    ago = HoldWriteSkipTest.ago
+    seed = HoldWriteSkipTest.seed
+
+    def board_puts(self, patch_body):
+        calls = []
+
+        def record(home, method, path, *args, **kwargs):
+            calls.append((method, path))
+            return self.api(home, method, path, *args, **kwargs)
+        with patch.object(factory, "api", side_effect=record), \
+                patch.object(factory, "paseo_session", return_value=None):
+            factory.board_write(self.home, "001-test", patch_body, show=False)
+        return calls.count(("PUT", "/api/board"))
+
+    def test_fresh_own_claim_no_op_skips_the_put(self):
+        self.seed(3, note="building task 2")
+        before = self.store["/api/board"]
+        self.assertEqual(self.board_puts({"note": "building task 2"}), 0)
+        self.assertEqual(self.store["/api/board"], before)
+
+    def test_stale_own_claim_no_op_writes(self):
+        self.seed(11, note="building task 2")
+        old = self.saved()["claim"]["seen"]
+        self.assertEqual(self.board_puts({"note": "building task 2"}), 1)
+        self.assertGreater(self.saved()["claim"]["seen"], old)
+
+    def test_changed_note_writes(self):
+        self.seed(3, note="building task 2")
+        self.assertEqual(self.board_puts({"note": "building task 3"}), 1)
+        self.assertEqual(self.saved()["note"], "building task 3")
+
+    def test_unclaimed_row(self):
+        self.seed(3, note="building task 2")
+        job = self.saved()
+        job.pop("claim")
+        self.save(job)
+        self.assertEqual(self.board_puts({"note": "building task 2"}), 0)
+        self.assertEqual(self.board_puts({"note": "building task 3"}), 1)
+
+
 class IdeaTest(IsolatedTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -1601,6 +1647,24 @@ class MoveFenceTest(IsolatedTestCase):
                               err.getvalue())
                 self.assertEqual(self.store["/api/board"], before)
 
+    def test_board_stores_a_dependency(self):
+        refs = [{"id": "201-sample-csv-api", "kind": "depends-on"}]
+        with patch.object(factory.sys, "stdin", io.StringIO(json.dumps({"refs": refs}))):
+            factory.board(self.home, "001-test")
+        self.assertEqual(self.saved()["refs"], refs)
+
+    def test_board_refuses_a_self_dependency(self):
+        before = self.store["/api/board"]
+        err = io.StringIO()
+        body = json.dumps({"refs": [{"id": "001-test", "kind": "depends-on"}]})
+        with patch.object(factory.sys, "stdin", io.StringIO(body)), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            factory.board(self.home, "001-test")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("a job cannot depend on itself: drop the depends-on ref to 001-test. Nothing was written.",
+                      err.getvalue())
+        self.assertEqual(self.store["/api/board"], before)
+
     def test_board_refuses_a_move_patch(self):
         before = self.store["/api/board"]
         err = io.StringIO()
@@ -1920,6 +1984,10 @@ class BacklogReworkTest(IsolatedTestCase):
     def test_suffix_guard_is_ascii(self):
         self.assertTrue(factory.BACKLOG_SUFFIX.search("Add (rework-of 001-x)"))
         self.assertIsNone(factory.BACKLOG_SUFFIX.search("Add (rework-of 001-é)"))
+
+    def test_suffix_takes_depends_on(self):
+        ref = factory.BACKLOG_SUFFIX.search("sample: Add CSV button (depends-on 201-sample-csv-api)")
+        self.assertEqual(factory.suffix_refs(ref), [{"id": "201-sample-csv-api", "kind": "depends-on"}])
 
     def test_close_skip_says_why(self):
         approved = dict(self.job, backlog=dict(self.job["backlog"], decision="approved"))

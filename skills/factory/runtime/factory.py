@@ -138,6 +138,7 @@
   factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
   factory.py retro aggregate [--days N]     pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
   factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, add its cards to the backlog
+  factory.py audit <job-id>                 list this host's tool calls in the job's worktree, risky ones flagged
   factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]
                                             append one row to the job's agents, after checking this
                                             session holds the claim, and print it as JSON
@@ -218,7 +219,7 @@ RELEASE = ("needs-human", "pr-open", "merged", "closed")
 # Stages a job finishes in. Entering one stamps done, leaving one clears it.
 TERMINAL = ("merged", "closed")
 # How one job relates to another, in a job's refs.
-REF_KINDS = ("rework-of", "follow-up-of", "sub-job-of", "batched-into")
+REF_KINDS = ("rework-of", "follow-up-of", "sub-job-of", "batched-into", "depends-on")
 # A rider is an idea that ships inside another job. It follows that lead's stage and PR.
 BATCH_REF = "batched-into"
 MAX_RIDERS = 20
@@ -765,8 +766,30 @@ def fresh_hold(job, device, session, paseo, take):
     if paseo and any(isinstance(row, dict) and row.get("session") == session and "paseo" not in row
                      for row in job.get("agents") or []):
         return False
+    return seen_recently(c)
+
+
+def seen_recently(c):
+    """True when the claim's seen stamp is under CLAIM_REFRESH_MINUTES old."""
     seen = datetime.strptime(c["seen"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     return datetime.now(timezone.utc) - seen < timedelta(minutes=CLAIM_REFRESH_MINUTES)
+
+
+def same_board(before, after, device, session):
+    """True when after differs from before only in updated stamps, and in claim.seen on rows this
+    session holds whose stored claim was seen under CLAIM_REFRESH_MINUTES ago."""
+    fresh = {j.get("id") for j in before["jobs"] if isinstance(j.get("claim"), dict)
+             and mine(j["claim"], device, session) and seen_recently(j["claim"])}
+
+    def quiet(data):
+        rows = []
+        for j in data["jobs"]:
+            j = {k: v for k, v in j.items() if k != "updated"}
+            if j.get("id") in fresh and isinstance(j.get("claim"), dict):
+                j["claim"] = {k: v for k, v in j["claim"].items() if k != "seen"}
+            rows.append(j)
+        return {**{k: v for k, v in data.items() if k != "updated"}, "jobs": rows}
+    return quiet(before) == quiet(after)
 
 
 def earlier_moves(m):
@@ -913,6 +936,8 @@ def board_write(factory, job_id, patch, show=True):
              "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
     if "github" in patch:
         fail("only factory.py pickup sets github. Nothing was written.", 2)
+    if "auto_babysit" in patch:
+        fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -925,6 +950,8 @@ def board_write(factory, job_id, patch, show=True):
     if patch.get("needs") is not None and not isinstance(patch["needs"], str):
         fail("needs must be a string or null", 2)
     check_refs(patch.get("refs"))
+    if {"id": job_id, "kind": "depends-on"} in (patch.get("refs") or []):
+        fail(f"a job cannot depend on itself: drop the depends-on ref to {job_id}. Nothing was written.", 2)
     check_build(patch.get("build"))
     check_tracer(patch.get("tracer"))
     check_pipeline(patch.get("pipeline"))
@@ -935,6 +962,7 @@ def board_write(factory, job_id, patch, show=True):
 
     def change(text):
         data = load_board(text)
+        before = load_board(text)
         found = next((j for j in data["jobs"] if j.get("id") == job_id), None)
         if found is None:
             m = re.match(r"(\d{3,})-", job_id)
@@ -990,6 +1018,8 @@ def board_write(factory, job_id, patch, show=True):
         if tracer_gate_passed(job, patch):
             job.update(stage="build", note=TRACER_APPROVED_NOTE)
             job.pop("needs", None)
+        if same_board(before, data, device, session):
+            return None, (next(j for j in before["jobs"] if j.get("id") == job_id), None, [])
         return dump_board(data), (job, None, stacked)
     job, held, stacked = cas(factory, "/api/board", change)
     if held == "closing":
@@ -1377,6 +1407,9 @@ def backlog_add(item, context=None):
     if context and RETRO_MARK.search(context):
         print(f"held {item} for review: retro items always wait for a person")
         return True
+    if context and DEPENDS_ON.search(context):
+        print(f"held {item} for review: lines that depend on another backlog item wait for a person")
+        return True
     verdict, final = backlog_triage(home, item, context)
     left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict, context)
     if final and (verdict is None or verdict["decision"] != "queue" or left):
@@ -1521,7 +1554,7 @@ def backlog_triage_pass(home):
             if len(picked) == TRIAGE_SWEEP_LIMIT:
                 break
             if raw in triaged or slug not in projects or any(raw == p[0] for p in picked) \
-                    or RETRO_MARK.search(line[3]):
+                    or RETRO_MARK.search(line[3]) or DEPENDS_ON.search(line[3]):
                 continue
             if slug not in enabled:
                 enabled[slug] = triage_enabled(home, slug)
@@ -1823,7 +1856,27 @@ def queue_backlog_item(home, slug, feature, verdict, context=None):
     return left
 
 
-BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$", re.ASCII)
+BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of|depends-on) (\w[\w.-]*)\)$", re.ASCII)
+
+
+DEPENDS_ON = re.compile(r"^Depends on: ([\w-]+: \S.*)$", re.M)
+
+
+def backlog_depends(text, context):
+    """(refs, waiting) for the Depends on: lines in context: a depends-on ref per item checked off as a job,
+    and the first item whose backlog line is still unchecked, or None. A missing item adds nothing."""
+    lines = [line.rstrip() for line in text.split("\n")]
+    refs, waiting = [], None
+    for item in DEPENDS_ON.findall(context):
+        item = item.rstrip()
+        if f"- [ ] {item}" in lines:
+            waiting = waiting or item
+            continue
+        done = re.compile(rf"- \[x\] {re.escape(item)} \(([^()]+)\)")
+        job_id = next((m.group(1) for m in map(done.fullmatch, lines) if m), None)
+        if job_id and JOB_ID.fullmatch(job_id) and ".." not in job_id:
+            refs.append({"id": job_id, "kind": "depends-on"})
+    return refs, waiting
 
 
 def suffix_refs(ref):
@@ -2063,6 +2116,11 @@ def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None)
             break
         held.append(line[2:])
     answered = backlog_answers(answers, backlog_questions("\n".join(held)), stored)
+    depends = []
+    if stored == "approved":
+        depends, waiting = backlog_depends("\n".join(lines), "\n".join(held))
+        if waiting:
+            fail(f'approve "{waiting}" first: its backlog line is still unchecked. Nothing was changed.', 2)
     if stored != "denied" and slug not in registered(home):
         fail(f"register project {slug} before deciding this item", 4)
     device = holder(home)[0]
@@ -2117,7 +2175,7 @@ def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None)
         else:
             job = {"id": job_id, "project": slug, "title": title, "idea": item + footer, "stage": "closed",
                    "updated": at, "done": at, "note": "denied from the backlog", "backlog": record}
-        refs = suffix_refs(ref)
+        refs = suffix_refs(ref) + depends
         if refs:
             job["refs"] = refs
         data["jobs"].append(job)
@@ -2221,7 +2279,7 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
                 break
             # A job waiting on a human, or an unapproved explorer card, is never promoted.
             if not j.get("project") or gated(j) or paused(j) or waiting_until(j) or closing(j) \
-                    or tracer_building(j):
+                    or waiting_on(j, data["jobs"]) or tracer_building(j):
                 continue
             repo = paths.get(j["project"])
             # The scheduler pastes the id into a shell command, so only well-formed ids pass.
@@ -2269,6 +2327,8 @@ def batch_problem(data, j, slug, device, session, minutes):
         return "closing"
     if waiting_until(j):
         return f"not before {waiting_until(j)}"
+    if waiting_on(j, data["jobs"]):
+        return f"waits on {waiting_on(j, data['jobs'])}"
     if j.get("idea_images"):
         return "has pasted images"
     if j.get("idea_files"):
@@ -5201,6 +5261,15 @@ def waiting_until(j):
     return t if isinstance(t, str) and NOT_BEFORE.fullmatch(t) and t > now() else None
 
 
+def waiting_on(j, jobs):
+    """The first depends-on id of an idea whose job is still open on the board, else None."""
+    if j.get("stage") != IDEA:
+        return None
+    open_ids = {o.get("id") for o in jobs if o.get("stage") not in TERMINAL}
+    return next((r["id"] for r in j.get("refs") or [] if isinstance(r, dict) and r.get("kind") == "depends-on"
+                 and r.get("id") in open_ids), None)
+
+
 CLOSE_REASON = re.compile(r"[^\x00-\x1f\x7f-\x9f\u2028\u2029]{1,200}")
 
 
@@ -5234,6 +5303,11 @@ GH_PR = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/\d+", re.ASCII)
 GH_PR_PARTS = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})", re.ASCII)
 SYNC_STAGES = ("pr-open", "needs-human")
 PR_SYNC_LIMIT = 100
+AUTO_BABYSIT_LIMIT = 20
+AUTO_BABYSIT = re.compile(r"[1-9]")
+CI_FAILED = {"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "CANCELLED", "ERROR"}
+AUTO_BABYSIT_COPY = {"fix-reviews": "has an open review thread", "rebase": "has a merge conflict",
+                     "fix-ci": "has a failing required check"}
 GITHUB_CLOSE_REASON = "PR closed on GitHub"
 MERGED_NOTE = "merged on GitHub"
 PR_CLOSE_COMMENT = (
@@ -5298,6 +5372,66 @@ def pr_states(repo, numbers, device):
         return None, ("gh api graphql returned no repository "
                       f"(check the project file's repo and gh auth status on {device})")
     return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
+
+
+def pr_signals(repo, numbers, device):
+    """({number: (head oid, pr_signal)}, None) for repo's pull requests from one gh api graphql call,
+    or (None, why), as pr_states reads them."""
+    owner, name = repo.split("/")
+    q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
+         + " ".join(f"p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid author {{ login }} "
+                    "reviewThreads(last: 50) { nodes { isResolved comments(first: 20) { nodes { authorAssociation "
+                    "author { __typename login } } } } } commits(last: 1) { nodes { commit { statusCheckRollup { "
+                    "contexts(first: 50) { nodes { __typename ... on CheckRun { conclusion "
+                    f"isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ state "
+                    f"isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }}" for n in numbers)
+         + " } }")
+    r = gh_cli("api", "graphql", "-f", "query=" + q)
+    if r is None:
+        return None, f"gh is not installed on {device}"
+    if r[0] == "timeout":
+        return None, f"gh api graphql timed out after 60 seconds on {device}"
+    try:
+        found = json.loads(r[1])["data"]["repository"]
+    except (ValueError, KeyError, TypeError):
+        found = None
+    if not isinstance(found, dict):
+        if r[0]:
+            return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
+        return None, ("gh api graphql returned no repository "
+                      f"(check the project file's repo and gh auth status on {device})")
+    return {n: (found[f"p{n}"].get("headRefOid"), pr_signal(found[f"p{n}"]))
+            for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
+
+
+def pr_signal(pull):
+    """What an open pull request needs from babysit, in pr_reading's order: fix-reviews for an open
+    counted review thread, rebase for a merge conflict, fix-ci for a failed required check, else None."""
+    if pull.get("state") != "OPEN":
+        return None
+
+    def login(item):
+        return str((item.get("author") or {}).get("login") or "")
+
+    author = login(pull)
+    for thread in (pull.get("reviewThreads") or {}).get("nodes") or []:
+        if not isinstance(thread, dict) or thread.get("isResolved"):
+            continue
+        comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
+        if not comments or any(login(c) == author for c in comments):
+            continue
+        if (comments[0].get("author") or {}).get("__typename") == "Bot" \
+                or comments[0].get("authorAssociation") in PR_REVIEWERS:
+            return "fix-reviews"
+    if pull.get("mergeable") == "CONFLICTING":
+        return "rebase"
+    for node in (pull.get("commits") or {}).get("nodes") or []:
+        rollup = ((node or {}).get("commit") or {}).get("statusCheckRollup") or {}
+        for c in (rollup.get("contexts") or {}).get("nodes") or []:
+            if isinstance(c, dict) and c.get("isRequired") is True \
+                    and (c.get("conclusion") or c.get("state")) in CI_FAILED:
+                return "fix-ci"
+    return None
 
 
 def close_pull_request(home, j, device, comment=None):
@@ -5432,7 +5566,8 @@ def close_decision(j, reason, device, earlier, outcome, pickup):
 
 def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
     """Move each pr-open or needs-human job whose pull request GitHub reports merged to merged, and queue
-    a close for each whose pull request GitHub reports closed. One gh api graphql call per repo."""
+    a close for each whose pull request GitHub reports closed. One gh api graphql call per repo, and one board write
+    for the whole pass."""
     def match(j):
         job_id, project, pr = j.get("id"), j.get("project"), j.get("pr")
         if not (j.get("stage") in SYNC_STAGES and isinstance(pr, str) and not closing(j) and lead_of(j) is None
@@ -5465,6 +5600,7 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
             continue
         groups.setdefault(repo, []).append((j, int(m[3])))
 
+    pending = []
     for repo, jobs in groups.items():
         if len(jobs) > PR_SYNC_LIMIT:
             print(f"factory.py: pickup syncs the first {PR_SYNC_LIMIT} of {len(jobs)} pull requests in {repo}",
@@ -5487,19 +5623,157 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
                          "note": MERGED_NOTE, "github": {"merged": now()}}
             else:
                 patch = {"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "via": "github"}, "babysit": None}
+            pending.append((j, patch, line))
+    if not pending:
+        return
 
-            def change(text, j=j, patch=patch):
+    def change(text):
+        board = load_board(text)
+        rows = []
+        for j, patch, line in pending:
+            found = next((x for x in board["jobs"] if x.get("id") == j["id"]), None)
+            if (found is None or not match(found) or found["pr"] != j["pr"]
+                    or found["project"] != j["project"] or blocking(found, device, "", minutes)):
+                continue
+            rows.append((j, patch_job(board, j["id"], patch), line))
+        return (dump_board(board) if rows else None), rows
+    for j, row, line in cas(home, "/api/board", change):
+        data["jobs"][data["jobs"].index(j)] = row
+        print(f"synced {line}")
+
+
+def auto_babysit_cap(home, slug):
+    """The project file's auto_babysit as an int from 1 to 9, else 0."""
+    md = project_files(home, slug)[0]
+    value = frontmatter(md)[0].get("auto_babysit", "") if md.exists() else ""
+    return int(value) if AUTO_BABYSIT.fullmatch(value) else 0
+
+
+def babysit_noted(home, slug):
+    """True when the project's effective pipeline has a Babysit stage note."""
+    status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+    try:
+        notes = json.loads(text).get("stage_notes") if status == 200 else None
+    except (ValueError, AttributeError):
+        notes = None
+    babysit = notes.get("babysit") if isinstance(notes, dict) else None
+    return isinstance(babysit, list) and bool(babysit)
+
+
+def auto_babysit_match(j):
+    """The PR URL match of a pr-open job pickup may babysit on its own, else None."""
+    job_id, project, pr = j.get("id"), j.get("project"), j.get("pr")
+    if not (j.get("stage") == "pr-open" and isinstance(job_id, str) and JOB_ID.fullmatch(job_id)
+            and ".." not in job_id and isinstance(project, str) and SLUG.fullmatch(project) and isinstance(pr, str)
+            and not (babysitting(j) or gated(j) or paused(j) or closing(j) or escalated(j))
+            and lead_of(j) is None):
+        return None
+    return GH_PR_PARTS.fullmatch(pr)
+
+
+def auto_babysit_record(j):
+    """(count, head, reason) of the job's last automatic babysit, (0, None, None) before the first."""
+    a = j.get("auto_babysit")
+    if not isinstance(a, dict):
+        return 0, None, None
+    return (a["count"] if type(a.get("count")) is int else 0), a.get("head"), a.get("reason")
+
+
+def auto_babysit_at(j):
+    """When the job was last auto-babysat, or "" before the first, so it sorts first."""
+    a = j.get("auto_babysit")
+    return a["at"] if isinstance(a, dict) and isinstance(a.get("at"), str) else ""
+
+
+def auto_babysit_pass(home, data, device, minutes, paths, settings, dry):
+    """Set babysit on each pr-open job whose PR fails a required check, has an open counted review thread
+    or a merge conflict, in projects whose project file sets auto_babysit. At most auto_babysit times per
+    job, and never twice for the same head and reason. One gh api graphql call per repo."""
+    caps, repos, noted, groups = {}, {}, {}, {}
+    for j in data["jobs"]:
+        m = auto_babysit_match(j)
+        if not m:
+            continue
+        job_id, project = j["id"], j["project"]
+        if project not in caps:
+            caps[project] = auto_babysit_cap(home, project)
+        cap = caps[project]
+        if not cap:
+            continue
+        head = f"skip auto-babysit {job_id} {project}"
+        c = blocking(j, device, "", minutes)
+        if c:
+            if dry:
+                print(f"{head}: claimed by {c['device']} session {c.get('session')}")
+            continue
+        if project not in repos:
+            md = project_files(home, project)[0]
+            repos[project] = frontmatter(md)[0].get("repo", "") if md.exists() else ""
+        repo = f"{m[1]}/{m[2]}".lower()
+        if repos[project].lower() != repo:
+            continue
+        reason = pickup_reason(home, project, paths, settings, device, dry)
+        if reason:
+            if dry:
+                print(f"{head}: {reason}")
+            continue
+        if project not in noted:
+            noted[project] = babysit_noted(home, project)
+        if not noted[project]:
+            if dry:
+                print(f"{head}: no Babysit note")
+            continue
+        if auto_babysit_record(j)[0] >= cap:
+            if dry:
+                print(f"{head}: {cap} of {cap} automatic babysits used")
+            continue
+        groups.setdefault(repo, []).append((j, int(m[3]), cap))
+
+    for repo, jobs in groups.items():
+        jobs = sorted(jobs, key=lambda c: auto_babysit_at(c[0]))
+        if len(jobs) > AUTO_BABYSIT_LIMIT:
+            print(f"factory.py: pickup checks {AUTO_BABYSIT_LIMIT} of {len(jobs)} auto-babysit candidates for {repo} "
+                  "this run, oldest automatic babysit first", file=sys.stderr)
+        jobs = jobs[:AUTO_BABYSIT_LIMIT]
+        signals, why = pr_signals(repo, [n for _, n, _ in jobs], device)
+        if signals is None:
+            print(f"factory.py: pickup skips auto-babysit for {repo}: {why}", file=sys.stderr)
+            continue
+        for j, n, cap in jobs:
+            head, reason = signals.get(n, (None, None))
+            if reason is None:
+                continue
+            count, last_head, last_reason = auto_babysit_record(j)
+            if (head, reason) == (last_head, last_reason):
+                if dry:
+                    print(f"skip auto-babysit {j['id']} {j['project']}: already babysat {reason} at {head[:7]}")
+                continue
+            copy = AUTO_BABYSIT_COPY[reason]
+            line = f"{j['id']} {j['project']}: PR #{n} {copy} ({count + 1} of {cap})"
+            if dry:
+                print(f"would auto-babysit {line}")
+                continue
+
+            def change(text, j=j, n=n, cap=cap, head=head, reason=reason, copy=copy):
                 board = load_board(text)
                 found = next((x for x in board["jobs"] if x.get("id") == j["id"]), None)
-                if (found is None or not match(found) or found["pr"] != j["pr"]
+                if (found is None or not auto_babysit_match(found) or found["pr"] != j["pr"]
                         or found["project"] != j["project"] or blocking(found, device, "", minutes)):
                     return None, None
-                row = patch_job(board, j["id"], patch)
+                count, last_head, last_reason = auto_babysit_record(found)
+                if count >= cap or (head, reason) == (last_head, last_reason):
+                    return None, None
+                stamp = now()
+                row = patch_job(board, j["id"], {
+                    "babysit": {"at": stamp, "via": "pickup", "by": device, "reason": reason},
+                    "auto_babysit": {"count": count + 1, "head": head, "reason": reason, "at": stamp},
+                    "note": f"auto-babysitting PR #{n}: it {copy}"})
                 return dump_board(board), row
             row = cas(home, "/api/board", change)
             if row:
                 data["jobs"][data["jobs"].index(j)] = row
-                print(f"synced {line}")
+                print(f"auto-babysat {j['id']} {j['project']}: PR #{n} {copy} "
+                      f"({row['auto_babysit']['count']} of {cap})")
 
 
 def close_pass(home, data, device, minutes, dry):
@@ -5696,6 +5970,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     close_pass(home, data, device, minutes, dry)
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
+    auto_babysit_pass(home, data, device, minutes, paths, settings, dry)
     babysit_pass(home, data, device, minutes, paths, settings, dry)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
@@ -5736,6 +6011,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
             return f"skip {j['id']} {project}: closing"
         if waiting_until(j):
             return f"skip {j['id']} {project}: not before {waiting_until(j)}"
+        if waiting_on(j, data["jobs"]):
+            return f"skip {j['id']} {project}: waits on {waiting_on(j, data['jobs'])}"
         if tracer_building(j):
             return f"skip {j['id']} {project}: building in Tracer"
         c = blocking(j, device, "", minutes)
@@ -9091,11 +9368,15 @@ RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
 RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+")
 RETRO_HEADERS = re.compile(
     r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))"
-    r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)[^\r\n'\"\\]+")
+    r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)(?:\\[ \t]|[^\r\n'\"\\])+")
 RETRO_URL_CREDS = re.compile(r"(?i)(?<=[a-z0-9+.-])://[^/\s]+@")
 RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
 RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)(?!=?\d+:\d+(?!\S))[^\s:]*:\S+")
-RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential"
+RETRO_MYSQL = re.compile(r"(?<![\w.-])(?:mysql\w*|mariadb(?:-\w+)?)(?:\.exe)?(?![\w.-])")
+RETRO_MYSQL_PASS = re.compile(r"((?:^|\s)-p)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_SSHPASS = re.compile(r"(?<![\w.-])sshpass(?:\.exe)?(?![\w.-])")
+RETRO_SSHPASS_PASS = re.compile(r"((?:^|\s)-p\s*)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential|mysql_pwd"
 RETRO_SECRET_WORD = re.compile(r"(?i)(?:" + RETRO_SECRET_WORDS + ")")
 RETRO_COUNT = re.compile(r"\d{1,7}[,;)}\]]*")
 RETRO_KEYVALUE = re.compile(
@@ -9121,6 +9402,7 @@ RETRO_RUN_SCHEMA = "factory.retro-run/1"
 RETRO_DOC_EDIT_SCHEMA = "factory.retro-doc-edit/1"
 RETRO_EDIT_CHANGE = 600
 MAX_RETRO_EDITS = 2
+RETRO_MERGED_MAX = 100
 RETRO_EDITS_PER_DAY = 2
 RETRO_EDIT_SCOPE = "retro edits only allowlisted project scopes; global is person-only"
 RETRO_DOC_EDIT_SCOPE = "retro edits only allowlisted projects"
@@ -9141,11 +9423,21 @@ def retro_secret_pair(match):
     return name + sep + "[redacted]"
 
 
+def retro_tool_pass(line):
+    """line with the password after a mysql glued -p, and after the first sshpass -p, as [redacted]."""
+    for tool, flag, count in ((RETRO_MYSQL, RETRO_MYSQL_PASS, 0), (RETRO_SSHPASS, RETRO_SSHPASS_PASS, 1)):
+        hit = tool.search(line)
+        if hit:
+            line = line[:hit.end()] + flag.sub(r"\1[redacted]", line[hit.end():], count=count)
+    return line
+
+
 def retro_redact(text):
     text = RETRO_HEADERS.sub(r"\1\2[redacted]", text)
     text = RETRO_URL_CREDS.sub("://[redacted]@", text)
     text = RETRO_BEARER.sub(r"\1[redacted]", text)
     text = RETRO_USER_PASS.sub(r"\1[redacted]", text)
+    text = "\n".join(retro_tool_pass(line) for line in text.split("\n"))
     for pattern in (RETRO_KEYVALUE, RETRO_FLAG, RETRO_LONG_KEYVALUE, RETRO_LONG_FLAG):
         text = pattern.sub(retro_secret_pair, text)
     for pattern in NOTE_SECRETS:
@@ -9412,6 +9704,131 @@ def retro_pull(date):
         sys.stdout.write(text)
 
 
+AUDIT_FLAGS = (
+    ("force-push", re.compile(r"\bgit\b[^;&|\n]*\bpush\b[^;&|\n]*\s(?:--force(?:-with-lease)?|-f)(?=[\s=]|$)")),
+    ("hard-reset", re.compile(r"\bgit\b[^;&|\n]*\breset\b[^;&|\n]*\s--hard\b")),
+    ("branch-delete", re.compile(r"\bgit\b[^;&|\n]*\bbranch\b[^;&|\n]*\s-D(?=\s|$)")),
+    ("recursive-delete", re.compile(r"(?:^|[\s;&|(])rm\s+(?:-[A-Za-z]+\s+)*(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)(?=\s|$)")),
+    ("no-verify", re.compile(r"\bgit\b[^;&|\n]*\s--no-verify\b")),
+    ("sudo", re.compile(r"(?:^|[\s;&|(])sudo\s")),
+    ("pipe-to-shell", re.compile(r"\b(?:curl|wget)\b[^|\n]*\|\s*(?:sudo\s+)?(?:ba|z)?sh\b")),
+    ("deploy", re.compile(r"\bwrangler\s+(?:deploy|publish)\b|\bdeploy\.py\s+deploy\b")),
+    ("pr-merge", re.compile(r"\bgh\s+pr\s+merge\b")),
+)
+AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
+AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
+AUDIT_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+
+
+def audit_target_raw(name, inp):
+    """The one input field that says what a tool call acted on, or "" for a tool without one."""
+    def text(key):
+        return inp.get(key) if isinstance(inp.get(key), str) else ""
+    if name == "Bash":
+        return text("command")
+    if name in AUDIT_FILE_TOOLS:
+        return text("file_path")
+    if name in ("Grep", "Glob"):
+        return text("pattern") + (f" in {text('path')}" if text("path") else "")
+    if name == "WebFetch":
+        return text("url")
+    if name == "WebSearch":
+        return text("query")
+    if name in ("Agent", "Task"):
+        return f"{text('subagent_type')}: {text('description')}"
+    return ""
+
+
+def audit_target(raw):
+    """raw as it prints: home as ~, retro-redacted, whitespace collapsed, control characters as ?,
+    at most 120 characters."""
+    folded = re.sub(re.escape(str(Path.home())) + r"(?![\w.-])", "~", raw)
+    return AUDIT_CONTROL.sub("?", " ".join(retro_redact(folded).split()))[:120]
+
+
+def audit_flags(name, inp, raw, denied):
+    """The names of the risky shapes one call matches, in AUDIT_FLAGS order, then sandbox-off,
+    secret-file and denied. They match the raw target, never the redacted one."""
+    flags = [flag for flag, pattern in AUDIT_FLAGS if name == "Bash" and pattern.search(raw)]
+    if name == "Bash" and inp.get("dangerouslyDisableSandbox") is True:
+        flags.append("sandbox-off")
+    path = inp.get("path") if name == "Grep" else raw if name == "Bash" or name in AUDIT_FILE_TOOLS else None
+    if isinstance(path, str) and AUDIT_SECRET_FILE.search(path):
+        flags.append("secret-file")
+    if denied:
+        flags.append("denied")
+    return flags
+
+
+def audit_scan(path, main):
+    """[{time, tool, flags, target}] for every tool_use block in one transcript. main=True skips
+    isSidechain lines."""
+    calls, denied = [], set()
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict) or (main and e.get("isSidechain")):
+                continue
+            msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+            content = msg.get("content")
+            blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+            for b in blocks:
+                if e.get("type") == "assistant" and b.get("type") == "tool_use":
+                    stamp = e.get("timestamp") if isinstance(e.get("timestamp"), str) else ""
+                    inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                    calls.append((b.get("id"), stamp.replace("T", " ")[:19], str(b.get("name")), inp))
+                elif e.get("type") == "user" and b.get("type") == "tool_result" and b.get("is_error") is True \
+                        and any(phrase in retro_text(b.get("content")) for phrase in RETRO_DENIALS):
+                    denied.add(b.get("tool_use_id"))
+    rows = []
+    for call_id, stamp, name, inp in calls:
+        raw = audit_target_raw(name, inp)
+        rows.append({"time": stamp, "tool": name, "flags": audit_flags(name, inp, raw, call_id in denied),
+                     "target": audit_target(raw) or "-"})
+    return rows
+
+
+def audit_rows(job_id):
+    """(rows, main session count) for every transcript this host keeps from the job's worktree."""
+    root = retro_transcripts()
+    if not root.is_dir():
+        fail(f"no Claude Code transcripts at {root}", 4)
+    folder = re.compile(r"(?:^|-)factory-" + re.escape(job_id) + r"(?:-|$)")
+    rows, sessions = [], 0
+    for project in sorted(p for p in root.iterdir() if p.is_dir() and folder.search(p.name)):
+        for path in sorted(project.glob("*.jsonl")):
+            sessions += 1
+            rows += [{"session": path.stem[:8], "agent": "main", **row} for row in audit_scan(path, True)]
+            for sub in sorted((project / path.stem / "subagents").glob("*.jsonl")):
+                try:
+                    kind = str(json.loads(sub.with_suffix(".meta.json").read_text(encoding="utf-8")).get("agentType")
+                               or "unknown")
+                except (OSError, ValueError, AttributeError):
+                    kind = "unknown"
+                rows += [{"session": path.stem[:8], "agent": AUDIT_CONTROL.sub("?", kind), **row} for row in audit_scan(sub, False)]
+    if not sessions:
+        fail(f"no Claude Code session on this host ran in a factory-{job_id} worktree", 4)
+    return sorted(rows, key=lambda r: (r["time"], r["session"])), sessions
+
+
+def audit_cmd(job_id):
+    if not NEW_JOB_ID.fullmatch(job_id):
+        fail("usage: factory.py audit <job-id>, a full job id such as 1017-add-x", 2)
+    rows, sessions = audit_rows(job_id)
+    flagged = sum(1 for r in rows if r["flags"])
+    print(f"job {job_id} on {retro_host()}: {len(rows)} call{'' if len(rows) == 1 else 's'} in {sessions} session{'' if sessions == 1 else 's'}, "
+          f"{flagged} flagged")
+    columns = ("time", "session", "agent", "tool", "flags", "target")
+    lines = [columns] + [(r["time"], r["session"], r["agent"], r["tool"], ",".join(r["flags"]) or "-", r["target"])
+                         for r in rows]
+    widths = [max(len(line[i]) for line in lines) for i in range(len(columns))]
+    for line in lines:
+        print("  ".join(cell.ljust(w) for cell, w in zip(line, widths)).rstrip())
+
+
 def retro_int(value):
     return value if type(value) is int else 0
 
@@ -9468,7 +9885,8 @@ def retro_aggregate(days):
     if not rows:
         fail(f"no host pushed a retro digest from {dates[0]} to {dates[-1]}", 3)
     projects = sorted(registered(home))
-    allow = load_autonomy(load_board(api(home, "GET", "/api/board")[2]))["projects"]
+    board = load_board(api(home, "GET", "/api/board")[2])
+    allow = load_autonomy(board)["projects"]
     pipeline = {}
     for scope in ["global"] + [f"projects/{p}" for p in projects]:
         status, headers, text = api(home, "GET", f"/api/pipeline/{scope}", ok=(200, 404))
@@ -9551,6 +9969,10 @@ def retro_aggregate(days):
         "subagents": subagents, "review_rounds": rounds, "agent_prompts": summed("agent_prompts"),
         "human_msgs": total("human_msgs"), "interrupts": total("interrupts"), "pipeline": pipeline,
         "documents": documents}
+    merged = sorted(({"id": j["id"], "project": j["project"], "title": str(j.get("title", ""))[:120], "merged": j["done"]}
+                     for j in board["jobs"] if j.get("stage") == "merged" and isinstance(j.get("done"), str)
+                     and j["done"][:10] >= dates[0] and j.get("project") in projects), key=lambda m: m["id"])
+    agg["merged"] = sorted(merged, key=lambda m: m["merged"], reverse=True)[:RETRO_MERGED_MAX]
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
@@ -9726,9 +10148,11 @@ def retro_apply_edits(home, run, edits, agg):
     return results
 
 
-def check_finding(f, projects):
-    """The first violation of one retro finding as (field, problem), or None. field is None for the whole finding."""
-    err = check_keys(f, ("title", "category", "count", "cost", "sessions", "root_cause", "fix", "project"))
+def check_finding(f, projects, merged=()):
+    """The first violation of one retro finding as (field, problem), or None. field is None for the whole finding.
+    merged holds the aggregate's merged rows, which an optional fixed_by must name."""
+    err = check_keys(f, ("title", "category", "count", "cost", "sessions", "root_cause", "fix", "project"),
+                     ("fixed_by",))
     if err:
         return None, err
     return next(((where, err) for where, err in (
@@ -9742,13 +10166,44 @@ def check_finding(f, projects):
         ("sessions", check_session_refs(f["sessions"])),
         ("root_cause", check_text(f["root_cause"], 1, 300)),
         ("fix", check_text(f["fix"], 1, 300)),
-        ("project", None if f["project"] in projects else "must be a project in aggregate.json")) if err), None)
+        ("project", None if f["project"] in projects else "must be a project in aggregate.json"),
+        ("fixed_by", None if "fixed_by" not in f or f["fixed_by"] in [m["id"] for m in merged]
+         else "must be a job id from merged in aggregate.json")) if err), None)
 
 
-def render_findings(agg, doc, rejected=(), edits=()):
+def retro_when(value):
+    """value as an aware datetime, or None."""
+    try:
+        when = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+    return when if when.tzinfo else None
+
+
+def retro_session_starts(folder):
+    """Each host/session ref in the run's digest.jsonl mapped to its start. A missing or linked file gives {}."""
+    path = folder / "digest.jsonl"
+    if is_link(path) or not path.is_file():
+        return {}
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    return {f"{r['host']}/{r['session']}": r.get("start") for r in rows}
+
+
+def retro_fixed(f, merged, starts):
+    """(id, merged) of the job in f's fixed_by when every session f cites has a known start before its merge, else None."""
+    if "fixed_by" not in f:
+        return None
+    m = next(m for m in merged if m["id"] == f["fixed_by"])
+    at = retro_when(m["merged"])
+    times = [retro_when(starts.get(r)) for r in f["sessions"]]
+    return (m["id"], m["merged"]) if at and all(t and t < at for t in times) else None
+
+
+def render_findings(agg, doc, rejected=(), edits=(), fixed=(), cards=()):
     """findings.md: the reply's findings ranked by count x cost, built from checked fields only.
     rejected holds (index, field, problem) for dropped findings, listed without their text.
-    edits holds retro_apply_edits rows."""
+    edits holds retro_apply_edits rows. fixed holds (index, finding, job id, merged) for findings a
+    merged job fixed. cards holds (index, problem) for dropped cards."""
     def cell(text):
         return text.replace("|", "\\|")
 
@@ -9756,7 +10211,8 @@ def render_findings(agg, doc, rejected=(), edits=()):
     sessions = sum(h["sessions"] for h in agg["hosts"].values())
     lines = [f"# Retro {doc['run']}", "",
              f"Window {agg['from']} to {agg['to']} · hosts {', '.join(sorted(agg['hosts']))} · "
-             f"{sessions} sessions · ranked by count x cost" + (f" · {len(rejected)} rejected" if rejected else ""),
+             f"{sessions} sessions · ranked by count x cost" + (f" · {len(rejected)} rejected" if rejected else "")
+             + (f" · {len(fixed)} fixed" if fixed else ""),
              "", "| Rank | Finding | Category | Count | Cost each | Score | Target |",
              "| --- | --- | --- | --- | --- | --- | --- |"]
     for n, f in enumerate(ranked, 1):
@@ -9765,11 +10221,22 @@ def render_findings(agg, doc, rejected=(), edits=()):
     for n, f in enumerate(ranked, 1):
         lines += ["", f"## {n}. {f['title']}", "", "Root cause:", "", quote(f["root_cause"]), "", "Fix:", "",
                   quote(f["fix"]), "", "Sessions: " + ", ".join(f"`{r}`" for r in f["sessions"])]
+        if "fixed_by" in f:
+            lines += ["", f"Fixed by: `{f['fixed_by']}`, but a session started after its merge."]
     if rejected:
         lines += ["", "## Rejected findings", "",
                   "Admission dropped these findings. Their text is not shown; read reply.json to see it.", "",
                   "| Finding | Field | Problem |", "| --- | --- | --- |"]
         lines += [f"| {i} | {field or 'whole finding'} | {cell(problem)} |" for i, field, problem in rejected]
+    if fixed:
+        lines += ["", "## Fixed findings", "", "A merged job fixed these before every session they cite started.", "",
+                  "| Finding | Title | Fixed by | Merged |", "| --- | --- | --- | --- |"]
+        lines += [f"| {i} | {cell(f['title'])} | {cell(job)} | {cell(at)} |" for i, f, job, at in fixed]
+    if cards:
+        lines += ["", "## Rejected cards", "",
+                  "Admission dropped these cards. Their text is not shown; read reply.json to see it.", "",
+                  "| Card | Problem |", "| --- | --- |"]
+        lines += [f"| {i} | {cell(problem)} |" for i, problem in cards]
     if edits:
         lines += ["", "## Pipeline edits", "", "| Scope | Stage | Result | Summary |", "| --- | --- | --- | --- |"]
         lines += [f"| {e['scope']} | {e['stage']} | {cell(e['result'])} | {cell(e['summary'])} |" for e in edits]
@@ -9787,10 +10254,17 @@ def check_finding_link(link, total):
     return f"must be a finding number from 1 to {total}, or a list of distinct finding numbers"
 
 
-def retro_upload(home, run, agg, kept, cards, links, outcomes):
+def check_retro_card(s, run, i):
+    """The first violation of retro card i as "suggestions[i]...: <problem>", or None."""
+    err = check_suggestions({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": [s]}, "retro")
+    return err and err.replace("suggestions[0]", f"suggestions[{i}]", 1)
+
+
+def retro_upload(home, run, agg, kept, rejected, cards, links, outcomes):
     """PUT the run's checked findings and logged cards as a factory.retro-run/1 record. kept holds each
-    reply finding in order, None where admission rejected it; links holds each card's finding number or
-    list of numbers. Errors print to stderr and never change the exit code."""
+    reply finding in order, None where admission rejected it or a merged job fixed it; rejected counts the
+    findings that failed checks; links holds each card's finding number or list of numbers. Errors print
+    to stderr and never change the exit code."""
     config = home / "config.md"
     device = (frontmatter(config)[0] if config.is_file() else {}).get("device") or ""
     if not HOST_NAME.fullmatch(device):
@@ -9812,7 +10286,7 @@ def retro_upload(home, run, agg, kept, cards, links, outcomes):
         if not ranks:
             loose.append(row)
     record = {"schema": RETRO_RUN_SCHEMA, "run": run, "host": device, "from": agg["from"], "to": agg["to"],
-              "sessions": sum(h["sessions"] for h in agg["hosts"].values()), "rejected": kept.count(None),
+              "sessions": sum(h["sessions"] for h in agg["hosts"].values()), "rejected": rejected,
               "findings": findings, "cards": loose}
     try:
         status, _, text = api(home, "PUT", f"/api/retros/{run}", json.dumps(record), ok=(200, 400, 403, 404, 409, 413),
@@ -9827,7 +10301,7 @@ def retro_upload(home, run, agg, kept, cards, links, outcomes):
 
 def retro_admit(run):
     """Check a retro run's reply, write its ranked findings.md and add its cards to the backlog.
-    A bad finding is dropped and listed; a bad card admits no card."""
+    A bad finding or card is dropped and listed; a finding a merged job fixed is listed apart."""
     home = factory_home()
     folder = home / "retro" / run
     path, agg_path = folder / "reply.json", folder / "aggregate.json"
@@ -9856,41 +10330,67 @@ def retro_admit(run):
     err = check_retro(doc) or (doc["run"] != run and f"run: must be {run}")
     if err:
         fail(f"{path}: {err}; nothing written", 2)
-    checked = [(i, f, check_finding(f, agg["projects"])) for i, f in enumerate(doc["findings"])]
-    kept = [f for _, f, bad in checked if not bad]
+    merged = agg.get("merged", [])
+    checked = [(i, f, check_finding(f, agg["projects"], merged)) for i, f in enumerate(doc["findings"])]
+    passed = [(i, f) for i, f, bad in checked if not bad]
     rejected = [(i, *bad) for i, _, bad in checked if bad]
     where = [f"findings[{i}]" + (f".{field}" if field else "") + f": {problem}" for i, field, problem in rejected]
-    if not kept:
+    if not passed:
         fail(f"{path}: {where[0]}; nothing written", 2)
-    write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected))
+    starts = retro_session_starts(folder)
+    fixes = {i: retro_fixed(f, merged, starts) for i, f in passed}
+    kept = [f for i, f in passed if not fixes[i]]
+    fixed = [(i, f, *fixes[i]) for i, f in passed if fixes[i]]
+    links = [s.pop("finding", None) if isinstance(s, dict) else None for s in doc["suggestions"]]
+    total = len(doc["findings"])
+    clean, bad_cards = [], []
+    for i, (s, link) in enumerate(zip(doc["suggestions"], links)):
+        bad = check_finding_link(link, total)
+        err = check_retro_card(s, run, i) or (bad and f"suggestions[{i}].finding: {bad}")
+        if err:
+            bad_cards.append((i, err))
+        else:
+            clean.append((i, s, link))
+    fixed_by = {i + 1: job for i, _, job, _ in fixed}
+    skipped = {}
+    for i, _, link in clean:
+        nums = [link] if type(link) is int else link
+        if all(n in fixed_by for n in nums):
+            skipped[i] = fixed_by[nums[0]]
+    write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected, fixed=fixed, cards=bad_cards))
     print(f"wrote {findings}")
     for line in where:
         print(f"rejected {line}")
+    for i, _, job, at in fixed:
+        print(f"fixed findings[{i}]: {job} merged {at}")
+    for _, err in bad_cards:
+        print(f"rejected {err}")
+    for i, job in skipped.items():
+        print(f"skipped suggestions[{i}]: finding fixed by {job}")
     if doc.get("edits"):
         results = retro_apply_edits(home, run, doc["edits"], agg)
-        write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected, edits=results))
-    reply_findings = [None if bad else f for _, f, bad in checked]
+        write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected, edits=results, fixed=fixed,
+                                               cards=bad_cards))
+    reply_findings = [f if i in fixes and not fixes[i] else None for i, f in enumerate(doc["findings"])]
     upload = ([], [])
     outcomes = []
     try:
         if not doc["suggestions"]:
             print("no suggestions")
             return
-        links = [s.pop("finding", None) if isinstance(s, dict) else None for s in doc["suggestions"]]
-        total = len(doc["findings"])
-        cards = {"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": doc["suggestions"]}
-        err = check_suggestions(cards, "retro")
-        if err:
-            fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
-        for i, link in enumerate(links):
-            bad = check_finding_link(link, total)
-            if bad:
-                fail(f"{path}: suggestions[{i}].finding: {bad}; findings.md written, no cards admitted", 2)
-        upload = (doc["suggestions"], links)
+        if not clean:
+            fail(f"{path}: {bad_cards[0][1]}; findings.md written, no cards admitted", 2)
+        upload = ([s for _, s, _ in clean], [link for _, _, link in clean])
+        outcomes += [{"fingerprint": fingerprint(s["project"], s), "result": f"finding fixed by {skipped[i]}"}
+                     for i, s, _ in clean if i in skipped]
+        admit = [s for i, s, _ in clean if i not in skipped]
+        if not admit:
+            fail("every clean card's finding is already fixed; findings.md written, no cards admitted", 3)
+        cards = {"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": admit}
         write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
         retro_backlog_admit(cards, outcomes)
     finally:
-        retro_upload(home, run, agg, reply_findings, *upload, outcomes)
+        retro_upload(home, run, agg, reply_findings, len(rejected), *upload, outcomes)
 
 
 def retro_date(d):
@@ -10096,6 +10596,7 @@ COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
+COMMANDS["audit"] = (audit_cmd, 1, 1)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
 
