@@ -139,6 +139,7 @@
   factory.py retro aggregate [--days N]     pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
   factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, add its cards to the backlog
   factory.py audit <job-id>                 list this host's tool calls in the job's worktree, risky ones flagged
+  factory.py audit push <job-id>            upload this host's audit rows to audit/<job-id>/<device>.jsonl
   factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]
                                             append one row to the job's agents, after checking this
                                             session holds the claim, and print it as JSON
@@ -9725,6 +9726,8 @@ AUDIT_FLAGS = (
 )
 AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
 AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
+AUDIT_MAX_BYTES = 1 << 20
+AUDIT_WRITE_ONLY = "audit rows are written only by the host's bound service token"
 AUDIT_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
 
@@ -9822,7 +9825,39 @@ def audit_rows(job_id):
     return sorted(rows, key=lambda r: (r["time"], r["session"])), sessions
 
 
-def audit_cmd(job_id):
+def audit_push(job_id):
+    """PUT this host's audit rows for the job to the Worker under its device name, oldest rows dropped past 1 MiB."""
+    home = factory_home()
+    config = home / "config.md"
+    device = (frontmatter(config)[0] if config.is_file() else {}).get("device") or ""
+    hint = f"set device: in {config}; pair this host with factory.py host pair <id> <code>"
+    if not HOST_NAME.fullmatch(device):
+        fail(hint, 2)
+    rows = audit_rows(job_id)[0]
+    lines = [json.dumps({"host": device, "job": job_id, **row}) + "\n" for row in rows]
+    size, dropped = sum(len(line.encode("utf-8")) for line in lines), 0
+    while size > AUDIT_MAX_BYTES:
+        size -= len(lines[dropped].encode("utf-8"))
+        dropped += 1
+    key = f"audit/{job_id}/{device}.jsonl"
+    status, _, text = api(home, "PUT", f"/api/{key}", "".join(lines[dropped:]),
+                          ok=(200, 403), headers={"Content-Type": "application/x-ndjson"})
+    if status == 403 and text.strip() == AUDIT_WRITE_ONLY:
+        fail(f"{AUDIT_WRITE_ONLY}. {hint}", 2)
+    if status == 403:
+        fail(access_message(os.path.abspath(os.path.join(home, ".env"))), 5)
+    if dropped:
+        print(f"pushed {len(rows) - dropped} of {len(rows)} calls to {key}; the oldest {dropped} did not fit in 1 MiB")
+    else:
+        print(f"pushed {len(rows)} calls to {key}")
+
+
+def audit_cmd(*args):
+    if len(args) == 2:
+        if args[0] != "push" or not NEW_JOB_ID.fullmatch(args[1]):
+            fail("usage: factory.py audit push <job-id>, a full job id such as 1017-add-x", 2)
+        return audit_push(args[1])
+    job_id = args[0]
     if not NEW_JOB_ID.fullmatch(job_id):
         fail("usage: factory.py audit <job-id>, a full job id such as 1017-add-x", 2)
     rows, sessions = audit_rows(job_id)
@@ -10604,7 +10639,7 @@ COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
-COMMANDS["audit"] = (audit_cmd, 1, 1)
+COMMANDS["audit"] = (audit_cmd, 1, 2)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
 

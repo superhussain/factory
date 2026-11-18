@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from support import ROOT, IsolatedTestCase, invoke, load_runtime, snapshot
+from support import ROOT, IsolatedTestCase, http_fixture, invoke, load_runtime, snapshot
 
 factory = load_runtime()
 FIXTURE = ROOT / "tests/fixtures/audit"
@@ -156,9 +156,11 @@ class AuditCommandTest(IsolatedTestCase):
                 code, out, err = invoke(factory, ["audit", job_id])
                 self.assertEqual((code, out), (2, ""))
                 self.assertIn("usage: factory.py audit <job-id>, a full job id such as 1017-add-x", err)
-        code, _, err = invoke(factory, ["audit", "1017-add-x", "extra"])
-        self.assertEqual(code, 2)
-        self.assertIn("factory.py audit <job-id>                 list this host's tool calls", err)
+        for args in (["push", "1017"], ["x", "1017-add-x"], ["1017-add-x", "extra"]):
+            with self.subTest(args=args):
+                code, out, err = invoke(factory, ["audit", *args])
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn("usage: factory.py audit push <job-id>, a full job id such as 1017-add-x", err)
         for job_id in ("1018-add-x", "1017-add-xy"):
             with self.subTest(job_id=job_id):
                 code, _, err = invoke(factory, ["audit", job_id])
@@ -175,6 +177,62 @@ class AuditCommandTest(IsolatedTestCase):
             code, out, _ = invoke(factory, ["audit", "1017-add-x"])
         self.assertEqual((code, out), (0, RUNNING_EXAMPLE))
         self.assertEqual(snapshot(self.root), before)
+
+
+class AuditPushTest(IsolatedTestCase):
+    setUp = AuditCommandTest.setUp
+    route = "PUT /api/audit/1017-add-x/example-host.jsonl"
+
+    def config(self, origin, device="device: example-host\n"):
+        (self.home / "config.md").write_text(f"---\napi_url: {origin}\n{device}---\n", encoding="utf-8")
+
+    def test_push_puts_rows(self):
+        with http_fixture({self.route: (200, b"ok")}) as server:
+            self.config(server.origin)
+            code, out, err = invoke(factory, ["audit", "push", "1017-add-x"])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, "pushed 6 calls to audit/1017-add-x/example-host.jsonl\n")
+        self.assertEqual([f"{m} {p}" for m, p, _, _ in server.requests], [self.route])
+        _, _, headers, body = server.requests[0]
+        self.assertEqual(headers["Content-Type"], "application/x-ndjson")
+        rows = [json.loads(line) for line in body.decode("utf-8").splitlines()]
+        self.assertEqual(len(rows), 6)
+        self.assertEqual({(r["host"], r["job"]) for r in rows}, {("example-host", "1017-add-x")})
+        self.assertEqual(list(rows[1]), ["host", "job", "session", "agent", "time", "tool", "flags", "target"])
+        self.assertEqual((rows[1]["flags"], rows[1]["target"]),
+                         (["force-push"], "git push --force origin factory/1017-add-x"))
+        self.assertNotIn("abc123", body.decode("utf-8"))
+
+    def test_push_trims_oldest(self):
+        with http_fixture({self.route: (200, b"ok")}) as server:
+            self.config(server.origin)
+            full = invoke(factory, ["audit", "push", "1017-add-x"])
+            body = server.requests[0][3]
+            with patch.object(factory, "AUDIT_MAX_BYTES", len(body) - 1):
+                code, out, err = invoke(factory, ["audit", "push", "1017-add-x"])
+        self.assertEqual(full[0], 0)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, "pushed 5 of 6 calls to audit/1017-add-x/example-host.jsonl; "
+                              "the oldest 1 did not fit in 1 MiB\n")
+        self.assertEqual(server.requests[1][3], body[body.index(b"\n") + 1:])
+
+    def test_push_errors(self):
+        hint = "pair this host with factory.py host pair <id> <code>"
+        with http_fixture({}) as server:
+            for device in ("", "device: -bad\n"):
+                with self.subTest(device=device):
+                    self.config(server.origin, device)
+                    code, out, err = invoke(factory, ["audit", "push", "1017-add-x"])
+                    self.assertEqual((code, out), (2, ""))
+                    self.assertIn(f"set device: in {self.home / 'config.md'}; {hint}", err)
+            self.assertEqual(server.requests, [])
+        for body, exit_code, message in ((factory.AUDIT_WRITE_ONLY.encode(), 2, hint),
+                                         (b"Forbidden", 5, "Access rejected the service token")):
+            with self.subTest(body=body), http_fixture({self.route: (403, body)}) as server:
+                self.config(server.origin)
+                code, out, err = invoke(factory, ["audit", "push", "1017-add-x"])
+                self.assertEqual((code, out), (exit_code, ""))
+                self.assertIn(message, err)
 
 
 if __name__ == "__main__":
