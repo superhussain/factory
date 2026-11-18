@@ -135,6 +135,19 @@ test("notifications", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await t.test("menu row keeps focus across a re-render", async () => {
+      const { page, errors } = await openPage();
+      await openMenu(page);
+      await page.focus('#notifications-menu-list a[href="#060-sample-merged"]');
+      await page.evaluate(() => renderBoard());
+      assert.equal(
+        await page.evaluate(() => document.activeElement.getAttribute("href")),
+        "#060-sample-merged",
+      );
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
     await t.test("menu caps at eight", async () => {
       await seedBoard(
         origin,

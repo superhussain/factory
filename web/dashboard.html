@@ -3560,6 +3560,7 @@ const NOTIFICATION_LABELS = { needs: 'Needs you', merged: 'Merged' };
 const NOTIFICATIONS_MENU_ROWS = 8;
 const NOTIFICATIONS_SEEN_KEY = 'factory-notifications-seen';
 let notificationsHtml = '';
+let notificationsMenuHtml = '';
 function notificationsRoute() { return location.hash === '#/notifications' ? true : null; }
 function notificationItems() {
   return jobs.filter((j) => isShown(j.project) && (waitsOnYou(j) || j.stage === 'merged'))
@@ -3581,9 +3582,12 @@ function renderNotifications() {
 }
 function renderNotificationsMenu(items) {
   $('notifications-menu-status').textContent = !loaded ? 'Loading notifications…' : items.length ? '' : 'No notifications yet.';
-  $('notifications-menu-list').innerHTML = items.slice(0, NOTIFICATIONS_MENU_ROWS).map((it) =>
+  const html = items.slice(0, NOTIFICATIONS_MENU_ROWS).map((it) =>
     '<li><a class="notification-link" href="#' + esc(encodeURIComponent(it.job.id)) + '"><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span>' +
     '<span class="inbox-title">' + esc(it.job.title || it.job.id) + '</span><span class="inbox-meta">' + esc(it.job.id) + ' · ' + esc(ago(it.at)) + '</span></a></li>').join('');
+  if (html === notificationsMenuHtml) return;
+  notificationsMenuHtml = html;
+  $('notifications-menu-list').innerHTML = html;
 }
 function renderNotificationsPage(items) {
   $('notifications-status').textContent = !loaded ? 'Loading notifications…'
@@ -3604,6 +3608,7 @@ function renderNotificationsPage(items) {
 function openNotificationsMenu() {
   $('notifications-menu').hidden = false;
   $('notifications-button').setAttribute('aria-expanded', 'true');
+  notificationsMenuHtml = '';
   renderNotifications();
 }
 function closeNotificationsMenu(refocus) {
