@@ -172,6 +172,11 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
    `deploy/profile.json`, for example `"embed_origins": ["https://app.paseo.sh"]`, then render
    and deploy as [config-changes.md](config-changes.md) describes. The dashboard sends
    `frame-ancestors 'self'` plus these origins, so no other site can frame it.
+
+   Listing an origin trusts that host's operator. Code served from `https://app.paseo.sh` could
+   frame your signed-in board and click its buttons, so list only origins whose operator you
+   trust with the board.
+
 4. In the Access application, open the cookie settings and set the SameSite attribute to
    `None`. With the default Lax cookie, the frame gets the Access login page, not the board.
    `tools/bootstrap.py` keeps this setting on a rerun.
