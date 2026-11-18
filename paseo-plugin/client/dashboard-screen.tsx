@@ -1,5 +1,5 @@
 import type { PluginClientContext, PluginScreenProps } from "@getpaseo/plugin/client";
-import { useSettings } from "@getpaseo/plugin/client";
+import { openExternalUrl, useSettings } from "@getpaseo/plugin/client";
 import { ExternalLink, Icon, Loading, ScrollView, useToast } from "@getpaseo/plugin/client/ui";
 import { useEffect, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
@@ -182,10 +182,16 @@ export function dashboardScreen(client: PluginClientContext) {
                 <View style={styles.actions}>
                   {button("Sign in", signIn, "LogIn")}
                   {button("Reload", () => setLoad((n) => n + 1), "RotateCw", true)}
+                  {button("Open in a browser tab", () => void openExternalUrl(src), "ExternalLink", true)}
                 </View>
                 <Text style={styles.footnote}>
                   {`Signed in and still blank? Ask your factory operator to add ${here ?? "this Paseo origin"} to embed_origins.`}
                 </Text>
+                {here?.startsWith("https://") ? (
+                  <Text style={styles.footnote}>
+                    Using Safari, or another browser that blocks third-party cookies? The board cannot load here. Select Open in a browser tab.
+                  </Text>
+                ) : null}
               </View>
             ) : (
               <View style={{ alignItems: "center", gap: 12 }}>

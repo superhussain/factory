@@ -352,7 +352,7 @@ test("project filter", { timeout: 180000 }, async (t) => {
           return {
             top: rect.top,
             buttonBottom: document.getElementById("filter").getBoundingClientRect().bottom,
-            statusTop: document.querySelector("header .status").getBoundingClientRect().top,
+            actionsTop: document.querySelector(".header-actions").getBoundingClientRect().top,
             left: rect.left,
             right: rect.right,
             width: rect.width,
@@ -372,7 +372,7 @@ test("project filter", { timeout: 180000 }, async (t) => {
         assert.equal(m.title, LONG);
       };
       const phone = await measure();
-      assert.ok(phone.statusTop >= phone.buttonBottom);
+      assert.ok(phone.actionsTop >= phone.buttonBottom);
       assert.ok(Math.abs(phone.top - phone.buttonBottom - 4) < 1);
       assert.equal(phone.left, 16);
       assert.equal(phone.right, 374);

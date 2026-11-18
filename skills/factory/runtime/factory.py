@@ -4593,6 +4593,7 @@ def pickup(*args):
                     print("factory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now", file=sys.stderr)
             retro_pickup_push(home)
             audit_pickup_push(home, data)
+        retro_pickup_catchup(home, dry)
         pickup_pass(home, device, minutes, dry, limit, cap, data)
     finally:
         if not dry:
@@ -8770,12 +8771,35 @@ def stop(wt):
     sys.exit(1 if alive else 0)
 
 
+def board_merged_head(home, slug, job_id):
+    """The board's github.head for a merged job, or None. An unreadable board warns and returns None."""
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(captured):
+            jobs = read_board(home)["jobs"]
+    except SystemExit:
+        reason = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error"
+    except ValueError:
+        reason = "malformed board"
+    else:
+        job = next((j for j in jobs if j.get("id") == job_id and j.get("project") == slug), {})
+        github = job.get("github")
+        if (job.get("stage") == "merged" and isinstance(github, dict) and isinstance(github.get("merged"), str)
+                and isinstance(github.get("head"), str) and COMMIT.fullmatch(github["head"])):
+            return github["head"]
+        return None
+    print(f"factory.py: cleanup could not read the board ({reason}), so it keeps a branch HEAD does not contain",
+          file=sys.stderr)
+    return None
+
+
 def cleanup(target):
     home, slug, job_id = r2_target(target, True)
     repo = read_paths(home).get(slug)
     if not repo:
         fail(f"{home / 'paths.md'} has no entry for {slug}: run /factory init in this device's checkout of it", 4)
-    removed, left = cleanup_job(repo, home / "worktrees" / slug / job_id, f"factory/{job_id}")
+    removed, left = cleanup_job(repo, home / "worktrees" / slug / job_id, f"factory/{job_id}",
+                                merged_head=board_merged_head(home, slug, job_id))
     folder = home / "prompts" / slug / job_id
     if os.path.lexists(folder):
         if any(entry.startswith("worktree ") for entry in left):
@@ -9521,6 +9545,10 @@ RETRO_POLLS = {"until_file": re.compile(r"\buntil \[ -[fs] "),
                "quiet_window": re.compile(r"stat -c %Y|stat -f %m")}
 RETRO_JOB = re.compile(r"factory-(\d{2,5})-")
 RETRO_PUSH_FILE = "retro-push.json"
+RETRO_PROMPT_FILE = "retro-schedule-prompt.md"
+RETRO_CATCHUP_FILE = "retro-catchup.json"
+RETRO_CATCHUP_AFTER = (9, 30)
+RETRO_RUN_NAME = re.compile(r"(\d{8}T\d{6}Z)-[0-9a-f]{6}")
 RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
 RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+")
 RETRO_HEADERS = re.compile(
@@ -9872,6 +9900,72 @@ def retro_pickup_push(home):
         retro_push()
     except SystemExit as e:
         print(f"factory.py: retro push stopped (exit {e.code}); the next pickup run retries it", file=sys.stderr)
+
+
+def retro_catchup_due(home, local):
+    """Whether this retro host missed today's weekday retro: it keeps the stored schedule prompt, local
+    is a weekday at or after RETRO_CATCHUP_AFTER, no catch-up is recorded for today, and no retro run
+    folder carries today's local date."""
+    prompt = home / RETRO_PROMPT_FILE
+    if prompt.is_symlink() or not prompt.is_file():
+        return False
+    if local.weekday() > 4 or (local.hour, local.minute) < RETRO_CATCHUP_AFTER:
+        return False
+    today = local.date()
+    try:
+        record = json.loads((home / RETRO_CATCHUP_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        record = None
+    if record == {"version": 1, "date": today.isoformat()}:
+        return False
+    folder = home / "retro"
+    for entry in folder.iterdir() if folder.is_dir() else ():
+        match = RETRO_RUN_NAME.fullmatch(entry.name)
+        if not match or not entry.is_dir():
+            continue
+        try:
+            stamp = datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ")
+        except ValueError:
+            continue
+        if stamp.replace(tzinfo=timezone.utc).astimezone(local.tzinfo).date() == today:
+            return False
+    return True
+
+
+def retro_pickup_catchup(home, dry):
+    """Launch the stored retro schedule prompt once on a weekday whose 09:00 slot left no run.
+    The record is written before the launch, so a failed or stopped session is not retried today."""
+    try:
+        local = datetime.now().astimezone()
+        if not retro_catchup_due(home, local):
+            return
+        job_id = "retro-" + local.strftime("%Y%m%d")
+        route = pick_route(home)
+        if route is None:
+            print("factory.py: retro catch-up waits: no available route", file=sys.stderr)
+            return
+        checkout = next(((slug, path) for slug, path in read_paths(home).items() if os.path.isdir(path)), None)
+        if checkout is None:
+            print("factory.py: retro catch-up waits: no checkout in paths.md", file=sys.stderr)
+            return
+        template = route_launcher(home, route)
+        if dry:
+            print(f"would launch retro catch-up {job_id} on {route[0]}")
+            return
+        name, provider, model, effort = route
+        given = {"id": job_id, "project": checkout[0], "repo_path": checkout[1], "session": secrets.token_hex(3),
+                 "provider": provider, "model": model, "effort": effort or "",
+                 "prompt": (home / RETRO_PROMPT_FILE).read_text(encoding="utf-8")}
+        write_atomic(home / RETRO_CATCHUP_FILE, json.dumps({"version": 1, "date": local.date().isoformat()}) + "\n")
+        ok, detail, log_path = launch_idea(home, given, name, launcher_argv(template, given),
+                                           launch_env(given, provider, model))
+        if ok:
+            print(f"launched retro catch-up {job_id} on {name} session {given['session']}")
+        else:
+            print(f"factory.py: retro catch-up {job_id} failed to launch ({detail}); see {log_path}; no retry today",
+                  file=sys.stderr)
+    except SystemExit as e:
+        print(f"factory.py: retro catch-up stopped (exit {e.code}); the next pickup run retries it", file=sys.stderr)
 
 
 def retro_fetch(home, date):

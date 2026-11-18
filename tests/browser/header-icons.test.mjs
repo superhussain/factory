@@ -1,4 +1,4 @@
-// The five header icon buttons stay on one row and match the project filter height.
+// The six header icon buttons stay on one row and match the project filter height.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -55,7 +55,14 @@ test("header icons share one row and match the filter height", { timeout: 120000
       await page.waitForSelector(".updated-word");
       const header = await page.evaluate(() => {
         const rect = (id) => document.getElementById(id).getBoundingClientRect();
-        const icons = ["inbox-link", "new-idea", "job-jump", "retros-link", "settings-link"];
+        const icons = [
+          "notifications-button",
+          "inbox-link",
+          "new-idea",
+          "job-jump",
+          "retros-link",
+          "settings-link",
+        ];
         const el = document.querySelector("header");
         const boxes = [...el.children]
           .map((child) => child.getBoundingClientRect())
@@ -92,7 +99,11 @@ test("header icons share one row and match the filter height", { timeout: 120000
         });
       }
       assert.equal(new Set(header.tops).size, 1, `icon tops at ${label}: ${header.tops}`);
-      assert.deepEqual(header.heights, [size, size, size, size, size, size], `heights at ${label}`);
+      assert.deepEqual(
+        header.heights,
+        [size, size, size, size, size, size, size],
+        `heights at ${label}`,
+      );
       assert.ok(
         header.scrollWidth <= header.clientWidth,
         `header scrolls at ${label}: ${header.scrollWidth} > ${header.clientWidth}`,

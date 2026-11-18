@@ -172,6 +172,23 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #inbox-link { position: relative; }
   #inbox-count { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--alert); color: var(--panel); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
   #inbox-count[hidden] { display: none; }
+  .notifications-wrap { position: relative; display: flex; }
+  #notifications-button { position: relative; }
+  #notifications-dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--alert); pointer-events: none; }
+  #notifications-dot[hidden] { display: none; }
+  .notifications-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; width: 360px; max-height: 70vh; overflow-y: auto; padding: 8px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .notifications-menu[hidden] { display: none; }
+  .notifications-menu-head { margin: 4px 8px 8px; font-size: 13px; font-weight: 600; }
+  #notifications-menu-status { margin: 4px 8px 8px; }
+  #notifications-menu-status:empty { display: none; }
+  #notifications-menu-list, #notifications-list { list-style: none; margin: 0; padding: 0; }
+  .notification-link { display: block; padding: 8px; border-bottom: 1px solid var(--line); border-radius: 6px; color: inherit; text-decoration: none; }
+  .notification-link .inbox-title, .notification-link .inbox-meta { display: block; }
+  .notification-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  @media (hover: hover) { .notification-link:hover { background: var(--line); } }
+  #notifications-more { display: block; padding: 10px 8px 4px; font-size: 13px; font-weight: 600; color: var(--accent); }
+  @media (pointer: coarse) { .notification-link, #notifications-more { min-height: 44px; box-sizing: border-box; } }
+  #notifications-page { max-width: 1040px; }
   #filter { height: var(--icon-size); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   #filter svg { flex: none; }
   #filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -188,7 +205,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .header-actions { display: flex; gap: inherit; }
   body[data-view="settings"] #board, body[data-view="settings"] #detail,
   body[data-view="retros"] #board, body[data-view="retros"] #detail,
-  body[data-view="inbox"] #board { display: none; }
+  body[data-view="inbox"] #board,
+  body[data-view="notifications"] #board { display: none; }
   #retros-page { max-width: 1040px; }
   .retros-runs-heading { font-size: 15px; margin: 24px 0 12px; }
   #audit-flags td a { color: var(--accent); }
@@ -210,7 +228,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .inbox-item[aria-current="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
   @media (min-width: 761px) {
-    body[data-inbox-split] #inbox-page { max-width: none; margin: 0 min(var(--drawer-w, 760px), 100%) 0 0; }
+    body[data-inbox-split] { --split-drawer: min(var(--drawer-w, 760px), 100vw - 400px); }
+    body[data-inbox-split] .detail { width: var(--split-drawer); }
+    body[data-inbox-split] #inbox-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
     body[data-inbox-split] .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; }
     body[data-inbox-split] .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
   }
@@ -634,6 +654,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     #filter { vertical-align: top; }
     /* top: auto opens the menu right under #filter; left and right still come from the header. */
     .filter-menu { top: auto; margin-top: 4px; left: 16px; right: 16px; min-width: 0; max-width: none; }
+    .notifications-wrap { position: static; }
+    .notifications-menu { left: 16px; right: 16px; width: auto; }
     :root { --icon-size: 32px; }
     .filter { padding: 4px 8px; }
 
@@ -689,10 +711,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .status .dot { flex: none; }
     /* The job actions button drops under the star, so the title keeps the width it had before the star. */
     .detail-head #d-star:not([hidden]) + #d-actions-wrap { margin-left: calc(-1 * (var(--icon-size) + 12px)); margin-top: calc(var(--icon-size) + 12px); }
+    .header-actions { gap: 4px; }
   }
   @media (pointer: coarse) { :root { --icon-size: 44px; } }
   /* Only when the icons and the status cannot share one row, the status moves up beside the filter. syncHeaderWrap sets wraps. */
-  @media (pointer: coarse) and (min-width: 361px) and (max-width: 760px) { header.wraps .header-actions { order: 1; } }
+  @media (max-width: 760px) { header.wraps .header-actions { order: 1; } }
 </style>
 </head>
 <body>
@@ -704,6 +727,15 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     <div class="filter-menu" id="filter-menu" role="group" aria-label="Show jobs from" hidden></div>
   </div>
   <div class="header-actions">
+    <div class="notifications-wrap" id="notifications-wrap">
+      <button class="btn icon" id="notifications-button" type="button" aria-label="Notifications" title="Notifications" aria-expanded="false" aria-controls="notifications-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.5 1.5h-11z"/><path d="M6.5 14a1.5 1.5 0 0 0 3 0"/></svg><span id="notifications-dot" aria-hidden="true" hidden></span></button>
+      <div class="notifications-menu" id="notifications-menu" role="region" aria-label="Recent notifications" hidden>
+        <p class="notifications-menu-head">Notifications</p>
+        <p class="muted" id="notifications-menu-status" role="status"></p>
+        <ol id="notifications-menu-list"></ol>
+        <a id="notifications-more" href="#/notifications">See more</a>
+      </div>
+    </div>
     <a class="btn icon" id="inbox-link" href="#/inbox" aria-label="Inbox" title="Inbox (I)" aria-keyshortcuts="i"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9.5V13h11V9.5L12 4H4z"/></svg><span id="inbox-count" aria-hidden="true" hidden></span></a>
     <button class="btn icon" id="new-idea" aria-label="New idea" title="New idea (N)" aria-keyshortcuts="n" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2c.4.3.6.7.6 1.2V12h4v-1.1c0-.5.2-.9.6-1.2A4.5 4.5 0 0 0 8 1.5zM6.5 14.5h3"/></svg></button>
     <button class="btn icon" id="job-jump" aria-label="Jump to job" title="Jump to job (J, /, ⌘K or Ctrl+K)" aria-keyshortcuts="j / Meta+K Control+K"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 4 4"/></svg></button>
@@ -1171,6 +1203,14 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
   </div>
   <p class="muted" id="inbox-status" role="status"></p>
   <ol id="inbox-list"></ol>
+</div>
+<div class="settings-page" id="notifications-page" role="region" aria-labelledby="notifications-page-heading" hidden>
+  <div class="settings-head">
+    <a class="btn icon" id="notifications-back" href="#" aria-label="Back to board" title="Back to board (H)" aria-keyshortcuts="h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
+    <h2 id="notifications-page-heading" tabindex="-1">Notifications</h2>
+  </div>
+  <p class="muted" id="notifications-status" role="status"></p>
+  <ol id="notifications-list"></ol>
 </div>
 <dialog id="idea-dlg" aria-labelledby="idea-h">
   <form id="idea-form">
@@ -3007,14 +3047,19 @@ function renderRoute() {
   const retrosOpen = !section && retrosRoute() !== null;
   const inboxWas = $('inbox-page').hidden === false;
   const inboxOpen = !section && inboxShown();
-  document.body.dataset.view = section ? 'settings' : retrosOpen ? 'retros' : inboxOpen ? 'inbox' : 'board';
+  const notificationsWas = $('notifications-page').hidden === false;
+  const notificationsOpen = !section && !retrosOpen && !inboxOpen && notificationsRoute() !== null;
+  document.body.dataset.view = section ? 'settings' : retrosOpen ? 'retros' : inboxOpen ? 'inbox' : notificationsOpen ? 'notifications' : 'board';
   $('settings-page').hidden = !section;
   $('retros-page').hidden = !retrosOpen;
   $('inbox-page').hidden = !inboxOpen;
+  $('notifications-page').hidden = !notificationsOpen;
   document.body.toggleAttribute('data-inbox-split', inboxSplit());
-  document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : baseTitle;
+  document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : notificationsOpen ? 'Notifications · ' + baseTitle : baseTitle;
   if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxFocusRow = -1; inboxAnswer = null; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
+  if (notificationsOpen && !notificationsWas) { notificationsHtml = ''; $('notifications-page-heading').focus(); }
+  renderNotifications();
   if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
@@ -3254,7 +3299,7 @@ let inboxAnswer = null;
 function inboxRoute() {
   return location.hash === '#/inbox' ? true : null;
 }
-function inboxSplit() { return drawerReturn === '#/inbox' && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null; }
+function inboxSplit() { return drawerReturn === '#/inbox' && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null; }
 function inboxShown() { return inboxRoute() !== null || inboxSplit(); }
 
 const INBOX_LABELS = { ask: 'Question', pr: 'Escalated PR', human: 'Needs recovery', backlog: 'Backlog decision' };
@@ -3524,6 +3569,79 @@ $('inbox-list').addEventListener('submit', (e) => {
   submitInboxAnswer();
 });
 $('inbox-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
+// Notifications: board jobs waiting on you and merged jobs, newest first.
+// The kinds match boardPushes in worker/push.js, without stuck.
+const NOTIFICATION_LABELS = { needs: 'Needs you', merged: 'Merged' };
+const NOTIFICATIONS_MENU_ROWS = 8;
+const NOTIFICATIONS_SEEN_KEY = 'factory-notifications-seen';
+let notificationsHtml = '';
+let notificationsMenuHtml = '';
+function notificationsRoute() { return location.hash === '#/notifications' ? true : null; }
+function notificationItems() {
+  return jobs.filter((j) => isShown(j.project) && (waitsOnYou(j) || j.stage === 'merged'))
+    .map((job) => job.stage === 'merged' ? { kind: 'merged', job, at: job.done || job.updated } : { kind: 'needs', job, at: job.updated })
+    .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+}
+function notificationsUnread(items) {
+  return (Date.parse(items[0]?.at) || 0) > (Date.parse(store.get(NOTIFICATIONS_SEEN_KEY)) || 0);
+}
+function renderNotifications() {
+  const items = loaded ? notificationItems() : [];
+  const menuOpen = !$('notifications-menu').hidden;
+  if ((menuOpen || notificationsRoute() !== null) && notificationsUnread(items)) store.set(NOTIFICATIONS_SEEN_KEY, items[0].at);
+  const unread = notificationsUnread(items);
+  $('notifications-dot').hidden = !unread;
+  $('notifications-button').setAttribute('aria-label', unread ? 'Notifications, new' : 'Notifications');
+  if (menuOpen) renderNotificationsMenu(items);
+  if (notificationsRoute() !== null) renderNotificationsPage(items);
+}
+function renderNotificationsMenu(items) {
+  $('notifications-menu-status').textContent = !loaded ? 'Loading notifications…' : items.length ? '' : 'No notifications yet.';
+  const html = items.slice(0, NOTIFICATIONS_MENU_ROWS).map((it) =>
+    '<li><a class="notification-link" href="#' + esc(encodeURIComponent(it.job.id)) + '"><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span>' +
+    '<span class="inbox-title">' + esc(it.job.title || it.job.id) + '</span><span class="inbox-meta">' + esc(it.job.id) + ' · ' + esc(ago(it.at)) + '</span></a></li>').join('');
+  if (html === notificationsMenuHtml) return;
+  notificationsMenuHtml = html;
+  $('notifications-menu-list').innerHTML = html;
+}
+function renderNotificationsPage(items) {
+  $('notifications-status').textContent = !loaded ? 'Loading notifications…'
+    : items.length ? '' : 'No notifications yet. Merged jobs and jobs waiting on you show up here.';
+  const html = items.map((it, i) => {
+    const j = it.job;
+    const pr = it.kind === 'merged' ? prLink(j) : null;
+    return '<li class="inbox-item"><span class="inbox-rank">' + (i + 1) + '</span>' +
+      '<div><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span><p class="inbox-title">' + esc(j.title || j.id) + '</p>' +
+      '<p class="inbox-meta">' + [projectName(j), j.id, ago(it.at)].map(esc).join(' · ') + '</p></div>' +
+      '<div class="inbox-actions">' + (pr ? '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>' : '') +
+      '<a class="btn" href="#' + esc(encodeURIComponent(j.id)) + '">Open job</a></div></li>';
+  }).join('');
+  if (html === notificationsHtml) return;
+  notificationsHtml = html;
+  $('notifications-list').innerHTML = html;
+}
+function openNotificationsMenu() {
+  $('notifications-menu').hidden = false;
+  $('notifications-button').setAttribute('aria-expanded', 'true');
+  notificationsMenuHtml = '';
+  renderNotifications();
+}
+function closeNotificationsMenu(refocus) {
+  if ($('notifications-menu').hidden) return;
+  $('notifications-menu').hidden = true;
+  $('notifications-button').setAttribute('aria-expanded', 'false');
+  if (refocus) $('notifications-button').focus();
+}
+$('notifications-button').addEventListener('click', () => $('notifications-menu').hidden ? openNotificationsMenu() : closeNotificationsMenu(false));
+$('notifications-wrap').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || $('notifications-menu').hidden) return;
+  e.stopPropagation();
+  closeNotificationsMenu(true);
+});
+document.addEventListener('pointerdown', (e) => { if (!$('notifications-wrap').contains(e.target)) closeNotificationsMenu(false); });
+$('notifications-wrap').addEventListener('focusout', (e) => { if (e.relatedTarget && !$('notifications-wrap').contains(e.relatedTarget)) closeNotificationsMenu(false); });
+$('notifications-menu').addEventListener('click', (e) => { if (e.target.closest('a')) closeNotificationsMenu(false); });
+$('notifications-back').addEventListener('click', (e) => { e.preventDefault(); leaveSettings(); });
 
 // Pipeline settings: one in-memory draft per scope. Stored text is shown only through
 // value and textContent, never parsed as markup.
@@ -4321,12 +4439,13 @@ function renderBoard() {
       '<p>Jobs show up here as they move through the loop.</p>' +
       (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
-    if (!settingsShown && !retrosRoute() && !inboxShown()) document.title = BASE_TITLE;
+    if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsRoute()) document.title = BASE_TITLE;
     syncAppBadge(0);
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
     renderRetrosPage();
     renderInboxPage();
+    renderNotifications();
     return;
   }
   const noneShown = !shownProjectKeys().length;
@@ -4341,7 +4460,7 @@ function renderBoard() {
   waiting.splice(0, waiting.length, ...waitingJobs());
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   for (const s of COLUMNS) if (s !== 'backlog' && !TERMINAL.includes(s)) starredFirst(lists[COLUMNS.indexOf(s)]);
-  if (!settingsShown && !retrosRoute() && !inboxShown()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
+  if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsRoute()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
@@ -4394,6 +4513,7 @@ function renderBoard() {
   syncCardActions();
   renderRetrosPage();
   renderInboxPage();
+  renderNotifications();
   heldDrawn = heldChipsKey();
 }
 
@@ -5927,7 +6047,7 @@ function closeDetail(keepHash = false) {
   const target = raw !== null ? focusBacklogControl(raw) : id && refocus ? focusJobCard(id) : null;
   target?.scrollIntoView({ block: 'nearest' });
   refreshPicker();
-  if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null) history.replaceState(null, '', location.pathname + location.search + (drawerReturn ?? ''));
+  if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null) history.replaceState(null, '', location.pathname + location.search + (drawerReturn ?? ''));
   const back = drawerReturn;
   drawerReturn = null;
   if (back && !keepHash) renderRoute();
@@ -5954,7 +6074,7 @@ document.addEventListener('keydown', (e) => {
 // Arrow navigation over cards and job pages, plus n, j or /, p, s, r, w and a single-key openers.
 // A separate listener, so the Esc/Cmd+K handler above stays byte-identical.
 function handleBoardKeys(e) {
-  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null) return;
+  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null || notificationsRoute() !== null) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
   if (e.target.closest('input, textarea, select, [contenteditable], #d-resize, video')) return;
   if (document.querySelector('dialog[open]')) return;
@@ -6023,7 +6143,7 @@ document.addEventListener('keydown', handleBoardKeys);
 
 // b opens the first backlog item. a and d approve or deny the open one, which opens the next.
 function handleBacklogKeys(e) {
-  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null) return;
+  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null || notificationsRoute() !== null) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || e.repeat) return;
   if (e.target.closest('textarea, select, [contenteditable], #d-resize, input:not([type=radio]):not([type=checkbox])')) return;
   if (document.querySelector('dialog[open]')) return;
@@ -6057,7 +6177,7 @@ function handleHomeKey(e) {
   // preventDefault below keeps a select's type-ahead off it.
   if (e.target.closest('textarea, [contenteditable], #d-resize, input:not([type=radio]):not([type=checkbox])')) return;
   if (document.querySelector('dialog[open]')) return;
-  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null) {
+  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null || notificationsRoute() !== null) {
     e.preventDefault();
     leaveSettings();
   } else if (openId || openBacklogRaw !== null) {
@@ -6149,7 +6269,8 @@ window.addEventListener('hashchange', (e) => {
   const { id } = parseHash();
   if (id !== archiveFailNoted) archiveFailNoted = '';
   const key = backlogRoute();
-  if (key || id) drawerReturn = new URL(e.oldURL).hash === '#/inbox' ? '#/inbox' : openId || openBacklogRaw !== null ? drawerReturn : null;
+  const from = new URL(e.oldURL).hash;
+  if (key || id) drawerReturn = from === '#/inbox' || from === '#/notifications' ? from : openId || openBacklogRaw !== null ? drawerReturn : null;
   else drawerReturn = null;
   if (key) openBacklogRoute(key);
   else if (id) openJob(id);

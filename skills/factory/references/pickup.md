@@ -177,7 +177,11 @@ Each run, in order:
   It is silent, calls no model, and never changes the run's output or exit code.
 - Pushes this host's retro digest on its first run of each local date that
   `<home>/retro-push.json` does not record; a failed push prints one warning and
-  the run goes on.
+  the run goes on. On the host that keeps `<home>/retro-schedule-prompt.md`,
+  pickup catches up a missed weekday retro: from 09:30 local, when no retro run
+  folder carries today's date and `<home>/retro-catchup.json` does not record
+  today, it launches that prompt once through the first route's launcher as
+  `retro-<YYYYMMDD>`.
 - Pushes this host's audit rows for each job at spec, build, review, approve or
   pr-open whose transcripts here changed since `<home>/audit-push.json` records;
   a failed push prints one warning and the run goes on.

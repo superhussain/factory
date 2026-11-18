@@ -681,6 +681,31 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await it("split inbox keeps 400px at 800 to 1100", async () => {
+      await reset();
+      for (const width of [800, 900, 1100, 1280]) {
+        const { page, errors } = await openPage("#/inbox", { width, height: 900 });
+        await openRow3(page);
+        const box = await page.evaluate(() => {
+          const inbox = document.querySelector("#inbox-page").getBoundingClientRect();
+          const detail = document.querySelector("#detail").getBoundingClientRect();
+          return {
+            inbox: inbox.width,
+            detail: detail.width,
+            beside: inbox.right <= detail.left + 0.5,
+          };
+        });
+        if (width === 1280) assert.equal(box.detail, 760, `drawer at ${width}`);
+        else {
+          assert.ok(box.inbox >= 360, `inbox at ${width}: ${box.inbox}`);
+          assert.ok(box.detail >= 360, `drawer at ${width}: ${box.detail}`);
+          assert.ok(box.beside, `overlap at ${width}`);
+        }
+        assert.deepEqual(errors, []);
+        await page.browserContext().close();
+      }
+    });
+
     if (SHOTS) await it("reference capture", () => shotKeys("after-reference-keys.png"));
 
     for (const [name, pick, decision] of [

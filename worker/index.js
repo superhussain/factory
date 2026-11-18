@@ -1716,6 +1716,7 @@ async function auditPut(request, env, principal, job, id) {
 
 const AUDIT_FLAGS_KEY = "audit-flags.json";
 const AUDIT_FLAGS_MAX = 500;
+const AUDIT_FLAGS_HOST_MAX = 100;
 const AUDIT_FLAGS_BUSY = "audit rows were saved, but the red-flag index kept changing; push again";
 const AUDIT_FLAGS_SCHEMA = "factory.audit-flags/1";
 const AUDIT_FLAGS_TIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
@@ -1769,6 +1770,18 @@ function auditFlagOrder(a, b) {
   return 0;
 }
 
+// Newest first, at most 100 rows per host and 500 in all.
+function auditFlagsKeep(rows) {
+  const counts = new Map();
+  return rows
+    .sort(auditFlagOrder)
+    .filter((row) => {
+      counts.set(row.host, (counts.get(row.host) ?? 0) + 1);
+      return counts.get(row.host) <= AUDIT_FLAGS_HOST_MAX;
+    })
+    .slice(0, AUDIT_FLAGS_MAX);
+}
+
 // Replaces the job and host's rows in the index. False after ten lost conditional puts.
 async function auditFlagsUpdate(env, job, host, rows) {
   const fresh = auditFlagRows(rows, job, host);
@@ -1777,7 +1790,7 @@ async function auditFlagsUpdate(env, job, host, rows) {
     const kept = prev
       ? JSON.parse(await prev.text()).rows.filter((row) => row.job !== job || row.host !== host)
       : [];
-    const next = [...kept, ...fresh].sort(auditFlagOrder).slice(0, AUDIT_FLAGS_MAX);
+    const next = auditFlagsKeep([...kept, ...fresh]);
     const saved = await env.BUCKET.put(
       AUDIT_FLAGS_KEY,
       JSON.stringify({ schema: AUDIT_FLAGS_SCHEMA, rows: next }),
