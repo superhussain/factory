@@ -3,6 +3,7 @@
 // the frame. An unlisted parent is refused by frame-ancestors. Every https://*.example.test
 // request is fulfilled here; the dashboard origin proxies to the owned local origin.
 // A sign-in popup opened by a listed parent posts factory-embed-signed-in to it; an unlisted parent gets nothing.
+// A listed parent gets the frame's hash on ready and on every change.
 // A listed parent also gets the Inbox count, which follows the frame's project filter.
 // The config also lists paseo://app, the desktop origin; Chrome here cannot load that scheme, so this proves the extra source leaves https framing intact.
 import assert from "node:assert/strict";
@@ -192,6 +193,32 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       ]);
       assert.equal(childFrame(page).url(), before);
       assert.equal(before, DASHBOARD + "/#042-sample-links");
+    });
+
+    await t.test("location posts", async () => {
+      const locations = () =>
+        page.evaluate(() =>
+          window.received.filter((m) => m?.type === "factory-embed-location").map((m) => m),
+        );
+      const waitFor = (hash) =>
+        page.waitForFunction(
+          (h) =>
+            window.received.filter((m) => m?.type === "factory-embed-location").at(-1)?.hash === h,
+          { timeout: 5000, polling: 50 },
+          hash,
+        );
+      await waitFor("#042-sample-links");
+      assert.deepEqual((await locations())[0], {
+        type: "factory-embed-location",
+        v: 1,
+        hash: "#042-sample-links",
+      });
+      await childFrame(page).evaluate(() => {
+        location.hash = "#/inbox";
+      });
+      await waitFor("#/inbox");
+      await childFrame(page).evaluate(() => replaceUrl("/#/settings/display"));
+      await waitFor("#/settings/display");
     });
 
     await t.test("unlisted origin", async () => {
