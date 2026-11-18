@@ -112,6 +112,26 @@ class RetroRedactTest(RetroCase):
             with self.subTest(text=text):
                 self.assertIn("[redacted]", factory.retro_redact(text))
 
+    def test_tool_call_credential_forms(self):
+        for text, out in (("mysql -u root -phunter2 db", "mysql -u root -p[redacted] db"),  # gitleaks:allow synthetic credentials
+                          ("sshpass -p hunter2 ssh host", "sshpass -p [redacted] ssh host"),  # gitleaks:allow synthetic credentials
+                          ("MYSQL_PWD=hunter2 mysql", "MYSQL_PWD=[redacted] mysql"),  # gitleaks:allow synthetic credentials
+                          ("curl -H Authorization:\\ Bearer\\ abc123 x", "curl -H Authorization:\\[redacted]"),
+                          ("mariadb-dump -phunter2 db", "mariadb-dump -p[redacted] db"),  # gitleaks:allow synthetic credentials
+                          ('mysql -p"hunter 2" db', "mysql -p[redacted] db"),  # gitleaks:allow synthetic credentials
+                          ("sshpass -phunter2 ssh host", "sshpass -p[redacted] ssh host")):  # gitleaks:allow synthetic credentials
+            with self.subTest(text=text):
+                self.assertEqual(factory.retro_redact(text), out)
+
+    def test_tool_call_lookalikes_kept(self):
+        for text, out in (("mysql -u root -p db", "mysql -u root -p db"),
+                          ("mkdir -p a/b && ps -p 123", "mkdir -p a/b && ps -p 123"),
+                          ("sshpass -p hunter2 ssh -p 2222 host",  # gitleaks:allow synthetic credentials
+                           "sshpass -p [redacted] ssh -p 2222 host"),
+                          ("sshpass -f pw.txt ssh -p 2222 host", "sshpass -f pw.txt ssh -p [redacted] host")):
+            with self.subTest(text=text):
+                self.assertEqual(factory.retro_redact(text), out)
+
     def test_long_name_run_redacts_in_linear_time(self):
         for text in ("a" * 30000, "-" * 30000, "a1" * 15000, "--" + "a" * 30000):
             with self.subTest(text=text[:3]):
@@ -154,9 +174,12 @@ class RetroRedactTest(RetroCase):
         self.assertIn("RETRO_SESSION_REF", patterns)
         self.assertIn("RETRO_LONG_KEYVALUE", patterns)
         self.assertIn("RETRO_LONG_FLAG", patterns)
+        for name in ("RETRO_MYSQL", "RETRO_MYSQL_PASS", "RETRO_SSHPASS", "RETRO_SSHPASS_PASS"):
+            self.assertIn(name, patterns)
         units = [*"aZ09-.+_:/", " ", "\t", "a.", "a-", "a+", "a1", "--a", "token", "password", "bearer ", "-u ", "://",
                  "a=", "--a ", "_token=", "tokens", "a" * 70 + " ", "a" * 40 + "://", "a" * 40 + "://u:p@",
-                 "@", "://u:p@ss@", "a" * 40 + "://u:p@ss@"]
+                 "@", "://u:p@ss@", "a" * 40 + "://u:p@ss@", "mysql ", "sshpass ", "mysql -p\"", "mysql -p'", " -p",
+                 "sshpass -p \"", "Authorization:\\ "]
         for unit in units:
             text = (unit * 30000)[:30000]
             for name, pattern in [*patterns.items(), ("retro_redact", None)]:
