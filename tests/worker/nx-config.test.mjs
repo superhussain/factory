@@ -83,6 +83,7 @@ const INPUTS = {
     "shared",
     "{workspaceRoot}/tests/tools/**",
     "{workspaceRoot}/tests/fixtures/deployment-valid.json",
+    "{workspaceRoot}/docs/cloudflare.md",
   ],
   local: [
     "default",
@@ -234,7 +235,7 @@ test("nx.json connects to no remote cache", () => {
   for (const key of ["nxCloudId", "nxCloudAccessToken", "nxCloudUrl", "tasksRunnerOptions"]) {
     assert.equal(nx[key], undefined, key);
   }
-  assert.doesNotMatch(nxText, /cloud/i);
+  assert.doesNotMatch(nxText.replaceAll("docs/cloudflare.md", ""), /cloud/i);
 });
 
 test("test:protocol prepares the .build assets before its suites", () => {

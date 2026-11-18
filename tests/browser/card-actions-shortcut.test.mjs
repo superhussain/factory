@@ -55,6 +55,10 @@ const KEYS = [
   ["B", "Open the first backlog item"],
   ["A or D", "Approve or deny the open backlog item"],
   ["Right or Left arrow", "Move between cards and job pages"],
+  [
+    "Right or Left arrow in the Inbox",
+    "Move between Inbox rows, with the open one beside the list",
+  ],
 ];
 
 async function openPage(browser, origin, hash) {

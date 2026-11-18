@@ -640,6 +640,15 @@ test("retros page", { timeout: 180000 }, async (t) => {
           "No retro runs yet. Each retro admit uploads its findings here.",
         wait,
       );
+      assert.equal(
+        await page.$eval(
+          "#retros-status",
+          (el) =>
+            el.previousElementSibling.matches("h3#retros-runs-heading") &&
+            el.previousElementSibling.textContent,
+        ),
+        "Retro runs",
+      );
       await page.browserContext().close();
       retros = { status: 500, body: "boom" };
       ({ page } = await openPage("#/retros"));

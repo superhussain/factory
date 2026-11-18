@@ -1654,13 +1654,25 @@ async function browserTest(url) {
       "- [ ] sample: Third synthetic item",
       "",
     ].join("\n");
-    await support.seedBoard(url, clone(JOBS));
+    // The slice's sub-job-of parent is on the board, so its id links.
+    const waitsJobs = [
+      ...JOBS,
+      {
+        id: "001-capture",
+        project: "sample",
+        title: "Capture",
+        stage: "build",
+        updated: "2026-10-26T12:00:00Z",
+      },
+    ];
+    await support.seedBoard(url, clone(waitsJobs));
     await putText(url, "/api/backlog", waitsBacklog, "text/markdown; charset=utf-8");
     await load(3);
     const drawer = () =>
       page.$eval("#d-doc", (el) => ({
         headings: [...el.querySelectorAll(".backlog-context h3")].map((h) => h.textContent),
         depends: [...el.querySelectorAll(".backlog-depends li")].map((li) => li.textContent),
+        links: [...el.querySelectorAll(".backlog-depends li a")].map((a) => a.getAttribute("href")),
         approve: el.querySelector("input[value=approved]").closest("label").textContent,
         waits: el.querySelectorAll(".ask-waits").length,
         rec: el.querySelectorAll(".ask-rec").length,
@@ -1688,6 +1700,7 @@ async function browserTest(url) {
     assert.deepEqual(await drawer(), {
       headings: ["Depends on", "Why this item"],
       depends: [SLICE],
+      links: ["#001-capture"],
       approve: `Approve Waits on ${SLICE} It moves to the idea column, and pickup starts it.`,
       waits: 1,
       rec: 0,
@@ -1717,7 +1730,7 @@ async function browserTest(url) {
     const checked = await drawer();
     assert.deepEqual([checked.waits, checked.rec], [0, 1]);
     assert.match(checked.approve, /^Approve Recommended /);
-    assert.deepEqual((await read("/api/board")).jobs, JOBS, "a refused approve adds no job");
+    assert.deepEqual((await read("/api/board")).jobs, waitsJobs, "a refused approve adds no job");
     assert.deepEqual(pageErrors, []);
     console.log("PASS backlog browser depends");
   } finally {
