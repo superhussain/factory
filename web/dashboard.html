@@ -1477,6 +1477,19 @@ window.addEventListener('online', async () => {
 });
 
 let loaded = false;
+// Why the first board read failed while nothing has loaded: '', 'signin', 'offline' or 'unreachable'.
+let boardLoadError = '';
+const BOARD_LOAD_ERRORS = {
+  signin: 'Your sign-in has expired. Sign in again, then retry.',
+  offline: "You're offline and this device has no saved board. Reconnect, then retry.",
+  unreachable: "Can't reach the factory. Check your connection, then retry.",
+};
+function noteBoardLoadError(state) {
+  if (loaded) return;
+  boardLoadError = state;
+  renderNotifications();
+  renderInboxPage();
+}
 // Archived jobs left the board. A link to one opens it read-only from GET /api/board/archive.
 const archivedJobs = new Map();
 // Ids the archive answered 404 for, so a link to one is fetched once per page session.
@@ -1526,6 +1539,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     const r = await fetch('./board.json', { cache: 'no-store' });
     if (r.status === 401 || r.status === 403) {
       setConnection('signin');
+      noteBoardLoadError('signin');
       return false;
     }
     // The orchestrator creates board.json with its first job, so a 404 is an empty factory, not an outage.
@@ -1549,6 +1563,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     boardArchived = Number.isInteger(data.archived?.max_id);
     boardUpdated = data.updated || '';
     boardEtag = etag;
+    boardLoadError = '';
     loaded = true;
     drawUpdated();
     renderBoard();
@@ -1567,6 +1582,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     if (!loaded) $('updated').textContent = "can't reach the factory";
     if (e instanceof TypeError) setConnection('offline');
     else if (!loaded) setConnection('unreachable');
+    noteBoardLoadError(e instanceof TypeError ? 'offline' : 'unreachable');
     return false;
   }
 }
@@ -3365,8 +3381,9 @@ function renderInboxPage() {
   inboxStepHref = '';
   syncInboxLink();
   if (!inboxShown()) return;
+  $('inbox-retry').hidden = !boardLoadError;
   if (!loaded || (!backlogLoaded && !backlogFailed)) {
-    $('inbox-status').textContent = inboxError || 'Loading the inbox\u2026';
+    $('inbox-status').textContent = inboxError || (boardLoadError ? "Couldn't load the inbox. " + BOARD_LOAD_ERRORS[boardLoadError] : 'Loading the inbox\u2026');
     $('inbox-list').innerHTML = '';
     inboxHtml = '';
     return;
@@ -3593,6 +3610,15 @@ $('inbox-back').addEventListener('click', e => { e.preventDefault(); leaveSettin
 // The kinds match boardPushes in worker/push.js, without stuck.
 const NOTIFICATION_LABELS = { needs: 'Needs you', merged: 'Merged' };
 const NOTIFICATIONS_MENU_ROWS = 8;
+const NOTIFICATIONS_PAGE_ROWS = 20;
+const NOTIFICATIONS_EMPTY = {
+  all: 'No notifications yet. Merged jobs and jobs waiting on you show up here.',
+  needs: 'Nothing needs you right now.',
+  merged: 'No merged jobs yet.',
+};
+// The page's filter and zero-based page, kept for this tab only.
+let notificationsFilter = 'all';
+let notificationsPage = 0;
 const NOTIFICATIONS_SEEN_KEY = 'factory-notifications-seen';
 let notificationsHtml = '';
 let notificationsMenuHtml = '';
@@ -3616,7 +3642,9 @@ function renderNotifications() {
   if (notificationsRoute() !== null) renderNotificationsPage(items);
 }
 function renderNotificationsMenu(items) {
-  $('notifications-menu-status').textContent = !loaded ? 'Loading notifications…' : items.length ? '' : 'No notifications yet.';
+  $('notifications-menu-status').textContent = boardLoadError ? "Couldn't load notifications. " + BOARD_LOAD_ERRORS[boardLoadError]
+    : !loaded ? 'Loading notifications…' : items.length ? '' : 'No notifications yet.';
+  $('notifications-menu-retry').hidden = !boardLoadError;
   const html = items.slice(0, NOTIFICATIONS_MENU_ROWS).map((it) =>
     '<li><a class="notification-link" href="#' + esc(encodeURIComponent(it.job.id)) + '"><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span>' +
     '<span class="inbox-title">' + esc(it.job.title || it.job.id) + '</span><span class="inbox-meta">' + esc(it.job.id) + ' · ' + esc(ago(it.at)) + '</span></a></li>').join('');
@@ -3624,17 +3652,39 @@ function renderNotificationsMenu(items) {
   notificationsMenuHtml = html;
   $('notifications-menu-list').innerHTML = html;
 }
+function notificationActions(it) {
+  const j = it.job, pr = prLink(j), paseo = paseoLinks(j), owner = sessionJob(j);
+  const whose = owner && owner !== j ? 'the session of ' + owner.id : "this job's session";
+  let html = '<a class="btn" href="#' + esc(encodeURIComponent(j.id)) + '">Open job</a>';
+  if (pr) html += '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>';
+  for (const kind of ['app', 'web']) {
+    if (!paseo?.[kind]) continue;
+    const label = factoryConfig.agent_links[kind].label;
+    html += '<a class="btn" href="' + esc(paseo[kind]) + '"' + (kind === 'web' ? ' target="_blank" rel="noopener noreferrer"' : '') +
+      ' aria-label="' + esc('Open ' + whose + ' in ' + label) + '">' + esc('Open in ' + label) + '</a>';
+  }
+  return html;
+}
 function renderNotificationsPage(items) {
-  $('notifications-status').textContent = !loaded ? 'Loading notifications…'
-    : items.length ? '' : 'No notifications yet. Merged jobs and jobs waiting on you show up here.';
-  const html = items.map((it, i) => {
+  const shown = notificationsFilter === 'all' ? items : items.filter((it) => it.kind === notificationsFilter);
+  const pages = Math.max(1, Math.ceil(shown.length / NOTIFICATIONS_PAGE_ROWS));
+  notificationsPage = Math.min(notificationsPage, pages - 1);
+  const start = notificationsPage * NOTIFICATIONS_PAGE_ROWS;
+  $('notifications-status').textContent = boardLoadError ? "Couldn't load notifications. " + BOARD_LOAD_ERRORS[boardLoadError]
+    : !loaded ? 'Loading notifications…' : shown.length ? '' : NOTIFICATIONS_EMPTY[notificationsFilter];
+  $('notifications-retry').hidden = !boardLoadError;
+  $('notifications-filters').hidden = !loaded;
+  for (const b of $('notifications-filters').querySelectorAll('[data-notifications-filter]')) b.setAttribute('aria-pressed', String(b.dataset.notificationsFilter === notificationsFilter));
+  $('notifications-pager').hidden = pages < 2;
+  $('notifications-page-label').textContent = 'Page ' + (notificationsPage + 1) + ' of ' + pages;
+  $('notifications-prev').disabled = notificationsPage === 0;
+  $('notifications-next').disabled = notificationsPage === pages - 1;
+  const html = shown.slice(start, start + NOTIFICATIONS_PAGE_ROWS).map((it, i) => {
     const j = it.job;
-    const pr = it.kind === 'merged' ? prLink(j) : null;
-    return '<li class="inbox-item"><span class="inbox-rank">' + (i + 1) + '</span>' +
+    return '<li class="inbox-item"><span class="inbox-rank">' + (start + i + 1) + '</span>' +
       '<div><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span><p class="inbox-title">' + esc(j.title || j.id) + '</p>' +
       '<p class="inbox-meta">' + [projectName(j), j.id, ago(it.at)].map(esc).join(' · ') + '</p></div>' +
-      '<div class="inbox-actions">' + (pr ? '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>' : '') +
-      '<a class="btn" href="#' + esc(encodeURIComponent(j.id)) + '">Open job</a></div></li>';
+      '<div class="inbox-actions">' + notificationActions(it) + '</div></li>';
   }).join('');
   if (html === notificationsHtml) return;
   notificationsHtml = html;
@@ -3662,6 +3712,28 @@ document.addEventListener('pointerdown', (e) => { if (!$('notifications-wrap').c
 $('notifications-wrap').addEventListener('focusout', (e) => { if (e.relatedTarget && !$('notifications-wrap').contains(e.relatedTarget)) closeNotificationsMenu(false); });
 $('notifications-menu').addEventListener('click', (e) => { if (e.target.closest('a')) closeNotificationsMenu(false); });
 $('notifications-back').addEventListener('click', (e) => { e.preventDefault(); leaveSettings(); });
+$('notifications-filters').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-notifications-filter]');
+  if (!b) return;
+  notificationsFilter = b.dataset.notificationsFilter;
+  notificationsPage = 0;
+  renderNotifications();
+});
+function stepNotificationsPage(delta, button) {
+  notificationsPage += delta;
+  renderNotifications();
+  $('notifications-page').scrollIntoView({ block: 'start' });
+  if (button.disabled) (button.id === 'notifications-prev' ? $('notifications-next') : $('notifications-prev')).focus();
+}
+$('notifications-prev').addEventListener('click', (e) => stepNotificationsPage(-1, e.currentTarget));
+$('notifications-next').addEventListener('click', (e) => stepNotificationsPage(1, e.currentTarget));
+async function retryBoardLoad(e) {
+  const id = e.currentTarget.id;
+  if (!(await poll()) || document.activeElement !== document.body) return;
+  if (id === 'notifications-menu-retry') ($('notifications-menu-list').querySelector('a') || $('notifications-more')).focus();
+  else $(id === 'notifications-retry' ? 'notifications-page-heading' : 'inbox-page-heading').focus();
+}
+for (const id of ['notifications-menu-retry', 'notifications-retry', 'inbox-retry']) $(id).addEventListener('click', retryBoardLoad);
 
 // Pipeline settings: one in-memory draft per scope. Stored text is shown only through
 // value and textContent, never parsed as markup.
