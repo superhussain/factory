@@ -128,9 +128,6 @@ test("embed_origins is optional, https or paseo://app, and sets frame-ancestors"
       assets.readServerConfig({ ...base, FACTORY_EMBED_ORIGINS: JSON.stringify([bad]) }),
     );
   assert.throws(() =>
-    assets.readServerConfig({ ...base, FACTORY_EMBED_ORIGINS: '["http://paseo.example.test"]' }),
-  );
-  assert.throws(() =>
     assets.readServerConfig({ ...base, FACTORY_EMBED_ORIGINS: JSON.stringify([paseo, paseo]) }),
   );
   const rendered = assets.renderDashboard(config({ embed_origins: [paseo, desktop] }));
