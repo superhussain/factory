@@ -4,6 +4,7 @@ import json
 import os
 import plistlib
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -14,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from support import SKILL, IsolatedTestCase, invoke, load_runtime, snapshot
+from support import ROOT, SKILL, IsolatedTestCase, invoke, load_runtime, snapshot
 
 factory = load_runtime()
 WORKTREE_PIDS = factory.worktree_pids
@@ -1862,6 +1863,69 @@ class RetroPickupTest(PickupFixture):
     def test_dry_run_never_pushes(self):
         self.assertEqual(self.pickup("--dry-run"), (0, f"host {DEVICE}: would launch 0\n", ""))
         self.assertEqual(self.retro_puts(), [])
+
+
+class AuditPickupTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        shutil.copytree(ROOT / "tests/fixtures/audit", self.root / "claude")
+        os.environ["CLAUDE_CONFIG_DIR"] = str(self.root / "claude")
+        (self.home / "retro-push.json").write_text(
+            json.dumps({"version": 1, "date": datetime.now().date().isoformat()}), encoding="utf-8")
+        self.board["jobs"] = [{"id": "1017-add-x", "project": "alpha", "stage": "build"}]
+        self.audit = (200, "ok")
+        self.line = f"pushed 6 calls to audit/1017-add-x/{DEVICE}.jsonl\n"
+
+    def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if path.startswith("/api/audit/"):
+            self.calls.append((method, path))
+            return self.audit[0], {}, self.audit[1]
+        return super().request(home, method, path, body, ok, headers, raw)
+
+    def audit_puts(self):
+        return [call for call in self.calls if call[1].startswith("/api/audit/")]
+
+    def record(self):
+        return json.loads((self.home / "audit-push.json").read_text(encoding="utf-8"))
+
+    def test_pushes_once_until_a_transcript_changes(self):
+        session = next((self.root / "claude/projects").glob("*/*.jsonl"))
+        self.assertEqual(self.pickup(), (0, self.line, ""))
+        self.assertEqual(self.record(), {"version": 1, "jobs": {"1017-add-x": factory.audit_stamp("1017-add-x")}})
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(self.audit_puts(), [("PUT", f"/api/audit/1017-add-x/{DEVICE}.jsonl")])
+        later = session.stat().st_mtime_ns + 10 ** 9
+        os.utime(session, ns=(later, later))
+        self.assertEqual(self.pickup(), (0, self.line, ""))
+        self.assertEqual(len(self.audit_puts()), 2)
+        self.assertEqual(self.record(), {"version": 1, "jobs": {"1017-add-x": later}})
+
+    def test_skips_other_jobs(self):
+        self.views = {"alpha": (200, effective("alpha"))}
+        for jobs in ([{"id": "1017-add-x", "project": "alpha", "stage": "merged"}],
+                     [idea("1017-add-x", "alpha")],
+                     [{"id": "1018-other", "project": "alpha", "stage": "build"}]):
+            with self.subTest(jobs=jobs):
+                self.board["jobs"] = jobs
+                self.assertEqual(self.pickup(), (0, "", ""))
+                self.assertEqual(self.audit_puts(), [])
+                self.assertFalse((self.home / "audit-push.json").exists())
+
+    def test_dry_run_never_pushes(self):
+        self.assertEqual(self.pickup("--dry-run"), (0, f"host {DEVICE}: would launch 0\n", ""))
+        self.assertEqual(self.audit_puts(), [])
+
+    def test_a_failed_push_warns_and_still_launches(self):
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.board["jobs"].append(idea("120-sample-digest", "alpha"))
+        self.audit = (403, "Forbidden")
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"^launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n$")
+        self.assertIn("Access rejected the service token", err)
+        self.assertTrue(err.endswith(
+            "factory.py: audit push stopped (exit 5); the next pickup run retries it\n"), err)
+        self.assertFalse((self.home / "audit-push.json").exists())
 
 
 class CloseTest(PickupFixture):

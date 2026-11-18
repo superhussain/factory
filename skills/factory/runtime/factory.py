@@ -4542,6 +4542,7 @@ def pickup(*args):
                     failing = failing or started
                     print("factory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now", file=sys.stderr)
             retro_pickup_push(home)
+            audit_pickup_push(home, data)
         pickup_pass(home, device, minutes, dry, limit, cap, data)
     finally:
         if not dry:
@@ -9797,6 +9798,7 @@ AUDIT_FLAGS = (
 AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
 AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
 AUDIT_MAX_BYTES = 1 << 20
+AUDIT_PUSH_FILE = "audit-push.json"
 AUDIT_WRITE_ONLY = "audit rows are written only by the host's bound service token"
 AUDIT_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
@@ -9872,14 +9874,19 @@ def audit_scan(path, main):
     return rows
 
 
+def audit_folders(job_id):
+    """The sorted transcript folders this host keeps from the job's worktrees."""
+    folder = re.compile(r"(?:^|-)factory-" + re.escape(job_id) + r"(?:-|$)")
+    return sorted(p for p in retro_transcripts().iterdir() if p.is_dir() and folder.search(p.name))
+
+
 def audit_rows(job_id):
     """(rows, main session count) for every transcript this host keeps from the job's worktree."""
     root = retro_transcripts()
     if not root.is_dir():
         fail(f"no Claude Code transcripts at {root}", 4)
-    folder = re.compile(r"(?:^|-)factory-" + re.escape(job_id) + r"(?:-|$)")
     rows, sessions = [], 0
-    for project in sorted(p for p in root.iterdir() if p.is_dir() and folder.search(p.name)):
+    for project in audit_folders(job_id):
         for path in sorted(project.glob("*.jsonl")):
             sessions += 1
             rows += [{"session": path.stem[:8], "agent": "main", **row} for row in audit_scan(path, True)]
@@ -9921,6 +9928,52 @@ def audit_push(job_id):
         print(f"pushed {len(rows) - dropped} of {len(rows)} {calls} to {key}; the oldest {dropped} did not fit in 1 MiB")
     else:
         print(f"pushed {len(rows)} {calls} to {key}")
+
+
+def audit_stamp(job_id):
+    """The newest st_mtime_ns of the job's session and subagent transcripts here, or None with no session."""
+    try:
+        folders = audit_folders(job_id)
+        sessions = [path for p in folders for path in p.glob("*.jsonl")]
+        subagents = [path for p in folders for path in p.glob("*/subagents/*.jsonl")]
+        return max(path.stat().st_mtime_ns for path in sessions + subagents) if sessions else None
+    except OSError:
+        return None
+
+
+def audit_pushed(home):
+    """{job id: stamp} from <home>/audit-push.json, or {} for a missing or malformed record."""
+    try:
+        record = json.loads((home / AUDIT_PUSH_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    jobs = record.get("jobs") if isinstance(record, dict) and record.get("version") == 1 else None
+    return jobs if isinstance(jobs, dict) and all(type(v) is int for v in jobs.values()) else {}
+
+
+def audit_pickup_push(home, data):
+    """Push this host's audit rows for each in-flight or pr-open job whose transcripts changed since
+    the last recorded push. Best effort: a failed push costs one warning, and the next pickup run retries it."""
+    if not retro_transcripts().is_dir():
+        return
+    record, kept = audit_pushed(home), {}
+    try:
+        for job in (data or read_board(home))["jobs"]:
+            job_id = job.get("id")
+            if job.get("stage") not in IN_FLIGHT + ("pr-open",) or not isinstance(job_id, str) \
+                    or not NEW_JOB_ID.fullmatch(job_id):
+                continue
+            stamp = audit_stamp(job_id)
+            if stamp is None:
+                continue
+            if record.get(job_id) != stamp:
+                audit_push(job_id)
+            kept[job_id] = stamp
+    except SystemExit as e:
+        print(f"factory.py: audit push stopped (exit {e.code}); the next pickup run retries it", file=sys.stderr)
+        return
+    if kept != record:
+        write_atomic(home / AUDIT_PUSH_FILE, json.dumps({"version": 1, "jobs": kept}) + "\n")
 
 
 def audit_cmd(*args):
