@@ -1,11 +1,19 @@
+import { openExternalUrl } from "@getpaseo/plugin/client";
 import { createElement, useEffect, useRef } from "react";
 import { Platform } from "react-native";
-import { readEmbedMessage, type EmbedMessage } from "../shared/embed";
+import {
+  dashboardSrc,
+  readEmbedMessage,
+  readSignedInMessage,
+  type EmbedMessage,
+} from "../shared/embed";
 
 // This plugin typechecks without the DOM library. Declare only what this module uses.
 type MessageSource = { postMessage(message: unknown, targetOrigin: string): void };
 type FrameMessage = { source: unknown; origin: string; data: unknown };
+type SignInWindow = { closed: boolean; close(): void; focus(): void };
 declare const window: {
+  open(url: string, target: string, features: string): SignInWindow | null;
   addEventListener(type: "message", listener: (event: FrameMessage) => void): void;
   removeEventListener(type: "message", listener: (event: FrameMessage) => void): void;
 };
@@ -46,4 +54,46 @@ export function DashboardFrame({
     onLoad: () =>
       frame.current?.contentWindow?.postMessage({ type: "factory-embed-hello", v: 1 }, origin),
   });
+}
+
+export function useSignInPopup(origin: string, onClosed: () => void): () => void {
+  const popup = useRef<SignInWindow | null>(null);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const closed = useRef(onClosed);
+  closed.current = onClosed;
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const listener = (event: FrameMessage) => {
+      if (
+        popup.current &&
+        event.source === popup.current &&
+        event.origin === origin &&
+        readSignedInMessage(event.data)
+      )
+        popup.current.close();
+    };
+    window.addEventListener("message", listener);
+    return () => {
+      window.removeEventListener("message", listener);
+      if (timer.current) clearInterval(timer.current);
+      popup.current = null;
+    };
+  }, [origin]);
+  return () => {
+    if (Platform.OS !== "web") return void openExternalUrl(origin);
+    if (popup.current) return popup.current.focus();
+    const opened = window.open(
+      dashboardSrc(origin),
+      "factory-sign-in",
+      "popup,width=480,height=720",
+    );
+    if (!opened) return void openExternalUrl(origin);
+    popup.current = opened;
+    timer.current = setInterval(() => {
+      if (!opened.closed) return;
+      if (timer.current) clearInterval(timer.current);
+      popup.current = null;
+      closed.current();
+    }, 500);
+  };
 }

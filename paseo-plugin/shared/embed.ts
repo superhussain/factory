@@ -18,6 +18,12 @@ export function dashboardSrc(origin: string, job?: string): string {
   return origin + "/" + (job && JOB.test(job) ? "#" + job : "");
 }
 
+export function readSignedInMessage(data: unknown): boolean {
+  if (!data || typeof data !== "object") return false;
+  const message = data as { type?: unknown; v?: unknown };
+  return message.type === "factory-embed-signed-in" && message.v === 1;
+}
+
 export function readEmbedMessage(data: unknown): EmbedMessage | null {
   if (!data || typeof data !== "object") return null;
   const message = data as { type?: unknown; v?: unknown; server?: unknown; agent?: unknown };

@@ -13,4 +13,5 @@ The plugin reads nothing on the daemon. It stores only the dashboard URL. The bo
 ## Limits
 
 - The board shows inside Paseo on web and desktop only. On iOS and Android the screen offers a link that opens the dashboard in the browser.
-- Browsers that block third-party cookies cannot show the board in the frame. Use Sign in on the screen to open it in a tab.
+- Browsers that block third-party cookies cannot show the board in the frame. Use Sign in on the screen to open it in a popup.
+- Sign in opens a Paseo popup, not your system browser. The desktop app keeps its own cookies, so you sign in once there.

@@ -1,11 +1,11 @@
 import type { PluginClientContext, PluginScreenProps } from "@getpaseo/plugin/client";
-import { openExternalUrl, useSettings } from "@getpaseo/plugin/client";
+import { useSettings } from "@getpaseo/plugin/client";
 import { ExternalLink, Loading, useToast } from "@getpaseo/plugin/client/ui";
 import { useEffect, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import { dashboardSrc, parseDashboardOrigin, type EmbedMessage } from "../shared/embed";
 import { factorySettings } from "../shared/settings";
-import { DashboardFrame } from "./web";
+import { DashboardFrame, useSignInPopup } from "./web";
 
 const READY_TIMEOUT_MS = 8000;
 
@@ -17,6 +17,7 @@ export function dashboardScreen(client: PluginClientContext) {
     const [ready, setReady] = useState(false);
     const [stalled, setStalled] = useState(false);
     const origin = settings.status === "ready" ? parseDashboardOrigin(settings.values.origin) : null;
+    const signIn = useSignInPopup(origin ?? "", () => setLoad((n) => n + 1));
     useEffect(() => {
       if (!origin || Platform.OS !== "web") return;
       setReady(false);
@@ -88,7 +89,7 @@ export function dashboardScreen(client: PluginClientContext) {
             <Text style={styles.text}>
               Factory did not load. Sign in through Cloudflare Access, or ask your factory operator to add this Paseo origin to embed_origins, then reload.
             </Text>
-            {button("Sign in", () => void openExternalUrl(origin))}
+            {button("Sign in", signIn)}
             {button("Reload", () => setLoad((n) => n + 1))}
           </View>
         ) : null}

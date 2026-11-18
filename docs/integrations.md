@@ -187,7 +187,7 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
 
 The board appears inside Paseo on web and desktop only. On iOS and Android the screen links to
 the dashboard in the browser instead. A browser that blocks third-party cookies cannot show the
-frame; the screen then offers **Sign in**, which opens the dashboard in a tab, and **Reload**.
+frame; the screen then offers **Sign in** and **Reload**. Sign in opens the dashboard in a small popup inside Paseo, so the desktop app signs in with its own cookies. When the board loads there, the popup closes and the frame reloads.
 
 ## Tracer mirror
 
