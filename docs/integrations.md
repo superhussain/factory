@@ -198,6 +198,26 @@ badge can trail the dashboard by up to a minute. It ignores the dashboard's per-
 filter. A host without the factory skill, or with a skill older than `factory.py inbox`, shows no
 badge.
 
+On Windows the plugin runs `python3`, and if that fails, `py -3`, because `python3` there is often
+the Microsoft Store stub.
+
+### Needs-you alerts
+
+`factory.py inbox` also lists the jobs waiting on you, by id, project and title, in board order.
+When a job joins that list, Paseo web and desktop show a notification such as
+"Needs you: 042-sample-links". Clicking it opens the Factory screen at that job. The first list
+after Paseo starts raises no alerts, so only jobs that start waiting while Paseo runs notify you.
+At most three alerts fire per minute; the badge still counts the rest.
+
+- Turn notifications on in Settings, Plugins, Factory, Notifications. The browser or desktop app
+  asks for permission once. If you blocked notifications, allow them in the site settings.
+- Alerts come from the same once-a-minute poll, so one can arrive up to a minute late.
+- They fire only while a Paseo window is open. iOS and Android get no alerts; the dashboard's
+  own Web Push still covers them and closed windows.
+- Each host needs the reinstalled factory skill and `paseo plugin update factory` before alerts
+  start. Two hosts that report the same job show one notification, because both use the tag
+  `factory-needs-<job-id>`.
+
 ## Tracer mirror
 
 An optional, one-way mirror shows a job's tasks, progress and review outcomes in a Tracer instance. It is off until Settings, Pipeline, Tracer integration is On and `<home>/tracer.json` lists the project. Delete the entry to turn it off.
