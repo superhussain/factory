@@ -131,7 +131,7 @@ test("authenticated root HTML and query-preserving legacy redirects never access
   assert.equal(page.headers.get("Location"), null);
   assert.equal(
     page.headers.get("Content-Security-Policy"),
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
   );
   const html = await page.text();
   assert.match(html, /<!doctype html>/i);
@@ -143,7 +143,7 @@ test("authenticated root HTML and query-preserving legacy redirects never access
   const meta = html
     .match(/http-equiv="Content-Security-Policy" content="([^"]*)"/)[1]
     .replaceAll("&#x27;", "'");
-  assert.equal(meta, page.headers.get("Content-Security-Policy"));
+  assert.equal(meta + "; frame-ancestors 'self'", page.headers.get("Content-Security-Policy"));
   for (const search of ["", "?view=a%2Fb&space=a+b&escape=%2f&view=second"]) {
     const response = await worker.fetch(request("/dashboard.html" + search, "GET", headers), env);
     assert.equal(response.status, 302);
@@ -346,5 +346,5 @@ test("hostile titles and JSON are escaped once and CSP matches rendered meta", a
   const meta = html
     .match(/http-equiv="Content-Security-Policy" content="([^"]*)"/)[1]
     .replaceAll("&#x27;", "'");
-  assert.equal(meta, response.headers.get("Content-Security-Policy"));
+  assert.equal(meta + "; frame-ancestors 'self'", response.headers.get("Content-Security-Policy"));
 });
