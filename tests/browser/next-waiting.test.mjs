@@ -73,6 +73,17 @@ test("w key and button open the next waiting job", { timeout: 120000 }, async ()
     await pressW("#1903-sample-c");
     await pressW("#1901-sample-a");
 
+    // Two presses in one task land before hashchange runs, so the second reads the hash, not the drawer.
+    await page.evaluate(() => (location.hash = ""));
+    await page.waitForSelector("#detail[hidden]", wait);
+    const quick = await page.evaluate(() => {
+      for (let i = 0; i < 2; i++) {
+        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "w", bubbles: true }));
+      }
+      return location.hash;
+    });
+    assert.equal(quick, "#1902-sample-b");
+
     // From a job that does not wait, the button opens the first waiting job, then the next.
     await page.evaluate(() => (location.hash = "#001-sample"));
     await page.waitForSelector("#detail:not([hidden])", wait);

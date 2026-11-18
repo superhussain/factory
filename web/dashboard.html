@@ -1682,10 +1682,11 @@ function waitingJobs() {
     .sort((a, b) => (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
 }
 
-// The waiting job after the open one, wrapping to the first. null when none waits.
+// The waiting job after the one the hash names, wrapping to the first. The hash is set before hashchange runs, so quick presses step on.
 function nextWaitingJob() {
   const list = waitingJobs();
-  const at = list.findIndex((j) => j.id === openId);
+  const { id } = parseHash();
+  const at = list.findIndex((j) => j.id === id);
   return list[at + 1] ?? list[0] ?? null;
 }
 
