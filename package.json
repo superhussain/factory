@@ -18,7 +18,7 @@
     "test:verify": "python3 -B -m unittest discover -s tests/tools -p test_verify.py && python3 -B -m unittest discover -s tests/tools -p test_pr_screenshots.py && python3 -B -m unittest discover -s tests/tools -p test_copy_pr_screenshots.py && python3 -B -m unittest discover -s tests/tools -p test_secret_scan.py && python3 -B -m unittest discover -s tests/tools -p test_public_cutover.py && python3 -B -m unittest discover -s tests/tools -p test_rewrite_pr_links.py && python3 -B -m unittest discover -s tests/tools -p test_stage_notes_check.py",
     "check:secrets": "python3 tools/secret-scan.py",
     "check:types": "tsc -p tsconfig.json",
-    "test:paseo-plugin": "node --test tests/paseo-plugin/embed.test.mjs tests/paseo-plugin/lockfile.test.mjs",
+    "test:paseo-plugin": "node --test tests/paseo-plugin/embed.test.mjs tests/paseo-plugin/lockfile.test.mjs tests/paseo-plugin/badge.test.mjs",
     "test:workflow": "node --test \"tests/ci/*.test.mjs\"",
     "test": "pnpm run test:assets && pnpm run test:auth && pnpm run test:protocol && pnpm run test:local && pnpm run test:browser && pnpm run test:deploy && pnpm run test:workflow",
     "lint": "oxlint worker tools tests",
