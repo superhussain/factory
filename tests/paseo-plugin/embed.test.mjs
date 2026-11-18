@@ -6,6 +6,7 @@ import {
   dashboardSrc,
   parseDashboardOrigin,
   readEmbedMessage,
+  readSignedInMessage,
 } from "../../paseo-plugin/shared/embed.ts";
 
 const ORIGIN = "https://factory.example.test";
@@ -51,4 +52,17 @@ test("message", () => {
     null,
   ])
     assert.equal(readEmbedMessage(data), null, JSON.stringify(data));
+});
+
+test("signed in", () => {
+  const signedIn = { type: "factory-embed-signed-in", v: 1 };
+  assert.equal(readSignedInMessage(signedIn), true);
+  for (const data of [
+    { type: "factory-embed-signed-in", v: 2 },
+    { type: "factory-embed-ready", v: 1 },
+    "factory-embed-signed-in",
+    null,
+  ])
+    assert.equal(readSignedInMessage(data), false, JSON.stringify(data));
+  assert.equal(readEmbedMessage(signedIn), null);
 });
