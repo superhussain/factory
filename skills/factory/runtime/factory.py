@@ -5450,12 +5450,13 @@ def gh_cli(*args, stderr=False):
 
 
 def pr_states(repo, numbers, device):
-    """The states of repo's pull requests from one gh api graphql call: ({number: state}, None),
-    or (None, why). A pull request GitHub returns null for is left out. A non-zero exit whose answer
-    still holds data.repository, as a partial GraphQL error gives, returns the states that resolved."""
+    """The states and head commits of repo's pull requests from one gh api graphql call:
+    ({number: (state, head oid)}, None), or (None, why). A pull request GitHub returns null for is left out.
+    A non-zero exit whose answer still holds data.repository, as a partial GraphQL error gives, returns the
+    states that resolved."""
     owner, name = repo.split("/")
     q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
-         + "".join(f"p{n}: pullRequest(number: {n}) {{ state }} " for n in numbers) + "} }")
+         + "".join(f"p{n}: pullRequest(number: {n}) {{ state headRefOid }} " for n in numbers) + "} }")
     r = gh_cli("api", "graphql", "-f", "query=" + q)
     if r is None:
         return None, f"gh is not installed on {device}"
@@ -5470,7 +5471,8 @@ def pr_states(repo, numbers, device):
             return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
         return None, ("gh api graphql returned no repository "
                       f"(check the project file's repo and gh auth status on {device})")
-    return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
+    return {n: (found[f"p{n}"]["state"], found[f"p{n}"].get("headRefOid"))
+            for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
 def pr_signals(repo, numbers, device):
@@ -5716,7 +5718,7 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
             print(f"factory.py: pickup skips the PR sync for {repo}: {why}", file=sys.stderr)
             continue
         for j, n in jobs:
-            state = states.get(n)
+            state, head = states.get(n, (None, None))
             if state not in ("MERGED", "CLOSED"):
                 continue
             line = f"{j['id']} {j['project']}: " + (MERGED_NOTE if state == "MERGED" else GITHUB_CLOSE_REASON)
@@ -5725,7 +5727,9 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
                 continue
             if state == "MERGED":
                 patch = {"stage": "merged", "needs": None, "automerge": None, "babysit": None, "claim": None,
-                         "note": MERGED_NOTE, "github": {"merged": now()}}
+                         "note": MERGED_NOTE,
+                         "github": {"merged": now(),
+                                    **({"head": head} if isinstance(head, str) and COMMIT.fullmatch(head) else {})}}
             else:
                 patch = {"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "via": "github"}, "babysit": None}
             pending.append((j, patch, line))
@@ -5978,7 +5982,9 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
             print(f"would clean up {job_id} {project}")
             continue
         try:
-            _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
+            merged_head = (c.get("head") if key == "github" and isinstance(c.get("head"), str)
+                           and COMMIT.fullmatch(c["head"]) else None)
+            _, left = cleanup_job(repo, wt, branch, drop_pushed=True, merged_head=merged_head)
         except Exception as e:
             print(f"factory.py: pickup could not clean up {job_id} {project}: {e}", file=sys.stderr)
             continue
@@ -8783,8 +8789,8 @@ def cleanup(target):
     sys.exit(1 if left else 0)
 
 
-def cleanup_job(repo, wt, branch, drop_pushed=False):
-    """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. (removed, left)."""
+def cleanup_job(repo, wt, branch, drop_pushed=False, merged_head=None):
+    """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. With merged_head, also delete a branch whose tip that commit contains and no worktree has checked out. (removed, left)."""
     def run_git(*args, timeout=20):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
@@ -8822,6 +8828,10 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             return not_merged("origin has no such branch")
         if out.split() != [tip, ref]:
             return not_merged("origin is at a different commit")
+        return delete_unless_checked_out(tip)
+
+    def delete_unless_checked_out(tip):
+        """None after deleting the branch, guarded by tip, unless a worktree has it checked out."""
         path = None
         for line in run_git("worktree", "list", "--porcelain")[1].splitlines():
             if line.startswith("worktree "):
@@ -8829,6 +8839,13 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             elif line == f"branch refs/heads/{branch}":
                 return f"checked out in {path}"
         return first_error("update-ref", "-d", f"refs/heads/{branch}", tip)
+
+    def merged_head_error():
+        """None after deleting a branch whose tip merged_head contains, else today's reason it stays."""
+        tip = run_git("rev-parse", f"refs/heads/{branch}")[1]
+        if tip and run_git("merge-base", "--is-ancestor", tip, merged_head)[0] == 0:
+            return delete_unless_checked_out(tip)
+        return pushed_tip_error() if drop_pushed else not_merged()
 
     removed, left = [], []
     if wt.exists():
@@ -8849,7 +8866,8 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             if code is None:
                 error = err
             elif code:
-                error = pushed_tip_error() if drop_pushed else not_merged()
+                error = (merged_head_error() if merged_head
+                         else pushed_tip_error() if drop_pushed else not_merged())
             elif run_git("config", "--get", f"branch.{branch}.merge")[1]:
                 error = first_error("branch", "--unset-upstream", branch) or first_error("branch", "-d", branch)
             else:

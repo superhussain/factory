@@ -116,7 +116,7 @@ class PickupFixture(IsolatedTestCase):
         self.sweep = patch.object(factory, "backlog_triage_pass").start()
         self.checkout = patch.object(factory, "checkout_problem", return_value=None).start()
         patch.object(factory, "pr_states",
-                     side_effect=lambda repo, numbers, device: ({n: "OPEN" for n in numbers}, None)).start()
+                     side_effect=lambda repo, numbers, device: ({n: ("OPEN", None) for n in numbers}, None)).start()
 
     def configure(self, line="started", code=0, sleep=0):
         (self.root / "fake.json").write_text(json.dumps({"line": line, "code": code, "sleep": sleep}),
@@ -2376,6 +2376,26 @@ class CloseCleanupTest(PickupFixture):
         self.assertEqual(len(left), 1)
         self.assertTrue(left[0].startswith("branch factory/042-sample-export: checked out in "))
 
+    def test_merged_head_keeps_a_branch_ahead_of_the_pr(self):
+        merged = self.git(self.wt, "rev-parse", "HEAD")
+        (self.wt / "more.txt").write_text("more\n")
+        self.git(self.wt, "add", "more.txt")
+        self.git(self.wt, "commit", "-q", "-m", "more")
+        self.assertEqual(factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export", drop_pushed=True,
+                                             merged_head=merged), ([f"worktree {self.wt}"], [self.UNREACHABLE]))
+        self.assertTrue(self.branch_exists())
+
+    def test_merged_head_keeps_a_branch_checked_out_elsewhere(self):
+        merged = self.git(self.wt, "rev-parse", "HEAD")
+        self.git(self.repo_a, "worktree", "remove", "--force", str(self.wt))
+        elsewhere = self.home / "elsewhere"
+        self.git(self.repo_a, "worktree", "add", "-q", str(elsewhere), "factory/042-sample-export")
+        removed, left = factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export", drop_pushed=True,
+                                            merged_head=merged)
+        self.assertEqual((removed, len(left)), ([], 1))
+        self.assertTrue(left[0].startswith("branch factory/042-sample-export: checked out in "))
+        self.assertTrue(self.branch_exists())
+
     def test_cleanup_job_keeps_a_pushed_branch_by_default(self):
         self.with_origin()
         self.assertEqual(factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export"),
@@ -2488,8 +2508,9 @@ class CloseCleanupTest(PickupFixture):
 
 
 class PrSyncTest(PickupFixture):
-    QUERY = ('query { repository(owner: "sample", name: "alpha") { p7: pullRequest(number: 7) { state } '
-             'p8: pullRequest(number: 8) { state } } }')
+    QUERY = ('query { repository(owner: "sample", name: "alpha") { p7: pullRequest(number: 7) { state headRefOid } '
+             'p8: pullRequest(number: 8) { state headRefOid } } }')
+    OID = "a1b2" * 10
     PR7 = "https://github.com/sample/alpha/pull/7"
     PR8 = "https://github.com/sample/alpha/pull/8"
     DECISION = "/api/jobs/alpha/043-sample-import/decision.md"
@@ -2505,6 +2526,7 @@ class PrSyncTest(PickupFixture):
             (self.home / "projects" / f"{slug}.md").write_text("---\nrepo: Sample/Alpha\n---\n", encoding="utf-8")
         self.files = {}
         self.states = {7: "MERGED", 8: "CLOSED"}
+        self.heads = {}
         self.failure = None
         self.reads = []
         patch.object(factory, "pr_states", side_effect=self.read).start()
@@ -2514,7 +2536,7 @@ class PrSyncTest(PickupFixture):
         self.reads.append((repo, list(numbers)))
         if self.failure:
             return None, self.failure
-        return {n: self.states[n] for n in numbers if n in self.states}, None
+        return {n: (self.states[n], self.heads.get(n)) for n in numbers if n in self.states}, None
 
     def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
         if not path.endswith("/decision.md"):
@@ -2535,14 +2557,14 @@ class PrSyncTest(PickupFixture):
                      "branch": "factory/043-sample-import", "updated": "2026-01-01T00:00:00Z"}, **extra)
 
     def test_pr_states_sends_one_query_and_parses_it(self):
-        answer = json.dumps({"data": {"repository": {"p7": {"state": "MERGED"}, "p8": None}}})
+        answer = json.dumps({"data": {"repository": {"p7": {"state": "MERGED", "headRefOid": self.OID}, "p8": None}}})
         with patch.object(factory, "gh_cli", return_value=(0, answer)) as gh:
-            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: "MERGED"}, None))
+            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: ("MERGED", self.OID)}, None))
         gh.assert_called_once_with("api", "graphql", "-f", "query=" + self.QUERY)
-        partial = json.dumps({"data": {"repository": {"p7": {"state": "MERGED"}, "p8": None}},
+        partial = json.dumps({"data": {"repository": {"p7": {"state": "MERGED", "headRefOid": self.OID}, "p8": None}},
                               "errors": [{"type": "NOT_FOUND", "path": ["repository", "p8"]}]})
         with patch.object(factory, "gh_cli", return_value=(1, partial)):
-            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: "MERGED"}, None))
+            self.assertEqual(self.pr_states("sample/alpha", [7, 8], DEVICE), ({7: ("MERGED", self.OID)}, None))
         for result, why in ((None, "gh is not installed on host-a"),
                             (("timeout", ""), "gh api graphql timed out after 60 seconds on host-a"),
                             ((1, ""), "gh api graphql exited 1 (check gh auth status on host-a)"),
@@ -2569,6 +2591,16 @@ class PrSyncTest(PickupFixture):
                     self.assertNotIn(key, job)
                 self.calls.clear()
                 self.assert_silent(self.pickup())
+
+    def test_merged_pr_records_the_head(self):
+        for head, github in ((self.OID, {"merged", "head"}), ("not-a-sha", {"merged"})):
+            with self.subTest(head=head):
+                self.heads[7] = head
+                self.board["jobs"] = [self.export()]
+                self.assertEqual(self.pickup(), (0, "synced 042-sample-export alpha: merged on GitHub\n", ""))
+                job = self.job("042-sample-export")
+                self.assertEqual(set(job["github"]), github)
+                self.assertEqual(job["github"].get("head"), head if "head" in github else None)
 
     def test_two_merged_prs_make_one_board_write(self):
         self.states = {7: "MERGED", 8: "MERGED"}
@@ -2646,6 +2678,30 @@ class PrSyncTest(PickupFixture):
         self.calls.clear()
         self.assert_silent(self.pickup())
         self.assertTrue(wt.exists())
+
+    def test_merged_job_deletes_a_branch_main_lacks(self):
+        patch.object(factory, "worktree_pids", return_value=[]).start()
+
+        def git(cwd, *args):
+            return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
+                                  text=True).stdout.strip()
+        git(self.repo_a, "init", "-q")
+        git(self.repo_a, "symbolic-ref", "HEAD", "refs/heads/main")
+        git(self.repo_a, "commit", "-q", "--allow-empty", "-m", "base")
+        wt = self.home / "worktrees" / "alpha" / "042-sample-export"
+        git(self.repo_a, "worktree", "add", "-q", str(wt), "-b", "factory/042-sample-export")
+        (wt / "work.txt").write_text("work\n")
+        git(wt, "add", "work.txt")
+        git(wt, "commit", "-q", "-m", "work")
+        self.heads[7] = git(wt, "rev-parse", "HEAD")
+        self.board["jobs"] = [self.export(port=8230)]
+        self.assertEqual(self.pickup(), (0, "synced 042-sample-export alpha: merged on GitHub\n"
+                                            "cleaned up 042-sample-export alpha\n", ""))
+        self.assertFalse(wt.exists())
+        self.assertEqual(git(self.repo_a, "branch", "--list", "factory/042-sample-export"), "")
+        job = self.job("042-sample-export")
+        self.assertEqual(job["github"]["head"], self.heads[7])
+        self.assertEqual(job["github"]["cleanup"][DEVICE]["left"], [])
 
     def test_board_refuses_a_github_patch(self):
         self.board["jobs"] = [self.export()]
