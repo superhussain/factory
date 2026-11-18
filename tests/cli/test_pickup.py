@@ -2376,6 +2376,26 @@ class CloseCleanupTest(PickupFixture):
         self.assertEqual(len(left), 1)
         self.assertTrue(left[0].startswith("branch factory/042-sample-export: checked out in "))
 
+    def test_merged_head_keeps_a_branch_ahead_of_the_pr(self):
+        merged = self.git(self.wt, "rev-parse", "HEAD")
+        (self.wt / "more.txt").write_text("more\n")
+        self.git(self.wt, "add", "more.txt")
+        self.git(self.wt, "commit", "-q", "-m", "more")
+        self.assertEqual(factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export", drop_pushed=True,
+                                             merged_head=merged), ([f"worktree {self.wt}"], [self.UNREACHABLE]))
+        self.assertTrue(self.branch_exists())
+
+    def test_merged_head_keeps_a_branch_checked_out_elsewhere(self):
+        merged = self.git(self.wt, "rev-parse", "HEAD")
+        self.git(self.repo_a, "worktree", "remove", "--force", str(self.wt))
+        elsewhere = self.home / "elsewhere"
+        self.git(self.repo_a, "worktree", "add", "-q", str(elsewhere), "factory/042-sample-export")
+        removed, left = factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export", drop_pushed=True,
+                                            merged_head=merged)
+        self.assertEqual((removed, len(left)), ([], 1))
+        self.assertTrue(left[0].startswith("branch factory/042-sample-export: checked out in "))
+        self.assertTrue(self.branch_exists())
+
     def test_cleanup_job_keeps_a_pushed_branch_by_default(self):
         self.with_origin()
         self.assertEqual(factory.cleanup_job(self.repo_a, self.wt, "factory/042-sample-export"),
@@ -2658,6 +2678,30 @@ class PrSyncTest(PickupFixture):
         self.calls.clear()
         self.assert_silent(self.pickup())
         self.assertTrue(wt.exists())
+
+    def test_merged_job_deletes_a_branch_main_lacks(self):
+        patch.object(factory, "worktree_pids", return_value=[]).start()
+
+        def git(cwd, *args):
+            return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
+                                  text=True).stdout.strip()
+        git(self.repo_a, "init", "-q")
+        git(self.repo_a, "symbolic-ref", "HEAD", "refs/heads/main")
+        git(self.repo_a, "commit", "-q", "--allow-empty", "-m", "base")
+        wt = self.home / "worktrees" / "alpha" / "042-sample-export"
+        git(self.repo_a, "worktree", "add", "-q", str(wt), "-b", "factory/042-sample-export")
+        (wt / "work.txt").write_text("work\n")
+        git(wt, "add", "work.txt")
+        git(wt, "commit", "-q", "-m", "work")
+        self.heads[7] = git(wt, "rev-parse", "HEAD")
+        self.board["jobs"] = [self.export(port=8230)]
+        self.assertEqual(self.pickup(), (0, "synced 042-sample-export alpha: merged on GitHub\n"
+                                            "cleaned up 042-sample-export alpha\n", ""))
+        self.assertFalse(wt.exists())
+        self.assertEqual(git(self.repo_a, "branch", "--list", "factory/042-sample-export"), "")
+        job = self.job("042-sample-export")
+        self.assertEqual(job["github"]["head"], self.heads[7])
+        self.assertEqual(job["github"]["cleanup"][DEVICE]["left"], [])
 
     def test_board_refuses_a_github_patch(self):
         self.board["jobs"] = [self.export()]

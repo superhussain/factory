@@ -5982,7 +5982,9 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
             print(f"would clean up {job_id} {project}")
             continue
         try:
-            _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
+            merged_head = (c.get("head") if key == "github" and isinstance(c.get("head"), str)
+                           and COMMIT.fullmatch(c["head"]) else None)
+            _, left = cleanup_job(repo, wt, branch, drop_pushed=True, merged_head=merged_head)
         except Exception as e:
             print(f"factory.py: pickup could not clean up {job_id} {project}: {e}", file=sys.stderr)
             continue
@@ -8787,8 +8789,8 @@ def cleanup(target):
     sys.exit(1 if left else 0)
 
 
-def cleanup_job(repo, wt, branch, drop_pushed=False):
-    """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. (removed, left)."""
+def cleanup_job(repo, wt, branch, drop_pushed=False, merged_head=None):
+    """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. With merged_head, also delete a branch whose tip that commit contains and no worktree has checked out. (removed, left)."""
     def run_git(*args, timeout=20):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
@@ -8826,6 +8828,10 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             return not_merged("origin has no such branch")
         if out.split() != [tip, ref]:
             return not_merged("origin is at a different commit")
+        return delete_unless_checked_out(tip)
+
+    def delete_unless_checked_out(tip):
+        """None after deleting the branch, guarded by tip, unless a worktree has it checked out."""
         path = None
         for line in run_git("worktree", "list", "--porcelain")[1].splitlines():
             if line.startswith("worktree "):
@@ -8833,6 +8839,13 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             elif line == f"branch refs/heads/{branch}":
                 return f"checked out in {path}"
         return first_error("update-ref", "-d", f"refs/heads/{branch}", tip)
+
+    def merged_head_error():
+        """None after deleting a branch whose tip merged_head contains, else today's reason it stays."""
+        tip = run_git("rev-parse", f"refs/heads/{branch}")[1]
+        if tip and run_git("merge-base", "--is-ancestor", tip, merged_head)[0] == 0:
+            return delete_unless_checked_out(tip)
+        return pushed_tip_error() if drop_pushed else not_merged()
 
     removed, left = [], []
     if wt.exists():
@@ -8853,7 +8866,8 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             if code is None:
                 error = err
             elif code:
-                error = pushed_tip_error() if drop_pushed else not_merged()
+                error = (merged_head_error() if merged_head
+                         else pushed_tip_error() if drop_pushed else not_merged())
             elif run_git("config", "--get", f"branch.{branch}.merge")[1]:
                 error = first_error("branch", "--unset-upstream", branch) or first_error("branch", "-d", branch)
             else:
