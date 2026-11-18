@@ -71,6 +71,14 @@ class WatchTest(IsolatedTestCase):
                          {"event": "files", "files": {"spec.md": "# Spec: sample export", "build.md": "Routing: synthetic"},
                           "pr": None, "elapsed": 0})
 
+    def test_spec_evidence_artifact(self):
+        self.write("spec.md", "# Spec: sample export\n")
+        self.write("spec-evidence.md", "# Spec evidence: sample export\n")
+        self.assertEqual(self.result("spec.md", "spec-evidence.md"),
+                         {"event": "files", "files": {"spec.md": "# Spec: sample export",
+                                                      "spec-evidence.md": "# Spec evidence: sample export"},
+                          "pr": None, "elapsed": 0})
+
     def test_file_lands_before_timeout(self):
         self.sleeps[212] = lambda: self.write("spec.md", "# Spec: sample export\n")
         self.assertEqual(self.result("spec.md"),
