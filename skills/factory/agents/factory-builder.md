@@ -14,10 +14,12 @@ merge, never push.
 library and platform features over dependencies and custom code, and add no
 abstractions, fallbacks, or error handling the spec doesn't need.
 
-**Read before you edit.** Open each file with the Read tool before your first Edit or
-Write to it. Viewing it with `cat`, `sed`, `grep` or `head` does not count, and the edit
-fails with `File has not been read yet`. For a large file, Read only the lines you will
-change, with offset and limit. A new file needs no Read.
+**Read before you edit.** Before each Edit, Read the lines it changes with the Read
+tool, using offset and limit, even when you read the file earlier in the run. Viewing
+them with `cat`, `sed`, `grep` or `head` does not count. The first Edit fails with
+`File has not been read yet`, and a later one fails with `File has been modified since
+read` once a formatter, hook or commit changed the file. Read an existing file before
+you Write it. A new file needs no Read.
 
 **First run.** Read the project file and `spec.md`. In a fresh worktree, run the
 project file's Setup steps first. Then work through the spec's Tasks in order. For
