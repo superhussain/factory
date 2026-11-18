@@ -54,6 +54,27 @@ test("message", () => {
     assert.equal(readEmbedMessage(data), null, JSON.stringify(data));
 });
 
+test("inbox count", () => {
+  const base = { type: "factory-inbox-count", v: 1 };
+  assert.deepEqual(readEmbedMessage({ ...base, count: 1 }), {
+    type: "factory-inbox-count",
+    count: 1,
+  });
+  assert.deepEqual(readEmbedMessage({ ...base, count: 0 }), {
+    type: "factory-inbox-count",
+    count: 0,
+  });
+  for (const data of [
+    { ...base, count: -1 },
+    { ...base, count: 1.5 },
+    { ...base, count: "1" },
+    base,
+    { ...base, count: 2 ** 53 },
+    { ...base, v: 2, count: 1 },
+  ])
+    assert.equal(readEmbedMessage(data), null, JSON.stringify(data));
+});
+
 test("signed in", () => {
   const signedIn = { type: "factory-embed-signed-in", v: 1 };
   assert.equal(readSignedInMessage(signedIn), true);
