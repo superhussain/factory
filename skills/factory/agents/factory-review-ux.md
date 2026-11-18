@@ -24,11 +24,11 @@ user-facing surface, say so and pass.
 **Keyboard focus probe.** In round 1, check whether the diff moves focus or scroll:
 
 ```bash
-git diff main...factory/<id> -- . ':!*.md' ':!tests/' ':!test/' ':!*__tests__/*' ':!*.test.*' ':!*.spec.*' | grep -nE '^\+.*(\.focus\(|\.blur\(|autofocus|tabindex|scrollIntoView|scrollTo|scrollTop|:focus)'
+git diff main...factory/<id> -- . ':!*.md' ':(glob,exclude)**/tests/**' ':(glob,exclude)**/test/**' ':!*__tests__/*' ':!*.test.*' ':!*.spec.*' | grep -nE '^\+.*(\.focus\(|\.blur\(|autofocus|tabindex|scrollIntoView|scrollTo|scrollTop|:focus)'
 ```
 
-Use the base branch the orchestrator names in place of `main`. The pathspec leaves out
-markdown and test files, so a doc or test that only names a focus API sets off no probe.
+Use the base branch the orchestrator names in place of `main`.
+The pathspec leaves out markdown and test files, including `tests/` and `test/` folders at any depth, so a doc or test that only names a focus API sets off no probe.
 When it prints a line, probe keyboard focus in this round. For each action the diff changes, trace from the
 keyboard where focus lands after the action, that Tab and Shift+Tab reach each control
 in order, that Escape closes an overlay and returns focus to the control that opened
