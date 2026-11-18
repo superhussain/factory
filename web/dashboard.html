@@ -3202,7 +3202,10 @@ async function readJobFile(j, name) {
 // Loads needs.md and answers.md for the open row and draws the form, or says why it cannot.
 async function openInboxAnswer(j) {
   const [f, answersFile] = await Promise.all([readJobFile(j, 'needs.md'), readJobFile(j, 'answers.md')]);
-  if (f) f.sha = await sha12(f.text);
+  if (f) {
+    f.sha = await sha12(f.text);
+    f.triage = await loadNeedsTriage(j, f.sha);
+  }
   if (inboxAnswer?.id !== j.id) return;
   const el = inboxAnswer.el;
   if (!f) {
@@ -3218,7 +3221,7 @@ async function openInboxAnswer(j) {
   inboxAnswer.answersFile = answersFile;
   const questions = parsed.parts.filter((p) => p.kind === 'question');
   el.classList.remove('muted');
-  el.innerHTML = '<form class="inbox-needs" novalidate>' + needsFieldsets(parsed, readNeedsDraft(j, f, questions), '', null) +
+  el.innerHTML = '<form class="inbox-needs" novalidate>' + needsFieldsets(parsed, readNeedsDraft(j, f, questions), '', f.triage) +
     '<p class="muted inbox-ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
     '<div class="ask-bar"><button class="btn primary" type="submit">Submit answers</button><span class="inbox-ask-status" role="status"></span></div></form>';
   inboxNeedsBar();
@@ -3258,7 +3261,7 @@ async function submitInboxAnswer() {
   if (!submit.disabled) submit.focus();
   a.el.querySelector('.inbox-ask-status').textContent = result.saved
     ? 'Saved to answers.md, but the board still shows this job waiting on you (' + result.boardError.message + '). Submit again to retry.'
-    : result.message.replace(/ Check the answers tab before you submit again\.$/, '') + ' Use Open job to check answers.md before you submit again.';
+    : result.message.replace(/ (Check the answers tab before you submit again|Reopen the job, then submit again)\.$/, '') + ' Use Open job to check answers.md before you submit again.';
 }
 
 function inboxReport(message) {
