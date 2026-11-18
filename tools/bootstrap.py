@@ -306,7 +306,7 @@ def precedences(policy_ids):
     return [{"id": policy_id, "precedence": index + 1} for index, policy_id in enumerate(policy_ids)]
 
 
-def ensure_app(api, account, hostname, n, policy_ids):
+def ensure_app(api, account, hostname, n, policy_ids, same_site=None):
     for app in api_list(api, "accounts/{}/access/apps".format(account)):
         if app.get("domain") == hostname:
             if app.get("name") != n["app"]:
@@ -319,14 +319,20 @@ def ensure_app(api, account, hostname, n, policy_ids):
                 raise CloudflareError("GET " + path + ": a policy has no precedence in the response; nothing was changed")
             current = [policy["id"] for policy in sorted(app["policies"], key=lambda policy: policy["precedence"])]
             missing = [policy_id for policy_id in policy_ids if policy_id not in current]
-            if not missing:
+            stale = same_site is not None and app.get("same_site_cookie_attribute") != same_site
+            if not missing and not stale:
                 print("app " + hostname + ": kept")
                 return app["aud"]
             body = {key: value for key, value in app.items() if key not in READ_ONLY_APP_FIELDS}
-            app = api("PUT", path, dict(body, policies=precedences(current + missing)))["result"]
+            body = dict(body, policies=precedences(current + missing))
+            if same_site is not None:
+                body["same_site_cookie_attribute"] = same_site
+            app = api("PUT", path, body)["result"]
             print("app " + hostname + ": updated")
             return app["aud"]
     body = {"name": n["app"], "domain": hostname, "type": "self_hosted", "policies": precedences(policy_ids)}
+    if same_site is not None:
+        body["same_site_cookie_attribute"] = same_site
     app = api("POST", "accounts/{}/access/apps".format(account), body)["result"]
     print("app " + hostname + ": created")
     return app["aud"]
@@ -365,6 +371,8 @@ def up(answers, api, run, root):
     origin = "https://" + hostname
     n = names(answers, device_label())
     existing = existing_profile(root, answers)
+    embed = deploy.embed_origins(existing["embed_origins"]) if existing and "embed_origins" in existing else []
+    same_site = "none" if embed else None
     api("GET", "accounts/{}".format(account))
     if not api_list(api, "zones?name={}&account.id={}".format(answers["zone"], account)):
         raise CloudflareError("zone {} is not in account {}".format(answers["zone"], account))
@@ -378,7 +386,7 @@ def up(answers, api, run, root):
     devices = sorted((policy["name"], policy["id"])
                      for policy in api_list(api, "accounts/{}/access/policies".format(account))
                      if policy["decision"] == "non_identity" and is_device_name(n, policy["name"]))
-    audience = ensure_app(api, account, hostname, n, [people] + [pid for _, pid in devices])
+    audience = ensure_app(api, account, hostname, n, [people] + [pid for _, pid in devices], same_site)
     profile = write_profile(root, answers, n, existing, issuer, audience)
     print("profile " + str(profile))
     result = run([sys.executable, str(root / "tools" / "deploy.py"), "deploy", "--profile", str(profile)])
@@ -388,6 +396,7 @@ def up(answers, api, run, root):
     print("Next: open it in a browser and sign in as one of " + ", ".join(answers["emails"]) + ".")
     print("Then follow docs/getting-started.md to install the skill, add a project and start a first job.")
     print("To add another device, run python3 tools/bootstrap.py up on that host.")
+    print("Store this API token as CLOUDFLARE_API_TOKEN in " + str(home / ".env") + " so agents here can manage the instance; see Device token in docs/cloudflare.md.")
 
 
 def down(answers, api, root, confirm=input):

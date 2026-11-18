@@ -2,10 +2,11 @@
 
 Works from any directory. The backlog is `backlog.md` in R2, one
 `- [ ] <slug>: <feature>` line per item. `next` takes the first unchecked line whose
-project has a checkout on this device, and skips the rest with a `skipping <slug>`
-line on stderr. An item may be followed by indented context lines that
+project has a checkout on this device. Each skipped line prints one stderr line:
+`skipping <slug>: no checkout on this device`, or `skipping "<slug>: <feature>": <why>`
+for a line that waits on a `Depends on:` prerequisite. An item may be followed by indented context lines that
 `backlog add --context` wrote. `next` ignores them except `Depends on:` lines.
-`next` and `batch` skip a line whose `Depends on:` line names an unchecked line or a job still open on the board.
+`next` and `batch` skip a line whose `Depends on:` line names an unchecked line or a job still open on the board. `batch` names each line it leaves out with a `skipping backlog:<key>` stderr line.
 
 1. Run `python3 <this skill's dir>/runtime/factory.py sync`, with no slug, since the
    project isn't known before `next` runs. Conflicts don't block, as in the Claims table.

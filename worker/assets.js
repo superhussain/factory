@@ -23,6 +23,8 @@ function text(value, max = Infinity) {
   return value;
 }
 
+export const DESKTOP_EMBED_ORIGINS = ["paseo://app"];
+
 function httpsOrigin(value) {
   text(value);
   const url = new URL(value);
@@ -89,7 +91,7 @@ export function readServerConfig(env) {
     env.FACTORY_EMBED_ORIGINS === undefined ? [] : JSON.parse(env.FACTORY_EMBED_ORIGINS);
   if (!Array.isArray(embed_origins) || new Set(embed_origins).size !== embed_origins.length)
     throw new Error("invalid embed origins");
-  embed_origins.forEach(httpsOrigin);
+  embed_origins.forEach((o) => DESKTOP_EMBED_ORIGINS.includes(o) || httpsOrigin(o));
   if (!agent_links || typeof agent_links !== "object" || Array.isArray(agent_links))
     throw new Error("invalid links");
   for (const [kind, link] of Object.entries(agent_links)) {

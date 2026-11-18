@@ -167,6 +167,28 @@ class RenderTest(unittest.TestCase):
             variables = json.loads(Path(config).read_text())["vars"]
         self.assertEqual(variables["FACTORY_EMBED_ORIGINS"], '["https://paseo.example.test"]')
 
+    def test_render_with_desktop_embed_origin(self):
+        origins = ["https://paseo.example.test", "paseo://app"]
+        profile = {**json.loads(VALID.read_text()), "embed_origins": origins}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.json"
+            path.write_text(json.dumps(profile))
+            self.assertEqual(run_cli("check", "--profile", str(path)).returncode, 0)
+            config = deploy.project_wrangler(deploy.load_profile(path), ROOT, Path(directory) / "out")
+            variables = json.loads(Path(config).read_text())["vars"]
+        self.assertEqual(variables["FACTORY_EMBED_ORIGINS"], json.dumps(origins))
+
+    def test_embed_origins_rejects_bad_desktop_entries(self):
+        bad = ["paseo://app/", "paseo://*", "paseo:", "PASEO://app", "paseo://app.example.test", "http://paseo.example.test"]
+        for entry in bad:
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as directory:
+                profile = {**json.loads(VALID.read_text()), "embed_origins": [entry]}
+                path = Path(directory) / "profile.json"
+                path.write_text(json.dumps(profile))
+                result = run_cli("check", "--profile", str(path))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("embed_origins entry must be a canonical https origin or paseo://app", result.stderr)
+
     def test_embed_origins_rejects_http(self):
         profile = {**json.loads(VALID.read_text()), "embed_origins": ["http://paseo.example.test"]}
         with tempfile.TemporaryDirectory() as directory:

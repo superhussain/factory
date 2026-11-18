@@ -87,7 +87,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   /* Touch screens get a 44px tap target. Mouse layouts keep the compact button. */
   @media (pointer: coarse) { .btn:not(.icon) { min-height: 44px; } }
   @media (pointer: coarse) { .tracer-tasks summary, .agent-runs summary { line-height: 44px; } }
-  @media (pointer: coarse) { .agent-runs td a { display: inline-block; line-height: 44px; } }
+  @media (pointer: coarse) { .agent-runs td a, #audit-flags td a { display: inline-block; line-height: 44px; } }
   /* --panel is white in light mode and near black in dark, so the label keeps contrast on either accent. */
   .ask { border: 1px solid var(--line); border-radius: 12px; margin: 16px 0; padding: 12px 16px; }
   .ask legend { font-weight: 600; padding: 0 6px; }
@@ -96,6 +96,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .ask-option:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
   .backlog-context, .backlog-triage { margin: 12px 0; }
   .doc .backlog-context > h3, .doc .backlog-triage > h3 { font-size: 13px; margin: 0 0 4px; }
+  .ask-waits { color: var(--muted); font-size: 12px; }
   .ask-rec { background: var(--accent-soft); color: var(--accent); border-radius: 999px; font-size: 11px; padding: 1px 8px; }
   .ask-desc { display: block; color: var(--muted); font-size: 13px; }
   .ask-model { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
@@ -187,8 +188,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .header-actions { display: flex; gap: inherit; }
   body[data-view="settings"] #board, body[data-view="settings"] #detail,
   body[data-view="retros"] #board, body[data-view="retros"] #detail,
-  body[data-view="inbox"] #board, body[data-view="inbox"] #detail { display: none; }
+  body[data-view="inbox"] #board { display: none; }
   #retros-page { max-width: 1040px; }
+  .retros-runs-heading { font-size: 15px; margin: 24px 0 12px; }
+  #audit-flags td a { color: var(--accent); }
+  #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
+  #audit-flags td:last-child { min-width: 14em; }
   #inbox-page { max-width: 1040px; }
   #inbox-list { list-style: none; margin: 0; padding: 0; }
   .inbox-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 16px; padding: 12px 10px; border-bottom: 1px solid var(--line); }
@@ -202,6 +207,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (max-width: 760px) {
     .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding: 12px 4px; }
     .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
+  }
+  .inbox-item[aria-current="true"] { background: var(--line); box-shadow: inset 3px 0 0 var(--accent); }
+  @media (min-width: 761px) {
+    body[data-inbox-split] #inbox-page { max-width: none; margin: 0 min(var(--drawer-w, 760px), 100%) 0 0; }
+    body[data-inbox-split] .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; }
+    body[data-inbox-split] .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
   }
   #retros-list { display: grid; gap: 20px; }
   .settings-section.retro-run { padding: 20px 20px 12px; }
@@ -662,6 +673,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail.head-media .doc > .file-list { margin-bottom: 16px; padding-left: 20px; }
     .detail.head-media .doc > .file-list + * { margin-top: 0; }
     .pager > .doc, .pager > .gallery, .pager > .file-list { touch-action: pan-y pinch-zoom; }
+    /* On a phone each audit row is a card: a label column, then the value. */
+    .doc table.audit, .doc table.audit tbody, .doc table.audit tr { display: block; }
+    .doc table.audit thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .doc table.audit tr { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 4px 0; }
+    .doc table.audit td, .doc table.audit td:first-child, .doc table.audit td:last-child { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); column-gap: 10px; border: 0; padding: 3px 10px; min-width: 0; max-width: none; white-space: normal; }
+    .doc table.audit td::before { content: attr(data-label); color: var(--muted); font-weight: 600; }
   }
   @media (max-width: 360px) {
     header { gap: 6px; }
@@ -1122,6 +1139,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
           <tr><td>B</td><td>Open the first backlog item</td></tr>
           <tr><td>A or D</td><td>Approve or deny the open backlog item</td></tr>
           <tr><td>Right or Left arrow</td><td>Move between cards and job pages</td></tr>
+          <tr><td>Right or Left arrow in the Inbox</td><td>Move between Inbox rows, with the open one beside the list</td></tr>
         </tbody>
       </table></div>
     </section>
@@ -1132,6 +1150,17 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <a class="btn icon" id="retros-back" href="#" aria-label="Back to board" title="Back to board (H)" aria-keyshortcuts="h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
     <h2 id="retros-page-heading" tabindex="-1">Retros</h2>
   </div>
+  <section class="settings-section" id="audit-flags" aria-labelledby="audit-flags-heading">
+    <h3 id="audit-flags-heading">Red flags</h3>
+    <p class="muted" id="audit-flags-status" role="status"></p>
+    <div class="reference-scroll" id="audit-flags-wrap" tabindex="0" role="region" aria-label="Red flags" hidden>
+      <table class="reference-table">
+        <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Job</th><th scope="col">Host</th><th scope="col">Agent</th><th scope="col">Tool</th><th scope="col">Flags</th><th scope="col">Target</th></tr></thead>
+        <tbody id="audit-flags-rows"></tbody>
+      </table>
+    </div>
+  </section>
+  <h3 class="retros-runs-heading" id="retros-runs-heading">Retro runs</h3>
   <p class="muted" id="retros-status" role="status"></p>
   <div id="retros-list"></div>
 </div>
@@ -1545,6 +1574,9 @@ function paseoLinksFor(p) {
 // Framed by a listed Paseo origin, app links go to the parent instead of the OS handler.
 const EMBED_ORIGINS = Array.isArray(factoryConfig.embed_origins) ? factoryConfig.embed_origins : [];
 let embedParent = null;
+// Opened as a sign-in popup by a listed Paseo origin: say sign-in finished.
+// Chrome throws on a non-http target such as paseo://app, so each origin is tried alone.
+if (window.opener && window.parent === window) for (const o of EMBED_ORIGINS) try { window.opener.postMessage({ type: 'factory-embed-signed-in', v: 1 }, o); } catch {}
 function appLinkIds(href) {
   const template = factoryConfig.agent_links.app?.template;
   if (!template) return null;
@@ -1699,7 +1731,8 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.paseo_writer), JSON.stringify(sessionJob(j) && sessionLink(sessionJob(j))), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.idea_files), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
+  const owner = sessionJob(j);
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.paseo_writer), JSON.stringify(owner && sessionLink(owner)), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.idea_files), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
 }
 
 // A holder's stop is recorded only when stopped is a string, as in factory.py.
@@ -2967,15 +3000,16 @@ function renderRoute() {
   settingsShown = section;
   const retrosOpen = !section && retrosRoute() !== null;
   const inboxWas = $('inbox-page').hidden === false;
-  const inboxOpen = !section && inboxRoute() !== null;
+  const inboxOpen = !section && inboxShown();
   document.body.dataset.view = section ? 'settings' : retrosOpen ? 'retros' : inboxOpen ? 'inbox' : 'board';
   $('settings-page').hidden = !section;
   $('retros-page').hidden = !retrosOpen;
   $('inbox-page').hidden = !inboxOpen;
+  document.body.toggleAttribute('data-inbox-split', inboxSplit());
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : baseTitle;
   if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxFocusRow = -1; inboxAnswer = null; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
-  if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); }
+  if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
@@ -3085,6 +3119,35 @@ async function loadRetros() {
   if ($('job-picker').open && pickerMode === 'job') renderJobResults();
 }
 
+// Red flags: the flagged tool calls of every job, newest first, from the Worker's index.
+let auditFlags = null, auditFlagsFailed = false;
+
+async function loadAuditFlags() {
+  renderAuditFlags();
+  try {
+    const r = await fetch('./api/audit-flags', { cache: 'no-store' });
+    if (r.status === 404) auditFlags = [];
+    else if (r.status !== 200) throw new Error(String(r.status));
+    else auditFlags = (await r.json()).rows;
+    auditFlagsFailed = false;
+  } catch { auditFlags = null; auditFlagsFailed = true; }
+  renderAuditFlags();
+}
+
+function renderAuditFlags() {
+  const rows = auditFlags ?? [];
+  const jobCount = new Set(rows.map((row) => row.job)).size;
+  $('audit-flags-status').textContent = auditFlagsFailed ? 'Could not load red flags. Reload to try again.'
+    : auditFlags === null ? 'Loading red flags\u2026'
+    : !rows.length ? 'No flagged tool calls yet. Each audit push adds its job\'s flagged calls here.'
+    : rows.length + (rows.length === 1 ? ' flagged call' : ' flagged calls') + ' across ' + jobCount + (jobCount === 1 ? ' job' : ' jobs')
+      + ', newest first. Each host redacted its targets before upload.';
+  $('audit-flags-wrap').hidden = !rows.length;
+  $('audit-flags-rows').innerHTML = rows.map((row) => '<tr><td>' + esc(row.time) + '</td><td><a href="#' + esc(encodeURIComponent(row.job)) + '">'
+    + esc(row.job) + '</a></td><td>' + esc(row.host) + '</td><td>' + esc(row.agent) + '</td><td>' + esc(row.tool) + '</td><td>'
+    + esc(row.flags.join(', ')) + '</td><td><code>' + esc(row.target) + '</code></td></tr>').join('');
+}
+
 const RETRO_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // "Nov 13, 2026, 22:43 UTC" from a run id that starts with its UTC timestamp, else the id.
 function retroWhen(run) {
@@ -3183,6 +3246,8 @@ let inboxAnswer = null;
 function inboxRoute() {
   return location.hash === '#/inbox' ? true : null;
 }
+function inboxSplit() { return drawerReturn === '#/inbox' && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null; }
+function inboxShown() { return inboxRoute() !== null || inboxSplit(); }
 
 const INBOX_LABELS = { ask: 'Question', pr: 'Escalated PR', human: 'Needs recovery', backlog: 'Backlog decision' };
 
@@ -3201,6 +3266,18 @@ function inboxItems() {
     .concat(backlogLoaded ? visibleBacklog().map((item) => ({ kind: 'backlog', item })) : []);
 }
 
+// The hash an inbox row's Open link goes to.
+function inboxHref(it) {
+  if (it.item) return '#/backlog/' + it.item.key;
+  const id = it.job.id;
+  return '#' + encodeURIComponent(id) + (it.kind === 'ask' && it.job.needs.includes('#' + id + '/needs') ? '/needs' : '');
+}
+
+// The index of the inbox row open in the drawer, or -1.
+function inboxOpenIndex(items) {
+  return items.findIndex((it) => it.item ? it.item.raw === openBacklogRaw : it.job.id === openId);
+}
+
 function syncInboxLink() {
   const n = loaded && (backlogLoaded || backlogFailed) ? inboxItems().length : 0;
   $('inbox-count').textContent = n > 99 ? '99+' : String(n);
@@ -3210,7 +3287,7 @@ function syncInboxLink() {
 
 function renderInboxPage() {
   syncInboxLink();
-  if (inboxRoute() === null) return;
+  if (!inboxShown()) return;
   if (!loaded || (!backlogLoaded && !backlogFailed)) {
     $('inbox-status').textContent = inboxError || 'Loading the inbox\u2026';
     $('inbox-list').innerHTML = '';
@@ -3222,12 +3299,14 @@ function renderInboxPage() {
   $('inbox-status').textContent = inboxError ||
     (backlogFailed ? 'Could not load the backlog, so backlog rows may be missing or out of date.' : items.length ? '' : 'Nothing is waiting on you.');
   const link = (href, text) => '<a class="btn" href="' + esc(href) + '">' + esc(text) + '</a>';
-  const html = items.map(({ kind, job: j, item }, i) => {
+  const current = inboxSplit() ? inboxOpenIndex(items) : -1;
+  const html = items.map((it, i) => {
+    const { kind, job: j, item } = it;
+    const href = inboxHref(it);
     let title, meta, actions;
     if (item) {
       const ctx = item.context === undefined ? null : parseBacklogContext(item.context);
       const busy = backlogBusy.has(item.raw) ? ' disabled' : '';
-      const href = '#/backlog/' + item.key;
       title = item.text;
       meta = [projectName(item)].concat(ctx ? 'Agent recommends ' + (ctx.recommend === 'approved' ? 'approve' : 'deny') : []);
       actions = ctx?.questions.length ? link(href, 'Answer questions')
@@ -3240,12 +3319,12 @@ function renderInboxPage() {
       const open = inboxAnswer?.id === j.id;
       actions = kind === 'ask' && j.needs.includes('#' + j.id + '/needs')
         ? '<button type="button" class="btn primary" data-inbox-answer="' + esc(j.id) + '" aria-expanded="' + open + '"' +
-          (open ? ' aria-controls="inbox-answer"' : '') + '>Answer</button>' + link('#' + j.id + '/needs', 'Open job')
+          (open ? ' aria-controls="inbox-answer"' : '') + '>Answer</button>' + link(href, 'Open job')
         : (kind === 'pr' && canBabysit(j) ? '<button type="button" class="btn primary" data-inbox-babysit="' + esc(j.id) + '">Babysit PR #' + esc(pr.n) + '</button>' : '') +
           (kind === 'pr' && pr ? '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>' : '') +
-          link('#' + j.id, 'Open job');
+          link(href, 'Open job');
     }
-    return '<li class="inbox-item"><span class="inbox-rank">' + (i + 1) + '</span>' +
+    return '<li class="inbox-item"' + (i === current ? ' aria-current="true"' : '') + '><span class="inbox-rank">' + (i + 1) + '</span>' +
       '<div><span class="chip inbox-kind">' + INBOX_LABELS[kind] + '</span><p class="inbox-title">' + esc(title) + '</p>' +
       '<p class="inbox-meta">' + meta.map(esc).join(' · ') + '</p></div>' +
       '<div class="inbox-actions">' + actions + '</div>' +
@@ -3270,7 +3349,32 @@ function renderInboxPage() {
     if (el.tagName === 'TEXTAREA') el.setSelectionRange(selectionStart, selectionEnd);
   }
   if (row >= 0) (list.children[Math.min(row, list.children.length - 1)]?.querySelector('.inbox-actions .btn:not(:disabled)') ?? $('inbox-page-heading')).focus();
+  if (current >= 0) list.children[current].scrollIntoView({ block: 'nearest' });
 }
+
+// Focus the first enabled action of the row for a job id or backlog raw line, else the heading.
+function focusInboxRow(id, raw) {
+  const at = inboxItems().findIndex((it) => it.item ? it.item.raw === raw : it.job.id === id);
+  ($('inbox-list').children[at]?.querySelector('.inbox-actions .btn:not(:disabled)') ?? $('inbox-page-heading')).focus();
+}
+
+// Right and Left step the drawer through the inbox rows; Left on the first row closes it.
+function handleInboxArrows(e) {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  if (!inboxShown()) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+  if (e.target.closest('input, textarea, select, [contenteditable], #d-resize, video')) return;
+  if (document.querySelector('dialog[open]')) return;
+  e.preventDefault();
+  const items = inboxItems();
+  const at = inboxSplit() ? inboxOpenIndex(items) : -1;
+  if (e.key === 'ArrowRight') {
+    const next = items[at + 1];
+    if (next) location.hash = inboxHref(next);
+  } else if (at > 0) location.hash = inboxHref(items[at - 1]);
+  else if (at === 0) closeDetail();
+}
+document.addEventListener('keydown', handleInboxArrows);
 
 // One job file as loadFiles reads it, or null.
 async function readJobFile(j, name) {
@@ -3385,7 +3489,7 @@ $('inbox-list').addEventListener('click', (e) => {
   if (e.target.closest('[data-inbox-babysit], [data-inbox-decide]')) inboxFocusRow = [...$('inbox-list').children].indexOf(e.target.closest('li'));
   const babysit = e.target.closest('[data-inbox-babysit]');
   if (babysit) {
-    babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxRoute() !== null });
+    babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxShown() });
     if (!babysit.disabled) inboxFocusRow = -1;
   }
   const decide = e.target.closest('[data-inbox-decide]');
@@ -4202,7 +4306,7 @@ function renderBoard() {
       '<p>Jobs show up here as they move through the loop.</p>' +
       (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
-    if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = BASE_TITLE;
+    if (!settingsShown && !retrosRoute() && !inboxShown()) document.title = BASE_TITLE;
     syncAppBadge(0);
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
@@ -4222,14 +4326,15 @@ function renderBoard() {
   waiting.splice(0, waiting.length, ...waitingJobs());
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   for (const s of COLUMNS) if (s !== 'backlog' && !TERMINAL.includes(s)) starredFirst(lists[COLUMNS.indexOf(s)]);
-  if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
+  if (!settingsShown && !retrosRoute() && !inboxShown()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
   const starredOnly = starView === 'only' && !noneShown;
   const starredLine = starredOnly ? '<p class="filter-empty" id="starred-only">' +
     (shown.some((j) => starred.has(j.id)) ? 'Showing starred jobs only.'
-      : jobs.some((j) => starred.has(j.id)) ? 'The project filter hides every starred job.'
+      : jobs.some((j) => starred.has(j.id)) ? 'The project filter hides every starred job.' +
+        ' <button type="button" class="btn" id="starred-show-projects">Show all projects</button>'
       : 'No starred jobs yet. Star a job with the star button in its job panel.') +
     ' <button type="button" class="btn" id="starred-show-all">Show all jobs</button></p>' : '';
   // The extra auto track lets the filter-empty or starred-only line span the whole board.
@@ -4280,6 +4385,11 @@ function renderBoard() {
 $('board').addEventListener('click', (e) => {
   if (e.target.closest('#starred-show-all')) {
     setStarView('float');
+    $('board').querySelector('.column-toggle')?.focus();
+    return;
+  }
+  if (e.target.closest('#starred-show-projects')) {
+    setHiddenProjects([]);
     $('board').querySelector('.column-toggle')?.focus();
     return;
   }
@@ -4360,13 +4470,15 @@ function renderAudit(f) {
   const hosts = new Set(rows.map((r) => r.host)).size;
   const flagged = rows.filter((r) => Array.isArray(r.flags) && r.flags.length).length;
   const n = (count, word) => count + ' ' + word + (count === 1 ? '' : 's');
-  const head = ['Time (UTC)', 'Host', 'Session', 'Agent', 'Tool', 'Flags', 'Target'].map((h) => '<th scope="col">' + h + '</th>').join('');
+  const cols = ['Time (UTC)', 'Host', 'Session', 'Agent', 'Tool', 'Flags', 'Target'];
+  const head = cols.map((h) => '<th scope="col" role="columnheader">' + h + '</th>').join('');
   const body = rows.map((r) => {
     const flags = Array.isArray(r.flags) && r.flags.length ? '<strong>' + esc(r.flags.join(', ')) + '</strong>' : '-';
-    return '<tr><td>' + [r.time, r.host, r.session, r.agent, r.tool].map(esc).join('</td><td>') + '</td><td>' + flags + '</td><td><code>' + esc(r.target) + '</code></td></tr>';
+    const cells = [...[r.time, r.host, r.session, r.agent, r.tool].map(esc), flags, '<code>' + esc(r.target) + '</code>'];
+    return '<tr role="row">' + cells.map((c, i) => '<td role="cell" data-label="' + cols[i] + '">' + c + '</td>').join('') + '</tr>';
   }).join('');
   return '<p>' + n(rows.length, 'call') + ' from ' + n(hosts, 'host') + ', ' + flagged + ' flagged. Each host redacted its targets before upload.</p>' +
-    '<div class="table-wrap" tabindex="0" role="region" aria-label="Audit rows"><table class="audit"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+    '<div class="table-wrap" tabindex="0" role="region" aria-label="Audit rows"><table class="audit" role="table"><thead role="rowgroup"><tr role="row">' + head + '</tr></thead><tbody role="rowgroup">' + body + '</tbody></table></div>';
 }
 
 const sha12 = async (text) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))).slice(0, 12);
@@ -5804,6 +5916,7 @@ function closeDetail(keepHash = false) {
   const back = drawerReturn;
   drawerReturn = null;
   if (back && !keepHash) renderRoute();
+  if (back === '#/inbox' && !keepHash) focusInboxRow(id, raw);
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
@@ -5831,6 +5944,7 @@ function handleBoardKeys(e) {
   if (e.target.closest('input, textarea, select, [contenteditable], #d-resize, video')) return;
   if (document.querySelector('dialog[open]')) return;
   if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    if (inboxSplit()) return;
     e.preventDefault();
     const cards = visibleCards();
     if (!openId) {
@@ -5948,6 +6062,7 @@ handle.setAttribute('aria-valuenow', DRAWER_DEFAULT);
 function setDrawerWidth(px, save) {
   const w = Math.round(Math.max(DRAWER_MIN, Math.min(px, innerWidth - 80)));
   $('detail').style.setProperty('--drawer-w', w + 'px');
+  document.body.style.setProperty('--drawer-w', w + 'px');
   handle.setAttribute('aria-valuemax', innerWidth - 80);
   handle.setAttribute('aria-valuenow', w);
   if (save) store.set(DRAWER_KEY, w);
@@ -5955,6 +6070,7 @@ function setDrawerWidth(px, save) {
 function resetDrawerWidth() {
   store.remove(DRAWER_KEY);
   $('detail').style.removeProperty('--drawer-w');
+  document.body.style.removeProperty('--drawer-w');
   handle.setAttribute('aria-valuenow', DRAWER_DEFAULT);
 }
 const savedWidth = Number(store.get(DRAWER_KEY) || NaN);
@@ -6302,18 +6418,26 @@ function backlogDepends(context, text) {
   return { refs, waiting };
 }
 
+// The refused approve's copy for an unchecked Depends on: prerequisite.
+function backlogWaitsText(waiting) {
+  return 'Approve "' + waiting + '" first. Its backlog line is still unchecked.';
+}
+
 // factory.py backlog_context rules. null means the text is not in the backlog context format.
 function parseBacklogContext(text) {
   const lines = trimBlankEdges(text.replace(/\r\n?/g, '\n')).split('\n');
   const recommend = { 'Recommend: approve': 'approved', 'Recommend: deny': 'denied' }[lines[0]];
   if (!recommend || lines.join('\n').length > 6000) return null;
   const at = lines.findIndex((l) => l.startsWith('## Question:'));
-  const reasons = lines.slice(1, at < 0 ? lines.length : at).join('\n').trim();
-  if (!reasons) return null;
-  if (at < 0) return { recommend, reasons, questions: [] };
+  const body = lines.slice(1, at < 0 ? lines.length : at);
+  if (!body.join('\n').trim()) return null;
+  const DEPENDS = /^Depends on: ([\w-]+: \S.*)$/;
+  const depends = body.map((l) => DEPENDS.exec(l)?.[1].trim()).filter(Boolean);
+  const reasons = body.filter((l) => !DEPENDS.test(l)).join('\n').trim();
+  if (at < 0) return { recommend, reasons, depends, questions: [] };
   const parsed = parseNeeds(lines.slice(at).join('\n'));
   if (!parsed?.ok || parsed.parts.length > 3 || parsed.parts.some((p) => p.kind !== 'question')) return null;
-  return { recommend, reasons, questions: parsed.parts };
+  return { recommend, reasons, depends, questions: parsed.parts };
 }
 
 // One line per question, for backlog.answers and the idea. answers[i] is { picked, other }.
@@ -6515,8 +6639,8 @@ async function decideBacklog(item, decision, notes, answers) {
     if (decision === 'approved') {
       const { refs, waiting } = backlogDepends(item.context ?? '', backlogText);
       if (waiting) {
-        const x = new Error('Approve "' + waiting + '" first. Its backlog line is still unchecked.');
-        x.prerequisite = backlog.find((b) => b.raw.trimEnd() === '- [ ] ' + waiting) ?? null;
+        const x = new Error(backlogWaitsText(waiting));
+        x.waiting = waiting;
         throw x;
       }
       item = { ...item, refs: [...item.refs, ...refs] };
@@ -8055,6 +8179,7 @@ function openBacklogItem(item) {
   drawerVersion++;
   openId = null;
   openBacklogRaw = item.raw;
+  backlogRefusal = null;
   files = [];
   activeFile = null;
   docDir = null;
@@ -8094,7 +8219,8 @@ function openBacklogItem(item) {
   updateBacklogBar();
   renderBoard();
   refreshPicker();
-  $('d-doc').querySelector('input[type=radio]').focus();
+  // Beside the Inbox, focus stays on the list so Right and Left keep stepping its rows.
+  if (!inboxSplit()) $('d-doc').querySelector('input[type=radio]').focus();
   if (backlogTriageSeen.get(item.raw) == null) fetchBacklogTriage([item]);
   fetchReworkHistory(item);
 }
@@ -8184,9 +8310,11 @@ async function fetchBacklogTriage(items) {
 function renderBacklogDecision(item, triageHtml) {
   const ctx = item.context === undefined ? null : parseBacklogContext(item.context);
   const draft = backlogDrafts.get(item.raw) ?? { pick: '', notes: '', answers: [] };
+  const { waiting } = backlogDepends(item.context ?? '', backlogText);
   const radio = (value, name, desc, key) =>
     '<label class="ask-option"><input type="radio" name="backlog-pick" value="' + value + '"' + (key ? ' aria-keyshortcuts="' + key + '"' : '') + (draft.pick === value ? ' checked' : '') +
-    '><span><strong>' + name + '</strong>' + (ctx?.recommend === value ? ' <span class="ask-rec">Recommended</span>' : '') +
+    '><span><strong>' + name + '</strong>' +
+    (value === 'approved' && waiting ? ' <span class="ask-waits">Waits on ' + esc(waiting) + '</span>' : ctx?.recommend === value ? ' <span class="ask-rec">Recommended</span>' : '') +
     ' <span class="ask-desc">' + desc + '</span></span></label>';
   const questions = (ctx?.questions ?? []).map((q, i) => {
     const a = draft.answers[i] ?? { picked: [], other: '' };
@@ -8201,7 +8329,9 @@ function renderBacklogDecision(item, triageHtml) {
       ' placeholder="Write your own answer, or expand on an option without choosing it.">' + esc(a.other) + '</textarea></label></fieldset>';
   }).join('');
   const shown = item.context === undefined ? '' : ctx
-    ? '<section class="backlog-context" aria-label="Context from the agent"><h3>Why this item</h3>' + md(ctx.reasons) + '</section>'
+    ? '<section class="backlog-context" aria-label="Context from the agent">' +
+      (ctx.depends.length ? '<h3>Depends on</h3><ul class="backlog-depends">' + ctx.depends.map((d) => '<li>' + autolink(esc(d)) + '</li>').join('') + '</ul>' : '') +
+      (ctx.reasons ? '<h3>Why this item</h3>' + md(ctx.reasons) : '') + '</section>'
     : '<p class="muted">This item\'s context is not in the backlog context format, so it shows as text.</p>' + md(item.context);
   const history = backlogReworkHistory(item, [...jobs, ...archivedJobs.values()]);
   return md(item.text) + shown +
@@ -8255,10 +8385,32 @@ function updateBacklogBar() {
 
 // Called by poll after the backlog reloads.
 function syncBacklogDetail() {
-  if (openBacklogRaw !== null && $('backlog-form')) updateBacklogBar();
+  if (openBacklogRaw === null || !$('backlog-form')) return;
+  updateBacklogBar();
+  if (!$('backlog-status').textContent) showBacklogRefusal();
+}
+
+// The open item's refused approve, { raw, waiting }. It lasts while that prerequisite still waits.
+let backlogRefusal = null;
+function showBacklogRefusal() {
+  const item = backlog.find((b) => b.raw === openBacklogRaw);
+  if (backlogRefusal?.raw !== openBacklogRaw || !item || backlogDepends(item.context ?? '', backlogText).waiting !== backlogRefusal.waiting) {
+    backlogRefusal = null;
+    return;
+  }
+  const { waiting } = backlogRefusal;
+  $('backlog-status').textContent = backlogWaitsText(waiting);
+  const prerequisite = backlog.find((b) => b.raw.trimEnd() === '- [ ] ' + waiting);
+  if (prerequisite) {
+    const a = document.createElement('a');
+    a.href = '#/backlog/' + prerequisite.key;
+    a.textContent = 'Open the prerequisite';
+    $('backlog-status').append(' ', a);
+  }
 }
 
 async function submitBacklogDecision() {
+  backlogRefusal = null;
   const raw = openBacklogRaw;
   const item = backlog.find((b) => b.raw === raw);
   if (!item) return syncBacklogDetail();
@@ -8287,11 +8439,9 @@ async function submitBacklogDecision() {
     if (openBacklogRaw === raw) {
       updateBacklogBar();
       fail(String(x.message || x));
-      if (x.prerequisite) {
-        const a = document.createElement('a');
-        a.href = '#/backlog/' + x.prerequisite.key;
-        a.textContent = 'Open the prerequisite';
-        $('backlog-status').append(' ', a);
+      if (x.waiting) {
+        backlogRefusal = { raw, waiting: x.waiting };
+        showBacklogRefusal();
       }
     }
   }
@@ -8299,6 +8449,7 @@ async function submitBacklogDecision() {
 
 function storeBacklogDraft(e) {
   if (!e.target.closest('#backlog-form')) return;
+  backlogRefusal = null;
   backlogDrafts.set(openBacklogRaw, { pick: backlogPick(), notes: $('backlog-notes').value, answers: collectBacklogAnswers($('backlog-form')) });
   updateBacklogBar();
 }

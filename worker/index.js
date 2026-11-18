@@ -97,6 +97,8 @@ const RETRO_FILE = /^\/api\/retro\/([^/]+)\/(\d{4}-\d{2}-\d{2})\.jsonl$/;
 const AUDIT_JOB = /^\/api\/audit\/([^/]+)$/;
 const AUDIT_FILE = /^\/api\/audit\/([^/]+)\/([^/]+)\.jsonl$/;
 const AUDIT_JOB_ID = /^\d+-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// The red-flag index of flagged calls across jobs.
+const AUDIT_FLAGS = /^\/api\/audit-flags$/;
 // Retro runs: one factory.retro-run/1 record per admitted run, and the newest 30 listed.
 const RETROS = /^\/api\/retros(?:\/([A-Za-z0-9_-]{1,64}))?$/;
 // board.json holds every job, merged ones included, so it outgrows the per-file cap.
@@ -1689,6 +1691,7 @@ async function auditPut(request, env, principal, job, id) {
   }
   const lines = text.split("\n");
   if (lines.at(-1) === "") lines.pop();
+  const rows = [];
   for (const [i, line] of lines.entries()) {
     let row = null;
     try {
@@ -1702,11 +1705,99 @@ async function auditPut(request, env, principal, job, id) {
       row.job !== job
     )
       return reply(`line ${i + 1} is not a JSON object with host ${id} and job ${job}`, 400);
+    rows.push(row);
   }
   await env.BUCKET.put(auditKey(job, id), bytes, {
     httpMetadata: { contentType: "application/x-ndjson" },
   });
+  if (!(await auditFlagsUpdate(env, job, id, rows))) return reply(AUDIT_FLAGS_BUSY, 503);
   return reply("ok");
+}
+
+const AUDIT_FLAGS_KEY = "audit-flags.json";
+const AUDIT_FLAGS_MAX = 500;
+const AUDIT_FLAGS_BUSY = "audit rows were saved, but the red-flag index kept changing; push again";
+const AUDIT_FLAGS_SCHEMA = "factory.audit-flags/1";
+const AUDIT_FLAGS_TIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+const AUDIT_FLAGS_AHEAD_MS = 24 * 60 * 60 * 1000;
+const AUDIT_FLAGS_TEXT_MAX = 120;
+const AUDIT_FLAGS_FLAGS_MAX = 16;
+const AUDIT_FLAGS_FLAG_MAX = 32;
+
+function auditFlagTime(time, now) {
+  if (typeof time !== "string" || !AUDIT_FLAGS_TIME.test(time)) return false;
+  const iso = time.replace(" ", "T");
+  const ms = Date.parse(iso + "Z");
+  return (
+    !Number.isNaN(ms) &&
+    new Date(ms).toISOString().slice(0, 19) === iso &&
+    ms <= now + AUDIT_FLAGS_AHEAD_MS
+  );
+}
+
+// The flagged calls of one job and host with a host-shaped UTC time, each field capped.
+function auditFlagRows(rows, job, host) {
+  const now = Date.now();
+  const cap = (value, max) =>
+    typeof value === "string" ? Array.from(value).slice(0, max).join("") : "";
+  return rows
+    .filter(
+      (row) =>
+        auditFlagTime(row.time, now) &&
+        Array.isArray(row.flags) &&
+        row.flags.length > 0 &&
+        row.flags.every((flag) => typeof flag === "string"),
+    )
+    .map((row) => ({
+      time: row.time,
+      job,
+      host,
+      agent: cap(row.agent, AUDIT_FLAGS_TEXT_MAX),
+      tool: cap(row.tool, AUDIT_FLAGS_TEXT_MAX),
+      flags: row.flags
+        .slice(0, AUDIT_FLAGS_FLAGS_MAX)
+        .map((flag) => cap(flag, AUDIT_FLAGS_FLAG_MAX)),
+      target: cap(row.target, AUDIT_FLAGS_TEXT_MAX),
+    }));
+}
+
+// Newest first, then job, host and agent.
+function auditFlagOrder(a, b) {
+  if (a.time !== b.time) return a.time < b.time ? 1 : -1;
+  for (const field of ["job", "host", "agent"])
+    if (a[field] !== b[field]) return a[field] < b[field] ? -1 : 1;
+  return 0;
+}
+
+// Replaces the job and host's rows in the index. False after ten lost conditional puts.
+async function auditFlagsUpdate(env, job, host, rows) {
+  const fresh = auditFlagRows(rows, job, host);
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const prev = await env.BUCKET.get(AUDIT_FLAGS_KEY);
+    const kept = prev
+      ? JSON.parse(await prev.text()).rows.filter((row) => row.job !== job || row.host !== host)
+      : [];
+    const next = [...kept, ...fresh].sort(auditFlagOrder).slice(0, AUDIT_FLAGS_MAX);
+    const saved = await env.BUCKET.put(
+      AUDIT_FLAGS_KEY,
+      JSON.stringify({ schema: AUDIT_FLAGS_SCHEMA, rows: next }),
+      {
+        ...JSON_TYPE,
+        onlyIf: new Headers(prev ? { "If-Match": prev.httpEtag } : { "If-None-Match": "*" }),
+      },
+    );
+    if (saved) return true;
+  }
+  return false;
+}
+
+async function auditFlagsGet(env) {
+  const text = await (await env.BUCKET.get(AUDIT_FLAGS_KEY))?.text();
+  return reply(
+    text ?? JSON.stringify({ schema: AUDIT_FLAGS_SCHEMA, rows: [] }),
+    200,
+    "application/json",
+  );
 }
 
 // Every host's rows for the job, in host record order, each file ending in a newline.
@@ -2440,6 +2531,7 @@ async function api(request, env, path, principal, ctx) {
     if (principal.kind !== "service") return reply(RETRO_READ_ONLY, 403);
     return getFile(env, retroKey(id, date), "application/x-ndjson");
   }
+  if (AUDIT_FLAGS.test(path)) return method === "GET" ? auditFlagsGet(env) : notFound();
   m = path.match(AUDIT_JOB);
   if (m) {
     if (method !== "GET" || !AUDIT_JOB_ID.test(m[1])) return notFound();

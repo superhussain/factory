@@ -2,6 +2,8 @@
 // gets a ready reply to its hello, and a Session app click posts the ids instead of leaving
 // the frame. An unlisted parent is refused by frame-ancestors. Every https://*.example.test
 // request is fulfilled here; the dashboard origin proxies to the owned local origin.
+// A sign-in popup opened by a listed parent posts factory-embed-signed-in to it; an unlisted parent gets nothing.
+// The config also lists paseo://app, the desktop origin; Chrome here cannot load that scheme, so this proves the extra source leaves https framing intact.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -28,17 +30,8 @@ frame.addEventListener("load", () =>
 addEventListener("message", (e) => window.received.push(e.data));
 </script>`;
 
-async function framedPage(browser, origin, parent) {
-  const page = await (await browser.createBrowserContext()).newPage();
-  await page.setViewport({ width: 1280, height: 900 });
-  await page.setBypassServiceWorker(true);
-  await page.evaluateOnNewDocument(() => {
-    window.WebSocket = class extends EventTarget {
-      close() {}
-    };
-  });
-  await page.setRequestInterception(true);
-  page.on("request", async (request) => {
+function proxy(origin, parent) {
+  return async (request) => {
     const url = new URL(request.url());
     if (url.origin === parent && url.pathname === "/")
       return request.respond({ status: 200, contentType: "text/html", body: PARENT });
@@ -60,9 +53,39 @@ async function framedPage(browser, origin, parent) {
       headers: forwarded,
       body: Buffer.from(await response.arrayBuffer()),
     });
+  };
+}
+
+async function stubbed(page, viewport, handler) {
+  await page.setViewport(viewport);
+  await page.setBypassServiceWorker(true);
+  await page.evaluateOnNewDocument(() => {
+    window.WebSocket = class extends EventTarget {
+      close() {}
+    };
   });
+  await page.setRequestInterception(true);
+  page.on("request", handler);
+}
+
+async function framedPage(browser, origin, parent) {
+  const page = await (await browser.createBrowserContext()).newPage();
+  await stubbed(page, { width: 1280, height: 900 }, proxy(origin, parent));
   await page.goto(parent + "/", { waitUntil: "domcontentloaded" });
   return page;
+}
+
+async function signInPopup(page, origin, parent) {
+  const opened = new Promise((resolve) => page.once("popup", resolve));
+  await page.evaluate(() => {
+    window.popup = window.open("about:blank", "factory-sign-in", "popup,width=480,height=720");
+  });
+  const popup = await opened;
+  await stubbed(popup, { width: 480, height: 720 }, proxy(origin, parent));
+  await page.evaluate((href) => {
+    window.popup.location.href = href;
+  }, DASHBOARD + "/#042-sample-links");
+  return popup;
 }
 
 const childFrame = (page) => page.mainFrame().childFrames()[0];
@@ -81,6 +104,24 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
     await t.test("listed origin ready", async () => {
       await page.waitForFunction(
         () => window.received.some((m) => m?.type === "factory-embed-ready" && m.v === 1),
+        { timeout: 5000, polling: 50 },
+      );
+      assert.equal(
+        await page.evaluate(() =>
+          window.received.some((m) => m?.type === "factory-embed-signed-in"),
+        ),
+        false,
+      );
+    });
+
+    await t.test("sign-in popup posts to listed opener", async () => {
+      const popup = await signInPopup(page, origin, LISTED);
+      await popup.waitForSelector("#board");
+      await popup.waitForFunction(() => document.body.innerText.includes("Synthetic linked job"), {
+        timeout: 8000,
+      });
+      await page.waitForFunction(
+        () => window.received.some((m) => m?.type === "factory-embed-signed-in" && m.v === 1),
         { timeout: 5000, polling: 50 },
       );
     });
@@ -106,6 +147,8 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
 
     await t.test("unlisted origin", async () => {
       const other = await framedPage(browser, origin, UNLISTED);
+      const popup = await signInPopup(other, origin, UNLISTED);
+      await popup.waitForSelector("#board");
       await new Promise((resolve) => setTimeout(resolve, 3000));
       const board = await childFrame(other)
         .evaluate(() => document.querySelector("#board") !== null)

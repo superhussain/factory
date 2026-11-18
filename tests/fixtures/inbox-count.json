@@ -1,0 +1,67 @@
+{
+  "jobs": [
+    {
+      "id": "041-sample-old",
+      "project": "sample",
+      "title": "Synthetic 041-sample-old",
+      "stage": "build",
+      "updated": "2026-01-01T00:00:00Z"
+    },
+    {
+      "id": "042-sample-links",
+      "project": "sample",
+      "title": "Synthetic 042-sample-links",
+      "stage": "needs-human",
+      "updated": "2026-01-01T00:00:00Z"
+    },
+    {
+      "id": "043-sample-asked",
+      "project": "sample",
+      "title": "Synthetic 043-sample-asked",
+      "stage": "build",
+      "updated": "2026-01-01T00:00:00Z",
+      "needs": "Pick A or B"
+    },
+    {
+      "id": "044-sample-export",
+      "project": "sample",
+      "title": "Synthetic 044-sample-export",
+      "stage": "pr-open",
+      "updated": "2026-01-01T00:00:00Z",
+      "escalated": true
+    },
+    {
+      "id": "045-sample-legacy",
+      "project": "sample",
+      "title": "Synthetic 045-sample-legacy",
+      "stage": "pr-open",
+      "updated": "2026-01-01T00:00:00Z",
+      "note": "Escalated: old note form"
+    },
+    {
+      "id": "046-sample-blank",
+      "project": "sample",
+      "title": "Synthetic 046-sample-blank",
+      "stage": "spec",
+      "updated": "2026-01-01T00:00:00Z",
+      "needs": "   "
+    },
+    {
+      "id": "047-sample-done",
+      "project": "sample",
+      "title": "Synthetic 047-sample-done",
+      "stage": "merged",
+      "updated": "2026-01-01T00:00:00Z",
+      "needs": "left over"
+    },
+    {
+      "id": "048-sample-plain-pr",
+      "project": "sample",
+      "title": "Synthetic 048-sample-plain-pr",
+      "stage": "pr-open",
+      "updated": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "backlog": "# Backlog\n\n- [ ] sample: Cache the sample report\n  Recommend: approve\n\n  The sample report reloads on every visit.\n- [ ] sample: Trim the export columns\n- [x] sample: Ship the old report (040-sample-shipped)\n- [ ] café: Non-ASCII slug line\n- [ ]sample: missing space\n",
+  "count": 6
+}

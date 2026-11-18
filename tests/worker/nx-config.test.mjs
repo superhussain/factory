@@ -83,6 +83,7 @@ const INPUTS = {
     "shared",
     "{workspaceRoot}/tests/tools/**",
     "{workspaceRoot}/tests/fixtures/deployment-valid.json",
+    "{workspaceRoot}/docs/cloudflare.md",
   ],
   local: [
     "default",
@@ -104,6 +105,7 @@ const INPUTS = {
     "!{workspaceRoot}/tools/deploy.py",
     "{workspaceRoot}/tests/browser/**/*",
     "{workspaceRoot}/tests/fixtures/browser-cases.json",
+    "{workspaceRoot}/tests/fixtures/inbox-count.json",
     "{workspaceRoot}/tests/fixtures/project-documents.md",
     "{workspaceRoot}/tests/fixtures/project-document-notes.md",
     "{workspaceRoot}/tests/fixtures/project-settings-board.json",
@@ -121,6 +123,7 @@ const INPUTS = {
     "{workspaceRoot}/tools/install.py",
     "{workspaceRoot}/tests/tools/test_install.py",
     "{workspaceRoot}/tests/fixtures/cli-v1.json",
+    "{workspaceRoot}/tests/fixtures/inbox-count.json",
     "{workspaceRoot}/docs/device.md",
     "{workspaceRoot}/docs/integrations.md",
     "{workspaceRoot}/worker/admission.js",
@@ -234,7 +237,7 @@ test("nx.json connects to no remote cache", () => {
   for (const key of ["nxCloudId", "nxCloudAccessToken", "nxCloudUrl", "tasksRunnerOptions"]) {
     assert.equal(nx[key], undefined, key);
   }
-  assert.doesNotMatch(nxText, /cloud/i);
+  assert.doesNotMatch(nxText.replaceAll("docs/cloudflare.md", ""), /cloud/i);
 });
 
 test("test:protocol prepares the .build assets before its suites", () => {

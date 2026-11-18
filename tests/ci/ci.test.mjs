@@ -64,7 +64,7 @@ test("the targets job installs a checksum-verified gitleaks and scans for secret
 });
 
 test("ci aggregates every job and skips only cancelled runs", () => {
-  assert.deepEqual(workflow.jobs.ci.needs, ["targets", "python", "browser"]);
+  assert.deepEqual(workflow.jobs.ci.needs, ["targets", "python", "browser", "paseo-plugin"]);
   assert.equal(workflow.jobs.ci.if, "${{ !cancelled() }}");
 });
 
@@ -72,7 +72,7 @@ test("the aggregate names each job in RESULTS", () => {
   const step = workflow.jobs.ci.steps.find((entry) => entry.name === "All CI jobs passed");
   assert.equal(
     step.env.RESULTS,
-    "targets=${{ needs.targets.result }} python=${{ needs.python.result }} browser=${{ needs.browser.result }}",
+    "targets=${{ needs.targets.result }} python=${{ needs.python.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }}",
   );
 });
 
@@ -121,4 +121,15 @@ test("the python job keeps .nx per pull request and falls back to main", () => {
   assert.ok(index("Adopt the restored Nx database") < index("Python suites"));
   const raw = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
   assert.doesNotMatch(raw, /secrets\./);
+});
+
+test("the paseo-plugin job installs, typechecks and tests the plugin in order", () => {
+  const steps = workflow.jobs["paseo-plugin"].steps.map((step) => step.run ?? action(step));
+  assert.deepEqual(steps, [
+    "actions/checkout",
+    "./.github/actions/ci-setup",
+    "pnpm --dir paseo-plugin install --frozen-lockfile",
+    "pnpm --dir paseo-plugin run typecheck",
+    "pnpm run test:paseo-plugin",
+  ]);
 });

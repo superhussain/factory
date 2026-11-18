@@ -318,6 +318,18 @@ const CAPTURE_AUDIT = [
   auditCall(5, "factory-builder", "Bash", ["recursive-delete", "denied"], "rm -rf build"),
   auditCall(6, "factory-builder", "Edit", [], "~/app/src/main.py"),
 ];
+// The Red flags index of the running example, newest first.
+const CAPTURE_AUDIT_FLAGS = CAPTURE_AUDIT.filter((row) => row.flags.length)
+  .reverse()
+  .map(({ time, job, host, agent, tool, flags, target }) => ({
+    time,
+    job,
+    host,
+    agent,
+    tool,
+    flags,
+    target,
+  }));
 // The archived running example: answered by interception, never on the board.
 const CAPTURE_ARCHIVED = {
   id: "412-fix-login",
@@ -443,6 +455,7 @@ async function capture(outdir, referencePath) {
     let longProject = false;
     let refBoard = false;
     let auditBoard = false;
+    let refusalBacklog = false;
     let leadAgentsBoard = false;
     let writerBoard = false;
     let tallAgentsBoard = false;
@@ -549,6 +562,28 @@ async function capture(outdir, referencePath) {
                     status: 200,
                     contentType: "application/x-ndjson",
                     body: CAPTURE_AUDIT.map((row) => JSON.stringify(row) + "\n").join(""),
+                  });
+                // Served, so the backlog reread after a refused approve keeps the Depends on: line.
+                if (
+                  refusalBacklog &&
+                  target.pathname === "/api/backlog" &&
+                  request.method() === "GET"
+                )
+                  return request.respond({
+                    status: 200,
+                    contentType: "text/markdown",
+                    body:
+                      CAPTURE_BACKLOG +
+                      "  Depends on: sample: Synthetic follow-on slice (sub-job-of 001-capture)\n",
+                  });
+                if (target.pathname === "/api/audit-flags")
+                  return request.respond({
+                    status: 200,
+                    contentType: "application/json",
+                    body: JSON.stringify({
+                      schema: "factory.audit-flags/1",
+                      rows: CAPTURE_AUDIT_FLAGS,
+                    }),
                   });
                 if (refBoard && target.pathname === "/board.json") {
                   const board = await fetch(target.href);
@@ -1522,7 +1557,6 @@ async function capture(outdir, referencePath) {
     }
     const openAudit = async (page, side) => {
       await openDrawer(page, side);
-      if (side !== "after") return;
       await page.click('.tab[data-name="audit.md"]');
       await page.waitForSelector("#d-doc table.audit");
       await page.waitForFunction(() => {
@@ -1541,6 +1575,17 @@ async function capture(outdir, referencePath) {
     } finally {
       auditBoard = false;
     }
+    // The reference retros page has no Red flags section.
+    const openRetrosFlags = async (page, side) => {
+      await page.evaluate(() => (location.hash = "#/retros"));
+      await page.waitForFunction(() => {
+        const status = document.getElementById("retros-status").textContent;
+        return status && !status.startsWith("Loading");
+      });
+      if (side === "after") await page.waitForSelector("#audit-flags-rows tr");
+    };
+    await view("retros-flags-desktop", 1440, 900, "light", openRetrosFlags);
+    await view("retros-flags-mobile", 390, 844, "dark", openRetrosFlags);
     // A phone drawer on an idea with two attached files, at rest and scrolled 40 px.
     const openIdeaFiles = async (page) => {
       await page.evaluate(() => {
@@ -1798,8 +1843,39 @@ async function capture(outdir, referencePath) {
         document.getElementById("backlog-status").textContent.includes("first."),
       );
     };
-    await view("backlog-refusal-desktop", 1440, 900, "light", openRefusal);
-    await view("backlog-refusal-mobile", 390, 844, "dark", openRefusal);
+    refusalBacklog = true;
+    try {
+      await view("backlog-refusal-desktop", 1440, 900, "light", openRefusal);
+      await view("backlog-refusal-mobile", 390, 844, "dark", openRefusal);
+    } finally {
+      refusalBacklog = false;
+    }
+    // The weekly report waits on the unchecked follow-on slice.
+    const openWaits = async (page) => {
+      await page.evaluate(() => {
+        backlog.find((b) => b.raw.includes("weekly report")).context = [
+          "Recommend: approve",
+          "",
+          "Depends on: sample: Synthetic follow-on slice (sub-job-of 001-capture)",
+          "The weekly report needs the follow-on slice first.",
+        ].join("\n");
+      });
+      await page.click('.backlog-card[data-index="2"]');
+      await page.waitForSelector("#backlog-form");
+    };
+    await view("backlog-waits-desktop", 1440, 900, "light", openWaits);
+    await view("backlog-waits-mobile", 390, 844, "dark", openWaits);
+    // A backlog poll after the refusal. The reference clears the status line.
+    const openRefusalPoll = async (page) => {
+      await openRefusal(page);
+      await page.evaluate(() => syncBacklogDetail());
+    };
+    refusalBacklog = true;
+    try {
+      await view("backlog-refusal-poll-mobile", 390, 844, "dark", openRefusalPoll);
+    } finally {
+      refusalBacklog = false;
+    }
     if (failed.length) {
       console.log(JSON.stringify({ result: "FAIL", failed, external }));
       throw new Error(

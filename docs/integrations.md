@@ -138,7 +138,7 @@ It reads `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PR_SCREENSHOTS_BUCKET
 `PR_SCREENSHOTS_ORIGIN` (an `https://` origin) from `<home>/.env`, stores each image in that
 bucket as `<project>/<label>/<12 hex>-<name>` (project `other` when `--project` is omitted)
 and prints one `<file>` and URL on the configured public origin per line. Any failure exits 1,
-and build-tab evidence stays the fallback.
+and build-tab evidence stays the fallback. The [device token](cloudflare.md#device-token) covers these uploads.
 
 `tools/copy-pr-screenshots.py` copies older screenshots from `<source>/factory-<job-id>/` into
 their project folders, using the same four `<home>/.env` keys.
@@ -162,23 +162,41 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
 | --- | --- | --- |
 | Factory dashboard URL | Paseo, Settings, Plugins, Factory | Paseo user, per host |
 | `embed_origins` | `deploy/profile.json` | Server operator |
-| SameSite None on the Access cookie | Cloudflare Zero Trust, Access application | Server operator |
+| SameSite None on the Access cookie | Cloudflare Access application, set by `tools/bootstrap.py up` with the [device token](cloudflare.md#device-token) | Server operator |
 
 1. Install the plugin on the daemon host: `paseo plugin install <checkout>/paseo-plugin`.
    Check it with `paseo plugin ls`, which shows `factory running`.
 2. In Paseo, open Settings, Plugins, Factory and enter your dashboard origin, such as
    `https://factory.example.com`.
-3. Add each Paseo web origin that frames the board to `embed_origins` in
-   `deploy/profile.json`, for example `"embed_origins": ["https://app.paseo.sh"]`, then render
+3. Add each Paseo origin that frames the board to `embed_origins` in
+   `deploy/profile.json`, for example `"embed_origins": ["https://app.paseo.sh", "paseo://app"]`, then render
    and deploy as [config-changes.md](config-changes.md) describes. The dashboard sends
    `frame-ancestors 'self'` plus these origins, so no other site can frame it.
-4. In the Access application, open the cookie settings and set the SameSite attribute to
-   `None`. With the default Lax cookie, the frame gets the Access login page, not the board.
-   `tools/bootstrap.py` keeps this setting on a rerun.
+   The Paseo desktop app frames from `paseo://app`; list it to show the board there. It is the
+   only non-https entry accepted.
+
+   Listing an origin trusts that host's operator. Code served from `https://app.paseo.sh` could
+   frame your signed-in board and click its buttons, so list only origins whose operator you
+   trust with the board.
+
+4. Rerun `up` with the [device token](cloudflare.md#device-token) loaded from the factory home `.env`, or ask an agent
+   on that device to do it. With `embed_origins` set, `up` sets the Access application's cookie SameSite
+   attribute to `None`. With the default Lax cookie, the frame gets the Access login page, not the board.
+   If bootstrap did not create your Access application, set the attribute to `None` by hand in its
+   cookie settings.
 
 The board appears inside Paseo on web and desktop only. On iOS and Android the screen links to
 the dashboard in the browser instead. A browser that blocks third-party cookies cannot show the
-frame; the screen then offers **Sign in**, which opens the dashboard in a tab, and **Reload**.
+frame; the screen then offers **Sign in** and **Reload**. The first time, the screen shows a card with three sign-in steps; once the board has loaded on that device, it shows a short card instead. Sign in opens the dashboard in a small popup inside Paseo, so the desktop app signs in with its own cookies. When the board loads there, the popup closes and the frame reloads.
+
+### Inbox badge
+
+The Factory row shows the same number as the dashboard's Inbox badge: jobs waiting on you plus
+unchecked backlog lines, across all projects. The plugin runs `factory.py inbox` from the installed
+factory skill (`~/.claude/skills/factory` or `~/.agents/skills/factory`) once a minute, so the
+badge can trail the dashboard by up to a minute. It ignores the dashboard's per-browser project
+filter. A host without the factory skill, or with a skill older than `factory.py inbox`, shows no
+badge.
 
 ## Tracer mirror
 

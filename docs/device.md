@@ -69,6 +69,7 @@ the private `.env` beside config.md. Never enter token values in argv, chat,
 screenshots, logs or Git. Both older and modern secret formats are opaque strings;
 the CLI sends them only in the two Access headers to the validated origin and
 does not follow Access redirects. Devices need no Cloudflare administrator profile.
+A device that manages the instance may also hold the guided-setup API token as `CLOUDFLARE_API_TOKEN` in the same `.env` ([cloudflare.md](cloudflare.md#device-token)).
 Fresh POSIX `.env` is mode 0600. Repeated init preserves existing modes rather than
 silently repairing them. Review existing ownership/permissions yourself. Windows
 uses the user's directory ACL; POSIX mode bits do not promise Windows secrecy.
@@ -304,6 +305,10 @@ fit in 1 MiB`. The job drawer's `audit` tab shows every host's pushed rows.
 `audit rows are written only by the host's bound service token`. Any other 403
 exits 5. A bad job id, or a second argument without `push`, exits 2 with
 `usage: factory.py audit push <job-id>, a full job id such as 1017-add-x`.
+
+`pickup` also pushes this host's audit rows for each job at spec, build, review,
+approve or pr-open whose transcripts here changed since `<home>/audit-push.json`
+records; a failed push prints one warning and the run goes on.
 
 ## Exit recovery
 

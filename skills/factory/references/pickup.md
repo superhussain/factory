@@ -178,6 +178,9 @@ Each run, in order:
 - Pushes this host's retro digest on its first run of each local date that
   `<home>/retro-push.json` does not record; a failed push prints one warning and
   the run goes on.
+- Pushes this host's audit rows for each job at spec, build, review, approve or
+  pr-open whose transcripts here changed since `<home>/audit-push.json` records;
+  a failed push prints one warning and the run goes on.
 
 Pickup skips an idea held by a live claim, and any job whose `not_before` is still
 in the future. The board `needs` field is only for input from a human. A coordinator
