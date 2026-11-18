@@ -9846,10 +9846,11 @@ def audit_push(job_id):
         fail(f"{AUDIT_WRITE_ONLY}. {hint}", 2)
     if status == 403:
         fail(access_message(os.path.abspath(os.path.join(home, ".env"))), 5)
+    calls = "call" if len(rows) == 1 else "calls"
     if dropped:
-        print(f"pushed {len(rows) - dropped} of {len(rows)} calls to {key}; the oldest {dropped} did not fit in 1 MiB")
+        print(f"pushed {len(rows) - dropped} of {len(rows)} {calls} to {key}; the oldest {dropped} did not fit in 1 MiB")
     else:
-        print(f"pushed {len(rows)} calls to {key}")
+        print(f"pushed {len(rows)} {calls} to {key}")
 
 
 def audit_cmd(*args):

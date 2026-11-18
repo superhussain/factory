@@ -216,6 +216,13 @@ class AuditPushTest(IsolatedTestCase):
                               "the oldest 1 did not fit in 1 MiB\n")
         self.assertEqual(server.requests[1][3], body[body.index(b"\n") + 1:])
 
+    def test_push_one_call(self):
+        with http_fixture({self.route: (200, b"ok")}) as server:
+            self.config(server.origin)
+            with patch.object(factory, "audit_rows", return_value=([{"session": "3f2a9c1d"}], 1)):
+                code, out, _ = invoke(factory, ["audit", "push", "1017-add-x"])
+        self.assertEqual((code, out), (0, "pushed 1 call to audit/1017-add-x/example-host.jsonl\n"))
+
     def test_push_errors(self):
         hint = "pair this host with factory.py host pair <id> <code>"
         with http_fixture({}) as server:
