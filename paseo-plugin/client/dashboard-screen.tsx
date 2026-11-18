@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import { dashboardSrc, parseDashboardOrigin, type EmbedMessage } from "../shared/embed";
 import { factorySettings } from "../shared/settings";
+import { setFrameInboxCount } from "./frame-inbox";
 import { DashboardFrame, hasLoadedBefore, markLoaded, paseoOrigin, useSignInPopup } from "./web";
 
 const READY_TIMEOUT_MS = 4000;
@@ -26,6 +27,7 @@ export function dashboardScreen(client: PluginClientContext) {
       const timer = setTimeout(() => setStalled(true), READY_TIMEOUT_MS);
       return () => clearTimeout(timer);
     }, [origin, load]);
+    useEffect(() => () => setFrameInboxCount(null), [origin, load]);
 
     const styles = {
       screen: { flex: 1, backgroundColor: theme.colors.surface0 },
@@ -135,7 +137,8 @@ export function dashboardScreen(client: PluginClientContext) {
       );
 
     const onMessage = (message: EmbedMessage) => {
-      if (message.type === "factory-embed-ready") {
+      if (message.type === "factory-inbox-count") setFrameInboxCount(message.count);
+      else if (message.type === "factory-embed-ready") {
         markLoaded(origin);
         setReady(true);
         setStalled(false);
