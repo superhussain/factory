@@ -4,10 +4,11 @@ Works from any directory. The backlog is `backlog.md` in R2, one
 `- [ ] <slug>: <feature>` line per item. `next` takes the first unchecked line whose
 project has a checkout on this device, and skips the rest with a `skipping <slug>`
 line on stderr. An item may be followed by indented context lines that
-`backlog add --context` wrote. `next` ignores them.
+`backlog add --context` wrote. `next` ignores them except `Depends on:` lines.
+`next` and `batch` skip a line whose `Depends on:` line names an unchecked line or a job still open on the board.
 
 1. Run `python3 <this skill's dir>/runtime/factory.py sync`, with no slug, since the
-   project isn't known yet. Conflicts don't block, as in the Claims table.
+   project isn't known before `next` runs. Conflicts don't block, as in the Claims table.
 2. Run `python3 <this skill's dir>/runtime/factory.py next --session <tag>` (no tag on
    the first call) and read its JSON: `id`, `project`, and `feature`. It claims the
    id under that project and marks the line `- [x] <slug>: <feature> (<id>)`.
@@ -15,9 +16,8 @@ line on stderr. An item may be followed by indented context lines that
    after step 5, because nothing was claimed. Exit 2 or 4 names a malformed line or an unknown
    project that blocks the queue. Report it and stop.
 4. Run `where <project>`, then step one of `/factory <slug>: <feature>` without
-   the sync and claim, since `next` already claimed `<id>` for this session. A feature
-   ending in `(<kind> <id>)`, such as `(sub-job-of 041-recipe-import)`, also sets
-   `refs` in that first board patch. Leave `refs` unset when that id contains `..`.
+   the sync and claim, since `next` already claimed `<id>` for this session. `next`
+   already put the job's `refs` on the board, so leave `refs` out of that first board patch.
    Continue the loop from there.
 5. On exit 3, check the build queue as Builds describes before stopping.
 

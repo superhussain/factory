@@ -8,6 +8,7 @@
 // A side that fails all attempts is logged and the run continues; it ends with a FAIL summary and a non-zero exit.
 // Compare two captures of one side with `node tests/browser/capture-compare.mjs`; it passes when no channel differs by more than 16.
 // Capture pages bypass the dashboard service worker so request interception answers /board.json.
+// Viewports and views: docs/development.md, Visual captures.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";
@@ -293,6 +294,30 @@ const CAPTURE_BUILD =
   "\n";
 const CAPTURE_ANSWERS =
   "# Answers\n\n## Question 1: Browser evidence\n\nPick: one\n\n- [ ] Ship on unit tests (recommended): open the PR now.\n- [x] Free a slot first: re-run the builder for screenshots.\n\nOther: none\n";
+const auditCall = (second, agent, tool, flags, target) => ({
+  host: "example-host",
+  job: "001-capture",
+  session: "3f2a9c1d",
+  agent,
+  time: `2026-11-10 10:00:0${second}`,
+  tool,
+  flags,
+  target,
+});
+const CAPTURE_AUDIT = [
+  auditCall(1, "main", "Bash", [], "git status"),
+  auditCall(2, "main", "Bash", ["force-push"], "git push --force origin factory/001-capture"),
+  auditCall(3, "main", "Read", ["secret-file"], "~/app/.env"),
+  auditCall(
+    4,
+    "main",
+    "Bash",
+    ["pipe-to-shell"],
+    "curl -H 'Authorization: [redacted]' https://get.example.test/i.sh | sh",
+  ),
+  auditCall(5, "factory-builder", "Bash", ["recursive-delete", "denied"], "rm -rf build"),
+  auditCall(6, "factory-builder", "Edit", [], "~/app/src/main.py"),
+];
 // The archived running example: answered by interception, never on the board.
 const CAPTURE_ARCHIVED = {
   id: "412-fix-login",
@@ -417,7 +442,9 @@ async function capture(outdir, referencePath) {
     let archiveSearchFails = false;
     let longProject = false;
     let refBoard = false;
+    let auditBoard = false;
     let leadAgentsBoard = false;
+    let writerBoard = false;
     let tallAgentsBoard = false;
     let ideaFilesBoard = false;
     let videoBoard = false;
@@ -517,6 +544,12 @@ async function capture(outdir, referencePath) {
                     ]),
                   });
                 }
+                if (auditBoard && target.pathname === "/api/audit/001-capture")
+                  return request.respond({
+                    status: 200,
+                    contentType: "application/x-ndjson",
+                    body: CAPTURE_AUDIT.map((row) => JSON.stringify(row) + "\n").join(""),
+                  });
                 if (refBoard && target.pathname === "/board.json") {
                   const board = await fetch(target.href);
                   const body = await board.json();
@@ -556,6 +589,29 @@ async function capture(outdir, referencePath) {
                               stage: "pr-open",
                               pr: "https://github.com/example/sample/pull/101",
                               paseo: { server: "srv-a", agent: "agent-lead" },
+                            }
+                          : j,
+                      ),
+                    }),
+                  });
+                }
+                if (writerBoard && target.pathname === "/board.json") {
+                  const board = await fetch(target.href);
+                  const body = await board.json();
+                  return request.respond({
+                    status: board.status,
+                    contentType: "application/json",
+                    headers: { ETag: board.headers.get("ETag") ?? "" },
+                    body: JSON.stringify({
+                      ...body,
+                      jobs: body.jobs.map((j) =>
+                        j.id === "002-needs"
+                          ? {
+                              ...j,
+                              paseo_writer: {
+                                server: "synthetic-server",
+                                agent: "synthetic-writer",
+                              },
                             }
                           : j,
                       ),
@@ -920,6 +976,8 @@ async function capture(outdir, referencePath) {
     await view("board-desktop", 1440, 900, "light", async () => {});
     await view("board-desktop-dark", 1440, 900, "dark", async () => {});
     await view("board-mobile", 390, 844, "dark", async () => {});
+    await view("header-inbox-dark-390", 390, 844, "dark", (page) => clipOf(page, "header"));
+    await view("header-inbox-dark-1440", 1440, 900, "dark", (page) => clipOf(page, "header"));
     await view("drawer-desktop", 1440, 900, "light", openDrawer);
     await view("drawer-mobile", 390, 844, "dark", openDrawer);
     await view("drawer-mobile-scrolled", 375, 667, "dark", openScrolled);
@@ -1139,6 +1197,58 @@ async function capture(outdir, referencePath) {
       (page) => openInstallSettings(page, true),
       true,
     );
+    const starCapture = async (page) => {
+      await page.evaluate(() =>
+        localStorage.setItem("factory-starred-jobs", JSON.stringify(["001-capture"])),
+      );
+      await page.reload({ waitUntil: "networkidle0" });
+      await page.waitForSelector('.card[data-id="001-capture"]');
+      await waitLiveDot(page);
+    };
+    await view("starred-board-1280", 1280, 900, "light", starCapture);
+    await view("starred-drawer-390", 390, 844, "dark", async (page, side) => {
+      await starCapture(page);
+      await openDrawer(page, side);
+      return clipOf(page, ".detail-head");
+    });
+    await view("starred-display-1280", 1280, 900, "light", async (page, side) => {
+      await starCapture(page);
+      await page.evaluate(() => {
+        location.hash = "#/settings/display";
+      });
+      await page.waitForSelector("#settings-display:not([hidden])");
+      await page.evaluate(() =>
+        document.querySelector("#display-filter").scrollIntoView({ block: "start" }),
+      );
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getElementById("settings-link")
+            .getAnimations()
+            .map((animation) => animation.finished),
+        ),
+      );
+      // The reference page has no starred setting, so its crop ends at the project filter.
+      return clipOf(
+        page,
+        "#display-filter",
+        side === "after" ? "#display-starred-help" : "#display-filter",
+      );
+    });
+    await view("starred-only-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => localStorage.setItem("factory-starred-view", "only"));
+      await starCapture(page);
+    });
+    await view("starred-filter-hidden-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        localStorage.setItem("factory-starred-jobs", JSON.stringify(["001-capture"]));
+        localStorage.setItem("factory-starred-view", "only");
+        localStorage.setItem("factory-projects-hidden", JSON.stringify(["sample"]));
+      });
+      await page.reload({ waitUntil: "networkidle0" });
+      await page.waitForSelector("#starred-only");
+      await waitLiveDot(page);
+    });
     const openSchedulerSettings = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/scheduler";
@@ -1162,6 +1272,25 @@ async function capture(outdir, referencePath) {
       await openSchedulerSettings(page);
       await page.evaluate(() => document.getElementById("scheduler-mode-tab-human")?.click());
     });
+    const openNotificationSettings = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/notifications";
+      });
+      await page.waitForSelector("#settings-notifications:not([hidden])");
+      await page.evaluate(() =>
+        document.querySelector("#notify-settings-heading").scrollIntoView({ block: "start" }),
+      );
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getElementById("settings-link")
+            .getAnimations()
+            .map((animation) => animation.finished),
+        ),
+      );
+    };
+    await view("notify-settings-desktop", 1280, 900, "light", openNotificationSettings);
+    await view("notify-settings-mobile", 390, 844, "light", openNotificationSettings, true);
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
@@ -1353,6 +1482,20 @@ async function capture(outdir, referencePath) {
     } finally {
       leadAgentsBoard = false;
     }
+    writerBoard = true;
+    try {
+      await view("writer-session-drawer-1280", 1280, 900, "light", async (page) => {
+        await page.evaluate(() => {
+          location.hash = "#002-needs";
+        });
+        await page.waitForFunction(
+          () => document.getElementById("d-title").textContent === "Synthetic blocked job",
+        );
+        return clipOf(page, ".detail-head");
+      });
+    } finally {
+      writerBoard = false;
+    }
     // A phone drawer whose open agents table is taller than the screen, scrolled to its last row.
     const openTallAgents = async (page) => {
       await openLeadAgents(page);
@@ -1376,6 +1519,27 @@ async function capture(outdir, referencePath) {
       await view("drawer-desktop-agents", 1280, 900, "light", openTallAgentsDesktop);
     } finally {
       tallAgentsBoard = false;
+    }
+    const openAudit = async (page, side) => {
+      await openDrawer(page, side);
+      if (side !== "after") return;
+      await page.click('.tab[data-name="audit.md"]');
+      await page.waitForSelector("#d-doc table.audit");
+      await page.waitForFunction(() => {
+        const pill = document.getElementById("d-tab-pill");
+        const tab = document.querySelector("#d-tabs .tab.active");
+        const style = getComputedStyle(pill);
+        return (
+          parseFloat(style.left) === tab.offsetLeft && parseFloat(style.width) === tab.offsetWidth
+        );
+      });
+    };
+    auditBoard = true;
+    try {
+      await view("audit-desktop", 1440, 900, "light", openAudit);
+      await view("audit-mobile", 390, 844, "dark", openAudit);
+    } finally {
+      auditBoard = false;
     }
     // A phone drawer on an idea with two attached files, at rest and scrolled 40 px.
     const openIdeaFiles = async (page) => {
@@ -1620,6 +1784,22 @@ async function capture(outdir, referencePath) {
     await view("backlog-answered-mobile", 390, 844, "dark", openAnswered);
     await view("backlog-rework-desktop", 1440, 900, "light", openRework);
     await view("backlog-rework-mobile", 390, 844, "dark", openRework);
+    // Both sides refuse the approve. Only the after side shows the link.
+    const openRefusal = async (page) => {
+      await page.click('.backlog-card[data-index="2"]');
+      await page.waitForSelector("#backlog-form");
+      await page.evaluate(() => {
+        backlog.find((b) => b.raw.includes("weekly report")).context =
+          "Depends on: sample: Synthetic follow-on slice (sub-job-of 001-capture)";
+      });
+      await page.click("input[value=approved]");
+      await page.click("#backlog-submit");
+      await page.waitForFunction(() =>
+        document.getElementById("backlog-status").textContent.includes("first."),
+      );
+    };
+    await view("backlog-refusal-desktop", 1440, 900, "light", openRefusal);
+    await view("backlog-refusal-mobile", 390, 844, "dark", openRefusal);
     if (failed.length) {
       console.log(JSON.stringify({ result: "FAIL", failed, external }));
       throw new Error(

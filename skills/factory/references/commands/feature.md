@@ -74,10 +74,13 @@ feature.
 7. After a merge, queue the job for a device build if the project file's Device
    builds section says its diff needs one: patch `{"build": {"state": "queued"}}`.
    Then check the build queue as Builds describes.
-8. If `spec.md` lists sub-jobs, queue each one with
+8. If `spec.md` lists sub-jobs, queue each one in list order with
    `factory.py backlog add "<slug>: <feature> (sub-job-of <id>)" --context <file>`.
    Write the file first, in a temporary location outside the job folder. Its first
-   line is `Recommend: approve` or `Recommend: deny`. Then come the reasons, from
+   line is `Recommend: approve` or `Recommend: deny`. Right after `Recommend: approve`,
+   write one `Depends on: <slug>: <feature> (sub-job-of <id>)` line per prerequisite
+   the sub-job's `Depends on:` bullet names, matching that prerequisite's backlog line
+   after `- [ ] `. Then come the reasons, from
    the spec, for the item and for your recommendation. Then add up to three
    `## Question:` sections in the needs.md format, only for choices the person
    should settle before the item is built. The `next` that runs one sets its `refs`.
@@ -97,7 +100,8 @@ feature.
    `decision.md` as a table with Item, Source and Outcome (`queued`,
    `already queued` or `for a person`) columns, or `None.` when there are none, and run
    `push "$SLUG/<id>"`.
-10. After the `merged:` line and the final summary are sent, run
+10. Run `python3 "$RUNTIME" audit push <id>`. A non-zero exit never stops close-out.
+    After the `merged:` line and the final summary are sent, run
     `python3 "$RUNTIME" archive-workspace "$SLUG/<id>" --check`. If the output has a
     `reason`, stop. If `leftovers` is not empty, write a file that starts with
     `Recommend: approve`, then `Left in Paseo workspace <would_archive> when <id> merged:`,

@@ -135,3 +135,94 @@ test("service worker leaves walkthrough.html to the network", async (t) => {
   }
   assert.deepEqual(calls, [serverEnv.FACTORY_ORIGIN + "/jobs/sample/001/spec.md"]);
 });
+
+test("service worker shows a push and opens only same-origin URLs on click", async (t) => {
+  const saved = Object.fromEntries(["self", "location"].map((k) => [k, globalThis[k]]));
+  t.after(() => Object.assign(globalThis, saved));
+  const handlers = {};
+  const calls = [];
+  let windows = [];
+  globalThis.self = {
+    addEventListener: (type, fn) => (handlers[type] = fn),
+    registration: { showNotification: async (...args) => calls.push(["show", ...args]) },
+    clients: {
+      matchAll: async (options) => (calls.push(["matchAll", options]), windows),
+      openWindow: async (url) => calls.push(["open", url]),
+    },
+  };
+  globalThis.location = { origin: serverEnv.FACTORY_ORIGIN };
+  serviceWorker();
+  const run = async (type, event) => {
+    const waits = [];
+    handlers[type]({ ...event, waitUntil: (p) => waits.push(p) });
+    await Promise.all(waits);
+  };
+  const payload = {
+    title: "Needs you: 042-sample-retry",
+    body: "Synthetic retry job",
+    tag: "factory-needs-042-sample-retry",
+    url: "/#042-sample-retry",
+  };
+  await run("push", { data: { json: () => payload } });
+  await run("push", { data: null });
+  assert.deepEqual(calls.splice(0), [
+    [
+      "show",
+      payload.title,
+      {
+        body: payload.body,
+        tag: payload.tag,
+        data: { url: payload.url },
+        icon: "/assets/icon-192.png",
+      },
+    ],
+    [
+      "show",
+      "Factory",
+      { body: undefined, tag: undefined, data: { url: undefined }, icon: "/assets/icon-192.png" },
+    ],
+  ]);
+
+  const click = (url) => {
+    const notification = { data: { url }, close: () => calls.push(["close"]) };
+    return run("notificationclick", { notification });
+  };
+  windows = [
+    {
+      focus: async () => calls.push(["focus"]),
+      navigate: async (url) => calls.push(["navigate", url]),
+    },
+    { focus: async () => calls.push(["focus second"]) },
+  ];
+  await click("/#042-sample-retry");
+  await click("https://evil.example.test/#042-sample-retry");
+  windows = [
+    {
+      focus: async () => calls.push(["focus uncontrolled"]),
+      navigate: async () => {
+        throw new TypeError("not controlled");
+      },
+    },
+  ];
+  await click("/#042-sample-retry");
+  windows = [];
+  await click("/#042-sample-retry");
+  const options = { type: "window", includeUncontrolled: true };
+  assert.deepEqual(calls, [
+    ["close"],
+    ["matchAll", options],
+    ["focus"],
+    ["navigate", serverEnv.FACTORY_ORIGIN + "/#042-sample-retry"],
+    ["close"],
+    ["matchAll", options],
+    ["focus"],
+    ["navigate", "/"],
+    ["close"],
+    ["matchAll", options],
+    ["focus uncontrolled"],
+    ["open", serverEnv.FACTORY_ORIGIN + "/#042-sample-retry"],
+    ["close"],
+    ["matchAll", options],
+    ["open", serverEnv.FACTORY_ORIGIN + "/#042-sample-retry"],
+  ]);
+});

@@ -141,7 +141,7 @@ const invalid = [
     "title: [a]",
   ].map((line) => [
     document.replace("base: main", line + "\nbase: main"),
-    "frontmatter allows one repo, base and title, plus an optional archive and buildkite_org",
+    "frontmatter allows one repo, base and title, plus an optional archive, buildkite_org and auto_babysit",
   ]),
   ...["https://github.com/a/b", "a/b/c", "./b", "a/..", "a/" + "b".repeat(101)].map((v) => [
     document.replace("example/sample", v),
@@ -150,7 +150,7 @@ const invalid = [
   [document.replace("base: main", "archive: a/b/c\nbase: main"), "invalid project archive"],
   [
     document.replace("base: main", "archive: a/b\narchive: a/c\nbase: main"),
-    "frontmatter allows one repo, base and title, plus an optional archive and buildkite_org",
+    "frontmatter allows one repo, base and title, plus an optional archive, buildkite_org and auto_babysit",
   ],
   ...["bad_org", ""].map((v) => [
     document.replace("base: main", "buildkite_org: " + v + "\nbase: main"),
@@ -158,7 +158,15 @@ const invalid = [
   ]),
   [
     document.replace("base: main", "buildkite_org: a\nbuildkite_org: b\nbase: main"),
-    "frontmatter allows one repo, base and title, plus an optional archive and buildkite_org",
+    "frontmatter allows one repo, base and title, plus an optional archive, buildkite_org and auto_babysit",
+  ],
+  ...["0", "10", "x", ""].map((v) => [
+    document.replace("base: main", "auto_babysit: " + v + "\nbase: main"),
+    "invalid project auto_babysit",
+  ]),
+  [
+    document.replace("base: main", "auto_babysit: 1\nauto_babysit: 2\nbase: main"),
+    "frontmatter allows one repo, base and title, plus an optional archive, buildkite_org and auto_babysit",
   ],
   ...["", "a..b", "a//b", "a/", "a/.b", "a/b.", "a/b.lock", "-main", "a b", "a".repeat(201)].map(
     (v) => [document.replace("base: main", "base: " + v), "invalid project base"],
@@ -169,7 +177,7 @@ const invalid = [
   ]),
   [
     document.replace("title: Sample", "title: \"broken'"),
-    "frontmatter allows one repo, base and title, plus an optional archive and buildkite_org",
+    "frontmatter allows one repo, base and title, plus an optional archive, buildkite_org and auto_babysit",
   ],
   [
     document + "a\u200bb\n",
@@ -303,12 +311,23 @@ test("an optional buildkite_org is stored and not listed", async () => {
   ]);
 });
 
+test("an optional auto_babysit is stored and listed", async () => {
+  const s = setup();
+  const body = document.replace("base: main", "auto_babysit: 3\nbase: main");
+  assert.equal((await s.request(body)).status, 200);
+  const res = await s.request(undefined, {}, "/projects.json", "GET");
+  assert.deepEqual(await res.json(), [
+    { slug: "sample", title: "Sample", repo: "example/sample", base: "main", auto_babysit: 3 },
+  ]);
+});
+
 test("dashboard allowlist names every project frontmatter error", async () => {
   const html = await readFile(new URL("../../web/dashboard.html", import.meta.url), "utf8");
   for (const error of [
-    "project frontmatter allows one repo, base and title, plus an optional archive and buildkite_org",
+    "project frontmatter allows one repo, base and title, plus an optional archive, buildkite_org and auto_babysit",
     "invalid project archive",
     "invalid project buildkite_org",
+    "invalid project auto_babysit",
   ])
     assert.ok(html.includes(error), error);
   assert.ok(!html.includes("base, and title only"));

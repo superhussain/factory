@@ -15,6 +15,8 @@ LINE = "- [ ] sample: Name the weekly CSV weekly-<date>.csv (follow-up-of 080-sa
 CLAIM = {"device": "test", "session": "tag", "since": NOW, "seen": NOW}
 RIDER = "092-sample-csv-name"
 PR = "https://github.com/sample/app/pull/42"
+PARSE = "sample: Parse recipe URLs (sub-job-of 041-recipe-import)"
+STORE = "sample: Store imported recipes (sub-job-of 041-recipe-import)"
 BAD_ID = "a job id is letters, digits, dots, dashes and underscores, like 003-rate-limiting. Nothing was written."
 
 
@@ -568,6 +570,22 @@ class BatchTest(IsolatedTestCase):
         j = self.job(RIDER)
         self.assertEqual((j["stage"], j["note"]), ("idea", f"unbatched: {LEAD} closed; stacked PR {PR} closed with a comment"))
 
+    def test_board_close_rewrites_two_stacked_notes_in_one_write(self):
+        self.stacked_pr_batch()
+        other, other_pr = "094-sample-csv-date", "https://github.com/sample/app/pull/43"
+        rows = json.loads(self.text)["jobs"]
+        rows.append({**rows[2], "id": other, "pr": other_pr})
+        self.set_jobs(rows)
+        heads = {PR: RIDER, other_pr: other}
+        self.puts = 0
+        with patch.object(factory, "gh_pr",
+                          side_effect=lambda *a: (0, f"OPEN false factory/{heads[a[1]]}\n") if a[0] == "view" else (0, "")):
+            code, out, err = self.close_lead()
+        self.assertEqual((code, self.puts), (0, 2))
+        for job_id, pr in ((RIDER, PR), (other, other_pr)):
+            self.assertEqual(self.job(job_id)["note"],
+                             f"unbatched: {LEAD} closed; stacked PR {pr} closed with a comment")
+
     def test_board_close_notes_merged_stacked_pr(self):
         self.gh_view = (0, f"MERGED false factory/{RIDER}\n")
         self.stacked_pr_batch()
@@ -602,3 +620,34 @@ class BatchTest(IsolatedTestCase):
         code, out, err = self.close_lead()
         self.assertEqual((code, out, self.puts, self.gh_calls), (6, "", 0, []))
         self.assertEqual(self.job(RIDER)["pr"], PR)
+
+    def set_depends(self, parse_line, stage=None, **extra):
+        self.backlog = (f"# Backlog\n{parse_line}\n- [ ] {STORE}\n  Depends on: {PARSE}\n")
+        if stage:
+            self.set_jobs(jobs() + [{"id": "052-parse-recipe-urls", "project": "sample", "stage": stage, **extra}])
+        return f"backlog:{factory.backlog_key('- [ ] ' + STORE)}"
+
+    def test_refuses_and_hides_a_line_whose_prerequisite_waits(self):
+        for parse_line, stage, why in (
+                (f"- [ ] {PARSE}", None, f'it depends on "{PARSE}", which is still unchecked'),
+                (f"- [x] {PARSE} (052-parse-recipe-urls)", "build", "it depends on 052-parse-recipe-urls, which is still open")):
+            with self.subTest(stage=stage):
+                key = self.set_depends(parse_line, stage)
+                self.refuse(2, f"cannot batch {key}: {why}. Nothing was written.", TARGET, key)
+                self.assertEqual(self.backlog_puts, 0)
+                code, out, _ = self.batch(TARGET)
+                self.assertEqual(code, 0)
+                self.assertNotIn(key, self.ids(out, "candidates"))
+
+    def test_attaches_when_the_prerequisite_rides_with_the_lead_or_merged(self):
+        for stage, extra in (("spec", {"refs": [REF]}), ("merged", {})):
+            with self.subTest(stage=stage):
+                self.puts = self.backlog_puts = 0
+                self.set_jobs(jobs())
+                key = self.set_depends(f"- [x] {PARSE} (052-parse-recipe-urls)", stage, **extra)
+                self.assertIn(key, self.ids(self.batch(TARGET)[1], "candidates"))
+                code, out, _ = self.batch(TARGET, key)
+                self.assertEqual((code, self.puts, self.backlog_puts), (0, 1, 1))
+                j = self.job("094-store-imported-recipes")
+                self.assertEqual(j["refs"], [{"id": "041-recipe-import", "kind": "sub-job-of"},
+                                             {"id": "052-parse-recipe-urls", "kind": "depends-on"}, REF])

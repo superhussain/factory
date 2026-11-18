@@ -96,6 +96,7 @@ const selectors = [
   "#d-paseo",
   "#d-paseo-web",
   "#d-babysit-bar",
+  "#d-star",
   "#d-actions",
   "#d-close",
 ];
@@ -212,6 +213,7 @@ function checkGeometry(g, fixture, width, label) {
   const boxes = [
     ".detail-head .titles",
     ...(g.babysit ? ["#d-babysit-bar"] : []),
+    "#d-star",
     ...(g.actions ? ["#d-actions"] : []),
     "#d-close",
   ];
@@ -250,7 +252,7 @@ function checkGeometry(g, fixture, width, label) {
     if (width < 760) assert.ok(t.lines.length > 1, label + " " + t.id + " long text wraps");
   }
   // The title takes the full remaining header width. On mobile the wrapped title row is
-  // titles, Babysit PR (when shown), the actions toggle (when any item exists), then close, with 12px gaps.
+  // titles, Babysit PR (when shown), the star, the actions toggle (when any item exists), then close, with 12px gaps.
   // On desktop the empty links box also occupies a gap slot, so assert the flex contract
   // instead of gap arithmetic: titles grows and can shrink for wrapping.
   const titles = g.bounds[".detail-head .titles"];
@@ -292,6 +294,7 @@ async function keyboard(page, fixture, label, support) {
   await support.focusVisible(page, "#d-refs a");
   const sequence = [
     ...(fixture.name === "linked-job" ? ["d-pr", "d-paseo", "d-paseo-web", "d-babysit-bar"] : []),
+    "d-star",
     ...(items.length ? ["d-actions"] : []),
     "d-close",
   ];

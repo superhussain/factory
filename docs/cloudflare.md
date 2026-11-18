@@ -287,6 +287,11 @@ client-supplied headers.
   has offered one, and the Share hint on iPhone and iPad.
   `tests/browser/pwa-install.test.mjs` checks Chrome's installability report in
   the browser suite.
+- An installed dashboard shows the needs-you count as its icon badge, the same
+  number as the tab title. The badge clears at zero and when sign-in expires. It
+  updates only while the app is open. Browsers without the Badging API show no
+  badge. iPhone and iPad show it only after the Home Screen app is allowed to
+  send notifications.
 - The service worker caches only the page, `/assets/*`, `/board.json`,
   `/projects.json` and `/jobs/*`, and never `/api/*`. Board and job reads try the
   network first and fall back to this device's saved copy under an offline
@@ -295,6 +300,19 @@ client-supplied headers.
   logout (`/cdn-cgi/access/logout`) and whenever a read meets an Access
   redirect, 401 or 403. A device that goes offline before its next request keeps
   showing its last board until it reconnects.
+- Web Push is optional and off until the Worker has the `FACTORY_VAPID_KEY`
+  secret, a private EC P-256 JWK. Generate it and store it in one pipe, so the
+  private key never shows on the terminal or touches disk:
+  `node tools/vapid-key.mjs 2>/dev/null | pnpm exec wrangler secret put FACTORY_VAPID_KEY --name <worker name>`.
+  Each person then turns on Settings, Notifications, Push to this device when the
+  dashboard is closed, once per browser. The Worker pushes when a board write
+  makes a job wait on you or merges it, with the job id and title only. The
+  hourly cron also pushes "Stuck: <id>" once for a stuck spec, build, review or
+  approve job whose claim went stale 240 minutes earlier. Removing
+  the secret turns push off: the key route answers 404 and nothing is sent.
+  After a key rotation, each browser must turn push off and on again to
+  subscribe with the new key. iPhone and iPad receive push only in the dashboard
+  added to the Home Screen.
 - Deploying/cutting over a real instance requires reviewed merged source, passing
   tests, four independent reviews, final approval and later release-owner
   authorization. This repository's own verification stops at render, dry-run and

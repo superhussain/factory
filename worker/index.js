@@ -29,6 +29,7 @@ import {
   REVIEWERS,
 } from "./escalation.js";
 import { announce, connectEvents, EVENTS_PATH } from "./events.js";
+import { boardPushes, pushKey, sendPushes, stuckPushes, validSubscription } from "./push.js";
 import {
   newPairingCode,
   OFFLINE_MINUTES,
@@ -92,6 +93,10 @@ const MAX_BODY = 1 << 20;
 // A day's list of hosts with a retro digest, and one host's digest for that day.
 const RETRO_DAY = /^\/api\/retro\/(\d{4}-\d{2}-\d{2})$/;
 const RETRO_FILE = /^\/api\/retro\/([^/]+)\/(\d{4}-\d{2}-\d{2})\.jsonl$/;
+// A job's audit rows from every host, and one host's rows for that job.
+const AUDIT_JOB = /^\/api\/audit\/([^/]+)$/;
+const AUDIT_FILE = /^\/api\/audit\/([^/]+)\/([^/]+)\.jsonl$/;
+const AUDIT_JOB_ID = /^\d+-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // Retro runs: one factory.retro-run/1 record per admitted run, and the newest 30 listed.
 const RETROS = /^\/api\/retros(?:\/([A-Za-z0-9_-]{1,64}))?$/;
 // board.json holds every job, merged ones included, so it outgrows the per-file cap.
@@ -205,10 +210,10 @@ function validateProjectDocument(text) {
   if (lines[0] !== "---" || end < 0) return "project document needs closed --- frontmatter";
   const meta = new Map();
   const fieldsError =
-    "project frontmatter allows one repo, base and title, plus an optional archive and buildkite_org";
+    "project frontmatter allows one repo, base and title, plus an optional archive, buildkite_org and auto_babysit";
   for (const line of lines.slice(1, end)) {
     if (!line.trim() || line.trim().startsWith("#")) continue;
-    const match = /^(repo|base|title|archive|buildkite_org):\s*(.*)$/.exec(line);
+    const match = /^(repo|base|title|archive|buildkite_org|auto_babysit):\s*(.*)$/.exec(line);
     if (!match || meta.has(match[1])) return fieldsError;
     let value = match[2].trim();
     if (/^["']|["']$/.test(value)) {
@@ -217,7 +222,13 @@ function validateProjectDocument(text) {
     } else if (/^[[{!&*|>]/.test(value)) return fieldsError;
     meta.set(match[1], value);
   }
-  if (meta.size !== 3 + (meta.has("archive") ? 1 : 0) + (meta.has("buildkite_org") ? 1 : 0))
+  if (
+    meta.size !==
+    3 +
+      (meta.has("archive") ? 1 : 0) +
+      (meta.has("buildkite_org") ? 1 : 0) +
+      (meta.has("auto_babysit") ? 1 : 0)
+  )
     return fieldsError;
   const repo = meta.get("repo"),
     base = meta.get("base"),
@@ -231,6 +242,8 @@ function validateProjectDocument(text) {
   if (badRepo(archive)) return "invalid project archive";
   if (meta.has("buildkite_org") && !/^[A-Za-z0-9-]{1,100}$/.test(meta.get("buildkite_org")))
     return "invalid project buildkite_org";
+  if (meta.has("auto_babysit") && !/^[1-9]$/.test(meta.get("auto_babysit")))
+    return "invalid project auto_babysit";
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(base) ||
     base.includes("..") ||
@@ -258,6 +271,7 @@ async function projects(env) {
     if (REPO.test(meta.repo || "")) item.repo = meta.repo;
     if (BASE.test(meta.base || "")) item.base = meta.base;
     if (REPO.test(meta.archive || "")) item.archive = meta.archive;
+    if (/^[1-9]$/.test(meta.auto_babysit || "")) item.auto_babysit = Number(meta.auto_babysit);
     out.push(item);
   }
   return reply(JSON.stringify(out), 200, "application/json");
@@ -395,20 +409,20 @@ const needsCondition = () => reply('PUT needs If-Match: "<etag>" or If-None-Matc
 
 // Board and backlog writes must name the exact version they replace, or create the
 // file only if it's absent, so no device clobbers another.
-async function casPut(request, env, key, type) {
+async function casPut(request, env, key, type, ctx) {
   const cond = condition(request);
   if (!cond) return needsCondition();
   const body = await readBody(request, MAX_BOARD);
   if (body === null) return reply("body over 4 MiB", 413);
+  let data, stored;
   if (key === "board.json") {
-    let data;
     try {
       data = JSON.parse(body);
     } catch {
       return reply("body is not JSON", 400);
     }
     if (!Array.isArray(data?.jobs)) return reply("body needs a jobs array", 400);
-    const stored = await storedBoard(env);
+    stored = await storedBoard(env);
     const bad =
       checkGoals(data.jobs) ??
       (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
@@ -427,6 +441,15 @@ async function casPut(request, env, key, type) {
     httpMetadata: { contentType: type },
   });
   if (obj) await announce(env, key);
+  // The stored board is the true prior version only when the write named its ETag.
+  if (obj && stored && cond.has("If-Match") && stored.etag === cond.get("If-Match")) {
+    const events = boardPushes(stored.jobs, data.jobs);
+    if (events.length) {
+      const send = sendPushes(env, events).catch(() => {});
+      if (ctx) ctx.waitUntil(send);
+      else await send;
+    }
+  }
   return obj
     ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
     : reply("precondition failed", 412);
@@ -1650,6 +1673,52 @@ async function retroPut(request, env, principal, id, date) {
   return reply("ok");
 }
 
+const AUDIT_WRITE_ONLY = "audit rows are written only by the host's bound service token";
+const auditKey = (job, id) => `audit/${job}/${id}.jsonl`;
+
+// A re-push replaces the host's rows for the job. Every line is a JSON object naming the host and job.
+async function auditPut(request, env, principal, job, id) {
+  if ((await boundHost(env, principal))?.id !== id) return reply(AUDIT_WRITE_ONLY, 403);
+  const bytes = await readCapped(request, MAX_BODY);
+  if (bytes === null) return reply("body over 1 MiB", 413);
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return reply("audit rows must be valid UTF-8", 400);
+  }
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  for (const [i, line] of lines.entries()) {
+    let row = null;
+    try {
+      row = JSON.parse(line);
+    } catch {}
+    if (
+      typeof row !== "object" ||
+      row === null ||
+      Array.isArray(row) ||
+      row.host !== id ||
+      row.job !== job
+    )
+      return reply(`line ${i + 1} is not a JSON object with host ${id} and job ${job}`, 400);
+  }
+  await env.BUCKET.put(auditKey(job, id), bytes, {
+    httpMetadata: { contentType: "application/x-ndjson" },
+  });
+  return reply("ok");
+}
+
+// Every host's rows for the job, in host record order, each file ending in a newline.
+async function auditGet(env, job) {
+  let out = "";
+  for (const { host } of await hostRecords(env)) {
+    const text = await (await env.BUCKET.get(auditKey(job, host.id)))?.text();
+    if (text) out += text.endsWith("\n") ? text : text + "\n";
+  }
+  return reply(out, 200, "application/x-ndjson");
+}
+
 const RETRO_RUN_WRITE_ONLY = "retro runs are written only by a bound host's service token";
 const RETRO_RUN_TAKEN = "retro run belongs to another host";
 const RETRO_RUN_CHANGED = "retro run changed, retry";
@@ -1949,6 +2018,12 @@ async function storedBoard(env) {
   } catch {
     return { etag: object.httpEtag, jobs: [] };
   }
+}
+
+// The hourly stuck-job push. A scheduled env has no config, so it is read here for VAPID.
+async function pushStuck(env, at) {
+  const { jobs } = await storedBoard(env);
+  return sendPushes({ ...env, config: readServerConfig(env) }, stuckPushes(jobs, at));
 }
 
 // JSON-quoted id with every char outside printable ASCII as \uXXXX, safe to echo to a terminal.
@@ -2280,6 +2355,38 @@ async function ideaFilePut(request, env, name) {
   return reply("ok");
 }
 
+const MAX_PUSH_BODY = 4 << 10;
+const MAX_PUSH_DEVICES = 20;
+const pushRecordKey = async (endpoint) =>
+  `push/${await sha256(new TextEncoder().encode(endpoint))}.json`;
+
+function pushKeyGet(env) {
+  const key = pushKey(env);
+  return key ? reply(JSON.stringify({ key }), 200, "application/json") : notFound();
+}
+
+// One record per browser, keyed by its endpoint's hash, so a repeat subscribe replaces it.
+async function pushSubscribe(request, env) {
+  const body = await readJson(request, MAX_PUSH_BODY);
+  if (body instanceof Response) return body;
+  const record = validSubscription(body);
+  if (typeof record === "string") return reply(record, 400);
+  const key = await pushRecordKey(record.endpoint);
+  const { objects } = await env.BUCKET.list({ prefix: "push/" });
+  if (objects.length >= MAX_PUSH_DEVICES && !objects.some((o) => o.key === key))
+    return reply(`push device limit reached (${MAX_PUSH_DEVICES})`, 409);
+  await env.BUCKET.put(key, JSON.stringify(record), JSON_TYPE);
+  return reply(null, 204);
+}
+
+async function pushUnsubscribe(request, env) {
+  const body = await readJson(request, MAX_PUSH_BODY);
+  if (body instanceof Response) return body;
+  if (typeof body?.endpoint !== "string") return reply("body needs an endpoint", 400);
+  await env.BUCKET.delete(await pushRecordKey(body.endpoint));
+  return reply(null, 204);
+}
+
 async function api(request, env, path, principal, ctx) {
   const method = request.method;
   if (path.startsWith("/api/pipeline/retro/")) {
@@ -2333,6 +2440,17 @@ async function api(request, env, path, principal, ctx) {
     if (principal.kind !== "service") return reply(RETRO_READ_ONLY, 403);
     return getFile(env, retroKey(id, date), "application/x-ndjson");
   }
+  m = path.match(AUDIT_JOB);
+  if (m) {
+    if (method !== "GET" || !AUDIT_JOB_ID.test(m[1])) return notFound();
+    return auditGet(env, m[1]);
+  }
+  m = path.match(AUDIT_FILE);
+  if (m) {
+    const [, job, id] = m;
+    if (method !== "PUT" || !AUDIT_JOB_ID.test(job) || !HOST_NAME.test(id)) return notFound();
+    return auditPut(request, env, principal, job, id);
+  }
   m = path.match(RETROS);
   if (m) {
     if (m[1] === undefined) return method === "GET" ? retrosList(env) : notFound();
@@ -2369,11 +2487,18 @@ async function api(request, env, path, principal, ctx) {
   if (path === "/api/review/escalation" && method === "POST") return reviewEscalation(request, env);
   if (path === "/api/board/archive")
     return method === "GET" ? archiveGet(request, env) : notFound();
+  if (path === "/api/push/key" || path === "/api/push/subscriptions") {
+    if (principal.kind !== "user") return notFound();
+    if (path === "/api/push/key") return method === "GET" ? pushKeyGet(env) : notFound();
+    if (method === "PUT") return pushSubscribe(request, env);
+    if (method === "DELETE") return pushUnsubscribe(request, env);
+    return notFound();
+  }
   if (path === "/api/board" || path === "/api/backlog") {
     const [key, type] =
       path === "/api/board" ? ["board.json", "application/json"] : ["backlog.md", "text/markdown"];
     if (method === "GET") return getFile(env, key, type);
-    if (method === "PUT") return casPut(request, env, key, type);
+    if (method === "PUT") return casPut(request, env, key, type, ctx);
     return notFound();
   }
   m = path.match(PROJECT_RETRO);
@@ -2457,6 +2582,7 @@ export default {
     ctx.waitUntil(pruneRetro(env, new Date(controller.scheduledTime)));
     ctx.waitUntil(pruneRetroRuns(env, new Date(controller.scheduledTime)));
     ctx.waitUntil(pruneIdeaUploads(env, new Date(controller.scheduledTime)));
+    ctx.waitUntil(pushStuck(env, new Date(controller.scheduledTime)).catch(() => {}));
   },
 };
 

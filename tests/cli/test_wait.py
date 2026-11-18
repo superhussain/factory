@@ -73,6 +73,17 @@ class WaitTest(IsolatedTestCase):
         code, out, _ = self.wait("decision.md", "--timeout", "5")
         self.assertEqual((code, out), (0, "decision.md: APPROVE\n"))
 
+    def test_default_timeout_is_540_seconds(self):
+        clock = [0.0]
+
+        def sleep(seconds):
+            clock[0] += seconds
+
+        with patch.object(factory.time, "monotonic", lambda: clock[0]), patch.object(factory.time, "sleep", sleep):
+            code, out, err = self.wait("decision.md")
+        self.assertEqual((code, out, err), (3, "", "factory.py: still missing: decision.md\n"))
+        self.assertEqual(clock[0], 540)
+
     def test_bad_usage_exits_2(self):
         for args in (["notes.md"], ["round-0/review-ux.md"], ["round-1/review-pm.md"], ["../spec.md"],
                      ["spec.md", "--timeout", "601"], ["spec.md", "--timeout", "-1"], ["spec.md", "--timeout"],
@@ -118,7 +129,8 @@ class WaitTest(IsolatedTestCase):
         ban = ("Never poll for job files with `until` or `while` loops, `sleep`, file mtimes, quiet windows, "
                "Monitor or a task's output file.")
         self.assertIn(ban, skill)
-        self.assertIn('`python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...`', skill)
+        self.assertIn('`python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...` once, with the Bash tool timeout at '
+                      '600000 ms.', skill)
         self.assertIn("`watch` and `wait` print those first lines.", skill)
         rest = skill.replace(ban, "")
         for loop in ("until [", "stat -c", "quiet"):

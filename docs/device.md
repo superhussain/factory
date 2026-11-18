@@ -158,6 +158,7 @@ Handoff requires a quiescent checkpoint, clean published branch and the
 owning session. It uploads artifacts before releasing the claim. Resume follows
 the installed [execution guide](../skills/factory/references/execution.md), never
 an automatic takeover or reset of review/approval counters.
+Within one command, the runtime reuses a 200 answer from /projects.json, /api/pipeline/global or /api/pipeline/effective/<slug> for up to 60 seconds. A pipeline or project write clears it.
 
 ## Session retro digest
 
@@ -177,6 +178,7 @@ counts turns, tokens once per message, tools, errors and denials, and folds
 subagents in by type. It writes nothing and makes no network call. Error and
 denial excerpts are redacted, have paths and digits normalized, and are clipped
 to 160 characters. Header values, URL passwords, bearer tokens, `curl -u` user:pass,
+a password glued to `mysql -p`, the `sshpass -p` password, `MYSQL_PWD`,
 secret-named values and the value after a secret-named `--` flag become
 `[redacted]`. The home prefix of `project`, through this host's user name,
 becomes `~`, and every string and key is cut to 160 characters. A
@@ -189,6 +191,9 @@ where the date is this host's local date, and prints
 `config.md` and this host's paired service token, else it exits 2 with the pair
 hint. A re-push the same day replaces that file. A host clock more than a day off
 makes the push fail with exit 5. The Worker keeps digests for 35 days.
+Pickup also pushes this host's retro digest on its first run of each local date that
+`<home>/retro-push.json` does not record; a failed push prints one warning and the
+run goes on.
 `retro pull YYYY-MM-DD` reads `GET /api/retro/<date>` and prints each listed
 host's lines in list order. A day
 no host pushed prints a note on stderr and exits 0. Raw transcripts never leave
@@ -198,8 +203,9 @@ the host.
 most 30), oldest date first, into a new run folder `<home>/retro/<run>/`. The run
 tag is the UTC time plus 6 random hex digits. It writes `digest.jsonl`, the rows,
 and `aggregate.json`: token sums, context medians, error, denial and command
-patterns with counts and up to 5 `host/session` refs, and the registered
-projects. Every ad-hoc row's `project` becomes `ad-hoc` in both files, so neither
+patterns with counts and up to 5 `host/session` refs, the registered
+projects, and `merged`: up to 100 board jobs of registered projects merged in the
+window, each with `id`, `project`, `title` and `merged` time, newest first. Every ad-hoc row's `project` becomes `ad-hoc` in both files, so neither
 names that work. Lines that are not digest rows count as `skipped`. So do rows
 whose `host` is not the host that pushed them or whose `session` is not a
 transcript id. It prints the run, the file paths, this host's transcripts root, and
@@ -211,9 +217,17 @@ pushed exits 3 and writes nothing. A linked `retro` or run folder exits 2.
 `retro admit <run>` checks the retro agent's `reply.json` in that folder against
 `factory.retro/1`. A bad reply, or one whose findings all fail, exits 2 with
 nothing written. A bad finding is dropped, printed as a `rejected findings[N]` line
-and listed under Rejected findings in `findings.md` without its text. A bad card
-exits 2 after `findings.md` is written, with no cards admitted. `{"none": true}`
-exits 3. It writes `findings.md`, ranked by count times cost per occurrence, then
+and listed under Rejected findings in `findings.md` without its text. A finding
+whose optional `fixed_by` names a `merged` job, and whose sessions in `digest.jsonl`
+all started before that merge, leaves the ranking. It prints as `fixed findings[N]:
+<id> merged <time>` and is listed under Fixed findings. An unknown or later start
+keeps the finding with a Fixed by line. Each card is checked on its own. A bad card
+is dropped, printed as a `rejected suggestions[N]` line and listed under Rejected
+cards without its text; the clean cards still go through. A clean card whose linked
+findings were all fixed prints `skipped suggestions[N]: finding fixed by <id>` and is
+not admitted. When every card is bad, admit exits 2 after `findings.md` is written,
+with no cards admitted; when every clean card was skipped, it exits 3. The upload's
+`rejected` counts only findings that failed checks. `{"none": true}` exits 3. It writes `findings.md`, ranked by count times cost per occurrence, then
 writes the reply's cards to `suggestions.json` and adds each one to the backlog as a
 held line with a decision form (see [Retro cards](autonomy.md#retro-cards)). It
 checks pause, fingerprint dedupe and both caps first, and exits 3 when nothing was
@@ -231,6 +245,65 @@ whether it was admitted or why it was skipped, even when nothing was admitted. I
 `retro upload skipped: set device: in config.md` without it. An upload error prints
 `retro upload failed: <status> <text>` to stderr and never changes the exit code. A Worker
 without the route answers 404. The `#/retros` dashboard page lists the runs.
+
+## Tool-call audit
+
+```text
+python3 <installed-skill>/runtime/factory.py audit <job-id>
+```
+
+`audit` lists every tool call that this host's Claude Code sessions made in a
+job's worktree, one row per call, oldest first. It reads the transcript folders
+under `~/.claude/projects`, or `$CLAUDE_CONFIG_DIR/projects`, whose name holds
+`factory-<job-id>`, with each main session and its subagents. Each row shows the
+time, the first 8 characters of the main session, the agent (`main` or the
+subagent type), the tool, its flags and its target. It covers this host only:
+sessions on other hosts, and sessions started outside the job's worktree, do not
+show. It writes nothing and makes no network call.
+
+Flags name risky calls. They are heuristics that inform a reader and block nothing.
+
+| Flag | Tools | Example hit |
+| --- | --- | --- |
+| `force-push` | Bash | `git push --force origin factory/1017-add-x` |
+| `hard-reset` | Bash | `git reset --hard HEAD~1` |
+| `branch-delete` | Bash | `git branch -D old` |
+| `recursive-delete` | Bash | `rm -rf build` |
+| `no-verify` | Bash | `git commit --no-verify -m x` |
+| `sudo` | Bash | `sudo chown u x` |
+| `pipe-to-shell` | Bash | `curl ... \| sh` |
+| `deploy` | Bash | `wrangler deploy` |
+| `pr-merge` | Bash | `gh pr merge 7` |
+| `sandbox-off` | Bash | input `dangerouslyDisableSandbox: true` |
+| `secret-file` | Bash, Read, Edit, Write, Grep `path` | `Read ~/app/.env` |
+| `denied` | any | the call's result is an error that holds a denial phrase |
+
+Flags print in this order, joined by `,`; a call with none prints `-`. Flags
+match the raw target in memory. The printed target has the home path folded to
+`~`, then the same redaction as `retro digest`, so header values, bearer tokens
+and secret-named values print as `[redacted]`. Control characters, and Unicode
+bidi and isolate controls such as U+202E, in the target and the agent name print
+as `?`, and the target is cut to 120 characters.
+
+A bad job id exits 2. A missing projects directory exits 4 with
+`no Claude Code transcripts at <path>`. No session in the job's worktree exits 4
+with `no Claude Code session on this host ran in a factory-<job-id> worktree`.
+
+```text
+python3 <installed-skill>/runtime/factory.py audit push <job-id>
+```
+
+`audit push` uploads the same rows, each with `host` (this host's `device:`) and
+`job` added, to `audit/<job-id>/<device>.jsonl` through `PUT /api/audit/<job-id>/<device>.jsonl`,
+and prints `pushed 6 calls to audit/1017-add-x/example-host.jsonl`. A re-push
+replaces this host's file. The body is capped at 1 MiB: past that, the oldest rows
+are dropped and the line reads `pushed 5 of 6 calls to ...; the oldest 1 did not
+fit in 1 MiB`. The job drawer's `audit` tab shows every host's pushed rows.
+
+`audit push` with no valid `device:` exits 2 with the pairing hint, as does a 403
+`audit rows are written only by the host's bound service token`. Any other 403
+exits 5. A bad job id, or a second argument without `push`, exits 2 with
+`usage: factory.py audit push <job-id>, a full job id such as 1017-add-x`.
 
 ## Exit recovery
 

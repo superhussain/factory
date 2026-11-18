@@ -221,11 +221,15 @@ test("idea files", { timeout: 180000 }, async (t) => {
           );
         }
 
-        await page.evaluate(async () => {
-          const video = document.querySelector("#d-files video");
-          video.muted = true;
-          await video.play();
-        });
+        assert.equal(
+          await page.evaluate(() => {
+            const v = document.querySelector("#d-files video");
+            v.muted = true;
+            v.play().catch(() => {});
+            return v.paused;
+          }),
+          false,
+        );
         await page.click("#d-close");
         assert.deepEqual(
           await page.$eval("#d-files video", (v) => [

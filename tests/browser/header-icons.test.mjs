@@ -1,4 +1,4 @@
-// The four header icon buttons stay on one row and match the project filter height.
+// The five header icon buttons stay on one row and match the project filter height.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -16,6 +16,12 @@ const JOBS = [
     title: "Synthetic sample job",
     stage: "spec",
   },
+  {
+    id: "1901-sample-a",
+    project: "sample",
+    title: "Synthetic sample A",
+    stage: "needs-human",
+  },
 ].map((job) => ({ ...job, updated: "2026-01-01T00:00:00Z" }));
 
 const TOUCH = { isMobile: true, hasTouch: true };
@@ -25,6 +31,7 @@ const CASES = [
   { viewport: { width: 320, height: 844 }, size: 32 },
   { viewport: { width: 390, height: 844, ...TOUCH }, size: 44 },
   { viewport: { width: 320, height: 844, ...TOUCH }, size: 44 },
+  { viewport: { width: 700, height: 1024, ...TOUCH }, size: 44 },
 ];
 
 test("header icons share one row and match the filter height", { timeout: 120000 }, async () => {
@@ -44,10 +51,11 @@ test("header icons share one row and match the filter height", { timeout: 120000
       await page.emulateTimezone("America/New_York");
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#new-idea:not([hidden])");
+      await page.waitForSelector("#inbox-count:not([hidden])");
       await page.waitForSelector(".updated-word");
       const header = await page.evaluate(() => {
         const rect = (id) => document.getElementById(id).getBoundingClientRect();
-        const icons = ["new-idea", "job-jump", "retros-link", "settings-link"];
+        const icons = ["inbox-link", "new-idea", "job-jump", "retros-link", "settings-link"];
         const el = document.querySelector("header");
         const boxes = [...el.children]
           .map((child) => child.getBoundingClientRect())
@@ -72,17 +80,19 @@ test("header icons share one row and match the filter height", { timeout: 120000
             return style.display !== "none" && style.visibility !== "hidden";
           })(),
           text: document.getElementById("updated").textContent,
+          order: getComputedStyle(document.querySelector(".header-actions")).order,
         };
       });
-      if (process.env.HEADER_SHOTS && label === "320px") {
+      const shots = { "320px": "320", "700px touch": "700-touch", "390px touch": "390-touch" };
+      if (process.env.HEADER_SHOTS && shots[label]) {
         await (
           await page.$("header")
         ).screenshot({
-          path: `${process.env.HEADER_SHOTS}/${process.env.HEADER_SHOT_STAGE || "after"}-header-320.png`,
+          path: `${process.env.HEADER_SHOTS}/${process.env.HEADER_SHOT_STAGE || "after"}-header-${shots[label]}.png`,
         });
       }
       assert.equal(new Set(header.tops).size, 1, `icon tops at ${label}: ${header.tops}`);
-      assert.deepEqual(header.heights, [size, size, size, size, size], `heights at ${label}`);
+      assert.deepEqual(header.heights, [size, size, size, size, size, size], `heights at ${label}`);
       assert.ok(
         header.scrollWidth <= header.clientWidth,
         `header scrolls at ${label}: ${header.scrollWidth} > ${header.clientWidth}`,
@@ -91,6 +101,12 @@ test("header icons share one row and match the filter height", { timeout: 120000
       assert.equal(header.wordShown, viewport.width !== 320, `updated word shown at ${label}`);
       assert.equal(header.wordRead, true, `updated word read at ${label}`);
       assert.ok(header.text.startsWith("updated "), `updated text at ${label}: ${header.text}`);
+      if (label === "700px touch") {
+        assert.equal(header.rows, 1, `header rows at ${label}: height ${header.headerHeight}`);
+        assert.equal(header.order, "0", `header-actions order at ${label}`);
+      }
+      if (label === "390px touch")
+        assert.equal(header.order, "1", `header-actions order at ${label}`);
       if (viewport.width === 1280) {
         const link = await page.$eval("#retros-link", (el) => ({
           next: el.nextElementSibling.id,
@@ -181,6 +197,45 @@ test("a failed first load shows the unreachable banner", { timeout: 120000 }, as
         true,
         `banner after a good read following ${label}`,
       );
+      await context.close();
+    }
+  });
+});
+
+// WCAG AA asks 4.5:1 for the badge's small count text, in both color schemes.
+test("the inbox badge keeps 4.5:1 contrast in both themes", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    await seedBoard(origin, JOBS);
+    for (const theme of ["light", "dark"]) {
+      const context = await browser.createBrowserContext();
+      const page = await context.newPage();
+      await page.setViewport({ width: 390, height: 844 });
+      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: theme }]);
+      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#inbox-count:not([hidden])");
+      const { color, background } = await page.$eval("#inbox-count", (el) => ({
+        color: getComputedStyle(el).color,
+        background: getComputedStyle(el).backgroundColor,
+      }));
+      const luminance = (css) => {
+        const [r, g, b] = css
+          .match(/[\d.]+/g)
+          .slice(0, 3)
+          .map((n) => {
+            const c = Number(n) / 255;
+            return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+          });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const [light, dark] = [luminance(color), luminance(background)].sort((a, b) => b - a);
+      const ratio = (light + 0.05) / (dark + 0.05);
+      assert.ok(ratio >= 4.5, `${theme} badge ${color} on ${background}: ${ratio.toFixed(2)}:1`);
       await context.close();
     }
   });

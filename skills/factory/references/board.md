@@ -22,7 +22,7 @@
   "needs": "optional: what only a human can do, e.g. approve spec.md",
   "not_before": "optional UTC time; pickup starts the job only after it, e.g. 2026-11-17T09:00:00Z",
   "port": "optional dev-server port or block the builder holds, e.g. 8130-8139",
-  "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | batched-into (set only by factory.py batch; dropped by the lead's close or merge, or the dashboard's Remove from batch while the lead is at spec)" }],
+  "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | depends-on | batched-into (set only by factory.py batch; dropped by the lead's close or merge, or the dashboard's Remove from batch while the lead is at spec)" }],
   "stacked": "true on the one rider that ships as a PR stacked on its lead's PR; set only by factory.py stack",
   "build": { "state": "queued | running | done | failed", "runs": ["https://github.com/<repo>/actions/runs/1"] },
   "pipeline": { "global": 3, "project": 2 },
@@ -30,6 +30,7 @@
   "experiment": { "name": "pilot", "arm": "a | b", "provider": "provider-b", "model": "model-b", "effort": "high" },
   "agents": [{ "at": "...", "stage": "spec", "role": "spec", "harness": "claude", "via": "native", "model": "...", "effort": "medium", "session": "a1b2c3", "paseo": {"server": "...", "agent": "..."} }],
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
+  "paseo_writer": {"server": "...", "agent": "..."},
   "started": "2026-10-15T11:40:00Z",
   "updated": "2026-10-15T12:00:00Z",
   "done": "2026-10-15T12:30:00Z"
@@ -43,6 +44,9 @@ job's own `$REPO`.
 `pending`, `PASS`, `CHANGES`, or `SKIPPED` (ux and ui only, written by `review-plan`). Reviewer keys are fixed: security, ux, ui, code.
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
 which ports live jobs hold. Only `factory.py` writes `claim`.
+A `board` patch that would change only `updated` stamps, or only this session's `claim.seen` while the stored one is under 10 minutes old, sends no PUT and prints the stored row.
+`depends-on` holds an idea back from pickup, `ideas` and `batch` until the named job is merged, closed or off the board.
+Approving a backlog line turns each `Depends on: <slug>: <feature>` context line into this ref, and is refused while that line is unchecked. The dashboard's refusal links to that prerequisite's backlog item. `next` and `batch` skip such a line while its prerequisite is unchecked or still open, and add this ref to the job they make. `batch` allows a prerequisite that is the lead or one of its riders.
 `done` is when the job entered `merged` or `closed`, and only `factory.py` writes it.
 `started` is when the job first got a claim, and only `factory.py` writes it.
 `escalated` is set when an ESCALATE PR ships, and marks a PR that waits on a human.
@@ -70,6 +74,7 @@ Only pickup and `agent record` append `agents` rows, newest 32 kept;
 `agent report` counts them.
 A row's paseo is the session that recorded it, or the session whose hold claimed its tag, or the worker named by `--paseo-agent`.
 A babysit sent to the job's own agent records a babysit row linked to that agent.
+`paseo_writer` is the Paseo session that last wrote the job with `board` while it held no claim and the job had no `paseo`. Only `factory.py` writes it. The dashboard uses it as the session link when `paseo` is absent. Nothing else reads it.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
 `babysit` is `{at}`, set on a `pr-open` job by Babysit PR or `control` (plus `via`, `quote`,

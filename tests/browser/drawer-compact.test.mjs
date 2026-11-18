@@ -274,7 +274,7 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       const hidden = Math.ceil(rest.pr - rest.title) + 4;
       assert.ok(hidden < rest.collapse, `shift ${hidden} under C ${rest.collapse}`);
       await scrollTo(hidden);
-      await page.focus("#d-actions");
+      await page.focus("#d-star");
       await page.keyboard.down("Shift");
       await page.keyboard.press("Tab");
       await page.keyboard.up("Shift");
@@ -302,7 +302,7 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
         pr.hidden = false;
       });
       await scrollTo(300);
-      await page.focus("#d-actions");
+      await page.focus("#d-star");
       await page.keyboard.down("Shift");
       await page.keyboard.press("Tab");
       await page.keyboard.up("Shift");
@@ -380,10 +380,38 @@ test("drawer head scrolls with the page", { timeout: 180000 }, async (t) => {
       await page.setViewport(MOBILE);
       await openAgents("spec");
       const rest = await rows();
-      await drag(rest.cell.x + 4, rest.cell.y + rest.cell.height / 2, 150);
+      // The middle of the table's visible width, so the touch lands on it whatever the host's fonts.
+      const at = await page.$eval(
+        "#d-agents .table-wrap",
+        (w, y) => {
+          const r = w.getBoundingClientRect();
+          const x = r.x + r.width / 2;
+          return {
+            x,
+            y,
+            onWrap: w.contains(document.elementFromPoint(x, y)),
+            sideways: w.scrollWidth > w.clientWidth + 1,
+          };
+        },
+        rest.cell.y + rest.cell.height / 2,
+      );
+      assert.ok(at.onWrap, `touch lands on the agents table: ${at.x}, ${at.y}`);
+      assert.ok(at.sideways, "the agents table scrolls sideways");
+      await page.touchscreen.touchStart(at.x, at.y);
+      for (let k = 1; k <= 3; k++) await page.touchscreen.touchMove(at.x - 40 * k, at.y);
+      await new Promise((r) => setTimeout(r, 150));
+      await page.touchscreen.touchEnd();
+      await frames();
+      const left = await page.$eval("#d-agents .table-wrap", (w) => w.scrollLeft);
+      assert.ok(left > 60, `table scrollLeft after sideways drag ${left}`);
+      assert.equal(await page.$eval("#d-doc", (d) => d.scrollTop), 0);
+      await page.$eval("#d-agents .table-wrap", (w) => {
+        w.scrollLeft = 0;
+      });
+      await frames();
+      await drag(at.x, at.y, 150);
       const s = await rows();
-      // The browser keeps a few pixels of touch slop, so the drag scrolls a little under 150.
-      assert.ok(s.scrollTop > 100, `scrollTop after drag ${s.scrollTop}`);
+      near(s.scrollTop, 150, "scrollTop after drag");
       near(rest.cell.y - s.cell.y, s.scrollTop, "cell after drag");
       near(rest.h1Top - s.h1Top, s.scrollTop, "h1 after drag");
       assert.equal(

@@ -79,6 +79,13 @@ function expectedRows(text, withDrawer) {
       kind: "command",
       words: "retros retro runs findings command",
     },
+    {
+      key: "command:inbox",
+      title: "Inbox",
+      meta: "Command · Everything waiting on you (I)",
+      kind: "command",
+      words: "inbox waiting decisions command",
+    },
   ]
     .filter((r) => tokens.every((t) => r.words.includes(t)))
     .map(({ words: _words, ...r }) => r);

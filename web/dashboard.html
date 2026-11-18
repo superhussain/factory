@@ -166,6 +166,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .btn.icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .btn.icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .btn.icon .teeth { stroke-width: 2.5; stroke-linecap: butt; }
+  #d-star[aria-pressed="true"] { color: var(--accent); }
+  #d-star[aria-pressed="true"] svg { fill: currentColor; }
+  #inbox-link { position: relative; }
+  #inbox-count { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--alert); color: var(--panel); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
+  #inbox-count[hidden] { display: none; }
   #filter { height: var(--icon-size); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   #filter svg { flex: none; }
   #filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -181,8 +186,23 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (pointer: coarse) { .filter-menu label { min-height: 44px; } .filter-menu .filter-title { white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; } }
   .header-actions { display: flex; gap: inherit; }
   body[data-view="settings"] #board, body[data-view="settings"] #detail,
-  body[data-view="retros"] #board, body[data-view="retros"] #detail { display: none; }
+  body[data-view="retros"] #board, body[data-view="retros"] #detail,
+  body[data-view="inbox"] #board, body[data-view="inbox"] #detail { display: none; }
   #retros-page { max-width: 1040px; }
+  #inbox-page { max-width: 1040px; }
+  #inbox-list { list-style: none; margin: 0; padding: 0; }
+  .inbox-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 16px; padding: 12px 10px; border-bottom: 1px solid var(--line); }
+  .inbox-kind { font-size: 11px; font-weight: 600; }
+  .inbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .inbox-actions a.btn { text-decoration: none; }
+  .inbox-answer { grid-column: 2 / -1; margin-top: 12px; }
+  .inbox-answer .ask-bar { position: static; padding: 10px 0 0; margin-bottom: 0; background: none; }
+  .inbox-answer .ask-bar .btn { flex: none; }
+  @media (pointer: coarse) { .inbox-actions .btn { min-height: 44px; display: inline-flex; align-items: center; } }
+  @media (max-width: 760px) {
+    .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding: 12px 4px; }
+    .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
+  }
   #retros-list { display: grid; gap: 20px; }
   .settings-section.retro-run { padding: 20px 20px 12px; }
   .retro-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; margin-bottom: 14px; }
@@ -196,9 +216,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .retro-finding { align-items: start; padding: 12px 10px; border-bottom: 1px solid var(--line); }
   .retro-finding:last-child { border-bottom: 0; }
   .retro-finding[aria-current="true"] { background: var(--accent-soft); border-radius: 10px; }
-  .retro-rank { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .retro-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
-  .retro-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+  .retro-rank, .inbox-rank { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .retro-title, .inbox-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+  .inbox-title { margin-top: 4px; }
+  .retro-meta, .inbox-meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .retro-share { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .retro-share-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .retro-chip-ref { font-weight: 400; white-space: pre; }
@@ -299,7 +320,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #display-filter, #display-columns, #display-card-fields, #display-drawer-links { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
   #display-filter legend, #display-columns legend, #display-card-fields legend, #display-drawer-links legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #display-filter label, #display-columns label, #display-card-fields label, #display-drawer-links label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); }
-  #settings-notifications label { display: flex; gap: 8px; align-items: baseline; color: var(--fg); font-size: 13px; }
+  #settings-notifications label[for="notify-needs"], #settings-notifications label[for="notify-push"], #settings-notifications label[for="sound-on"] { display: flex; gap: 8px; align-items: baseline; color: var(--fg); font-size: 13px; }
+  .sound-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
+  .sound-kinds li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; margin: 0 0 4px; }
   .scheduler-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
   .reference-scroll { overflow-x: auto; margin: 0 0 12px; }
   .reference-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -558,6 +581,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .doc th, .agent-runs th { background: var(--code-bg); font-weight: 600; }
   .agent-runs th, .agent-runs td { min-width: 0; white-space: nowrap; }
+  /* The audit table fits the desktop drawer: smaller type, only Time and the headers stay on one line, Target keeps a floor. */
+  .doc table.audit { font-size: 13px; }
+  .doc table.audit th, .doc table.audit td { min-width: 0; }
+  .doc table.audit th, .doc table.audit td:first-child { white-space: nowrap; }
+  .doc table.audit td:last-child { min-width: 14em; }
   .agent-runs td a + a { margin-left: 8px; }
   /* A long run list scrolls in its own box, so the tabs and page stay on a desktop screen. */
   .detail-head > #d-agents .table-wrap { max-height: 40vh; overflow-y: auto; scroll-padding-top: 2.5em; }
@@ -619,9 +647,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     /* On a phone the details under the title slide up with the page; syncHeadShift sets the shift. */
     .detail-head { border-bottom: 0; }
     .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
-    #d-title, .detail-head #d-babysit-bar, #d-actions, .detail-head .close { position: relative; z-index: 3; }
+    #d-title, .detail-head #d-babysit-bar, #d-star, #d-actions, .detail-head .close { position: relative; z-index: 3; }
     .detail-head .close { background: var(--panel); }
-    #d-meta, #d-pipeline, #d-chat, #d-held, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
+    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
@@ -642,8 +670,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .status .updated-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     #updated { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .status .dot { flex: none; }
+    /* The job actions button drops under the star, so the title keeps the width it had before the star. */
+    .detail-head #d-star:not([hidden]) + #d-actions-wrap { margin-left: calc(-1 * (var(--icon-size) + 12px)); margin-top: calc(var(--icon-size) + 12px); }
   }
   @media (pointer: coarse) { :root { --icon-size: 44px; } }
+  /* Only when the icons and the status cannot share one row, the status moves up beside the filter. syncHeaderWrap sets wraps. */
+  @media (pointer: coarse) and (min-width: 361px) and (max-width: 760px) { header.wraps .header-actions { order: 1; } }
 </style>
 </head>
 <body>
@@ -655,6 +687,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     <div class="filter-menu" id="filter-menu" role="group" aria-label="Show jobs from" hidden></div>
   </div>
   <div class="header-actions">
+    <a class="btn icon" id="inbox-link" href="#/inbox" aria-label="Inbox" title="Inbox (I)" aria-keyshortcuts="i"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9.5V13h11V9.5L12 4H4z"/></svg><span id="inbox-count" aria-hidden="true" hidden></span></a>
     <button class="btn icon" id="new-idea" aria-label="New idea" title="New idea (N)" aria-keyshortcuts="n" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2c.4.3.6.7.6 1.2V12h4v-1.1c0-.5.2-.9.6-1.2A4.5 4.5 0 0 0 8 1.5zM6.5 14.5h3"/></svg></button>
     <button class="btn icon" id="job-jump" aria-label="Jump to job" title="Jump to job (J, /, ⌘K or Ctrl+K)" aria-keyshortcuts="j / Meta+K Control+K"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 4 4"/></svg></button>
     <a class="btn icon" id="retros-link" href="#/retros" aria-label="Retros" title="Retros (R)" aria-keyshortcuts="r"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2 2v2.6h2.6"/><path d="M8 5v3l2 1.5"/></svg></a>
@@ -669,7 +702,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="meta" id="d-not-before" hidden></div><div class="meta" id="d-auto-babysit" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>
@@ -677,6 +710,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <a class="pr-link" id="d-tracer" target="_blank" rel="noopener noreferrer" hidden>Tracer</a>
     </div>
     <button class="btn" id="d-babysit-bar" title="Work this PR as the Babysit note asks, or hand it back" hidden>Babysit PR</button>
+    <button class="btn icon" id="d-star" aria-label="Star job" title="Star job" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg></button>
     <div class="job-actions" id="d-actions-wrap">
       <button class="btn icon" id="d-actions" aria-label="Job actions" title="Job actions (A or .)" aria-keyshortcuts="a ." aria-haspopup="menu" aria-expanded="false" aria-controls="d-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>
       <div class="job-actions-menu" id="d-actions-menu" role="menu" aria-label="Job actions" hidden>
@@ -907,8 +941,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="display-theme">Theme<select id="display-theme"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <label for="display-density">Density<select id="display-density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
       <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="15">Every 15 seconds</option><option value="30">Every 30 seconds</option><option value="60">Every 60 seconds</option></select></label>
-      <p class="muted" id="display-poll-help">If live updates drop, the board refreshes on this schedule and the backlog every 2 minutes. Refreshing pauses while the window is hidden or unfocused. With notifications on, it refreshes every 30 seconds instead.</p>
+      <p class="muted" id="display-poll-help">If live updates drop, the board refreshes on this schedule and the backlog every 2 minutes. Refreshing pauses while the window is hidden or unfocused. With notifications or sounds on, it refreshes every 30 seconds instead.</p>
       <fieldset id="display-filter"><legend>Show jobs from</legend></fieldset>
+      <label for="display-starred">Starred jobs<select id="display-starred" aria-describedby="display-starred-help"><option value="float">Float to the top of each column</option><option value="only">Show only starred jobs</option><option value="off">Keep board order</option></select></label>
+      <p class="muted" id="display-starred-help">Star a job with the star button in its job panel. Stars are saved in this browser. The needs you column always shows its jobs.</p>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
       <p class="muted" id="display-card-fields-help">Cards in the needs you column always show what the job is waiting on.</p>
@@ -929,7 +965,21 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <p class="muted">Get a browser notification when a job starts waiting on you while this tab is in the background. The notification shows the job id and title only. This setting applies only to this browser.</p>
       <label for="notify-needs"><input type="checkbox" id="notify-needs" aria-describedby="notify-permission"> Notify me when a job needs me</label>
       <p class="muted" id="notify-permission"></p>
+      <label for="notify-remind">Remind me when a job still waits after<select id="notify-remind" aria-describedby="notify-remind-help"><option value="">Never</option><option value="1">1 hour</option><option value="4">4 hours</option><option value="24">1 day</option></select></label>
+      <p class="muted" id="notify-remind-help">Sends one more notification when a job has waited on you longer than this, while this tab is in the background. The wait counts from the job's last board update. Turn on notifications above to use this.</p>
       <p id="notify-status" role="status"></p>
+      <label for="notify-push"><input type="checkbox" id="notify-push" aria-describedby="push-help" disabled> Push to this device when the dashboard is closed</label>
+      <p class="muted" id="push-help"></p>
+      <p id="push-status" role="status"></p>
+      <h4 id="sound-heading">Sounds</h4>
+      <label for="sound-on"><input type="checkbox" id="sound-on" aria-describedby="sound-help"> Play a sound for board events</label>
+      <p class="muted" id="sound-help"></p>
+      <ul class="sound-kinds" aria-labelledby="sound-heading">
+        <li><span>A job needs you</span><button class="btn" type="button" data-sound="needs" aria-label="Play the sound for: A job needs you">Play</button></li>
+        <li><span>A pull request opens</span><button class="btn" type="button" data-sound="pr" aria-label="Play the sound for: A pull request opens">Play</button></li>
+        <li><span>A job merges</span><button class="btn" type="button" data-sound="merged" aria-label="Play the sound for: A job merges">Play</button></li>
+      </ul>
+      <p id="sound-status" role="status"></p>
     </section>
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
       <h3 id="scheduler-settings-heading" tabindex="-1">Scheduler</h3>
@@ -1064,8 +1114,10 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
           <tr><td>N</td><td>New idea</td></tr>
           <tr><td>P</td><td>Select project</td></tr>
           <tr><td>S</td><td>Open Settings</td></tr>
-          <tr><td>H</td><td>Back to the board from a job, a backlog item, Settings or Retros</td></tr>
+          <tr><td>H</td><td>Back to the board from a job, a backlog item, Settings, Retros or the Inbox</td></tr>
           <tr><td>R</td><td>Open Retros</td></tr>
+          <tr><td>I</td><td>Open the Inbox</td></tr>
+          <tr><td>W</td><td>Open the next job waiting on you</td></tr>
           <tr><td>A or .</td><td>Open the jumper with actions for the hovered or focused job card, or the open job</td></tr>
           <tr><td>B</td><td>Open the first backlog item</td></tr>
           <tr><td>A or D</td><td>Approve or deny the open backlog item</td></tr>
@@ -1082,6 +1134,14 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
   </div>
   <p class="muted" id="retros-status" role="status"></p>
   <div id="retros-list"></div>
+</div>
+<div class="settings-page" id="inbox-page" role="region" aria-labelledby="inbox-page-heading" hidden>
+  <div class="settings-head">
+    <a class="btn icon" id="inbox-back" href="#" aria-label="Back to board" title="Back to board (H)" aria-keyshortcuts="h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
+    <h2 id="inbox-page-heading" tabindex="-1">Inbox</h2>
+  </div>
+  <p class="muted" id="inbox-status" role="status"></p>
+  <ol id="inbox-list"></ol>
 </div>
 <dialog id="idea-dlg" aria-labelledby="idea-h">
   <form id="idea-form">
@@ -1164,7 +1224,7 @@ const store = {
 // board.json is agent-written and the dashboard is public, so only exact PR URLs for a registered project's repo or archive become links.
 const prUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/pull/(\\d+)$');
 const runUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/actions/runs/(\\d+)$');
-const REF_KINDS = { 'rework-of': 'rework of', 'follow-up-of': 'follow-up of', 'sub-job-of': 'sub-job of', 'batched-into': 'batched into' };
+const REF_KINDS = { 'rework-of': 'rework of', 'follow-up-of': 'follow-up of', 'sub-job-of': 'sub-job of', 'batched-into': 'batched into', 'depends-on': 'depends on' };
 const BUILD_STATES = ['queued', 'running', 'done', 'failed'];
 // The stages factory.py mirrors into Tracer.
 const TRACER_STAGES = ['spec', 'build', 'review', 'approve', 'needs-human', 'pr-open', 'merged'];
@@ -1185,9 +1245,41 @@ function readHiddenProjects() {
   return new Set(raw.split(',').filter(Boolean));
 }
 let hiddenProjects = readHiddenProjects();
+const STARRED_KEY = 'factory-starred-jobs';
+// Saved as a JSON array of job ids. Any other value reads as no stars.
+function readStarred() {
+  try {
+    const ids = JSON.parse(store.get(STARRED_KEY));
+    if (Array.isArray(ids)) return new Set(ids.filter((id) => typeof id === 'string' && id));
+  } catch {}
+  return new Set();
+}
+let starred = readStarred();
+function saveStarred() {
+  if (starred.size) store.set(STARRED_KEY, JSON.stringify([...starred])); else store.remove(STARRED_KEY);
+}
+function toggleStar(id) {
+  if (!starred.delete(id)) starred.add(id);
+  saveStarred();
+  renderBoard();
+}
+function syncStarButton(id) {
+  $('d-star').setAttribute('aria-pressed', String(starred.has(id)));
+  $('d-star').title = starred.has(id) ? 'Unstar job' : 'Star job';
+}
 
 // The server-rendered title, which renderBoard prefixes with the needs-you count.
 const BASE_TITLE = document.title;
+// The installed app's icon badge carries the needs-you count from the tab title. An expired sign-in clears it.
+// badgeCount keeps the last requested count, so leaving signin restores it without a fresh render.
+let appBadge = null, badgeCount = 0;
+function syncAppBadge(count) {
+  badgeCount = count;
+  const n = connState === 'signin' ? 0 : count;
+  if (n === appBadge || !('setAppBadge' in navigator)) return;
+  appBadge = n;
+  (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+}
 
 let jobs = [];
 let openId = null;
@@ -1197,6 +1289,8 @@ const TRACER_WAIT_MS = 3000;
 let tracerSettingRead = null;
 // The backlog line open in the drawer's decision page, or null. Never set together with openId.
 let openBacklogRaw = null;
+// '#/inbox' while the open drawer was opened from the inbox, so closing it goes back there.
+let drawerReturn = null;
 // item.raw -> triage verdict object, or null when the Worker has none stored.
 const backlogTriageSeen = new Map();
 // item.raw values with a read in flight, so a second call for the same line skips it.
@@ -1251,7 +1345,8 @@ function setConnection(state) {
   const cadence = every ? 'Polling every ' + every + ' seconds until live updates reconnect' : 'Polling paused while this window is hidden or unfocused';
   const label = polling ? cadence + (liveNote && '. ' + liveNote) : title;
   drawDot(polling ? dot + ' polling' : dot, label);
-  if (was === 'signin' && state !== 'signin') syncLive();
+  if (was === 'signin' && state !== 'signin') { syncLive(); syncAppBadge(badgeCount); }
+  if (state === 'signin') syncAppBadge(badgeCount);
 }
 function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
 // Keepalive: an open socket sends "ping" every 25 s and the room's auto-response answers "pong", so proxies that drop quiet connections keep it. No pong for 60 s closes it. liveNote names how the last socket closed, for the polling dot.
@@ -1332,7 +1427,7 @@ function refreshBacklog() {
   const version = boardReadVersion;
   // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
   const seen = backlog.map((b) => b.raw).join('\n');
-  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); });
+  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); renderInboxPage(); });
 }
 
 async function poll({ ifChanged = false, withBacklog = true } = {}) {
@@ -1370,6 +1465,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     renderBoard();
     loadHoldConfigs();
     notifyNeeds();
+    boardSound();
     if (settingsShown === 'projects') renderProjectList();
     syncDetail();
     syncBacklogRoute();
@@ -1473,13 +1569,19 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   window.parent.postMessage({ type: 'factory-open-agent', v: 1, ...ids }, embedParent);
 }, true);
+
+// The session link a job carries: the one that claimed it, else the last Paseo session that wrote it unclaimed.
+function sessionLink(j) {
+  if (paseoLinksFor(j.paseo)) return j.paseo;
+  return paseoLinksFor(j.paseo_writer) ? j.paseo_writer : null;
+}
 // The job whose session a drawer links to: its own, else its batch lead's, else null.
 function sessionJob(j) {
-  if (paseoLinksFor(j.paseo)) return j;
+  if (sessionLink(j)) return j;
   const lead = jobs.find((x) => x.id === leadOf(j));
-  return lead && paseoLinksFor(lead.paseo) ? lead : null;
+  return lead && sessionLink(lead) ? lead : null;
 }
-const paseoLinks = (j) => { const s = sessionJob(j); return s ? paseoLinksFor(s.paseo) : null; };
+const paseoLinks = (j) => { const s = sessionJob(j); return s ? paseoLinksFor(sessionLink(s)) : null; };
 
 // The job's Tracer page, only as a plain http(s) URL with no credentials.
 function tracerLink(j) {
@@ -1597,7 +1699,7 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(sessionJob(j)?.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.idea_files), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.paseo_writer), JSON.stringify(sessionJob(j) && sessionLink(sessionJob(j))), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.idea_files), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
 }
 
 // A holder's stop is recorded only when stopped is a string, as in factory.py.
@@ -1644,8 +1746,23 @@ function waitsOnYou(j) {
     (j.stage === 'pr-open' && (j.escalated === true || /^escalated:/i.test(String(j.note ?? ''))));
 }
 
+// Shown jobs waiting on you, oldest update first: the needs you column's order.
+function waitingJobs() {
+  return jobs.filter((j) => isShown(j.project) && waitsOnYou(j))
+    .sort((a, b) => (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
+}
+
+// The waiting job after the one the hash names, wrapping to the first. The hash is set before hashchange runs, so quick presses step on.
+function nextWaitingJob() {
+  const list = waitingJobs();
+  const { id } = parseHash();
+  const at = list.findIndex((j) => j.id === id);
+  return list[at + 1] ?? list[0] ?? null;
+}
+
 // Prioritized jobs first, as factory.py pickup takes them. The sort is stable, so ties keep board order.
 function prioritizedFirst(list) { return list.sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at)); }
+function starredFirst(list) { return starView === 'float' ? list.sort((a, b) => Number(starred.has(b.id)) - Number(starred.has(a.id))) : list; }
 
 // Mirrors batch_hold in factory.py, plus no claim: a follow-up or triage-queued idea that no
 // person added, approved or prioritized. batchState mirrors batch_holds. Change both together.
@@ -1744,10 +1861,35 @@ function batchState(j) {
   };
 }
 
-// The held chips' text as the board last drew it. clockTick redraws once a chip's text would change.
+// The not-before chip as { text, title } while j.not_before is still ahead, or null. Mirrors waiting_until in factory.py.
+const NOT_BEFORE_STAMP = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
+function notBefore(j) {
+  const at = j.not_before;
+  if (!NOT_BEFORE_STAMP.test(String(at)) || !(Date.parse(at) > Date.now())) return null;
+  const local = new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return { text: 'Not before ' + local, title: 'Pickup leaves this job alone until ' + local + ' (' + at + ').' };
+}
+
+// Mirrors AUTO_BABYSIT_COPY in factory.py. Change both together.
+const AUTO_BABYSIT_COPY = { 'fix-reviews': 'has an open review thread', rebase: 'has a merge conflict', 'fix-ci': 'has a failing required check' };
+
+// The babysit chip and drawer line for a babysit pickup started on its own, or null for a person's babysit.
+function autoBabysit(j) {
+  if (j.babysit?.via !== 'pickup') return null;
+  const copy = Object.hasOwn(AUTO_BABYSIT_COPY, j.babysit.reason) ? AUTO_BABYSIT_COPY[j.babysit.reason] : '';
+  const pr = prLink(j);
+  const count = j.auto_babysit?.count;
+  const cap = projects?.get(j.project)?.autoBabysit || 0;
+  const title = 'Pickup started this babysit' + (copy && pr ? ' because PR #' + pr.n + ' ' + copy : '') + '.' +
+    (Number.isInteger(count) ? ' Automatic babysit ' + count + (cap ? ' of ' + cap : '') + '.' : '');
+  return { text: 'Auto-babysitting', title };
+}
+
+// The held and not-before chips' text as the board last drew it. clockTick redraws once a chip's text would change.
 let heldDrawn = '';
 function heldChipsKey() {
-  return jobs.filter(batchHeld).map((j) => j.id + ':' + batchState(j).text).join('\n');
+  return jobs.filter(batchHeld).map((j) => j.id + ':' + batchState(j).text)
+    .concat(jobs.filter(notBefore).map((j) => j.id + ':not-before')).join('\n');
 }
 
 // One fact on one row, with the full text in its tooltip.
@@ -1777,15 +1919,17 @@ function card(j, inNeeds, archived = false) {
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const dup = duplicateOf(j);
   const dupOnBoard = dup !== null && jobs.some((x) => x.id === dup);
-  const chat = chatDecision(j), held = batchState(j);
+  const chat = chatDecision(j), held = batchState(j), later = notBefore(j), auto = autoBabysit(j);
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
-  const tags = (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
+  const tags = (!archived && starred.has(j.id) ? '<span class="chip">Starred</span>' : '') +
+    (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
     (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
     (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
     (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
     (chat ? '<span class="chip chat" title="' + esc(chat.title) + '">' + esc(chat.text) + '</span>' : '') +
     (held ? '<span class="chip held" title="' + esc(held.title) + '">' + esc(held.text) + '</span>' : '') +
-    (j.babysit?.at ? '<span class="chip" title="' + esc(prLink(j) ? 'An agent is working PR #' + prLink(j).n + ' as the Babysit note asks' : 'An agent is working this PR as the Babysit note asks') + '">Babysitting</span>' : '');
+    (later ? '<span class="chip not-before" title="' + esc(later.title) + '">' + esc(later.text) + '</span>' : '') +
+    (j.babysit?.at ? '<span class="chip" title="' + esc(auto ? auto.title : prLink(j) ? 'An agent is working PR #' + prLink(j).n + ' as the Babysit note asks' : 'An agent is working this PR as the Babysit note asks') + '">' + esc(auto ? auto.text : 'Babysitting') + '</span>' : '');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
     '<div class="id line" title="' + esc(j.id) + '"><span class="proj line" title="' + esc(projectName(j)) + '">' + esc(projectName(j)) + '</span><span class="id-text">' + esc(j.id) + '</span></div>' +
@@ -1859,7 +2003,7 @@ function jobLinkRows(j) {
   const pr = prLink(j);
   if (pr) link('pr', 'Open PR #' + pr.n, 'pr github', true);
   const owner = sessionJob(j);
-  const paseo = owner && paseoLinksFor(owner.paseo);
+  const paseo = owner && paseoLinksFor(sessionLink(owner));
   const open = (label) => (owner !== j ? 'Open the session of ' + owner.id + ' in ' : 'Open in ') + label;
   if (paseo) {
     if (paseo.app) link('paseo', open(factoryConfig.agent_links.app.label), factoryConfig.agent_links.app.label, false);
@@ -1969,7 +2113,8 @@ function renderJobResults() {
   const projectCommand = !projectFilter || projectFilter.hidden || projectFilter.disabled ? null
     : { kind: 'command', key: 'command:select-project', title: 'Select project', meta: 'Command · Change the board project filter', words: 'select project command' };
   const retrosCommand = { kind: 'command', key: 'command:retros', title: 'Retros', meta: 'Command · Open retro runs and findings (R)', words: 'retros retro runs findings command' };
-  const commands = [command, projectCommand, retrosCommand].filter((r) => r && tokens.every((t) => r.words.includes(t)));
+  const inboxCommand = { kind: 'command', key: 'command:inbox', title: 'Inbox', meta: 'Command · Everything waiting on you (I)', words: 'inbox waiting decisions command' };
+  const commands = [command, projectCommand, retrosCommand, inboxCommand].filter((r) => r && tokens.every((t) => r.words.includes(t)));
   const retroRows = retroPickerRows(tokens);
   const retroCount = retroRows.runs.length + retroRows.findings.length;
   const jobRows = matched.map((j) => ({
@@ -1997,6 +2142,7 @@ function renderJobResults() {
     { id: 'new-idea', title: 'New idea', rows: commands.filter((r) => r.key === 'command:new-idea') },
     { id: 'select-project', title: 'Select project', rows: commands.filter((r) => r.key === 'command:select-project') },
     { id: 'retros', title: 'Retros', rows: commands.filter((r) => r.key === 'command:retros') },
+    { id: 'inbox', title: 'Inbox', rows: commands.filter((r) => r.key === 'command:inbox') },
     ...[['needs-you', 'Needs you'], ...JOB_PICKER_STAGES.map((stage) => [stage, stage === 'pr-open' ? 'PR open' : stage[0].toUpperCase() + stage.slice(1)]),
       ['other', 'Other jobs']].map(([id, title]) => ({ id, title, rows: jobRows.filter((r) => jobResultSection(r.job) === id) })),
     { id: 'retro-runs', title: 'Retro runs', rows: retroRows.runs },
@@ -2158,6 +2304,11 @@ function activateJobResult() {
     location.hash = '#/retros';
     return;
   }
+  if (row.key === 'command:inbox') {
+    closeJobPicker(true);
+    location.hash = '#/inbox';
+    return;
+  }
   if (row.kind === 'command') {
     // The trigger may have gone away while the picker sat open; then nothing opens.
     const trigger = $('new-idea');
@@ -2187,6 +2338,13 @@ function activateJobResult() {
 }
 
 $('job-jump').addEventListener('click', openJobPicker);
+function syncHeaderWrap() {
+  const header = document.querySelector('header');
+  header.classList.remove('wraps');
+  if (header.querySelector('.status').getBoundingClientRect().top >= header.querySelector('h1').getBoundingClientRect().bottom) header.classList.add('wraps');
+}
+const headerObserver = new ResizeObserver(syncHeaderWrap);
+for (const el of [document.querySelector('header'), $('filter-wrap'), document.querySelector('.header-actions'), document.querySelector('.status')]) headerObserver.observe(el);
 $('job-picker-close').addEventListener('click', () => closeJobPicker());
 $('job-picker-back').addEventListener('click', backToJobPicker);
 $('job-picker').addEventListener('cancel', (e) => { e.preventDefault(); cancelJobPicker(); });
@@ -2304,7 +2462,7 @@ async function loadProjects() {
     const r = await fetch('./projects.json', { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status);
     const list = await r.json();
-    projects = new Map(list.map((p) => [p.slug, { title: p.title, repo: p.repo || '', archive: p.archive || '', base: p.base || '', re: p.repo ? prUrl(p.repo) : null, archiveRe: p.archive ? prUrl(p.archive) : null, runRe: p.repo ? runUrl(p.repo) : null }]));
+    projects = new Map(list.map((p) => [p.slug, { title: p.title, repo: p.repo || '', archive: p.archive || '', base: p.base || '', autoBabysit: p.auto_babysit || 0, re: p.repo ? prUrl(p.repo) : null, archiveRe: p.archive ? prUrl(p.archive) : null, runRe: p.repo ? runUrl(p.repo) : null }]));
     loaded = true;
   } catch {}
   $('idea-project-help').textContent = projects === null
@@ -2678,7 +2836,7 @@ async function saveProjectDocument() {
     } else {
       const allowed = extra
         ? ['body over 1 MiB','invalid document write condition','document needs text/markdown','document must be valid UTF-8','document contains control characters','PUT needs If-Match: "<etag>" or If-None-Match: *','project document: contains control, invisible or bidirectional characters','project document: contains the reserved envelope tag','project document: looks like a secret']
-        : ['project document must be valid UTF-8','project document contains control characters','project document needs closed --- frontmatter','project frontmatter allows one repo, base and title, plus an optional archive and buildkite_org','invalid project repo','invalid project archive','invalid project buildkite_org','invalid project base','invalid project title','body over 1 MiB',
+        : ['project document must be valid UTF-8','project document contains control characters','project document needs closed --- frontmatter','project frontmatter allows one repo, base and title, plus an optional archive, buildkite_org and auto_babysit','invalid project repo','invalid project archive','invalid project buildkite_org','invalid project auto_babysit','invalid project base','invalid project title','body over 1 MiB',
           'project document: contains control, invisible or bidirectional characters',
           'project document: contains the reserved envelope tag',
           'project document: looks like a secret'];
@@ -2766,14 +2924,14 @@ function noteDeployedVersion(r) {
   reloadWhenIdle();
 }
 function unsavedWork() {
-  const typing = '#needs-form textarea, #backlog-form textarea';
+  const typing = '#needs-form textarea, #backlog-form textarea, .inbox-needs textarea';
   const blank = el => !el.value.trim();
   return !!document.querySelector('dialog[open]')
     || settingsUnsaved()
     || [...document.querySelectorAll(typing)].some(el => !blank(el))
     || [...document.querySelectorAll('#host-add input[type=text], #host-add input:not([type])')].some(el => !blank(el))
     || hostDrafts.size > 0
-    || backlogSaving || needsSaving || boardWrites > 0
+    || backlogSaving || needsSaving || inboxAnswer?.saving || boardWrites > 0
     || needsStorageFailed && [...needsMemory.values()].some(a => a.some(x => x.picked.length || x.other.trim()))
     || [...backlogDrafts.values()].some(d => d.pick || d.notes.trim() || d.answers.some(a => a.picked.length || a.other.trim()))
     || !!document.activeElement?.matches('textarea, input[type=text], input[type=search], input:not([type]), [contenteditable]');
@@ -2808,15 +2966,21 @@ function renderRoute() {
   const retrosWas = $('retros-page').hidden === false;
   settingsShown = section;
   const retrosOpen = !section && retrosRoute() !== null;
-  document.body.dataset.view = section ? 'settings' : retrosOpen ? 'retros' : 'board';
+  const inboxWas = $('inbox-page').hidden === false;
+  const inboxOpen = !section && inboxRoute() !== null;
+  document.body.dataset.view = section ? 'settings' : retrosOpen ? 'retros' : inboxOpen ? 'inbox' : 'board';
   $('settings-page').hidden = !section;
   $('retros-page').hidden = !retrosOpen;
-  document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : baseTitle;
+  $('inbox-page').hidden = !inboxOpen;
+  document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : baseTitle;
+  if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxFocusRow = -1; inboxAnswer = null; $('inbox-page-heading').focus(); }
+  if (inboxOpen) renderInboxPage();
   if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
   if (retrosOpen) $('retros-link').setAttribute('aria-current', 'page'); else $('retros-link').removeAttribute('aria-current');
+  if (inboxOpen) $('inbox-link').setAttribute('aria-current', 'page'); else $('inbox-link').removeAttribute('aria-current');
   for (const name of SETTINGS_SECTIONS) {
     $('settings-' + name).hidden = name !== section;
     if (name === section) $('settings-nav-' + name).setAttribute('aria-current', 'page'); else $('settings-nav-' + name).removeAttribute('aria-current');
@@ -3007,6 +3171,240 @@ function renderRetrosPage() {
 }
 
 $('retros-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
+
+// Inbox page: the '#/inbox' view ranks every job and backlog line waiting on a person.
+let inboxHtml = '';
+let inboxError = '';
+// The row whose action button was clicked, for when disabling it moved focus to the body.
+let inboxFocusRow = -1;
+// The one inbox row whose needs.md form is open: { id, el, f, answersFile, saving }, or null.
+let inboxAnswer = null;
+
+function inboxRoute() {
+  return location.hash === '#/inbox' ? true : null;
+}
+
+const INBOX_LABELS = { ask: 'Question', pr: 'Escalated PR', human: 'Needs recovery', backlog: 'Backlog decision' };
+
+function inboxKind(j) {
+  if (j.stage === 'needs-human') return 'human';
+  if (j.stage === 'pr-open' && (j.escalated === true || /^escalated:/i.test(String(j.note ?? '')))) return 'pr';
+  if (asks(j.needs)) return 'ask';
+  return null;
+}
+
+// Ranked by kind; within a job kind, prioritized jobs first, then the oldest. Backlog keeps file order.
+function inboxItems() {
+  const waiting = jobs.filter((j) => waitsOnYou(j) && isShown(j.project))
+    .sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at) || (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
+  return ['ask', 'pr', 'human'].flatMap((kind) => waiting.filter((j) => inboxKind(j) === kind).map((job) => ({ kind, job })))
+    .concat(backlogLoaded ? visibleBacklog().map((item) => ({ kind: 'backlog', item })) : []);
+}
+
+function syncInboxLink() {
+  const n = loaded && (backlogLoaded || backlogFailed) ? inboxItems().length : 0;
+  $('inbox-count').textContent = n > 99 ? '99+' : String(n);
+  $('inbox-count').hidden = !n;
+  $('inbox-link').setAttribute('aria-label', n ? 'Inbox, ' + n + ' waiting' : 'Inbox');
+}
+
+function renderInboxPage() {
+  syncInboxLink();
+  if (inboxRoute() === null) return;
+  if (!loaded || (!backlogLoaded && !backlogFailed)) {
+    $('inbox-status').textContent = inboxError || 'Loading the inbox\u2026';
+    $('inbox-list').innerHTML = '';
+    inboxHtml = '';
+    return;
+  }
+  const items = inboxItems();
+  if (inboxAnswer && !items.some((it) => it.kind === 'ask' && it.job.id === inboxAnswer.id)) inboxAnswer = null;
+  $('inbox-status').textContent = inboxError ||
+    (backlogFailed ? 'Could not load the backlog, so backlog rows may be missing or out of date.' : items.length ? '' : 'Nothing is waiting on you.');
+  const link = (href, text) => '<a class="btn" href="' + esc(href) + '">' + esc(text) + '</a>';
+  const html = items.map(({ kind, job: j, item }, i) => {
+    let title, meta, actions;
+    if (item) {
+      const ctx = item.context === undefined ? null : parseBacklogContext(item.context);
+      const busy = backlogBusy.has(item.raw) ? ' disabled' : '';
+      const href = '#/backlog/' + item.key;
+      title = item.text;
+      meta = [projectName(item)].concat(ctx ? 'Agent recommends ' + (ctx.recommend === 'approved' ? 'approve' : 'deny') : []);
+      actions = ctx?.questions.length ? link(href, 'Answer questions')
+        : '<button type="button" class="btn primary" data-inbox-decide="approved" data-raw="' + esc(item.raw) + '"' + busy + '>Approve</button>' +
+          '<button type="button" class="btn" data-inbox-decide="denied" data-raw="' + esc(item.raw) + '"' + busy + '>Deny</button>' + link(href, 'Open');
+    } else {
+      const pr = prLink(j);
+      title = j.title || j.id;
+      meta = [projectName(j), j.id].concat(asks(j.needs) ? j.needs : []);
+      const open = inboxAnswer?.id === j.id;
+      actions = kind === 'ask' && j.needs.includes('#' + j.id + '/needs')
+        ? '<button type="button" class="btn primary" data-inbox-answer="' + esc(j.id) + '" aria-expanded="' + open + '"' +
+          (open ? ' aria-controls="inbox-answer"' : '') + '>Answer</button>' + link('#' + j.id + '/needs', 'Open job')
+        : (kind === 'pr' && canBabysit(j) ? '<button type="button" class="btn primary" data-inbox-babysit="' + esc(j.id) + '">Babysit PR #' + esc(pr.n) + '</button>' : '') +
+          (kind === 'pr' && pr ? '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>' : '') +
+          link('#' + j.id, 'Open job');
+    }
+    return '<li class="inbox-item"><span class="inbox-rank">' + (i + 1) + '</span>' +
+      '<div><span class="chip inbox-kind">' + INBOX_LABELS[kind] + '</span><p class="inbox-title">' + esc(title) + '</p>' +
+      '<p class="inbox-meta">' + meta.map(esc).join(' · ') + '</p></div>' +
+      '<div class="inbox-actions">' + actions + '</div>' +
+      (j && inboxAnswer?.id === j.id ? '<div id="inbox-answer"></div>' : '') + '</li>';
+  }).join('');
+  if (html === inboxHtml) return;
+  // Replacing the rows drops focus, so keep it on the same row, or on the heading when none are left.
+  const list = $('inbox-list');
+  const active = document.activeElement;
+  // The open form moves into the new row as is, so a focused control keeps its focus and caret.
+  const controls = () => [...inboxAnswer.el.querySelectorAll('input, textarea, button')];
+  const at = inboxAnswer?.el.contains(active) ? controls().indexOf(active) : -1;
+  const { selectionStart, selectionEnd } = active;
+  const row = at >= 0 ? -1 : list.contains(active) ? [...list.children].indexOf(active.closest('li')) : active === document.body ? inboxFocusRow : -1;
+  inboxFocusRow = -1;
+  inboxHtml = html;
+  list.innerHTML = html;
+  if (inboxAnswer) $('inbox-answer')?.replaceWith(inboxAnswer.el);
+  if (at >= 0) {
+    const el = controls()[at];
+    el.focus({ preventScroll: true });
+    if (el.tagName === 'TEXTAREA') el.setSelectionRange(selectionStart, selectionEnd);
+  }
+  if (row >= 0) (list.children[Math.min(row, list.children.length - 1)]?.querySelector('.inbox-actions .btn:not(:disabled)') ?? $('inbox-page-heading')).focus();
+}
+
+// One job file as loadFiles reads it, or null.
+async function readJobFile(j, name) {
+  try {
+    const r = await fetch(jobBase(j) + name, { cache: 'no-store' });
+    return r.ok ? { name, text: await r.text(), etag: r.headers.get('ETag') } : null;
+  } catch { return null; }
+}
+
+// Loads needs.md and answers.md for the open row and draws the form, or says why it cannot.
+async function openInboxAnswer(j) {
+  const [f, answersFile] = await Promise.all([readJobFile(j, 'needs.md'), readJobFile(j, 'answers.md')]);
+  if (f) {
+    f.sha = await sha12(f.text);
+    f.triage = await loadNeedsTriage(j, f.sha);
+  }
+  if (inboxAnswer?.id !== j.id) return;
+  const el = inboxAnswer.el;
+  if (!f) {
+    el.textContent = 'needs.md could not be loaded. Open the job to see what it asks.';
+    return;
+  }
+  const parsed = parseNeeds(f.text);
+  if (!parsed?.ok) {
+    el.textContent = 'needs.md is not in the question format. Open the job to read it.';
+    return;
+  }
+  inboxAnswer.f = f;
+  inboxAnswer.answersFile = answersFile;
+  const questions = parsed.parts.filter((p) => p.kind === 'question');
+  el.classList.remove('muted');
+  el.innerHTML = '<form class="inbox-needs" novalidate>' + needsFieldsets(parsed, readNeedsDraft(j, f, questions), '', f.triage) +
+    '<p class="muted inbox-ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
+    '<div class="ask-bar"><button class="btn primary" type="submit">Submit answers</button><span class="inbox-ask-status" role="status"></span></div></form>';
+  inboxNeedsBar();
+  el.querySelector('input').focus();
+}
+
+function inboxNeedsBar() {
+  const form = inboxAnswer.el.querySelector('.inbox-needs');
+  const all = collectNeeds(form);
+  const done = all.filter((a) => a.picked.length || a.other.trim()).length;
+  form.querySelector('[type=submit]').disabled = inboxAnswer.saving || done < all.length;
+  form.querySelector('.inbox-ask-status').textContent = inboxAnswer.saving ? 'Saving answers.' :
+    done < all.length ? 'Answer every question to submit. ' + done + ' of ' + all.length + ' answered.' : '';
+}
+
+async function submitInboxAnswer() {
+  const a = inboxAnswer;
+  const j = jobs.find((x) => x.id === a.id);
+  a.saving = true;
+  inboxNeedsBar();
+  inboxFocusRow = [...$('inbox-list').children].indexOf(a.el.closest('li'));
+  const result = await saveAnswers(j, a.f, a.answersFile, collectNeeds(a.el.querySelector('.inbox-needs')));
+  a.saving = false;
+  if (result.saved && !result.boardError) {
+    if (inboxAnswer === a) inboxAnswer = null;
+    inboxReport('Saved to answers.md for ' + a.id + '. The agent reads it when the job continues.');
+    await poll();
+    return;
+  }
+  // The next submit replaces the answers.md just written, so it needs that file's ETag.
+  if (result.saved) a.answersFile = await readJobFile(j, 'answers.md');
+  if (inboxAnswer !== a) return;
+  inboxNeedsBar();
+  // The disabled submit dropped focus to the body, so give it back rather than to the row's Answer button.
+  inboxFocusRow = -1;
+  const submit = a.el.querySelector('[type=submit]');
+  if (!submit.disabled) submit.focus();
+  a.el.querySelector('.inbox-ask-status').textContent = result.saved
+    ? 'Saved to answers.md, but the board still shows this job waiting on you (' + result.boardError.message + '). Submit again to retry.'
+    : result.message.replace(/ (Check the answers tab before you submit again|Reopen the job, then submit again)\.$/, '') + ' Use Open job to check answers.md before you submit again.';
+}
+
+function inboxReport(message) {
+  inboxError = message;
+  renderInboxPage();
+}
+
+// The project checks and copy of submitBacklogDecision, with no notes and no answers.
+async function inboxDecide(raw, pick, button) {
+  const item = backlog.find((b) => b.raw === raw);
+  if (!item || backlogBusy.has(raw)) return;
+  if (pick !== 'denied' && !projects) return inboxReport('Could not load projects. Refresh this page to retry.');
+  if (pick !== 'denied' && !projects.has(item.project)) return inboxReport('Register project ' + item.project + ' before approving this item.');
+  inboxReport('');
+  button.disabled = true;
+  try {
+    await decideBacklog(item, pick, '', '');
+  } catch (x) {
+    inboxReport(String(x.message || x));
+  }
+}
+
+$('inbox-list').addEventListener('click', (e) => {
+  const answer = e.target.closest('[data-inbox-answer]');
+  if (answer) {
+    const id = answer.dataset.inboxAnswer;
+    if (inboxAnswer?.id === id) {
+      inboxAnswer = null;
+      renderInboxPage();
+    } else {
+      const el = document.createElement('div');
+      el.id = 'inbox-answer';
+      el.className = 'inbox-answer muted';
+      el.textContent = 'Loading the questions\u2026';
+      inboxAnswer = { id, el, f: null, answersFile: null, saving: false };
+      renderInboxPage();
+      openInboxAnswer(jobs.find((x) => x.id === id));
+    }
+  }
+  if (e.target.closest('[data-inbox-babysit], [data-inbox-decide]')) inboxFocusRow = [...$('inbox-list').children].indexOf(e.target.closest('li'));
+  const babysit = e.target.closest('[data-inbox-babysit]');
+  if (babysit) {
+    babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxRoute() !== null });
+    if (!babysit.disabled) inboxFocusRow = -1;
+  }
+  const decide = e.target.closest('[data-inbox-decide]');
+  if (decide) inboxDecide(decide.dataset.raw, decide.dataset.inboxDecide, decide);
+});
+function inboxNeedsInput(e) {
+  const form = e.target.closest('.inbox-needs');
+  if (!form) return;
+  if (!storeNeedsDraft(jobs.find((x) => x.id === inboxAnswer.id), inboxAnswer.f, collectNeeds(form))) inboxAnswer.el.querySelector('.inbox-ask-storage').hidden = false;
+  inboxNeedsBar();
+}
+$('inbox-list').addEventListener('input', inboxNeedsInput);
+$('inbox-list').addEventListener('change', inboxNeedsInput);
+$('inbox-list').addEventListener('submit', (e) => {
+  if (!e.target.matches('.inbox-needs')) return;
+  e.preventDefault();
+  submitInboxAnswer();
+});
+$('inbox-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
 
 // Pipeline settings: one in-memory draft per scope. Stored text is shown only through
 // value and textContent, never parsed as markup.
@@ -3804,14 +4202,16 @@ function renderBoard() {
       '<p>Jobs show up here as they move through the loop.</p>' +
       (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
-    if (!settingsShown && !retrosRoute()) document.title = BASE_TITLE;
+    if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = BASE_TITLE;
+    syncAppBadge(0);
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
     renderRetrosPage();
+    renderInboxPage();
     return;
   }
   const noneShown = !shownProjectKeys().length;
-  const shown = jobs.filter((j) => isShown(j.project));
+  const shown = jobs.filter((j) => isShown(j.project) && (starView !== 'only' || starred.has(j.id) || waitsOnYou(j)));
   renderedBacklog = backlog;
   syncBacklogTriage();
   const lists = COLUMNS.map((s) => s === 'backlog'
@@ -3819,20 +4219,28 @@ function renderBoard() {
     : shown.filter((j) => (waitsOnYou(j) ? 'needs-you' : j.stage) === s));
   const waiting = lists[COLUMNS.indexOf('needs-you')];
   // Oldest first, so the longest wait sits on top.
-  waiting.sort((a, b) => (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
+  waiting.splice(0, waiting.length, ...waitingJobs());
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
-  if (!settingsShown && !retrosRoute()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
+  for (const s of COLUMNS) if (s !== 'backlog' && !TERMINAL.includes(s)) starredFirst(lists[COLUMNS.indexOf(s)]);
+  if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
+  syncAppBadge(waiting.length);
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
-  // The extra auto track lets the filter-empty line span the whole board.
-  $('board').style.setProperty('--cols', tracks.concat(noneShown ? ['auto'] : []).join(' '));
-  $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : '') + COLUMNS.map((s, i) => {
+  const starredOnly = starView === 'only' && !noneShown;
+  const starredLine = starredOnly ? '<p class="filter-empty" id="starred-only">' +
+    (shown.some((j) => starred.has(j.id)) ? 'Showing starred jobs only.'
+      : jobs.some((j) => starred.has(j.id)) ? 'The project filter hides every starred job.'
+      : 'No starred jobs yet. Star a job with the star button in its job panel.') +
+    ' <button type="button" class="btn" id="starred-show-all">Show all jobs</button></p>' : '';
+  // The extra auto track lets the filter-empty or starred-only line span the whole board.
+  $('board').style.setProperty('--cols', tracks.concat(noneShown || starredOnly ? ['auto'] : []).join(' '));
+  $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : starredLine) + COLUMNS.map((s, i) => {
     if (hiddenColumns.has(s)) return '';
     let list = lists[i];
     let more = '';
     if (TERMINAL.includes(s)) {
       const t = (j) => Date.parse(j.done || j.updated) || 0;
-      list.sort((a, b) => t(b) - t(a));
+      starredFirst(list.sort((a, b) => t(b) - t(a)));
       if (list.length > CAP) {
         const open = expanded.has(s);
         more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '">' +
@@ -3865,10 +4273,16 @@ function renderBoard() {
   }
   syncCardActions();
   renderRetrosPage();
+  renderInboxPage();
   heldDrawn = heldChipsKey();
 }
 
 $('board').addEventListener('click', (e) => {
+  if (e.target.closest('#starred-show-all')) {
+    setStarView('float');
+    $('board').querySelector('.column-toggle')?.focus();
+    return;
+  }
   const toggle = e.target.closest('.column-toggle');
   if (toggle) {
     columnCollapsed.set(toggle.dataset.stage, toggle.getAttribute('aria-expanded') === 'true');
@@ -3916,14 +4330,43 @@ function jobBase(j) {
 }
 
 async function loadFiles(j) {
-  const base = jobBase(j);
-  const results = await Promise.all(candidates(j).map(async (name) => {
-    try {
-      const r = await fetch(base + name, { cache: 'no-store' });
-      return r.ok ? { name, text: await r.text(), etag: r.headers.get('ETag') } : null;
-    } catch { return null; }
-  }));
+  const results = await Promise.all(candidates(j).map((name) => readJobFile(j, name)));
   return results.filter(Boolean);
+}
+
+// Every host's pushed audit rows for the job. Unparsable lines are skipped; any failure gives [].
+async function loadAudit(j) {
+  try {
+    const r = await fetch('./api/audit/' + encodeURIComponent(j.id), { cache: 'no-store' });
+    if (!r.ok) return [];
+    const rows = [];
+    for (const line of (await r.text()).split('\n')) {
+      try {
+        const row = JSON.parse(line);
+        if (row && typeof row === 'object' && !Array.isArray(row)) rows.push(row);
+      } catch {}
+    }
+    return rows;
+  } catch { return []; }
+}
+
+// The audit tab: one row per tool call, every cell escaped, never rendered as markdown.
+function renderAudit(f) {
+  const key = (r) => [r.time, r.host, r.session].map((v) => String(v ?? ''));
+  const rows = [...f.rows].sort((a, b) => {
+    const [x, y] = [key(a), key(b)];
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+  const hosts = new Set(rows.map((r) => r.host)).size;
+  const flagged = rows.filter((r) => Array.isArray(r.flags) && r.flags.length).length;
+  const n = (count, word) => count + ' ' + word + (count === 1 ? '' : 's');
+  const head = ['Time (UTC)', 'Host', 'Session', 'Agent', 'Tool', 'Flags', 'Target'].map((h) => '<th scope="col">' + h + '</th>').join('');
+  const body = rows.map((r) => {
+    const flags = Array.isArray(r.flags) && r.flags.length ? '<strong>' + esc(r.flags.join(', ')) + '</strong>' : '-';
+    return '<tr><td>' + [r.time, r.host, r.session, r.agent, r.tool].map(esc).join('</td><td>') + '</td><td>' + flags + '</td><td><code>' + esc(r.target) + '</code></td></tr>';
+  }).join('');
+  return '<p>' + n(rows.length, 'call') + ' from ' + n(hosts, 'host') + ', ' + flagged + ' flagged. Each host redacted its targets before upload.</p>' +
+    '<div class="table-wrap" tabindex="0" role="region" aria-label="Audit rows"><table class="audit"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
 }
 
 const sha12 = async (text) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))).slice(0, 12);
@@ -4008,16 +4451,21 @@ function needsFile() {
   return [j, files.find((x) => x.name === 'needs.md')];
 }
 
-function writeNeedsDraft() {
-  const [j, f] = needsFile();
-  const answers = collectNeeds($('needs-form'));
+// Keeps the draft in memory and in localStorage. false means storage failed.
+function storeNeedsDraft(j, f, answers) {
   needsMemory.set(needsKey(j, f), answers);
   try {
     localStorage.setItem(needsKey(j, f), JSON.stringify({ version: 1, answers }));
+    return true;
   } catch {
     needsStorageFailed = true;
-    $('ask-storage').hidden = false;
+    return false;
   }
+}
+
+function writeNeedsDraft() {
+  const [j, f] = needsFile();
+  if (!storeNeedsDraft(j, f, collectNeeds($('needs-form')))) $('ask-storage').hidden = false;
 }
 
 function updateNeedsBar() {
@@ -4046,11 +4494,20 @@ function renderNeeds(j, f) {
   const notes = [];
   if (!waiting) notes.push('This job is no longer waiting on you. The form is read-only.');
   if (savedNote(f)) notes.push(savedNote(f));
-  const body = parsed.parts.map((p) => {
+  return notes.map((n) => '<p class="muted">' + esc(n) + '</p>').join('') +
+    '<form id="needs-form" novalidate>' + needsFieldsets(parsed, draft, off, f.triage) +
+    '<p class="muted" id="ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
+    '<div class="ask-bar"><button class="btn primary" id="ask-submit" type="submit"' + off + '>Submit answers</button>' +
+    '<span id="ask-status" role="status"></span></div></form>';
+}
+
+// The needs.md parts as markdown and one fieldset per question, with draft answers filled in.
+function needsFieldsets(parsed, draft, off, triage) {
+  return parsed.parts.map((p) => {
     if (p.kind === 'md') return md(p.text);
     const a = draft[p.index];
     const type = p.pick === 'one' ? 'radio' : 'checkbox';
-    const c = needsPick(f.triage, p);
+    const c = needsPick(triage, p);
     return '<fieldset class="ask"><legend>' + esc(p.header) + '</legend><p>' + esc(p.prompt) + '</p>' +
       '<p class="muted">' + (p.pick === 'one' ? 'Choose one.' : 'Choose any that apply.') + '</p>' +
       (c ? '<p class="ask-model">' + esc('clef-flash picks ' + c.pick + ' at ' + c.confidence + '%.') + '</p>' : '') +
@@ -4062,11 +4519,6 @@ function renderNeeds(j, f) {
       '<label class="ask-other-label">Other, or more detail<textarea class="ask-other" maxlength="4000" rows="3"' + off +
       ' placeholder="Write your own answer, or expand on an option without choosing it.">' + esc(a.other) + '</textarea></label></fieldset>';
   }).join('');
-  return notes.map((n) => '<p class="muted">' + esc(n) + '</p>').join('') +
-    '<form id="needs-form" novalidate>' + body +
-    '<p class="muted" id="ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
-    '<div class="ask-bar"><button class="btn primary" id="ask-submit" type="submit"' + off + '>Submit answers</button>' +
-    '<span id="ask-status" role="status"></span></div></form>';
 }
 
 // clef-flash's choices for this needs.md, or null. A failed read or an older file's record gives null.
@@ -4103,45 +4555,55 @@ function needsPick(triage, p) {
     c.options.every((o, k) => o?.label === p.options[k].label && Number.isInteger(o.chance) && str(o.reason)) ? c : null;
 }
 
+// Writes answers.md, then clears the job's needs line. answersFile is the loaded answers.md or null.
+async function saveAnswers(j, f, answersFile, answers) {
+  const id = j.id;
+  const url = jobBase(j).replace('./jobs/', './api/jobs/') + 'answers.md';
+  const body = answersMarkdown(parseNeeds(f.text), answers, f.sha, isoNow());
+  const conflict = 'answers.md changed since this page loaded. Your answers are kept. Reopen the job, then submit again.';
+  try {
+    if (answersFile && !answersFile.etag) return { saved: false, message: conflict };
+    const r = await fetch(url, {
+      method: 'PUT',
+      headers: { ...(answersFile ? { 'If-Match': answersFile.etag.replace(/^W\//, '') } : { 'If-None-Match': '*' }), 'Content-Type': 'text/markdown; charset=utf-8' },
+      body,
+    });
+    if (r.status !== 200) return { saved: false, message: r.status === 412 ? conflict : 'Could not save answers (status ' + r.status + '). Your answers are kept.' };
+  } catch {
+    return { saved: false, message: 'Could not confirm the save. Your answers are kept. Check the answers tab before you submit again.' };
+  }
+  let boardError;
+  if (j.stage !== 'needs-human' && String(j.needs ?? '').includes('#' + id + '/needs')) {
+    try { await casBoard((b) => clearNeeds(b, id, isoNow())); } catch (e) { boardError = e; }
+  }
+  return { saved: true, boardError };
+}
+
 async function submitNeeds() {
   const [j, f] = needsFile();
   const id = j.id;
-  const answers = files.find((x) => x.name === 'answers.md');
-  const url = jobBase(j).replace('./jobs/', './api/jobs/') + 'answers.md';
-  const body = answersMarkdown(parseNeeds(f.text), collectNeeds($('needs-form')), f.sha, isoNow());
-  const conflict = 'answers.md changed since this page loaded. Your answers are kept. Reopen the job, then submit again.';
+  const answers = collectNeeds($('needs-form'));
   needsSaving = true;
   updateNeedsBar();
   let message;
   try {
-    if (answers && !answers.etag) message = conflict;
-    else {
-      const r = await fetch(url, {
-        method: 'PUT',
-        headers: { ...(answers ? { 'If-Match': answers.etag.replace(/^W\//, '') } : { 'If-None-Match': '*' }), 'Content-Type': 'text/markdown; charset=utf-8' },
-        body,
-      });
-      if (r.status === 200) {
-        let boardError;
-        if (j.stage !== 'needs-human' && String(j.needs ?? '').includes('#' + id + '/needs')) {
-          try { await casBoard((b) => clearNeeds(b, id, isoNow())); } catch (e) { boardError = e; }
-        }
-        await poll();
-        needsSaving = false;
-        await openJob(id);
-        const submit = $('ask-submit');
-        if (!submit) return;
-        if (submit.disabled) {
-          $('d-tabs').querySelector('.tab.active')?.focus();
-          $('ask-status').textContent = 'Saved to answers.md. This job is no longer waiting on you.';
-          return;
-        }
-        submit.focus();
-        if (boardError) $('ask-status').textContent = 'Saved to answers.md, but the board still shows this job waiting on you (' + boardError.message + '). Submit again to retry.';
+    const result = await saveAnswers(j, f, files.find((x) => x.name === 'answers.md') ?? null, answers);
+    if (result.saved) {
+      await poll();
+      needsSaving = false;
+      await openJob(id);
+      const submit = $('ask-submit');
+      if (!submit) return;
+      if (submit.disabled) {
+        $('d-tabs').querySelector('.tab.active')?.focus();
+        $('ask-status').textContent = 'Saved to answers.md. This job is no longer waiting on you.';
         return;
       }
-      message = r.status === 412 ? conflict : 'Could not save answers (status ' + r.status + '). Your answers are kept.';
+      submit.focus();
+      if (result.boardError) $('ask-status').textContent = 'Saved to answers.md, but the board still shows this job waiting on you (' + result.boardError.message + '). Submit again to retry.';
+      return;
     }
+    message = result.message;
   } catch {
     message = 'Could not confirm the save. Your answers are kept. Check the answers tab before you submit again.';
   }
@@ -4208,13 +4670,18 @@ function drawerMeta(j) {
     (j.close?.at && !TERMINAL.includes(j.stage) ? ' · closing' : '');
 }
 
-// The chat decision and held state as drawer lines, so touch, keyboard and screen reader users get what the chip titles say.
+// The chat decision, held, not-before and auto-babysit state as drawer lines, so touch, keyboard and screen reader users get what the chip titles say.
 function renderDrawerStatus(j) {
-  const chat = chatDecision(j), held = batchState(j);
+  const chat = chatDecision(j), held = batchState(j), later = notBefore(j);
   $('d-chat').textContent = chat ? chat.title : '';
   $('d-chat').hidden = !chat;
   $('d-held').textContent = held ? held.title : '';
   $('d-held').hidden = !held;
+  $('d-not-before').textContent = later ? later.title : '';
+  $('d-not-before').hidden = !later;
+  const auto = autoBabysit(j);
+  $('d-auto-babysit').textContent = auto ? auto.title : '';
+  $('d-auto-babysit').hidden = !auto;
 }
 
 async function loadArchivedJob(id) {
@@ -4288,6 +4755,8 @@ async function openJob(id) {
   renderDrawerStatus(j);
   const shown = jobActionsFor(j);
   for (const id of JOB_ACTIONS) $(id).hidden = !shown.includes(id);
+  $('d-star').hidden = archived;
+  syncStarButton(id);
   $('d-babysit-bar').hidden = archived || !shown.includes('d-babysit');
   if (archived) for (const b of $('d-actions-menu').querySelectorAll('button')) b.hidden = b.id !== 'd-copy-link';
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
@@ -4345,10 +4814,11 @@ async function openJob(id) {
   }
   renderBoard();
   // An idea has no job files yet.
-  const [got, walk] = j.stage === 'idea' || !j.project ? [[], new Set()] : await Promise.all([loadFiles(j), listWalkthroughs(j)]);
+  const [got, walk, rows] = j.stage === 'idea' || !j.project ? [[], new Set(), []] : await Promise.all([loadFiles(j), listWalkthroughs(j), loadAudit(j)]);
   if (openId !== id) return;
   // The idea text shows as its own tab, rendered through md() like any job file.
   if (typeof j.idea === 'string' && j.idea) got.unshift({ name: 'idea.md', text: j.idea });
+  if (rows.length) got.push({ name: 'audit.md', text: '', rows });
   const needsFile = got.find((f) => f.name === 'needs.md');
   if (needsFile) needsFile.sha = await sha12(needsFile.text);
   if (openId !== id) return;
@@ -4649,7 +5119,7 @@ function renderDetail() {
     docDir = new URL(jobBase(j), location.href).href;
     docBase = new URL(f.name, docDir).href;
   }
-  setDocHtml(f ? (f.name === 'needs.md' ? renderNeeds(j, f) : md(f.text)) : '<p class="muted">No files yet.</p>');
+  setDocHtml(f ? (f.name === 'needs.md' ? renderNeeds(j, f) : f.name === 'audit.md' ? renderAudit(f) : md(f.text)) : '<p class="muted">No files yet.</p>');
   buildSteppers($('d-doc'), openId + '/' + activeFile);
   if (f && f.name !== 'needs.md') addWalkthrough($('d-doc'), true, f.name);
   renderGallery(j, f);
@@ -4905,7 +5375,7 @@ let swipeSettling = false;
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
 // so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
 // On an idea tab the gallery and file list move into the top of the page, so they scroll with it.
-const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
+const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
 let headCollapse = 0;
 let headShift = 0;
 let headStop = null;
@@ -4971,7 +5441,7 @@ $('detail').addEventListener('wheel', (e) => {
 }, { passive: false });
 // The details sit outside the page's scroller, so a touch drag on them does not scroll it either.
 // A drag that starts more up or down than sideways moves the page with the finger.
-// Sideways drags, form fields and sideways scrollers keep their own touches.
+// Form fields keep their own touches. A drag that starts more sideways than up or down is left to the browser, so a sideways scroller such as the agents table still pans.
 // A flick on the details keeps the page moving after the finger lifts, slowing like a native page flick.
 // A new touch, a wheel, a scroll set by other code, either end of the page or a closed drawer stops it.
 const GLIDE_MS = 325;
@@ -5009,7 +5479,7 @@ $('detail').addEventListener('touchstart', (e) => {
   stopHeadGlide();
   headDrag = null;
   if (!headCollapse || e.touches.length !== 1 || !e.target.closest(HEAD_MOVERS)) return;
-  if (e.target.closest('input, textarea, select') || sidewaysScroller(e.target, $('detail'))) return;
+  if (e.target.closest('input, textarea, select')) return;
   const t = e.touches[0];
   headDrag = { x0: t.clientX, y0: t.clientY, top: $('d-doc').scrollTop, active: false, y: t.clientY, t: e.timeStamp, v: 0 };
 }, { passive: true });
@@ -5186,7 +5656,7 @@ function swipePeek(s, to) {
   peek.style.height = $('d-doc').offsetHeight + 'px';
   const base = docBase;
   docBase = docDir ? new URL(f.name, docDir).href : null;
-  peek.innerHTML = f.name === 'needs.md' ? renderNeeds(j, f) : md(f.text);
+  peek.innerHTML = f.name === 'needs.md' ? renderNeeds(j, f) : f.name === 'audit.md' ? renderAudit(f) : md(f.text);
   docBase = base;
   peek.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
   buildSteppers(peek, null);
@@ -5330,7 +5800,10 @@ function closeDetail(keepHash = false) {
   const target = raw !== null ? focusBacklogControl(raw) : id && refocus ? focusJobCard(id) : null;
   target?.scrollIntoView({ block: 'nearest' });
   refreshPicker();
-  if (!keepHash && settingsRoute() === null && retrosRoute() === null) history.replaceState(null, '', location.pathname + location.search);
+  if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null) history.replaceState(null, '', location.pathname + location.search + (drawerReturn ?? ''));
+  const back = drawerReturn;
+  drawerReturn = null;
+  if (back && !keepHash) renderRoute();
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
@@ -5350,10 +5823,10 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && openId && !document.querySelector('dialog[open]')) closeDetail();
 });
 
-// Arrow navigation over cards and job pages, plus n, j or /, p, s and a single-key openers.
+// Arrow navigation over cards and job pages, plus n, j or /, p, s, r, w and a single-key openers.
 // A separate listener, so the Esc/Cmd+K handler above stays byte-identical.
 function handleBoardKeys(e) {
-  if (settingsRoute() !== null || retrosRoute() !== null) return;
+  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
   if (e.target.closest('input, textarea, select, [contenteditable], #d-resize, video')) return;
   if (document.querySelector('dialog[open]')) return;
@@ -5401,6 +5874,14 @@ function handleBoardKeys(e) {
   } else if (e.key === 'r') {
     e.preventDefault();
     location.hash = '#/retros';
+  } else if (e.key === 'i') {
+    e.preventDefault();
+    location.hash = '#/inbox';
+  } else if (e.key === 'w') {
+    const j = nextWaitingJob();
+    if (!j) return;
+    e.preventDefault();
+    openCard(j.id);
   } else if (e.key === 'a' || e.key === '.') {
     if (openBacklogRaw !== null) return;
     const target = cardShortcutTarget(e);
@@ -5413,7 +5894,7 @@ document.addEventListener('keydown', handleBoardKeys);
 
 // b opens the first backlog item. a and d approve or deny the open one, which opens the next.
 function handleBacklogKeys(e) {
-  if (settingsRoute() !== null || retrosRoute() !== null) return;
+  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || e.repeat) return;
   if (e.target.closest('textarea, select, [contenteditable], #d-resize, input:not([type=radio]):not([type=checkbox])')) return;
   if (document.querySelector('dialog[open]')) return;
@@ -5447,7 +5928,7 @@ function handleHomeKey(e) {
   // preventDefault below keeps a select's type-ahead off it.
   if (e.target.closest('textarea, [contenteditable], #d-resize, input:not([type=radio]):not([type=checkbox])')) return;
   if (document.querySelector('dialog[open]')) return;
-  if (settingsRoute() !== null || retrosRoute() !== null) {
+  if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null) {
     e.preventDefault();
     leaveSettings();
   } else if (openId || openBacklogRaw !== null) {
@@ -5533,10 +6014,12 @@ function syncDetail() {
       (pending && candidates(j).includes(pending))) openJob(openId);
 }
 
-window.addEventListener('hashchange', () => {
+window.addEventListener('hashchange', (e) => {
   const { id } = parseHash();
   if (id !== archiveFailNoted) archiveFailNoted = '';
   const key = backlogRoute();
+  if (key || id) drawerReturn = new URL(e.oldURL).hash === '#/inbox' ? '#/inbox' : openId || openBacklogRaw !== null ? drawerReturn : null;
+  else drawerReturn = null;
   if (key) openBacklogRoute(key);
   else if (id) openJob(id);
   else if (openId || openBacklogRaw !== null) closeDetail();
@@ -5760,10 +6243,11 @@ function addIdea(board, snap, now) {
 
 // factory.py BACKLOG_LINE, and the (kind id) suffix /factory next turns into refs.
 const BACKLOG_LINE = /^- \[ \] ([\w-]+): (\S.*)$/;
-const BACKLOG_REF = / \((rework-of|follow-up-of|sub-job-of) (\w[\w.-]*)\)$/;
+const BACKLOG_REF = / \((rework-of|follow-up-of|sub-job-of|depends-on) (\w[\w.-]*)\)$/;
 let backlog = [];               // parsed items from the last good read
 let backlogText = '';           // the last good read's whole text, checked lines included
 let backlogLoaded = false;      // a 200 or 404 has been read at least once
+let backlogFailed = false;      // the last read was neither a 200 nor a 404
 const backlogBusy = new Set();  // item.raw values with a decision in flight
 const backlogPending = new Map(); // item.raw -> captureId, kept until a decision settles
 
@@ -5797,6 +6281,25 @@ function backlogItems(text) {
     });
   }
   return items;
+}
+
+// factory.py backlog_depends: a depends-on ref per Depends on: item checked off as a job, and the
+// first item whose backlog line is still unchecked. A missing item adds nothing.
+function backlogDepends(context, text) {
+  const lines = text.split('\n').map((l) => l.trimEnd());
+  const refs = [];
+  let waiting = null;
+  for (const m of context.matchAll(/^Depends on: ([\w-]+: \S.*)$/gm)) {
+    const dep = m[1].trimEnd();
+    if (lines.includes('- [ ] ' + dep)) {
+      waiting ??= dep;
+      continue;
+    }
+    const done = '- [x] ' + dep + ' ';
+    const id = lines.map((l) => l.startsWith(done) && /^\(([^()]+)\)$/.exec(l.slice(done.length))?.[1]).find(Boolean);
+    if (id && /^\w[\w.-]*$/.test(id) && !id.includes('..')) refs.push({ id, kind: 'depends-on' });
+  }
+  return { refs, waiting };
 }
 
 // factory.py backlog_context rules. null means the text is not in the backlog context format.
@@ -5835,10 +6338,11 @@ async function loadBacklog() {
       backlog = items;
       backlogText = text;
     } else if (r.status === 404) { backlog = []; backlogText = ''; }
-    else return;
+    else { backlogFailed = true; return; }
     backlogLoaded = true;
+    backlogFailed = false;
     pruneBacklogDrafts();
-  } catch {}
+  } catch { backlogFailed = true; }
 }
 
 // A draft whose item left the backlog can never show again, and it would hold a deploy reload forever.
@@ -6008,6 +6512,15 @@ async function decideBacklog(item, decision, notes, answers) {
   backlogBusy.add(item.raw);
   renderBoard();
   try {
+    if (decision === 'approved') {
+      const { refs, waiting } = backlogDepends(item.context ?? '', backlogText);
+      if (waiting) {
+        const x = new Error('Approve "' + waiting + '" first. Its backlog line is still unchecked.');
+        x.prerequisite = backlog.find((b) => b.raw.trimEnd() === '- [ ] ' + waiting) ?? null;
+        throw x;
+      }
+      item = { ...item, refs: [...item.refs, ...refs] };
+    }
     const now = isoNow();
     const id = await casBoard((board) => addBacklogJob(board, item, decision, notes, answers, captureId, now));
     if (await casBacklog((text) => markBacklogLine(text, item, id)) === 'gone') {
@@ -7344,6 +7857,10 @@ const JOB_ACTION_RUN = {
   'd-close-job': openCloseDialog,
 };
 for (const id of JOB_ACTIONS) $(id).addEventListener('click', () => JOB_ACTION_RUN[id](drawerAction(id)));
+$('d-star').addEventListener('click', () => {
+  toggleStar(openId);
+  syncStarButton(openId);
+});
 $('d-babysit-bar').addEventListener('click', () => babysitAction({ ...drawerAction('d-babysit'), button: $('d-babysit-bar') }));
 
 // One run per job and action at a time; a second click while the first is in flight does nothing.
@@ -7557,7 +8074,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-chat', 'd-held', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-star', 'd-pipeline', 'd-chat', 'd-held', 'd-not-before', 'd-auto-babysit', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
@@ -7770,6 +8287,12 @@ async function submitBacklogDecision() {
     if (openBacklogRaw === raw) {
       updateBacklogBar();
       fail(String(x.message || x));
+      if (x.prerequisite) {
+        const a = document.createElement('a');
+        a.href = '#/backlog/' + x.prerequisite.key;
+        a.textContent = 'Open the prerequisite';
+        $('backlog-status').append(' ', a);
+      }
     }
   }
 }
@@ -7802,8 +8325,13 @@ const NOTIFY_PERMISSION = {
   granted: 'Browser permission: allowed.',
   denied: "Notifications are blocked for this site. Allow them in your browser's site settings, then turn this on again.",
 };
+const REMIND_KEY = 'factory-notify-remind', REMIND_HOURS = [1, 4, 24], REMIND_CHECK_MS = 60000;
+const REMIND_LABEL = { 1: '1 hour', 4: '4 hours', 24: '1 day' };
 let notifyOn = store.get(NOTIFY_KEY) === 'on';
+let remindHours = Number(store.get(REMIND_KEY));
+if (!REMIND_HOURS.includes(remindHours)) remindHours = 0;
 let waitingSeen = null;
+const reminded = new Set();
 function notifySupported() { return 'Notification' in window; }
 function notifyActive() { return notifyOn && notifySupported() && Notification.permission === 'granted'; }
 function notifyNeeds() {
@@ -7812,6 +8340,7 @@ function notifyNeeds() {
     for (const j of jobs) if (waiting.has(j.id) && !waitingSeen.has(j.id)) showNeedsNotification(j);
   }
   waitingSeen = waiting;
+  remindWaiting();
 }
 function showNeedsNotification(j) {
   try {
@@ -7819,13 +8348,36 @@ function showNeedsNotification(j) {
     n.onclick = () => { window.focus(); openCard(j.id); n.close(); };
   } catch {}
 }
+// One reminder per wait: the key changes when the job's updated time does.
+function remindWaiting() {
+  if (!remindHours || !document.hidden || !notifyActive()) return;
+  const due = jobs.filter((j) => waitsOnYou(j) && Date.now() - Date.parse(j.updated) >= remindHours * 3600000 && !reminded.has(j.id + '@' + j.updated))
+    .sort((a, b) => Date.parse(a.updated) - Date.parse(b.updated));
+  if (!due.length) return;
+  for (const j of due) reminded.add(j.id + '@' + j.updated);
+  showReminder(due);
+}
+function showReminder(due) {
+  try {
+    if (due.length === 1) {
+      const [j] = due;
+      const n = new Notification('Still needs you: ' + String(j.id).slice(0, 80), { body: String(j.title || j.id).slice(0, 120), tag: 'factory-remind' });
+      n.onclick = () => { window.focus(); openCard(j.id); n.close(); };
+    } else {
+      const n = new Notification('Still needs you: ' + due.length + ' jobs', { body: due.map((j) => j.id).join(', ').slice(0, 120), tag: 'factory-remind' });
+      n.onclick = () => { window.focus(); n.close(); };
+    }
+  } catch {}
+}
 function renderNotifySettings() {
   const permission = notifySupported() ? Notification.permission : 'unsupported';
   $('notify-needs').disabled = permission === 'unsupported';
   $('notify-needs').checked = notifyActive();
   $('notify-permission').textContent = NOTIFY_PERMISSION[permission];
+  $('notify-remind').disabled = !notifyActive();
+  $('notify-remind').value = remindHours ? String(remindHours) : '';
 }
-function enterNotificationsSection() { renderNotifySettings(); $('notify-needs').focus(); }
+function enterNotificationsSection() { renderNotifySettings(); renderSoundSettings(); loadPushState(); $('notify-needs').focus(); }
 $('notify-needs').addEventListener('change', async () => {
   if ($('notify-needs').checked && notifySupported() && Notification.permission === 'default') await Notification.requestPermission();
   notifyOn = $('notify-needs').checked && notifySupported() && Notification.permission === 'granted';
@@ -7834,6 +8386,156 @@ $('notify-needs').addEventListener('change', async () => {
   syncLive(); schedulePoll();
   $('notify-status').textContent = notifyOn ? 'Notifications are on in this browser.' : 'Notifications are off.';
 });
+$('notify-remind').addEventListener('change', () => {
+  const n = Number($('notify-remind').value);
+  remindHours = REMIND_HOURS.includes(n) ? n : 0;
+  if (remindHours) store.set(REMIND_KEY, String(remindHours)); else store.remove(REMIND_KEY);
+  $('notify-status').textContent = remindHours ? 'Reminders are on: after ' + REMIND_LABEL[remindHours] + '.' : 'Reminders are off.';
+});
+
+// Board sounds are opt-in per browser and play in a visible or hidden tab. One read plays
+// at most one tone, the first kind in SOUND_ORDER that fired.
+const SOUND_KEY = 'factory-sound';
+const SOUNDS = { needs: [880, 660, 880], pr: [523, 659], merged: [523, 659, 784] };
+const SOUND_ORDER = ['needs', 'pr', 'merged'];
+const SOUND_HELP = 'Each event has its own sound. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.';
+let soundOn = store.get(SOUND_KEY) === 'on';
+let soundSeen = null;
+let audio = null;
+function soundSupported() { return 'AudioContext' in window; }
+function soundActive() { return soundOn && soundSupported(); }
+function watchAway() { return notifyActive() || soundActive(); }
+// Browsers keep an AudioContext suspended until the page gets a click or key.
+function wakeAudio() {
+  try {
+    audio ||= new AudioContext();
+    if (audio.state === 'suspended') audio.resume();
+  } catch {}
+}
+function playSound(kind) {
+  wakeAudio();
+  try {
+    SOUNDS[kind].forEach((hz, i) => {
+      const at = audio.currentTime + 0.02 + i * 0.15;
+      const osc = audio.createOscillator();
+      const gain = audio.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = hz;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(0.2, at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.14);
+      osc.connect(gain).connect(audio.destination);
+      osc.start(at);
+      osc.stop(at + 0.15);
+    });
+  } catch {}
+}
+// The first read only fills soundSeen. pr and merged need a previous entry for the job.
+function boardSound() {
+  const seen = new Map(jobs.map((j) => [j.id, { stage: j.stage, waits: waitsOnYou(j) }]));
+  const prev = soundSeen;
+  soundSeen = seen;
+  if (!prev || !soundActive()) return;
+  const fired = new Set();
+  for (const [id, now] of seen) {
+    const was = prev.get(id);
+    if (now.waits && !was?.waits) fired.add('needs');
+    if (was && now.stage === 'pr-open' && was.stage !== 'pr-open' && !now.waits) fired.add('pr');
+    if (was && now.stage === 'merged' && was.stage !== 'merged') fired.add('merged');
+  }
+  const kind = SOUND_ORDER.find((k) => fired.has(k));
+  if (kind) playSound(kind);
+}
+function renderSoundSettings() {
+  const supported = soundSupported();
+  $('sound-on').disabled = !supported;
+  $('sound-on').checked = soundActive();
+  for (const b of document.querySelectorAll('[data-sound]')) b.disabled = !supported;
+  $('sound-help').textContent = supported ? SOUND_HELP : 'This browser cannot play sounds.';
+}
+$('sound-on').addEventListener('change', () => {
+  soundOn = $('sound-on').checked;
+  if (soundOn) store.set(SOUND_KEY, 'on'); else store.remove(SOUND_KEY);
+  wakeAudio();
+  syncLive(); schedulePoll();
+  $('sound-status').textContent = soundOn ? 'Sounds are on in this browser.' : 'Sounds are off.';
+});
+$('settings-notifications').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sound]');
+  if (b) playSound(b.dataset.sound);
+});
+for (const type of ['pointerdown', 'keydown']) document.addEventListener(type, () => { if (soundActive() && audio?.state !== 'running') wakeAudio(); });
+
+// Web Push reaches this device while the dashboard is closed. The Worker serves its VAPID
+// public key only when the instance has one, and stores one subscription per browser.
+const PUSH_HELP = {
+  ready: 'Sends a push when a job starts waiting on you or merges. It shows the job id and title only.',
+  unsupported: 'This browser cannot receive push. On iPhone or iPad, add the dashboard to your Home Screen and open it from there.',
+  missing: 'Push is not set up on this instance. See docs/cloudflare.md.',
+  denied: NOTIFY_PERMISSION.denied,
+  failed: 'Push status could not be loaded. Check your connection or sign in again, then reopen this page.',
+};
+const PUSH_STATUS = {
+  on: 'Push is on for this device.',
+  off: 'Push is off for this device.',
+  failed: 'Push could not be turned on. Try again.',
+  full: 'This instance already has 20 push devices. Turn push off on one first.',
+};
+let pushKey = null;
+function pushSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && notifySupported(); }
+function pushKeyBytes(key) { return Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)); }
+async function loadPushState() {
+  const box = $('notify-push');
+  box.disabled = true;
+  box.checked = false;
+  if (!pushSupported()) { $('push-help').textContent = PUSH_HELP.unsupported; return; }
+  try {
+    const r = await fetch('./api/push/key', {cache:'no-store'});
+    if (r.status === 404) { $('push-help').textContent = PUSH_HELP.missing; return; }
+    if (!r.ok || r.redirected) throw new Error('push key ' + r.status);
+    pushKey = (await r.json()).key;
+    const subscription = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+    box.checked = !!subscription;
+  } catch { $('push-help').textContent = PUSH_HELP.failed; return; }
+  box.disabled = false;
+  $('push-help').textContent = Notification.permission === 'denied' ? PUSH_HELP.denied : PUSH_HELP.ready;
+}
+async function setPush(on) {
+  const box = $('notify-push');
+  box.disabled = true;
+  let status = 'off';
+  let pushManager;
+  try {
+    pushManager = (await navigator.serviceWorker.ready).pushManager;
+    if (on) {
+      if (Notification.permission === 'default') await Notification.requestPermission();
+      if (Notification.permission === 'denied') $('push-help').textContent = PUSH_HELP.denied;
+      if (Notification.permission === 'granted') {
+        const subscription = await pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushKeyBytes(pushKey) });
+        const r = await fetch('./api/push/subscriptions', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(subscription) });
+        if (r.status === 204) status = 'on';
+        else { status = r.status === 409 ? 'full' : 'failed'; await subscription.unsubscribe(); }
+      }
+    } else {
+      const subscription = await pushManager.getSubscription();
+      if (subscription) {
+        await subscription.unsubscribe();
+        await fetch('./api/push/subscriptions', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ endpoint: subscription.endpoint }) }).catch(() => {});
+      }
+    }
+  } catch {
+    // Turn-on failure drops the local subscription; turn-off failure keeps state.
+    if (on) await pushManager?.getSubscription().then((s) => s?.unsubscribe()).catch(() => {});
+    box.checked = !on;
+    box.disabled = false;
+    if (on) $('push-status').textContent = PUSH_STATUS.failed;
+    return;
+  }
+  box.checked = status === 'on';
+  box.disabled = false;
+  $('push-status').textContent = PUSH_STATUS[status];
+}
+$('notify-push').addEventListener('change', () => setPush($('notify-push').checked));
 
 loadProjects().then(() => {
   if (settingsShown === 'projects') enterProjectsSection(!$('settings-page').contains(document.activeElement) || document.activeElement === $('settings-nav-projects'));
@@ -7844,10 +8546,11 @@ loadProjects().then(() => {
   referenceReady = true; if (settingsShown === 'reference') loadReferenceEffective();
   pollStarted = true; loadHosts(); poll(); syncLive(); schedulePoll();
 });
+setInterval(remindWaiting, REMIND_CHECK_MS);
 
 // Display settings live only in this browser. Each value is read against a fixed list,
 // so a bad stored value falls back to the default.
-const DISPLAY_KEYS = { theme:'factory-theme', density:'factory-density', columns:'factory-hidden-columns', poll:'factory-poll', cardFields:'factory-hidden-card-fields', ideaProject:'factory-idea-project', drawerLinks:'factory-hidden-drawer-links' };
+const DISPLAY_KEYS = { theme:'factory-theme', density:'factory-density', columns:'factory-hidden-columns', poll:'factory-poll', cardFields:'factory-hidden-card-fields', ideaProject:'factory-idea-project', drawerLinks:'factory-hidden-drawer-links', starred:'factory-starred-view' };
 const THEMES = ['system', 'light', 'dark'], DENSITIES = ['comfortable', 'compact'], POLL_SECONDS = [15, 30, 60], POLL_DEFAULT = 30;
 const THEME_COLORS = { light: '#f9fafb', dark: '#111827' };
 const pickDisplay = (value, list, fallback = list[0]) => list.includes(value) ? value : fallback;
@@ -7858,6 +8561,14 @@ let pollSeconds = pickDisplay(Number(store.get(DISPLAY_KEYS.poll)), POLL_SECONDS
 const hiddenColumns = new Set((store.get(DISPLAY_KEYS.columns) || '').split(',').filter(s => COLUMNS.includes(s) && s !== 'needs-you'));
 const CARD_FIELDS = [['note', 'Note'], ['meta', 'Branch, round and build line'], ['pr', 'PR link']];
 const hiddenCardFields = new Set((store.get(DISPLAY_KEYS.cardFields) || '').split(',').filter(f => CARD_FIELDS.some(([k]) => k === f)));
+const STAR_VIEWS = ['float', 'only', 'off'];
+let starView = pickDisplay(store.get(DISPLAY_KEYS.starred), STAR_VIEWS);
+function setStarView(v) {
+  starView = pickDisplay(v, STAR_VIEWS);
+  if (starView === 'float') store.remove(DISPLAY_KEYS.starred); else store.set(DISPLAY_KEYS.starred, starView);
+  $('display-starred').value = starView;
+  if (loaded) renderBoard();
+}
 const DRAWER_LINKS = [['pr', 'PR'], ...['app', 'web'].filter(k => factoryConfig.agent_links[k]).map(k => [k, factoryConfig.agent_links[k].label]), ['tracer', 'Tracer']];
 const hiddenDrawerLinks = new Set((store.get(DISPLAY_KEYS.drawerLinks) || '').split(',').filter(f => DRAWER_LINKS.some(([k]) => k === f)));
 let pollTimer = 0, pollStarted = false;
@@ -7872,11 +8583,11 @@ function applyDisplay() {
   for (const f of document.querySelectorAll('.html-stepper-frame')) f.contentWindow.location.replace(f.src.replace(/#.*$/, '') + walkthroughHash());
 }
 // The board timer runs only while the live socket is closed. Hidden or unfocused windows
-// never poll unless notifications are on. Returning to the window refreshes at once.
+// never poll unless notifications or sounds are on. Returning to the window refreshes at once.
 // A tick reads the backlog only when the last read is 2 minutes old.
 function pollTick() { return poll({ ifChanged: true, withBacklog: Date.now() - backlogReadAt >= BACKLOG_POLL_MS }); }
 // Seconds between fallback ticks now, or 0 while a hidden or unfocused window waits.
-function pollEvery() { const away = document.hidden || !document.hasFocus(); return !away ? pollSeconds : notifyActive() ? 30 : 0; }
+function pollEvery() { const away = document.hidden || !document.hasFocus(); return !away ? pollSeconds : watchAway() ? 30 : 0; }
 function schedulePoll() {
   clearInterval(pollTimer);
   const ms = !pollStarted || liveOpen ? 0 : pollEvery() * 1000;
@@ -7892,7 +8603,7 @@ const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000;
 let liveSocket = null, liveOpen = false, liveRetries = 0, liveRetryTimer = 0;
 const LIVE_READ_MS = 2000;
 const liveReads = { 'board.json': { timer: 0, busy: false, again: false }, 'backlog.md': { timer: 0, busy: false, again: false } };
-function liveWanted() { return pollStarted && navigator.onLine && connState !== 'signin' && (!document.hidden || notifyActive()); }
+function liveWanted() { return pollStarted && navigator.onLine && connState !== 'signin' && (!document.hidden || watchAway()); }
 function openLive() {
   clearTimeout(liveRetryTimer);
   liveRetryTimer = 0;
@@ -7958,7 +8669,10 @@ function clockTick() {
   if (document.hidden) return;
   drawUpdated();
   if (cardMenu || $('board').contains(document.activeElement)) return;
-  if (loaded && heldChipsKey() !== heldDrawn) renderBoard();
+  if (!loaded || heldChipsKey() === heldDrawn) return;
+  renderBoard();
+  const open = jobs.find((x) => x.id === openId);
+  if (open) renderDrawerStatus(open);
 }
 setInterval(clockTick, 30000);
 $('display-columns').append(...COLUMNS.map(s => {
@@ -7991,6 +8705,7 @@ function renderDisplaySettings() {
   $('display-theme').value = theme;
   $('display-density').value = density;
   $('display-poll').value = String(pollSeconds);
+  $('display-starred').value = starView;
   for (const box of $('display-columns').querySelectorAll('input')) box.checked = !hiddenColumns.has(box.dataset.stage);
   for (const box of $('display-card-fields').querySelectorAll('input')) box.checked = !hiddenCardFields.has(box.dataset.field);
   for (const box of $('display-drawer-links').querySelectorAll('input')) box.checked = !hiddenDrawerLinks.has(box.dataset.link);
@@ -8046,6 +8761,7 @@ $('display-install').addEventListener('click', async () => {
 renderInstall();
 $('display-theme').addEventListener('change', () => { theme = pickDisplay($('display-theme').value, THEMES); store.set(DISPLAY_KEYS.theme, theme); applyDisplay(); displaySaved(); });
 $('display-density').addEventListener('change', () => { density = pickDisplay($('display-density').value, DENSITIES); store.set(DISPLAY_KEYS.density, density); applyDisplay(); displaySaved(); });
+$('display-starred').addEventListener('change', () => { setStarView($('display-starred').value); displaySaved(); });
 $('display-poll').addEventListener('change', () => { pollSeconds = pickDisplay(Number($('display-poll').value), POLL_SECONDS, POLL_DEFAULT); store.set(DISPLAY_KEYS.poll, pollSeconds); schedulePoll(); displaySaved(); });
 $('display-columns').addEventListener('change', e => {
   const s = e.target.dataset.stage;
@@ -8077,7 +8793,7 @@ $('display-idea-project').addEventListener('change', () => {
 $('display-reset').addEventListener('click', () => {
   for (const key of [...Object.values(DISPLAY_KEYS), PROJECTS_HIDDEN_KEY, 'factory-project']) store.remove(key);
   resetDrawerWidth();
-  theme = 'system'; density = 'comfortable'; pollSeconds = POLL_DEFAULT;
+  theme = 'system'; density = 'comfortable'; pollSeconds = POLL_DEFAULT; starView = 'float';
   hiddenProjects.clear();
   hiddenColumns.clear();
   hiddenCardFields.clear();

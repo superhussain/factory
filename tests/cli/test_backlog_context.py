@@ -77,7 +77,7 @@ class BacklogContextTests(IsolatedTestCase):
         line = "- [ ] " + ITEM
         self.assertEqual(
             self.module.first_item(self.backlog, {"factory"}, {"factory": "/x"}, set()),
-            (line, "factory", ITEM.split(": ", 1)[1]),
+            (line, "factory", ITEM.split(": ", 1)[1], [{"id": "204-factory-backlog-cards", "kind": "sub-job-of"}]),
         )
 
     def test_backlog_key_hashes_the_line(self):
@@ -156,3 +156,67 @@ class BacklogContextTests(IsolatedTestCase):
             with self.subTest(args=args):
                 self.assertEqual(invoke(self.module, args), (2, "", usage))
         self.assertEqual(self.writes, [])
+
+
+PARSE = "sample: Parse recipe URLs (sub-job-of 041-recipe-import)"
+STORE = "sample: Store imported recipes (sub-job-of 041-recipe-import)"
+
+
+class NextDependsTests(IsolatedTestCase):
+    """next skips a line until its Depends on: prerequisite is checked off and its job merged, closed or gone."""
+
+    def setUp(self):
+        self.module = load_runtime()
+        self.claims, self.board_reads = [], 0
+
+        def api(home, method, path, *args, **kwargs):
+            if path == "/projects.json":
+                return 200, {}, json.dumps([{"slug": "sample"}])
+            return 200, {}, self.backlog
+
+        def read_board(home):
+            self.board_reads += 1
+            return {"jobs": self.jobs}
+
+        def claim_id(home, feature_slug, project_slug, refs=None):
+            self.claims.append((feature_slug, refs))
+            return "053-store-imported-recipes"
+
+        for target, fake in (("factory_home", lambda: Path("/x")), ("holder", lambda home: ("device", "tag", 120)),
+                             ("read_paths", lambda home: {"sample": "/x"}), ("api", api), ("read_board", read_board),
+                             ("claim_id", claim_id), ("cas", lambda home, path, change: True)):
+            patcher = patch.object(self.module, target, fake)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def next(self, parse_line, stage=None):
+        self.backlog = f"{parse_line}\n- [ ] {STORE}\n  Depends on: {PARSE}\n"
+        self.jobs = [] if stage is None else [{"id": "052-parse-recipe-urls", "stage": stage}]
+        return invoke(self.module, ["next"])
+
+    def test_waits_while_the_prerequisite_line_is_unchecked(self):
+        self.backlog = f"- [ ] {STORE}\n  Depends on: {PARSE}\n- [ ] {PARSE}\n"
+        self.jobs = []
+        code, out, err = invoke(self.module, ["next"])
+        self.assertEqual((code, json.loads(out)["feature"]), (0, PARSE.split(": ", 1)[1]))
+        self.assertEqual(err, f'skipping "{STORE}": it depends on "{PARSE}", which is still unchecked\n')
+        self.assertEqual((self.claims[0][0], self.board_reads), ("parse-recipe-urls", 0))
+
+    def test_waits_while_the_prerequisite_job_is_open(self):
+        code, out, err = self.next(f"- [x] {PARSE} (052-parse-recipe-urls)", "build")
+        self.assertEqual((code, out), (3, ""))
+        self.assertEqual(err, f'skipping "{STORE}": it depends on 052-parse-recipe-urls, which is still open\n'
+                              "factory.py: nothing this device can run in the backlog\n")
+        self.assertEqual((self.claims, self.board_reads), ([], 1))
+
+    def test_runs_with_refs_once_the_prerequisite_job_is_merged_closed_or_gone(self):
+        for stage in ("merged", "closed", None):
+            with self.subTest(stage=stage):
+                self.claims = []
+                code, out, err = self.next(f"- [x] {PARSE} (052-parse-recipe-urls)", stage)
+                self.assertEqual((code, err), (0, ""))
+                self.assertEqual(json.loads(out), {"id": "053-store-imported-recipes", "project": "sample",
+                                                   "feature": STORE.split(": ", 1)[1]})
+                self.assertEqual(self.claims, [("store-imported-recipes", [
+                    {"id": "041-recipe-import", "kind": "sub-job-of"},
+                    {"id": "052-parse-recipe-urls", "kind": "depends-on"}])])
