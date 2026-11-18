@@ -1874,7 +1874,8 @@ class RetroCatchupTest(PickupFixture):
         self.prompt = self.home / "retro-schedule-prompt.md"
         self.prompt.write_text(self.PROMPT, encoding="utf-8")
         self.record = self.home / "retro-catchup.json"
-        self.id = "retro-" + datetime.now().strftime("%Y%m%d")
+        self.wait = self.home / "retro-catchup-wait.json"
+        self.id ="retro-" + datetime.now().strftime("%Y%m%d")
 
     def due(self, day=18, hour=10, minute=15):
         return factory.retro_catchup_due(self.home, datetime(2026, 11, day, hour, minute, tzinfo=self.ZONE))
@@ -1978,18 +1979,53 @@ class RetroCatchupTest(PickupFixture):
         self.assertEqual([r["argv"][0] for r in self.launched()], [self.id, "120-sample-digest"])
         self.assertTrue(self.record.exists())
 
-    def test_no_route_waits_without_a_record(self):
+    def wait_record(self, reason):
+        return {"version": 1, "date": datetime.now().date().isoformat(), "reason": reason}
+
+    def test_no_route_waits_once_a_day(self):
         patch.object(factory, "retro_catchup_due", return_value=True).start()
         patch.object(factory, "pick_route", return_value=None).start()
         self.assertEqual(self.pickup(), (0, "", "factory.py: retro catch-up waits: no available route\n"))
         self.assertFalse(self.record.exists())
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(json.loads(self.wait.read_text(encoding="utf-8")), self.wait_record("no available route"))
 
-    def test_no_checkout_waits_without_a_record(self):
+    def test_no_checkout_waits_once_a_day(self):
         patch.object(factory, "retro_catchup_due", return_value=True).start()
         patch.object(factory, "read_paths", return_value={}).start()
         self.assertEqual(self.pickup(), (0, "", "factory.py: retro catch-up waits: no checkout in paths.md\n"))
         self.assertFalse(self.record.exists())
         self.assertEqual(self.launched(), [])
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(json.loads(self.wait.read_text(encoding="utf-8")),
+                         self.wait_record("no checkout in paths.md"))
+
+    def test_a_new_reason_prints_again(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        route = patch.object(factory, "pick_route", return_value=None)
+        route.start()
+        self.assertEqual(self.pickup(), (0, "", "factory.py: retro catch-up waits: no available route\n"))
+        route.stop()
+        patch.object(factory, "read_paths", return_value={}).start()
+        self.assertEqual(self.pickup(), (0, "", "factory.py: retro catch-up waits: no checkout in paths.md\n"))
+        self.assertEqual(self.pickup(), (0, "", ""))
+
+    def test_a_wait_record_from_yesterday_prints_again(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        patch.object(factory, "pick_route", return_value=None).start()
+        yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
+        self.wait.write_text(json.dumps({"version": 1, "date": yesterday, "reason": "no available route"}),
+                             encoding="utf-8")
+        self.assertEqual(self.pickup(), (0, "", "factory.py: retro catch-up waits: no available route\n"))
+        self.assertEqual(json.loads(self.wait.read_text(encoding="utf-8")), self.wait_record("no available route"))
+
+    def test_dry_run_waits_print_without_a_record(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        patch.object(factory, "pick_route", return_value=None).start()
+        for _ in range(2):
+            code, out, err = self.pickup("--dry-run")
+            self.assertEqual((code, err), (0, "factory.py: retro catch-up waits: no available route\n"))
+        self.assertFalse(self.wait.exists())
 
     def test_a_config_error_stops_the_catch_up_and_the_idea_still_launches(self):
         patch.object(factory, "retro_catchup_due", return_value=True).start()
