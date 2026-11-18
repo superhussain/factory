@@ -109,7 +109,8 @@
     "PASS backlog browser tap gate",
     "PASS backlog browser tap no submit",
     "PASS backlog browser tap hint",
-    "PASS backlog browser deep link"
+    "PASS backlog browser deep link",
+    "PASS backlog browser depends"
    ]
   }
  ],

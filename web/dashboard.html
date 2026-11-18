@@ -96,6 +96,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .ask-option:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
   .backlog-context, .backlog-triage { margin: 12px 0; }
   .doc .backlog-context > h3, .doc .backlog-triage > h3 { font-size: 13px; margin: 0 0 4px; }
+  .ask-waits { color: var(--muted); font-size: 12px; }
   .ask-rec { background: var(--accent-soft); color: var(--accent); border-radius: 999px; font-size: 11px; padding: 1px 8px; }
   .ask-desc { display: block; color: var(--muted); font-size: 13px; }
   .ask-model { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
@@ -6343,6 +6344,11 @@ function backlogDepends(context, text) {
   return { refs, waiting };
 }
 
+// The refused approve's copy for an unchecked Depends on: prerequisite.
+function backlogWaitsText(waiting) {
+  return 'Approve "' + waiting + '" first. Its backlog line is still unchecked.';
+}
+
 // factory.py backlog_context rules. null means the text is not in the backlog context format.
 function parseBacklogContext(text) {
   const lines = trimBlankEdges(text.replace(/\r\n?/g, '\n')).split('\n');
@@ -6559,8 +6565,8 @@ async function decideBacklog(item, decision, notes, answers) {
     if (decision === 'approved') {
       const { refs, waiting } = backlogDepends(item.context ?? '', backlogText);
       if (waiting) {
-        const x = new Error('Approve "' + waiting + '" first. Its backlog line is still unchecked.');
-        x.prerequisite = backlog.find((b) => b.raw.trimEnd() === '- [ ] ' + waiting) ?? null;
+        const x = new Error(backlogWaitsText(waiting));
+        x.waiting = waiting;
         throw x;
       }
       item = { ...item, refs: [...item.refs, ...refs] };
@@ -8099,6 +8105,7 @@ function openBacklogItem(item) {
   drawerVersion++;
   openId = null;
   openBacklogRaw = item.raw;
+  backlogRefusal = null;
   files = [];
   activeFile = null;
   docDir = null;
@@ -8228,9 +8235,11 @@ async function fetchBacklogTriage(items) {
 function renderBacklogDecision(item, triageHtml) {
   const ctx = item.context === undefined ? null : parseBacklogContext(item.context);
   const draft = backlogDrafts.get(item.raw) ?? { pick: '', notes: '', answers: [] };
+  const { waiting } = backlogDepends(item.context ?? '', backlogText);
   const radio = (value, name, desc, key) =>
     '<label class="ask-option"><input type="radio" name="backlog-pick" value="' + value + '"' + (key ? ' aria-keyshortcuts="' + key + '"' : '') + (draft.pick === value ? ' checked' : '') +
-    '><span><strong>' + name + '</strong>' + (ctx?.recommend === value ? ' <span class="ask-rec">Recommended</span>' : '') +
+    '><span><strong>' + name + '</strong>' +
+    (value === 'approved' && waiting ? ' <span class="ask-waits">Waits on ' + esc(waiting) + '</span>' : ctx?.recommend === value ? ' <span class="ask-rec">Recommended</span>' : '') +
     ' <span class="ask-desc">' + desc + '</span></span></label>';
   const questions = (ctx?.questions ?? []).map((q, i) => {
     const a = draft.answers[i] ?? { picked: [], other: '' };
@@ -8301,10 +8310,32 @@ function updateBacklogBar() {
 
 // Called by poll after the backlog reloads.
 function syncBacklogDetail() {
-  if (openBacklogRaw !== null && $('backlog-form')) updateBacklogBar();
+  if (openBacklogRaw === null || !$('backlog-form')) return;
+  updateBacklogBar();
+  if (!$('backlog-status').textContent) showBacklogRefusal();
+}
+
+// The open item's refused approve, { raw, waiting }. It lasts while that prerequisite still waits.
+let backlogRefusal = null;
+function showBacklogRefusal() {
+  const item = backlog.find((b) => b.raw === openBacklogRaw);
+  if (backlogRefusal?.raw !== openBacklogRaw || !item || backlogDepends(item.context ?? '', backlogText).waiting !== backlogRefusal.waiting) {
+    backlogRefusal = null;
+    return;
+  }
+  const { waiting } = backlogRefusal;
+  $('backlog-status').textContent = backlogWaitsText(waiting);
+  const prerequisite = backlog.find((b) => b.raw.trimEnd() === '- [ ] ' + waiting);
+  if (prerequisite) {
+    const a = document.createElement('a');
+    a.href = '#/backlog/' + prerequisite.key;
+    a.textContent = 'Open the prerequisite';
+    $('backlog-status').append(' ', a);
+  }
 }
 
 async function submitBacklogDecision() {
+  backlogRefusal = null;
   const raw = openBacklogRaw;
   const item = backlog.find((b) => b.raw === raw);
   if (!item) return syncBacklogDetail();
@@ -8333,11 +8364,9 @@ async function submitBacklogDecision() {
     if (openBacklogRaw === raw) {
       updateBacklogBar();
       fail(String(x.message || x));
-      if (x.prerequisite) {
-        const a = document.createElement('a');
-        a.href = '#/backlog/' + x.prerequisite.key;
-        a.textContent = 'Open the prerequisite';
-        $('backlog-status').append(' ', a);
+      if (x.waiting) {
+        backlogRefusal = { raw, waiting: x.waiting };
+        showBacklogRefusal();
       }
     }
   }
@@ -8345,6 +8374,7 @@ async function submitBacklogDecision() {
 
 function storeBacklogDraft(e) {
   if (!e.target.closest('#backlog-form')) return;
+  backlogRefusal = null;
   backlogDrafts.set(openBacklogRaw, { pick: backlogPick(), notes: $('backlog-notes').value, answers: collectBacklogAnswers($('backlog-form')) });
   updateBacklogBar();
 }
