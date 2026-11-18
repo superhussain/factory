@@ -111,7 +111,8 @@
   factory.py worktree <project-slug>/<job-id>
                                             create or fast-forward the job's worktree from origin
   factory.py job <job-id>                   print one job's board entry as JSON
-  factory.py inbox                          print the dashboard Inbox count across all projects as JSON
+  factory.py inbox                          print the dashboard Inbox count across all projects and
+                                            the jobs waiting on a person as JSON
   factory.py builds <project-slug>          print the project's build queue and in-flight jobs as JSON
   factory.py stuck [--limit N]              claim up to N (default 1) jobs a dead session left mid-loop,
                                             print them as JSON for the resume schedule
@@ -3478,11 +3479,14 @@ def inbox_count(jobs, backlog_text):
 
 
 def inbox():
-    """Print the dashboard Inbox count across all projects as JSON."""
+    """Print the dashboard Inbox count across all projects, and the jobs waiting on a person in
+    board order, as JSON."""
     home = factory_home()
     jobs = read_board(home)["jobs"]
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
-    print(json.dumps({"count": inbox_count(jobs, text if status == 200 else "")}))
+    waiting = [{"id": j["id"], "project": str(j.get("project") or ""), "title": str(j.get("title") or "")}
+               for j in jobs if isinstance(j.get("id"), str) and waits_on_you(j)]
+    print(json.dumps({"count": inbox_count(jobs, text if status == 200 else ""), "jobs": waiting}))
 
 
 def needs_answers_markdown(questions, picks, sha12, stamp, device, quote):

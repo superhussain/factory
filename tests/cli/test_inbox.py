@@ -7,6 +7,8 @@ from support import ROOT, IsolatedTestCase, invoke, load_runtime
 
 factory = load_runtime()
 FIXTURE = json.loads(Path(ROOT, "tests/fixtures/inbox-count.json").read_text(encoding="utf-8"))
+WAITING = [{"id": i, "project": "sample", "title": f"Synthetic {i}"}
+           for i in ("042-sample-links", "043-sample-asked", "044-sample-export", "045-sample-legacy")]
 
 
 class InboxTest(IsolatedTestCase):
@@ -17,17 +19,27 @@ class InboxTest(IsolatedTestCase):
 
     def test_counts_jobs_and_backlog_lines(self):
         code, out, _ = self.run_inbox(lambda *a, **k: (200, {}, FIXTURE["backlog"]))
-        self.assertEqual((code, out), (0, json.dumps({"count": FIXTURE["count"]}) + "\n"))
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), {"count": FIXTURE["count"], "jobs": WAITING})
 
     def test_missing_backlog_counts_as_empty(self):
         code, out, _ = self.run_inbox(lambda *a, **k: (404, {}, ""))
-        self.assertEqual((code, out), (0, '{"count": 4}\n'))
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), {"count": 4, "jobs": WAITING})
 
     def test_api_failure_exits_5(self):
         def fail(*a, **k):
             raise SystemExit(5)
         code, out, _ = self.run_inbox(fail)
         self.assertEqual((code, out), (5, ""))
+
+    def test_jobs_need_a_string_id_and_default_to_empty_text(self):
+        jobs = [{"stage": "needs-human"}, {"id": "043-asked", "stage": "spec", "needs": "pick A"}]
+        with patch.object(factory, "read_board", return_value={"jobs": jobs}), \
+                patch.object(factory, "api", lambda *a, **k: (404, {}, "")):
+            code, out, _ = invoke(factory, ["inbox"])
+        self.assertEqual((code, json.loads(out)),
+                         (0, {"count": 2, "jobs": [{"id": "043-asked", "project": "", "title": ""}]}))
 
     def test_empty_board(self):
         self.assertEqual(factory.inbox_count([], ""), 0)
