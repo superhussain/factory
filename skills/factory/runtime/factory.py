@@ -6357,6 +6357,7 @@ ROLE_ALIASES = {"builder": "build", "factory-builder": "build",
                 "approver": "approve", "factory-approver": "approve",
                 "factory-review-security": "review-security", "factory-review-ux": "review-ux",
                 "factory-review-ui": "review-ui", "factory-review-code": "review-code"}
+VIA_ALIASES = {"subagent": "native"}
 PROMPT_USAGE = "usage: prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]"
 PROMPT_HELP = ("roles and flags: spec | approve | build [--round N] [--port P] | review-security, review-ux, "
                "review-ui or review-code --round N. Every role also takes --out <path>.\n"
@@ -6632,13 +6633,13 @@ def review_plan_cmd(target, round_text):
                       "reason": reason}))
 
 
-WAIT_ARTIFACT = re.compile(r"spec\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
+WAIT_ARTIFACT = re.compile(r"spec\.md|spec-evidence\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
 WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]"
 
 
 def wait_valid(artifact, line):
     """True when line is a finished first line for artifact."""
-    if artifact in ("spec.md", "build.md"):
+    if artifact in ("spec.md", "spec-evidence.md", "build.md"):
         return bool(line.strip())
     if artifact == "decision.md":
         return line in ("APPROVE", "ESCALATE", "CHANGES") or line.startswith("CLOSED: ")
@@ -10749,6 +10750,7 @@ def agent_cmd(sub, *args):
     if sub == "record" and len(args) in (5, 6):
         target, role, harness, via, model, *effort = args
         role = ROLE_ALIASES.get(role, role)
+        via = VIA_ALIASES.get(via, via)
         problem = agent_record_problem(role, harness, via, model, effort[0] if effort else None)
         if problem:
             fail(f"{AGENT_RECORD_USAGE}: {problem}", 2)
