@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   dashboardSrc,
+  frameLoaded,
   parseDashboardOrigin,
   readEmbedMessage,
   readSignedInMessage,
@@ -86,4 +87,18 @@ test("signed in", () => {
   ])
     assert.equal(readSignedInMessage(data), false, JSON.stringify(data));
   assert.equal(readEmbedMessage(signedIn), null);
+});
+
+test("a frame load clears the count, then says hello", () => {
+  const calls = [];
+  const target = { postMessage: (message, origin) => calls.push(["hello", message, origin]) };
+  const clear = (count) => calls.push(["clear", count]);
+  frameLoaded(target, ORIGIN, clear);
+  assert.deepEqual(calls, [
+    ["clear", null],
+    ["hello", { type: "factory-embed-hello", v: 1 }, ORIGIN],
+  ]);
+  calls.length = 0;
+  frameLoaded(null, ORIGIN, clear);
+  assert.deepEqual(calls, [["clear", null]]);
 });
