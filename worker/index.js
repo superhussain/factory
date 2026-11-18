@@ -93,6 +93,10 @@ const MAX_BODY = 1 << 20;
 // A day's list of hosts with a retro digest, and one host's digest for that day.
 const RETRO_DAY = /^\/api\/retro\/(\d{4}-\d{2}-\d{2})$/;
 const RETRO_FILE = /^\/api\/retro\/([^/]+)\/(\d{4}-\d{2}-\d{2})\.jsonl$/;
+// A job's audit rows from every host, and one host's rows for that job.
+const AUDIT_JOB = /^\/api\/audit\/([^/]+)$/;
+const AUDIT_FILE = /^\/api\/audit\/([^/]+)\/([^/]+)\.jsonl$/;
+const AUDIT_JOB_ID = /^\d+-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // Retro runs: one factory.retro-run/1 record per admitted run, and the newest 30 listed.
 const RETROS = /^\/api\/retros(?:\/([A-Za-z0-9_-]{1,64}))?$/;
 // board.json holds every job, merged ones included, so it outgrows the per-file cap.
@@ -1668,6 +1672,52 @@ async function retroPut(request, env, principal, id, date) {
   return reply("ok");
 }
 
+const AUDIT_WRITE_ONLY = "audit rows are written only by the host's bound service token";
+const auditKey = (job, id) => `audit/${job}/${id}.jsonl`;
+
+// A re-push replaces the host's rows for the job. Every line is a JSON object naming the host and job.
+async function auditPut(request, env, principal, job, id) {
+  if ((await boundHost(env, principal))?.id !== id) return reply(AUDIT_WRITE_ONLY, 403);
+  const bytes = await readCapped(request, MAX_BODY);
+  if (bytes === null) return reply("body over 1 MiB", 413);
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return reply("audit rows must be valid UTF-8", 400);
+  }
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  for (const [i, line] of lines.entries()) {
+    let row = null;
+    try {
+      row = JSON.parse(line);
+    } catch {}
+    if (
+      typeof row !== "object" ||
+      row === null ||
+      Array.isArray(row) ||
+      row.host !== id ||
+      row.job !== job
+    )
+      return reply(`line ${i + 1} is not a JSON object with host ${id} and job ${job}`, 400);
+  }
+  await env.BUCKET.put(auditKey(job, id), bytes, {
+    httpMetadata: { contentType: "application/x-ndjson" },
+  });
+  return reply("ok");
+}
+
+// Every host's rows for the job, in host record order, each file ending in a newline.
+async function auditGet(env, job) {
+  let out = "";
+  for (const { host } of await hostRecords(env)) {
+    const text = await (await env.BUCKET.get(auditKey(job, host.id)))?.text();
+    if (text) out += text.endsWith("\n") ? text : text + "\n";
+  }
+  return reply(out, 200, "application/x-ndjson");
+}
+
 const RETRO_RUN_WRITE_ONLY = "retro runs are written only by a bound host's service token";
 const RETRO_RUN_TAKEN = "retro run belongs to another host";
 const RETRO_RUN_CHANGED = "retro run changed, retry";
@@ -2388,6 +2438,17 @@ async function api(request, env, path, principal, ctx) {
     if (method !== "GET") return notFound();
     if (principal.kind !== "service") return reply(RETRO_READ_ONLY, 403);
     return getFile(env, retroKey(id, date), "application/x-ndjson");
+  }
+  m = path.match(AUDIT_JOB);
+  if (m) {
+    if (method !== "GET" || !AUDIT_JOB_ID.test(m[1])) return notFound();
+    return auditGet(env, m[1]);
+  }
+  m = path.match(AUDIT_FILE);
+  if (m) {
+    const [, job, id] = m;
+    if (method !== "PUT" || !AUDIT_JOB_ID.test(job) || !HOST_NAME.test(id)) return notFound();
+    return auditPut(request, env, principal, job, id);
   }
   m = path.match(RETROS);
   if (m) {
