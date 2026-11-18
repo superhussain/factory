@@ -4404,13 +4404,15 @@ function renderAudit(f) {
   const hosts = new Set(rows.map((r) => r.host)).size;
   const flagged = rows.filter((r) => Array.isArray(r.flags) && r.flags.length).length;
   const n = (count, word) => count + ' ' + word + (count === 1 ? '' : 's');
-  const head = ['Time (UTC)', 'Host', 'Session', 'Agent', 'Tool', 'Flags', 'Target'].map((h) => '<th scope="col">' + h + '</th>').join('');
+  const cols = ['Time (UTC)', 'Host', 'Session', 'Agent', 'Tool', 'Flags', 'Target'];
+  const head = cols.map((h) => '<th scope="col" role="columnheader">' + h + '</th>').join('');
   const body = rows.map((r) => {
     const flags = Array.isArray(r.flags) && r.flags.length ? '<strong>' + esc(r.flags.join(', ')) + '</strong>' : '-';
-    return '<tr><td>' + [r.time, r.host, r.session, r.agent, r.tool].map(esc).join('</td><td>') + '</td><td>' + flags + '</td><td><code>' + esc(r.target) + '</code></td></tr>';
+    const cells = [...[r.time, r.host, r.session, r.agent, r.tool].map(esc), flags, '<code>' + esc(r.target) + '</code>'];
+    return '<tr role="row">' + cells.map((c, i) => '<td role="cell" data-label="' + cols[i] + '">' + c + '</td>').join('') + '</tr>';
   }).join('');
   return '<p>' + n(rows.length, 'call') + ' from ' + n(hosts, 'host') + ', ' + flagged + ' flagged. Each host redacted its targets before upload.</p>' +
-    '<div class="table-wrap" tabindex="0" role="region" aria-label="Audit rows"><table class="audit"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+    '<div class="table-wrap" tabindex="0" role="region" aria-label="Audit rows"><table class="audit" role="table"><thead role="rowgroup"><tr role="row">' + head + '</tr></thead><tbody role="rowgroup">' + body + '</tbody></table></div>';
 }
 
 const sha12 = async (text) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))).slice(0, 12);
