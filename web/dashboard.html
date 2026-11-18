@@ -87,7 +87,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   /* Touch screens get a 44px tap target. Mouse layouts keep the compact button. */
   @media (pointer: coarse) { .btn:not(.icon) { min-height: 44px; } }
   @media (pointer: coarse) { .tracer-tasks summary, .agent-runs summary { line-height: 44px; } }
-  @media (pointer: coarse) { .agent-runs td a { display: inline-block; line-height: 44px; } }
+  @media (pointer: coarse) { .agent-runs td a, #audit-flags td a { display: inline-block; line-height: 44px; } }
   /* --panel is white in light mode and near black in dark, so the label keeps contrast on either accent. */
   .ask { border: 1px solid var(--line); border-radius: 12px; margin: 16px 0; padding: 12px 16px; }
   .ask legend { font-weight: 600; padding: 0 6px; }
@@ -96,6 +96,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .ask-option:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
   .backlog-context, .backlog-triage { margin: 12px 0; }
   .doc .backlog-context > h3, .doc .backlog-triage > h3 { font-size: 13px; margin: 0 0 4px; }
+  .ask-waits { color: var(--muted); font-size: 12px; }
   .ask-rec { background: var(--accent-soft); color: var(--accent); border-radius: 999px; font-size: 11px; padding: 1px 8px; }
   .ask-desc { display: block; color: var(--muted); font-size: 13px; }
   .ask-model { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
@@ -189,6 +190,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   body[data-view="retros"] #board, body[data-view="retros"] #detail,
   body[data-view="inbox"] #board, body[data-view="inbox"] #detail { display: none; }
   #retros-page { max-width: 1040px; }
+  #audit-flags td a { color: var(--accent); }
+  #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
+  #audit-flags td:last-child { min-width: 14em; }
   #inbox-page { max-width: 1040px; }
   #inbox-list { list-style: none; margin: 0; padding: 0; }
   .inbox-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 16px; padding: 12px 10px; border-bottom: 1px solid var(--line); }
@@ -1132,6 +1136,16 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <a class="btn icon" id="retros-back" href="#" aria-label="Back to board" title="Back to board (H)" aria-keyshortcuts="h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
     <h2 id="retros-page-heading" tabindex="-1">Retros</h2>
   </div>
+  <section class="settings-section" id="audit-flags" aria-labelledby="audit-flags-heading">
+    <h3 id="audit-flags-heading">Red flags</h3>
+    <p class="muted" id="audit-flags-status" role="status"></p>
+    <div class="reference-scroll" id="audit-flags-wrap" tabindex="0" role="region" aria-label="Red flags" hidden>
+      <table class="reference-table">
+        <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Job</th><th scope="col">Host</th><th scope="col">Agent</th><th scope="col">Tool</th><th scope="col">Flags</th><th scope="col">Target</th></tr></thead>
+        <tbody id="audit-flags-rows"></tbody>
+      </table>
+    </div>
+  </section>
   <p class="muted" id="retros-status" role="status"></p>
   <div id="retros-list"></div>
 </div>
@@ -2976,7 +2990,7 @@ function renderRoute() {
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : baseTitle;
   if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxFocusRow = -1; inboxAnswer = null; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
-  if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); }
+  if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
@@ -3084,6 +3098,35 @@ async function loadRetros() {
   } catch { retros = null; retrosFailed = true; }
   renderRetrosPage();
   if ($('job-picker').open && pickerMode === 'job') renderJobResults();
+}
+
+// Red flags: the flagged tool calls of every job, newest first, from the Worker's index.
+let auditFlags = null, auditFlagsFailed = false;
+
+async function loadAuditFlags() {
+  renderAuditFlags();
+  try {
+    const r = await fetch('./api/audit-flags', { cache: 'no-store' });
+    if (r.status === 404) auditFlags = [];
+    else if (r.status !== 200) throw new Error(String(r.status));
+    else auditFlags = (await r.json()).rows;
+    auditFlagsFailed = false;
+  } catch { auditFlags = null; auditFlagsFailed = true; }
+  renderAuditFlags();
+}
+
+function renderAuditFlags() {
+  const rows = auditFlags ?? [];
+  const jobCount = new Set(rows.map((row) => row.job)).size;
+  $('audit-flags-status').textContent = auditFlagsFailed ? 'Could not load red flags. Reload to try again.'
+    : auditFlags === null ? 'Loading red flags\u2026'
+    : !rows.length ? 'No flagged tool calls yet. Each audit push adds its job\'s flagged calls here.'
+    : rows.length + (rows.length === 1 ? ' flagged call' : ' flagged calls') + ' across ' + jobCount + (jobCount === 1 ? ' job' : ' jobs')
+      + ', newest first. Each host redacted its targets before upload.';
+  $('audit-flags-wrap').hidden = !rows.length;
+  $('audit-flags-rows').innerHTML = rows.map((row) => '<tr><td>' + esc(row.time) + '</td><td><a href="#' + esc(encodeURIComponent(row.job)) + '">'
+    + esc(row.job) + '</a></td><td>' + esc(row.host) + '</td><td>' + esc(row.agent) + '</td><td>' + esc(row.tool) + '</td><td>'
+    + esc(row.flags.join(', ')) + '</td><td><code>' + esc(row.target) + '</code></td></tr>').join('');
 }
 
 const RETRO_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -6303,18 +6346,26 @@ function backlogDepends(context, text) {
   return { refs, waiting };
 }
 
+// The refused approve's copy for an unchecked Depends on: prerequisite.
+function backlogWaitsText(waiting) {
+  return 'Approve "' + waiting + '" first. Its backlog line is still unchecked.';
+}
+
 // factory.py backlog_context rules. null means the text is not in the backlog context format.
 function parseBacklogContext(text) {
   const lines = trimBlankEdges(text.replace(/\r\n?/g, '\n')).split('\n');
   const recommend = { 'Recommend: approve': 'approved', 'Recommend: deny': 'denied' }[lines[0]];
   if (!recommend || lines.join('\n').length > 6000) return null;
   const at = lines.findIndex((l) => l.startsWith('## Question:'));
-  const reasons = lines.slice(1, at < 0 ? lines.length : at).join('\n').trim();
-  if (!reasons) return null;
-  if (at < 0) return { recommend, reasons, questions: [] };
+  const body = lines.slice(1, at < 0 ? lines.length : at);
+  if (!body.join('\n').trim()) return null;
+  const DEPENDS = /^Depends on: ([\w-]+: \S.*)$/;
+  const depends = body.map((l) => DEPENDS.exec(l)?.[1].trim()).filter(Boolean);
+  const reasons = body.filter((l) => !DEPENDS.test(l)).join('\n').trim();
+  if (at < 0) return { recommend, reasons, depends, questions: [] };
   const parsed = parseNeeds(lines.slice(at).join('\n'));
   if (!parsed?.ok || parsed.parts.length > 3 || parsed.parts.some((p) => p.kind !== 'question')) return null;
-  return { recommend, reasons, questions: parsed.parts };
+  return { recommend, reasons, depends, questions: parsed.parts };
 }
 
 // One line per question, for backlog.answers and the idea. answers[i] is { picked, other }.
@@ -6516,8 +6567,8 @@ async function decideBacklog(item, decision, notes, answers) {
     if (decision === 'approved') {
       const { refs, waiting } = backlogDepends(item.context ?? '', backlogText);
       if (waiting) {
-        const x = new Error('Approve "' + waiting + '" first. Its backlog line is still unchecked.');
-        x.prerequisite = backlog.find((b) => b.raw.trimEnd() === '- [ ] ' + waiting) ?? null;
+        const x = new Error(backlogWaitsText(waiting));
+        x.waiting = waiting;
         throw x;
       }
       item = { ...item, refs: [...item.refs, ...refs] };
@@ -8056,6 +8107,7 @@ function openBacklogItem(item) {
   drawerVersion++;
   openId = null;
   openBacklogRaw = item.raw;
+  backlogRefusal = null;
   files = [];
   activeFile = null;
   docDir = null;
@@ -8185,9 +8237,11 @@ async function fetchBacklogTriage(items) {
 function renderBacklogDecision(item, triageHtml) {
   const ctx = item.context === undefined ? null : parseBacklogContext(item.context);
   const draft = backlogDrafts.get(item.raw) ?? { pick: '', notes: '', answers: [] };
+  const { waiting } = backlogDepends(item.context ?? '', backlogText);
   const radio = (value, name, desc, key) =>
     '<label class="ask-option"><input type="radio" name="backlog-pick" value="' + value + '"' + (key ? ' aria-keyshortcuts="' + key + '"' : '') + (draft.pick === value ? ' checked' : '') +
-    '><span><strong>' + name + '</strong>' + (ctx?.recommend === value ? ' <span class="ask-rec">Recommended</span>' : '') +
+    '><span><strong>' + name + '</strong>' +
+    (value === 'approved' && waiting ? ' <span class="ask-waits">Waits on ' + esc(waiting) + '</span>' : ctx?.recommend === value ? ' <span class="ask-rec">Recommended</span>' : '') +
     ' <span class="ask-desc">' + desc + '</span></span></label>';
   const questions = (ctx?.questions ?? []).map((q, i) => {
     const a = draft.answers[i] ?? { picked: [], other: '' };
@@ -8202,7 +8256,9 @@ function renderBacklogDecision(item, triageHtml) {
       ' placeholder="Write your own answer, or expand on an option without choosing it.">' + esc(a.other) + '</textarea></label></fieldset>';
   }).join('');
   const shown = item.context === undefined ? '' : ctx
-    ? '<section class="backlog-context" aria-label="Context from the agent"><h3>Why this item</h3>' + md(ctx.reasons) + '</section>'
+    ? '<section class="backlog-context" aria-label="Context from the agent">' +
+      (ctx.depends.length ? '<h3>Depends on</h3><ul class="backlog-depends">' + ctx.depends.map((d) => '<li>' + esc(d) + '</li>').join('') + '</ul>' : '') +
+      (ctx.reasons ? '<h3>Why this item</h3>' + md(ctx.reasons) : '') + '</section>'
     : '<p class="muted">This item\'s context is not in the backlog context format, so it shows as text.</p>' + md(item.context);
   const history = backlogReworkHistory(item, [...jobs, ...archivedJobs.values()]);
   return md(item.text) + shown +
@@ -8256,10 +8312,32 @@ function updateBacklogBar() {
 
 // Called by poll after the backlog reloads.
 function syncBacklogDetail() {
-  if (openBacklogRaw !== null && $('backlog-form')) updateBacklogBar();
+  if (openBacklogRaw === null || !$('backlog-form')) return;
+  updateBacklogBar();
+  if (!$('backlog-status').textContent) showBacklogRefusal();
+}
+
+// The open item's refused approve, { raw, waiting }. It lasts while that prerequisite still waits.
+let backlogRefusal = null;
+function showBacklogRefusal() {
+  const item = backlog.find((b) => b.raw === openBacklogRaw);
+  if (backlogRefusal?.raw !== openBacklogRaw || !item || backlogDepends(item.context ?? '', backlogText).waiting !== backlogRefusal.waiting) {
+    backlogRefusal = null;
+    return;
+  }
+  const { waiting } = backlogRefusal;
+  $('backlog-status').textContent = backlogWaitsText(waiting);
+  const prerequisite = backlog.find((b) => b.raw.trimEnd() === '- [ ] ' + waiting);
+  if (prerequisite) {
+    const a = document.createElement('a');
+    a.href = '#/backlog/' + prerequisite.key;
+    a.textContent = 'Open the prerequisite';
+    $('backlog-status').append(' ', a);
+  }
 }
 
 async function submitBacklogDecision() {
+  backlogRefusal = null;
   const raw = openBacklogRaw;
   const item = backlog.find((b) => b.raw === raw);
   if (!item) return syncBacklogDetail();
@@ -8288,11 +8366,9 @@ async function submitBacklogDecision() {
     if (openBacklogRaw === raw) {
       updateBacklogBar();
       fail(String(x.message || x));
-      if (x.prerequisite) {
-        const a = document.createElement('a');
-        a.href = '#/backlog/' + x.prerequisite.key;
-        a.textContent = 'Open the prerequisite';
-        $('backlog-status').append(' ', a);
+      if (x.waiting) {
+        backlogRefusal = { raw, waiting: x.waiting };
+        showBacklogRefusal();
       }
     }
   }
@@ -8300,6 +8376,7 @@ async function submitBacklogDecision() {
 
 function storeBacklogDraft(e) {
   if (!e.target.closest('#backlog-form')) return;
+  backlogRefusal = null;
   backlogDrafts.set(openBacklogRaw, { pick: backlogPick(), notes: $('backlog-notes').value, answers: collectBacklogAnswers($('backlog-form')) });
   updateBacklogBar();
 }

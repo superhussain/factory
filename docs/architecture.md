@@ -166,6 +166,21 @@ tab reads the merged rows.
 | `PUT /api/audit/<job>/<host>.jsonl` | the bound service token of `<host>` | store or replace that host's rows |
 | `GET /api/audit/<job>` | any verified principal | each host record's file in host order, as `application/x-ndjson`, `""` when none |
 
+Each audit push also rewrites that job and host's rows in the red-flag index
+`audit-flags.json`. The index keeps every row whose `flags` is a non-empty list
+of strings and whose `time` is a string, as `{time, job, host, agent, tool, flags,
+target}`. Rows sort by `time` descending, then `job`, `host` and `agent`
+ascending, and only the newest 500 stay. The host file is saved first, then the
+index with a conditional put retried up to 10 times. When all 10 lose a race, the
+push answers 503 `audit rows were saved, but the red-flag index kept changing;
+push again`, and a re-push repairs it without duplicating rows. Files pushed
+before the index existed enter it on their next push. The `#/retros` page shows
+the index as `Red flags`.
+
+| Route | Who | Effect |
+| --- | --- | --- |
+| `GET /api/audit-flags` | any verified principal | `{"schema":"factory.audit-flags/1","rows":[...]}`, `rows: []` when no index exists; other methods answer 404 |
+
 Retro runs are stored one record per run at `retro-runs/<run>.json`. The hourly scheduled pass deletes a record uploaded more
 than 90 days before today's UTC date; a re-admit resets that clock. `retro admit` sends a `factory.retro-run/1` record with the checked findings, each
 card's `finding` link (one number or a list; a card linked to several findings is stored under each) and its outcome. The body is at most 64 KiB, `host` must be the bound

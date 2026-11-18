@@ -419,10 +419,9 @@ async function offline() {
     { id: "052-parse-recipe-urls", kind: "depends-on" },
   ]);
   dep = await decideStore(`- [ ] ${parse}`, "approved");
-  const parseKey = await sha12(`- [ ] ${parse}`);
   await assert.rejects(dep.run, (x) => {
     assert.equal(x.message, `Approve "${parse}" first. Its backlog line is still unchecked.`);
-    assert.equal(x.prerequisite.key, parseKey);
+    assert.equal(x.waiting, parse);
     return true;
   });
   assert.deepEqual(dep.st.puts, [], "a refused approve writes nothing");
@@ -565,6 +564,26 @@ async function offlineContext() {
   assert.deepEqual(clone(api.parseBacklogContext("\n\nRecommend: deny\nNo.\n\n")), {
     recommend: "denied",
     reasons: "No.",
+    depends: [],
+    questions: [],
+  });
+  assert.deepEqual(
+    clone(
+      api.parseBacklogContext(
+        "Recommend: approve\n\nDepends on: sample: Synthetic follow-on slice (sub-job-of 001-capture)  \nDepends on: not a backlog line\nThe weekly report needs the follow-on slice first.\n",
+      ),
+    ),
+    {
+      recommend: "approved",
+      reasons: "Depends on: not a backlog line\nThe weekly report needs the follow-on slice first.",
+      depends: ["sample: Synthetic follow-on slice (sub-job-of 001-capture)"],
+      questions: [],
+    },
+  );
+  assert.deepEqual(clone(api.parseBacklogContext("Recommend: approve\nDepends on: sample: X")), {
+    recommend: "approved",
+    reasons: "",
+    depends: ["sample: X"],
     questions: [],
   });
   const q = (n) => "## Question: Q" + n + "\nPrompt?\nPick: one\n- A: a\n- B: b";
@@ -1620,6 +1639,87 @@ async function browserTest(url) {
     console.log(
       "PASS backlog browser deep link: item opens by hash, decided key lands on its job, unknown key toasts, Copy link is the only menu item",
     );
+
+    // Depends on: its own list, a Waits on hint on Approve, and a refusal that survives a backlog poll.
+    const SLICE = "sample: Synthetic follow-on slice (sub-job-of 001-capture)";
+    const waitsBacklog = [
+      "# Backlog",
+      "",
+      "- [ ] sample: Weekly report",
+      "  Recommend: approve",
+      "",
+      `  Depends on: ${SLICE}`,
+      "  The weekly report needs the follow-on slice first.",
+      `- [ ] ${SLICE}`,
+      "- [ ] sample: Third synthetic item",
+      "",
+    ].join("\n");
+    await support.seedBoard(url, clone(JOBS));
+    await putText(url, "/api/backlog", waitsBacklog, "text/markdown; charset=utf-8");
+    await load(3);
+    const drawer = () =>
+      page.$eval("#d-doc", (el) => ({
+        headings: [...el.querySelectorAll(".backlog-context h3")].map((h) => h.textContent),
+        depends: [...el.querySelectorAll(".backlog-depends li")].map((li) => li.textContent),
+        approve: el.querySelector("input[value=approved]").closest("label").textContent,
+        waits: el.querySelectorAll(".ask-waits").length,
+        rec: el.querySelectorAll(".ask-rec").length,
+      }));
+    const refusal = () =>
+      page.$eval("#backlog-status", (e) => [
+        e.textContent,
+        e.querySelector("a")?.getAttribute("href") ?? null,
+      ]);
+    const refused = [
+      `Approve "${SLICE}" first. Its backlog line is still unchecked. Open the prerequisite`,
+      "#/backlog/" + (await sha12(`- [ ] ${SLICE}`)),
+    ];
+    const refuse = async () => {
+      await page.click("input[value=approved]");
+      await page.click("#backlog-submit");
+      await page.waitForFunction(
+        () => document.getElementById("backlog-status").textContent.includes("first."),
+        { polling: 50 },
+      );
+      assert.deepEqual(await refusal(), refused);
+    };
+    const refresh = () => page.evaluate(() => refreshBacklog());
+    await open(1);
+    assert.deepEqual(await drawer(), {
+      headings: ["Depends on", "Why this item"],
+      depends: [SLICE],
+      approve: `Approve Waits on ${SLICE} It moves to the idea column, and pickup starts it.`,
+      waits: 1,
+      rec: 0,
+    });
+    await refuse();
+    await refresh();
+    assert.deepEqual(await refusal(), refused, "the refusal survives a backlog poll");
+    await page.type("#backlog-notes", "x");
+    assert.deepEqual(await refusal(), ["", null], "a notes edit clears it");
+    await refresh();
+    assert.deepEqual(await refusal(), ["", null]);
+    await refuse();
+    await open(3);
+    await open(1);
+    await refresh();
+    assert.deepEqual(await refusal(), ["", null], "opening another item clears it");
+    await refuse();
+    await putText(
+      url,
+      "/api/backlog",
+      waitsBacklog.replace(`- [ ] ${SLICE}`, `- [x] ${SLICE} (009-follow-on-slice)`),
+      "text/markdown; charset=utf-8",
+    );
+    await refresh();
+    assert.deepEqual(await refusal(), ["", null], "a checked prerequisite clears it");
+    await open(1);
+    const checked = await drawer();
+    assert.deepEqual([checked.waits, checked.rec], [0, 1]);
+    assert.match(checked.approve, /^Approve Recommended /);
+    assert.deepEqual((await read("/api/board")).jobs, JOBS, "a refused approve adds no job");
+    assert.deepEqual(pageErrors, []);
+    console.log("PASS backlog browser depends");
   } finally {
     await browser.close();
   }

@@ -109,7 +109,8 @@
     "PASS backlog browser tap gate",
     "PASS backlog browser tap no submit",
     "PASS backlog browser tap hint",
-    "PASS backlog browser deep link"
+    "PASS backlog browser deep link",
+    "PASS backlog browser depends"
    ]
   }
  ],
@@ -173,6 +174,7 @@
   "tests/browser/home-key.test.mjs",
   "tests/browser/next-waiting.test.mjs",
   "tests/browser/retros-page.test.mjs",
+  "tests/browser/audit-flags.test.mjs",
   "tests/browser/inbox-page.test.mjs",
   "tests/browser/needs-you-form.test.mjs",
   "tests/browser/drawer-swipe.test.mjs",
