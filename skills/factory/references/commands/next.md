@@ -8,7 +8,7 @@ line on stderr. An item may be followed by indented context lines that
 `next` and `batch` skip a line whose `Depends on:` line names an unchecked line or a job still open on the board.
 
 1. Run `python3 <this skill's dir>/runtime/factory.py sync`, with no slug, since the
-   project isn't known yet. Conflicts don't block, as in the Claims table.
+   project isn't known before `next` runs. Conflicts don't block, as in the Claims table.
 2. Run `python3 <this skill's dir>/runtime/factory.py next --session <tag>` (no tag on
    the first call) and read its JSON: `id`, `project`, and `feature`. It claims the
    id under that project and marks the line `- [x] <slug>: <feature> (<id>)`.
