@@ -1667,7 +1667,12 @@ async function capture(outdir, referencePath) {
         const status = document.getElementById("retros-status").textContent;
         return status && !status.startsWith("Loading");
       });
-      if (side === "after") await page.waitForSelector("#audit-flags-rows tr");
+      if (side === "after") {
+        await page.waitForSelector("#audit-flags-rows tr");
+        await page.evaluate(() =>
+          document.getElementById("audit-flags-pager").scrollIntoView({ block: "end" }),
+        );
+      }
     };
     flagsHosts = true;
     try {

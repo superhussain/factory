@@ -210,10 +210,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #retros-page { max-width: 1040px; }
   .retros-runs-heading { font-size: 15px; margin: 24px 0 12px; }
   #audit-flags td a { color: var(--accent); }
+  #audit-flags td a { white-space: nowrap; }
   #audit-flags td a + a { margin-left: 8px; }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #audit-flags td:last-child { min-width: 14em; }
-  .audit-flags-pager { display: flex; gap: 12px; margin-top: 8px; }
+  .audit-flags-pager { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
   #audit-flags-pager[hidden] { display: none; }
   #inbox-page { max-width: 1040px; }
   #inbox-list { list-style: none; margin: 0; padding: 0; }

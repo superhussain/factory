@@ -1761,18 +1761,21 @@ function auditFlagRows(rows, job, host) {
         row.flags.length > 0 &&
         row.flags.every((flag) => typeof flag === "string"),
     )
-    .map((row) => ({
-      time: row.time,
-      job,
-      host,
-      agent: cap(row.agent, AUDIT_FLAGS_TEXT_MAX),
-      tool: cap(row.tool, AUDIT_FLAGS_TEXT_MAX),
-      flags: row.flags
-        .slice(0, AUDIT_FLAGS_FLAGS_MAX)
-        .map((flag) => cap(flag, AUDIT_FLAGS_FLAG_MAX)),
-      target: cap(row.target, AUDIT_FLAGS_TEXT_MAX),
-      ...(auditFlagPaseo(row.paseo) && { paseo: auditFlagPaseo(row.paseo) }),
-    }));
+    .map((row) => {
+      const paseo = auditFlagPaseo(row.paseo);
+      return {
+        time: row.time,
+        job,
+        host,
+        agent: cap(row.agent, AUDIT_FLAGS_TEXT_MAX),
+        tool: cap(row.tool, AUDIT_FLAGS_TEXT_MAX),
+        flags: row.flags
+          .slice(0, AUDIT_FLAGS_FLAGS_MAX)
+          .map((flag) => cap(flag, AUDIT_FLAGS_FLAG_MAX)),
+        target: cap(row.target, AUDIT_FLAGS_TEXT_MAX),
+        ...(paseo && { paseo }),
+      };
+    });
 }
 
 // Newest first, then job, host and agent.
