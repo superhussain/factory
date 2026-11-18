@@ -6364,7 +6364,11 @@ async function decideBacklog(item, decision, notes, answers) {
   try {
     if (decision === 'approved') {
       const { refs, waiting } = backlogDepends(item.context ?? '', backlogText);
-      if (waiting) throw new Error('Approve "' + waiting + '" first. Its backlog line is still unchecked.');
+      if (waiting) {
+        const x = new Error('Approve "' + waiting + '" first. Its backlog line is still unchecked.');
+        x.prerequisite = backlog.find((b) => b.raw.trimEnd() === '- [ ] ' + waiting) ?? null;
+        throw x;
+      }
       item = { ...item, refs: [...item.refs, ...refs] };
     }
     const now = isoNow();
@@ -8129,6 +8133,12 @@ async function submitBacklogDecision() {
     if (openBacklogRaw === raw) {
       updateBacklogBar();
       fail(String(x.message || x));
+      if (x.prerequisite) {
+        const a = document.createElement('a');
+        a.href = '#/backlog/' + x.prerequisite.key;
+        a.textContent = 'Open the prerequisite';
+        $('backlog-status').append(' ', a);
+      }
     }
   }
 }

@@ -419,8 +419,11 @@ async function offline() {
     { id: "052-parse-recipe-urls", kind: "depends-on" },
   ]);
   dep = await decideStore(`- [ ] ${parse}`, "approved");
-  await assert.rejects(dep.run, {
-    message: `Approve "${parse}" first. Its backlog line is still unchecked.`,
+  const parseKey = await sha12(`- [ ] ${parse}`);
+  await assert.rejects(dep.run, (x) => {
+    assert.equal(x.message, `Approve "${parse}" first. Its backlog line is still unchecked.`);
+    assert.equal(x.prerequisite.key, parseKey);
+    return true;
   });
   assert.deepEqual(dep.st.puts, [], "a refused approve writes nothing");
   dep = await decideStore(`- [ ] ${parse}`, "denied");
