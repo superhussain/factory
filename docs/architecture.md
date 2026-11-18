@@ -172,8 +172,9 @@ of strings and whose `time` is a `YYYY-MM-DD HH:MM:SS` UTC time no more than one
 day ahead of the Worker clock, as `{time, job, host, agent, tool, flags, target}`.
 `agent`, `tool` and `target` are cut to 120 code points, and `flags` to its first
 16 names of 32 code points each. The host file keeps the full row. Rows sort by
-`time` descending, then `job`, `host` and `agent` ascending, and only the newest
-500 stay. The host file is saved first, then the
+`time` descending, then `job`, `host` and `agent` ascending. Each host keeps
+only its newest 100 rows across all jobs, and only the newest 500 rows stay in
+all. The host file is saved first, then the
 index with a conditional put retried up to 10 times. When all 10 lose a race, the
 push answers 503 `audit rows were saved, but the red-flag index kept changing;
 push again`, and a re-push repairs it without duplicating rows. Files pushed
