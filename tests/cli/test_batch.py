@@ -639,6 +639,32 @@ class BatchTest(IsolatedTestCase):
                 self.assertEqual(code, 0)
                 self.assertNotIn(key, self.ids(out, "candidates"))
 
+    def test_names_each_waiting_line_it_hides(self):
+        for parse_line, stage, why in (
+                (f"- [ ] {PARSE}", None, f'it depends on "{PARSE}", which is still unchecked'),
+                (f"- [x] {PARSE} (052-parse-recipe-urls)", "build", "it depends on 052-parse-recipe-urls, which is still open")):
+            with self.subTest(stage=stage):
+                key = self.set_depends(parse_line, stage)
+                code, out, err = self.batch(TARGET)
+                self.assertEqual(code, 0)
+                self.assertEqual(set(json.loads(out)), {"lead", "riders", "candidates"})
+                self.assertEqual(err, f'skipping {key} "{STORE}": {why}\n')
+        with self.subTest("alone"):
+            rows = jobs()
+            rows[0]["priority"] = {"alone": True}
+            self.set_jobs(rows)
+            self.set_depends(f"- [ ] {PARSE}")
+            code, _, err = self.batch(TARGET)
+            self.assertEqual((code, err), (0, ""))
+        with self.subTest("control characters"):
+            self.set_jobs(jobs())
+            store, parse = "sample: Store\x1b[2J recipes", "sample: Parse\x07 recipe URLs"
+            self.backlog = f"# Backlog\n- [ ] {parse}\n- [ ] {store}\n  Depends on: {parse}\n"
+            key = f"backlog:{factory.backlog_key('- [ ] ' + store)}"
+            code, _, err = self.batch(TARGET)
+            self.assertEqual((code, err), (0, f'skipping {key} "sample: Store?[2J recipes": '
+                                              'it depends on "sample: Parse? recipe URLs", which is still unchecked\n'))
+
     def test_refusal_prints_control_characters_as_question_marks(self):
         store, parse = "sample: Store\x1b[2J recipes", "sample: Parse\x07 recipe URLs"
         self.backlog = f"# Backlog\n- [ ] {parse}\n- [ ] {store}\n  Depends on: {parse}\n"

@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -822,6 +823,24 @@ class DownTest(Instance):
         code, out, err = self.down("factory.example.test")
         self.assertEqual(code, 0, err)
         self.assertIn("bucket factory-example-test: already deleted", out)
+
+
+class DeviceTokenDocTest(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("pwsh") or os.environ.get("CI"), "pwsh not installed")
+    def test_powershell_loader(self):
+        doc = (ROOT / "docs" / "cloudflare.md").read_text(encoding="utf-8")
+        block = doc.split("3. Use it.", 1)[1].split("```powershell\n", 1)[1].split("```", 1)[0].strip()
+        up = "mise exec -- py -3 tools/bootstrap.py up"
+        self.assertEqual(block.count(up), 1)
+        with tempfile.TemporaryDirectory() as home:
+            Path(home, ".env").write_bytes(b"OTHER=1\r\nCLOUDFLARE_API_TOKEN=synthetic-token-123\r\n")
+            script = (block.replace(up, "[Console]::Out.Write('token=' + $env:CLOUDFLARE_API_TOKEN)")
+                      .replace("<factory-home>", home)
+                      + "; [Console]::Out.Write(';after=' + [string]$env:CLOUDFLARE_API_TOKEN)")
+            env = {k: v for k, v in os.environ.items() if k != "CLOUDFLARE_API_TOKEN"}
+            out = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", script], env=env,
+                                 capture_output=True, text=True, check=True).stdout
+        self.assertEqual(out, "token=synthetic-token-123;after=")
 
 
 if __name__ == "__main__":

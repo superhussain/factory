@@ -58,6 +58,7 @@ test(
           );
           return page.$eval("#audit-flags", (section) => ({
             next: section.nextElementSibling.id,
+            afterNext: section.nextElementSibling.nextElementSibling.id,
             previous: section.previousElementSibling.querySelector("h2")?.id,
             heading: section.querySelector("h3").textContent,
             status: section.querySelector("#audit-flags-status").textContent,
@@ -76,7 +77,8 @@ test(
 
         let shown = await open("4 flagged");
         assert.equal(shown.previous, "retros-page-heading");
-        assert.equal(shown.next, "retros-status");
+        assert.equal(shown.next, "retros-runs-heading");
+        assert.equal(shown.afterNext, "retros-status");
         assert.equal(shown.heading, "Red flags");
         assert.equal(
           shown.status,

@@ -179,6 +179,15 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       ).$eval("[data-inbox-answer]", (b) => b.click());
       await page.waitForSelector("#inbox-answer .inbox-needs fieldset.ask", wait);
     };
+    const openRow3 = async (page) => {
+      await (
+        await rowOf(page, "Recover the sample host")
+      ).$eval('a[href="#046-sample-human"]', (a) => a.click());
+      await page.waitForFunction(
+        () => document.querySelector("#d-meta")?.textContent.includes("046-sample-human"),
+        wait,
+      );
+    };
     const shotKeys = async (name) => {
       const { page } = await openPage("#/settings/reference");
       await page.waitForSelector("#settings-reference:not([hidden])", wait);
@@ -198,6 +207,10 @@ test("inbox page", { timeout: 180000 }, async (t) => {
         await failed.page.screenshot({ path: `${SHOTS}/before-inbox-backlog-error.png` });
         await failed.page.browserContext().close();
         await shotKeys("before-reference-keys.png");
+        const opened = await openPage("#/inbox");
+        await openRow3(opened.page);
+        await opened.page.screenshot({ path: `${SHOTS}/before-inbox-open-job-desktop.png` });
+        await opened.page.browserContext().close();
       });
 
     const it = (name, fn) => t.test(name, { skip: BEFORE }, fn);
@@ -552,6 +565,77 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       await fromBoard.page.waitForFunction(() => location.hash === "", wait);
       assert.equal(await fromBoard.page.evaluate(() => document.body.dataset.view), "board");
       await fromBoard.page.browserContext().close();
+    });
+
+    await it("split drawer keeps the inbox", async () => {
+      await reset();
+      const { page, errors } = await openPage("#/inbox");
+      await openRow3(page);
+      assert.deepEqual(
+        await page.evaluate(() => {
+          const inbox = document.querySelector("#inbox-page");
+          const detail = document.querySelector("#detail");
+          return {
+            view: document.body.dataset.view,
+            split: document.body.hasAttribute("data-inbox-split"),
+            inbox: inbox.checkVisibility(),
+            detail: detail.checkVisibility(),
+            current: [...document.querySelectorAll('#inbox-list [aria-current="true"]')].map(
+              (el) => el.querySelector(".inbox-title").textContent,
+            ),
+            beside:
+              inbox.getBoundingClientRect().right <= detail.getBoundingClientRect().left + 0.5,
+          };
+        }),
+        {
+          view: "inbox",
+          split: true,
+          inbox: true,
+          detail: true,
+          current: ["Recover the sample host"],
+          beside: true,
+        },
+      );
+      if (SHOTS) {
+        const settled = () => document.querySelector("#d-doc").textContent !== "loading files";
+        await mkdir(SHOTS, { recursive: true });
+        await page.waitForFunction(settled, wait);
+        await page.screenshot({ path: `${SHOTS}/after-inbox-split-desktop.png` });
+        const phone = await openPage("#/inbox", { width: 390, height: 844 });
+        await openRow3(phone.page);
+        await phone.page.waitForFunction(settled, wait);
+        await phone.page.screenshot({ path: `${SHOTS}/after-inbox-split-mobile.png` });
+        await phone.page.browserContext().close();
+      }
+      await page.keyboard.press("ArrowRight");
+      await page.waitForFunction(
+        () =>
+          /^#\/backlog\/[0-9a-f]{12}$/.test(location.hash) &&
+          document.querySelector("#d-title").textContent === "Backlog item",
+        wait,
+      );
+      await page.keyboard.press("ArrowLeft");
+      await page.waitForFunction(
+        () => document.querySelector("#d-meta")?.textContent.includes("046-sample-human"),
+        wait,
+      );
+      await page.keyboard.press("ArrowLeft");
+      await page.waitForFunction(
+        () => document.querySelector("#d-meta")?.textContent.includes("042-sample-export"),
+        wait,
+      );
+      assert.equal(await page.evaluate(() => location.hash), "#042-sample-export");
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => location.hash === "#/inbox", wait);
+      assert.deepEqual(
+        await page.evaluate(() => [
+          document.body.hasAttribute("data-inbox-split"),
+          document.activeElement.textContent,
+        ]),
+        [false, "Babysit PR #44"],
+      );
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
     });
 
     if (SHOTS) await it("reference capture", () => shotKeys("after-reference-keys.png"));

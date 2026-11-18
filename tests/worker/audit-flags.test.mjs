@@ -184,3 +184,28 @@ test("any principal reads the index, a missing one is empty, and other methods a
     assert.equal((await s.send(method, "/api/audit-flags", { body: "{}" })).status, 404, method);
   assert.equal((await s.send("GET", "/api/audit-flags/x")).status, 404);
 });
+
+test("a bad or future time is dropped and long fields are capped", async () => {
+  const s = await setup();
+  const bad = ["9999-12-31 23:59:59", "2026-11-10T10:00:09Z", "2026-13-01 00:00:00", ""].map(
+    (time) => ({ ...call(9, "main", "Bash", ["sudo"], "x"), time }),
+  );
+  const flags = Array.from(
+    { length: 40 },
+    (_, i) => `flag-${String(i).padStart(2, "0")}-` + "f".repeat(99),
+  );
+  const long = call(7, "a".repeat(500), "T".repeat(500), flags, "😀".repeat(200));
+  assert.equal((await s.put([...SIX, ...bad, long])).status, 200);
+  const rows = await s.flags();
+  assert.equal(rows.length, 5);
+  assert.deepEqual(
+    rows[0],
+    flagged(
+      7,
+      "a".repeat(120),
+      "T".repeat(120),
+      flags.slice(0, 16).map((flag) => flag.slice(0, 32)),
+      "😀".repeat(120),
+    ),
+  );
+});

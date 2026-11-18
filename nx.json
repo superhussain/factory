@@ -55,7 +55,8 @@
         "default",
         "shared",
         "{workspaceRoot}/tests/tools/**",
-        "{workspaceRoot}/tests/fixtures/deployment-valid.json"
+        "{workspaceRoot}/tests/fixtures/deployment-valid.json",
+        "{workspaceRoot}/docs/cloudflare.md"
       ]
     },
     "local": {

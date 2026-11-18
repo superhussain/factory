@@ -1557,7 +1557,6 @@ async function capture(outdir, referencePath) {
     }
     const openAudit = async (page, side) => {
       await openDrawer(page, side);
-      if (side !== "after") return;
       await page.click('.tab[data-name="audit.md"]');
       await page.waitForSelector("#d-doc table.audit");
       await page.waitForFunction(() => {
