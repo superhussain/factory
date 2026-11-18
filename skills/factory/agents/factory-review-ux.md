@@ -21,8 +21,27 @@ calls out, that copy is clear and matches the project's tone, and look for basic
 accessibility gaps such as labels and touch targets. If the change has no
 user-facing surface, say so and pass.
 
-View every image in `<job folder>/` with the Read tool, which shows images. Return
-CHANGES if the diff touches UI and build.md embeds no images, or if they don't show
+**Keyboard focus probe.** In round 1, check whether the diff moves focus or scroll:
+
+```bash
+git diff main...factory/<id> | grep -nE '^\+.*(\.focus\(|\.blur\(|autofocus|tabindex|scrollIntoView|scrollTo|scrollTop|:focus)'
+```
+
+Use the base branch the orchestrator names in place of `main`. When it prints a line,
+probe keyboard focus in this round. For each action the diff changes, trace from the
+keyboard where focus lands after the action, that Tab and Shift+Tab reach each control
+in order, that Escape closes an overlay and returns focus to the control that opened
+it, that the focused element stays in view after a scroll, and that it shows a visible
+focus ring. Run the repo's own browser tests for that view when it has any. Add a
+`### Keyboard focus` table with the columns `Action`, `Expected focus`, `Found` and
+`Result`, one row per action. Focus that is lost, trapped or scrolled out of view is
+CHANGES. In a later round, probe only the actions the latest fix changed. When the
+grep prints nothing, write `Keyboard focus: no focus or scroll change.`
+
+List the job folder with `ls <job folder>`, then view each image the listing shows
+with the Read tool, which shows images, by its exact name. Never use a glob such as
+`<job folder>/*.png`, because zsh stops with `no matches found` when nothing matches.
+Return CHANGES if the diff touches UI and build.md embeds no images, or if they don't show
 what build.md claims. You may save a cropped image next to your review file in the
 round folder to point at a finding.
 
