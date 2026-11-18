@@ -18,6 +18,10 @@ test("every plugin tarball resolves through the public registry", () => {
   for (const [path, entry] of entries) {
     const resolution = entry.resolution ?? {};
     assert.ok(
+      resolution.tarball,
+      `${path} has no tarball URL. Run pnpm --dir paseo-plugin install to record it, then commit paseo-plugin/pnpm-lock.yaml.`,
+    );
+    assert.ok(
       resolution.tarball?.startsWith(REGISTRY),
       `${path} resolves through a non-public authority: ${resolution.tarball}`,
     );
