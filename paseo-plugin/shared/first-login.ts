@@ -27,3 +27,30 @@ export function markLoaded(web: WebGlobals | null, origin: string): void {
 export function paseoOrigin(web: WebGlobals | null): string | null {
   return web ? web.origin() : null;
 }
+
+// Paseo web serves from http(s); the desktop app uses its own scheme.
+export function isBrowserOrigin(origin: string | null): boolean {
+  return origin !== null && /^https?:\/\//.test(origin);
+}
+
+const SIGN_IN_STEPS = [
+  "Enter your email, then the code Cloudflare sends you.",
+  "That window closes once your board shows, and this page reloads. If it stays open, close it.",
+];
+
+export function firstLoginSteps(browser: boolean): string[] {
+  return browser
+    ? [
+        "Using Safari, or another browser that blocks third-party cookies? Select Open in a browser tab and sign in there. You can skip the rest.",
+        "Otherwise select Sign in. A small Paseo window opens on the Cloudflare Access page.",
+        ...SIGN_IN_STEPS,
+      ]
+    : [
+        "Select Sign in. A small Paseo window opens on the Cloudflare Access page.",
+        ...SIGN_IN_STEPS,
+      ];
+}
+
+export function openLabel(browser: boolean): string {
+  return browser ? "Open in a browser tab" : "Open in your browser";
+}
