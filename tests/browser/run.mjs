@@ -1640,6 +1640,22 @@ async function capture(outdir, referencePath) {
     await view("backlog-answered-mobile", 390, 844, "dark", openAnswered);
     await view("backlog-rework-desktop", 1440, 900, "light", openRework);
     await view("backlog-rework-mobile", 390, 844, "dark", openRework);
+    // Both sides refuse the approve. Only the after side shows the link.
+    const openRefusal = async (page) => {
+      await page.click('.backlog-card[data-index="2"]');
+      await page.waitForSelector("#backlog-form");
+      await page.evaluate(() => {
+        backlog.find((b) => b.raw.includes("weekly report")).context =
+          "Depends on: sample: Synthetic follow-on slice (sub-job-of 001-capture)";
+      });
+      await page.click("input[value=approved]");
+      await page.click("#backlog-submit");
+      await page.waitForFunction(() =>
+        document.getElementById("backlog-status").textContent.includes("first."),
+      );
+    };
+    await view("backlog-refusal-desktop", 1440, 900, "light", openRefusal);
+    await view("backlog-refusal-mobile", 390, 844, "dark", openRefusal);
     if (failed.length) {
       console.log(JSON.stringify({ result: "FAIL", failed, external }));
       throw new Error(
