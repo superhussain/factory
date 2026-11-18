@@ -6349,12 +6349,15 @@ function parseBacklogContext(text) {
   const recommend = { 'Recommend: approve': 'approved', 'Recommend: deny': 'denied' }[lines[0]];
   if (!recommend || lines.join('\n').length > 6000) return null;
   const at = lines.findIndex((l) => l.startsWith('## Question:'));
-  const reasons = lines.slice(1, at < 0 ? lines.length : at).join('\n').trim();
-  if (!reasons) return null;
-  if (at < 0) return { recommend, reasons, questions: [] };
+  const body = lines.slice(1, at < 0 ? lines.length : at);
+  if (!body.join('\n').trim()) return null;
+  const DEPENDS = /^Depends on: ([\w-]+: \S.*)$/;
+  const depends = body.map((l) => DEPENDS.exec(l)?.[1].trim()).filter(Boolean);
+  const reasons = body.filter((l) => !DEPENDS.test(l)).join('\n').trim();
+  if (at < 0) return { recommend, reasons, depends, questions: [] };
   const parsed = parseNeeds(lines.slice(at).join('\n'));
   if (!parsed?.ok || parsed.parts.length > 3 || parsed.parts.some((p) => p.kind !== 'question')) return null;
-  return { recommend, reasons, questions: parsed.parts };
+  return { recommend, reasons, depends, questions: parsed.parts };
 }
 
 // One line per question, for backlog.answers and the idea. answers[i] is { picked, other }.
@@ -8242,7 +8245,9 @@ function renderBacklogDecision(item, triageHtml) {
       ' placeholder="Write your own answer, or expand on an option without choosing it.">' + esc(a.other) + '</textarea></label></fieldset>';
   }).join('');
   const shown = item.context === undefined ? '' : ctx
-    ? '<section class="backlog-context" aria-label="Context from the agent"><h3>Why this item</h3>' + md(ctx.reasons) + '</section>'
+    ? '<section class="backlog-context" aria-label="Context from the agent">' +
+      (ctx.depends.length ? '<h3>Depends on</h3><ul class="backlog-depends">' + ctx.depends.map((d) => '<li>' + esc(d) + '</li>').join('') + '</ul>' : '') +
+      (ctx.reasons ? '<h3>Why this item</h3>' + md(ctx.reasons) : '') + '</section>'
     : '<p class="muted">This item\'s context is not in the backlog context format, so it shows as text.</p>' + md(item.context);
   const history = backlogReworkHistory(item, [...jobs, ...archivedJobs.values()]);
   return md(item.text) + shown +

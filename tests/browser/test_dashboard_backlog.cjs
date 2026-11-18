@@ -565,6 +565,26 @@ async function offlineContext() {
   assert.deepEqual(clone(api.parseBacklogContext("\n\nRecommend: deny\nNo.\n\n")), {
     recommend: "denied",
     reasons: "No.",
+    depends: [],
+    questions: [],
+  });
+  assert.deepEqual(
+    clone(
+      api.parseBacklogContext(
+        "Recommend: approve\n\nDepends on: sample: Synthetic follow-on slice (sub-job-of 001-capture)  \nDepends on: not a backlog line\nThe weekly report needs the follow-on slice first.\n",
+      ),
+    ),
+    {
+      recommend: "approved",
+      reasons: "Depends on: not a backlog line\nThe weekly report needs the follow-on slice first.",
+      depends: ["sample: Synthetic follow-on slice (sub-job-of 001-capture)"],
+      questions: [],
+    },
+  );
+  assert.deepEqual(clone(api.parseBacklogContext("Recommend: approve\nDepends on: sample: X")), {
+    recommend: "approved",
+    reasons: "",
+    depends: ["sample: X"],
     questions: [],
   });
   const q = (n) => "## Question: Q" + n + "\nPrompt?\nPick: one\n- A: a\n- B: b";
