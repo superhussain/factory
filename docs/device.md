@@ -202,8 +202,9 @@ the host.
 most 30), oldest date first, into a new run folder `<home>/retro/<run>/`. The run
 tag is the UTC time plus 6 random hex digits. It writes `digest.jsonl`, the rows,
 and `aggregate.json`: token sums, context medians, error, denial and command
-patterns with counts and up to 5 `host/session` refs, and the registered
-projects. Every ad-hoc row's `project` becomes `ad-hoc` in both files, so neither
+patterns with counts and up to 5 `host/session` refs, the registered
+projects, and `merged`: up to 100 board jobs of registered projects merged in the
+window, each with `id`, `project`, `title` and `merged` time, newest first. Every ad-hoc row's `project` becomes `ad-hoc` in both files, so neither
 names that work. Lines that are not digest rows count as `skipped`. So do rows
 whose `host` is not the host that pushed them or whose `session` is not a
 transcript id. It prints the run, the file paths, this host's transcripts root, and
@@ -215,9 +216,17 @@ pushed exits 3 and writes nothing. A linked `retro` or run folder exits 2.
 `retro admit <run>` checks the retro agent's `reply.json` in that folder against
 `factory.retro/1`. A bad reply, or one whose findings all fail, exits 2 with
 nothing written. A bad finding is dropped, printed as a `rejected findings[N]` line
-and listed under Rejected findings in `findings.md` without its text. A bad card
-exits 2 after `findings.md` is written, with no cards admitted. `{"none": true}`
-exits 3. It writes `findings.md`, ranked by count times cost per occurrence, then
+and listed under Rejected findings in `findings.md` without its text. A finding
+whose optional `fixed_by` names a `merged` job, and whose sessions in `digest.jsonl`
+all started before that merge, leaves the ranking. It prints as `fixed findings[N]:
+<id> merged <time>` and is listed under Fixed findings. An unknown or later start
+keeps the finding with a Fixed by line. Each card is checked on its own. A bad card
+is dropped, printed as a `rejected suggestions[N]` line and listed under Rejected
+cards without its text; the clean cards still go through. A clean card whose linked
+findings were all fixed prints `skipped suggestions[N]: finding fixed by <id>` and is
+not admitted. When every card is bad, admit exits 2 after `findings.md` is written,
+with no cards admitted; when every clean card was skipped, it exits 3. The upload's
+`rejected` counts only findings that failed checks. `{"none": true}` exits 3. It writes `findings.md`, ranked by count times cost per occurrence, then
 writes the reply's cards to `suggestions.json` and adds each one to the backlog as a
 held line with a decision form (see [Retro cards](autonomy.md#retro-cards)). It
 checks pause, fingerprint dedupe and both caps first, and exits 3 when nothing was

@@ -9339,6 +9339,7 @@ RETRO_RUN_SCHEMA = "factory.retro-run/1"
 RETRO_DOC_EDIT_SCHEMA = "factory.retro-doc-edit/1"
 RETRO_EDIT_CHANGE = 600
 MAX_RETRO_EDITS = 2
+RETRO_MERGED_MAX = 100
 RETRO_EDITS_PER_DAY = 2
 RETRO_EDIT_SCOPE = "retro edits only allowlisted project scopes; global is person-only"
 RETRO_DOC_EDIT_SCOPE = "retro edits only allowlisted projects"
@@ -9811,7 +9812,8 @@ def retro_aggregate(days):
     if not rows:
         fail(f"no host pushed a retro digest from {dates[0]} to {dates[-1]}", 3)
     projects = sorted(registered(home))
-    allow = load_autonomy(load_board(api(home, "GET", "/api/board")[2]))["projects"]
+    board = load_board(api(home, "GET", "/api/board")[2])
+    allow = load_autonomy(board)["projects"]
     pipeline = {}
     for scope in ["global"] + [f"projects/{p}" for p in projects]:
         status, headers, text = api(home, "GET", f"/api/pipeline/{scope}", ok=(200, 404))
@@ -9894,6 +9896,10 @@ def retro_aggregate(days):
         "subagents": subagents, "review_rounds": rounds, "agent_prompts": summed("agent_prompts"),
         "human_msgs": total("human_msgs"), "interrupts": total("interrupts"), "pipeline": pipeline,
         "documents": documents}
+    merged = sorted(({"id": j["id"], "project": j["project"], "title": str(j.get("title", ""))[:120], "merged": j["done"]}
+                     for j in board["jobs"] if j.get("stage") == "merged" and isinstance(j.get("done"), str)
+                     and j["done"][:10] >= dates[0] and j.get("project") in projects), key=lambda m: m["id"])
+    agg["merged"] = sorted(merged, key=lambda m: m["merged"], reverse=True)[:RETRO_MERGED_MAX]
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
@@ -10069,9 +10075,11 @@ def retro_apply_edits(home, run, edits, agg):
     return results
 
 
-def check_finding(f, projects):
-    """The first violation of one retro finding as (field, problem), or None. field is None for the whole finding."""
-    err = check_keys(f, ("title", "category", "count", "cost", "sessions", "root_cause", "fix", "project"))
+def check_finding(f, projects, merged=()):
+    """The first violation of one retro finding as (field, problem), or None. field is None for the whole finding.
+    merged holds the aggregate's merged rows, which an optional fixed_by must name."""
+    err = check_keys(f, ("title", "category", "count", "cost", "sessions", "root_cause", "fix", "project"),
+                     ("fixed_by",))
     if err:
         return None, err
     return next(((where, err) for where, err in (
@@ -10085,13 +10093,44 @@ def check_finding(f, projects):
         ("sessions", check_session_refs(f["sessions"])),
         ("root_cause", check_text(f["root_cause"], 1, 300)),
         ("fix", check_text(f["fix"], 1, 300)),
-        ("project", None if f["project"] in projects else "must be a project in aggregate.json")) if err), None)
+        ("project", None if f["project"] in projects else "must be a project in aggregate.json"),
+        ("fixed_by", None if "fixed_by" not in f or f["fixed_by"] in [m["id"] for m in merged]
+         else "must be a job id from merged in aggregate.json")) if err), None)
 
 
-def render_findings(agg, doc, rejected=(), edits=()):
+def retro_when(value):
+    """value as an aware datetime, or None."""
+    try:
+        when = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+    return when if when.tzinfo else None
+
+
+def retro_session_starts(folder):
+    """Each host/session ref in the run's digest.jsonl mapped to its start. A missing or linked file gives {}."""
+    path = folder / "digest.jsonl"
+    if is_link(path) or not path.is_file():
+        return {}
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    return {f"{r['host']}/{r['session']}": r.get("start") for r in rows}
+
+
+def retro_fixed(f, merged, starts):
+    """(id, merged) of the job in f's fixed_by when every session f cites has a known start before its merge, else None."""
+    if "fixed_by" not in f:
+        return None
+    m = next(m for m in merged if m["id"] == f["fixed_by"])
+    at = retro_when(m["merged"])
+    times = [retro_when(starts.get(r)) for r in f["sessions"]]
+    return (m["id"], m["merged"]) if at and all(t and t < at for t in times) else None
+
+
+def render_findings(agg, doc, rejected=(), edits=(), fixed=(), cards=()):
     """findings.md: the reply's findings ranked by count x cost, built from checked fields only.
     rejected holds (index, field, problem) for dropped findings, listed without their text.
-    edits holds retro_apply_edits rows."""
+    edits holds retro_apply_edits rows. fixed holds (index, finding, job id, merged) for findings a
+    merged job fixed. cards holds (index, problem) for dropped cards."""
     def cell(text):
         return text.replace("|", "\\|")
 
@@ -10099,7 +10138,8 @@ def render_findings(agg, doc, rejected=(), edits=()):
     sessions = sum(h["sessions"] for h in agg["hosts"].values())
     lines = [f"# Retro {doc['run']}", "",
              f"Window {agg['from']} to {agg['to']} · hosts {', '.join(sorted(agg['hosts']))} · "
-             f"{sessions} sessions · ranked by count x cost" + (f" · {len(rejected)} rejected" if rejected else ""),
+             f"{sessions} sessions · ranked by count x cost" + (f" · {len(rejected)} rejected" if rejected else "")
+             + (f" · {len(fixed)} fixed" if fixed else ""),
              "", "| Rank | Finding | Category | Count | Cost each | Score | Target |",
              "| --- | --- | --- | --- | --- | --- | --- |"]
     for n, f in enumerate(ranked, 1):
@@ -10108,11 +10148,22 @@ def render_findings(agg, doc, rejected=(), edits=()):
     for n, f in enumerate(ranked, 1):
         lines += ["", f"## {n}. {f['title']}", "", "Root cause:", "", quote(f["root_cause"]), "", "Fix:", "",
                   quote(f["fix"]), "", "Sessions: " + ", ".join(f"`{r}`" for r in f["sessions"])]
+        if "fixed_by" in f:
+            lines += ["", f"Fixed by: `{f['fixed_by']}`, but a session started after its merge."]
     if rejected:
         lines += ["", "## Rejected findings", "",
                   "Admission dropped these findings. Their text is not shown; read reply.json to see it.", "",
                   "| Finding | Field | Problem |", "| --- | --- | --- |"]
         lines += [f"| {i} | {field or 'whole finding'} | {cell(problem)} |" for i, field, problem in rejected]
+    if fixed:
+        lines += ["", "## Fixed findings", "", "A merged job fixed these before every session they cite started.", "",
+                  "| Finding | Title | Fixed by | Merged |", "| --- | --- | --- | --- |"]
+        lines += [f"| {i} | {cell(f['title'])} | {job} | {cell(at)} |" for i, f, job, at in fixed]
+    if cards:
+        lines += ["", "## Rejected cards", "",
+                  "Admission dropped these cards. Their text is not shown; read reply.json to see it.", "",
+                  "| Card | Problem |", "| --- | --- |"]
+        lines += [f"| {i} | {cell(problem)} |" for i, problem in cards]
     if edits:
         lines += ["", "## Pipeline edits", "", "| Scope | Stage | Result | Summary |", "| --- | --- | --- | --- |"]
         lines += [f"| {e['scope']} | {e['stage']} | {cell(e['result'])} | {cell(e['summary'])} |" for e in edits]
@@ -10130,10 +10181,17 @@ def check_finding_link(link, total):
     return f"must be a finding number from 1 to {total}, or a list of distinct finding numbers"
 
 
-def retro_upload(home, run, agg, kept, cards, links, outcomes):
+def check_retro_card(s, run, i):
+    """The first violation of retro card i as "suggestions[i]...: <problem>", or None."""
+    err = check_suggestions({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": [s]}, "retro")
+    return err and err.replace("suggestions[0]", f"suggestions[{i}]", 1)
+
+
+def retro_upload(home, run, agg, kept, rejected, cards, links, outcomes):
     """PUT the run's checked findings and logged cards as a factory.retro-run/1 record. kept holds each
-    reply finding in order, None where admission rejected it; links holds each card's finding number or
-    list of numbers. Errors print to stderr and never change the exit code."""
+    reply finding in order, None where admission rejected it or a merged job fixed it; rejected counts the
+    findings that failed checks; links holds each card's finding number or list of numbers. Errors print
+    to stderr and never change the exit code."""
     config = home / "config.md"
     device = (frontmatter(config)[0] if config.is_file() else {}).get("device") or ""
     if not HOST_NAME.fullmatch(device):
@@ -10155,7 +10213,7 @@ def retro_upload(home, run, agg, kept, cards, links, outcomes):
         if not ranks:
             loose.append(row)
     record = {"schema": RETRO_RUN_SCHEMA, "run": run, "host": device, "from": agg["from"], "to": agg["to"],
-              "sessions": sum(h["sessions"] for h in agg["hosts"].values()), "rejected": kept.count(None),
+              "sessions": sum(h["sessions"] for h in agg["hosts"].values()), "rejected": rejected,
               "findings": findings, "cards": loose}
     try:
         status, _, text = api(home, "PUT", f"/api/retros/{run}", json.dumps(record), ok=(200, 400, 403, 404, 409, 413),
@@ -10170,7 +10228,7 @@ def retro_upload(home, run, agg, kept, cards, links, outcomes):
 
 def retro_admit(run):
     """Check a retro run's reply, write its ranked findings.md and add its cards to the backlog.
-    A bad finding is dropped and listed; a bad card admits no card."""
+    A bad finding or card is dropped and listed; a finding a merged job fixed is listed apart."""
     home = factory_home()
     folder = home / "retro" / run
     path, agg_path = folder / "reply.json", folder / "aggregate.json"
@@ -10199,41 +10257,67 @@ def retro_admit(run):
     err = check_retro(doc) or (doc["run"] != run and f"run: must be {run}")
     if err:
         fail(f"{path}: {err}; nothing written", 2)
-    checked = [(i, f, check_finding(f, agg["projects"])) for i, f in enumerate(doc["findings"])]
-    kept = [f for _, f, bad in checked if not bad]
+    merged = agg.get("merged", [])
+    checked = [(i, f, check_finding(f, agg["projects"], merged)) for i, f in enumerate(doc["findings"])]
+    passed = [(i, f) for i, f, bad in checked if not bad]
     rejected = [(i, *bad) for i, _, bad in checked if bad]
     where = [f"findings[{i}]" + (f".{field}" if field else "") + f": {problem}" for i, field, problem in rejected]
-    if not kept:
+    if not passed:
         fail(f"{path}: {where[0]}; nothing written", 2)
-    write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected))
+    starts = retro_session_starts(folder)
+    fixes = {i: retro_fixed(f, merged, starts) for i, f in passed}
+    kept = [f for i, f in passed if not fixes[i]]
+    fixed = [(i, f, *fixes[i]) for i, f in passed if fixes[i]]
+    links = [s.pop("finding", None) if isinstance(s, dict) else None for s in doc["suggestions"]]
+    total = len(doc["findings"])
+    clean, bad_cards = [], []
+    for i, (s, link) in enumerate(zip(doc["suggestions"], links)):
+        bad = check_finding_link(link, total)
+        err = check_retro_card(s, run, i) or (bad and f"suggestions[{i}].finding: {bad}")
+        if err:
+            bad_cards.append((i, err))
+        else:
+            clean.append((i, s, link))
+    fixed_by = {i + 1: job for i, _, job, _ in fixed}
+    skipped = {}
+    for i, _, link in clean:
+        nums = [link] if type(link) is int else link
+        if all(n in fixed_by for n in nums):
+            skipped[i] = fixed_by[nums[0]]
+    write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected, fixed=fixed, cards=bad_cards))
     print(f"wrote {findings}")
     for line in where:
         print(f"rejected {line}")
+    for i, _, job, at in fixed:
+        print(f"fixed findings[{i}]: {job} merged {at}")
+    for _, err in bad_cards:
+        print(f"rejected {err}")
+    for i, job in skipped.items():
+        print(f"skipped suggestions[{i}]: finding fixed by {job}")
     if doc.get("edits"):
         results = retro_apply_edits(home, run, doc["edits"], agg)
-        write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected, edits=results))
-    reply_findings = [None if bad else f for _, f, bad in checked]
+        write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected, edits=results, fixed=fixed,
+                                               cards=bad_cards))
+    reply_findings = [f if i in fixes and not fixes[i] else None for i, f in enumerate(doc["findings"])]
     upload = ([], [])
     outcomes = []
     try:
         if not doc["suggestions"]:
             print("no suggestions")
             return
-        links = [s.pop("finding", None) if isinstance(s, dict) else None for s in doc["suggestions"]]
-        total = len(doc["findings"])
-        cards = {"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": doc["suggestions"]}
-        err = check_suggestions(cards, "retro")
-        if err:
-            fail(f"{path}: {err}; findings.md written, no cards admitted", 2)
-        for i, link in enumerate(links):
-            bad = check_finding_link(link, total)
-            if bad:
-                fail(f"{path}: suggestions[{i}].finding: {bad}; findings.md written, no cards admitted", 2)
-        upload = (doc["suggestions"], links)
+        if not clean:
+            fail(f"{path}: {bad_cards[0][1]}; findings.md written, no cards admitted", 2)
+        upload = ([s for _, s, _ in clean], [link for _, _, link in clean])
+        outcomes += [{"fingerprint": fingerprint(s["project"], s), "result": f"finding fixed by {skipped[i]}"}
+                     for i, s, _ in clean if i in skipped]
+        admit = [s for i, s, _ in clean if i not in skipped]
+        if not admit:
+            fail("every clean card's finding is already fixed; findings.md written, no cards admitted", 3)
+        cards = {"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": admit}
         write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
         retro_backlog_admit(cards, outcomes)
     finally:
-        retro_upload(home, run, agg, reply_findings, *upload, outcomes)
+        retro_upload(home, run, agg, reply_findings, len(rejected), *upload, outcomes)
 
 
 def retro_date(d):

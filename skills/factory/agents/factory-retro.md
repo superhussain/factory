@@ -33,6 +33,8 @@ Each finding takes one category:
 | `information-access` | context an agent lacked or loaded in bulk |
 | `permissions` | denials and classifier friction |
 
+`merged` lists jobs merged in the window. Set `fixed_by` when one of them fixed the finding's error. Admit drops it when every session started before the merge.
+
 **Ad-hoc sessions.** A row whose `project` is `ad-hoc` is not factory work. Use only
 its stats and excerpts of at most 160 characters. Never name its project or repo.
 Never name a host's home path or a pairing link.
@@ -51,6 +53,7 @@ around it. Its keys are `schema` (`"factory.retro/1"`), `run` copied as given,
 | `.sessions` | 1 to 5 `host/session` refs from the digest |
 | `.root_cause`, `.fix` | 1 to 300 characters, one line each |
 | `.project` | a slug from `projects` in `aggregate` |
+| `.fixed_by` | optional; the `id` of a job in `merged` in `aggregate` that fixed this error |
 | `suggestions` | 0 to 5 idea cards |
 | `edits` | optional, 0 to 2 stage-note or file edits |
 
@@ -69,7 +72,7 @@ around it. Its keys are `schema` (`"factory.retro/1"`), `run` copied as given,
 | `reason` | 1 to 300 characters |
 | `diagram` | optional mermaid source, 1 to 1500 characters |
 
-Every card carries `finding`, the 1-based number of the reply finding it fixes, or a list of distinct numbers when one card fixes several, such as `[3, 4]` for one shell fix that covers two findings. Retro admit removes it before checking the card, so the card fields above stay the same. A card with no `finding`, or a number outside 1 to the finding count, admits no card.
+Every card carries `finding`, the 1-based number of the reply finding it fixes, or a list of distinct numbers when one card fixes several, such as `[3, 4]` for one shell fix that covers two findings. Retro admit removes it before checking the card, so the card fields above stay the same. A card with no `finding`, or a number outside 1 to the finding count, is dropped; the other cards still go through. A card whose findings were all fixed by a merged job is skipped.
 
 A repo path is relative, at most 200 characters of `A-Z a-z 0-9 _ . / -`, with no
 `..` segment. Every field but diagram is required, and no other key is allowed. Do not add by; retro admit sets it.
