@@ -9339,6 +9339,7 @@ RETRO_RUN_SCHEMA = "factory.retro-run/1"
 RETRO_DOC_EDIT_SCHEMA = "factory.retro-doc-edit/1"
 RETRO_EDIT_CHANGE = 600
 MAX_RETRO_EDITS = 2
+RETRO_MERGED_MAX = 100
 RETRO_EDITS_PER_DAY = 2
 RETRO_EDIT_SCOPE = "retro edits only allowlisted project scopes; global is person-only"
 RETRO_DOC_EDIT_SCOPE = "retro edits only allowlisted projects"
@@ -9811,7 +9812,8 @@ def retro_aggregate(days):
     if not rows:
         fail(f"no host pushed a retro digest from {dates[0]} to {dates[-1]}", 3)
     projects = sorted(registered(home))
-    allow = load_autonomy(load_board(api(home, "GET", "/api/board")[2]))["projects"]
+    board = load_board(api(home, "GET", "/api/board")[2])
+    allow = load_autonomy(board)["projects"]
     pipeline = {}
     for scope in ["global"] + [f"projects/{p}" for p in projects]:
         status, headers, text = api(home, "GET", f"/api/pipeline/{scope}", ok=(200, 404))
@@ -9894,6 +9896,10 @@ def retro_aggregate(days):
         "subagents": subagents, "review_rounds": rounds, "agent_prompts": summed("agent_prompts"),
         "human_msgs": total("human_msgs"), "interrupts": total("interrupts"), "pipeline": pipeline,
         "documents": documents}
+    merged = sorted(({"id": j["id"], "project": j["project"], "title": str(j.get("title", ""))[:120], "merged": j["done"]}
+                     for j in board["jobs"] if j.get("stage") == "merged" and isinstance(j.get("done"), str)
+                     and j["done"][:10] >= dates[0] and j.get("project") in projects), key=lambda m: m["id"])
+    agg["merged"] = sorted(merged, key=lambda m: m["merged"], reverse=True)[:RETRO_MERGED_MAX]
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")

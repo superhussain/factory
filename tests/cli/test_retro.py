@@ -523,8 +523,33 @@ class RetroAggregateTest(RetroWorkerCase):
             "documents": {"factory/project.md": {"version": 3, "text": "---\nrepo: example/factory\nbase: main\ntitle: Factory\n---\n"},
                           "factory/notes.md": {"version": 4, "text": "- Run pnpm test.\n"},
                           "factory/decisions.md": {"version": 0, "text": "# Decisions\n"},
-                          "factory/runbook.md": {"version": 1, "text": "# Runbook\n"}}})
+                          "factory/runbook.md": {"version": 1, "text": "# Runbook\n"}},
+            "merged": []})
         self.assertFalse(any(key.startswith("sample-tools") for key in agg["documents"]))
+
+    def test_aggregate_lists_merged_jobs(self):
+        today = datetime.now().date()
+        inside = f"{today.isoformat()}T12:30:00Z"
+        earlier = f"{(today - timedelta(days=2)).isoformat()}T08:00:00Z"
+        outside = f"{(today - timedelta(days=9)).isoformat()}T08:00:00Z"
+        jobs = [{"id": "1700-guard-the-ls", "project": "factory", "title": "Guard the ls alias " + "x" * 200,
+                 "stage": "merged", "done": inside},
+                {"id": "1650-old-fix", "project": "factory", "title": "Old fix", "stage": "merged", "done": outside},
+                {"id": "1690-closed-job", "project": "factory", "title": "Closed", "stage": "closed", "done": inside},
+                {"id": "1695-elsewhere", "project": "unregistered", "title": "Elsewhere", "stage": "merged",
+                 "done": inside},
+                {"id": "1680-pin-node", "project": "sample-tools", "title": "Pin node", "stage": "merged",
+                 "done": earlier}]
+        routes = self.window(7, {0: {"host-a": [digest_row("host-a", S1)]}})
+        routes["GET /api/board"] = (200, {"updated": "2026-11-12T09:00:00Z", "jobs": jobs,
+                                          "autonomy": {"paused": False, "projects": ["factory"], "self": []}})
+        code, out, err = self.aggregate(routes)
+        self.assertEqual((code, err), (0, ""))
+        agg = json.loads(Path(json.loads(out)["aggregate"]).read_text(encoding="utf-8"))
+        self.assertEqual(agg["merged"], [
+            {"id": "1700-guard-the-ls", "project": "factory", "title": ("Guard the ls alias " + "x" * 200)[:120],
+             "merged": inside},
+            {"id": "1680-pin-node", "project": "sample-tools", "title": "Pin node", "merged": earlier}])
 
     def test_latest_is_the_newest_kept_row(self):
         code, out, err = self.aggregate(self.window(7, {1: {"host-a": [digest_row("host-a", S1)]},
