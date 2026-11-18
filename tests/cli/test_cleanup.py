@@ -20,6 +20,7 @@ class CleanupTest(IsolatedTestCase):
         self.addCleanup(patch.stopall)
         patch.object(factory, "factory_home", return_value=self.home).start()
         patch.object(factory, "worktree_pids", return_value=[]).start()
+        self.read_board = patch.object(factory, "read_board", return_value={"updated": "", "jobs": []}).start()
         self.repo = self.home / "checkout"
         self.repo.mkdir()
         (self.home / "paths.md").write_text(f"---\nsample: {self.repo}\n---\n")
@@ -35,6 +36,14 @@ class CleanupTest(IsolatedTestCase):
     def git(self, cwd, *args):
         return subprocess.run(["git", "-C", str(cwd), *args], check=True,
                               capture_output=True, text=True).stdout.strip()
+
+    def board(self, stage, head):
+        job = {"id": "001-test", "project": "sample", "stage": stage}
+        if stage == "merged":
+            job["github"] = {"merged": "2026-11-18T00:00:00Z", "head": head}
+        else:
+            job["close"] = {"closed": "2026-11-18T00:00:00Z"}
+        self.read_board.return_value = {"updated": "", "jobs": [job]}
 
     def merge(self):
         self.git(self.repo, "merge", "-q", "--no-ff", "-m", "merge", "factory/001-test")
@@ -216,6 +225,38 @@ class CleanupTest(IsolatedTestCase):
         code, out, _ = self.git_raises("rev-parse", OSError())
         self.assertEqual(code, 1)
         self.assertEqual(out["left"], ["branch factory/001-test: could not run git rev-parse"])
+        self.assertTrue(self.branch_exists())
+
+    def test_board_head_deletes_a_merged_branch(self):
+        self.board("merged", self.git(self.wt, "rev-parse", "HEAD"))
+        code, out, _ = self.cleanup()
+        self.assertEqual(code, 0)
+        self.assertEqual(out, {"removed": [f"worktree {self.wt}", "branch factory/001-test"], "left": []})
+        self.assertFalse(self.branch_exists())
+
+    def test_board_head_behind_the_branch_keeps_it(self):
+        self.board("merged", self.git(self.repo, "rev-parse", "main"))
+        code, out, _ = self.cleanup()
+        self.assertEqual(code, 1)
+        self.assertEqual(out["left"], ["branch factory/001-test: not merged into main"])
+        self.assertTrue(self.branch_exists())
+
+    def test_closed_job_ignores_board_head(self):
+        self.board("closed", self.git(self.wt, "rev-parse", "HEAD"))
+        code, out, _ = self.cleanup()
+        self.assertEqual(code, 1)
+        self.assertEqual(out["left"], ["branch factory/001-test: not merged into main"])
+        self.assertTrue(self.branch_exists())
+
+    def test_unreadable_board_keeps_the_local_rule(self):
+        self.read_board.side_effect = lambda home: factory.fail(
+            "can't reach https://factory.invalid/api/board: offline", 5)
+        code, out, err = self.cleanup()
+        self.assertEqual(code, 1)
+        self.assertEqual(out["left"], ["branch factory/001-test: not merged into main"])
+        self.assertEqual(err, "factory.py: cleanup could not read the board (can't reach "
+                              "https://factory.invalid/api/board: offline), so it keeps a branch HEAD "
+                              "does not contain\n")
         self.assertTrue(self.branch_exists())
 
     def test_bad_target_and_unknown_project(self):
