@@ -190,6 +190,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   body[data-view="retros"] #board, body[data-view="retros"] #detail,
   body[data-view="inbox"] #board { display: none; }
   #retros-page { max-width: 1040px; }
+  .retros-runs-heading { font-size: 15px; margin: 24px 0 12px; }
   #audit-flags td a { color: var(--accent); }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #audit-flags td:last-child { min-width: 14em; }
@@ -1153,6 +1154,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
       </table>
     </div>
   </section>
+  <h3 class="retros-runs-heading" id="retros-runs-heading">Retro runs</h3>
   <p class="muted" id="retros-status" role="status"></p>
   <div id="retros-list"></div>
 </div>
