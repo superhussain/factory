@@ -17,6 +17,34 @@ declare const window: {
   addEventListener(type: "message", listener: (event: FrameMessage) => void): void;
   removeEventListener(type: "message", listener: (event: FrameMessage) => void): void;
 };
+declare const localStorage: {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+};
+declare const location: { origin: string };
+
+const SEEN_KEY = "factory-plugin:loaded:";
+
+// True once the board has loaded on this device for this origin, so the screen can skip onboarding.
+export function hasLoadedBefore(origin: string): boolean {
+  if (Platform.OS !== "web") return false;
+  try {
+    return localStorage.getItem(SEEN_KEY + origin) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markLoaded(origin: string): void {
+  if (Platform.OS !== "web") return;
+  try {
+    localStorage.setItem(SEEN_KEY + origin, "1");
+  } catch {}
+}
+
+export function paseoOrigin(): string | null {
+  return Platform.OS === "web" ? location.origin : null;
+}
 
 const SANDBOX =
   "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals";
