@@ -4324,7 +4324,8 @@ function renderBoard() {
   const starredOnly = starView === 'only' && !noneShown;
   const starredLine = starredOnly ? '<p class="filter-empty" id="starred-only">' +
     (shown.some((j) => starred.has(j.id)) ? 'Showing starred jobs only.'
-      : jobs.some((j) => starred.has(j.id)) ? 'The project filter hides every starred job.'
+      : jobs.some((j) => starred.has(j.id)) ? 'The project filter hides every starred job.' +
+        ' <button type="button" class="btn" id="starred-show-projects">Show all projects</button>'
       : 'No starred jobs yet. Star a job with the star button in its job panel.') +
     ' <button type="button" class="btn" id="starred-show-all">Show all jobs</button></p>' : '';
   // The extra auto track lets the filter-empty or starred-only line span the whole board.
@@ -4375,6 +4376,11 @@ function renderBoard() {
 $('board').addEventListener('click', (e) => {
   if (e.target.closest('#starred-show-all')) {
     setStarView('float');
+    $('board').querySelector('.column-toggle')?.focus();
+    return;
+  }
+  if (e.target.closest('#starred-show-projects')) {
+    setHiddenProjects([]);
     $('board').querySelector('.column-toggle')?.focus();
     return;
   }

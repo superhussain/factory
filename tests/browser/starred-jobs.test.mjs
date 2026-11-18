@@ -235,9 +235,17 @@ test("starred jobs", { timeout: 240000 }, async (t) => {
           await page.waitForSelector("#starred-only");
           assert.equal(
             await page.$eval("#starred-only", (el) => el.textContent),
-            "The project filter hides every starred job. Show all jobs",
+            "The project filter hides every starred job. Show all projects Show all jobs",
           );
-          await page.evaluate(() => localStorage.removeItem("factory-projects-hidden"));
+          await activate("#starred-show-projects");
+          await page.waitForSelector('.card[data-id="042-sample-export"]');
+          assert.equal(await stored(page, "factory-projects-hidden"), null);
+          assert.equal(
+            await page.evaluate(
+              () => document.activeElement === document.querySelector(".column-toggle"),
+            ),
+            true,
+          );
         },
       );
 
