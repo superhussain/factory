@@ -147,6 +147,22 @@ test("header icons share one row and match the filter height", { timeout: 120000
           keys: "r",
           svg: [16, 16],
         });
+        // Like Retros and Settings, the Inbox icon marks itself current while its page is open.
+        const current = () => page.$eval("#inbox-link", (el) => el.getAttribute("aria-current"));
+        assert.equal(await current(), null, "inbox current on the board");
+        await page.evaluate(() => (location.hash = "#/inbox"));
+        await page.waitForFunction(() => document.body.dataset.view === "inbox");
+        if (process.env.HEADER_SHOTS) {
+          await (
+            await page.$("header")
+          ).screenshot({
+            path: `${process.env.HEADER_SHOTS}/${process.env.HEADER_SHOT_STAGE || "after"}-header-inbox.png`,
+          });
+        }
+        assert.equal(await current(), "page", "inbox current on #/inbox");
+        await page.evaluate(() => (location.hash = "#/retros"));
+        await page.waitForFunction(() => document.body.dataset.view === "retros");
+        assert.equal(await current(), null, "inbox current on #/retros");
       }
       if (viewport.hasTouch) {
         await page.evaluate(() => (location.hash = "#/settings"));

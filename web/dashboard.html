@@ -2913,6 +2913,7 @@ function renderRoute() {
   if (!retrosOpen) retrosScrolled = '';
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
   if (retrosOpen) $('retros-link').setAttribute('aria-current', 'page'); else $('retros-link').removeAttribute('aria-current');
+  if (inboxOpen) $('inbox-link').setAttribute('aria-current', 'page'); else $('inbox-link').removeAttribute('aria-current');
   for (const name of SETTINGS_SECTIONS) {
     $('settings-' + name).hidden = name !== section;
     if (name === section) $('settings-nav-' + name).setAttribute('aria-current', 'page'); else $('settings-nav-' + name).removeAttribute('aria-current');
