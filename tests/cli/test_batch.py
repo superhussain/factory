@@ -570,6 +570,22 @@ class BatchTest(IsolatedTestCase):
         j = self.job(RIDER)
         self.assertEqual((j["stage"], j["note"]), ("idea", f"unbatched: {LEAD} closed; stacked PR {PR} closed with a comment"))
 
+    def test_board_close_rewrites_two_stacked_notes_in_one_write(self):
+        self.stacked_pr_batch()
+        other, other_pr = "094-sample-csv-date", "https://github.com/sample/app/pull/43"
+        rows = json.loads(self.text)["jobs"]
+        rows.append({**rows[2], "id": other, "pr": other_pr})
+        self.set_jobs(rows)
+        heads = {PR: RIDER, other_pr: other}
+        self.puts = 0
+        with patch.object(factory, "gh_pr",
+                          side_effect=lambda *a: (0, f"OPEN false factory/{heads[a[1]]}\n") if a[0] == "view" else (0, "")):
+            code, out, err = self.close_lead()
+        self.assertEqual((code, self.puts), (0, 2))
+        for job_id, pr in ((RIDER, PR), (other, other_pr)):
+            self.assertEqual(self.job(job_id)["note"],
+                             f"unbatched: {LEAD} closed; stacked PR {pr} closed with a comment")
+
     def test_board_close_notes_merged_stacked_pr(self):
         self.gh_view = (0, f"MERGED false factory/{RIDER}\n")
         self.stacked_pr_batch()

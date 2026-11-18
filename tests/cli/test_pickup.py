@@ -3208,6 +3208,37 @@ class AutoBabysitTest(PickupFixture):
                 self.assertEqual(self.puts(), [])
                 self.assertEqual(self.job("042-sample-export"), self.export(**race))
 
+    def spied_pickup(self):
+        real, counts = factory.auto_babysit_pass, []
+
+        def spy(*args):
+            before = self.puts().count(("PUT", "/api/board"))
+            real(*args)
+            counts.append(self.puts().count(("PUT", "/api/board")) - before)
+        with patch.object(factory, "auto_babysit_pass", side_effect=spy):
+            return self.pickup(), counts
+
+    def test_two_jobs_make_one_board_write(self):
+        self.board["jobs"] = [self.export(), self.export("043-sample-export", n=8)]
+        self.signals = {7: (HEAD, "fix-ci"), 8: (HEAD, "fix-ci")}
+        (code, out, err), counts = self.spied_pickup()
+        self.assertEqual((code, err, counts), (0, "", [1]))
+        self.assertIn("auto-babysat 042-sample-export alpha: PR #7 has a failing required check (1 of 3)\n"
+                      "auto-babysat 043-sample-export alpha: PR #8 has a failing required check (1 of 3)\n", out)
+        for job_id in ("042-sample-export", "043-sample-export"):
+            self.assertEqual(self.job(job_id)["auto_babysit"]["count"], 1)
+
+    def test_the_write_rechecks_each_row(self):
+        self.board["jobs"] = [self.export(), self.export("043-sample-export", n=8)]
+        self.signals = {7: (HEAD, "fix-ci"), 8: (HEAD, "fix-ci")}
+        self.race = {"babysit": {"at": "2026-01-02T12:00:00Z", "by": "dashboard"}}
+        (code, out, err), counts = self.spied_pickup()
+        self.assertEqual((code, err, counts), (0, "", [1]))
+        self.assertNotIn("auto-babysat 042-sample-export", out)
+        self.assertIn("auto-babysat 043-sample-export alpha: PR #8 has a failing required check (1 of 3)\n", out)
+        self.assertNotIn("auto_babysit", self.job("042-sample-export"))
+        self.assertEqual(self.job("043-sample-export")["auto_babysit"]["count"], 1)
+
     def test_board_refuses_the_field(self):
         self.board["jobs"] = [self.export()]
         with patch.object(factory.sys, "stdin", io.StringIO('{"auto_babysit": {"count": 0}}')):
