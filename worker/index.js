@@ -267,6 +267,7 @@ async function projects(env) {
     if (REPO.test(meta.repo || "")) item.repo = meta.repo;
     if (BASE.test(meta.base || "")) item.base = meta.base;
     if (REPO.test(meta.archive || "")) item.archive = meta.archive;
+    if (/^[1-9]$/.test(meta.auto_babysit || "")) item.auto_babysit = Number(meta.auto_babysit);
     out.push(item);
   }
   return reply(JSON.stringify(out), 200, "application/json");

@@ -642,7 +642,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
     #d-title, .detail-head #d-babysit-bar, #d-actions, .detail-head .close { position: relative; z-index: 3; }
     .detail-head .close { background: var(--panel); }
-    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
+    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
@@ -693,7 +693,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="meta" id="d-not-before" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="meta" id="d-not-before" hidden></div><div class="meta" id="d-auto-babysit" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>
@@ -1685,10 +1685,11 @@ function waitingJobs() {
     .sort((a, b) => (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
 }
 
-// The waiting job after the open one, wrapping to the first. null when none waits.
+// The waiting job after the one the hash names, wrapping to the first. The hash is set before hashchange runs, so quick presses step on.
 function nextWaitingJob() {
   const list = waitingJobs();
-  const at = list.findIndex((j) => j.id === openId);
+  const { id } = parseHash();
+  const at = list.findIndex((j) => j.id === id);
   return list[at + 1] ?? list[0] ?? null;
 }
 
@@ -1801,6 +1802,21 @@ function notBefore(j) {
   return { text: 'Not before ' + local, title: 'Pickup leaves this job alone until ' + local + ' (' + at + ').' };
 }
 
+// Mirrors AUTO_BABYSIT_COPY in factory.py. Change both together.
+const AUTO_BABYSIT_COPY = { 'fix-reviews': 'has an open review thread', rebase: 'has a merge conflict', 'fix-ci': 'has a failing required check' };
+
+// The babysit chip and drawer line for a babysit pickup started on its own, or null for a person's babysit.
+function autoBabysit(j) {
+  if (j.babysit?.via !== 'pickup') return null;
+  const copy = Object.hasOwn(AUTO_BABYSIT_COPY, j.babysit.reason) ? AUTO_BABYSIT_COPY[j.babysit.reason] : '';
+  const pr = prLink(j);
+  const count = j.auto_babysit?.count;
+  const cap = projects?.get(j.project)?.autoBabysit || 0;
+  const title = 'Pickup started this babysit' + (copy && pr ? ' because PR #' + pr.n + ' ' + copy : '') + '.' +
+    (Number.isInteger(count) ? ' Automatic babysit ' + count + (cap ? ' of ' + cap : '') + '.' : '');
+  return { text: 'Auto-babysitting', title };
+}
+
 // The held and not-before chips' text as the board last drew it. clockTick redraws once a chip's text would change.
 let heldDrawn = '';
 function heldChipsKey() {
@@ -1835,7 +1851,7 @@ function card(j, inNeeds, archived = false) {
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const dup = duplicateOf(j);
   const dupOnBoard = dup !== null && jobs.some((x) => x.id === dup);
-  const chat = chatDecision(j), held = batchState(j), later = notBefore(j);
+  const chat = chatDecision(j), held = batchState(j), later = notBefore(j), auto = autoBabysit(j);
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
   const tags = (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
     (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
@@ -1844,7 +1860,7 @@ function card(j, inNeeds, archived = false) {
     (chat ? '<span class="chip chat" title="' + esc(chat.title) + '">' + esc(chat.text) + '</span>' : '') +
     (held ? '<span class="chip held" title="' + esc(held.title) + '">' + esc(held.text) + '</span>' : '') +
     (later ? '<span class="chip not-before" title="' + esc(later.title) + '">' + esc(later.text) + '</span>' : '') +
-    (j.babysit?.at ? '<span class="chip" title="' + esc(prLink(j) ? 'An agent is working PR #' + prLink(j).n + ' as the Babysit note asks' : 'An agent is working this PR as the Babysit note asks') + '">Babysitting</span>' : '');
+    (j.babysit?.at ? '<span class="chip" title="' + esc(auto ? auto.title : prLink(j) ? 'An agent is working PR #' + prLink(j).n + ' as the Babysit note asks' : 'An agent is working this PR as the Babysit note asks') + '">' + esc(auto ? auto.text : 'Babysitting') + '</span>' : '');
   const btn = '<button class="card' + (inNeeds ? ' needs-you' : '') + (archived ? ' archived' : '') +
     (j.id === openId ? ' selected' : '') + '" data-id="' + esc(j.id) + '"' + (archived ? '' : ' aria-keyshortcuts="a ."') + '>' +
     '<div class="id line" title="' + esc(j.id) + '"><span class="proj line" title="' + esc(projectName(j)) + '">' + esc(projectName(j)) + '</span><span class="id-text">' + esc(j.id) + '</span></div>' +
@@ -2377,7 +2393,7 @@ async function loadProjects() {
     const r = await fetch('./projects.json', { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status);
     const list = await r.json();
-    projects = new Map(list.map((p) => [p.slug, { title: p.title, repo: p.repo || '', archive: p.archive || '', base: p.base || '', re: p.repo ? prUrl(p.repo) : null, archiveRe: p.archive ? prUrl(p.archive) : null, runRe: p.repo ? runUrl(p.repo) : null }]));
+    projects = new Map(list.map((p) => [p.slug, { title: p.title, repo: p.repo || '', archive: p.archive || '', base: p.base || '', autoBabysit: p.auto_babysit || 0, re: p.repo ? prUrl(p.repo) : null, archiveRe: p.archive ? prUrl(p.archive) : null, runRe: p.repo ? runUrl(p.repo) : null }]));
     loaded = true;
   } catch {}
   $('idea-project-help').textContent = projects === null
@@ -3198,7 +3214,10 @@ async function readJobFile(j, name) {
 // Loads needs.md and answers.md for the open row and draws the form, or says why it cannot.
 async function openInboxAnswer(j) {
   const [f, answersFile] = await Promise.all([readJobFile(j, 'needs.md'), readJobFile(j, 'answers.md')]);
-  if (f) f.sha = await sha12(f.text);
+  if (f) {
+    f.sha = await sha12(f.text);
+    f.triage = await loadNeedsTriage(j, f.sha);
+  }
   if (inboxAnswer?.id !== j.id) return;
   const el = inboxAnswer.el;
   if (!f) {
@@ -3214,7 +3233,7 @@ async function openInboxAnswer(j) {
   inboxAnswer.answersFile = answersFile;
   const questions = parsed.parts.filter((p) => p.kind === 'question');
   el.classList.remove('muted');
-  el.innerHTML = '<form class="inbox-needs" novalidate>' + needsFieldsets(parsed, readNeedsDraft(j, f, questions), '', null) +
+  el.innerHTML = '<form class="inbox-needs" novalidate>' + needsFieldsets(parsed, readNeedsDraft(j, f, questions), '', f.triage) +
     '<p class="muted inbox-ask-storage"' + (needsStorageFailed ? '' : ' hidden') + '>Browser storage is unavailable, so these answers last only while this tab stays open.</p>' +
     '<div class="ask-bar"><button class="btn primary" type="submit">Submit answers</button><span class="inbox-ask-status" role="status"></span></div></form>';
   inboxNeedsBar();
@@ -3254,7 +3273,7 @@ async function submitInboxAnswer() {
   if (!submit.disabled) submit.focus();
   a.el.querySelector('.inbox-ask-status').textContent = result.saved
     ? 'Saved to answers.md, but the board still shows this job waiting on you (' + result.boardError.message + '). Submit again to retry.'
-    : result.message.replace(/ Check the answers tab before you submit again\.$/, '') + ' Use Open job to check answers.md before you submit again.';
+    : result.message.replace(/ (Check the answers tab before you submit again|Reopen the job, then submit again)\.$/, '') + ' Use Open job to check answers.md before you submit again.';
 }
 
 function inboxReport(message) {
@@ -4535,7 +4554,7 @@ function drawerMeta(j) {
     (j.close?.at && !TERMINAL.includes(j.stage) ? ' · closing' : '');
 }
 
-// The chat decision, held and not-before state as drawer lines, so touch, keyboard and screen reader users get what the chip titles say.
+// The chat decision, held, not-before and auto-babysit state as drawer lines, so touch, keyboard and screen reader users get what the chip titles say.
 function renderDrawerStatus(j) {
   const chat = chatDecision(j), held = batchState(j), later = notBefore(j);
   $('d-chat').textContent = chat ? chat.title : '';
@@ -4544,6 +4563,9 @@ function renderDrawerStatus(j) {
   $('d-held').hidden = !held;
   $('d-not-before').textContent = later ? later.title : '';
   $('d-not-before').hidden = !later;
+  const auto = autoBabysit(j);
+  $('d-auto-babysit').textContent = auto ? auto.title : '';
+  $('d-auto-babysit').hidden = !auto;
 }
 
 async function loadArchivedJob(id) {
@@ -5234,7 +5256,7 @@ let swipeSettling = false;
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
 // so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
 // On an idea tab the gallery and file list move into the top of the page, so they scroll with it.
-const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
+const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
 let headCollapse = 0;
 let headShift = 0;
 let headStop = null;
@@ -7929,7 +7951,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-chat', 'd-held', 'd-not-before', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-pipeline', 'd-chat', 'd-held', 'd-not-before', 'd-auto-babysit', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
