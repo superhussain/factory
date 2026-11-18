@@ -183,8 +183,8 @@ Each run, in order:
   a failed push prints one warning and the run goes on.
 
 Pickup skips an idea held by a live claim, and any job whose `not_before` is still
-in the future. The board `needs` field is only for input from a human. A coordinator
-that parks an idea until a later time sets `not_before`, never `needs`, and does not
+in the future. The board `needs` field is only for input from a human. A session
+that parks a job until a later time sets `not_before`, never `needs`, and does not
 keep a claim on it.
 
 ## Configure

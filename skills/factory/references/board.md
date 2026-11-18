@@ -20,7 +20,7 @@
   "tracer": { "follow": true, "gather": true, "feature": "factory-42", "url": "set only by factory.py after a Tracer mirror", "scope": "gathering, approved or declined; set only by factory.py", "building": "true only while a Tracer build agent holds the feature; set by pickup", "stopped": "true once factory.py asked Tracer to stop the build scope approval queued; set only by factory.py", "tasks": "up to 30 {id, title, status} from the Tracer feature; set by pickup once Tracer builds the job" },
   "note": "optional one-line status, e.g. escalation reason",
   "needs": "optional: what only a human can do, e.g. approve spec.md",
-  "not_before": "optional UTC time; pickup starts the job only after it, e.g. 2026-11-17T09:00:00Z",
+  "not_before": "optional UTC time; pickup and stuck leave the job alone until it, e.g. 2026-11-17T09:00:00Z",
   "port": "optional dev-server port or block the builder holds, e.g. 8130-8139",
   "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | depends-on | batched-into (set only by factory.py batch; dropped by the lead's close or merge, or the dashboard's Remove from batch while the lead is at spec)" }],
   "stacked": "true on the one rider that ships as a PR stacked on its lead's PR; set only by factory.py stack",
@@ -60,9 +60,10 @@ device build. Jobs whose `runs` match rode the same build. Both are optional, an
 `factory.py` rejects a malformed one.
 `pipeline` holds the pipeline configuration versions the job last ran under, from
 `factory.py pipeline`. `factory.py` rejects a malformed one.
-`not_before` holds a job back from pickup and `ideas` until that UTC time. `{"not_before": null}`
-clears it, and a past time has no effect. Setting it on an idea releases the writer's own claim,
-so a coordinator parks an idea with one board write and keeps no claim on it.
+`not_before` holds a job back from pickup, `ideas` and `stuck` until that UTC time, and the job
+does not count toward `max_inflight`. `{"not_before": null}` clears it, and a past time has no
+effect. Setting it on an open job releases the writer's own claim, so a session parks a job with
+one board write and ends. `stuck` resumes it after that time.
 `backlog` is set only on jobs decided from the Backlog column or `backlog decide`. It holds
 the backlog line, the decision, when it was made, and any notes typed with the decision.
 Approve also appends the notes to `idea`.
