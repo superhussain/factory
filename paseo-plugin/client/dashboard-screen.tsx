@@ -29,12 +29,13 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
     const [stalled, setStalled] = useState(false);
     const origin =
       settings.status === "ready" ? parseDashboardOrigin(settings.values.origin) : null;
-    const [src, setSrc] = useState<string | null>(null);
+    const [saved, setSaved] = useState<string | null>(null);
     useEffect(() => {
-      if (origin) setSrc(startUrl(origin, params.job, savedLocation(origin)));
+      if (origin) setSaved(startUrl(origin, params.job, savedLocation(origin)));
     }, [origin, params.job]);
+    const src = origin && saved?.startsWith(origin + "/") ? saved : null;
     const reloadFrame = () => {
-      if (origin) setSrc(frameUrl(origin, savedLocation(origin)));
+      if (origin) setSaved(frameUrl(origin, savedLocation(origin)));
       setLoad((n) => n + 1);
     };
     const reloadRef = useRef(reloadFrame);

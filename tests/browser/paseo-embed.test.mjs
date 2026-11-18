@@ -197,9 +197,7 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
 
     await t.test("location posts", async () => {
       const locations = () =>
-        page.evaluate(() =>
-          window.received.filter((m) => m?.type === "factory-embed-location").map((m) => m),
-        );
+        page.evaluate(() => window.received.filter((m) => m?.type === "factory-embed-location"));
       const waitFor = (hash) =>
         page.waitForFunction(
           (h) =>
