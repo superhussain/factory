@@ -202,6 +202,15 @@ class NextDependsTests(IsolatedTestCase):
         self.assertEqual(err, f'skipping "{STORE}": it depends on "{PARSE}", which is still unchecked\n')
         self.assertEqual((self.claims[0][0], self.board_reads), ("parse-recipe-urls", 0))
 
+    def test_control_characters_print_as_question_marks(self):
+        store, parse = "sample: Store\x1b[2J recipes", "sample: Parse\x07 recipe URLs"
+        self.backlog = f"- [ ] {store}\n  Depends on: {parse}\n- [ ] {parse}\n"
+        self.jobs = []
+        code, _, err = invoke(self.module, ["next"])
+        self.assertEqual(code, 0)
+        self.assertEqual(err, 'skipping "sample: Store?[2J recipes": it depends on "sample: Parse? recipe URLs", '
+                              "which is still unchecked\n")
+
     def test_waits_while_the_prerequisite_job_is_open(self):
         code, out, err = self.next(f"- [x] {PARSE} (052-parse-recipe-urls)", "build")
         self.assertEqual((code, out), (3, ""))

@@ -639,6 +639,13 @@ class BatchTest(IsolatedTestCase):
                 self.assertEqual(code, 0)
                 self.assertNotIn(key, self.ids(out, "candidates"))
 
+    def test_refusal_prints_control_characters_as_question_marks(self):
+        store, parse = "sample: Store\x1b[2J recipes", "sample: Parse\x07 recipe URLs"
+        self.backlog = f"# Backlog\n- [ ] {parse}\n- [ ] {store}\n  Depends on: {parse}\n"
+        key = f"backlog:{factory.backlog_key('- [ ] ' + store)}"
+        self.refuse(2, f'cannot batch {key}: it depends on "sample: Parse? recipe URLs", which is still unchecked. '
+                       "Nothing was written.", TARGET, key)
+
     def test_attaches_when_the_prerequisite_rides_with_the_lead_or_merged(self):
         for stage, extra in (("spec", {"refs": [REF]}), ("merged", {})):
             with self.subTest(stage=stage):

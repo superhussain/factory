@@ -1300,7 +1300,8 @@ def first_item(text, projects, paths, skipped, open_ids=frozenset):
             return line, slug, feature, suffix_refs(BACKLOG_SUFFIX.search(feature)) + refs
         if line not in skipped:
             skipped.add(line)
-            print(f'skipping "{slug}: {feature}": {why}', file=sys.stderr)
+            shown = AUDIT_CONTROL.sub("?", f'"{slug}: {feature}": {why}')
+            print(f"skipping {shown}", file=sys.stderr)
     return None
 
 
@@ -2440,7 +2441,7 @@ def batch_cmd(target, *idea_ids):
             for pick in line_picks:
                 depends[pick], why = backlog_waits(backlog_text, lines[pick][4], open_ids, together)
                 if why:
-                    fail(f"cannot batch {pick}: {why}. Nothing was written.", 2)
+                    fail(AUDIT_CONTROL.sub("?", f"cannot batch {pick}: {why}. Nothing was written."), 2)
             picked = []
             for idea_id in job_picks:
                 j = next((x for x in data["jobs"] if x.get("id") == idea_id), None)
@@ -2448,7 +2449,7 @@ def batch_cmd(target, *idea_ids):
                     fail(f"no job {idea_id} on the board. Nothing was written.", 4)
                 problem = batch_problem(data, j, slug, device, session, minutes)
                 if problem:
-                    fail(f"cannot batch {idea_id}: {problem}. Nothing was written.", 2)
+                    fail(AUDIT_CONTROL.sub("?", f"cannot batch {idea_id}: {problem}. Nothing was written."), 2)
                 picked.append(j)
             for j in picked:
                 j.pop("claim", None)
