@@ -18,15 +18,19 @@ export function findRuntime(home = homedir()): string | null {
   return null;
 }
 
+// On Windows `python3` is often the Microsoft Store stub, so fall back to the `py` launcher.
+const PYTHONS = process.platform === "win32" ? [["python3"], ["py", "-3"]] : [["python3"]];
+
 export async function readInbox(runtime: string): Promise<InboxEvent | null> {
-  try {
-    const { stdout } = await execCommand("python3", [runtime, "inbox"], {
-      timeout: 30_000,
-      maxBuffer: 1_048_576,
-    });
-    const parsed = factoryInbox.event.safeParse(JSON.parse(stdout));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
+  for (const [command, ...args] of PYTHONS) {
+    try {
+      const { stdout } = await execCommand(command, [...args, runtime, "inbox"], {
+        timeout: 30_000,
+        maxBuffer: 1_048_576,
+      });
+      const parsed = factoryInbox.event.safeParse(JSON.parse(stdout));
+      return parsed.success ? parsed.data : null;
+    } catch {}
   }
+  return null;
 }
