@@ -87,7 +87,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   /* Touch screens get a 44px tap target. Mouse layouts keep the compact button. */
   @media (pointer: coarse) { .btn:not(.icon) { min-height: 44px; } }
   @media (pointer: coarse) { .tracer-tasks summary, .agent-runs summary { line-height: 44px; } }
-  @media (pointer: coarse) { .agent-runs td a { display: inline-block; line-height: 44px; } }
+  @media (pointer: coarse) { .agent-runs td a, #audit-flags td a { display: inline-block; line-height: 44px; } }
   /* --panel is white in light mode and near black in dark, so the label keeps contrast on either accent. */
   .ask { border: 1px solid var(--line); border-radius: 12px; margin: 16px 0; padding: 12px 16px; }
   .ask legend { font-weight: 600; padding: 0 6px; }
@@ -190,7 +190,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   body[data-view="retros"] #board, body[data-view="retros"] #detail,
   body[data-view="inbox"] #board, body[data-view="inbox"] #detail { display: none; }
   #retros-page { max-width: 1040px; }
-  #audit-flags .table-wrap { overflow-x: auto; }
+  #audit-flags td a { color: var(--accent); }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #audit-flags td:last-child { min-width: 14em; }
   #inbox-page { max-width: 1040px; }
@@ -1139,7 +1139,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
   <section class="settings-section" id="audit-flags" aria-labelledby="audit-flags-heading">
     <h3 id="audit-flags-heading">Red flags</h3>
     <p class="muted" id="audit-flags-status" role="status"></p>
-    <div class="table-wrap" id="audit-flags-wrap" hidden>
+    <div class="reference-scroll" id="audit-flags-wrap" tabindex="0" role="region" aria-label="Red flags" hidden>
       <table class="reference-table">
         <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Job</th><th scope="col">Host</th><th scope="col">Agent</th><th scope="col">Tool</th><th scope="col">Flags</th><th scope="col">Target</th></tr></thead>
         <tbody id="audit-flags-rows"></tbody>
