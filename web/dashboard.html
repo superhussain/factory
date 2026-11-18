@@ -166,6 +166,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .btn.icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .btn.icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .btn.icon .teeth { stroke-width: 2.5; stroke-linecap: butt; }
+  #inbox-link { position: relative; }
+  .icon-count { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: var(--panel); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; }
+  /* The inbox lists the same jobs, so the next waiting button gives up its place on a phone. */
+  @media (max-width: 480px) { #next-waiting { display: none; } }
   #filter { height: var(--icon-size); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   #filter svg { flex: none; }
   #filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -678,6 +682,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     <button class="btn icon" id="next-waiting" aria-label="Next waiting job" title="Next waiting job (W)" aria-keyshortcuts="w" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9.5V13h11V9.5L12 4H4z"/><path d="M8 2.5v5M6 5.5l2 2 2-2"/></svg></button>
     <button class="btn icon" id="new-idea" aria-label="New idea" title="New idea (N)" aria-keyshortcuts="n" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2c.4.3.6.7.6 1.2V12h4v-1.1c0-.5.2-.9.6-1.2A4.5 4.5 0 0 0 8 1.5zM6.5 14.5h3"/></svg></button>
     <button class="btn icon" id="job-jump" aria-label="Jump to job" title="Jump to job (J, /, ⌘K or Ctrl+K)" aria-keyshortcuts="j / Meta+K Control+K"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 4 4"/></svg></button>
+    <a class="btn icon" id="inbox-link" href="#/inbox" aria-label="Inbox" title="Inbox (I)" aria-keyshortcuts="i"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9.5V13h11V9.5L12 4H4z"/></svg><span class="icon-count" id="inbox-count" aria-hidden="true" hidden></span></a>
     <a class="btn icon" id="retros-link" href="#/retros" aria-label="Retros" title="Retros (R)" aria-keyshortcuts="r"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2 2v2.6h2.6"/><path d="M8 5v3l2 1.5"/></svg></a>
     <a class="btn icon" id="settings-link" href="#/settings" aria-label="Settings" title="Settings (S)" aria-keyshortcuts="s"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="4.5"/><path class="teeth" d="M8 1v3M8 12v3M1 8h3M12 8h3M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12"/></svg></a>
   </div>
@@ -4124,6 +4129,8 @@ function renderBoard() {
     $('board').style.removeProperty('--cols');
     if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = BASE_TITLE;
     syncAppBadge(0);
+    $('inbox-count').hidden = true;
+    $('inbox-link').setAttribute('aria-label', 'Inbox');
     $('next-waiting').hidden = true;
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
@@ -4145,6 +4152,9 @@ function renderBoard() {
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
+  $('inbox-count').textContent = waiting.length > 99 ? '99+' : String(waiting.length);
+  $('inbox-count').hidden = !waiting.length;
+  $('inbox-link').setAttribute('aria-label', waiting.length ? 'Inbox, ' + waiting.length + ' waiting' : 'Inbox');
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
   // The extra auto track lets the filter-empty line span the whole board.

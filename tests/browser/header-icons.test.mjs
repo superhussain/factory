@@ -1,4 +1,5 @@
-// The five header icon buttons stay on one row and match the project filter height.
+// The header icon buttons stay on one row and match the project filter height. At 480 px and
+// below the next waiting button hides, so the inbox icon fits with the other four.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -53,9 +54,16 @@ test("header icons share one row and match the filter height", { timeout: 120000
       await page.waitForSelector("#new-idea:not([hidden])");
       await page.waitForSelector("#next-waiting:not([hidden])");
       await page.waitForSelector(".updated-word");
-      const header = await page.evaluate(() => {
+      const icons = [
+        ...(viewport.width > 480 ? ["next-waiting"] : []),
+        "new-idea",
+        "job-jump",
+        "inbox-link",
+        "retros-link",
+        "settings-link",
+      ];
+      const header = await page.evaluate((icons) => {
         const rect = (id) => document.getElementById(id).getBoundingClientRect();
-        const icons = ["next-waiting", "new-idea", "job-jump", "retros-link", "settings-link"];
         const el = document.querySelector("header");
         const boxes = [...el.children]
           .map((child) => child.getBoundingClientRect())
@@ -81,8 +89,12 @@ test("header icons share one row and match the filter height", { timeout: 120000
           })(),
           text: document.getElementById("updated").textContent,
           order: getComputedStyle(document.querySelector(".header-actions")).order,
+          nextShown: document.getElementById("next-waiting").getClientRects().length > 0,
+          count: document.getElementById("inbox-count").textContent,
+          countShown: !document.getElementById("inbox-count").hidden,
+          inboxLabel: document.getElementById("inbox-link").getAttribute("aria-label"),
         };
-      });
+      }, icons);
       const shots = { "320px": "320", "700px touch": "700-touch", "390px touch": "390-touch" };
       if (process.env.HEADER_SHOTS && shots[label]) {
         await (
@@ -92,7 +104,13 @@ test("header icons share one row and match the filter height", { timeout: 120000
         });
       }
       assert.equal(new Set(header.tops).size, 1, `icon tops at ${label}: ${header.tops}`);
-      assert.deepEqual(header.heights, [size, size, size, size, size, size], `heights at ${label}`);
+      assert.deepEqual(header.heights, Array(icons.length + 1).fill(size), `heights at ${label}`);
+      assert.equal(header.nextShown, viewport.width > 480, `next waiting shown at ${label}`);
+      assert.deepEqual(
+        [header.count, header.countShown, header.inboxLabel],
+        ["1", true, "Inbox, 1 waiting"],
+        `inbox count at ${label}`,
+      );
       assert.ok(
         header.scrollWidth <= header.clientWidth,
         `header scrolls at ${label}: ${header.scrollWidth} > ${header.clientWidth}`,
@@ -122,7 +140,7 @@ test("header icons share one row and match the filter height", { timeout: 120000
         }));
         assert.deepEqual(link, {
           next: "settings-link",
-          previous: "job-jump",
+          previous: "inbox-link",
           href: "#/retros",
           label: "Retros",
           title: "Retros (R)",
