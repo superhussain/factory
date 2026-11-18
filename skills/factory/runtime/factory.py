@@ -2400,7 +2400,8 @@ def batch_problem(data, j, slug, device, session, minutes):
 def batch_cmd(target, *idea_ids):
     """List the project's ideas and unchecked backlog lines that can ride in a job at spec, or attach
     up to MAX_RIDERS of them as riders. A backlog line becomes a new rider job and is checked off with
-    its id. Prints {"lead", "riders", "candidates"} as JSON."""
+    its id. Prints {"lead", "riders", "candidates"} as JSON, and one skipping line on stderr per backlog line that
+    waits on a Depends on: prerequisite."""
     home, slug, lead_id = r2_target(target, True)
     device, session, minutes = holder(home)
     idea_ids = list(dict.fromkeys(idea_ids))
@@ -2472,14 +2473,21 @@ def batch_cmd(target, *idea_ids):
         candidates = [entry(j) for j in data["jobs"]
                       if j.get("id") != lead_id and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
                       and batch_problem(data, j, slug, device, session, minutes) is None]
-        candidates += [v[3] for k, v in lines.items() if k not in line_picks
-                       and backlog_waits(backlog_text, v[4], open_ids, together)[1] is None]
+        waiting = []
+        for k, v in lines.items():
+            if k in line_picks:
+                continue
+            why = backlog_waits(backlog_text, v[4], open_ids, together)[1]
+            if why is None:
+                candidates.append(v[3])
+            else:
+                waiting.append(f'skipping {k} "{v[0][6:].rstrip()}": {why}')
         if alone:
-            candidates = []
+            candidates, waiting = [], []
         result = {"lead": lead_id, "riders": [entry(j) for j in riders_of(data, lead_id)],
                   "candidates": candidates[:MAX_CANDIDATES]}
-        return (dump_board(data) if idea_ids else None), (result, made)
-    result, made = cas(home, "/api/board", change)
+        return (dump_board(data) if idea_ids else None), (result, made, waiting)
+    result, made, waiting = cas(home, "/api/board", change)
 
     def mark(text):
         rows, marked = (text or "").split("\n"), set()
@@ -2519,6 +2527,8 @@ def batch_cmd(target, *idea_ids):
             print(f"factory.py: {pick} changed before batch could check it off; removed {rider_id}",
                   file=sys.stderr)
             result["riders"] = [r for r in result["riders"] if r["id"] != rider_id]
+    for line in waiting:
+        print(AUDIT_CONTROL.sub("?", line), file=sys.stderr)
     print(json.dumps(result, indent=2))
 
 
