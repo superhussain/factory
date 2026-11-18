@@ -189,6 +189,15 @@ The board appears inside Paseo on web and desktop only. On iOS and Android the s
 the dashboard in the browser instead. A browser that blocks third-party cookies cannot show the
 frame; the screen then offers **Sign in** and **Reload**. The first time, the screen shows a card with three sign-in steps; once the board has loaded on that device, it shows a short card instead. Sign in opens the dashboard in a small popup inside Paseo, so the desktop app signs in with its own cookies. When the board loads there, the popup closes and the frame reloads.
 
+### Inbox badge
+
+The Factory row shows the same number as the dashboard's Inbox badge: jobs waiting on you plus
+unchecked backlog lines, across all projects. The plugin runs `factory.py inbox` from the installed
+factory skill (`~/.claude/skills/factory` or `~/.agents/skills/factory`) once a minute, so the
+badge can trail the dashboard by up to a minute. It ignores the dashboard's per-browser project
+filter. A host without the factory skill, or with a skill older than `factory.py inbox`, shows no
+badge.
+
 ## Tracer mirror
 
 An optional, one-way mirror shows a job's tasks, progress and review outcomes in a Tracer instance. It is off until Settings, Pipeline, Tracer integration is On and `<home>/tracer.json` lists the project. Delete the entry to turn it off.

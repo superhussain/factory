@@ -20,8 +20,10 @@ icon usage, theming, and responsive layout. Flag new one-off styles where an
 existing component or class fits. If the change has no visual surface, say so and
 pass.
 
-View every image in `<job folder>/` with the Read tool, which shows images. Return
-CHANGES if the diff touches UI and build.md embeds no images, or if they don't show
+List the job folder with `ls <job folder>`, then view each image the listing shows
+with the Read tool, which shows images, by its exact name. Never use a glob such as
+`<job folder>/*.png`, because zsh stops with `no matches found` when nothing matches.
+Return CHANGES if the diff touches UI and build.md embeds no images, or if they don't show
 what build.md claims. You may save a cropped image next to your review file in the
 round folder to point at a finding.
 

@@ -316,7 +316,7 @@
     },
     {
       "id": "IdeaTest",
-      "count": 19,
+      "count": 20,
       "methods": [
         "test_ideas_skip_unassigned_without_consuming_limit",
         "test_ideas_only_unassigned_writes_nothing",
@@ -329,6 +329,7 @@
         "test_ideas_max_inflight_counts_fresh_claim_from_any_holder",
         "test_ideas_max_inflight_ignores_stale_load",
         "test_ideas_max_inflight_skips_escalated_pr_open",
+        "test_ideas_max_inflight_skips_a_job_before_not_before",
         "test_ideas_max_inflight_and_limit_compose_in_either_order",
         "test_ideas_without_max_inflight_claims_despite_fresh_inflight",
         "test_ideas_max_inflight_conflict_recounts_and_puts_once",

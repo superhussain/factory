@@ -105,6 +105,11 @@ class AgentRecordTest(BoardFixture):
         self.assertEqual(self.record("factory-review-code", "claude", "native", "claude-opus-5-5")[0], 0)
         self.assertEqual([row["role"] for row in self.job()["agents"]], ["build", "review-code"])
 
+    def test_accepts_subagent_via(self):
+        code, out, err = self.record("review-code", "claude", "subagent", "claude-opus-5-5", "medium")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([json.loads(out)["via"], self.job()["agents"][0]["via"]], ["native", "native"])
+
     def test_refuses(self):
         roles = "orchestrator, spec, build, review-security, review-ux, review-ui, review-code, approve"
         for args, problem in (
@@ -113,8 +118,6 @@ class AgentRecordTest(BoardFixture):
                  'harness "open code" must be 1 to 64 letters, digits, _ or -'),
                 (("build", "h" * 65, "native", "gpt-6.1-sol"),
                  f'harness "{"h" * 65}" must be 1 to 64 letters, digits, _ or -'),
-                (("build", "opencode", "subagent", "gpt-6.1-sol"),
-                 'via "subagent" is not one of native, paseo, launcher, general, direct'),
                 (("build", "opencode", "native", "gpt 6.1"),
                  'model "gpt 6.1" must be 1 to 200 letters, digits or _ . / : @ [ ] -'),
                 (("build", "opencode", "native", "gpt-6.1-sol", "huge"),

@@ -58,6 +58,9 @@
                                             line, write each verdict to the board's rounds entry as it
                                             lands, print one JSON line (default and max 540 seconds); runs
                                             hold first
+  factory.py verdict <project-slug>/<job-id> <round> <reviewer> <verdict>
+                                            set one reviewer's verdict in the board's rounds entry, print it
+                                            as JSON
   factory.py checks <project-slug>/<job-id> [--timeout S]
                                             print the job PR's checks as <bucket> <name> once none is
                                             pending, checking every 10 seconds for up to S seconds
@@ -111,6 +114,7 @@
   factory.py worktree <project-slug>/<job-id>
                                             create or fast-forward the job's worktree from origin
   factory.py job <job-id>                   print one job's board entry as JSON
+  factory.py inbox                          print the dashboard Inbox count across all projects as JSON
   factory.py builds <project-slug>          print the project's build queue and in-flight jobs as JSON
   factory.py stuck [--limit N]              claim up to N (default 1) jobs a dead session left mid-loop,
                                             print them as JSON for the resume schedule
@@ -899,7 +903,7 @@ def board(factory, job_id):
     board_write(factory, job_id, patch)
 
 
-def board_write(factory, job_id, patch, show=True):
+def board_write(factory, job_id, patch, show=True, verdict=None):
     if patch.get("claim") is not None:
         fail('only hold sets a claim. {"claim": null} releases it', 2)
     if "paseo" in patch:
@@ -967,6 +971,15 @@ def board_write(factory, job_id, patch, show=True):
         data = load_board(text)
         before = load_board(text)
         found = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if verdict:
+            slug, n, reviewer, value = verdict
+            if found is not None and found.get("project") != slug:
+                fail(f"{job_id} belongs to {found.get('project')}, not {slug}", 2)
+            rounds = (found or {}).get("rounds")
+            if not isinstance(rounds, list) or len(rounds) < n or not isinstance(rounds[n - 1], dict):
+                fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
+            patch["rounds"] = list(rounds)
+            patch["rounds"][n - 1] = {**rounds[n - 1], reviewer: value}
         if found is None:
             m = re.match(r"(\d{3,})-", job_id)
             floor = archive_floor(data)
@@ -1011,7 +1024,7 @@ def board_write(factory, job_id, patch, show=True):
             job.pop("priority", None)
         if patch.get("stage") in RELEASE:
             job.pop("claim", None)
-        elif isinstance(patch.get("not_before"), str) and job.get("stage") == IDEA \
+        elif isinstance(patch.get("not_before"), str) and job.get("stage") not in TERMINAL \
                 and mine(job.get("claim") or {}, device, session):
             job.pop("claim")
         elif mine(job.get("claim") or {}, device, session):
@@ -2274,8 +2287,8 @@ def backlog_cmd(sub, item, *rest):
 
 def inflight_count(data, project, minutes, device=None):
     """Fresh in-flight jobs on the board: of one project, or of all when project is None,
-    and only this device's claims when device is set. A job waiting on a human, or handed to a
-    babysit session, never counts."""
+    and only this device's claims when device is set. A job waiting on a human, handed to a
+    babysit session, or parked by not_before never counts."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     count = 0
     for j in data["jobs"]:
@@ -2283,7 +2296,7 @@ def inflight_count(data, project, minutes, device=None):
             continue
         if device and (j.get("claim") or {}).get("device") != device:
             continue
-        if gated(j) or lead_of(j) or babysitting(j):
+        if gated(j) or lead_of(j) or babysitting(j) or waiting_until(j):
             continue
         stage = j.get("stage")
         if stage == IDEA or tracer_start(j):
@@ -3466,6 +3479,22 @@ def waits_on_you(j):
         return False
     return j.get("stage") == "needs-human" or isinstance(j.get("needs"), str) and bool(j["needs"].strip()) \
         or j.get("stage") == "pr-open" and escalated(j)
+
+
+def inbox_count(jobs, backlog_text):
+    """The dashboard Inbox badge's number with every project shown: jobs waiting on a person plus
+    unchecked backlog lines. Mirrors inboxItems in web/dashboard.html. tests/fixtures/inbox-count.json
+    pins both. The dashboard's \\w is ASCII only, so a non-ASCII slug never counts."""
+    return sum(1 for j in jobs if waits_on_you(j)) + \
+        sum(1 for _, slug, _, _ in unchecked_lines(backlog_text) if slug.isascii())
+
+
+def inbox():
+    """Print the dashboard Inbox count across all projects as JSON."""
+    home = factory_home()
+    jobs = read_board(home)["jobs"]
+    status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
+    print(json.dumps({"count": inbox_count(jobs, text if status == 200 else "")}))
 
 
 def needs_answers_markdown(questions, picks, sha12, stamp, device, quote):
@@ -5421,12 +5450,13 @@ def gh_cli(*args, stderr=False):
 
 
 def pr_states(repo, numbers, device):
-    """The states of repo's pull requests from one gh api graphql call: ({number: state}, None),
-    or (None, why). A pull request GitHub returns null for is left out. A non-zero exit whose answer
-    still holds data.repository, as a partial GraphQL error gives, returns the states that resolved."""
+    """The states and head commits of repo's pull requests from one gh api graphql call:
+    ({number: (state, head oid)}, None), or (None, why). A pull request GitHub returns null for is left out.
+    A non-zero exit whose answer still holds data.repository, as a partial GraphQL error gives, returns the
+    states that resolved."""
     owner, name = repo.split("/")
     q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
-         + "".join(f"p{n}: pullRequest(number: {n}) {{ state }} " for n in numbers) + "} }")
+         + "".join(f"p{n}: pullRequest(number: {n}) {{ state headRefOid }} " for n in numbers) + "} }")
     r = gh_cli("api", "graphql", "-f", "query=" + q)
     if r is None:
         return None, f"gh is not installed on {device}"
@@ -5441,7 +5471,8 @@ def pr_states(repo, numbers, device):
             return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
         return None, ("gh api graphql returned no repository "
                       f"(check the project file's repo and gh auth status on {device})")
-    return {n: found[f"p{n}"]["state"] for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
+    return {n: (found[f"p{n}"]["state"], found[f"p{n}"].get("headRefOid"))
+            for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
 def pr_signals(repo, numbers, device):
@@ -5687,7 +5718,7 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
             print(f"factory.py: pickup skips the PR sync for {repo}: {why}", file=sys.stderr)
             continue
         for j, n in jobs:
-            state = states.get(n)
+            state, head = states.get(n, (None, None))
             if state not in ("MERGED", "CLOSED"):
                 continue
             line = f"{j['id']} {j['project']}: " + (MERGED_NOTE if state == "MERGED" else GITHUB_CLOSE_REASON)
@@ -5696,7 +5727,9 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
                 continue
             if state == "MERGED":
                 patch = {"stage": "merged", "needs": None, "automerge": None, "babysit": None, "claim": None,
-                         "note": MERGED_NOTE, "github": {"merged": now()}}
+                         "note": MERGED_NOTE,
+                         "github": {"merged": now(),
+                                    **({"head": head} if isinstance(head, str) and COMMIT.fullmatch(head) else {})}}
             else:
                 patch = {"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "via": "github"}, "babysit": None}
             pending.append((j, patch, line))
@@ -5949,7 +5982,9 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
             print(f"would clean up {job_id} {project}")
             continue
         try:
-            _, left = cleanup_job(repo, wt, branch, drop_pushed=True)
+            merged_head = (c.get("head") if key == "github" and isinstance(c.get("head"), str)
+                           and COMMIT.fullmatch(c["head"]) else None)
+            _, left = cleanup_job(repo, wt, branch, drop_pushed=True, merged_head=merged_head)
         except Exception as e:
             print(f"factory.py: pickup could not clean up {job_id} {project}: {e}", file=sys.stderr)
             continue
@@ -6345,6 +6380,7 @@ ROLE_ALIASES = {"builder": "build", "factory-builder": "build",
                 "approver": "approve", "factory-approver": "approve",
                 "factory-review-security": "review-security", "factory-review-ux": "review-ux",
                 "factory-review-ui": "review-ui", "factory-review-code": "review-code"}
+VIA_ALIASES = {"subagent": "native"}
 PROMPT_USAGE = "usage: prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]"
 PROMPT_HELP = ("roles and flags: spec | approve | build [--round N] [--port P] | review-security, review-ux, "
                "review-ui or review-code --round N. Every role also takes --out <path>.\n"
@@ -6620,13 +6656,13 @@ def review_plan_cmd(target, round_text):
                       "reason": reason}))
 
 
-WAIT_ARTIFACT = re.compile(r"spec\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
+WAIT_ARTIFACT = re.compile(r"spec\.md|spec-evidence\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
 WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]"
 
 
 def wait_valid(artifact, line):
     """True when line is a finished first line for artifact."""
-    if artifact in ("spec.md", "build.md"):
+    if artifact in ("spec.md", "spec-evidence.md", "build.md"):
         return bool(line.strip())
     if artifact == "decision.md":
         return line in ("APPROVE", "ESCALATE", "CHANGES") or line.startswith("CLOSED: ")
@@ -6810,6 +6846,22 @@ def round_wait_cmd(target, *args):
                           "files": {a: lines.get(a) for a in artifacts.values()},
                           "elapsed": int(time.monotonic() - start)}))
         return
+
+
+VERDICT_USAGE = "usage: verdict <project-slug>/<job-id> <round> <reviewer> <PASS|CHANGES|SKIPPED|pending>"
+
+
+def verdict_cmd(target, round_text, reviewer, value):
+    """Set one reviewer's verdict in the board's rounds entry N in one CAS write, keeping the rest."""
+    if not re.fullmatch(r"[1-9][0-9]*", round_text) or reviewer not in REVIEWERS \
+            or value not in ("PASS", "CHANGES", "pending", "SKIPPED") \
+            or value == "SKIPPED" and reviewer not in ("ux", "ui"):
+        fail(VERDICT_USAGE, 2)
+    home, slug, job_id = r2_target(target, True)
+    n = int(round_text)
+    job = board_write(home, job_id, {}, show=False, verdict=(slug, n, reviewer, value))
+    print(json.dumps({"round": n, "verdicts": job["rounds"][n - 1]}))
+
 
 CHECKS_USAGE = "usage: checks <project-slug>/<job-id> [--timeout S]"
 CHECKS_INTERVAL = 10
@@ -8538,7 +8590,7 @@ def stuck(*args):
         return agents is not None and agents.get(link.get("agent"), "closed") == "closed"
 
     def is_stuck(job):
-        if paused(job) or closing(job) or lead_of(job):
+        if paused(job) or closing(job) or lead_of(job) or waiting_until(job):
             return False
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
@@ -8737,8 +8789,8 @@ def cleanup(target):
     sys.exit(1 if left else 0)
 
 
-def cleanup_job(repo, wt, branch, drop_pushed=False):
-    """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. (removed, left)."""
+def cleanup_job(repo, wt, branch, drop_pushed=False, merged_head=None):
+    """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. With merged_head, also delete a branch whose tip that commit contains and no worktree has checked out. (removed, left)."""
     def run_git(*args, timeout=20):
         """(exit code, stdout, stderr) of git in repo. A timeout or a git that cannot start gives (None, "", reason), so the caller keeps what it was about to remove."""
         try:
@@ -8776,6 +8828,10 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             return not_merged("origin has no such branch")
         if out.split() != [tip, ref]:
             return not_merged("origin is at a different commit")
+        return delete_unless_checked_out(tip)
+
+    def delete_unless_checked_out(tip):
+        """None after deleting the branch, guarded by tip, unless a worktree has it checked out."""
         path = None
         for line in run_git("worktree", "list", "--porcelain")[1].splitlines():
             if line.startswith("worktree "):
@@ -8783,6 +8839,13 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             elif line == f"branch refs/heads/{branch}":
                 return f"checked out in {path}"
         return first_error("update-ref", "-d", f"refs/heads/{branch}", tip)
+
+    def merged_head_error():
+        """None after deleting a branch whose tip merged_head contains, else today's reason it stays."""
+        tip = run_git("rev-parse", f"refs/heads/{branch}")[1]
+        if tip and run_git("merge-base", "--is-ancestor", tip, merged_head)[0] == 0:
+            return delete_unless_checked_out(tip)
+        return pushed_tip_error() if drop_pushed else not_merged()
 
     removed, left = [], []
     if wt.exists():
@@ -8803,7 +8866,8 @@ def cleanup_job(repo, wt, branch, drop_pushed=False):
             if code is None:
                 error = err
             elif code:
-                error = pushed_tip_error() if drop_pushed else not_merged()
+                error = (merged_head_error() if merged_head
+                         else pushed_tip_error() if drop_pushed else not_merged())
             elif run_git("config", "--get", f"branch.{branch}.merge")[1]:
                 error = first_error("branch", "--unset-upstream", branch) or first_error("branch", "-d", branch)
             else:
@@ -10721,6 +10785,7 @@ def agent_cmd(sub, *args):
     if sub == "record" and len(args) in (5, 6):
         target, role, harness, via, model, *effort = args
         role = ROLE_ALIASES.get(role, role)
+        via = VIA_ALIASES.get(via, via)
         problem = agent_record_problem(role, harness, via, model, effort[0] if effort else None)
         if problem:
             fail(f"{AGENT_RECORD_USAGE}: {problem}", 2)
@@ -10790,6 +10855,7 @@ COMMANDS["prompt"] = (prompt_cmd, 2, 8)
 COMMANDS["wait"] = (wait_cmd, 2, 23)
 COMMANDS["watch"] = (watch_cmd, 2, 24)
 COMMANDS["round-wait"] = (round_wait_cmd, 2, 4)
+COMMANDS["verdict"] = (verdict_cmd, 4, 4)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
 COMMANDS["pr-state"] = (pr_state_cmd, 1, 3)
 COMMANDS["pr-queue"] = (pr_queue_cmd, 1, 1)
@@ -10808,6 +10874,7 @@ COMMANDS["retro"] = (retro_cmd, 1, 3)
 COMMANDS["audit"] = (audit_cmd, 1, 2)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
+COMMANDS["inbox"] = (inbox, 0, 0)
 
 def main(argv=None):
     global _HOME_OVERRIDE, _LOCATED, _READS
