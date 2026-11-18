@@ -2572,6 +2572,16 @@ class PrSyncTest(PickupFixture):
                 self.calls.clear()
                 self.assert_silent(self.pickup())
 
+    def test_merged_pr_records_the_head(self):
+        for head, github in ((self.OID, {"merged", "head"}), ("not-a-sha", {"merged"})):
+            with self.subTest(head=head):
+                self.heads[7] = head
+                self.board["jobs"] = [self.export()]
+                self.assertEqual(self.pickup(), (0, "synced 042-sample-export alpha: merged on GitHub\n", ""))
+                job = self.job("042-sample-export")
+                self.assertEqual(set(job["github"]), github)
+                self.assertEqual(job["github"].get("head"), head if "head" in github else None)
+
     def test_two_merged_prs_make_one_board_write(self):
         self.states = {7: "MERGED", 8: "MERGED"}
         self.board["jobs"] = [self.export(), self.sample_import()]

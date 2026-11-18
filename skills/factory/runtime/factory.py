@@ -5727,7 +5727,9 @@ def pr_sync_pass(home, data, device, minutes, paths, settings, dry):
                 continue
             if state == "MERGED":
                 patch = {"stage": "merged", "needs": None, "automerge": None, "babysit": None, "claim": None,
-                         "note": MERGED_NOTE, "github": {"merged": now()}}
+                         "note": MERGED_NOTE,
+                         "github": {"merged": now(),
+                                    **({"head": head} if isinstance(head, str) and COMMIT.fullmatch(head) else {})}}
             else:
                 patch = {"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "via": "github"}, "babysit": None}
             pending.append((j, patch, line))
