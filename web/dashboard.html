@@ -228,7 +228,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .inbox-item[aria-current="true"] { background: var(--line); box-shadow: inset 3px 0 0 var(--accent); }
   @media (min-width: 761px) {
-    body[data-inbox-split] #inbox-page { max-width: none; margin: 0 min(var(--drawer-w, 760px), 100%) 0 0; }
+    body[data-inbox-split] { --split-drawer: min(var(--drawer-w, 760px), 100vw - 400px); }
+    body[data-inbox-split] .detail { width: var(--split-drawer); }
+    body[data-inbox-split] #inbox-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
     body[data-inbox-split] .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; }
     body[data-inbox-split] .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
   }
