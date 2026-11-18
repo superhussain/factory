@@ -199,7 +199,9 @@ the backlog. The jumper lists matching runs under `Retro runs` and up to 20 matc
 The `#/inbox` dashboard page ranks jobs waiting on you and backlog lines, then offers Approve, Deny, Babysit or the job's needs.md questions in place.
 
 The status may carry `triage_failed_since`, an ISO 8601 UTC time, while
-backlog triage fails on that host.
+backlog triage fails on that host. It may also carry `bundle_behind_since`, the
+commit time of the first merge on origin's base that the installed bundle
+lacks. Settings, Hosts warns once that time is more than 24 hours old.
 
 A pairing code is ten characters shown as `XXXXX-XXXXX` and lasts 15 minutes.
 Any pair attempt uses it up, and every failure answers the same 403. One
