@@ -189,6 +189,8 @@ The board appears inside Paseo on web and desktop only. On iOS and Android the s
 the dashboard in the browser instead. A browser that blocks third-party cookies cannot show the
 frame; the screen then offers **Sign in**, **Reload** and **Open in a browser tab**. The first time, the screen shows a card with three sign-in steps; once the board has loaded on that device, it shows a short card instead. Sign in opens the dashboard in a small popup inside Paseo, so the desktop app signs in with its own cookies. When the board loads there, the popup closes and the frame reloads. In Safari, or another browser that blocks third-party cookies, the frame cannot load even after sign-in. Use **Open in a browser tab** there. It opens the board, or the linked job, in a normal tab outside Paseo.
 
+The screen remembers the dashboard page you were on while the Paseo window stays open, and opens there again. A notification opens its job instead. Press the Factory row while the screen shows to reload it. With the plugin on several hosts, Paseo adds a host picker to the screen header. Plugins cannot hide it. Hosts with the same dashboard URL show the same page.
+
 ### Inbox badge
 
 The Factory row shows the same number as the dashboard's Inbox badge: jobs waiting on you plus
