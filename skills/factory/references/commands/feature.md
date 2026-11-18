@@ -100,7 +100,8 @@ feature.
    `decision.md` as a table with Item, Source and Outcome (`queued`,
    `already queued` or `for a person`) columns, or `None.` when there are none, and run
    `push "$SLUG/<id>"`.
-10. After the `merged:` line and the final summary are sent, run
+10. Run `python3 "$RUNTIME" audit push <id>`. A non-zero exit never stops close-out.
+    After the `merged:` line and the final summary are sent, run
     `python3 "$RUNTIME" archive-workspace "$SLUG/<id>" --check`. If the output has a
     `reason`, stop. If `leftovers` is not empty, write a file that starts with
     `Recommend: approve`, then `Left in Paseo workspace <would_archive> when <id> merged:`,
