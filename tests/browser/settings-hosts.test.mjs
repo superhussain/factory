@@ -599,6 +599,60 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       await page.close();
     });
 
+    await t.test(
+      "hosts H10 a bundle over a day behind origin shows in the alert color",
+      async () => {
+        const behind = {
+          "studio-mac": "2025-12-30T14:00:00Z",
+          "lab-linux": "2026-01-01T06:00:00Z",
+        };
+        const lagging = HOSTS.map((h) =>
+          behind[h.id] ? { ...h, status: { ...h.status, bundle_behind_since: behind[h.id] } } : h,
+        );
+        const page = await open("#/settings/hosts", lagging);
+        await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
+        await page.click("#hosts-load");
+        await page.waitForFunction(
+          () => document.querySelectorAll(".host-card").length === 5,
+          wait,
+        );
+        const card = '.host-card[data-id="studio-mac"]';
+        const lab = '.host-card[data-id="lab-linux"]';
+        if (captureDir) {
+          await mkdir(captureDir, { recursive: true });
+          await shoot(page, card, join(captureDir, "host-card-bundle-lag-1280.png"));
+          await page.setViewport({ width: 390, height: 844 });
+          await shoot(page, card, join(captureDir, "host-card-bundle-lag-390.png"));
+          await page.setViewport({ width: 1280, height: 900 });
+        }
+        assert.deepEqual(
+          await page.evaluate(
+            (studio, linux) => {
+              const line = document.querySelector(`${studio} .host-bundle`);
+              return {
+                spoken: [...line.childNodes]
+                  .filter((n) => !(n.nodeType === 1 && n.getAttribute("aria-hidden") === "true"))
+                  .map((n) => n.textContent)
+                  .join(""),
+                color: getComputedStyle(line).color,
+                labBundle: document.querySelector(`${linux} .host-bundle`) !== null,
+              };
+            },
+            card,
+            lab,
+          ),
+          {
+            spoken:
+              "Warning: Bundle 1a2b3c4 is over a day behind origin. It lacks merges since " +
+              "2025-12-30 14:00 UTC. Reinstall it as docs/upgrade.md step 4 says.",
+            color: "rgb(209, 52, 47)",
+            labBundle: false,
+          },
+        );
+        await page.close();
+      },
+    );
+
     await t.test("hosts H5 pickup checkboxes and the save-time check", async (st) => {
       const current = await fetch(origin + "/api/pipeline/projects/sample");
       const put = await fetch(origin + "/api/pipeline/projects/sample", {

@@ -319,17 +319,26 @@ const CAPTURE_AUDIT = [
   auditCall(6, "factory-builder", "Edit", [], "~/app/src/main.py"),
 ];
 // The Red flags index of the running example, newest first.
-const CAPTURE_AUDIT_FLAGS = CAPTURE_AUDIT.filter((row) => row.flags.length)
-  .reverse()
-  .map(({ time, job, host, agent, tool, flags, target }) => ({
-    time,
-    job,
-    host,
-    agent,
-    tool,
-    flags,
-    target,
-  }));
+const CAPTURE_AUDIT_FLAGS = [
+  ...CAPTURE_AUDIT.filter((row) => row.flags.length).reverse(),
+  ...Array.from({ length: 8 }, (_, i) =>
+    auditCall(0, "factory-builder", "Bash", ["recursive-delete"], `rm -rf build-${i + 1}`),
+  ),
+].map(({ time, job, host, agent, tool, flags, target }, i) => ({
+  time: i < 4 ? time : `2026-11-10 09:${String(59 - i).padStart(2, "0")}:00`,
+  job,
+  host,
+  agent,
+  tool,
+  flags,
+  target,
+  paseo: { server: "srv-a", agent: "agent-build" },
+}));
+// Settings > Hosts for the retros-flags views: the fixture list plus the capture host.
+const CAPTURE_HOSTS = JSON.parse(
+  await readFile(new URL("../fixtures/hosts-list.json", import.meta.url), "utf8"),
+);
+CAPTURE_HOSTS.push({ ...CAPTURE_HOSTS[0], id: "example-host", label: "Example Mac" });
 // The archived running example: answered by interception, never on the board.
 const CAPTURE_ARCHIVED = {
   id: "412-fix-login",
@@ -456,6 +465,7 @@ async function capture(outdir, referencePath) {
     let refBoard = false;
     let notifyBoard = false;
     let auditBoard = false;
+    let flagsHosts = false;
     let refusalBacklog = false;
     let leadAgentsBoard = false;
     let writerBoard = false;
@@ -576,6 +586,12 @@ async function capture(outdir, referencePath) {
                     body:
                       CAPTURE_BACKLOG +
                       "  Depends on: sample: Synthetic follow-on slice (sub-job-of 001-capture)\n",
+                  });
+                if (flagsHosts && target.pathname === "/api/hosts")
+                  return request.respond({
+                    status: 200,
+                    contentType: "application/json",
+                    body: JSON.stringify(CAPTURE_HOSTS),
                   });
                 if (target.pathname === "/api/audit-flags")
                   return request.respond({
@@ -1651,10 +1667,20 @@ async function capture(outdir, referencePath) {
         const status = document.getElementById("retros-status").textContent;
         return status && !status.startsWith("Loading");
       });
-      if (side === "after") await page.waitForSelector("#audit-flags-rows tr");
+      if (side === "after") {
+        await page.waitForSelector("#audit-flags-rows tr");
+        await page.evaluate(() =>
+          document.getElementById("audit-flags-pager").scrollIntoView({ block: "end" }),
+        );
+      }
     };
-    await view("retros-flags-desktop", 1440, 900, "light", openRetrosFlags);
-    await view("retros-flags-mobile", 390, 844, "dark", openRetrosFlags);
+    flagsHosts = true;
+    try {
+      await view("retros-flags-desktop", 1440, 900, "light", openRetrosFlags);
+      await view("retros-flags-mobile", 390, 844, "dark", openRetrosFlags);
+    } finally {
+      flagsHosts = false;
+    }
     // A phone drawer on an idea with two attached files, at rest and scrolled 40 px.
     const openIdeaFiles = async (page) => {
       await page.evaluate(() => {

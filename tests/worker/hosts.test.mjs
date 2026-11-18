@@ -345,6 +345,11 @@ test("PATCH and status reject fields their writer does not own", async () => {
       "triage_failed_since: must be an ISO 8601 UTC time",
     ],
     [status({ triage_failed_since: null }), "triage_failed_since: must be an ISO 8601 UTC time"],
+    [
+      status({ bundle_behind_since: "yesterday" }),
+      "bundle_behind_since: must be an ISO 8601 UTC time",
+    ],
+    [status({ bundle_behind_since: null }), "bundle_behind_since: must be an ISO 8601 UTC time"],
   ]) {
     const r = await s.putStatus("work-mac", JSON.parse(JSON.stringify(body)));
     assert.equal(r.status, 400, JSON.stringify(body));
@@ -361,11 +366,15 @@ test("PATCH and status reject fields their writer does not own", async () => {
   assert.equal(large.status, 413);
   const failing = await s.putStatus(
     "work-mac",
-    status({ triage_failed_since: "2026-01-01T09:00:00Z" }),
+    status({
+      triage_failed_since: "2026-01-01T09:00:00Z",
+      bundle_behind_since: "2025-12-30T14:00:00Z",
+    }),
   );
   assert.equal(failing.status, 200);
   const stored = JSON.parse(s.bucket.objects.get("host-status/work-mac.json").bytes.toString());
   assert.equal(stored.triage_failed_since, "2026-01-01T09:00:00Z");
+  assert.equal(stored.bundle_behind_since, "2025-12-30T14:00:00Z");
 });
 
 test("the effective view keeps only active hosts once any host is registered", async () => {

@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -230,6 +231,32 @@ class StatusTest(HostFixture):
             sent = [json.loads(body) for _, _, _, body in server.requests]
         self.assertNotIn("triage_failed_since", sent[0])
         self.assertEqual(sent[1]["triage_failed_since"], "2026-01-01T09:00:00Z")
+
+    def test_bundle_behind_since_reads_origin_base(self):
+        repo = self.home / "studio"
+        repo.mkdir()
+
+        def git(*args, date=None):
+            env = {**os.environ, "GIT_COMMITTER_DATE": date} if date else None
+            return subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test",
+                                   "-c", "user.email=test@example.invalid", *args],
+                                  capture_output=True, text=True, check=True, env=env).stdout.strip()
+
+        git("init", "-q")
+        commits = []
+        for date in ("2025-12-29T16:00:00Z", "2025-12-30T14:00:00Z", "2026-01-01T06:00:00Z"):
+            git("commit", "-q", "--allow-empty", "-m", date, date=date)
+            commits.append(git("rev-parse", "HEAD"))
+        a, _, c = commits
+        git("update-ref", "refs/remotes/origin/main", c)
+        (self.home / "paths.md").write_text(f"---\nstudio: {repo}\n---\n")
+        self.assertEqual(factory.bundle_behind_since(self.home, a), "2025-12-30T14:00:00Z")
+        self.assertIsNone(factory.bundle_behind_since(self.home, c))
+        self.assertIsNone(factory.bundle_behind_since(self.home, "0" * 40))
+        with patch.object(factory, "bundle_stamp", return_value={"commit": a, "tree": "b" * 64}):
+            body = factory.host_status(self.home, {"checks": []}, "cron", None, "2026-01-01T09:00:00Z")
+        self.assertEqual(list(body)[-2:], ["bundle_behind_since", "triage_failed_since"])
+        self.assertEqual(body["bundle_behind_since"], "2025-12-30T14:00:00Z")
 
 
 class PickupHeartbeatTest(HostFixture):

@@ -62,3 +62,15 @@ export function readEmbedMessage(data: unknown): EmbedMessage | null {
     return { type: "factory-embed-location", hash: message.hash };
   return null;
 }
+
+type HelloTarget = { postMessage(message: unknown, targetOrigin: string): void };
+
+// Every frame load, first or self-navigated: drop the count the old page posted, then greet the new page.
+export function frameLoaded(
+  target: HelloTarget | null | undefined,
+  origin: string,
+  clearCount: (count: null) => void,
+): void {
+  clearCount(null);
+  target?.postMessage({ type: "factory-embed-hello", v: 1 }, origin);
+}

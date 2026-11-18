@@ -6,7 +6,12 @@ import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import {
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+  blockLiveEvents,
+} from "../support/browser-server.mjs";
 
 const wait = { polling: 50 };
 const SHOTS = process.env.INBOX_SHOTS;
@@ -884,6 +889,38 @@ test("inbox page", { timeout: 180000 }, async (t) => {
         wait,
       );
       assert.equal(await page.$("#inbox-list .inbox-item"), null);
+      await page.browserContext().close();
+    });
+
+    await it("board load failure", async () => {
+      await reset();
+      let fail = true;
+      const page = await (await browser.createBrowserContext()).newPage();
+      await page.setViewport({ width: 1280, height: 900 });
+      await blockLiveEvents(page);
+      await page.setBypassServiceWorker(true);
+      await page.setRequestInterception(true);
+      page.on("request", (request) =>
+        fail && request.method() === "GET" && new URL(request.url()).pathname === "/board.json"
+          ? request.respond({ status: 503, body: "" })
+          : request.continue(),
+      );
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await page.goto(origin + "/#/inbox", { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#inbox-status").textContent ===
+          "Couldn't load the inbox. Can't reach the factory. Check your connection, then retry.",
+        wait,
+      );
+      assert.equal(await page.$eval("#inbox-retry", (el) => el.hidden), false);
+      fail = false;
+      await page.click("#inbox-retry");
+      await page.waitForSelector("#inbox-list .inbox-item", wait);
+      await page.waitForFunction(() => document.activeElement.id === "inbox-page-heading", wait);
+      assert.equal(await page.$eval("#inbox-retry", (el) => el.hidden), true);
+      assert.deepEqual(errors, []);
       await page.browserContext().close();
     });
   });

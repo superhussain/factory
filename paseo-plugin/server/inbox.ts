@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { factoryInbox, type InboxEvent } from "../shared/inbox";
+import { isStartFailure, pythonCommands } from "../shared/python";
 
 const RUNTIME_PATHS = [
   ".claude/skills/factory/runtime/factory.py",
@@ -18,18 +19,8 @@ export function findRuntime(home = homedir()): string | null {
   return null;
 }
 
-// On Windows `python3` is often the Microsoft Store stub. Fall back to the `py` launcher only when
-// `python3` fails to start; a run that exits non-zero or prints bad output is not retried.
-const PYTHONS = process.platform === "win32" ? [["python3"], ["py", "-3"]] : [["python3"]];
-
-// ENOENT is a spawn error. 9009 is cmd.exe's "command not found", which the Store stub also returns.
-export function isStartFailure(error: unknown): boolean {
-  const code = (error as { code?: unknown }).code;
-  return code === "ENOENT" || code === 9009;
-}
-
 export async function readInbox(runtime: string): Promise<InboxEvent | null> {
-  for (const [command, ...args] of PYTHONS) {
+  for (const [command, ...args] of pythonCommands(process.platform)) {
     let stdout: string;
     try {
       ({ stdout } = await execCommand(command, [...args, runtime, "inbox"], {

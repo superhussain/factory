@@ -49,6 +49,9 @@ python3 tools/install.py --destination <absolute-directory> --replace
 The old bundle stays beside it as `factory.backup-<uuid>`. See
 [device.md](device.md) for the lock and backup rules.
 
+Settings, Hosts flags a host whose `bundle_behind_since` is more than a day
+old. Reinstall that host first.
+
 Install hooks are approved only for esbuild `0.28.2` and workerd `1.20261023.1`;
 fsevents `2.3.3` is denied. Do not broaden approval to repair an installation.
 To roll back dependencies, return to the previous reviewed checkout, remove

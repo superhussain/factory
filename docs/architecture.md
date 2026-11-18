@@ -169,7 +169,8 @@ tab reads the merged rows.
 Each audit push also rewrites that job and host's rows in the red-flag index
 `audit-flags.json`. The index keeps every row whose `flags` is a non-empty list
 of strings and whose `time` is a `YYYY-MM-DD HH:MM:SS` UTC time no more than one
-day ahead of the Worker clock, as `{time, job, host, agent, tool, flags, target}`.
+day ahead of the Worker clock, as `{time, job, host, agent, tool, flags, target}`, plus an optional
+`paseo: {server, agent}` kept only when both ids match `[A-Za-z0-9_-]{1,64}`.
 `agent`, `tool` and `target` are cut to 120 code points, and `flags` to its first
 16 names of 32 code points each. The host file keeps the full row. Rows sort by
 `time` descending, then `job`, `host` and `agent` ascending. Each host keeps
@@ -200,7 +201,9 @@ the backlog. The jumper lists matching runs under `Retro runs` and up to 20 matc
 The `#/inbox` dashboard page ranks jobs waiting on you and backlog lines, then offers Approve, Deny, Babysit or the job's needs.md questions in place.
 
 The status may carry `triage_failed_since`, an ISO 8601 UTC time, while
-backlog triage fails on that host.
+backlog triage fails on that host. It may also carry `bundle_behind_since`, the
+commit time of the first merge on origin's base that the installed bundle
+lacks. Settings, Hosts warns once that time is more than 24 hours old.
 
 A pairing code is ten characters shown as `XXXXX-XXXXX` and lasts 15 minutes.
 Any pair attempt uses it up, and every failure answers the same 403. One

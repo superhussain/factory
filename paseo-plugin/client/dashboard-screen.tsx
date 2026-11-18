@@ -6,6 +6,7 @@ import { Platform, Pressable, Text, View } from "react-native";
 import { parseDashboardOrigin, type EmbedMessage } from "../shared/embed";
 import { frameUrl, startUrl } from "../shared/location";
 import type { Reload } from "../shared/reload";
+import { firstLoginSteps, isBrowserOrigin, openLabel } from "../shared/first-login";
 import { factorySettings } from "../shared/settings";
 import { setFrameInboxCount } from "./frame-inbox";
 import {
@@ -171,6 +172,7 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
     };
     const returning = hasLoadedBefore(origin);
     const here = paseoOrigin();
+    const browser = isBrowserOrigin(here);
     return (
       <View style={styles.screen}>
         <View style={{ flex: 1 }}>
@@ -191,22 +193,14 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
                 </Text>
                 {returning ? null : (
                   <View style={{ gap: 12 }}>
-                    {step(
-                      1,
-                      "Select Sign in. A small Paseo window opens on the Cloudflare Access page.",
-                    )}
-                    {step(2, "Enter your email, then the code Cloudflare sends you.")}
-                    {step(
-                      3,
-                      "That window closes once your board shows, and this page reloads. If it stays open, close it.",
-                    )}
+                    {firstLoginSteps(browser).map((text, i) => step(i + 1, text))}
                   </View>
                 )}
                 <View style={styles.actions}>
                   {button("Sign in", signIn, "LogIn")}
                   {button("Reload", reloadFrame, "RotateCw", true)}
                   {button(
-                    "Open in a browser tab",
+                    openLabel(browser),
                     () => void openExternalUrl(src),
                     "ExternalLink",
                     true,
@@ -215,7 +209,7 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
                 <Text style={styles.footnote}>
                   {`Signed in and still blank? Ask your factory operator to add ${here ?? "this Paseo origin"} to embed_origins.`}
                 </Text>
-                {here?.startsWith("https://") ? (
+                {browser && returning ? (
                   <Text style={styles.footnote}>
                     Using Safari, or another browser that blocks third-party cookies? The board
                     cannot load here. Select Open in a browser tab.

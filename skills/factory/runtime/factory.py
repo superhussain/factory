@@ -4425,6 +4425,27 @@ def bundle_stamp():
     return None
 
 
+def bundle_behind_since(home, commit):
+    """When the first merge on origin's base that commit lacks landed, as UTC, from the first
+    pickup checkout holding commit. None when commit is current or no checkout holds it."""
+    for slug, repo in sorted(read_paths(Path(home)).items()):
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", slug) or not os.path.isdir(repo):
+            continue
+        try:
+            project = project_files(home, slug)[0]
+        except SystemExit:
+            continue
+        base = frontmatter(project)[0].get("base", "main") if project.exists() else "main"
+        if check_path(base) or base.startswith("-"):
+            continue
+        origin = f"refs/remotes/origin/{base}"
+        if git(repo, "merge-base", commit, origin) != commit:
+            continue
+        times = git(repo, "log", "--first-parent", "--format=%ct", f"{commit}..{origin}").split()
+        return datetime.fromtimestamp(int(times[-1]), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if times else None
+    return None
+
+
 def cached_status(home):
     """(scheduler, last_pickup, triage_failed_since) from the last status pickup sent, else
     ("none", None, None)."""
@@ -4466,6 +4487,9 @@ def host_status(home, report, scheduler, last_pickup, triage_failed_since=None):
                    and WORKER_MODEL.fullmatch(model)][:16],
         "checkouts": sorted(slug for slug, path in paths.items()
                             if re.fullmatch(r"[A-Za-z0-9_-]+", slug) and os.path.isdir(path))[:64]}
+    behind = body["bundle"] and bundle_behind_since(home, body["bundle"]["commit"])
+    if behind:
+        body["bundle_behind_since"] = behind
     if triage_failed_since:
         body["triage_failed_since"] = triage_failed_since
     return body
@@ -9557,6 +9581,7 @@ RETRO_JOB = re.compile(r"factory-(\d{2,5})-")
 RETRO_PUSH_FILE = "retro-push.json"
 RETRO_PROMPT_FILE = "retro-schedule-prompt.md"
 RETRO_CATCHUP_FILE = "retro-catchup.json"
+RETRO_WAIT_FILE = "retro-catchup-wait.json"
 RETRO_CATCHUP_AFTER = (9, 30)
 RETRO_RUN_NAME = re.compile(r"(\d{8}T\d{6}Z)-[0-9a-f]{6}")
 RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
@@ -9942,6 +9967,22 @@ def retro_catchup_due(home, local):
     return True
 
 
+def retro_catchup_wait(home, local, reason, dry):
+    """Print why the retro catch-up waits, once per local date and reason. A dry run prints every
+    time and records nothing."""
+    record = {"version": 1, "date": local.date().isoformat(), "reason": reason}
+    path = home / RETRO_WAIT_FILE
+    if not dry:
+        try:
+            if json.loads(path.read_text(encoding="utf-8")) == record:
+                return
+        except (OSError, ValueError):
+            pass
+    print(f"factory.py: retro catch-up waits: {reason}", file=sys.stderr)
+    if not dry:
+        write_atomic(path, json.dumps(record) + "\n")
+
+
 def retro_pickup_catchup(home, dry):
     """Launch the stored retro schedule prompt once on a weekday whose 09:00 slot left no run.
     The record is written before the launch, so a failed or stopped session is not retried today."""
@@ -9952,11 +9993,11 @@ def retro_pickup_catchup(home, dry):
         job_id = "retro-" + local.strftime("%Y%m%d")
         route = pick_route(home)
         if route is None:
-            print("factory.py: retro catch-up waits: no available route", file=sys.stderr)
+            retro_catchup_wait(home, local, "no available route", dry)
             return
         checkout = next(((slug, path) for slug, path in read_paths(home).items() if os.path.isdir(path)), None)
         if checkout is None:
-            print("factory.py: retro catch-up waits: no checkout in paths.md", file=sys.stderr)
+            retro_catchup_wait(home, local, "no checkout in paths.md", dry)
             return
         template = route_launcher(home, route)
         if dry:
@@ -10084,6 +10125,20 @@ def audit_scan(path, main):
     return rows
 
 
+def audit_paseo_agents():
+    """{Claude session id: Paseo agent id} from the agent files on this host. Skips files it cannot read."""
+    agents = {}
+    for path in Path(os.environ.get("PASEO_HOME") or Path.home() / ".paseo", "agents").glob("*/*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            session, agent = data["persistence"]["sessionId"], data["id"]
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if isinstance(session, str) and isinstance(agent, str) and PASEO_ID.fullmatch(agent):
+            agents[session] = agent
+    return agents
+
+
 def audit_folders(job_id):
     """The sorted transcript folders this host keeps from the job's worktrees."""
     folder = re.compile(r"(?:^|-)factory-" + re.escape(job_id) + r"(?:-|$)")
@@ -10096,17 +10151,20 @@ def audit_rows(job_id):
     if not root.is_dir():
         fail(f"no Claude Code transcripts at {root}", 4)
     rows, sessions = [], 0
+    server, agents = paseo_server(), audit_paseo_agents()
     for project in audit_folders(job_id):
         for path in sorted(project.glob("*.jsonl")):
             sessions += 1
-            rows += [{"session": path.stem[:8], "agent": "main", **row} for row in audit_scan(path, True)]
+            link = {"paseo": {"server": server, "agent": agents[path.stem]}} if server and path.stem in agents else {}
+            rows += [{"session": path.stem[:8], "agent": "main", **row, **link} for row in audit_scan(path, True)]
             for sub in sorted((project / path.stem / "subagents").glob("*.jsonl")):
                 try:
                     kind = str(json.loads(sub.with_suffix(".meta.json").read_text(encoding="utf-8")).get("agentType")
                                or "unknown")
                 except (OSError, ValueError, AttributeError):
                     kind = "unknown"
-                rows += [{"session": path.stem[:8], "agent": AUDIT_CONTROL.sub("?", kind), **row} for row in audit_scan(sub, False)]
+                rows += [{"session": path.stem[:8], "agent": AUDIT_CONTROL.sub("?", kind), **row, **link}
+                         for row in audit_scan(sub, False)]
     if not sessions:
         fail(f"no Claude Code session on this host ran in a factory-{job_id} worktree", 4)
     return sorted(rows, key=lambda r: (r["time"], r["session"])), sessions

@@ -203,6 +203,24 @@ class AuditPushTest(IsolatedTestCase):
                          (["force-push"], "git push --force origin factory/1017-add-x"))
         self.assertNotIn("abc123", body.decode("utf-8"))
 
+    def test_push_links_paseo_session(self):
+        home = Path(self.home, "paseo")
+        (home / "agents/a").mkdir(parents=True)
+        (home / "server-id").write_text("srv-a\n", encoding="utf-8")
+        (home / "agents/a/agent-build.json").write_text(json.dumps(
+            {"id": "agent-build", "persistence": {"sessionId": "3f2a9c1d-0000-4000-8000-000000000001"}}), encoding="utf-8")
+        (home / "agents/a/agent-other.json").write_text(json.dumps(
+            {"id": "agent-other", "persistence": {"sessionId": "ffffffff-0000-4000-8000-000000000002"}}), encoding="utf-8")
+        (home / "agents/a/broken.json").write_text("{", encoding="utf-8")
+        with http_fixture({self.route: (200, b"ok")}) as server, patch.dict(os.environ, {"PASEO_HOME": str(home)}):
+            self.config(server.origin)
+            code, _, err = invoke(factory, ["audit", "push", "1017-add-x"])
+        self.assertEqual((code, err), (0, ""))
+        rows = [json.loads(line) for line in server.requests[0][3].decode("utf-8").splitlines()]
+        self.assertEqual({json.dumps(r["paseo"]) for r in rows},
+                         {json.dumps({"server": "srv-a", "agent": "agent-build"})})
+        self.assertEqual(list(rows[1])[-1], "paseo")
+
     def test_push_trims_oldest(self):
         with http_fixture({self.route: (200, b"ok")}) as server:
             self.config(server.origin)
