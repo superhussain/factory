@@ -289,6 +289,22 @@ A bad job id exits 2. A missing projects directory exits 4 with
 `no Claude Code transcripts at <path>`. No session in the job's worktree exits 4
 with `no Claude Code session on this host ran in a factory-<job-id> worktree`.
 
+```text
+python3 <installed-skill>/runtime/factory.py audit push <job-id>
+```
+
+`audit push` uploads the same rows, each with `host` (this host's `device:`) and
+`job` added, to `audit/<job-id>/<device>.jsonl` through `PUT /api/audit/<job-id>/<device>.jsonl`,
+and prints `pushed 6 calls to audit/1017-add-x/example-host.jsonl`. A re-push
+replaces this host's file. The body is capped at 1 MiB: past that, the oldest rows
+are dropped and the line reads `pushed 5 of 6 calls to ...; the oldest 1 did not
+fit in 1 MiB`. The job drawer's `audit` tab shows every host's pushed rows.
+
+`audit push` with no valid `device:` exits 2 with the pairing hint, as does a 403
+`audit rows are written only by the host's bound service token`. Any other 403
+exits 5. A bad job id, or a second argument without `push`, exits 2 with
+`usage: factory.py audit push <job-id>, a full job id such as 1017-add-x`.
+
 ## Exit recovery
 
 | Exit | Action |
