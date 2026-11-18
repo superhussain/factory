@@ -576,8 +576,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .doc th, .agent-runs th { background: var(--code-bg); font-weight: 600; }
   .agent-runs th, .agent-runs td { min-width: 0; white-space: nowrap; }
-  .doc table.audit th, .doc table.audit td { min-width: 0; white-space: nowrap; }
-  .doc table.audit td:last-child { min-width: 16em; white-space: normal; }
+  /* The audit table fits the desktop drawer: smaller type, only Time and the headers stay on one line, Target keeps a floor. */
+  .doc table.audit { font-size: 13px; }
+  .doc table.audit th, .doc table.audit td { min-width: 0; }
+  .doc table.audit th, .doc table.audit td:first-child { white-space: nowrap; }
+  .doc table.audit td:last-child { min-width: 14em; }
   .agent-runs td a + a { margin-left: 8px; }
   /* A long run list scrolls in its own box, so the tabs and page stay on a desktop screen. */
   .detail-head > #d-agents .table-wrap { max-height: 40vh; overflow-y: auto; scroll-padding-top: 2.5em; }
