@@ -367,6 +367,13 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("unless `ls <job folder>` shows `before-` shots", builder)
         self.assertNotIn("`before-*`", builder)
 
+    def test_ux_review_probes_keyboard_focus(self):
+        review = " ".join((SKILL / "agents/factory-review-ux.md").read_text(encoding="utf-8").split())
+        for phrase in ("**Keyboard focus probe.** In round 1", "scrollIntoView", "### Keyboard focus",
+                       "lost, trapped or scrolled out of view is CHANGES",
+                       "Keyboard focus: no focus or scroll change."):
+            self.assertIn(phrase, review)
+
     def test_open_items_are_absorbed_before_queued(self):
         def flat(name):
             return " ".join((SKILL / name).read_text(encoding="utf-8").split())
