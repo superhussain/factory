@@ -1530,7 +1530,7 @@ def unchecked_lines(text):
 
 
 def backlog_candidates(text, slug):
-    """{"backlog:<key>": (raw, feature, ref, entry)} for the project's unchecked backlog lines, in
+    """{"backlog:<key>": (raw, feature, ref, entry, context)} for the project's unchecked backlog lines, in
     file order. entry is the batch candidate {"id", "title", "idea"}; ref is the suffix match or None."""
     found = {}
     for raw, line_slug, feature, context in unchecked_lines(text):
@@ -1541,7 +1541,7 @@ def backlog_candidates(text, slug):
         ref = BACKLOG_SUFFIX.search(feature)
         body = (feature[:ref.start()] if ref else feature).strip()
         found[key] = (raw, feature, ref, {"id": key, "title": body[:80],
-                                          "idea": f"{body}\n\n{context}" if context else body})
+                                          "idea": f"{body}\n\n{context}" if context else body}, context)
     return found
 
 
@@ -2390,7 +2390,8 @@ def batch_cmd(target, *idea_ids):
             fail(f"bad job id {idea_id!r}: a job id is letters, digits, dots, dashes and underscores, "
                  "like 003-rate-limiting. Nothing was written.", 2)
     status, _, text = api(home, "GET", "/api/backlog", ok=(200, 404))
-    lines = backlog_candidates(text if status == 200 else "", slug)
+    backlog_text = text if status == 200 else ""
+    lines = backlog_candidates(backlog_text, slug)
     line_picks = [i for i in idea_ids if BACKLOG_PICK.fullmatch(i)]
     job_picks = [i for i in idea_ids if not BACKLOG_PICK.fullmatch(i)]
     for pick in line_picks:
@@ -2409,6 +2410,9 @@ def batch_cmd(target, *idea_ids):
         if lead is None:
             fail(f"no job {lead_id} on the board. Nothing was written.", 4)
         alone = isinstance(lead.get("priority"), dict) and lead["priority"].get("alone") is True
+        open_ids = {j.get("id") for j in data["jobs"] if j.get("stage") not in TERMINAL}
+        together = {lead_id} | {j.get("id") for j in riders_of(data, lead_id)}
+        depends = {}
         if idea_ids:
             if not mine(lead.get("claim") or {}, device, session):
                 fail(f"{lead_id} is not held by this session. Nothing was written.", 6)
@@ -2420,6 +2424,10 @@ def batch_cmd(target, *idea_ids):
                 fail(f"cannot batch into {lead_id}: follows Tracer", 2)
             if len(riders_of(data, lead_id)) + len(idea_ids) > MAX_RIDERS:
                 fail(f"a batch holds at most {MAX_RIDERS} riders", 2)
+            for pick in line_picks:
+                depends[pick], why = backlog_waits(backlog_text, lines[pick][4], open_ids, together)
+                if why:
+                    fail(f"cannot batch {pick}: {why}. Nothing was written.", 2)
             picked = []
             for idea_id in job_picks:
                 j = next((x for x in data["jobs"] if x.get("id") == idea_id), None)
@@ -2435,17 +2443,18 @@ def batch_cmd(target, *idea_ids):
                                           "refs": [*(j.get("refs") or []), {"id": lead_id, "kind": BATCH_REF}]})
         made = {}
         for pick in line_picks:
-            _, _, ref, candidate = lines[pick]
+            _, _, ref, candidate, _ = lines[pick]
             job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]],
                                  feature_slug(candidate["title"]), archive_floor(data))
-            refs = suffix_refs(ref) + [{"id": lead_id, "kind": BATCH_REF}]
+            refs = suffix_refs(ref) + depends[pick] + [{"id": lead_id, "kind": BATCH_REF}]
             patch_job(data, job_id, {"project": slug, "title": candidate["title"], "idea": candidate["idea"],
                                      "stage": "spec", "note": f"batched into {lead_id}", "refs": refs})
             made[pick] = job_id
         candidates = [entry(j) for j in data["jobs"]
                       if j.get("id") != lead_id and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
                       and batch_problem(data, j, slug, device, session, minutes) is None]
-        candidates += [v[3] for k, v in lines.items() if k not in line_picks]
+        candidates += [v[3] for k, v in lines.items() if k not in line_picks
+                       and backlog_waits(backlog_text, v[4], open_ids, together)[1] is None]
         if alone:
             candidates = []
         result = {"lead": lead_id, "riders": [entry(j) for j in riders_of(data, lead_id)],
