@@ -158,7 +158,7 @@ function response(body, type, headers = {}) {
 
 /** @param {ServerConfig} env */
 export function renderDashboard(env) {
-  const embed = env.embed_origins ?? [];
+  const embed = env.embed_origins;
   const config = jsonScript({
     image_origins: env.image_origins,
     agent_links: env.agent_links,

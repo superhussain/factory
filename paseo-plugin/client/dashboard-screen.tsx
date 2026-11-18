@@ -41,6 +41,9 @@ export function dashboardScreen(client: PluginClientContext) {
       },
       button: {
         alignSelf: "flex-start" as const,
+        minHeight: 44,
+        justifyContent: "center" as const,
+        borderRadius: 999,
         paddingVertical: 8,
         paddingHorizontal: 12,
         backgroundColor: theme.colors.accent,
@@ -83,7 +86,7 @@ export function dashboardScreen(client: PluginClientContext) {
         {stalled && !ready ? (
           <View style={styles.bar}>
             <Text style={styles.text}>
-              Factory did not load. Sign in through Cloudflare Access, then reload.
+              Factory did not load. Sign in through Cloudflare Access, or ask your factory operator to add this Paseo origin to embed_origins, then reload.
             </Text>
             {button("Sign in", () => void openExternalUrl(origin))}
             {button("Reload", () => setLoad((n) => n + 1))}

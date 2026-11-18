@@ -40,7 +40,10 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
           hint="The HTTPS origin of your factory, like https://factory.example.com."
           placeholder="https://factory.example.com"
           initialValue={ready.values.origin}
-          onChangeText={setValue}
+          onChangeText={(text) => {
+            setValue(text);
+            setError(null);
+          }}
           disabled={ready.saving}
           error={error ?? ready.saveError}
         />

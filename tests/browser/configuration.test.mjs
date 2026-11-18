@@ -27,6 +27,7 @@ function config(overrides = {}) {
     issuer: "https://example-team.cloudflareaccess.com",
     audience: "example-application-audience",
     image_origins: [],
+    embed_origins: [],
     agent_links: {},
     ...overrides,
   };
