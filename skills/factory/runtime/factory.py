@@ -1251,6 +1251,25 @@ def feature_slug(feature):
     return "-".join(re.findall(r"[a-z0-9]+", feature.lower())[:3])[:40].strip("-") or "item"
 
 
+def context_below(lines, i):
+    """The indented block under lines[i], with its indent and blank edge lines removed."""
+    held = []
+    for below in lines[i + 1:]:
+        if below and not below.startswith("  "):
+            break
+        held.append(below[2:])
+    while held and not held[0].strip():
+        held.pop(0)
+    while held and not held[-1].strip():
+        held.pop()
+    return "\n".join(held)
+
+
+def open_job_ids(jobs):
+    """The ids of the board jobs not merged or closed."""
+    return {j.get("id") for j in jobs if j.get("stage") not in TERMINAL}
+
+
 def first_item(text, projects, paths, skipped, open_ids=frozenset):
     """(raw line, slug, feature, refs) for the first unchecked line this device can run, or None.
     Lines for a project with no checkout here are skipped, and their slugs added to skipped. A line whose
@@ -1274,19 +1293,15 @@ def first_item(text, projects, paths, skipped, open_ids=frozenset):
                 skipped.add(slug)
                 print(f"skipping {slug}: no checkout on this device", file=sys.stderr)
             continue
-        held = []
-        for below in lines[i + 1:]:
-            if below and not below.startswith("  "):
-                break
-            held.append(below[2:])
-        context, feature = "\n".join(held), m.group(2).rstrip()
+        context, feature = context_below(lines, i), m.group(2).rstrip()
         depends, _ = backlog_depends(text, context)
         refs, why = backlog_waits(text, context, open_ids() if depends else frozenset())
         if why is None:
             return line, slug, feature, suffix_refs(BACKLOG_SUFFIX.search(feature)) + refs
         if line not in skipped:
             skipped.add(line)
-            print(f'skipping "{slug}: {feature}": {why}', file=sys.stderr)
+            shown = AUDIT_CONTROL.sub("?", f'"{slug}: {feature}": {why}')
+            print(f"skipping {shown}", file=sys.stderr)
     return None
 
 
@@ -1303,7 +1318,7 @@ def next_item():
 
         def open_ids():
             if "ids" not in board:
-                board["ids"] = {j.get("id") for j in read_board(home)["jobs"] if j.get("stage") not in TERMINAL}
+                board["ids"] = open_job_ids(read_board(home)["jobs"])
             return board["ids"]
         item = first_item(text if status == 200 else "", projects, paths, skipped, open_ids)
         if item is None:
@@ -1524,16 +1539,7 @@ def unchecked_lines(text):
         m = BACKLOG_LINE.match(line)
         if not m:
             continue
-        held = []
-        for below in lines[i + 1:]:
-            if below and not below.startswith("  "):
-                break
-            held.append(below[2:])
-        while held and not held[0].strip():
-            held.pop(0)
-        while held and not held[-1].strip():
-            held.pop()
-        found.append((line, m.group(1), m.group(2), "\n".join(held)))
+        found.append((line, m.group(1), m.group(2), context_below(lines, i)))
     return found
 
 
@@ -1891,15 +1897,19 @@ BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of|depends-on) 
 DEPENDS_ON = re.compile(r"^Depends on: ([\w-]+: \S.*)$", re.M)
 
 
-def backlog_depends(text, context):
-    """(refs, waiting) for the Depends on: lines in context: a depends-on ref per item checked off as a job,
-    and the first item whose backlog line is still unchecked, or None. A missing item adds nothing."""
+def backlog_depends(text, context, same_call=None):
+    """(refs, waiting) for the Depends on: lines in context: a depends-on ref per item checked off as a job
+    or picked in the same call (same_call maps an item to its new job id), and the first other item whose
+    backlog line is still unchecked, or None. A missing item adds nothing."""
     lines = [line.rstrip() for line in text.split("\n")]
     refs, waiting = [], None
     for item in DEPENDS_ON.findall(context):
         item = item.rstrip()
         if f"- [ ] {item}" in lines:
-            waiting = waiting or item
+            if same_call and item in same_call:
+                refs.append({"id": same_call[item], "kind": "depends-on"})
+            else:
+                waiting = waiting or item
             continue
         done = re.compile(rf"- \[x\] {re.escape(item)} \(([^()]+)\)")
         job_id = next((m.group(1) for m in map(done.fullmatch, lines) if m), None)
@@ -1908,10 +1918,11 @@ def backlog_depends(text, context):
     return refs, waiting
 
 
-def backlog_waits(text, context, open_ids, together=frozenset()):
+def backlog_waits(text, context, open_ids, together=frozenset(), same_call=None):
     """(refs, why) for a line's Depends on: context: its depends-on refs, and why it must wait (None when it can
-    start). It waits on an unchecked prerequisite line or a prerequisite job still open, unless that job is in together."""
-    refs, waiting = backlog_depends(text, context)
+    start). It waits on an unchecked prerequisite line not in same_call or a prerequisite job still open, unless
+    that job is in together."""
+    refs, waiting = backlog_depends(text, context, same_call)
     if waiting:
         return refs, f'it depends on "{waiting}", which is still unchecked'
     held = next((r["id"] for r in refs if r["id"] in open_ids and r["id"] not in together), None)
@@ -2418,9 +2429,13 @@ def batch_cmd(target, *idea_ids):
         if lead is None:
             fail(f"no job {lead_id} on the board. Nothing was written.", 4)
         alone = isinstance(lead.get("priority"), dict) and lead["priority"].get("alone") is True
-        open_ids = {j.get("id") for j in data["jobs"] if j.get("stage") not in TERMINAL}
+        open_ids = open_job_ids(data["jobs"])
         together = {lead_id} | {j.get("id") for j in riders_of(data, lead_id)}
-        depends = {}
+        depends, made = {}, {}
+        for pick in line_picks:
+            made[pick] = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]] + list(made.values()),
+                                     feature_slug(lines[pick][3]["title"]), archive_floor(data))
+        same_call = {lines[p][0][6:].rstrip(): made[p] for p in line_picks}
         if idea_ids:
             if not mine(lead.get("claim") or {}, device, session):
                 fail(f"{lead_id} is not held by this session. Nothing was written.", 6)
@@ -2433,9 +2448,9 @@ def batch_cmd(target, *idea_ids):
             if len(riders_of(data, lead_id)) + len(idea_ids) > MAX_RIDERS:
                 fail(f"a batch holds at most {MAX_RIDERS} riders", 2)
             for pick in line_picks:
-                depends[pick], why = backlog_waits(backlog_text, lines[pick][4], open_ids, together)
+                depends[pick], why = backlog_waits(backlog_text, lines[pick][4], open_ids, together, same_call)
                 if why:
-                    fail(f"cannot batch {pick}: {why}. Nothing was written.", 2)
+                    fail(AUDIT_CONTROL.sub("?", f"cannot batch {pick}: {why}. Nothing was written."), 2)
             picked = []
             for idea_id in job_picks:
                 j = next((x for x in data["jobs"] if x.get("id") == idea_id), None)
@@ -2443,21 +2458,17 @@ def batch_cmd(target, *idea_ids):
                     fail(f"no job {idea_id} on the board. Nothing was written.", 4)
                 problem = batch_problem(data, j, slug, device, session, minutes)
                 if problem:
-                    fail(f"cannot batch {idea_id}: {problem}. Nothing was written.", 2)
+                    fail(AUDIT_CONTROL.sub("?", f"cannot batch {idea_id}: {problem}. Nothing was written."), 2)
                 picked.append(j)
             for j in picked:
                 j.pop("claim", None)
                 patch_job(data, j["id"], {"stage": "spec", "note": f"batched into {lead_id}",
                                           "refs": [*(j.get("refs") or []), {"id": lead_id, "kind": BATCH_REF}]})
-        made = {}
         for pick in line_picks:
             _, _, ref, candidate, _ = lines[pick]
-            job_id = next_job_id(local + [str(j.get("id", "")) for j in data["jobs"]],
-                                 feature_slug(candidate["title"]), archive_floor(data))
             refs = suffix_refs(ref) + depends[pick] + [{"id": lead_id, "kind": BATCH_REF}]
-            patch_job(data, job_id, {"project": slug, "title": candidate["title"], "idea": candidate["idea"],
-                                     "stage": "spec", "note": f"batched into {lead_id}", "refs": refs})
-            made[pick] = job_id
+            patch_job(data, made[pick], {"project": slug, "title": candidate["title"], "idea": candidate["idea"],
+                                         "stage": "spec", "note": f"batched into {lead_id}", "refs": refs})
         candidates = [entry(j) for j in data["jobs"]
                       if j.get("id") != lead_id and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
                       and batch_problem(data, j, slug, device, session, minutes) is None]
@@ -4542,6 +4553,7 @@ def pickup(*args):
                     failing = failing or started
                     print("factory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now", file=sys.stderr)
             retro_pickup_push(home)
+            audit_pickup_push(home, data)
         pickup_pass(home, device, minutes, dry, limit, cap, data)
     finally:
         if not dry:
@@ -5313,7 +5325,7 @@ def waiting_on(j, jobs):
     """The first depends-on id of an idea whose job is still open on the board, else None."""
     if j.get("stage") != IDEA:
         return None
-    open_ids = {o.get("id") for o in jobs if o.get("stage") not in TERMINAL}
+    open_ids = open_job_ids(jobs)
     return next((r["id"] for r in j.get("refs") or [] if isinstance(r, dict) and r.get("kind") == "depends-on"
                  and r.get("id") in open_ids), None)
 
@@ -9452,6 +9464,12 @@ RETRO_REDIS_PASS = re.compile(r"((?:^|\s)(?:-a\s*|--pass\s+))(\"[^\"]*\"|'[^']*'
 RETRO_DOCKER_LOGIN = re.compile(r"(?<![\w.-])docker(?:\.exe)?\s+login(?![\w.-])")
 RETRO_OPENSSL = re.compile(r"(?<![\w.-])openssl(?:\.exe)?(?![\w.-])")
 RETRO_OPENSSL_PASS = re.compile(r"((?:^|\s)-pass(?:in|out)?\s+pass:)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_OPENSSL_K = re.compile(r"((?:^|\s)-[kK]\s+)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_OPENSSL_BARE = re.compile(
+    r"((?:^|\s)-pass(?:in|out)?\s+)(?!(?:pass|env|file|fd):|stdin(?!\S))(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_COMMAND_SPLIT = re.compile(r"([|;&]+)")
+RETRO_PASSWORD_STDIN = re.compile(r"(?<![\w-])--password-stdin(?![\w-])")
+RETRO_ECHO_PASS = re.compile(r"((?:^|[\s;&(])echo\s+(?:-[neE]{1,3}\s+)?)(\"[^\"]*\"|'[^']*'|[^\s\"'|;&]+)(\s*\|\s*)$")
 RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential|mysql_pwd|sshpass|rediscli_auth"
 RETRO_SECRET_WORD = re.compile(r"(?i)(?:" + RETRO_SECRET_WORDS + ")")
 RETRO_COUNT = re.compile(r"\d{1,7}[,;)}\]]*")
@@ -9499,15 +9517,30 @@ def retro_secret_pair(match):
     return name + sep + "[redacted]"
 
 
+def retro_openssl_part(part):
+    """One command with every -k, -K and bare -pass, -passin or -passout value after its openssl as [redacted]."""
+    hit = RETRO_OPENSSL.search(part)
+    if not hit:
+        return part
+    rest = RETRO_OPENSSL_BARE.sub(r"\1[redacted]", RETRO_OPENSSL_K.sub(r"\1[redacted]", part[hit.end():]))
+    return part[:hit.end()] + rest
+
+
 def retro_tool_pass(line):
     """line with the password after a mysql glued -p, after the first sshpass -p, redis-cli -a or --pass and
-    docker login -p, and after every openssl -pass, -passin or -passout pass:, as [redacted]."""
+    docker login -p, after every openssl -pass, -passin or -passout pass:, after every openssl -k, -K or bare
+    -pass, -passin or -passout in that command, and in an echo piped to docker login --password-stdin, as
+    [redacted]."""
     for tool, flag, count in ((RETRO_MYSQL, RETRO_MYSQL_PASS, 0), (RETRO_SSHPASS, RETRO_SSHPASS_PASS, 1),
                               (RETRO_REDIS, RETRO_REDIS_PASS, 1), (RETRO_DOCKER_LOGIN, RETRO_SSHPASS_PASS, 1),
                               (RETRO_OPENSSL, RETRO_OPENSSL_PASS, 0)):
         hit = tool.search(line)
         if hit:
             line = line[:hit.end()] + flag.sub(r"\1[redacted]", line[hit.end():], count=count)
+    line = "".join(retro_openssl_part(p) for p in RETRO_COMMAND_SPLIT.split(line))
+    hit = RETRO_DOCKER_LOGIN.search(line)
+    if hit and RETRO_PASSWORD_STDIN.search(line, hit.end()):
+        line = RETRO_ECHO_PASS.sub(r"\1[redacted]\3", line[:hit.start()]) + line[hit.start():]
     return line
 
 
@@ -9797,6 +9830,7 @@ AUDIT_FLAGS = (
 AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
 AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
 AUDIT_MAX_BYTES = 1 << 20
+AUDIT_PUSH_FILE = "audit-push.json"
 AUDIT_WRITE_ONLY = "audit rows are written only by the host's bound service token"
 AUDIT_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
@@ -9872,14 +9906,19 @@ def audit_scan(path, main):
     return rows
 
 
+def audit_folders(job_id):
+    """The sorted transcript folders this host keeps from the job's worktrees."""
+    folder = re.compile(r"(?:^|-)factory-" + re.escape(job_id) + r"(?:-|$)")
+    return sorted(p for p in retro_transcripts().iterdir() if p.is_dir() and folder.search(p.name))
+
+
 def audit_rows(job_id):
     """(rows, main session count) for every transcript this host keeps from the job's worktree."""
     root = retro_transcripts()
     if not root.is_dir():
         fail(f"no Claude Code transcripts at {root}", 4)
-    folder = re.compile(r"(?:^|-)factory-" + re.escape(job_id) + r"(?:-|$)")
     rows, sessions = [], 0
-    for project in sorted(p for p in root.iterdir() if p.is_dir() and folder.search(p.name)):
+    for project in audit_folders(job_id):
         for path in sorted(project.glob("*.jsonl")):
             sessions += 1
             rows += [{"session": path.stem[:8], "agent": "main", **row} for row in audit_scan(path, True)]
@@ -9921,6 +9960,52 @@ def audit_push(job_id):
         print(f"pushed {len(rows) - dropped} of {len(rows)} {calls} to {key}; the oldest {dropped} did not fit in 1 MiB")
     else:
         print(f"pushed {len(rows)} {calls} to {key}")
+
+
+def audit_stamp(job_id):
+    """The newest st_mtime_ns of the job's session and subagent transcripts here, or None with no session."""
+    try:
+        folders = audit_folders(job_id)
+        sessions = [path for p in folders for path in p.glob("*.jsonl")]
+        subagents = [path for p in folders for path in p.glob("*/subagents/*.jsonl")]
+        return max(path.stat().st_mtime_ns for path in sessions + subagents) if sessions else None
+    except OSError:
+        return None
+
+
+def audit_pushed(home):
+    """{job id: stamp} from <home>/audit-push.json, or {} for a missing or malformed record."""
+    try:
+        record = json.loads((home / AUDIT_PUSH_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    jobs = record.get("jobs") if isinstance(record, dict) and record.get("version") == 1 else None
+    return jobs if isinstance(jobs, dict) and all(type(v) is int for v in jobs.values()) else {}
+
+
+def audit_pickup_push(home, data):
+    """Push this host's audit rows for each in-flight or pr-open job whose transcripts changed since
+    the last recorded push. Best effort: a failed push costs one warning, and the next pickup run retries it."""
+    if not retro_transcripts().is_dir():
+        return
+    record, kept = audit_pushed(home), {}
+    try:
+        for job in (data or read_board(home))["jobs"]:
+            job_id = job.get("id")
+            if job.get("stage") not in IN_FLIGHT + ("pr-open",) or not isinstance(job_id, str) \
+                    or not NEW_JOB_ID.fullmatch(job_id):
+                continue
+            stamp = audit_stamp(job_id)
+            if stamp is None:
+                continue
+            if record.get(job_id) != stamp:
+                audit_push(job_id)
+            kept[job_id] = stamp
+    except SystemExit as e:
+        print(f"factory.py: audit push stopped (exit {e.code}); the next pickup run retries it", file=sys.stderr)
+        return
+    if kept != record:
+        write_atomic(home / AUDIT_PUSH_FILE, json.dumps({"version": 1, "jobs": kept}) + "\n")
 
 
 def audit_cmd(*args):

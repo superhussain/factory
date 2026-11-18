@@ -305,6 +305,10 @@ fit in 1 MiB`. The job drawer's `audit` tab shows every host's pushed rows.
 exits 5. A bad job id, or a second argument without `push`, exits 2 with
 `usage: factory.py audit push <job-id>, a full job id such as 1017-add-x`.
 
+`pickup` also pushes this host's audit rows for each job at spec, build, review,
+approve or pr-open whose transcripts here changed since `<home>/audit-push.json`
+records; a failed push prints one warning and the run goes on.
+
 ## Exit recovery
 
 | Exit | Action |
