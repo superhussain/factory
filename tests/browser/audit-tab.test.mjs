@@ -54,6 +54,25 @@ async function seed(origin) {
   }
 }
 
+async function openAudit(page, origin, width, height) {
+  await page.setViewport({ width, height, deviceScaleFactor: 1 });
+  await page.setRequestInterception(true);
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/audit/1017-add-x")
+      return request.respond({
+        status: 200,
+        contentType: "application/x-ndjson",
+        body: ROWS.map((r) => JSON.stringify(r) + "\n").join("") + "not json\n",
+      });
+    if (path === "/api/audit/1018-no-audit")
+      return request.respond({ status: 200, contentType: "application/x-ndjson", body: "" });
+    return request.continue();
+  });
+  await page.goto(origin + "/#1017-add-x/audit", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#d-doc table.audit");
+}
+
 test("the audit tab lists every pushed call as text", { timeout: 120000 }, async () => {
   await prepareAssets();
   await withBrowserFixture(async ({ browser, origin }) => {
@@ -61,24 +80,9 @@ test("the audit tab lists every pushed call as text", { timeout: 120000 }, async
     const context = await browser.createBrowserContext();
     try {
       const page = await context.newPage();
-      await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
       const errors = [];
       page.on("pageerror", (error) => errors.push(String(error)));
-      await page.setRequestInterception(true);
-      page.on("request", (request) => {
-        const path = new URL(request.url()).pathname;
-        if (path === "/api/audit/1017-add-x")
-          return request.respond({
-            status: 200,
-            contentType: "application/x-ndjson",
-            body: ROWS.map((r) => JSON.stringify(r) + "\n").join("") + "not json\n",
-          });
-        if (path === "/api/audit/1018-no-audit")
-          return request.respond({ status: 200, contentType: "application/x-ndjson", body: "" });
-        return request.continue();
-      });
-      await page.goto(origin + "/#1017-add-x/audit", { waitUntil: "domcontentloaded" });
-      await page.waitForSelector("#d-doc table.audit");
+      await openAudit(page, origin, 1440, 900);
       assert.equal(
         await page.$eval("#d-tabs .tab.active", (tab) => tab.textContent.trim()),
         "audit",
@@ -92,7 +96,15 @@ test("the audit tab lists every pushed call as text", { timeout: 120000 }, async
         ),
         strong: [...doc.querySelectorAll("table.audit strong")].map((s) => s.textContent),
         images: doc.querySelectorAll("img").length,
+        display: getComputedStyle(doc.querySelector("table.audit")).display,
+        role: doc.querySelector("table.audit").getAttribute("role"),
+        labels: [...doc.querySelectorAll("table.audit tbody tr")].map((tr) =>
+          [...tr.cells].map((td) => td.dataset.label),
+        ),
       }));
+      assert.equal(table.display, "table");
+      assert.equal(table.role, "table");
+      for (const labels of table.labels) assert.deepEqual(labels, table.headers);
       assert.equal(
         table.summary,
         "6 calls from 1 host, 4 flagged. Each host redacted its targets before upload.",
@@ -130,6 +142,51 @@ test("the audit tab lists every pushed call as text", { timeout: 120000 }, async
         document.getElementById("d-doc").textContent.includes("Spec 1018-no-audit"),
       );
       assert.equal(await page.$('#d-tabs .tab[data-name="audit.md"]'), null);
+      assert.deepEqual(errors, [], "no page errors");
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+test("the audit tab stacks each call as a card on a phone", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seed(origin);
+    const context = await browser.createBrowserContext();
+    try {
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await openAudit(page, origin, 390, 844);
+      const layout = await page.$eval("#d-doc", (doc) => {
+        const wrap = doc.querySelector(".table-wrap");
+        const row = doc.querySelectorAll("table.audit tbody tr")[4];
+        const cell = (label) => {
+          const td = row.querySelector(`td[data-label="${label}"]`);
+          td.scrollIntoView({ block: "center" });
+          const box = td.getBoundingClientRect();
+          return {
+            text: td.textContent,
+            inside:
+              box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight,
+          };
+        };
+        return {
+          display: getComputedStyle(doc.querySelector("table.audit")).display,
+          scrollWidth: wrap.scrollWidth,
+          clientWidth: wrap.clientWidth,
+          flags: cell("Flags"),
+          target: cell("Target"),
+        };
+      });
+      assert.equal(layout.display, "block");
+      assert.ok(
+        layout.scrollWidth <= layout.clientWidth,
+        `no sideways scroll: ${layout.scrollWidth} > ${layout.clientWidth}`,
+      );
+      assert.deepEqual(layout.flags, { text: "recursive-delete, denied", inside: true });
+      assert.deepEqual(layout.target, { text: "rm -rf build", inside: true });
       assert.deepEqual(errors, [], "no page errors");
     } finally {
       await context.close();

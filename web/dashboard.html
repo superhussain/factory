@@ -666,6 +666,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail.head-media .doc > .file-list { margin-bottom: 16px; padding-left: 20px; }
     .detail.head-media .doc > .file-list + * { margin-top: 0; }
     .pager > .doc, .pager > .gallery, .pager > .file-list { touch-action: pan-y pinch-zoom; }
+    /* On a phone each audit row is a card: a label column, then the value. */
+    .doc table.audit, .doc table.audit tbody, .doc table.audit tr { display: block; }
+    .doc table.audit thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .doc table.audit tr { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 4px 0; }
+    .doc table.audit td, .doc table.audit td:first-child, .doc table.audit td:last-child { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); column-gap: 10px; border: 0; padding: 3px 10px; min-width: 0; max-width: none; white-space: normal; }
+    .doc table.audit td::before { content: attr(data-label); color: var(--muted); font-weight: 600; }
   }
   @media (max-width: 360px) {
     header { gap: 6px; }
@@ -4404,13 +4410,15 @@ function renderAudit(f) {
   const hosts = new Set(rows.map((r) => r.host)).size;
   const flagged = rows.filter((r) => Array.isArray(r.flags) && r.flags.length).length;
   const n = (count, word) => count + ' ' + word + (count === 1 ? '' : 's');
-  const head = ['Time (UTC)', 'Host', 'Session', 'Agent', 'Tool', 'Flags', 'Target'].map((h) => '<th scope="col">' + h + '</th>').join('');
+  const cols = ['Time (UTC)', 'Host', 'Session', 'Agent', 'Tool', 'Flags', 'Target'];
+  const head = cols.map((h) => '<th scope="col" role="columnheader">' + h + '</th>').join('');
   const body = rows.map((r) => {
     const flags = Array.isArray(r.flags) && r.flags.length ? '<strong>' + esc(r.flags.join(', ')) + '</strong>' : '-';
-    return '<tr><td>' + [r.time, r.host, r.session, r.agent, r.tool].map(esc).join('</td><td>') + '</td><td>' + flags + '</td><td><code>' + esc(r.target) + '</code></td></tr>';
+    const cells = [...[r.time, r.host, r.session, r.agent, r.tool].map(esc), flags, '<code>' + esc(r.target) + '</code>'];
+    return '<tr role="row">' + cells.map((c, i) => '<td role="cell" data-label="' + cols[i] + '">' + c + '</td>').join('') + '</tr>';
   }).join('');
   return '<p>' + n(rows.length, 'call') + ' from ' + n(hosts, 'host') + ', ' + flagged + ' flagged. Each host redacted its targets before upload.</p>' +
-    '<div class="table-wrap" tabindex="0" role="region" aria-label="Audit rows"><table class="audit"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+    '<div class="table-wrap" tabindex="0" role="region" aria-label="Audit rows"><table class="audit" role="table"><thead role="rowgroup"><tr role="row">' + head + '</tr></thead><tbody role="rowgroup">' + body + '</tbody></table></div>';
 }
 
 const sha12 = async (text) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))).slice(0, 12);
