@@ -713,7 +713,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   @media (pointer: coarse) { :root { --icon-size: 44px; } }
   /* Only when the icons and the status cannot share one row, the status moves up beside the filter. syncHeaderWrap sets wraps. */
-  @media (pointer: coarse) and (min-width: 361px) and (max-width: 760px) { header.wraps .header-actions { order: 1; } }
+  @media (max-width: 760px) { header.wraps .header-actions { order: 1; } }
 </style>
 </head>
 <body>
