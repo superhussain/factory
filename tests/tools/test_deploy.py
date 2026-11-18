@@ -158,6 +158,24 @@ class RenderTest(unittest.TestCase):
             variables = json.loads(Path(config).read_text())["vars"]
         self.assertEqual(variables["FACTORY_JIRA_ORIGIN"], "https://jira.example.test")
 
+    def test_render_with_embed_origins(self):
+        profile = {**json.loads(VALID.read_text()), "embed_origins": ["https://paseo.example.test"]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.json"
+            path.write_text(json.dumps(profile))
+            config = deploy.project_wrangler(deploy.load_profile(path), ROOT, Path(directory) / "out")
+            variables = json.loads(Path(config).read_text())["vars"]
+        self.assertEqual(variables["FACTORY_EMBED_ORIGINS"], '["https://paseo.example.test"]')
+
+    def test_embed_origins_rejects_http(self):
+        profile = {**json.loads(VALID.read_text()), "embed_origins": ["http://paseo.example.test"]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.json"
+            path.write_text(json.dumps(profile))
+            result = run_cli("check", "--profile", str(path))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("embed_origins entry must be a canonical https origin", result.stderr)
+
 class PreflightTest(unittest.TestCase):
     def fake_run(self, calls, wrangler_dry_run=0, wrangler_deploy=0, inspect=0):
         def fake(argv, **kwargs):

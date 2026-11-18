@@ -17,7 +17,7 @@ COMPATIBILITY_DATE = "2026-06-01"
 OBSERVABILITY = {"enabled": True, "head_sampling_rate": 1, "redact_query_string": True}
 PROFILE_KEYS = ["version", "account_id", "worker_name", "bucket_name", "origin", "title",
                 "issuer", "audience", "image_origins", "agent_links"]
-OPTIONAL_PROFILE_KEYS = ["jira_origin"]
+OPTIONAL_PROFILE_KEYS = ["jira_origin", "embed_origins"]
 
 DNS = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]*$")
 CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
@@ -78,6 +78,16 @@ def image_origins(value):
         fail("image_origins must not contain duplicates")
     for origin in value:
         https_origin(origin, "image_origins entry")
+    return list(value)
+
+
+def embed_origins(value):
+    if not isinstance(value, list) or any(not isinstance(v, str) for v in value):
+        fail("embed_origins must be a list of origin strings")
+    if len(set(value)) != len(value):
+        fail("embed_origins must not contain duplicates")
+    for origin in value:
+        https_origin(origin, "embed_origins entry")
     return list(value)
 
 
@@ -186,6 +196,8 @@ def load_profile(path):
     if "jira_origin" in data:
         https_origin(data["jira_origin"], "jira_origin")
         profile["jira_origin"] = data["jira_origin"]
+    if "embed_origins" in data:
+        profile["embed_origins"] = embed_origins(data["embed_origins"])
     return profile
 
 
@@ -227,6 +239,8 @@ def project_wrangler(profile, source_root, output):
     }
     if "jira_origin" in profile:
         config["vars"]["FACTORY_JIRA_ORIGIN"] = profile["jira_origin"]
+    if "embed_origins" in profile:
+        config["vars"]["FACTORY_EMBED_ORIGINS"] = json.dumps(profile["embed_origins"])
     connection = {"version": 1, "api_url": profile["origin"]}
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
