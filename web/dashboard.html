@@ -3288,6 +3288,9 @@ function syncInboxLink() {
 }
 
 function renderInboxPage() {
+  // Only the render right after an arrow step may use it, so a stale step never pulls focus later.
+  const step = inboxStepHref;
+  inboxStepHref = '';
   syncInboxLink();
   if (!inboxShown()) return;
   if (!loaded || (!backlogLoaded && !backlogFailed)) {
@@ -3351,9 +3354,8 @@ function renderInboxPage() {
     if (el.tagName === 'TEXTAREA') el.setSelectionRange(selectionStart, selectionEnd);
   }
   if (row >= 0) (list.children[Math.min(row, list.children.length - 1)]?.querySelector('.inbox-actions .btn:not(:disabled)') ?? $('inbox-page-heading')).focus();
-  if (current >= 0 && inboxStepHref === inboxHref(items[current])) {
-    [...list.children[current].querySelectorAll('a.btn')].find((a) => a.getAttribute('href') === inboxStepHref).focus({ preventScroll: true });
-    inboxStepHref = '';
+  if (current >= 0 && step === inboxHref(items[current])) {
+    [...list.children[current].querySelectorAll('a.btn')].find((a) => a.getAttribute('href') === step).focus({ preventScroll: true });
   }
   if (current >= 0) list.children[current].scrollIntoView({ block: 'nearest' });
 }

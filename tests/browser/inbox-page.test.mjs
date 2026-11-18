@@ -661,6 +661,25 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       assert.deepEqual(errors, []);
       await page.browserContext().close();
     });
+    await it("a stale arrow step does not pull focus later", async () => {
+      await reset();
+      const { page, errors } = await openPage("#/inbox");
+      await openRow3(page);
+      // A step whose row never rendered as the open one, then a render that drops it.
+      await page.evaluate(() => {
+        inboxStepHref = "#042-sample-export";
+        renderInboxPage();
+        document.querySelector("#inbox-page-heading").focus();
+        location.hash = "#042-sample-export";
+      });
+      await page.waitForFunction(
+        () => document.querySelector("#d-meta")?.textContent.includes("042-sample-export"),
+        wait,
+      );
+      assert.equal(await page.evaluate(() => document.activeElement.id), "inbox-page-heading");
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
 
     if (SHOTS) await it("reference capture", () => shotKeys("after-reference-keys.png"));
 
