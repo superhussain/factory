@@ -57,6 +57,27 @@ const BATCH = [
     updated: "2026-01-01T00:00:00Z",
   },
 ];
+const WRITERS = [
+  {
+    id: "096-sample-writer",
+    project: "sample",
+    title: "Synthetic job a session wrote",
+    stage: "pr-open",
+    pr: "https://github.com/example/sample/pull/96",
+    paseo_writer: { server: "synthetic-server", agent: "writer-agent" },
+    updated: "2026-01-01T00:00:00Z",
+  },
+  {
+    id: "097-sample-both",
+    project: "sample",
+    title: "Synthetic job with an owner and a writer",
+    stage: "pr-open",
+    pr: "https://github.com/example/sample/pull/97",
+    paseo: { server: "synthetic-server", agent: "own-agent" },
+    paseo_writer: { server: "synthetic-server", agent: "writer-agent" },
+    updated: "2026-01-01T00:00:00Z",
+  },
+];
 const KEY = "factory-hidden-drawer-links";
 const HEAD = ["#d-pr", "#d-paseo", "#d-paseo-web", "#d-tracer", "#d-actions", "#d-close"];
 const DESKTOP = { width: 1280, height: 900 };
@@ -71,7 +92,7 @@ test("drawer header links", { timeout: 180000 }, async (t) => {
       "sample",
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
-    await seedBoard(origin, [JOB, ...BATCH]);
+    await seedBoard(origin, [JOB, ...BATCH, ...WRITERS]);
     await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
     const page = await (await browser.createBrowserContext()).newPage();
     const errors = [];
@@ -288,6 +309,21 @@ test("drawer header links", { timeout: 180000 }, async (t) => {
       ]);
       for (const id of ["090-sample-export-csv", "093-sample-own"])
         assert.deepEqual(await jumperLinks(id), ["Open in Session app", "Open in Session"], id);
+    });
+
+    await t.test("writer session link", async () => {
+      await page.setViewport(DESKTOP);
+      const href = async (id) => {
+        await page.goto("about:blank");
+        await page.goto(`${origin}/#${id}`, { waitUntil: "load" });
+        await page.waitForFunction(() => !document.getElementById("d-pr").hidden, wait);
+        return page.$eval("#d-paseo", (el) => el.getAttribute("href"));
+      };
+      assert.equal(
+        await href("096-sample-writer"),
+        "session://h/synthetic-server/agent/writer-agent",
+      );
+      assert.match(await href("097-sample-both"), /\/agent\/own-agent$/);
     });
 
     assert.deepEqual(errors, []);

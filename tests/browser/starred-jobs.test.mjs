@@ -223,6 +223,24 @@ test("starred jobs", { timeout: 240000 }, async (t) => {
         assert.deepEqual(await onBoard(page), ["046-sample-review"]);
       });
 
+      await t.test(
+        `only with every starred job filtered out says the filter hides them ${width}`,
+        async () => {
+          await page.evaluate(() => {
+            localStorage.setItem("factory-starred-jobs", '["042-sample-export"]');
+            localStorage.setItem("factory-starred-view", "only");
+            localStorage.setItem("factory-projects-hidden", '["sample"]');
+          });
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await page.waitForSelector("#starred-only");
+          assert.equal(
+            await page.$eval("#starred-only", (el) => el.textContent),
+            "The project filter hides every starred job. Show all jobs",
+          );
+          await page.evaluate(() => localStorage.removeItem("factory-projects-hidden"));
+        },
+      );
+
       await t.test(`reset keeps stars and garbage values are ignored ${width}`, async () => {
         await page.evaluate(() =>
           localStorage.setItem("factory-starred-jobs", '["042-sample-export"]'),
@@ -258,6 +276,17 @@ test("starred jobs", { timeout: 240000 }, async (t) => {
           0,
         );
         assert.equal(await page.$("#starred-only"), null);
+      });
+
+      await t.test(`star tooltip follows the pressed state ${width}`, async () => {
+        const label = () =>
+          page.$eval(STAR, (el) => [el.getAttribute("title"), el.getAttribute("aria-label")]);
+        await openDrawer(page, "043-sample-import");
+        assert.deepEqual(await label(), ["Star job", "Star job"]);
+        await activate(STAR);
+        assert.deepEqual(await label(), ["Unstar job", "Star job"]);
+        await activate(STAR);
+        assert.deepEqual(await label(), ["Star job", "Star job"]);
       });
       await context.close();
     }

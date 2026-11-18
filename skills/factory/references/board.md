@@ -30,6 +30,7 @@
   "experiment": { "name": "pilot", "arm": "a | b", "provider": "provider-b", "model": "model-b", "effort": "high" },
   "agents": [{ "at": "...", "stage": "spec", "role": "spec", "harness": "claude", "via": "native", "model": "...", "effort": "medium", "session": "a1b2c3", "paseo": {"server": "...", "agent": "..."} }],
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
+  "paseo_writer": {"server": "...", "agent": "..."},
   "started": "2026-10-15T11:40:00Z",
   "updated": "2026-10-15T12:00:00Z",
   "done": "2026-10-15T12:30:00Z"
@@ -73,6 +74,7 @@ Only pickup and `agent record` append `agents` rows, newest 32 kept;
 `agent report` counts them.
 A row's paseo is the session that recorded it, or the session whose hold claimed its tag, or the worker named by `--paseo-agent`.
 A babysit sent to the job's own agent records a babysit row linked to that agent.
+`paseo_writer` is the Paseo session that last wrote the job with `board` while it held no claim and the job had no `paseo`. Only `factory.py` writes it. The dashboard uses it as the session link when `paseo` is absent. Nothing else reads it.
 `notes_read` is when a `/factory deny-notes` session finished a denied job's notes, and
 only `factory.py deny-notes` writes it.
 `babysit` is `{at}`, set on a `pr-open` job by Babysit PR or `control` (plus `via`, `quote`,

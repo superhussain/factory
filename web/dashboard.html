@@ -1263,6 +1263,10 @@ function toggleStar(id) {
   saveStarred();
   renderBoard();
 }
+function syncStarButton(id) {
+  $('d-star').setAttribute('aria-pressed', String(starred.has(id)));
+  $('d-star').title = starred.has(id) ? 'Unstar job' : 'Star job';
+}
 
 // The server-rendered title, which renderBoard prefixes with the needs-you count.
 const BASE_TITLE = document.title;
@@ -1538,13 +1542,18 @@ function paseoLinksFor(p) {
   }
   return links;
 }
+// The session link a job carries: the one that claimed it, else the last Paseo session that wrote it unclaimed.
+function sessionLink(j) {
+  if (paseoLinksFor(j.paseo)) return j.paseo;
+  return paseoLinksFor(j.paseo_writer) ? j.paseo_writer : null;
+}
 // The job whose session a drawer links to: its own, else its batch lead's, else null.
 function sessionJob(j) {
-  if (paseoLinksFor(j.paseo)) return j;
+  if (sessionLink(j)) return j;
   const lead = jobs.find((x) => x.id === leadOf(j));
-  return lead && paseoLinksFor(lead.paseo) ? lead : null;
+  return lead && sessionLink(lead) ? lead : null;
 }
-const paseoLinks = (j) => { const s = sessionJob(j); return s ? paseoLinksFor(s.paseo) : null; };
+const paseoLinks = (j) => { const s = sessionJob(j); return s ? paseoLinksFor(sessionLink(s)) : null; };
 
 // The job's Tracer page, only as a plain http(s) URL with no credentials.
 function tracerLink(j) {
@@ -1662,7 +1671,7 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(sessionJob(j)?.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.idea_files), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.paseo_writer), JSON.stringify(sessionJob(j) && sessionLink(sessionJob(j))), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.idea_files), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
 }
 
 // A holder's stop is recorded only when stopped is a string, as in factory.py.
@@ -1966,7 +1975,7 @@ function jobLinkRows(j) {
   const pr = prLink(j);
   if (pr) link('pr', 'Open PR #' + pr.n, 'pr github', true);
   const owner = sessionJob(j);
-  const paseo = owner && paseoLinksFor(owner.paseo);
+  const paseo = owner && paseoLinksFor(sessionLink(owner));
   const open = (label) => (owner !== j ? 'Open the session of ' + owner.id + ' in ' : 'Open in ') + label;
   if (paseo) {
     if (paseo.app) link('paseo', open(factoryConfig.agent_links.app.label), factoryConfig.agent_links.app.label, false);
@@ -4191,7 +4200,9 @@ function renderBoard() {
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
   const starredOnly = starView === 'only' && !noneShown;
   const starredLine = starredOnly ? '<p class="filter-empty" id="starred-only">' +
-    (shown.some((j) => starred.has(j.id)) ? 'Showing starred jobs only.' : 'No starred jobs yet. Star a job with the star button in its job panel.') +
+    (shown.some((j) => starred.has(j.id)) ? 'Showing starred jobs only.'
+      : jobs.some((j) => starred.has(j.id)) ? 'The project filter hides every starred job.'
+      : 'No starred jobs yet. Star a job with the star button in its job panel.') +
     ' <button type="button" class="btn" id="starred-show-all">Show all jobs</button></p>' : '';
   // The extra auto track lets the filter-empty or starred-only line span the whole board.
   $('board').style.setProperty('--cols', tracks.concat(noneShown || starredOnly ? ['auto'] : []).join(' '));
@@ -4717,7 +4728,7 @@ async function openJob(id) {
   const shown = jobActionsFor(j);
   for (const id of JOB_ACTIONS) $(id).hidden = !shown.includes(id);
   $('d-star').hidden = archived;
-  $('d-star').setAttribute('aria-pressed', String(starred.has(id)));
+  syncStarButton(id);
   $('d-babysit-bar').hidden = archived || !shown.includes('d-babysit');
   if (archived) for (const b of $('d-actions-menu').querySelectorAll('button')) b.hidden = b.id !== 'd-copy-link';
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
@@ -7820,7 +7831,7 @@ const JOB_ACTION_RUN = {
 for (const id of JOB_ACTIONS) $(id).addEventListener('click', () => JOB_ACTION_RUN[id](drawerAction(id)));
 $('d-star').addEventListener('click', () => {
   toggleStar(openId);
-  $('d-star').setAttribute('aria-pressed', String(starred.has(openId)));
+  syncStarButton(openId);
 });
 $('d-babysit-bar').addEventListener('click', () => babysitAction({ ...drawerAction('d-babysit'), button: $('d-babysit-bar') }));
 
