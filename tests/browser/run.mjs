@@ -419,6 +419,7 @@ async function capture(outdir, referencePath) {
     let longProject = false;
     let refBoard = false;
     let leadAgentsBoard = false;
+    let writerBoard = false;
     let tallAgentsBoard = false;
     let ideaFilesBoard = false;
     let videoBoard = false;
@@ -557,6 +558,29 @@ async function capture(outdir, referencePath) {
                               stage: "pr-open",
                               pr: "https://github.com/example/sample/pull/101",
                               paseo: { server: "srv-a", agent: "agent-lead" },
+                            }
+                          : j,
+                      ),
+                    }),
+                  });
+                }
+                if (writerBoard && target.pathname === "/board.json") {
+                  const board = await fetch(target.href);
+                  const body = await board.json();
+                  return request.respond({
+                    status: board.status,
+                    contentType: "application/json",
+                    headers: { ETag: board.headers.get("ETag") ?? "" },
+                    body: JSON.stringify({
+                      ...body,
+                      jobs: body.jobs.map((j) =>
+                        j.id === "002-needs"
+                          ? {
+                              ...j,
+                              paseo_writer: {
+                                server: "synthetic-server",
+                                agent: "synthetic-writer",
+                              },
                             }
                           : j,
                       ),
@@ -1178,6 +1202,20 @@ async function capture(outdir, referencePath) {
         side === "after" ? "#display-starred-help" : "#display-filter",
       );
     });
+    await view("starred-only-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => localStorage.setItem("factory-starred-view", "only"));
+      await starCapture(page);
+    });
+    await view("starred-filter-hidden-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        localStorage.setItem("factory-starred-jobs", JSON.stringify(["001-capture"]));
+        localStorage.setItem("factory-starred-view", "only");
+        localStorage.setItem("factory-projects-hidden", JSON.stringify(["sample"]));
+      });
+      await page.reload({ waitUntil: "networkidle0" });
+      await page.waitForSelector("#starred-only");
+      await waitLiveDot(page);
+    });
     const openSchedulerSettings = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/settings/scheduler";
@@ -1410,6 +1448,20 @@ async function capture(outdir, referencePath) {
       await view("agent-runs-lead-360", 1280, 900, "light", openLeadAgents360);
     } finally {
       leadAgentsBoard = false;
+    }
+    writerBoard = true;
+    try {
+      await view("writer-session-drawer-1280", 1280, 900, "light", async (page) => {
+        await page.evaluate(() => {
+          location.hash = "#002-needs";
+        });
+        await page.waitForFunction(
+          () => document.getElementById("d-title").textContent === "Synthetic blocked job",
+        );
+        return clipOf(page, ".detail-head");
+      });
+    } finally {
+      writerBoard = false;
     }
     // A phone drawer whose open agents table is taller than the screen, scrolled to its last row.
     const openTallAgents = async (page) => {
