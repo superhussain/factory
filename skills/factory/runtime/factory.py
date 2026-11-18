@@ -1382,6 +1382,9 @@ def backlog_add(item, context=None):
     if context and RETRO_MARK.search(context):
         print(f"held {item} for review: retro items always wait for a person")
         return True
+    if context and DEPENDS_ON.search(context):
+        print(f"held {item} for review: lines that depend on another backlog item wait for a person")
+        return True
     verdict, final = backlog_triage(home, item, context)
     left = verdict is not None and report_verdict(home, m.group(1), m.group(2), item, verdict, context)
     if final and (verdict is None or verdict["decision"] != "queue" or left):
@@ -1526,7 +1529,7 @@ def backlog_triage_pass(home):
             if len(picked) == TRIAGE_SWEEP_LIMIT:
                 break
             if raw in triaged or slug not in projects or any(raw == p[0] for p in picked) \
-                    or RETRO_MARK.search(line[3]):
+                    or RETRO_MARK.search(line[3]) or DEPENDS_ON.search(line[3]):
                 continue
             if slug not in enabled:
                 enabled[slug] = triage_enabled(home, slug)

@@ -161,6 +161,18 @@ class BacklogTriageTests(TriageFixture):
                                                "Recommend: approve\nSmall.\n\nQueued by backlog triage:"))
         self.assertEqual(self.files["/api/backlog"].split("\n")[1], f"- [x] {item} (004-add-csv-export)")
 
+    def test_add_holds_a_line_that_depends_on_another_item(self):
+        item = "sample: Store imported recipes (sub-job-of 041-recipe-import)"
+        path = self.dir / "context.md"
+        path.write_text("Recommend: approve\nDepends on: sample: Parse recipe URLs (sub-job-of 041-recipe-import)\n",
+                        encoding="utf-8")
+        code, out, err = self.add(item, "--context", str(path))
+        self.assertEqual((code, err), (0, ""))
+        self.assertTrue(out.endswith(f"held {item} for review: lines that depend on another backlog item wait "
+                                     "for a person\n"), out)
+        self.assertEqual(self.posts, [])
+        self.assertEqual(len(self.board()), 1)
+
     def test_queue_copies_the_context_into_the_idea(self):
         path = self.dir / "context.md"
         path.write_text("Recommend: approve\nUsers ask for CSV weekly.\n", encoding="utf-8")
@@ -374,6 +386,18 @@ class BacklogTriagePassTests(TriageFixture):
         self.assertEqual(self.posts, [{"item": "sample: Add PDF export to reports"}])
         self.assertEqual(self.cached(), None)
         self.assertIn(retro + "\n", self.files["/api/backlog"])
+
+    def test_skips_lines_that_depend_on_another_item(self):
+        store = "- [ ] sample: Store imported recipes (sub-job-of 041-recipe-import)"
+        self.files["/api/backlog"] = (f"# Backlog\n{store}\n  Recommend: approve\n"
+                                      "  Depends on: sample: Parse recipe URLs (sub-job-of 041-recipe-import)\n"
+                                      f"{PDF}\n")
+        out, err = self.sweep()
+        self.assertEqual(err, "")
+        self.assertEqual(self.reads, [["sample: Add PDF export to reports"]])
+        self.assertEqual(self.posts, [{"item": "sample: Add PDF export to reports"}])
+        self.assertEqual(self.cached(), None)
+        self.assertIn(store + "\n", self.files["/api/backlog"])
 
     def test_one_verdict_read_per_sweep(self):
         self.sweep()
