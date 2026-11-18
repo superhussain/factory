@@ -2,6 +2,7 @@
 // sample. INBOX_SHOTS names a folder for captures. INBOX_SHOT_STAGE=before takes only the before
 // captures and skips every other subtest, so the file runs against an older checkout.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -380,6 +381,106 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       ]);
       await rowOf(page, "Name the sample bucket");
       assert.equal(await onSubmit(), true);
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
+    await it("answer shows clef-flash picks", async () => {
+      await reset();
+      const { page, errors } = await openPage("#/inbox");
+      const record = {
+        sha256: createHash("sha256").update(NEEDS).digest("hex"),
+        choices: [
+          {
+            header: "Retry limit",
+            pick: "3",
+            confidence: 64,
+            options: [
+              { label: "3", chance: 64, reason: "A short outage clears in three tries." },
+              { label: "5", chance: 36, reason: "More tries ride out a longer outage." },
+            ],
+          },
+        ],
+      };
+      await page.setRequestInterception(true);
+      page.on("request", (request) =>
+        request.method() === "GET" &&
+        new URL(request.url()).pathname === "/api/jobs/sample/051-sample-retry/needs-triage.json"
+          ? request.respond({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify(record),
+            })
+          : request.continue(),
+      );
+      await answerForm(page);
+      assert.equal(
+        await page.$eval("#inbox-answer .ask-model", (el) => el.textContent),
+        "clef-flash picks 3 at 64%.",
+      );
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
+    await it("answer conflict asks once", async () => {
+      await reset();
+      const { page, errors } = await openPage("#/inbox");
+      await page.setRequestInterception(true);
+      page.on("request", (request) =>
+        request.method() === "PUT" && request.url().endsWith("/answers.md")
+          ? request.respond({ status: 412, body: "" })
+          : request.continue(),
+      );
+      await answerForm(page);
+      await page.click('#inbox-answer input[value="0"]');
+      await page.click("#inbox-answer [type=submit]");
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector("#inbox-answer .inbox-ask-status")
+            .textContent.startsWith("answers.md"),
+        wait,
+      );
+      assert.equal(
+        await page.$eval("#inbox-answer .inbox-ask-status", (el) => el.textContent),
+        "answers.md changed since this page loaded. Your answers are kept. Use Open job to check answers.md before you submit again.",
+      );
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
+    await it("answer retry after a failed board clear", async () => {
+      await reset();
+      const { page, errors } = await openPage("#/inbox");
+      let boardPuts = 0;
+      const answerPuts = [];
+      await page.setRequestInterception(true);
+      page.on("request", (request) =>
+        request.method() === "PUT" &&
+        new URL(request.url()).pathname === "/api/board" &&
+        boardPuts++ === 0
+          ? request.respond({ status: 503, body: "" })
+          : request.continue(),
+      );
+      page.on("response", (response) => {
+        if (response.request().method() === "PUT" && response.url().endsWith("/answers.md"))
+          answerPuts.push(response.status());
+      });
+      await answerForm(page);
+      await page.click('#inbox-answer input[value="0"]');
+      await page.click("#inbox-answer [type=submit]");
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector("#inbox-answer .inbox-ask-status")
+            .textContent.startsWith("Saved to answers.md, but the board still shows"),
+        wait,
+      );
+      await page.waitForSelector("#inbox-answer [type=submit]:not([disabled])", wait);
+      await page.click("#inbox-answer [type=submit]");
+      await gone(page, "Retry the sample upload");
+      assert.deepEqual(answerPuts, [200, 200]);
+      assert.equal((await board()).find((j) => j.id === "051-sample-retry").needs, undefined);
       assert.deepEqual(errors, []);
       await page.browserContext().close();
     });

@@ -311,13 +311,13 @@ test("an optional buildkite_org is stored and not listed", async () => {
   ]);
 });
 
-test("an optional auto_babysit is stored and not listed", async () => {
+test("an optional auto_babysit is stored and listed", async () => {
   const s = setup();
   const body = document.replace("base: main", "auto_babysit: 3\nbase: main");
   assert.equal((await s.request(body)).status, 200);
   const res = await s.request(undefined, {}, "/projects.json", "GET");
   assert.deepEqual(await res.json(), [
-    { slug: "sample", title: "Sample", repo: "example/sample", base: "main" },
+    { slug: "sample", title: "Sample", repo: "example/sample", base: "main", auto_babysit: 3 },
   ]);
 });
 

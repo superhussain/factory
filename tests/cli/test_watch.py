@@ -44,6 +44,8 @@ class WatchTest(IsolatedTestCase):
 
         def gh(*gh_args, stderr=False):
             self.gh_calls.append(gh_args)
+            if gh_args[0].startswith("repos/"):
+                return 0, "main\n"
             reading = readings[min(sum(c[0] == "view" for c in self.gh_calls) - 1, len(readings) - 1)]
             answer = {"view": reading[0], "checks": reading[1]}.get(gh_args[0], graph())
             return answer + ("",) if stderr else answer

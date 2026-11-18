@@ -75,7 +75,7 @@ class PrStateTest(IsolatedTestCase):
     def sleep(self, seconds):
         self.now += seconds
 
-    def state(self, readings, *args, pr=PR, routes=None):
+    def state(self, readings, *args, pr=PR, routes=None, upstream_base="main"):
         """Run pr-state with gh answering each (view, checks[, queue]) reading in turn, repeating the last."""
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open"}
         if pr is not None:
@@ -84,6 +84,8 @@ class PrStateTest(IsolatedTestCase):
 
         def gh(*gh_args, stderr=False):
             calls.append(gh_args)
+            if gh_args[0].startswith("repos/"):
+                return 0, upstream_base + "\n"
             reading = readings[min(sum(c[0] == "view" for c in calls) - 1, len(readings) - 1)]
             answer = {"view": reading[0], "checks": reading[1]}.get(gh_args[0], (reading + (graph(),))[2])
             return answer + ("",) if stderr and answer and len(answer) == 2 else answer
@@ -319,13 +321,31 @@ class PrStateTest(IsolatedTestCase):
         code, out, err, calls = self.state([(view(), checks("pass"))], pr=upstream)
         self.assertEqual((code, err), (0, ""))
         self.assertEqual((json.loads(out)["pr"], json.loads(out)["next"]), (47, "merge"))
-        self.assertEqual(calls[0][:2], ("view", upstream))
+        self.assertEqual(calls[0], ("repos/example-upstream/sample", "--jq", ".default_branch"))
+        self.assertEqual(calls[1][:2], ("view", upstream))
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open", "pr": upstream}
         with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job]})}) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
             code, out, err = invoke(factory, ["--home", str(self.home), "pr-queue", f"sample/{JOB}"])
         self.assertEqual((code, out), (4, ""))
         self.assertIn("is not a pull request in example/sample", err)
+
+    def test_archive_pr_compares_the_archive_default_branch(self):
+        (self.home / "projects" / "sample.md").write_text(
+            "---\nrepo: example/sample\narchive: example-upstream/sample\nbase: main\n---\n# Sample\n")
+        upstream = "https://github.com/example-upstream/sample/pull/47"
+        code, out, err, _ = self.state([(view(base="trunk"), checks("pass"))], pr=upstream, upstream_base="trunk")
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["base"], reading["stacked"], reading["next"]), ("trunk", False, "merge"))
+
+    def test_archive_pr_unusable_default_branch_exits_5(self):
+        (self.home / "projects" / "sample.md").write_text(
+            "---\nrepo: example/sample\narchive: example-upstream/sample\nbase: main\n---\n# Sample\n")
+        upstream = "https://github.com/example-upstream/sample/pull/47"
+        code, out, err, _ = self.state([(view(), checks("pass"))], pr=upstream, upstream_base="-bad")
+        self.assertEqual((code, out), (5, ""))
+        self.assertIn("gh printed an unusable default_branch", err)
 
     def test_gh_problem_exits_5(self):
         for reading, why in ((None, "not installed"), (("timeout", ""), "timed out"), ((1, ""), "gh auth status"),
