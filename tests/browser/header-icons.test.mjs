@@ -51,11 +51,11 @@ test("header icons share one row and match the filter height", { timeout: 120000
       await page.emulateTimezone("America/New_York");
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#new-idea:not([hidden])");
-      await page.waitForSelector("#next-waiting:not([hidden])");
+      await page.waitForSelector("#inbox-count:not([hidden])");
       await page.waitForSelector(".updated-word");
       const header = await page.evaluate(() => {
         const rect = (id) => document.getElementById(id).getBoundingClientRect();
-        const icons = ["next-waiting", "new-idea", "job-jump", "retros-link", "settings-link"];
+        const icons = ["inbox-link", "new-idea", "job-jump", "retros-link", "settings-link"];
         const el = document.querySelector("header");
         const boxes = [...el.children]
           .map((child) => child.getBoundingClientRect())

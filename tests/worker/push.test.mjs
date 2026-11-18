@@ -3,12 +3,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { importJWK, jwtVerify } from "jose";
-import { loadProduction, memoryBucket } from "../support/worker.mjs";
+import { loadProduction, memoryBucket, serverEnv } from "../support/worker.mjs";
 import {
   boardPushes,
   encryptWith,
   pushKey,
   pushMessage,
+  stuckPushes,
   validSubscription,
 } from "../../worker/push.js";
 
@@ -96,6 +97,45 @@ test("boardPushes finds new waits and merges only", () => {
   );
 });
 
+const SEEN = "2026-11-17T05:40:00Z";
+const at = (hhmm) => new Date(`2026-11-17T${hhmm}:00Z`);
+
+test("stuckPushes pushes a stale claim once, in its window", () => {
+  const claim = { device: "device-a", seen: SEEN };
+  const jobs = [
+    row("042-sample-retry", "build", { claim }),
+    row("060-sample-unclaimed", "review", { updated: SEEN }),
+    row("061-sample-no-seen", "spec", { claim: { device: "device-a" }, updated: SEEN }),
+    row("062-sample-needs", "build", { claim, needs: "Pick one" }),
+    row("063-sample-pr", "pr-open", { claim }),
+    row("064-sample-idea", "idea", { claim }),
+    row("065-sample-merged", "merged", { claim }),
+    row("066-sample-paused", "build", { claim, paused: { at: SEEN } }),
+    row("067-sample-closing", "approve", { claim, close: { at: SEEN } }),
+    row("068-sample-batched", "build", {
+      claim,
+      refs: [{ kind: "batched-into", id: "042-sample-retry" }],
+    }),
+    row("069-sample-move", "build", { claim, move: { to: "device-b" } }),
+    row("070-sample-blank-needs", "build", { claim, needs: "  " }),
+    row("071-sample-closed-close", "build", { claim, close: { at: SEEN, closed: SEEN } }),
+    row("072-sample-moved", "build", { claim, move: { to: "device-b", claimed: SEEN } }),
+  ];
+  const stuck = (id) => ({ kind: "stuck", id, title: "Synthetic " + id });
+  assert.deepEqual(stuckPushes(jobs, at("09:17")), []);
+  assert.deepEqual(stuckPushes(jobs, at("10:17")), [
+    stuck("042-sample-retry"),
+    stuck("060-sample-unclaimed"),
+    stuck("070-sample-blank-needs"),
+    stuck("071-sample-closed-close"),
+    stuck("072-sample-moved"),
+  ]);
+  assert.deepEqual(stuckPushes(jobs, at("11:17")), []);
+  // The window is after its start and at or before its end.
+  assert.equal(stuckPushes(jobs, at("09:40")).length, 5);
+  assert.equal(stuckPushes(jobs, at("10:40")).length, 0);
+});
+
 test("pushMessage builds the needs, merged and summary payloads", () => {
   assert.deepEqual(
     pushMessage([{ kind: "needs", id: "042-sample-retry", title: "Synthetic retry job" }]),
@@ -113,6 +153,27 @@ test("pushMessage builds the needs, merged and summary payloads", () => {
       body: "Synthetic PR job",
       tag: "factory-merged-043-sample-pr",
       url: "/#043-sample-pr",
+    },
+  );
+  assert.deepEqual(
+    pushMessage([{ kind: "stuck", id: "042-sample-retry", title: "Synthetic retry job" }]),
+    {
+      title: "Stuck: 042-sample-retry",
+      body: "Synthetic retry job",
+      tag: "factory-stuck-042-sample-retry",
+      url: "/#042-sample-retry",
+    },
+  );
+  assert.deepEqual(
+    pushMessage([
+      { kind: "stuck", id: "042-sample-retry", title: "T" },
+      { kind: "stuck", id: "060-sample-unclaimed", title: "T" },
+    ]),
+    {
+      title: "2 factory updates",
+      body: "Stuck: 042-sample-retry\nStuck: 060-sample-unclaimed",
+      tag: "factory-updates",
+      url: "/",
     },
   );
   const five = ["a", "b", "c", "d", "e"].map((x, i) => ({
@@ -460,4 +521,33 @@ test("a 410 drops the record, a bad host gets 400, a 21st device 409, a service 
   ])
     assert.equal((await call(path, { method, body, principal: device })).status, 404);
   assert.equal(records().length, before);
+});
+
+test("the hourly cron pushes 042-sample-retry once when its claim goes stale", async (t) => {
+  const sent = stubFetch(t);
+  const { env, call } = setup();
+  const phone = await browser("https://fcm.googleapis.com/fcm/send/sample-cron");
+  await call("/api/push/subscriptions", { method: "PUT", body: phone.body });
+  const claim = { device: "device-a", seen: SEEN };
+  await env.BUCKET.put("board.json", JSON.stringify({ jobs: [{ ...RETRY, claim }] }));
+  const { scheduled } = (await loadProduction()).default;
+  const cronEnv = { ...serverEnv, BUCKET: env.BUCKET, FACTORY_VAPID_KEY: env.FACTORY_VAPID_KEY };
+  const run = async (hhmm) => {
+    const pending = [];
+    scheduled({ scheduledTime: at(hhmm).getTime() }, cronEnv, {
+      waitUntil: (p) => pending.push(p),
+    });
+    await Promise.allSettled(pending);
+  };
+  await run("10:17");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, phone.body.endpoint);
+  assert.deepEqual(await decrypt(phone, sent[0].body), {
+    title: "Stuck: 042-sample-retry",
+    body: "Synthetic retry job",
+    tag: "factory-stuck-042-sample-retry",
+    url: "/#042-sample-retry",
+  });
+  await run("11:17");
+  assert.equal(sent.length, 1);
 });

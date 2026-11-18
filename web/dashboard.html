@@ -166,6 +166,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .btn.icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .btn.icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .btn.icon .teeth { stroke-width: 2.5; stroke-linecap: butt; }
+  #inbox-link { position: relative; }
+  #inbox-count { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--alert); color: var(--panel); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
+  #inbox-count[hidden] { display: none; }
   #filter { height: var(--icon-size); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   #filter svg { flex: none; }
   #filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -675,7 +678,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     <div class="filter-menu" id="filter-menu" role="group" aria-label="Show jobs from" hidden></div>
   </div>
   <div class="header-actions">
-    <button class="btn icon" id="next-waiting" aria-label="Next waiting job" title="Next waiting job (W)" aria-keyshortcuts="w" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9.5V13h11V9.5L12 4H4z"/><path d="M8 2.5v5M6 5.5l2 2 2-2"/></svg></button>
+    <a class="btn icon" id="inbox-link" href="#/inbox" aria-label="Inbox" title="Inbox (I)" aria-keyshortcuts="i"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9.5V13h11V9.5L12 4H4z"/></svg><span id="inbox-count" aria-hidden="true" hidden></span></a>
     <button class="btn icon" id="new-idea" aria-label="New idea" title="New idea (N)" aria-keyshortcuts="n" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2c.4.3.6.7.6 1.2V12h4v-1.1c0-.5.2-.9.6-1.2A4.5 4.5 0 0 0 8 1.5zM6.5 14.5h3"/></svg></button>
     <button class="btn icon" id="job-jump" aria-label="Jump to job" title="Jump to job (J, /, ⌘K or Ctrl+K)" aria-keyshortcuts="j / Meta+K Control+K"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 4 4"/></svg></button>
     <a class="btn icon" id="retros-link" href="#/retros" aria-label="Retros" title="Retros (R)" aria-keyshortcuts="r"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2 2v2.6h2.6"/><path d="M8 5v3l2 1.5"/></svg></a>
@@ -2908,6 +2911,7 @@ function renderRoute() {
   if (!retrosOpen) retrosScrolled = '';
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
   if (retrosOpen) $('retros-link').setAttribute('aria-current', 'page'); else $('retros-link').removeAttribute('aria-current');
+  if (inboxOpen) $('inbox-link').setAttribute('aria-current', 'page'); else $('inbox-link').removeAttribute('aria-current');
   for (const name of SETTINGS_SECTIONS) {
     $('settings-' + name).hidden = name !== section;
     if (name === section) $('settings-nav-' + name).setAttribute('aria-current', 'page'); else $('settings-nav-' + name).removeAttribute('aria-current');
@@ -3128,7 +3132,15 @@ function inboxItems() {
     .concat(backlogLoaded ? visibleBacklog().map((item) => ({ kind: 'backlog', item })) : []);
 }
 
+function syncInboxLink() {
+  const n = loaded && (backlogLoaded || backlogFailed) ? inboxItems().length : 0;
+  $('inbox-count').textContent = n > 99 ? '99+' : String(n);
+  $('inbox-count').hidden = !n;
+  $('inbox-link').setAttribute('aria-label', n ? 'Inbox, ' + n + ' waiting' : 'Inbox');
+}
+
 function renderInboxPage() {
+  syncInboxLink();
   if (inboxRoute() === null) return;
   if (!loaded || (!backlogLoaded && !backlogFailed)) {
     $('inbox-status').textContent = inboxError || 'Loading the inbox\u2026';
@@ -4053,7 +4065,6 @@ function visibleCards() {
 function openCard(id) {
   location.hash = encodeURIComponent(id);
 }
-$('next-waiting').addEventListener('click', () => { const j = nextWaitingJob(); if (j) openCard(j.id); });
 
 // The backlog the cards on screen were drawn from. poll() replaces backlog before it re-renders,
 // so a click resolves data-index against this, never against a newer list.
@@ -4124,7 +4135,6 @@ function renderBoard() {
     $('board').style.removeProperty('--cols');
     if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = BASE_TITLE;
     syncAppBadge(0);
-    $('next-waiting').hidden = true;
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
     renderRetrosPage();
@@ -4141,7 +4151,6 @@ function renderBoard() {
   const waiting = lists[COLUMNS.indexOf('needs-you')];
   // Oldest first, so the longest wait sits on top.
   waiting.splice(0, waiting.length, ...waitingJobs());
-  $('next-waiting').hidden = !waiting.length;
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
@@ -6155,6 +6164,25 @@ function backlogItems(text) {
   return items;
 }
 
+// factory.py backlog_depends: a depends-on ref per Depends on: item checked off as a job, and the
+// first item whose backlog line is still unchecked. A missing item adds nothing.
+function backlogDepends(context, text) {
+  const lines = text.split('\n').map((l) => l.trimEnd());
+  const refs = [];
+  let waiting = null;
+  for (const m of context.matchAll(/^Depends on: ([\w-]+: \S.*)$/gm)) {
+    const dep = m[1].trimEnd();
+    if (lines.includes('- [ ] ' + dep)) {
+      waiting ??= dep;
+      continue;
+    }
+    const done = '- [x] ' + dep + ' ';
+    const id = lines.map((l) => l.startsWith(done) && /^\(([^()]+)\)$/.exec(l.slice(done.length))?.[1]).find(Boolean);
+    if (id && /^\w[\w.-]*$/.test(id) && !id.includes('..')) refs.push({ id, kind: 'depends-on' });
+  }
+  return { refs, waiting };
+}
+
 // factory.py backlog_context rules. null means the text is not in the backlog context format.
 function parseBacklogContext(text) {
   const lines = trimBlankEdges(text.replace(/\r\n?/g, '\n')).split('\n');
@@ -6365,6 +6393,15 @@ async function decideBacklog(item, decision, notes, answers) {
   backlogBusy.add(item.raw);
   renderBoard();
   try {
+    if (decision === 'approved') {
+      const { refs, waiting } = backlogDepends(item.context ?? '', backlogText);
+      if (waiting) {
+        const x = new Error('Approve "' + waiting + '" first. Its backlog line is still unchecked.');
+        x.prerequisite = backlog.find((b) => b.raw.trimEnd() === '- [ ] ' + waiting) ?? null;
+        throw x;
+      }
+      item = { ...item, refs: [...item.refs, ...refs] };
+    }
     const now = isoNow();
     const id = await casBoard((board) => addBacklogJob(board, item, decision, notes, answers, captureId, now));
     if (await casBacklog((text) => markBacklogLine(text, item, id)) === 'gone') {
@@ -8127,6 +8164,12 @@ async function submitBacklogDecision() {
     if (openBacklogRaw === raw) {
       updateBacklogBar();
       fail(String(x.message || x));
+      if (x.prerequisite) {
+        const a = document.createElement('a');
+        a.href = '#/backlog/' + x.prerequisite.key;
+        a.textContent = 'Open the prerequisite';
+        $('backlog-status').append(' ', a);
+      }
     }
   }
 }

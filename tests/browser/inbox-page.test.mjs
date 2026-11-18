@@ -673,6 +673,48 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await it("header inbox link", async () => {
+      await reset();
+      const phone = { width: 390, height: 844, isMobile: true, hasTouch: true };
+      const { page, errors } = await openPage("", phone);
+      const link = () =>
+        page.$eval("#inbox-link", (el) => ({
+          shown: el.getClientRects().length > 0,
+          label: el.getAttribute("aria-label"),
+          count: document.getElementById("inbox-count").textContent,
+          countHidden: document.getElementById("inbox-count").hidden,
+        }));
+      await page.waitForSelector("#inbox-count:not([hidden])", wait);
+      assert.deepEqual(await link(), {
+        shown: true,
+        label: "Inbox, 5 waiting",
+        count: "5",
+        countHidden: false,
+      });
+      await page.tap("#inbox-link");
+      await page.waitForFunction(() => location.hash === "#/inbox", wait);
+      await page.waitForSelector("#inbox-page:not([hidden])", wait);
+      await page.waitForSelector('#inbox-link[aria-current="page"]', wait);
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+      await seedBoard(origin, [JOBS[1]]);
+      await seedBacklog(origin, "# Backlog\n");
+      const empty = await openPage("#/inbox", phone);
+      await empty.page.waitForFunction(
+        () => document.querySelector("#inbox-status").textContent === "Nothing is waiting on you.",
+        wait,
+      );
+      assert.deepEqual(
+        await empty.page.$eval("#inbox-link", (el) => ({
+          shown: el.getClientRects().length > 0,
+          label: el.getAttribute("aria-label"),
+          countHidden: document.getElementById("inbox-count").hidden,
+        })),
+        { shown: true, label: "Inbox", countHidden: true },
+      );
+      await empty.page.browserContext().close();
+    });
+
     await it("empty and filtered", async () => {
       await reset();
       const filtered = await openPage("#/inbox", undefined, "sample");

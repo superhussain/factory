@@ -3,6 +3,8 @@
 import { importJWK, SignJWT } from "jose";
 
 const TERMINAL = ["merged", "closed"];
+const IN_FLIGHT = ["spec", "build", "review", "approve"];
+export const STUCK_MINUTES = 240;
 const PUSH_HOSTS = [
   "fcm.googleapis.com",
   "updates.push.services.mozilla.com",
@@ -121,7 +123,33 @@ export function boardPushes(before, after) {
   return events;
 }
 
-const line = (e) => (e.kind === "needs" ? "Needs you: " : "Merged: ") + String(e.id).slice(0, 80);
+// Paused, closing, batched into a lead, or a move its target host has not claimed.
+const parked = (j) =>
+  typeof j.paused?.at === "string" ||
+  (typeof j.close?.at === "string" && !("closed" in j.close)) ||
+  (Array.isArray(j.refs) && j.refs.some((r) => r?.kind === "batched-into")) ||
+  (j.move !== null &&
+    typeof j.move === "object" &&
+    !Array.isArray(j.move) &&
+    !("claimed" in j.move));
+
+// Ports is_stuck in factory.py stuck. Change both together.
+/** The stuck events for in-flight jobs whose claim (or, with no claim, update) went stale in
+ * the hour ending STUCK_MINUTES before at, so each stale claim is pushed by one hourly run. */
+export function stuckPushes(jobs, at) {
+  const end = at.getTime() - STUCK_MINUTES * 60_000;
+  const events = [];
+  for (const j of jobs.filter(hasId)) {
+    if (!IN_FLIGHT.includes(j.stage) || parked(j) || asks(j.needs)) continue;
+    const seen = Date.parse(j.claim ? j.claim.seen : j.updated);
+    if (seen > end - 3_600_000 && seen <= end)
+      events.push({ kind: "stuck", id: j.id, title: j.title });
+  }
+  return events;
+}
+
+const LINE = { needs: "Needs you: ", merged: "Merged: ", stuck: "Stuck: " };
+const line = (e) => LINE[e.kind] + String(e.id).slice(0, 80);
 
 /** The notification payload for one write's events. */
 export function pushMessage(events) {
