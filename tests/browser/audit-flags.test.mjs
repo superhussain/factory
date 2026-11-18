@@ -79,6 +79,11 @@ test(
             {},
             wait,
           );
+          // Labels fill in when /api/hosts lands and loadHosts redraws the card.
+          await page.waitForFunction(() => {
+            const host = document.querySelector("#audit-flags-rows td:nth-child(3)");
+            return !host || host.textContent !== "example-host";
+          });
           return read();
         };
         const read = () =>
