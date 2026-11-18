@@ -101,7 +101,7 @@ test("jira_origin is optional, https only, and injected only when set", async ()
   assert.equal((await injected(config({ jira_origin: jira }))).jira_origin, jira);
 });
 
-test("embed_origins is optional, https only, and sets frame-ancestors", async () => {
+test("embed_origins is optional, https or paseo://app, and sets frame-ancestors", async () => {
   const base = {
     FACTORY_ORIGIN: "https://factory.example.test",
     FACTORY_TITLE: "Factory",
@@ -110,25 +110,40 @@ test("embed_origins is optional, https only, and sets frame-ancestors", async ()
   };
   assert.deepEqual(assets.readServerConfig(base).embed_origins, []);
   const paseo = "https://paseo.example.test";
-  const read = assets.readServerConfig({ ...base, FACTORY_EMBED_ORIGINS: JSON.stringify([paseo]) });
-  assert.deepEqual(read.embed_origins, [paseo]);
+  const desktop = "paseo://app";
+  const read = assets.readServerConfig({
+    ...base,
+    FACTORY_EMBED_ORIGINS: JSON.stringify([paseo, desktop]),
+  });
+  assert.deepEqual(read.embed_origins, [paseo, desktop]);
+  for (const bad of [
+    "paseo://app/",
+    "paseo://*",
+    "paseo:",
+    "PASEO://app",
+    "paseo://app.example.test",
+    "http://paseo.example.test",
+  ])
+    assert.throws(() =>
+      assets.readServerConfig({ ...base, FACTORY_EMBED_ORIGINS: JSON.stringify([bad]) }),
+    );
   assert.throws(() =>
     assets.readServerConfig({ ...base, FACTORY_EMBED_ORIGINS: '["http://paseo.example.test"]' }),
   );
   assert.throws(() =>
     assets.readServerConfig({ ...base, FACTORY_EMBED_ORIGINS: JSON.stringify([paseo, paseo]) }),
   );
-  const rendered = assets.renderDashboard(config({ embed_origins: [paseo] }));
+  const rendered = assets.renderDashboard(config({ embed_origins: [paseo, desktop] }));
   assert.ok(
     rendered.headers
       .get("Content-Security-Policy")
-      .endsWith("; frame-ancestors 'self' https://paseo.example.test"),
+      .endsWith("; frame-ancestors 'self' https://paseo.example.test paseo://app"),
   );
   const html = await rendered.text();
   const meta = html.match(/http-equiv="Content-Security-Policy" content="([^"]*)"/)[1];
   assert.ok(!meta.includes("frame-ancestors"));
   const injected = (page) => JSON.parse(page.match(/id="factory-config">([^<]*)<\/script>/)[1]);
-  assert.deepEqual(injected(html).embed_origins, [paseo]);
+  assert.deepEqual(injected(html).embed_origins, [paseo, desktop]);
   assert.ok(!("embed_origins" in injected(await assets.renderDashboard(config()).text())));
 });
 
