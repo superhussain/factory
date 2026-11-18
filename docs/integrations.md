@@ -138,7 +138,7 @@ It reads `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PR_SCREENSHOTS_BUCKET
 `PR_SCREENSHOTS_ORIGIN` (an `https://` origin) from `<home>/.env`, stores each image in that
 bucket as `<project>/<label>/<12 hex>-<name>` (project `other` when `--project` is omitted)
 and prints one `<file>` and URL on the configured public origin per line. Any failure exits 1,
-and build-tab evidence stays the fallback.
+and build-tab evidence stays the fallback. The [device token](cloudflare.md#device-token) covers these uploads.
 
 `tools/copy-pr-screenshots.py` copies older screenshots from `<source>/factory-<job-id>/` into
 their project folders, using the same four `<home>/.env` keys.
@@ -162,7 +162,7 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
 | --- | --- | --- |
 | Factory dashboard URL | Paseo, Settings, Plugins, Factory | Paseo user, per host |
 | `embed_origins` | `deploy/profile.json` | Server operator |
-| SameSite None on the Access cookie | Cloudflare Access application, set by `tools/bootstrap.py up` | Server operator |
+| SameSite None on the Access cookie | Cloudflare Access application, set by `tools/bootstrap.py up` with the [device token](cloudflare.md#device-token) | Server operator |
 
 1. Install the plugin on the daemon host: `paseo plugin install <checkout>/paseo-plugin`.
    Check it with `paseo plugin ls`, which shows `factory running`.
@@ -177,10 +177,11 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
    frame your signed-in board and click its buttons, so list only origins whose operator you
    trust with the board.
 
-4. Rerun `mise exec -- python3 tools/bootstrap.py up`. With `embed_origins` set, it sets the
-   Access application's cookie SameSite attribute to `None`. With the default Lax cookie, the
-   frame gets the Access login page, not the board. If bootstrap did not create your Access
-   application, set the attribute to `None` by hand in its cookie settings.
+4. Rerun `up` with the [device token](cloudflare.md#device-token) loaded from the factory home `.env`, or ask an agent
+   on that device to do it. With `embed_origins` set, `up` sets the Access application's cookie SameSite
+   attribute to `None`. With the default Lax cookie, the frame gets the Access login page, not the board.
+   If bootstrap did not create your Access application, set the attribute to `None` by hand in its
+   cookie settings.
 
 The board appears inside Paseo on web and desktop only. On iOS and Android the screen links to
 the dashboard in the browser instead. A browser that blocks third-party cookies cannot show the
