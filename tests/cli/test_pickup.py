@@ -1875,7 +1875,7 @@ class RetroCatchupTest(PickupFixture):
         self.prompt.write_text(self.PROMPT, encoding="utf-8")
         self.record = self.home / "retro-catchup.json"
         self.wait = self.home / "retro-catchup-wait.json"
-        self.id ="retro-" + datetime.now().strftime("%Y%m%d")
+        self.id = "retro-" + datetime.now().strftime("%Y%m%d")
 
     def due(self, day=18, hour=10, minute=15):
         return factory.retro_catchup_due(self.home, datetime(2026, 11, day, hour, minute, tzinfo=self.ZONE))
