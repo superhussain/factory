@@ -9453,6 +9453,12 @@ RETRO_REDIS_PASS = re.compile(r"((?:^|\s)(?:-a\s*|--pass\s+))(\"[^\"]*\"|'[^']*'
 RETRO_DOCKER_LOGIN = re.compile(r"(?<![\w.-])docker(?:\.exe)?\s+login(?![\w.-])")
 RETRO_OPENSSL = re.compile(r"(?<![\w.-])openssl(?:\.exe)?(?![\w.-])")
 RETRO_OPENSSL_PASS = re.compile(r"((?:^|\s)-pass(?:in|out)?\s+pass:)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_OPENSSL_K = re.compile(r"((?:^|\s)-[kK]\s+)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_OPENSSL_BARE = re.compile(
+    r"((?:^|\s)-pass(?:in|out)?\s+)(?!(?:pass|env|file|fd):|stdin(?!\S))(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_COMMAND_SPLIT = re.compile(r"([|;&]+)")
+RETRO_PASSWORD_STDIN = re.compile(r"(?<![\w-])--password-stdin(?![\w-])")
+RETRO_ECHO_PASS = re.compile(r"((?:^|[\s;&(])echo\s+(?:-[neE]{1,3}\s+)?)(\"[^\"]*\"|'[^']*'|[^\s\"'|;&]+)(\s*\|\s*)$")
 RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential|mysql_pwd|sshpass|rediscli_auth"
 RETRO_SECRET_WORD = re.compile(r"(?i)(?:" + RETRO_SECRET_WORDS + ")")
 RETRO_COUNT = re.compile(r"\d{1,7}[,;)}\]]*")
@@ -9500,15 +9506,30 @@ def retro_secret_pair(match):
     return name + sep + "[redacted]"
 
 
+def retro_openssl_part(part):
+    """One command with every -k, -K and bare -pass, -passin or -passout value after its openssl as [redacted]."""
+    hit = RETRO_OPENSSL.search(part)
+    if not hit:
+        return part
+    rest = RETRO_OPENSSL_BARE.sub(r"\1[redacted]", RETRO_OPENSSL_K.sub(r"\1[redacted]", part[hit.end():]))
+    return part[:hit.end()] + rest
+
+
 def retro_tool_pass(line):
     """line with the password after a mysql glued -p, after the first sshpass -p, redis-cli -a or --pass and
-    docker login -p, and after every openssl -pass, -passin or -passout pass:, as [redacted]."""
+    docker login -p, after every openssl -pass, -passin or -passout pass:, after every openssl -k, -K or bare
+    -pass, -passin or -passout in that command, and in an echo piped to docker login --password-stdin, as
+    [redacted]."""
     for tool, flag, count in ((RETRO_MYSQL, RETRO_MYSQL_PASS, 0), (RETRO_SSHPASS, RETRO_SSHPASS_PASS, 1),
                               (RETRO_REDIS, RETRO_REDIS_PASS, 1), (RETRO_DOCKER_LOGIN, RETRO_SSHPASS_PASS, 1),
                               (RETRO_OPENSSL, RETRO_OPENSSL_PASS, 0)):
         hit = tool.search(line)
         if hit:
             line = line[:hit.end()] + flag.sub(r"\1[redacted]", line[hit.end():], count=count)
+    line = "".join(retro_openssl_part(p) for p in RETRO_COMMAND_SPLIT.split(line))
+    hit = RETRO_DOCKER_LOGIN.search(line)
+    if hit and RETRO_PASSWORD_STDIN.search(line, hit.end()):
+        line = RETRO_ECHO_PASS.sub(r"\1[redacted]\3", line[:hit.start()]) + line[hit.start():]
     return line
 
 

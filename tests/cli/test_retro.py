@@ -129,7 +129,18 @@ class RetroRedactTest(RetroCase):
                           ("REDISCLI_AUTH=hunter2 redis-cli ping", "REDISCLI_AUTH=[redacted] redis-cli ping"),  # gitleaks:allow synthetic credentials
                           ("redis-cli -a hunter2 ping && ls -a /tmp",  # gitleaks:allow synthetic credentials
                            "redis-cli -a [redacted] ping && ls -a /tmp"),
-                          ("curl -H Authorization:\\ Bearer\\ abc\\$x", "curl -H Authorization:\\[redacted]")):
+                          ("curl -H Authorization:\\ Bearer\\ abc\\$x", "curl -H Authorization:\\[redacted]"),
+                          ("openssl enc -aes-256-cbc -k hunter2 -in a.txt",  # gitleaks:allow synthetic credentials
+                           "openssl enc -aes-256-cbc -k [redacted] -in a.txt"),
+                          ("openssl enc -K 00ff -iv 01 -in a", "openssl enc -K [redacted] -iv 01 -in a"),  # gitleaks:allow synthetic credentials
+                          ("openssl rsa -passin hunter2 -in key.pem",  # gitleaks:allow synthetic credentials
+                           "openssl rsa -passin [redacted] -in key.pem"),
+                          ("openssl pkcs12 -export -passout hunter2 -in a",  # gitleaks:allow synthetic credentials
+                           "openssl pkcs12 -export -passout [redacted] -in a"),
+                          ("echo hunter2 | docker login ghcr.io -u me --password-stdin",  # gitleaks:allow synthetic credentials
+                           "echo [redacted] | docker login ghcr.io -u me --password-stdin"),
+                          ('echo -n "hunter 2" | docker login ghcr.io -u me --password-stdin',  # gitleaks:allow synthetic credentials
+                           "echo -n [redacted] | docker login ghcr.io -u me --password-stdin")):
             with self.subTest(text=text):
                 self.assertEqual(factory.retro_redact(text), out)
 
@@ -143,7 +154,10 @@ class RetroRedactTest(RetroCase):
                 self.assertEqual(factory.retro_redact(text), out)
         for text in ("redis-cli -h h -p 6379 ping", "docker run -p 8080:80 nginx", "docker login ghcr.io",
                      "openssl rsa -passin env:KEY_PW", "openssl rsa -passin file:pw.txt", "sshpass -e ssh host",
-                     "export SSHPASS"):
+                     "export SSHPASS", "openssl enc -d -kfile pw.txt -in a", "openssl rsa -passin stdin",
+                     "openssl rsa -passin fd:3", "openssl version && curl -k https://example.test",
+                     "cat pw.txt | docker login ghcr.io -u me --password-stdin", "echo hunter2 | grep h",
+                     "echo hi; docker login ghcr.io"):
             with self.subTest(text=text):
                 self.assertEqual(factory.retro_redact(text), text)
 
@@ -190,13 +204,16 @@ class RetroRedactTest(RetroCase):
         self.assertIn("RETRO_LONG_KEYVALUE", patterns)
         self.assertIn("RETRO_LONG_FLAG", patterns)
         for name in ("RETRO_MYSQL", "RETRO_MYSQL_PASS", "RETRO_SSHPASS", "RETRO_SSHPASS_PASS", "RETRO_REDIS",
-                     "RETRO_REDIS_PASS", "RETRO_DOCKER_LOGIN", "RETRO_OPENSSL", "RETRO_OPENSSL_PASS"):
+                     "RETRO_REDIS_PASS", "RETRO_DOCKER_LOGIN", "RETRO_OPENSSL", "RETRO_OPENSSL_PASS",
+                     "RETRO_OPENSSL_K", "RETRO_OPENSSL_BARE", "RETRO_COMMAND_SPLIT", "RETRO_PASSWORD_STDIN",
+                     "RETRO_ECHO_PASS"):
             self.assertIn(name, patterns)
         units = [*"aZ09-.+_:/", " ", "\t", "a.", "a-", "a+", "a1", "--a", "token", "password", "bearer ", "-u ", "://",
                  "a=", "--a ", "_token=", "tokens", "a" * 70 + " ", "a" * 40 + "://", "a" * 40 + "://u:p@",
                  "@", "://u:p@ss@", "a" * 40 + "://u:p@ss@", "mysql ", "sshpass ", "mysql -p\"", "mysql -p'", " -p",
                  "sshpass -p \"", "Authorization:\\ ", "redis-cli ", "redis-cli -a ", "docker login ", "openssl ",
-                 " -passin pass:", "SSHPASS=", "Authorization:\\$", "\\$"]
+                 " -passin pass:", "SSHPASS=", "Authorization:\\$", "\\$", "openssl -k ", " -k ", " -passin ",
+                 "echo ", "echo a | ", "echo \"", "| docker login --password-stdin ", "docker login echo a | "]
         for unit in units:
             text = (unit * 30000)[:30000]
             for name, pattern in [*patterns.items(), ("retro_redact", None)]:
