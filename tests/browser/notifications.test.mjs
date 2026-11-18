@@ -89,6 +89,14 @@ test("notifications", { timeout: 180000 }, async (t) => {
         await page.$eval("#notifications-more", (a) => [a.textContent, a.getAttribute("href")]),
         ["See more", "#/notifications"],
       );
+      const menu = await page.$eval("#notifications-menu", (el) => {
+        const box = el.getBoundingClientRect();
+        return { left: box.left, right: box.right, innerWidth };
+      });
+      assert.ok(
+        menu.left >= 0 && menu.right <= menu.innerWidth,
+        `menu off screen: ${JSON.stringify(menu)}`,
+      );
       assert.equal(await page.$eval("#notifications-dot", (el) => el.hidden), true);
       assert.deepEqual(errors, []);
     });
