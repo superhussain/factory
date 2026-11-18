@@ -3,7 +3,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
+import {
+  withBrowserFixture,
+  seedProject,
+  seedBoard,
+  blockLiveEvents,
+} from "../support/browser-server.mjs";
 
 const wait = { polling: 50 };
 const job = (id, stage, extra = {}) => ({
@@ -19,6 +24,7 @@ const JOBS = [
   job("060-sample-merged", "merged", {
     pr: "https://github.com/example/sample/pull/60",
     done: "2026-01-04T00:00:00Z",
+    paseo: { server: "srv-a", agent: "agent-60" },
   }),
   job("051-sample-retry", "build", {
     needs: "Pick a retry limit",
@@ -32,6 +38,11 @@ const JOBS = [
   job("061-sample-closed", "closed", { done: "2026-01-05T00:00:00Z" }),
   FILTER,
 ];
+// 22 older merged jobs, so JOBS plus OLD gives 25 items: 23 merged, 2 needs.
+const OLD = Array.from({ length: 22 }, (_, i) => {
+  const nn = String(i + 1).padStart(2, "0");
+  return job(`1${nn}-sample-old`, "merged", { done: `2025-12-${nn}T00:00:00Z` });
+});
 const EXPECTED = [
   ["Merged", "Synthetic 060-sample-merged"],
   ["Needs you", "Synthetic 051-sample-retry"],
@@ -47,9 +58,10 @@ test("notifications", { timeout: 180000 }, async (t) => {
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
     await seedBoard(origin, JOBS);
-    const openPage = async (hash = "") => {
+    const openPage = async (hash = "", setup = null) => {
       const page = await (await browser.createBrowserContext()).newPage();
       await page.setViewport({ width: 1280, height: 900 });
+      if (setup) await setup(page);
       const errors = [];
       page.on("pageerror", (error) => errors.push(String(error)));
       await page.goto(origin + "/" + hash, { waitUntil: "domcontentloaded" });
@@ -148,6 +160,29 @@ test("notifications", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await t.test("menu row keeps focus when its time label changes", async () => {
+      const { page, errors } = await openPage();
+      await openMenu(page);
+      const row = '#notifications-menu-list a[href="#060-sample-merged"]';
+      const meta = () => page.$eval(row + " .inbox-meta", (el) => el.textContent);
+      const before = await meta();
+      await page.focus(row);
+      await page.evaluate(() => {
+        jobs.find((j) => j.id === "060-sample-merged").done = new Date().toISOString();
+        renderBoard();
+      });
+      assert.notEqual(await meta(), before);
+      assert.deepEqual(
+        await page.evaluate(() => [
+          document.activeElement.getAttribute("href"),
+          document.getElementById("notifications-menu").hidden,
+        ]),
+        ["#060-sample-merged", false],
+      );
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
     await t.test("menu caps at eight", async () => {
       await seedBoard(
         origin,
@@ -190,9 +225,200 @@ test("notifications", { timeout: 180000 }, async (t) => {
         await page.$eval("#notifications-list .inbox-item .inbox-actions", (el) =>
           [...el.children].map((a) => a.textContent),
         ),
-        ["Open PR #60", "Open job"],
+        ["Open job", "Open PR #60", "Open in Session app", "Open in Session"],
       );
       assert.deepEqual(errors, []);
+    });
+
+    await t.test("row links", async () => {
+      const { page, errors } = await openPage("#/notifications");
+      await pageRows(page, 3);
+      const actions = (id) =>
+        page.$$eval(
+          "#notifications-list .inbox-item",
+          (items, id) =>
+            [
+              ...items
+                .find((item) => item.querySelector(`a[href="#${id}"]`))
+                .querySelectorAll(".inbox-actions a"),
+            ].map((a) => [a.textContent, a.getAttribute("href"), a.getAttribute("target")]),
+          id,
+        );
+      assert.deepEqual(await actions("060-sample-merged"), [
+        ["Open job", "#060-sample-merged", null],
+        ["Open PR #60", "https://github.com/example/sample/pull/60", "_blank"],
+        ["Open in Session app", "session://h/srv-a/agent/agent-60", null],
+        ["Open in Session", "https://sessions.example.test/srv-a/agent-60", "_blank"],
+      ]);
+      assert.deepEqual(
+        (await actions("042-sample-export")).map((a) => a[0]),
+        ["Open job", "Open PR #44"],
+      );
+      assert.deepEqual(
+        (await actions("051-sample-retry")).map((a) => a[0]),
+        ["Open job"],
+      );
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
+    const ranks = (page) =>
+      page.$$eval("#notifications-list .inbox-rank", (els) => els.map((el) => el.textContent));
+
+    await t.test("page paginates at twenty", async () => {
+      await seedBoard(origin, [...JOBS, ...OLD]);
+      const { page, errors } = await openPage("#/notifications");
+      await pageRows(page, 20);
+      assert.deepEqual(
+        await page.evaluate(() => [
+          document.getElementById("notifications-pager").hidden,
+          document.getElementById("notifications-page-label").textContent,
+          document.getElementById("notifications-prev").disabled,
+        ]),
+        [false, "Page 1 of 2", true],
+      );
+      await page.click("#notifications-next");
+      await pageRows(page, 5);
+      assert.deepEqual(await ranks(page), ["21", "22", "23", "24", "25"]);
+      assert.deepEqual(
+        await page.evaluate(() => [
+          document.getElementById("notifications-page-label").textContent,
+          document.getElementById("notifications-next").disabled,
+          document.activeElement.id,
+        ]),
+        ["Page 2 of 2", true, "notifications-prev"],
+      );
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+      await seedBoard(origin, JOBS);
+    });
+
+    await t.test("filters", async () => {
+      await seedBoard(origin, [...JOBS, ...OLD]);
+      const { page, errors } = await openPage("#/notifications");
+      await pageRows(page, 20);
+      const pressed = () =>
+        page.$$eval("[data-notifications-filter]", (bs) =>
+          bs.map((b) => [b.textContent, b.getAttribute("aria-pressed")]),
+        );
+      const kinds = () =>
+        page.$$eval("#notifications-list .inbox-kind", (els) => [
+          ...new Set(els.map((el) => el.textContent)),
+        ]);
+      await page.click("#notifications-next");
+      await pageRows(page, 5);
+      await page.click('[data-notifications-filter="merged"]');
+      await page.waitForFunction(
+        () => document.querySelector("#notifications-list .inbox-rank").textContent === "1",
+        wait,
+      );
+      await pageRows(page, 20);
+      assert.deepEqual(await kinds(), ["Merged"]);
+      assert.deepEqual(await pressed(), [
+        ["All", "false"],
+        ["Needs you", "false"],
+        ["Merged", "true"],
+      ]);
+      assert.equal(
+        await page.$eval("#notifications-page-label", (el) => el.textContent),
+        "Page 1 of 2",
+      );
+      await page.click("#notifications-next");
+      await pageRows(page, 3);
+      await page.click('[data-notifications-filter="needs"]');
+      await pageRows(page, 2);
+      assert.deepEqual(await kinds(), ["Needs you"]);
+      assert.equal(await page.$eval("#notifications-pager", (el) => el.hidden), true);
+      await page.browserContext().close();
+      await seedBoard(origin, [JOBS[0]]);
+      const only = await openPage("#/notifications");
+      await pageRows(only.page, 1);
+      await only.page.click('[data-notifications-filter="needs"]');
+      await pageRows(only.page, 0);
+      assert.equal(
+        await only.page.$eval("#notifications-status", (el) => el.textContent),
+        "Nothing needs you right now.",
+      );
+      assert.deepEqual(errors, []);
+      assert.deepEqual(only.errors, []);
+      await only.page.browserContext().close();
+      await seedBoard(origin, JOBS);
+    });
+
+    await t.test("board load failure", async () => {
+      let fail = true;
+      let hold = null;
+      const failBoard = async (p) => {
+        await blockLiveEvents(p);
+        await p.setBypassServiceWorker(true);
+        await p.setRequestInterception(true);
+        p.on("request", async (request) => {
+          if (
+            !fail ||
+            request.method() !== "GET" ||
+            new URL(request.url()).pathname !== "/board.json"
+          )
+            return request.continue();
+          await hold;
+          return request.respond({ status: 503, body: "" });
+        });
+      };
+      const { page, errors } = await openPage("#/notifications", failBoard);
+      const copy =
+        "Couldn't load notifications. Can't reach the factory. Check your connection, then retry.";
+      const status = (p, id, text) =>
+        p.waitForFunction((i, c) => document.getElementById(i).textContent === c, wait, id, text);
+      await status(page, "notifications-status", copy);
+      assert.equal(await page.$eval("#notifications-retry", (el) => el.hidden), false);
+      await page.click("#notifications-button");
+      assert.deepEqual(
+        await page.evaluate(() => [
+          document.getElementById("notifications-menu-status").textContent,
+          document.getElementById("notifications-menu-retry").hidden,
+        ]),
+        [copy, false],
+      );
+      await page.keyboard.press("Escape");
+      let release;
+      hold = new Promise((resolve) => (release = resolve));
+      await page.click("#notifications-retry");
+      await status(page, "notifications-status", "Retrying\u2026");
+      assert.equal(await page.$eval("#notifications-retry", (el) => el.disabled), true);
+      release();
+      hold = null;
+      await status(page, "notifications-status", copy);
+      await page.waitForFunction(() => document.activeElement.id === "notifications-retry", wait);
+      assert.equal(await page.$eval("#notifications-retry", (el) => el.disabled), false);
+      fail = false;
+      await page.click("#notifications-retry");
+      await pageRows(page, 3);
+      await page.waitForFunction(
+        () => document.activeElement.id === "notifications-page-heading",
+        wait,
+      );
+      assert.equal(await page.$eval("#notifications-retry", (el) => el.hidden), true);
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+
+      fail = true;
+      const menu = await openPage("", failBoard);
+      await menu.page.click("#notifications-button");
+      await status(menu.page, "notifications-menu-status", copy);
+      fail = false;
+      await menu.page.click("#notifications-menu-retry");
+      await menu.page.waitForFunction(
+        () => document.activeElement.matches("#notifications-menu-list a"),
+        wait,
+      );
+      assert.deepEqual(
+        await menu.page.evaluate(() => [
+          document.getElementById("notifications-menu").hidden,
+          document.getElementById("notifications-menu-retry").hidden,
+        ]),
+        [false, true],
+      );
+      assert.deepEqual(menu.errors, []);
+      await menu.page.browserContext().close();
     });
 
     await t.test("open job returns to the page", async () => {

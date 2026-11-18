@@ -3,12 +3,14 @@ import { createElement, useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import {
   dashboardSrc,
+  frameLoaded,
   readEmbedMessage,
   readSignedInMessage,
   type EmbedMessage,
 } from "../shared/embed";
 import { needsBody, needsTitle, type WaitingJob } from "../shared/arrivals";
 import * as firstLogin from "../shared/first-login";
+import { setFrameInboxCount } from "./frame-inbox";
 
 // This plugin typechecks without the DOM library. Declare only what this module uses.
 type MessageSource = { postMessage(message: unknown, targetOrigin: string): void };
@@ -91,8 +93,7 @@ export function DashboardFrame({
     sandbox: SANDBOX,
     style: { border: 0, width: "100%", height: "100%" },
     ref: frame,
-    onLoad: () =>
-      frame.current?.contentWindow?.postMessage({ type: "factory-embed-hello", v: 1 }, origin),
+    onLoad: () => frameLoaded(frame.current?.contentWindow, origin, setFrameInboxCount),
   });
 }
 
