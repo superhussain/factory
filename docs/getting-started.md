@@ -14,6 +14,8 @@ mise exec -- python3 tools/bootstrap.py up
 
 `up` asks for your account ID, zone, hostname and allowed emails. See [cloudflare.md](cloudflare.md#guided-setup) for the token permissions. It ends with `Factory is live at https://factory.example.test`.
 
+Keep that token. Store it as `CLOUDFLARE_API_TOKEN` in the factory home `.env` on this computer, as [cloudflare.md](cloudflare.md#device-token) shows, so agents here can rerun `up`, change Access settings and upload PR screenshots. `up` itself never saves it, and its last line prints the `.env` path.
+
 ## 2. Sign in
 
 Open the origin and sign in with an allowed email, such as `ada@example.test`. The board is empty. Settings, Projects says "No registered projects."
@@ -92,6 +94,7 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | Deploy every merge to main | `deploy-main` workflow | [cloudflare.md](cloudflare.md#8-continuous-deployment-from-main) |
 | PR screenshots, Paseo, Tracer | device config | [integrations.md](integrations.md) |
 | Browser sounds, notifications, reminders and display | Settings, Notifications and Display | none |
+| Let agents manage the instance, such as Access settings or an `up` rerun | `CLOUDFLARE_API_TOKEN` in the factory home `.env` | [cloudflare.md](cloudflare.md#device-token) |
 | Upgrade later | `git pull` here, then `install.py --replace` on each host | [upgrade.md](upgrade.md) |
 
 Automatic pickup: run `python3 <installed-skill>/runtime/factory.py pickup setup` on each host and fix each missing line until it prints 7 of 7 ok. A stored Paseo or Claude schedule prompt does not pick up ideas.
