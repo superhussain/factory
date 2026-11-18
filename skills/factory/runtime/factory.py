@@ -1807,7 +1807,7 @@ def idea_with_context(head, context, tail):
     room = IDEA_LIMIT - utf16_len(head) - utf16_len(intro) - utf16_len(cut) - utf16_len(tail)
     if room <= 0:
         return head + tail
-    return head + intro + context.encode("utf-16-le")[:2 * room].decode("utf-16-le", "ignore") + cut + tail
+    return head + intro + context.encode("utf-16-le", "surrogatepass")[:2 * room].decode("utf-16-le", "ignore") + cut + tail
 
 
 def queue_backlog_item(home, slug, feature, verdict, context=None):
@@ -3480,7 +3480,7 @@ def inbox_count(jobs, backlog_text):
 
 def utf16_cut(text, limit):
     """text cut to at most limit UTF-16 code units, the plugin schema's length, without half a surrogate pair."""
-    return text.encode("utf-16-le")[:limit * 2].decode("utf-16-le", "ignore")
+    return text.encode("utf-16-le", "surrogatepass")[:limit * 2].decode("utf-16-le", "ignore")
 
 
 def inbox():

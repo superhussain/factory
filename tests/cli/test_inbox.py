@@ -57,6 +57,13 @@ class InboxTest(IsolatedTestCase):
             _, out, _ = invoke(factory, ["inbox"])
         self.assertEqual(json.loads(out)["jobs"][0]["title"], "x" * 199)
 
+    def test_a_lone_surrogate_in_a_title_is_dropped(self):
+        jobs = [{"id": "043-asked", "stage": "needs-human", "title": "x\ud800y"}]
+        with patch.object(factory, "read_board", return_value={"jobs": jobs}), \
+                patch.object(factory, "api", lambda *a, **k: (404, {}, "")):
+            code, out, _ = invoke(factory, ["inbox"])
+        self.assertEqual((code, json.loads(out)["jobs"][0]["title"]), (0, "xy"))
+
     def test_empty_board(self):
         self.assertEqual(factory.inbox_count([], ""), 0)
 
