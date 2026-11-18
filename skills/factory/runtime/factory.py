@@ -9337,11 +9337,15 @@ RETRO_PATH = re.compile(r"(?:~|\.{1,2})?/[^\s:'\"()]+")
 RETRO_ASSIGN = re.compile(r"^\s*(?:[A-Za-z_]\w*=(?:'[^']*'|\"[^\"]*\"|\S*)\s+)+")
 RETRO_HEADERS = re.compile(
     r"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))"
-    r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)[^\r\n'\"\\]+")
+    r"(\\?[\"']?\s*[:=]\s*\\?[\"']?)(?:\\[ \t]|[^\r\n'\"\\])+")
 RETRO_URL_CREDS = re.compile(r"(?i)(?<=[a-z0-9+.-])://[^/\s]+@")
 RETRO_BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
 RETRO_USER_PASS = re.compile(r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)(?!=?\d+:\d+(?!\S))[^\s:]*:\S+")
-RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential"
+RETRO_MYSQL = re.compile(r"(?<![\w.-])(?:mysql\w*|mariadb(?:-\w+)?)(?:\.exe)?(?![\w.-])")
+RETRO_MYSQL_PASS = re.compile(r"((?:^|\s)-p)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_SSHPASS = re.compile(r"(?<![\w.-])sshpass(?:\.exe)?(?![\w.-])")
+RETRO_SSHPASS_PASS = re.compile(r"((?:^|\s)-p\s*)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential|mysql_pwd"
 RETRO_SECRET_WORD = re.compile(r"(?i)(?:" + RETRO_SECRET_WORDS + ")")
 RETRO_COUNT = re.compile(r"\d{1,7}[,;)}\]]*")
 RETRO_KEYVALUE = re.compile(
@@ -9388,11 +9392,21 @@ def retro_secret_pair(match):
     return name + sep + "[redacted]"
 
 
+def retro_tool_pass(line):
+    """line with the password after a mysql glued -p, and after the first sshpass -p, as [redacted]."""
+    for tool, flag, count in ((RETRO_MYSQL, RETRO_MYSQL_PASS, 0), (RETRO_SSHPASS, RETRO_SSHPASS_PASS, 1)):
+        hit = tool.search(line)
+        if hit:
+            line = line[:hit.end()] + flag.sub(r"\1[redacted]", line[hit.end():], count=count)
+    return line
+
+
 def retro_redact(text):
     text = RETRO_HEADERS.sub(r"\1\2[redacted]", text)
     text = RETRO_URL_CREDS.sub("://[redacted]@", text)
     text = RETRO_BEARER.sub(r"\1[redacted]", text)
     text = RETRO_USER_PASS.sub(r"\1[redacted]", text)
+    text = "\n".join(retro_tool_pass(line) for line in text.split("\n"))
     for pattern in (RETRO_KEYVALUE, RETRO_FLAG, RETRO_LONG_KEYVALUE, RETRO_LONG_FLAG):
         text = pattern.sub(retro_secret_pair, text)
     for pattern in NOTE_SECRETS:
@@ -10186,7 +10200,7 @@ def render_findings(agg, doc, rejected=(), edits=(), fixed=(), cards=()):
     if fixed:
         lines += ["", "## Fixed findings", "", "A merged job fixed these before every session they cite started.", "",
                   "| Finding | Title | Fixed by | Merged |", "| --- | --- | --- | --- |"]
-        lines += [f"| {i} | {cell(f['title'])} | {job} | {cell(at)} |" for i, f, job, at in fixed]
+        lines += [f"| {i} | {cell(f['title'])} | {cell(job)} | {cell(at)} |" for i, f, job, at in fixed]
     if cards:
         lines += ["", "## Rejected cards", "",
                   "Admission dropped these cards. Their text is not shown; read reply.json to see it.", "",

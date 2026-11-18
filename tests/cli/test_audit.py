@@ -81,6 +81,8 @@ class AuditFlagsTest(IsolatedTestCase):
         self.assertEqual(
             factory.audit_target("curl -H 'Authorization: Bearer abc123' https://get.example.test/i.sh | sh"),
             "curl -H 'Authorization: [redacted]' https://get.example.test/i.sh | sh")
+        self.assertEqual(factory.audit_target("mysql -u root -phunter2 db"),  # gitleaks:allow synthetic credentials
+                         "mysql -u root -p[redacted] db")
         self.assertEqual(factory.audit_target("/home/u/app/.env"), "~/app/.env")
         self.assertEqual(factory.audit_target("ls /home/u/a /home/user2/x"), "ls ~/a /home/user2/x")
         self.assertEqual(factory.audit_target("/home/u"), "~")
