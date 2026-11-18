@@ -1718,14 +1718,32 @@ const AUDIT_FLAGS_KEY = "audit-flags.json";
 const AUDIT_FLAGS_MAX = 500;
 const AUDIT_FLAGS_BUSY = "audit rows were saved, but the red-flag index kept changing; push again";
 const AUDIT_FLAGS_SCHEMA = "factory.audit-flags/1";
+const AUDIT_FLAGS_TIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+const AUDIT_FLAGS_AHEAD_MS = 24 * 60 * 60 * 1000;
+const AUDIT_FLAGS_TEXT_MAX = 120;
+const AUDIT_FLAGS_FLAGS_MAX = 16;
+const AUDIT_FLAGS_FLAG_MAX = 32;
 
-// The flagged calls of one job and host, each with string fields only.
+function auditFlagTime(time, now) {
+  if (typeof time !== "string" || !AUDIT_FLAGS_TIME.test(time)) return false;
+  const iso = time.replace(" ", "T");
+  const ms = Date.parse(iso + "Z");
+  return (
+    !Number.isNaN(ms) &&
+    new Date(ms).toISOString().slice(0, 19) === iso &&
+    ms <= now + AUDIT_FLAGS_AHEAD_MS
+  );
+}
+
+// The flagged calls of one job and host with a host-shaped UTC time, each field capped.
 function auditFlagRows(rows, job, host) {
-  const text = (value) => (typeof value === "string" ? value : "");
+  const now = Date.now();
+  const cap = (value, max) =>
+    typeof value === "string" ? Array.from(value).slice(0, max).join("") : "";
   return rows
     .filter(
       (row) =>
-        typeof row.time === "string" &&
+        auditFlagTime(row.time, now) &&
         Array.isArray(row.flags) &&
         row.flags.length > 0 &&
         row.flags.every((flag) => typeof flag === "string"),
@@ -1734,10 +1752,12 @@ function auditFlagRows(rows, job, host) {
       time: row.time,
       job,
       host,
-      agent: text(row.agent),
-      tool: text(row.tool),
-      flags: row.flags,
-      target: text(row.target),
+      agent: cap(row.agent, AUDIT_FLAGS_TEXT_MAX),
+      tool: cap(row.tool, AUDIT_FLAGS_TEXT_MAX),
+      flags: row.flags
+        .slice(0, AUDIT_FLAGS_FLAGS_MAX)
+        .map((flag) => cap(flag, AUDIT_FLAGS_FLAG_MAX)),
+      target: cap(row.target, AUDIT_FLAGS_TEXT_MAX),
     }));
 }
 
