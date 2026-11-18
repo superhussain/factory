@@ -201,3 +201,42 @@ test("a failed first load shows the unreachable banner", { timeout: 120000 }, as
     }
   });
 });
+
+// WCAG AA asks 4.5:1 for the badge's small count text, in both color schemes.
+test("the inbox badge keeps 4.5:1 contrast in both themes", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    await seedBoard(origin, JOBS);
+    for (const theme of ["light", "dark"]) {
+      const context = await browser.createBrowserContext();
+      const page = await context.newPage();
+      await page.setViewport({ width: 390, height: 844 });
+      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: theme }]);
+      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#inbox-count:not([hidden])");
+      const { color, background } = await page.$eval("#inbox-count", (el) => ({
+        color: getComputedStyle(el).color,
+        background: getComputedStyle(el).backgroundColor,
+      }));
+      const luminance = (css) => {
+        const [r, g, b] = css
+          .match(/[\d.]+/g)
+          .slice(0, 3)
+          .map((n) => {
+            const c = Number(n) / 255;
+            return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+          });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const [light, dark] = [luminance(color), luminance(background)].sort((a, b) => b - a);
+      const ratio = (light + 0.05) / (dark + 0.05);
+      assert.ok(ratio >= 4.5, `${theme} badge ${color} on ${background}: ${ratio.toFixed(2)}:1`);
+      await context.close();
+    }
+  });
+});
