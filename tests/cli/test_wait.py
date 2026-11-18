@@ -36,6 +36,12 @@ class WaitTest(IsolatedTestCase):
                               "round-1/review-code.md: VERDICT: PASS\nbuild.md: Routing: synthetic\n"
                               "decision.md: CLOSED: superseded by a later job\n")
 
+    def test_spec_evidence_artifact(self):
+        self.write("spec-evidence.md", "# Spec evidence: sample\n")
+        self.assertEqual(self.wait("spec-evidence.md"), (0, "spec-evidence.md: # Spec evidence: sample\n", ""))
+        self.write("spec-evidence.md", "\n# Spec evidence\n")
+        self.assertEqual(self.wait("spec-evidence.md", "--timeout", "0")[0], 5)
+
     def test_missing_at_timeout_exits_3(self):
         self.write("round-1/review-ux.md", "not a verdict\n")
         code, out, err = self.wait("round-1/review-ux.md", "round-1/review-ui.md", "decision.md", "--timeout", "0")
