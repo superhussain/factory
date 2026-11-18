@@ -3,7 +3,7 @@
 export const EMBED_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const ORIGIN =
   /^https:\/\/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)\/?$/i;
-const JOB = /^[A-Za-z0-9-]{1,128}$/;
+export const JOB_ID = /^[A-Za-z0-9-]{1,128}$/;
 
 export type EmbedMessage =
   | { type: "factory-embed-ready" }
@@ -15,7 +15,7 @@ export function parseDashboardOrigin(value: string): string | null {
 }
 
 export function dashboardSrc(origin: string, job?: string): string {
-  return origin + "/" + (job && JOB.test(job) ? "#" + job : "");
+  return origin + "/" + (job && JOB_ID.test(job) ? "#" + job : "");
 }
 
 export function readEmbedMessage(data: unknown): EmbedMessage | null {
