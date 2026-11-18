@@ -9467,7 +9467,7 @@ RETRO_OPENSSL_PASS = re.compile(r"((?:^|\s)-pass(?:in|out)?\s+pass:)(\"[^\"]*\"|
 RETRO_OPENSSL_K = re.compile(r"((?:^|\s)-[kK]\s+)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
 RETRO_OPENSSL_BARE = re.compile(
     r"((?:^|\s)-pass(?:in|out)?\s+)(?!(?:pass|env|file|fd):|stdin(?!\S))(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
-RETRO_COMMAND_SPLIT = re.compile(r"([|;&]+)")
+RETRO_COMMAND_SPLIT = re.compile(r"(?:\"[^\"]*\"|'[^']*'|[^|;&\"']|[\"'])+|[|;&]+")
 RETRO_PASSWORD_STDIN = re.compile(r"(?<![\w-])--password-stdin(?![\w-])")
 RETRO_ECHO_PASS = re.compile(r"((?:^|[\s;&(])echo\s+(?:-[neE]{1,3}\s+)?)(\"[^\"]*\"|'[^']*'|[^\s\"'|;&]+)(\s*\|\s*)$")
 RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential|mysql_pwd|sshpass|rediscli_auth"
@@ -9537,7 +9537,7 @@ def retro_tool_pass(line):
         hit = tool.search(line)
         if hit:
             line = line[:hit.end()] + flag.sub(r"\1[redacted]", line[hit.end():], count=count)
-    line = "".join(retro_openssl_part(p) for p in RETRO_COMMAND_SPLIT.split(line))
+    line = "".join(retro_openssl_part(m.group(0)) for m in RETRO_COMMAND_SPLIT.finditer(line))
     hit = RETRO_DOCKER_LOGIN.search(line)
     if hit and RETRO_PASSWORD_STDIN.search(line, hit.end()):
         line = RETRO_ECHO_PASS.sub(r"\1[redacted]\3", line[:hit.start()]) + line[hit.start():]

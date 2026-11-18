@@ -133,6 +133,8 @@ class RetroRedactTest(RetroCase):
                           ("openssl enc -aes-256-cbc -k hunter2 -in a.txt",  # gitleaks:allow synthetic credentials
                            "openssl enc -aes-256-cbc -k [redacted] -in a.txt"),
                           ("openssl enc -K 00ff -iv 01 -in a", "openssl enc -K [redacted] -iv 01 -in a"),  # gitleaks:allow synthetic credentials
+                          ('openssl enc -k "a|b" -in x', "openssl enc -k [redacted] -in x"),  # gitleaks:allow synthetic credentials
+                          ("openssl enc -k 'a;b' -in x", "openssl enc -k [redacted] -in x"),  # gitleaks:allow synthetic credentials
                           ("openssl rsa -passin hunter2 -in key.pem",  # gitleaks:allow synthetic credentials
                            "openssl rsa -passin [redacted] -in key.pem"),
                           ("openssl pkcs12 -export -passout hunter2 -in a",  # gitleaks:allow synthetic credentials
@@ -162,7 +164,7 @@ class RetroRedactTest(RetroCase):
                 self.assertEqual(factory.retro_redact(text), text)
 
     def test_long_name_run_redacts_in_linear_time(self):
-        for text in ("a" * 30000, "-" * 30000, "a1" * 15000, "--" + "a" * 30000):
+        for text in ("a" * 30000, "-" * 30000, "a1" * 15000, "--" + "a" * 30000, '"' + "a" * 30000):
             with self.subTest(text=text[:3]):
                 start = time.monotonic()
                 self.assertEqual(factory.retro_redact(text), text)
