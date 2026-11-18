@@ -9376,7 +9376,12 @@ RETRO_MYSQL = re.compile(r"(?<![\w.-])(?:mysql\w*|mariadb(?:-\w+)?)(?:\.exe)?(?!
 RETRO_MYSQL_PASS = re.compile(r"((?:^|\s)-p)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
 RETRO_SSHPASS = re.compile(r"(?<![\w.-])sshpass(?:\.exe)?(?![\w.-])")
 RETRO_SSHPASS_PASS = re.compile(r"((?:^|\s)-p\s*)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
-RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential|mysql_pwd"
+RETRO_REDIS = re.compile(r"(?<![\w.-])redis-cli(?:\.exe)?(?![\w.-])")
+RETRO_REDIS_PASS = re.compile(r"((?:^|\s)(?:-a\s*|--pass\s+))(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_DOCKER_LOGIN = re.compile(r"(?<![\w.-])docker(?:\.exe)?\s+login(?![\w.-])")
+RETRO_OPENSSL = re.compile(r"(?<![\w.-])openssl(?:\.exe)?(?![\w.-])")
+RETRO_OPENSSL_PASS = re.compile(r"((?:^|\s)-pass(?:in|out)?\s+pass:)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)")
+RETRO_SECRET_WORDS = r"token|secret|password|passwd|api[_-]?key|credential|mysql_pwd|sshpass|rediscli_auth"
 RETRO_SECRET_WORD = re.compile(r"(?i)(?:" + RETRO_SECRET_WORDS + ")")
 RETRO_COUNT = re.compile(r"\d{1,7}[,;)}\]]*")
 RETRO_KEYVALUE = re.compile(
@@ -9424,8 +9429,11 @@ def retro_secret_pair(match):
 
 
 def retro_tool_pass(line):
-    """line with the password after a mysql glued -p, and after the first sshpass -p, as [redacted]."""
-    for tool, flag, count in ((RETRO_MYSQL, RETRO_MYSQL_PASS, 0), (RETRO_SSHPASS, RETRO_SSHPASS_PASS, 1)):
+    """line with the password after a mysql glued -p, after the first sshpass -p, redis-cli -a or --pass and
+    docker login -p, and after every openssl -pass, -passin or -passout pass:, as [redacted]."""
+    for tool, flag, count in ((RETRO_MYSQL, RETRO_MYSQL_PASS, 0), (RETRO_SSHPASS, RETRO_SSHPASS_PASS, 1),
+                              (RETRO_REDIS, RETRO_REDIS_PASS, 1), (RETRO_DOCKER_LOGIN, RETRO_SSHPASS_PASS, 1),
+                              (RETRO_OPENSSL, RETRO_OPENSSL_PASS, 0)):
         hit = tool.search(line)
         if hit:
             line = line[:hit.end()] + flag.sub(r"\1[redacted]", line[hit.end():], count=count)
