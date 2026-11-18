@@ -84,7 +84,7 @@ runs `format:check`, the workflow contracts and the affected `auth`, `protocol`,
 `assets`, `deploy` and `local` targets. The `python` job runs the cached `cli`,
 `install` and `verify` targets via `nx run-many` on every pull request. Four
 `browser` jobs each run the affected `browser` target on a quarter of the
-suites, picked by `FACTORY_BROWSER_SHARD=<n>/4`; unset runs them all. The `ci`
+suites, picked by `FACTORY_BROWSER_SHARD=<n>/4`; unset runs them all. The `paseo-plugin` job installs `paseo-plugin/` from its own lockfile, then runs its `typecheck` and `pnpm run test:paseo-plugin`, which also checks that every plugin lockfile entry has a public registry tarball URL. Its packages are not in the cached store, so that install downloads them each run. The `ci`
 job runs unless the run was cancelled, prints each job's name with its result,
 and passes only when every other job succeeds. `local` binds
 `127.0.0.1:8220`/`8221` and `browser` binds owned ephemeral ports,

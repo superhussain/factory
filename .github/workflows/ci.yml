@@ -119,15 +119,26 @@ jobs:
           echo "NX_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: Nx affected browser
         run: pnpm exec nx affected -t browser --base="$NX_BASE" --head="$NX_HEAD"
+  paseo-plugin:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/ci-setup
+      - run: pnpm --dir paseo-plugin install --frozen-lockfile
+      - run: pnpm --dir paseo-plugin run typecheck
+      - run: pnpm run test:paseo-plugin
   ci:
     if: ${{ !cancelled() }}
-    needs: [targets, python, browser]
+    needs: [targets, python, browser, paseo-plugin]
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
       - name: All CI jobs passed
         env:
-          RESULTS: targets=${{ needs.targets.result }} python=${{ needs.python.result }} browser=${{ needs.browser.result }}
+          RESULTS: targets=${{ needs.targets.result }} python=${{ needs.python.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }}
         run: |
           status=0
           for pair in $RESULTS; do
