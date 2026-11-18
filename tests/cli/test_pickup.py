@@ -1865,6 +1865,153 @@ class RetroPickupTest(PickupFixture):
         self.assertEqual(self.retro_puts(), [])
 
 
+class RetroCatchupTest(PickupFixture):
+    ZONE = timezone(timedelta(hours=-5))
+    PROMPT = "Run the weekday retro.\n\nStanding instruction: work unattended.\n"
+
+    def setUp(self):
+        super().setUp()
+        self.prompt = self.home / "retro-schedule-prompt.md"
+        self.prompt.write_text(self.PROMPT, encoding="utf-8")
+        self.record = self.home / "retro-catchup.json"
+        self.id = "retro-" + datetime.now().strftime("%Y%m%d")
+
+    def due(self, day=18, hour=10, minute=15):
+        return factory.retro_catchup_due(self.home, datetime(2026, 11, day, hour, minute, tzinfo=self.ZONE))
+
+    def run_folder(self, name):
+        (self.home / "retro" / name).mkdir(parents=True)
+
+    def test_weekday_after_the_grace_is_due(self):
+        self.assertTrue(self.due())
+        self.assertTrue(self.due(hour=9, minute=30))
+
+    def test_before_the_grace_is_not_due(self):
+        self.assertFalse(self.due(hour=9, minute=29))
+
+    def test_weekend_is_not_due(self):
+        self.assertFalse(self.due(day=21))
+        self.assertFalse(self.due(day=22))
+
+    def test_missing_prompt_file_is_not_due(self):
+        self.prompt.unlink()
+        self.assertFalse(self.due())
+
+    def test_linked_prompt_file_is_not_due(self):
+        target = self.root / "prompt.md"
+        self.prompt.rename(target)
+        os.symlink(target, self.prompt)
+        self.assertFalse(self.due())
+
+    def test_a_run_folder_from_today_is_not_due(self):
+        self.run_folder("20261118T140034Z-c3ac38")
+        self.assertFalse(self.due())
+
+    def test_a_late_utc_stamp_counts_by_local_date(self):
+        self.run_folder("20261119T030000Z-0a1b2c")
+        self.assertFalse(self.due())
+
+    def test_a_run_folder_from_yesterday_is_due(self):
+        self.run_folder("20261117T140034Z-c3ac38")
+        self.run_folder("20261118-notes")
+        self.assertTrue(self.due())
+
+    def test_a_record_for_today_is_not_due(self):
+        self.record.write_text(json.dumps({"version": 1, "date": "2026-11-18"}), encoding="utf-8")
+        self.assertFalse(self.due())
+
+    def test_an_older_or_unknown_record_is_due(self):
+        for record in ({"version": 1, "date": "2026-11-17"}, {"version": 2, "date": "2026-11-18"}):
+            self.record.write_text(json.dumps(record), encoding="utf-8")
+            self.assertTrue(self.due())
+        self.record.write_text("{not json", encoding="utf-8")
+        self.assertTrue(self.due())
+
+    def test_a_due_pickup_launches_once(self):
+        due = patch.object(factory, "retro_catchup_due", return_value=True)
+        due.start()
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, rf"^launched retro catch-up {self.id} on primary session [0-9a-f]{{6}}\n$")
+        [record] = self.launched()
+        self.assertEqual(record["cwd"], str(self.repo_a))
+        self.assertEqual(record["argv"][:4], [self.id, "alpha", str(self.repo_a), out.split()[-1]])
+        self.assertEqual(record["argv"][7], self.PROMPT)
+        self.assertEqual(record["env"]["FACTORY_PROMPT"], self.PROMPT)
+        self.assertEqual(json.loads(self.record.read_text(encoding="utf-8")),
+                         {"version": 1, "date": datetime.now().date().isoformat()})
+        due.stop()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(len(self.launched()), 1)
+
+    def test_a_second_run_the_same_day_launches_nothing(self):
+        self.record.write_text(json.dumps({"version": 1, "date": datetime.now().date().isoformat()}),
+                               encoding="utf-8")
+        self.assert_silent(self.pickup())
+
+    def test_dry_run_launches_nothing(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        self.assertEqual(self.pickup("--dry-run"),
+                         (0, f"would launch retro catch-up {self.id} on primary\nhost {DEVICE}: would launch 0\n", ""))
+        self.assertEqual(self.launched(), [])
+        self.assertFalse(self.record.exists())
+
+    def test_a_failed_launch_warns_and_the_idea_still_launches(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.board["jobs"] = [idea("120-sample-digest", "alpha")]
+        self.configure(code=1)
+        real = factory.launch_idea
+
+        def launch(*args):
+            result = real(*args)
+            self.configure()
+            return result
+
+        patch.object(factory, "launch_idea", side_effect=launch).start()
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"^launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n$")
+        [log] = (self.home / "logs" / "pickup").glob(f"{self.id}-*.log")
+        self.assertEqual(err, f"factory.py: retro catch-up {self.id} failed to launch (exit 1); see {log}; "
+                              "no retry today\n")
+        self.assertEqual([r["argv"][0] for r in self.launched()], [self.id, "120-sample-digest"])
+        self.assertTrue(self.record.exists())
+
+    def test_no_route_waits_without_a_record(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        patch.object(factory, "pick_route", return_value=None).start()
+        self.assertEqual(self.pickup(), (0, "", "factory.py: retro catch-up waits: no available route\n"))
+        self.assertFalse(self.record.exists())
+
+    def test_no_checkout_waits_without_a_record(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        patch.object(factory, "read_paths", return_value={}).start()
+        self.assertEqual(self.pickup(), (0, "", "factory.py: retro catch-up waits: no checkout in paths.md\n"))
+        self.assertFalse(self.record.exists())
+        self.assertEqual(self.launched(), [])
+
+    def test_a_config_error_stops_the_catch_up_and_the_idea_still_launches(self):
+        patch.object(factory, "retro_catchup_due", return_value=True).start()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.board["jobs"] = [idea("120-sample-digest", "alpha")]
+        real, calls = factory.route_launcher, []
+
+        def launcher(home, route):
+            calls.append(route[0])
+            if len(calls) == 1:
+                raise SystemExit(2)
+            return real(home, route)
+
+        patch.object(factory, "route_launcher", side_effect=launcher).start()
+        code, out, err = self.pickup()
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"^launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n$")
+        self.assertEqual(err, "factory.py: retro catch-up stopped (exit 2); the next pickup run retries it\n")
+        self.assertFalse(self.record.exists())
+        self.assertEqual([r["argv"][0] for r in self.launched()], ["120-sample-digest"])
+
+
 class AuditPickupTest(PickupFixture):
     def setUp(self):
         super().setUp()
