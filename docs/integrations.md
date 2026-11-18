@@ -192,11 +192,12 @@ frame; the screen then offers **Sign in**, **Reload** and **Open in a browser ta
 ### Inbox badge
 
 The Factory row shows the same number as the dashboard's Inbox badge: jobs waiting on you plus
-unchecked backlog lines, across all projects. The plugin runs `factory.py inbox` from the installed
-factory skill (`~/.claude/skills/factory` or `~/.agents/skills/factory`) once a minute, so the
-badge can trail the dashboard by up to a minute. It ignores the dashboard's per-browser project
-filter. A host without the factory skill, or with a skill older than `factory.py inbox`, shows no
-badge.
+unchecked backlog lines. While the Factory screen shows your board, the framed dashboard sends its
+own Inbox count to the Paseo origin that framed it, so the badge matches what you see, including
+the per-browser project filter. Otherwise the plugin runs `factory.py inbox` from the installed
+factory skill (`~/.claude/skills/factory` or `~/.agents/skills/factory`) once a minute. That count
+covers all projects and can trail the dashboard by up to a minute. A host without the factory
+skill, or with a skill older than `factory.py inbox`, shows a badge only while the board is open.
 
 ## Tracer mirror
 

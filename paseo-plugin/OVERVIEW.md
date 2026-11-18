@@ -8,7 +8,7 @@ Factory shows your factory dashboard on its own Paseo screen. A Factory row in t
 
 ## What it reads and sends
 
-Once a minute the plugin runs `factory.py inbox` from this host's factory skill and sends the app only the inbox count. The runtime reads the board and backlog with this host's device credentials, which never leave the host. The plugin stores only the dashboard URL. The board loads in the app with your own Access session, and the plugin only receives the server and agent ids of a session link you click.
+Once a minute the plugin runs `factory.py inbox` from this host's factory skill and sends the app only the inbox count. While the board is open, the framed dashboard sends the plugin its own Inbox count, which follows the board's project filter, and the badge shows that number instead. The runtime reads the board and backlog with this host's device credentials, which never leave the host. The plugin stores only the dashboard URL. The board loads in the app with your own Access session, and the plugin only receives the server and agent ids of a session link you click.
 
 ## Limits
 

@@ -7,3 +7,8 @@ export function badgeText(count: number): string {
 export function badgeLabel(count: number): string {
   return `Factory inbox, ${count} waiting`;
 }
+
+// The framed dashboard's count while the Factory screen shows it, else the daemon's.
+export function shownInboxCount(daemon: number, frame: number | null, open: boolean): number {
+  return open && frame !== null ? frame : daemon;
+}
