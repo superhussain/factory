@@ -1533,13 +1533,18 @@ function paseoLinksFor(p) {
   }
   return links;
 }
+// The session link a job carries: the one that claimed it, else the last Paseo session that wrote it unclaimed.
+function sessionLink(j) {
+  if (paseoLinksFor(j.paseo)) return j.paseo;
+  return paseoLinksFor(j.paseo_writer) ? j.paseo_writer : null;
+}
 // The job whose session a drawer links to: its own, else its batch lead's, else null.
 function sessionJob(j) {
-  if (paseoLinksFor(j.paseo)) return j;
+  if (sessionLink(j)) return j;
   const lead = jobs.find((x) => x.id === leadOf(j));
-  return lead && paseoLinksFor(lead.paseo) ? lead : null;
+  return lead && sessionLink(lead) ? lead : null;
 }
-const paseoLinks = (j) => { const s = sessionJob(j); return s ? paseoLinksFor(s.paseo) : null; };
+const paseoLinks = (j) => { const s = sessionJob(j); return s ? paseoLinksFor(sessionLink(s)) : null; };
 
 // The job's Tracer page, only as a plain http(s) URL with no credentials.
 function tracerLink(j) {
@@ -1657,7 +1662,7 @@ function buildRuns(j) {
 }
 
 function stamp(j) {
-  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(sessionJob(j)?.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.idea_files), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
+  return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.paseo_writer), JSON.stringify(sessionJob(j)?.paseo), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.idea_files), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
 }
 
 // A holder's stop is recorded only when stopped is a string, as in factory.py.
@@ -1961,7 +1966,7 @@ function jobLinkRows(j) {
   const pr = prLink(j);
   if (pr) link('pr', 'Open PR #' + pr.n, 'pr github', true);
   const owner = sessionJob(j);
-  const paseo = owner && paseoLinksFor(owner.paseo);
+  const paseo = owner && paseoLinksFor(sessionLink(owner));
   const open = (label) => (owner !== j ? 'Open the session of ' + owner.id + ' in ' : 'Open in ') + label;
   if (paseo) {
     if (paseo.app) link('paseo', open(factoryConfig.agent_links.app.label), factoryConfig.agent_links.app.label, false);
