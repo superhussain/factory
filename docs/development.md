@@ -44,8 +44,8 @@ The pnpm scripts are the source of truth (`package.json`):
 | Script | What it runs |
 | --- | --- |
 | `lint` | `oxlint` over `worker tools tests` |
-| `format:check` | `oxfmt --check` over `worker tools tests` (CI gate; `tests/fixtures/` excluded by `.oxfmtrc.json`) |
-| `format` | `oxfmt` over `worker tools tests`, rewriting in place |
+| `format:check` | `oxfmt --check` over `worker tools tests paseo-plugin` (CI gate; `tests/fixtures/` excluded by `.oxfmtrc.json`) |
+| `format` | `oxfmt` over `worker tools tests paseo-plugin`, rewriting in place |
 | `test:assets` | Asset build, deployment dry-run, bundle verification |
 | `test:auth` | Asset preparation, then production auth unit suites |
 | `test:protocol` | Asset preparation, then v1 protocol, settings, lockfile suites |
@@ -177,7 +177,7 @@ Every `git commit` runs the `.husky/pre-commit` hook (installed by the
 - oxfmt failure fails the commit with `formatting required: run 'mise exec --
   pnpm exec oxfmt <files>' and restage`. Replace `<files>` with the staged
   paths, or run `mise exec -- pnpm run format`.
-- The repository follows oxfmt's default style over `worker tools tests`, and
+- The repository follows oxfmt's default style over `worker tools tests paseo-plugin`, and
   the `CI` pull-request job runs `pnpm run format:check` as a gate.
   `.oxfmtrc.json` sets only `ignorePatterns: ["tests/fixtures/"]`. Fixtures are
   test data that suites read as bytes, so the formatter never rewrites them.
