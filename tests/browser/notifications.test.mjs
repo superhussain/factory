@@ -347,23 +347,28 @@ test("notifications", { timeout: 180000 }, async (t) => {
 
     await t.test("board load failure", async () => {
       let fail = true;
-      const { page, errors } = await openPage("#/notifications", async (p) => {
+      let hold = null;
+      const failBoard = async (p) => {
         await blockLiveEvents(p);
         await p.setBypassServiceWorker(true);
         await p.setRequestInterception(true);
-        p.on("request", (request) =>
-          fail && request.method() === "GET" && new URL(request.url()).pathname === "/board.json"
-            ? request.respond({ status: 503, body: "" })
-            : request.continue(),
-        );
-      });
+        p.on("request", async (request) => {
+          if (
+            !fail ||
+            request.method() !== "GET" ||
+            new URL(request.url()).pathname !== "/board.json"
+          )
+            return request.continue();
+          await hold;
+          return request.respond({ status: 503, body: "" });
+        });
+      };
+      const { page, errors } = await openPage("#/notifications", failBoard);
       const copy =
         "Couldn't load notifications. Can't reach the factory. Check your connection, then retry.";
-      await page.waitForFunction(
-        (c) => document.getElementById("notifications-status").textContent === c,
-        wait,
-        copy,
-      );
+      const status = (p, id, text) =>
+        p.waitForFunction((i, c) => document.getElementById(i).textContent === c, wait, id, text);
+      await status(page, "notifications-status", copy);
       assert.equal(await page.$eval("#notifications-retry", (el) => el.hidden), false);
       await page.click("#notifications-button");
       assert.deepEqual(
@@ -374,6 +379,16 @@ test("notifications", { timeout: 180000 }, async (t) => {
         [copy, false],
       );
       await page.keyboard.press("Escape");
+      let release;
+      hold = new Promise((resolve) => (release = resolve));
+      await page.click("#notifications-retry");
+      await status(page, "notifications-status", "Retrying\u2026");
+      assert.equal(await page.$eval("#notifications-retry", (el) => el.disabled), true);
+      release();
+      hold = null;
+      await status(page, "notifications-status", copy);
+      await page.waitForFunction(() => document.activeElement.id === "notifications-retry", wait);
+      assert.equal(await page.$eval("#notifications-retry", (el) => el.disabled), false);
       fail = false;
       await page.click("#notifications-retry");
       await pageRows(page, 3);
@@ -384,6 +399,26 @@ test("notifications", { timeout: 180000 }, async (t) => {
       assert.equal(await page.$eval("#notifications-retry", (el) => el.hidden), true);
       assert.deepEqual(errors, []);
       await page.browserContext().close();
+
+      fail = true;
+      const menu = await openPage("", failBoard);
+      await menu.page.click("#notifications-button");
+      await status(menu.page, "notifications-menu-status", copy);
+      fail = false;
+      await menu.page.click("#notifications-menu-retry");
+      await menu.page.waitForFunction(
+        () => document.activeElement.matches("#notifications-menu-list a"),
+        wait,
+      );
+      assert.deepEqual(
+        await menu.page.evaluate(() => [
+          document.getElementById("notifications-menu").hidden,
+          document.getElementById("notifications-menu-retry").hidden,
+        ]),
+        [false, true],
+      );
+      assert.deepEqual(menu.errors, []);
+      await menu.page.browserContext().close();
     });
 
     await t.test("open job returns to the page", async () => {

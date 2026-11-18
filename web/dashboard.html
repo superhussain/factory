@@ -195,7 +195,6 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .notifications-filters[hidden], .notifications-pager[hidden] { display: none; }
   .notifications-filters .btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
   #notifications-menu-retry { margin: 0 8px 8px; }
-  @media (pointer: coarse) { .notifications-filters .btn, .notifications-pager .btn { min-height: 44px; } }
   #filter { height: var(--icon-size); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   #filter svg { flex: none; }
   #filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3731,13 +3730,20 @@ function stepNotificationsPage(delta, button) {
 }
 $('notifications-prev').addEventListener('click', (e) => stepNotificationsPage(-1, e.currentTarget));
 $('notifications-next').addEventListener('click', (e) => stepNotificationsPage(1, e.currentTarget));
+const RETRY_STATUS = { 'notifications-menu-retry': 'notifications-menu-status', 'notifications-retry': 'notifications-status', 'inbox-retry': 'inbox-status' };
 async function retryBoardLoad(e) {
-  const id = e.currentTarget.id;
-  if (!(await poll()) || document.activeElement !== document.body) return;
+  const button = e.currentTarget, id = button.id;
+  // Disabled while the read runs, so repeated clicks cannot start parallel polls.
+  button.disabled = true;
+  $(RETRY_STATUS[id]).textContent = 'Retrying\u2026';
+  const ok = await poll();
+  button.disabled = false;
+  if (document.activeElement !== document.body) return;
+  if (!ok) { button.focus(); return; }
   if (id === 'notifications-menu-retry') ($('notifications-menu-list').querySelector('a') || $('notifications-more')).focus();
   else $(id === 'notifications-retry' ? 'notifications-page-heading' : 'inbox-page-heading').focus();
 }
-for (const id of ['notifications-menu-retry', 'notifications-retry', 'inbox-retry']) $(id).addEventListener('click', retryBoardLoad);
+for (const id of Object.keys(RETRY_STATUS)) $(id).addEventListener('click', retryBoardLoad);
 
 // Pipeline settings: one in-memory draft per scope. Stored text is shown only through
 // value and textContent, never parsed as markup.
