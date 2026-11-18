@@ -8771,12 +8771,35 @@ def stop(wt):
     sys.exit(1 if alive else 0)
 
 
+def board_merged_head(home, slug, job_id):
+    """The board's github.head for a merged job, or None. An unreadable board warns and returns None."""
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(captured):
+            jobs = read_board(home)["jobs"]
+    except SystemExit:
+        reason = " ".join(captured.getvalue().split()).replace("factory.py: ", "", 1) or "unknown error"
+    except ValueError:
+        reason = "malformed board"
+    else:
+        job = next((j for j in jobs if j.get("id") == job_id and j.get("project") == slug), {})
+        github = job.get("github")
+        if (job.get("stage") == "merged" and isinstance(github, dict) and isinstance(github.get("merged"), str)
+                and isinstance(github.get("head"), str) and COMMIT.fullmatch(github["head"])):
+            return github["head"]
+        return None
+    print(f"factory.py: cleanup could not read the board ({reason}), so it keeps a branch HEAD does not contain",
+          file=sys.stderr)
+    return None
+
+
 def cleanup(target):
     home, slug, job_id = r2_target(target, True)
     repo = read_paths(home).get(slug)
     if not repo:
         fail(f"{home / 'paths.md'} has no entry for {slug}: run /factory init in this device's checkout of it", 4)
-    removed, left = cleanup_job(repo, home / "worktrees" / slug / job_id, f"factory/{job_id}")
+    removed, left = cleanup_job(repo, home / "worktrees" / slug / job_id, f"factory/{job_id}",
+                                merged_head=board_merged_head(home, slug, job_id))
     folder = home / "prompts" / slug / job_id
     if os.path.lexists(folder):
         if any(entry.startswith("worktree ") for entry in left):

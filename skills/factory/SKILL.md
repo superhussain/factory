@@ -470,7 +470,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   servers.
 - On cleanup, run `python3 "$RUNTIME" cleanup "$SLUG/<id>"` and clear `port`. It
   stops processes running out of `$WT`, runs `git worktree remove` without `--force`,
-  then `git branch -d factory/<id>` once it is merged into the checkout's HEAD, and
+  then `git branch -d factory/<id>` once it is merged into the checkout's HEAD (for a `merged` job, also a branch the board's `github.head` contains, deleted with a tip-guarded `git update-ref -d`), and
   prints `{"removed": [...], "left": [...]}`.
   Exit 1 means something was left: a dirty worktree, a process it could not stop,
   an unmerged branch, or a git call that failed or ran past 20 s. That is not a stop.

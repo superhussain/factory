@@ -22,8 +22,8 @@
     "test:workflow": "node --test \"tests/ci/*.test.mjs\"",
     "test": "pnpm run test:assets && pnpm run test:auth && pnpm run test:protocol && pnpm run test:local && pnpm run test:browser && pnpm run test:deploy && pnpm run test:workflow",
     "lint": "oxlint worker tools tests",
-    "format": "oxfmt worker tools tests",
-    "format:check": "oxfmt --check worker tools tests",
+    "format": "oxfmt worker tools tests paseo-plugin",
+    "format:check": "oxfmt --check worker tools tests paseo-plugin",
     "prepare": "husky"
   },
   "dependencies": {
