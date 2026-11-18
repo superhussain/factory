@@ -1155,6 +1155,53 @@ class PaseoClaimHomeTest(IsolatedTestCase):
         self.assertEqual(self.saved()["note"], "checking")
 
 
+class PaseoWriterTest(IsolatedTestCase):
+    setUp = FactoryTest.setUp
+    api = FactoryTest.api
+    git = FactoryTest.git
+    saved = FactoryTest.saved
+    save = FactoryTest.save
+    link = {"server": "srv-mac", "agent": "agent-batch"}
+
+    def write(self, text='{"note": "upstream PR ready"}'):
+        with patch.object(factory, "paseo_session", return_value=self.link), \
+                patch.object(factory.sys, "stdin", io.StringIO(text)):
+            factory.board(self.home, "001-test")
+
+    def test_unclaimed_write_sets_paseo_writer(self):
+        job = self.saved()
+        job.pop("claim")
+        self.save(dict(job, stage="pr-open"))
+        self.write()
+        job = self.saved()
+        self.assertEqual(job["paseo_writer"], self.link)
+        self.assertNotIn("paseo", job)
+        self.assertFalse((self.home / "paseo-claims").exists())
+
+    def test_owner_link_is_kept(self):
+        own = {"server": "srv-mac", "agent": "agent-own"}
+        job = self.saved()
+        job.pop("claim")
+        self.save(dict(job, stage="pr-open", paseo=own))
+        self.write()
+        job = self.saved()
+        self.assertEqual(job["paseo"], own)
+        self.assertNotIn("paseo_writer", job)
+
+    def test_claimed_write_sets_paseo(self):
+        self.write()
+        job = self.saved()
+        self.assertEqual(job["paseo"], self.link)
+        self.assertNotIn("paseo_writer", job)
+
+    def test_patch_cannot_set_paseo_writer(self):
+        before = self.store["/api/board"]
+        with self.assertRaises(SystemExit) as raised, contextlib.redirect_stderr(io.StringIO()):
+            self.write('{"paseo_writer": {"server": "srv-mac", "agent": "agent-batch"}}')
+        self.assertEqual(raised.exception.code, 2)
+        self.assertEqual(self.store["/api/board"], before)
+
+
 class HoldWriteSkipTest(IsolatedTestCase):
     setUp = FactoryTest.setUp
     api = FactoryTest.api

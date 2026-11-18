@@ -903,6 +903,8 @@ def board_write(factory, job_id, patch, show=True):
         fail('only hold sets a claim. {"claim": null} releases it', 2)
     if "paseo" in patch:
         fail("only factory.py sets paseo", 2)
+    if "paseo_writer" in patch:
+        fail("only factory.py sets paseo_writer", 2)
     if "handoff" in patch:
         fail("only factory.py sets handoff", 2)
     if "done" in patch:
@@ -1015,6 +1017,8 @@ def board_write(factory, job_id, patch, show=True):
             job["claim"]["seen"] = job["updated"]
             if paseo:
                 job["paseo"] = paseo
+        if paseo and not isinstance(job.get("paseo"), dict) and job.get("paseo_writer") != paseo:
+            job["paseo_writer"] = paseo
         if tracer_gate_passed(job, patch):
             job.update(stage="build", note=TRACER_APPROVED_NOTE)
             job.pop("needs", None)
