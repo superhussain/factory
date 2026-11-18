@@ -2,7 +2,9 @@
 
 Before enabling or refreshing this stored prompt, the user materializes
 `<installed-skill>` and `<python-launcher>`. Enable it Monday to Friday at 09:00 on
-one host only. Stop before running anything if any placeholder remains unresolved.
+one host only. Save the materialized prompt as `<home>/retro-schedule-prompt.md` on
+that host only, so pickup can catch up a missed slot; see `retro-catchup.json` in
+references/schedules.md. Stop before running anything if any placeholder remains unresolved.
 This is a prompt template, not an executable or an automatically enabled schedule.
 
 1. Pick a route. Run:
