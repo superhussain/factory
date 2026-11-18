@@ -189,6 +189,13 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #notifications-more { display: block; padding: 10px 8px 4px; font-size: 13px; font-weight: 600; color: var(--accent); }
   @media (pointer: coarse) { .notification-link, #notifications-more { min-height: 44px; box-sizing: border-box; } }
   #notifications-page { max-width: 1040px; }
+  .notifications-filters, .notifications-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .notifications-filters { margin: 0 0 12px; }
+  .notifications-pager { margin: 12px 0 0; }
+  .notifications-filters[hidden], .notifications-pager[hidden] { display: none; }
+  .notifications-filters .btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  #notifications-menu-retry { margin: 0 8px 8px; }
+  @media (pointer: coarse) { .notifications-filters .btn, .notifications-pager .btn { min-height: 44px; } }
   #filter { height: var(--icon-size); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   #filter svg { flex: none; }
   #filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -732,6 +739,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <div class="notifications-menu" id="notifications-menu" role="region" aria-label="Recent notifications" hidden>
         <p class="notifications-menu-head">Notifications</p>
         <p class="muted" id="notifications-menu-status" role="status"></p>
+        <button type="button" class="btn" id="notifications-menu-retry" hidden>Retry</button>
         <ol id="notifications-menu-list"></ol>
         <a id="notifications-more" href="#/notifications">See more</a>
       </div>
@@ -1202,6 +1210,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <h2 id="inbox-page-heading" tabindex="-1">Inbox</h2>
   </div>
   <p class="muted" id="inbox-status" role="status"></p>
+  <button type="button" class="btn" id="inbox-retry" hidden>Retry</button>
   <ol id="inbox-list"></ol>
 </div>
 <div class="settings-page" id="notifications-page" role="region" aria-labelledby="notifications-page-heading" hidden>
@@ -1209,8 +1218,19 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <a class="btn icon" id="notifications-back" href="#" aria-label="Back to board" title="Back to board (H)" aria-keyshortcuts="h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg></a>
     <h2 id="notifications-page-heading" tabindex="-1">Notifications</h2>
   </div>
+  <div class="notifications-filters" id="notifications-filters" role="group" aria-label="Filter notifications" hidden>
+    <button type="button" class="btn" data-notifications-filter="all" aria-pressed="true">All</button>
+    <button type="button" class="btn" data-notifications-filter="needs" aria-pressed="false">Needs you</button>
+    <button type="button" class="btn" data-notifications-filter="merged" aria-pressed="false">Merged</button>
+  </div>
   <p class="muted" id="notifications-status" role="status"></p>
+  <button type="button" class="btn" id="notifications-retry" hidden>Retry</button>
   <ol id="notifications-list"></ol>
+  <nav class="notifications-pager" id="notifications-pager" aria-label="Notification pages" hidden>
+    <button type="button" class="btn" id="notifications-prev">Previous</button>
+    <span id="notifications-page-label"></span>
+    <button type="button" class="btn" id="notifications-next">Next</button>
+  </nav>
 </div>
 <dialog id="idea-dlg" aria-labelledby="idea-h">
   <form id="idea-form">
