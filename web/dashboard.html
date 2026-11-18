@@ -1592,6 +1592,7 @@ window.addEventListener('message', (e) => {
         e.data?.type === 'factory-embed-hello' && e.data.v === 1)) return;
   embedParent = e.origin;
   window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, e.origin);
+  syncInboxLink();
 });
 document.addEventListener('click', (e) => {
   if (!embedParent) return;
@@ -1601,6 +1602,11 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   window.parent.postMessage({ type: 'factory-open-agent', v: 1, ...ids }, embedParent);
 }, true);
+// Tell a listed Paseo parent the Inbox count, once the board and backlog have loaded.
+function postInboxCount(n) {
+  if (!embedParent || !loaded || (!backlogLoaded && !backlogFailed)) return;
+  window.parent.postMessage({ type: 'factory-inbox-count', v: 1, count: n }, embedParent);
+}
 
 // The session link a job carries: the one that claimed it, else the last Paseo session that wrote it unclaimed.
 function sessionLink(j) {
@@ -3285,6 +3291,7 @@ function syncInboxLink() {
   $('inbox-count').textContent = n > 99 ? '99+' : String(n);
   $('inbox-count').hidden = !n;
   $('inbox-link').setAttribute('aria-label', n ? 'Inbox, ' + n + ' waiting' : 'Inbox');
+  postInboxCount(n);
 }
 
 function renderInboxPage() {
