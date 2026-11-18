@@ -18,6 +18,7 @@ OBSERVABILITY = {"enabled": True, "head_sampling_rate": 1, "redact_query_string"
 PROFILE_KEYS = ["version", "account_id", "worker_name", "bucket_name", "origin", "title",
                 "issuer", "audience", "image_origins", "agent_links"]
 OPTIONAL_PROFILE_KEYS = ["jira_origin", "embed_origins"]
+DESKTOP_EMBED_ORIGINS = ("paseo://app",)
 
 DNS = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]*$")
 CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
@@ -87,6 +88,10 @@ def embed_origins(value):
     if len(set(value)) != len(value):
         fail("embed_origins must not contain duplicates")
     for origin in value:
+        if origin in DESKTOP_EMBED_ORIGINS:
+            continue
+        if not origin.startswith("https://"):
+            fail("embed_origins entry must be a canonical https origin or paseo://app")
         https_origin(origin, "embed_origins entry")
     return list(value)
 

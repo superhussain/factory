@@ -168,10 +168,12 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
    Check it with `paseo plugin ls`, which shows `factory running`.
 2. In Paseo, open Settings, Plugins, Factory and enter your dashboard origin, such as
    `https://factory.example.com`.
-3. Add each Paseo web origin that frames the board to `embed_origins` in
-   `deploy/profile.json`, for example `"embed_origins": ["https://app.paseo.sh"]`, then render
+3. Add each Paseo origin that frames the board to `embed_origins` in
+   `deploy/profile.json`, for example `"embed_origins": ["https://app.paseo.sh", "paseo://app"]`, then render
    and deploy as [config-changes.md](config-changes.md) describes. The dashboard sends
    `frame-ancestors 'self'` plus these origins, so no other site can frame it.
+   The Paseo desktop app frames from `paseo://app`; list it to show the board there. It is the
+   only non-https entry accepted.
 
    Listing an origin trusts that host's operator. Code served from `https://app.paseo.sh` could
    frame your signed-in board and click its buttons, so list only origins whose operator you
