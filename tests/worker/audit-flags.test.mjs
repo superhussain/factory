@@ -113,7 +113,7 @@ test("a push indexes its flagged calls newest first with seven fields", async ()
   assert.deepEqual((await s.flags())[0], flagged(7, "", "", ["sudo"], ""));
 });
 
-test("a re-push replaces only its job and host, jobs interleave, and the cap keeps 500", async () => {
+test("a re-push replaces only its job and host, and jobs interleave", async () => {
   const s = await setup();
   await s.put(SIX);
   const other = (second) => ({ ...call(second, "main", "Bash", ["sudo"], "sudo x"), host: "pc" });
@@ -140,16 +140,67 @@ test("a re-push replaces only its job and host, jobs interleave, and the cap kee
       ["3", JOB, "pc"],
     ],
   );
-  const many = Array.from({ length: 501 }, (_, i) => ({
+});
+
+const many = (length, job, day) =>
+  Array.from({ length }, (_, i) => ({
     ...call(0, "main", "Bash", ["sudo"], `sudo ${i}`),
-    job: "1019-add-z",
-    time: `2026-11-11 ${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}:00`,
+    job,
+    time: `${day} ${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}:00`,
   }));
-  assert.equal((await s.put(many, { job: "1019-add-z" })).status, 200);
+const count = (rows, field, value) => rows.filter((r) => r[field] === value).length;
+
+test("one host keeps at most its newest 100 rows", async () => {
+  const s = await setup();
+  const pcRows = [1, 2, 3].map((second) => ({
+    ...call(second, "main", "Bash", ["sudo"], "sudo x"),
+    host: "pc",
+  }));
+  assert.equal((await s.put(pcRows, { host: "pc", principal: pc })).status, 200);
+  assert.equal(
+    (await s.put(many(500, "1019-add-z", "2026-11-11"), { job: "1019-add-z" })).status,
+    200,
+  );
+  const rows = await s.flags();
+  assert.deepEqual([count(rows, "host", "mac"), count(rows, "host", "pc")], [100, 3]);
+  assert.equal(rows[0].target, "sudo 499");
+  assert.equal(rows[99].target, "sudo 400");
+
+  const t = await setup();
+  assert.equal((await t.put(many(60, JOB, "2026-11-11"))).status, 200);
+  assert.equal(
+    (await t.put(many(60, "1018-add-y", "2026-11-12"), { job: "1018-add-y" })).status,
+    200,
+  );
+  const spans = await t.flags();
+  assert.equal(spans.length, 100);
+  assert.equal(count(spans, "job", "1018-add-y"), 60);
+  assert.deepEqual(
+    spans.filter((r) => r.job === JOB).map((r) => r.target),
+    Array.from({ length: 40 }, (_, i) => `sudo ${59 - i}`),
+  );
+});
+
+test("the index keeps the newest 500 rows across hosts", async () => {
+  const s = await setup();
+  const seeded = Array.from({ length: 500 }, (_, i) => ({
+    ...flagged(0, "main", "Bash", ["sudo"], `seed ${i}`, JOB, `h${(i % 5) + 1}`),
+    time: `2026-11-10 00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}`,
+  }));
+  await s.bucket.put(
+    "audit-flags.json",
+    JSON.stringify({ schema: "factory.audit-flags/1", rows: seeded.toReversed() }),
+  );
+  const fresh = { ...call(0, "main", "Bash", ["sudo"], "sudo new"), time: "2026-11-11 00:00:00" };
+  assert.equal((await s.put([fresh])).status, 200);
   const rows = await s.flags();
   assert.equal(rows.length, 500);
-  assert.equal(rows[0].target, "sudo 500");
-  assert.equal(rows.at(-1).target, "sudo 1");
+  assert.deepEqual([rows[0].host, rows[0].target], ["mac", "sudo new"]);
+  assert.equal(rows.at(-1).target, "seed 1");
+  assert.equal(
+    rows.some((r) => r.target === "seed 0"),
+    false,
+  );
 });
 
 test("ten lost index puts answer 503 and keep the host file", async () => {
