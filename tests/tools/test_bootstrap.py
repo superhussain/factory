@@ -560,6 +560,70 @@ class RerunTest(Instance):
         self.assertNotIn("PUT", [m for m, path, _ in self.fake.calls[since:] if "/apps/" in path])
 
 
+class EmbedCookieTest(Instance):
+    def set_embed(self, origins):
+        path = self.root / "deploy" / "profile.json"
+        profile = json.loads(path.read_text(encoding="utf-8"))
+        path.write_text(json.dumps(dict(profile, embed_origins=origins)), encoding="utf-8")
+
+    def app_puts(self, since):
+        return [body for method, path, body in self.fake.calls[since:] if method == "PUT" and "/apps/" in path]
+
+    def test_embed_origins_sets_same_site_none_once(self):
+        self.up()
+        [app] = self.fake.items["apps"].values()
+        app["session_duration"] = "1h"
+        policies = app["policies"]
+        self.set_embed(["https://paseo.example.test"])
+        since = len(self.fake.calls)
+        code, _, err = self.up(inputs=["", "", "", ""])
+        self.assertEqual(code, 0, err)
+        [put] = self.app_puts(since)
+        self.assertEqual(put["same_site_cookie_attribute"], "none")
+        self.assertEqual(put["session_duration"], "1h")
+        self.assertEqual(put["policies"], policies)
+
+    def test_rerun_with_embed_origins_keeps_the_app(self):
+        self.up()
+        self.set_embed(["https://paseo.example.test"])
+        self.up(inputs=["", "", "", ""])
+        since = len(self.fake.calls)
+        code, out, err = self.up(inputs=["", "", "", ""])
+        self.assertEqual(code, 0, err)
+        self.assertIn("app factory.example.test: kept", out)
+        self.assertEqual(self.app_puts(since), [])
+
+    def test_without_embed_origins_the_cookie_is_left_alone(self):
+        self.up()
+        [app] = self.fake.items["apps"].values()
+        app["same_site_cookie_attribute"] = "strict"
+        since = len(self.fake.calls)
+        code, out, err = self.up(inputs=["", "", "", ""])
+        self.assertEqual(code, 0, err)
+        self.assertIn("app factory.example.test: kept", out)
+        self.assertEqual(self.app_puts(since), [])
+        self.assertEqual(app["same_site_cookie_attribute"], "strict")
+
+    def test_new_app_with_embed_origins_gets_same_site_none(self):
+        self.up()
+        self.set_embed(["https://paseo.example.test"])
+        self.fake.items["apps"].clear()
+        code, out, err = self.up(inputs=["", "", "", ""])
+        self.assertEqual(code, 0, err)
+        self.assertIn("app factory.example.test: created", out)
+        [app] = self.fake.items["apps"].values()
+        self.assertEqual(app["same_site_cookie_attribute"], "none")
+
+    def test_bad_embed_origins_exit_2_before_cloudflare(self):
+        self.up()
+        self.set_embed(["http://paseo.example.test"])
+        since = len(self.fake.calls)
+        code, _, err = self.up(inputs=["", "", "", ""])
+        self.assertEqual(code, 2)
+        self.assertIn("embed_origins entry must be a canonical https origin", err)
+        self.assertEqual(len(self.fake.calls), since)
+
+
 class TokenConflictTest(Instance):
     def test_existing_token_without_matching_env_exits_1_and_keeps_env(self):
         self.fake.items["service_tokens"]["old"] = {
