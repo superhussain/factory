@@ -190,6 +190,19 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await page.waitForSelector(selector, wait);
       await page.waitForFunction(() => window.pollTimers.size > 0, wait);
     };
+    // The Display controls sit below the fold. Scroll, hit-test and press in one page task,
+    // so a late layout shift cannot separate them and a covered control still fails.
+    const pressBelowFold = async (selector) => {
+      const covering = await page.$eval(selector, (el) => {
+        el.scrollIntoView({ block: "center", behavior: "instant" });
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        if (hit !== el && !el.contains(hit)) return hit?.id || hit?.tagName || "nothing";
+        el.click();
+        return null;
+      });
+      assert.equal(covering, null, `${selector} is covered by ${covering}`);
+    };
     const tones = () => page.evaluate(() => window.tones);
     const shown = () =>
       page.evaluate(() => window.shown.map(({ title, body, tag }) => ({ title, body, tag })));
@@ -668,8 +681,9 @@ test("notification settings", { timeout: 180000 }, async (t) => {
 
     await t.test("notify C3 display reset keeps notifications", async () => {
       await page.select("#display-idea-project", "other");
-      await page.click("#display-card-field-pr");
-      await page.click("#display-reset");
+      await pressBelowFold("#display-card-field-pr");
+      assert.equal(await page.$eval("#display-card-field-pr", (el) => el.checked), false);
+      await pressBelowFold("#display-reset");
       assert.equal(await storage("factory-hidden-card-fields"), null);
       assert.equal(await storage("factory-idea-project"), null);
       assert.equal(await storage("factory-notify"), "on");

@@ -166,6 +166,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .btn.icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .btn.icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .btn.icon .teeth { stroke-width: 2.5; stroke-linecap: butt; }
+  #d-star[aria-pressed="true"] { color: var(--accent); }
+  #d-star[aria-pressed="true"] svg { fill: currentColor; }
   #inbox-link { position: relative; }
   #inbox-count { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--alert); color: var(--panel); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
   #inbox-count[hidden] { display: none; }
@@ -640,7 +642,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     /* On a phone the details under the title slide up with the page; syncHeadShift sets the shift. */
     .detail-head { border-bottom: 0; }
     .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
-    #d-title, .detail-head #d-babysit-bar, #d-actions, .detail-head .close { position: relative; z-index: 3; }
+    #d-title, .detail-head #d-babysit-bar, #d-star, #d-actions, .detail-head .close { position: relative; z-index: 3; }
     .detail-head .close { background: var(--panel); }
     #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
@@ -663,6 +665,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .status .updated-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     #updated { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .status .dot { flex: none; }
+    /* The job actions button drops under the star, so the title keeps the width it had before the star. */
+    .detail-head #d-star:not([hidden]) + #d-actions-wrap { margin-left: calc(-1 * (var(--icon-size) + 12px)); margin-top: calc(var(--icon-size) + 12px); }
   }
   @media (pointer: coarse) { :root { --icon-size: 44px; } }
   /* Only when the icons and the status cannot share one row, the status moves up beside the filter. syncHeaderWrap sets wraps. */
@@ -701,6 +705,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <a class="pr-link" id="d-tracer" target="_blank" rel="noopener noreferrer" hidden>Tracer</a>
     </div>
     <button class="btn" id="d-babysit-bar" title="Work this PR as the Babysit note asks, or hand it back" hidden>Babysit PR</button>
+    <button class="btn icon" id="d-star" aria-label="Star job" title="Star job" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg></button>
     <div class="job-actions" id="d-actions-wrap">
       <button class="btn icon" id="d-actions" aria-label="Job actions" title="Job actions (A or .)" aria-keyshortcuts="a ." aria-haspopup="menu" aria-expanded="false" aria-controls="d-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>
       <div class="job-actions-menu" id="d-actions-menu" role="menu" aria-label="Job actions" hidden>
@@ -933,6 +938,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="display-poll">Refresh without live updates<select id="display-poll" aria-describedby="display-poll-help"><option value="15">Every 15 seconds</option><option value="30">Every 30 seconds</option><option value="60">Every 60 seconds</option></select></label>
       <p class="muted" id="display-poll-help">If live updates drop, the board refreshes on this schedule and the backlog every 2 minutes. Refreshing pauses while the window is hidden or unfocused. With notifications or sounds on, it refreshes every 30 seconds instead.</p>
       <fieldset id="display-filter"><legend>Show jobs from</legend></fieldset>
+      <label for="display-starred">Starred jobs<select id="display-starred" aria-describedby="display-starred-help"><option value="float">Float to the top of each column</option><option value="only">Show only starred jobs</option><option value="off">Keep board order</option></select></label>
+      <p class="muted" id="display-starred-help">Star a job with the star button in its job panel. Stars are saved in this browser. The needs you column always shows its jobs.</p>
       <fieldset id="display-columns"><legend>Board columns</legend></fieldset>
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
       <p class="muted" id="display-card-fields-help">Cards in the needs you column always show what the job is waiting on.</p>
@@ -1233,6 +1240,24 @@ function readHiddenProjects() {
   return new Set(raw.split(',').filter(Boolean));
 }
 let hiddenProjects = readHiddenProjects();
+const STARRED_KEY = 'factory-starred-jobs';
+// Saved as a JSON array of job ids. Any other value reads as no stars.
+function readStarred() {
+  try {
+    const ids = JSON.parse(store.get(STARRED_KEY));
+    if (Array.isArray(ids)) return new Set(ids.filter((id) => typeof id === 'string' && id));
+  } catch {}
+  return new Set();
+}
+let starred = readStarred();
+function saveStarred() {
+  if (starred.size) store.set(STARRED_KEY, JSON.stringify([...starred])); else store.remove(STARRED_KEY);
+}
+function toggleStar(id) {
+  if (!starred.delete(id)) starred.add(id);
+  saveStarred();
+  renderBoard();
+}
 
 // The server-rendered title, which renderBoard prefixes with the needs-you count.
 const BASE_TITLE = document.title;
@@ -1695,6 +1720,7 @@ function nextWaitingJob() {
 
 // Prioritized jobs first, as factory.py pickup takes them. The sort is stable, so ties keep board order.
 function prioritizedFirst(list) { return list.sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at)); }
+function starredFirst(list) { return starView === 'float' ? list.sort((a, b) => Number(starred.has(b.id)) - Number(starred.has(a.id))) : list; }
 
 // Mirrors batch_hold in factory.py, plus no claim: a follow-up or triage-queued idea that no
 // person added, approved or prioritized. batchState mirrors batch_holds. Change both together.
@@ -1853,7 +1879,8 @@ function card(j, inNeeds, archived = false) {
   const dupOnBoard = dup !== null && jobs.some((x) => x.id === dup);
   const chat = chatDecision(j), held = batchState(j), later = notBefore(j), auto = autoBabysit(j);
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
-  const tags = (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
+  const tags = (!archived && starred.has(j.id) ? '<span class="chip">Starred</span>' : '') +
+    (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
     (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
     (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
     (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
@@ -4142,7 +4169,7 @@ function renderBoard() {
     return;
   }
   const noneShown = !shownProjectKeys().length;
-  const shown = jobs.filter((j) => isShown(j.project));
+  const shown = jobs.filter((j) => isShown(j.project) && (starView !== 'only' || starred.has(j.id) || waitsOnYou(j)));
   renderedBacklog = backlog;
   syncBacklogTriage();
   const lists = COLUMNS.map((s) => s === 'backlog'
@@ -4152,19 +4179,24 @@ function renderBoard() {
   // Oldest first, so the longest wait sits on top.
   waiting.splice(0, waiting.length, ...waitingJobs());
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
+  for (const s of COLUMNS) if (s !== 'backlog' && !TERMINAL.includes(s)) starredFirst(lists[COLUMNS.indexOf(s)]);
   if (!settingsShown && !retrosRoute() && inboxRoute() === null) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
-  // The extra auto track lets the filter-empty line span the whole board.
-  $('board').style.setProperty('--cols', tracks.concat(noneShown ? ['auto'] : []).join(' '));
-  $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : '') + COLUMNS.map((s, i) => {
+  const starredOnly = starView === 'only' && !noneShown;
+  const starredLine = starredOnly ? '<p class="filter-empty" id="starred-only">' +
+    (shown.some((j) => starred.has(j.id)) ? 'Showing starred jobs only.' : 'No starred jobs yet. Star a job with the star button in its job panel.') +
+    ' <button type="button" class="btn" id="starred-show-all">Show all jobs</button></p>' : '';
+  // The extra auto track lets the filter-empty or starred-only line span the whole board.
+  $('board').style.setProperty('--cols', tracks.concat(noneShown || starredOnly ? ['auto'] : []).join(' '));
+  $('board').innerHTML = (noneShown ? FILTER_EMPTY_HTML : starredLine) + COLUMNS.map((s, i) => {
     if (hiddenColumns.has(s)) return '';
     let list = lists[i];
     let more = '';
     if (TERMINAL.includes(s)) {
       const t = (j) => Date.parse(j.done || j.updated) || 0;
-      list.sort((a, b) => t(b) - t(a));
+      starredFirst(list.sort((a, b) => t(b) - t(a)));
       if (list.length > CAP) {
         const open = expanded.has(s);
         more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '">' +
@@ -4202,6 +4234,11 @@ function renderBoard() {
 }
 
 $('board').addEventListener('click', (e) => {
+  if (e.target.closest('#starred-show-all')) {
+    setStarView('float');
+    $('board').querySelector('.column-toggle')?.focus();
+    return;
+  }
   const toggle = e.target.closest('.column-toggle');
   if (toggle) {
     columnCollapsed.set(toggle.dataset.stage, toggle.getAttribute('aria-expanded') === 'true');
@@ -4639,6 +4676,8 @@ async function openJob(id) {
   renderDrawerStatus(j);
   const shown = jobActionsFor(j);
   for (const id of JOB_ACTIONS) $(id).hidden = !shown.includes(id);
+  $('d-star').hidden = archived;
+  $('d-star').setAttribute('aria-pressed', String(starred.has(id)));
   $('d-babysit-bar').hidden = archived || !shown.includes('d-babysit');
   if (archived) for (const b of $('d-actions-menu').querySelectorAll('button')) b.hidden = b.id !== 'd-copy-link';
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
@@ -7738,6 +7777,10 @@ const JOB_ACTION_RUN = {
   'd-close-job': openCloseDialog,
 };
 for (const id of JOB_ACTIONS) $(id).addEventListener('click', () => JOB_ACTION_RUN[id](drawerAction(id)));
+$('d-star').addEventListener('click', () => {
+  toggleStar(openId);
+  $('d-star').setAttribute('aria-pressed', String(starred.has(openId)));
+});
 $('d-babysit-bar').addEventListener('click', () => babysitAction({ ...drawerAction('d-babysit'), button: $('d-babysit-bar') }));
 
 // One run per job and action at a time; a second click while the first is in flight does nothing.
@@ -7951,7 +7994,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-pipeline', 'd-chat', 'd-held', 'd-not-before', 'd-auto-babysit', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-star', 'd-pipeline', 'd-chat', 'd-held', 'd-not-before', 'd-auto-babysit', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
@@ -8427,7 +8470,7 @@ setInterval(remindWaiting, REMIND_CHECK_MS);
 
 // Display settings live only in this browser. Each value is read against a fixed list,
 // so a bad stored value falls back to the default.
-const DISPLAY_KEYS = { theme:'factory-theme', density:'factory-density', columns:'factory-hidden-columns', poll:'factory-poll', cardFields:'factory-hidden-card-fields', ideaProject:'factory-idea-project', drawerLinks:'factory-hidden-drawer-links' };
+const DISPLAY_KEYS = { theme:'factory-theme', density:'factory-density', columns:'factory-hidden-columns', poll:'factory-poll', cardFields:'factory-hidden-card-fields', ideaProject:'factory-idea-project', drawerLinks:'factory-hidden-drawer-links', starred:'factory-starred-view' };
 const THEMES = ['system', 'light', 'dark'], DENSITIES = ['comfortable', 'compact'], POLL_SECONDS = [15, 30, 60], POLL_DEFAULT = 30;
 const THEME_COLORS = { light: '#f9fafb', dark: '#111827' };
 const pickDisplay = (value, list, fallback = list[0]) => list.includes(value) ? value : fallback;
@@ -8438,6 +8481,14 @@ let pollSeconds = pickDisplay(Number(store.get(DISPLAY_KEYS.poll)), POLL_SECONDS
 const hiddenColumns = new Set((store.get(DISPLAY_KEYS.columns) || '').split(',').filter(s => COLUMNS.includes(s) && s !== 'needs-you'));
 const CARD_FIELDS = [['note', 'Note'], ['meta', 'Branch, round and build line'], ['pr', 'PR link']];
 const hiddenCardFields = new Set((store.get(DISPLAY_KEYS.cardFields) || '').split(',').filter(f => CARD_FIELDS.some(([k]) => k === f)));
+const STAR_VIEWS = ['float', 'only', 'off'];
+let starView = pickDisplay(store.get(DISPLAY_KEYS.starred), STAR_VIEWS);
+function setStarView(v) {
+  starView = pickDisplay(v, STAR_VIEWS);
+  if (starView === 'float') store.remove(DISPLAY_KEYS.starred); else store.set(DISPLAY_KEYS.starred, starView);
+  $('display-starred').value = starView;
+  if (loaded) renderBoard();
+}
 const DRAWER_LINKS = [['pr', 'PR'], ...['app', 'web'].filter(k => factoryConfig.agent_links[k]).map(k => [k, factoryConfig.agent_links[k].label]), ['tracer', 'Tracer']];
 const hiddenDrawerLinks = new Set((store.get(DISPLAY_KEYS.drawerLinks) || '').split(',').filter(f => DRAWER_LINKS.some(([k]) => k === f)));
 let pollTimer = 0, pollStarted = false;
@@ -8574,6 +8625,7 @@ function renderDisplaySettings() {
   $('display-theme').value = theme;
   $('display-density').value = density;
   $('display-poll').value = String(pollSeconds);
+  $('display-starred').value = starView;
   for (const box of $('display-columns').querySelectorAll('input')) box.checked = !hiddenColumns.has(box.dataset.stage);
   for (const box of $('display-card-fields').querySelectorAll('input')) box.checked = !hiddenCardFields.has(box.dataset.field);
   for (const box of $('display-drawer-links').querySelectorAll('input')) box.checked = !hiddenDrawerLinks.has(box.dataset.link);
@@ -8629,6 +8681,7 @@ $('display-install').addEventListener('click', async () => {
 renderInstall();
 $('display-theme').addEventListener('change', () => { theme = pickDisplay($('display-theme').value, THEMES); store.set(DISPLAY_KEYS.theme, theme); applyDisplay(); displaySaved(); });
 $('display-density').addEventListener('change', () => { density = pickDisplay($('display-density').value, DENSITIES); store.set(DISPLAY_KEYS.density, density); applyDisplay(); displaySaved(); });
+$('display-starred').addEventListener('change', () => { setStarView($('display-starred').value); displaySaved(); });
 $('display-poll').addEventListener('change', () => { pollSeconds = pickDisplay(Number($('display-poll').value), POLL_SECONDS, POLL_DEFAULT); store.set(DISPLAY_KEYS.poll, pollSeconds); schedulePoll(); displaySaved(); });
 $('display-columns').addEventListener('change', e => {
   const s = e.target.dataset.stage;
@@ -8660,7 +8713,7 @@ $('display-idea-project').addEventListener('change', () => {
 $('display-reset').addEventListener('click', () => {
   for (const key of [...Object.values(DISPLAY_KEYS), PROJECTS_HIDDEN_KEY, 'factory-project']) store.remove(key);
   resetDrawerWidth();
-  theme = 'system'; density = 'comfortable'; pollSeconds = POLL_DEFAULT;
+  theme = 'system'; density = 'comfortable'; pollSeconds = POLL_DEFAULT; starView = 'float';
   hiddenProjects.clear();
   hiddenColumns.clear();
   hiddenCardFields.clear();
