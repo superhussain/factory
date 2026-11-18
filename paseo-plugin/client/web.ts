@@ -7,12 +7,14 @@ import {
   readSignedInMessage,
   type EmbedMessage,
 } from "../shared/embed";
+import { needsBody, needsTitle, type WaitingJob } from "../shared/arrivals";
 
 // This plugin typechecks without the DOM library. Declare only what this module uses.
 type MessageSource = { postMessage(message: unknown, targetOrigin: string): void };
 type FrameMessage = { source: unknown; origin: string; data: unknown };
 type SignInWindow = { closed: boolean; close(): void; focus(): void };
 declare const window: {
+  focus(): void;
   open(url: string, target: string, features: string): SignInWindow | null;
   addEventListener(type: "message", listener: (event: FrameMessage) => void): void;
   removeEventListener(type: "message", listener: (event: FrameMessage) => void): void;
@@ -22,6 +24,18 @@ declare const localStorage: {
   setItem(key: string, value: string): void;
 };
 declare const location: { origin: string };
+type Permission = "granted" | "denied" | "default";
+declare const Notification: {
+  readonly permission: Permission;
+  requestPermission(): Promise<Permission>;
+  new (
+    title: string,
+    options: { body: string; tag: string },
+  ): {
+    onclick: (() => void) | null;
+    close(): void;
+  };
+};
 
 const SEEN_KEY = "factory-plugin:loaded:";
 
@@ -123,5 +137,30 @@ export function useSignInPopup(origin: string, onClosed: () => void): () => void
       popup.current = null;
       closed.current();
     }, 500);
+  };
+}
+
+export type NotificationState = Permission | "unsupported";
+
+export function notificationState(): NotificationState {
+  if (Platform.OS !== "web" || typeof Notification === "undefined") return "unsupported";
+  return Notification.permission;
+}
+
+export async function requestNotifications(): Promise<NotificationState> {
+  if (notificationState() === "unsupported") return "unsupported";
+  return Notification.requestPermission();
+}
+
+export function showNeedsNotification(job: WaitingJob, onClick: () => void): void {
+  if (notificationState() !== "granted") return;
+  const notification = new Notification(needsTitle(job), {
+    body: needsBody(job),
+    tag: "factory-needs-" + job.id,
+  });
+  notification.onclick = () => {
+    window.focus();
+    onClick();
+    notification.close();
   };
 }

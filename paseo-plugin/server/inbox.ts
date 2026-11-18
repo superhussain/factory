@@ -3,7 +3,7 @@ import { execCommand } from "@getpaseo/plugin/server";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { factoryInbox } from "../shared/inbox";
+import { factoryInbox, type InboxEvent } from "../shared/inbox";
 
 const RUNTIME_PATHS = [
   ".claude/skills/factory/runtime/factory.py",
@@ -18,7 +18,7 @@ export function findRuntime(home = homedir()): string | null {
   return null;
 }
 
-export async function readInbox(runtime: string): Promise<{ count: number } | null> {
+export async function readInbox(runtime: string): Promise<InboxEvent | null> {
   try {
     const { stdout } = await execCommand("python3", [runtime, "inbox"], {
       timeout: 30_000,

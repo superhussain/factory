@@ -12,12 +12,20 @@ import { useState } from "react";
 import { Text } from "react-native";
 import { parseDashboardOrigin } from "../shared/embed";
 import { factorySettings } from "../shared/settings";
+import { notificationState, requestNotifications, type NotificationState } from "./web";
+
+const NOTIFICATION_HINTS: Record<Exclude<NotificationState, "unsupported">, string> = {
+  default: "Get a desktop notification when a factory job needs you.",
+  granted: "On. Paseo shows a notification when a factory job needs you.",
+  denied: "Notifications are blocked for Paseo. Allow them in your browser's site settings.",
+};
 
 export function SettingsScreen({ theme }: PluginSurfaceProps) {
   const settings = useSettings(factorySettings);
   const toast = useToast();
   const [value, setValue] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [permission, setPermission] = useState(notificationState);
   if (settings.status === "loading") return <Loading />;
   if (settings.status !== "ready")
     return <Text style={{ color: theme.colors.foregroundMuted }}>{settings.error}</Text>;
@@ -33,27 +41,42 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
       toast.show("Factory URL saved", { variant: "success" });
   };
   return (
-    <SettingsSection title="Dashboard">
-      <SettingsCard>
-        <SettingsInput
-          label="Factory dashboard URL"
-          hint="The HTTPS origin of your factory, like https://factory.example.com."
-          placeholder="https://factory.example.com"
-          initialValue={ready.values.origin}
-          onChangeText={(text) => {
-            setValue(text);
-            setError(null);
-          }}
-          disabled={ready.saving}
-          error={error ?? ready.saveError}
-        />
-        <SettingsAction
-          label="Save changes"
-          actionLabel="Save"
-          disabled={ready.saving}
-          onPress={() => void save()}
-        />
-      </SettingsCard>
-    </SettingsSection>
+    <>
+      <SettingsSection title="Dashboard">
+        <SettingsCard>
+          <SettingsInput
+            label="Factory dashboard URL"
+            hint="The HTTPS origin of your factory, like https://factory.example.com."
+            placeholder="https://factory.example.com"
+            initialValue={ready.values.origin}
+            onChangeText={(text) => {
+              setValue(text);
+              setError(null);
+            }}
+            disabled={ready.saving}
+            error={error ?? ready.saveError}
+          />
+          <SettingsAction
+            label="Save changes"
+            actionLabel="Save"
+            disabled={ready.saving}
+            onPress={() => void save()}
+          />
+        </SettingsCard>
+      </SettingsSection>
+      {permission !== "unsupported" && (
+        <SettingsSection title="Notifications">
+          <SettingsCard>
+            <SettingsAction
+              label="Desktop notifications"
+              hint={NOTIFICATION_HINTS[permission]}
+              actionLabel={permission === "granted" ? "On" : "Turn on"}
+              disabled={permission !== "default"}
+              onPress={() => void requestNotifications().then(setPermission)}
+            />
+          </SettingsCard>
+        </SettingsSection>
+      )}
+    </>
   );
 }

@@ -19,6 +19,28 @@ export function needsBody(job: WaitingJob): string {
   return (job.title || job.id).slice(0, 120);
 }
 
-export function needsCount(n: number): string {
-  return n === 1 ? "1 job needs you" : `${n} jobs need you`;
+// Keeps the latest inbox count outside any component, so a remounted sidebar row shows it at once.
+// The first snapshot only records what is already waiting; later ones alert on new ids.
+export function createInbox(onArrive: (job: WaitingJob) => void) {
+  let count = 0;
+  let seen: Set<string> | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    apply(event: { count: number; jobs: WaitingJob[] }) {
+      const fresh = arrivals(seen, event.jobs);
+      seen = new Set(event.jobs.map((job) => job.id));
+      count = event.count;
+      fresh.slice(0, MAX_ALERTS).forEach(onArrive);
+      listeners.forEach((listener) => listener());
+    },
+    get: () => count,
+    listen(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
 }
+
+export type Inbox = ReturnType<typeof createInbox>;
