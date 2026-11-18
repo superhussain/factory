@@ -42,6 +42,7 @@ dashboard links only exact `https://github.com/<repo>/pull/<n>` URLs for the
 job's own `$REPO`.
 `round` is 0 before the first review. `rounds[i]` is round i+1. Verdicts are
 `pending`, `PASS`, `CHANGES`, or `SKIPPED` (ux and ui only, written by `review-plan`). Reviewer keys are fixed: security, ux, ui, code.
+`factory.py verdict` sets one reviewer's verdict in one write and keeps the rest of `rounds`.
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
 which ports live jobs hold. Only `factory.py` writes `claim`.
 A `board` patch that would change only `updated` stamps, or only this session's `claim.seen` while the stored one is under 10 minutes old, sends no PUT and prints the stored row.
