@@ -1879,6 +1879,16 @@ def backlog_depends(text, context):
     return refs, waiting
 
 
+def backlog_waits(text, context, open_ids, together=frozenset()):
+    """(refs, why) for a line's Depends on: context: its depends-on refs, and why it must wait (None when it can
+    start). It waits on an unchecked prerequisite line or a prerequisite job still open, unless that job is in together."""
+    refs, waiting = backlog_depends(text, context)
+    if waiting:
+        return refs, f'it depends on "{waiting}", which is still unchecked'
+    held = next((r["id"] for r in refs if r["id"] in open_ids and r["id"] not in together), None)
+    return refs, (f"it depends on {held}, which is still open" if held else None)
+
+
 def suffix_refs(ref):
     """The refs a BACKLOG_SUFFIX match carries: none when there is no match or its id contains ".."."""
     return [{"id": ref.group(2), "kind": ref.group(1)}] if ref and ".." not in ref.group(2) else []
