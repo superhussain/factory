@@ -1,6 +1,8 @@
 // Starred jobs: the job panel star button, the card chip, the float, only and off views, and the
 // Display setting with its reset, against one owned local Worker, at mobile and desktop width.
+// STARRED_SHOTS names a folder for captures.
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import {
@@ -237,6 +239,12 @@ test("starred jobs", { timeout: 240000 }, async (t) => {
             await page.$eval("#starred-only", (el) => el.textContent),
             "The project filter hides every starred job. Show all projects Show all jobs",
           );
+          if (process.env.STARRED_SHOTS && theme === "light") {
+            await mkdir(process.env.STARRED_SHOTS, { recursive: true });
+            await page.screenshot({
+              path: `${process.env.STARRED_SHOTS}/after-starred-show-projects.png`,
+            });
+          }
           await activate("#starred-show-projects");
           await page.waitForSelector('.card[data-id="042-sample-export"]');
           assert.equal(await stored(page, "factory-projects-hidden"), null);

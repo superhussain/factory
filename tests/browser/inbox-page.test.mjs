@@ -597,10 +597,13 @@ test("inbox page", { timeout: 180000 }, async (t) => {
         },
       );
       if (SHOTS) {
+        const settled = () => document.querySelector("#d-doc").textContent !== "loading files";
         await mkdir(SHOTS, { recursive: true });
+        await page.waitForFunction(settled, wait);
         await page.screenshot({ path: `${SHOTS}/after-inbox-split-desktop.png` });
         const phone = await openPage("#/inbox", { width: 390, height: 844 });
         await openRow3(phone.page);
+        await phone.page.waitForFunction(settled, wait);
         await phone.page.screenshot({ path: `${SHOTS}/after-inbox-split-mobile.png` });
         await phone.page.browserContext().close();
       }
