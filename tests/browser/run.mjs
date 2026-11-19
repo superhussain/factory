@@ -1782,6 +1782,41 @@ async function capture(outdir, referencePath) {
       flagsHosts = false;
       flagsAckAbort = false;
     }
+    // A drawer opened from Retros or Settings keeps that page beside it.
+    const openDrawerFrom = (hash, open) => async (page) => {
+      await page.evaluate((h) => {
+        location.hash = h;
+      }, hash);
+      await open(page);
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#d-meta")?.textContent.includes("001-capture") &&
+          document.querySelector("#d-doc").textContent !== "loading files",
+        { timeout: 30000 },
+      );
+    };
+    await view(
+      "retros-split-1280",
+      1280,
+      900,
+      "light",
+      openDrawerFrom("#/retros", async (page) => {
+        await page.waitForSelector('#audit-flags-rows a[href="#001-capture"]');
+        await page.click('#audit-flags-rows a[href="#001-capture"]');
+      }),
+    );
+    await view(
+      "settings-split-1280",
+      1280,
+      900,
+      "light",
+      openDrawerFrom("#/settings/display", async (page) => {
+        await page.waitForSelector("#settings-display:not([hidden])");
+        await page.evaluate(() => {
+          location.hash = "#001-capture";
+        });
+      }),
+    );
     // A phone drawer on an idea with two attached files, at rest and scrolled 40 px.
     const openIdeaFiles = async (page) => {
       await page.evaluate(() => {
