@@ -7453,7 +7453,14 @@ async function casBoard(change) {
         x.uncertain = true; // the request may have landed before the connection dropped
         throw x;
       }
-      if (r.ok) return result;
+      if (r.ok) {
+        // The page holds the commit at once, so a second write in the same action, such as
+        // a backlog deny that removes the job it just added, starts from it.
+        const sent = new Map(rows.map((e) => [e.id, e.row]));
+        jobs = jobs.map((j) => (sent.has(j.id) ? sent.get(j.id) : j)).filter(Boolean)
+          .concat(rows.filter((e) => e.row && !jobs.some((j) => j.id === e.id)).map((e) => e.row));
+        return result;
+      }
       if (r.status === 409) {
         const body = await r.json().catch(() => null);
         if (body?.error !== 'conflict') break;
