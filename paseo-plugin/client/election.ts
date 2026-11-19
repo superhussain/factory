@@ -9,6 +9,7 @@ import { onWindowFocus } from "./web";
 export function startElection(
   client: PluginClientContext,
   register: (origin: string | null) => () => void,
+  onSettings: (origin: string | null, factoryLinkButtons: boolean) => void,
 ) {
   const member = joinBallot(sharedBallot(globalThis), register);
   const read = settingsRpc(factorySettings.id).read;
@@ -16,7 +17,15 @@ export function startElection(
     const result = await client.rpc(read, {});
     const parsed =
       result.status === "ready" ? factorySettings.schema.safeParse(result.values) : null;
-    return parsed?.success ? parseDashboardOrigin(parsed.data.origin) : null;
+    return parsed?.success
+      ? {
+          origin: parseDashboardOrigin(parsed.data.origin),
+          factoryLinkButtons: parsed.data.factoryLinkButtons,
+        }
+      : null;
   };
-  return { elected: member.elected, ...runElection(member, readOrigin, onWindowFocus) };
+  return {
+    elected: member.elected,
+    ...runElection(member, readOrigin, onWindowFocus, onSettings),
+  };
 }
