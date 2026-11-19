@@ -5,7 +5,8 @@ import { spawn } from "node:child_process";
 export function runChild(command, args, { env = {}, timeoutMs = 0, label = "" } = {}) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(command, args, { env: { ...process.env, ...env } });
+    // Its own process group, so a timeout also kills the test subprocesses and Chrome it started.
+    const child = spawn(command, args, { env: { ...process.env, ...env }, detached: true });
     if (label) console.log(`start ${label}`);
     let output = "";
     let timedOut = false;
@@ -19,7 +20,9 @@ export function runChild(command, args, { env = {}, timeoutMs = 0, label = "" } 
       timeoutMs &&
       setTimeout(() => {
         timedOut = true;
-        child.kill("SIGKILL");
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {}
         if (label) console.log(`timeout ${label} after ${timeoutMs / 1000}s`);
       }, timeoutMs);
     child.once("exit", (code) => {

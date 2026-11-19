@@ -36,3 +36,13 @@ test("runChild returns a finished child's exit code and output", async () => {
   assert.equal(lines[0], "start quick");
   assert.match(lines[1], /^done quick: exit 3 \(\d+\.\ds\)$/);
 });
+
+test("runChild kills a timed-out child's own children too", async () => {
+  const script =
+    "const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });" +
+    "console.log(c.pid); setInterval(() => {}, 1000)";
+  const { result } = await logged(() => runChild("node", ["-e", script], { timeoutMs: 500 }));
+  const pid = Number(result.output.trim());
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
