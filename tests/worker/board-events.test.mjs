@@ -176,7 +176,11 @@ const NOTIFY = "https://board-events.invalid/notify?key=";
 // A socket that records every frame it is sent.
 function recordingSocket() {
   const sent = [];
-  return { sent, send: (frame) => sent.push(frame) };
+  return {
+    sent,
+    send: (frame) => sent.push(frame),
+    deserializeAttachment: () => ({ exp: 4102444800 }),
+  };
 }
 
 test("the room sends a valid notify to every socket and skips one that fails", async () => {
