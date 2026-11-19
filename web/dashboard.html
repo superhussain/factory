@@ -7135,6 +7135,7 @@ function removeBacklogJob(board, id, captureId) {
 async function casBacklog(change) {
   for (let i = 0; i < 10; i++) {
     const r = await fetch('./api/backlog', { cache: 'no-store' });
+    if (r.headers.get('X-Factory-Offline')) throw new Error("reading the backlog failed: you're offline, so nothing was saved");
     if (!r.ok && r.status !== 404) throw new Error('reading the backlog failed: ' + r.status);
     const { text, state } = change(r.ok ? await r.text() : null);
     if (state !== 'marked') return state;
