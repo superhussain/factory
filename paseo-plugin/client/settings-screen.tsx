@@ -107,7 +107,7 @@ export function settingsScreen(onSaved: () => void) {
                 setLastSave("switch");
                 void ready
                   .save({ ...ready.values, factoryLinkButtons }, ready.revision)
-                  .then(onSaved);
+                  .then((ok) => ok && onSaved());
               }}
             />
           </SettingsCard>

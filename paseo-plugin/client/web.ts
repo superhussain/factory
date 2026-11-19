@@ -13,9 +13,11 @@ import * as firstLogin from "../shared/first-login";
 import { readLocation, writeLocation } from "../shared/location";
 import {
   createFrameKeeper,
+  freshPress,
   shouldFocusFrame,
   type InputKind,
   type KeptFrame,
+  type Press,
 } from "../shared/warm-frame";
 import { setFrameInboxCount } from "./frame-inbox";
 
@@ -159,7 +161,7 @@ const keeper = createFrameKeeper<FrameElement, EmbedMessage>({
 let listening = false;
 // The last input in Paseo's own document, so a warm return can tell a click on the Factory row from a key press.
 let lastInput: InputKind | null = null;
-let pressed: InputKind | null = null;
+let pressed: Press | null = null;
 const onPointer = () => {
   lastInput = "pointer";
 };
@@ -168,7 +170,7 @@ const onKey = () => {
 };
 
 export function noteSidebarOpen(): void {
-  pressed = lastInput;
+  pressed = lastInput ? { kind: lastInput, at: Date.now() } : null;
 }
 
 function listen(): void {
@@ -236,7 +238,7 @@ export function DashboardFrame({
     if (warm && jump) keeper.jumpTo(frame, jump);
     jumped.current = jumpKey;
     attached.current = frame;
-    const press = pressed;
+    const press = freshPress(pressed, Date.now());
     pressed = null;
     if (shouldFocusFrame(warm, press, document.activeElement)) frame.element.focus();
     return () => {

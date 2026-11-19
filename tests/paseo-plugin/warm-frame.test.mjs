@@ -2,8 +2,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  PRESS_MS,
   WARM_FRAME_MS,
   createFrameKeeper,
+  freshPress,
   shouldFocusFrame,
 } from "../../paseo-plugin/shared/warm-frame.ts";
 
@@ -168,4 +170,14 @@ test("shouldFocusFrame focuses only a warm pointer return", () => {
       expected,
       JSON.stringify([warm, press, active]),
     );
+});
+
+test("freshPress forgets a press after PRESS_MS", () => {
+  assert.equal(PRESS_MS, 2_000);
+  const at = 1_000_000;
+  assert.equal(freshPress({ kind: "pointer", at }, at), "pointer");
+  assert.equal(freshPress({ kind: "pointer", at }, at + 1_999), "pointer");
+  assert.equal(freshPress({ kind: "pointer", at }, at + 2_000), null);
+  assert.equal(freshPress({ kind: "keyboard", at }, at + 1_999), "keyboard");
+  assert.equal(freshPress(null, at), null);
 });

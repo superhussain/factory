@@ -92,3 +92,11 @@ export function shouldFocusFrame(
   if (!warm || press !== "pointer") return false;
   return !(active && (TYPING_TAGS.has(active.tagName) || active.isContentEditable));
 }
+
+// A Factory row press counts for a frame that mounts within PRESS_MS of it.
+export const PRESS_MS = 2_000;
+export type Press = { kind: InputKind; at: number };
+
+export function freshPress(press: Press | null, now: number): InputKind | null {
+  return press && now - press.at < PRESS_MS ? press.kind : null;
+}
