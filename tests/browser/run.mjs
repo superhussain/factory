@@ -249,6 +249,15 @@ const CAPTURE_JOBS = [
     note: "batched into 108-batch-lead",
     updated: "2026-01-01T12:00:00Z",
   },
+  {
+    id: "110-spec-gate",
+    project: "sample",
+    title: "Synthetic spec gate",
+    stage: "needs-human",
+    updated: "2026-01-01T12:00:00Z",
+    note: "gate: spec-approval",
+    needs: "approve spec.md, then run /factory approve-spec 110-spec-gate to start the build",
+  },
 ];
 // More merged rows than the slim board read carries, so the merged column loads the rest on demand.
 const CAPTURE_MERGED = Array.from({ length: 30 }, (_, n) => {
@@ -1989,6 +1998,32 @@ async function capture(outdir, referencePath) {
       return clipOf(page, ".detail-head");
     };
     await view("held-drawer-390", 390, 844, "dark", openHeldDrawer, true);
+    const openSpecGate = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#110-spec-gate";
+      });
+      await page.waitForFunction(
+        () =>
+          document.getElementById("d-meta").textContent.includes("110-spec-gate") &&
+          document.querySelector("#d-doc").textContent !== "loading files",
+        { timeout: 30000 },
+      );
+    };
+    await view("approve-spec-drawer-1280", 1280, 900, "light", async (page) => {
+      await openSpecGate(page);
+      return clipOf(page, ".detail-head");
+    });
+    await view("approve-spec-drawer-390", 390, 844, "dark", openSpecGate);
+    await view("inbox-spec-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/inbox";
+      });
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll("#inbox-list .inbox-meta")].some((el) =>
+          el.textContent.includes("110-spec-gate"),
+        ),
+      );
+    });
     const openCardActions = (id) => async (page) => {
       const wrap = `.card-wrap:has(.card[data-id="${id}"])`;
       await page.evaluate(
