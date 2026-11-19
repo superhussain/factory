@@ -169,13 +169,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .btn.icon .teeth { stroke-width: 2.5; stroke-linecap: butt; }
   #d-star[aria-pressed="true"] { color: var(--accent); }
   #d-star[aria-pressed="true"] svg { fill: currentColor; }
-  #inbox-link { position: relative; }
-  #inbox-count { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--alert); color: var(--panel); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
-  #inbox-count[hidden] { display: none; }
+  #inbox-link, #notifications-button, #retros-link { position: relative; }
+  .icon-count { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--alert); color: var(--panel); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
+  .icon-count[hidden] { display: none; }
   .notifications-wrap { position: relative; display: flex; }
-  #notifications-button { position: relative; }
-  #notifications-dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--alert); pointer-events: none; }
-  #notifications-dot[hidden] { display: none; }
   .notifications-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; width: 360px; max-height: 70vh; overflow-y: auto; padding: 8px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .notifications-menu[hidden] { display: none; }
   .notifications-menu-head { margin: 4px 8px 8px; font-size: 13px; font-weight: 600; }
@@ -749,8 +746,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     <div class="filter-menu" id="filter-menu" role="group" aria-label="Show jobs from" hidden></div>
   </div>
   <div class="header-actions">
+    <a class="btn icon" id="inbox-link" href="#/inbox" aria-label="Inbox" title="Inbox (I)" aria-keyshortcuts="i"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9.5V13h11V9.5L12 4H4z"/></svg><span class="icon-count" id="inbox-count" aria-hidden="true" hidden></span></a>
     <div class="notifications-wrap" id="notifications-wrap">
-      <button class="btn icon" id="notifications-button" type="button" aria-label="Notifications" title="Notifications" aria-expanded="false" aria-controls="notifications-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.5 1.5h-11z"/><path d="M6.5 14a1.5 1.5 0 0 0 3 0"/></svg><span id="notifications-dot" aria-hidden="true" hidden></span></button>
+      <button class="btn icon" id="notifications-button" type="button" aria-label="Notifications" title="Notifications" aria-expanded="false" aria-controls="notifications-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.5 1.5h-11z"/><path d="M6.5 14a1.5 1.5 0 0 0 3 0"/></svg><span class="icon-count" id="notifications-count" aria-hidden="true" hidden></span></button>
       <div class="notifications-menu" id="notifications-menu" role="region" aria-label="Recent notifications" hidden>
         <p class="notifications-menu-head">Notifications</p>
         <p class="muted" id="notifications-menu-status" role="status"></p>
@@ -759,11 +757,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <a id="notifications-more" href="#/notifications">See more</a>
       </div>
     </div>
-    <a class="btn icon" id="inbox-link" href="#/inbox" aria-label="Inbox" title="Inbox (I)" aria-keyshortcuts="i"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9.5V13h11V9.5L12 4H4z"/></svg><span id="inbox-count" aria-hidden="true" hidden></span></a>
+    <a class="btn icon" id="retros-link" href="#/retros" aria-label="Retros" title="Retros (R)" aria-keyshortcuts="r"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2 2v2.6h2.6"/><path d="M8 5v3l2 1.5"/></svg><span class="icon-count" id="retros-count" aria-hidden="true" hidden></span></a>
+    <a class="btn icon" id="settings-link" href="#/settings" aria-label="Settings" title="Settings (S)" aria-keyshortcuts="s"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="4.5"/><path class="teeth" d="M8 1v3M8 12v3M1 8h3M12 8h3M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12"/></svg></a>
     <button class="btn icon" id="new-idea" aria-label="New idea" title="New idea (N)" aria-keyshortcuts="n" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2c.4.3.6.7.6 1.2V12h4v-1.1c0-.5.2-.9.6-1.2A4.5 4.5 0 0 0 8 1.5zM6.5 14.5h3"/></svg></button>
     <button class="btn icon" id="job-jump" aria-label="Jump to job" title="Jump to job (J, /, ⌘K or Ctrl+K)" aria-keyshortcuts="j / Meta+K Control+K"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 4 4"/></svg></button>
-    <a class="btn icon" id="retros-link" href="#/retros" aria-label="Retros" title="Retros (R)" aria-keyshortcuts="r"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2 2v2.6h2.6"/><path d="M8 5v3l2 1.5"/></svg></a>
-    <a class="btn icon" id="settings-link" href="#/settings" aria-label="Settings" title="Settings (S)" aria-keyshortcuts="s"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="4.5"/><path class="teeth" d="M8 1v3M8 12v3M1 8h3M12 8h3M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12"/></svg></a>
   </div>
   <div class="status"><span id="updated">loading</span><span class="dot" id="dot" role="img" aria-label="connection" title="connection"></span></div>
 </header>
