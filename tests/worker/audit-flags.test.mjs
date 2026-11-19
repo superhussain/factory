@@ -275,3 +275,86 @@ test("a bad or future time is dropped and long fields are capped", async () => {
     ),
   );
 });
+
+const R = STEP_4[1];
+const ackBody = (row, ack) => ({
+  body: JSON.stringify({ row, ack }),
+  type: "application/json",
+});
+
+test("ack sets and clears", async () => {
+  const s = await setup();
+  await s.put(SIX);
+  const set = await s.send("POST", "/api/audit-flags/ack", ackBody(R, true));
+  assert.equal(set.status, 200);
+  const rows = await s.flags();
+  assert.match(rows[1].ack, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  assert.deepEqual(JSON.parse(set.text).rows, rows);
+  assert.deepEqual({ ...rows[1], ack: undefined }, { ...R, ack: undefined });
+  assert.equal(rows.filter((r) => "ack" in r).length, 1);
+  const cleared = await s.send("POST", "/api/audit-flags/ack", ackBody(R, false));
+  assert.equal(cleared.status, 200);
+  assert.deepEqual(await s.flags(), STEP_4);
+});
+
+test("ack refuses", async () => {
+  const s = await setup();
+  await s.put(SIX);
+  const refused = await s.send("POST", "/api/audit-flags/ack", {
+    ...ackBody(R, true),
+    principal: mac,
+  });
+  assert.deepEqual(
+    [refused.status, refused.text],
+    [403, "red flags are acknowledged only by a signed-in person"],
+  );
+  const bad = [
+    { ack: true },
+    { row: R },
+    { row: { ...R, time: 1 }, ack: true },
+    { row: R, ack: "yes" },
+    { row: null, ack: true },
+  ];
+  for (const body of bad) {
+    const r = await s.send("POST", "/api/audit-flags/ack", ackBody(body.row, body.ack));
+    assert.deepEqual(
+      [r.status, r.text],
+      [400, 'body must be {"row": {time, job, host, agent, tool, target}, "ack": true or false}'],
+    );
+  }
+  const unknown = await s.send(
+    "POST",
+    "/api/audit-flags/ack",
+    ackBody({ ...R, target: "x" }, true),
+  );
+  assert.deepEqual(
+    [unknown.status, unknown.text],
+    [409, "that red flag is no longer in the index; reload"],
+  );
+  for (const method of ["GET", "PUT", "DELETE"])
+    assert.equal((await s.send(method, "/api/audit-flags/ack")).status, 404, method);
+  assert.deepEqual(await s.flags(), STEP_4);
+});
+
+test("ten lost ack puts answer 503", async () => {
+  const s = await setup();
+  await s.put(SIX);
+  const put = s.bucket.put;
+  s.bucket.put = async (key, value, options = {}) =>
+    key === "audit-flags.json" && options.onlyIf ? null : put(key, value, options);
+  const r = await s.send("POST", "/api/audit-flags/ack", ackBody(R, true));
+  assert.deepEqual([r.status, r.text], [503, "the red-flag index kept changing; try again"]);
+});
+
+test("re-push keeps ack", async () => {
+  const s = await setup();
+  await s.put(SIX);
+  await s.send("POST", "/api/audit-flags/ack", ackBody(R, true));
+  const ack = (await s.flags())[1].ack;
+  const added = call(7, "main", "Bash", ["sudo"], "sudo new");
+  assert.equal((await s.put([...SIX, added])).status, 200);
+  const rows = await s.flags();
+  assert.equal(rows.find((r) => r.target === R.target).ack, ack);
+  assert.equal(rows.find((r) => r.target === "sudo new").ack, undefined);
+  assert.equal(rows.filter((r) => "ack" in r).length, 1);
+});
