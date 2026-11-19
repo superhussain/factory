@@ -48,6 +48,9 @@ test("message", () => {
   assert.deepEqual(readEmbedMessage({ type: "factory-embed-ready", v: 1 }), {
     type: "factory-embed-ready",
   });
+  assert.deepEqual(readEmbedMessage({ type: "factory-embed-signin", v: 1 }), {
+    type: "factory-embed-signin",
+  });
   assert.deepEqual(
     readEmbedMessage({
       type: "factory-open-agent",
@@ -61,6 +64,7 @@ test("message", () => {
     { type: "factory-open-agent", v: 1, server: "synthetic server", agent: "synthetic-agent" },
     { type: "factory-open-agent", v: 1, server: "synthetic-server" },
     { type: "factory-embed-ready", v: 2 },
+    { type: "factory-embed-signin", v: 2 },
     { type: "factory-embed-hello", v: 1 },
     "factory-embed-ready",
     null,

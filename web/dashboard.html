@@ -1499,6 +1499,7 @@ function setConnection(state) {
   drawDot(polling ? dot + ' polling' : dot, label);
   if (was === 'signin' && state !== 'signin') { syncLive(); syncAppBadge(badgeCount); }
   if (state === 'signin') syncAppBadge(badgeCount);
+  if (state === 'signin' && was !== 'signin') postEmbedSignin();
 }
 function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
 // Keepalive: an open socket sends "ping" every 25 s and the room's auto-response answers "pong", so proxies that drop quiet connections keep it. No pong for 60 s closes it. liveNote names how the last socket closed, for the polling dot.
@@ -1685,8 +1686,8 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
   const version = ++boardReadVersion;
   try {
     if (withBacklog) refreshBacklog();
-    const r = await fetch('./board.json?view=slim', { cache: 'no-store' });
-    if (r.status === 401 || r.status === 403) {
+    const r = await fetch('./board.json?view=slim', { cache: 'no-store', redirect: 'manual' });
+    if (r.type === 'opaqueredirect' || r.status === 401 || r.status === 403) {
       setConnection('signin');
       noteBoardLoadError('signin');
       return false;
@@ -1820,9 +1821,11 @@ window.addEventListener('message', (e) => {
   embedParent = e.origin;
   embedLinksExternal = e.data.links === 'external';
   window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, e.origin);
+  if (connState === 'signin') postEmbedSignin();
   postEmbedLocation();
   syncInboxLink();
 });
+function postEmbedSignin() { if (embedParent) window.parent.postMessage({ type: 'factory-embed-signin', v: 1 }, embedParent); }
 // In a Paseo frame, a warm return focuses the frame. Put focus back on the last focused element.
 // Chrome has already moved activeElement to body when window blur fires, so track focusin instead.
 // A press outside any focusable element forgets it. A scrollbar press keeps it, and a focused dialog holding it gives focus back.
