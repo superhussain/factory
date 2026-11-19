@@ -21,7 +21,7 @@ dispatch set none. `<via>` names the launch path:
 
 | via | Launch path |
 | --- | --- |
-| `native` | the harness's own subagent tool (`subagent` is accepted as `native`) |
+| `native` | the harness's own subagent tool (`subagent`, `agent` and `local` are accepted as `native`) |
 | `paseo` | a Paseo agent |
 | `launcher` | a pickup launcher other than Paseo |
 | `general` | the general-worker fallback |
