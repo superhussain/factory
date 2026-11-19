@@ -2,6 +2,8 @@
 // Paseo, React Native and the frame module. No browser needed.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import * as esbuild from "esbuild";
 import { bundleCards } from "../../tools/capture-plugin-cards.mjs";
 
 test("the card capture bundles the real screen with owned stubs", async () => {
@@ -26,4 +28,25 @@ test("the card capture bundles the real screen with owned stubs", async () => {
     "Sign in to your factory",
   ])
     assert.ok(code.includes(title), `the bundle holds "${title}"`);
+});
+
+test("the View stub renders nativeID as the element id", async () => {
+  const repo = fileURLToPath(new URL("../..", import.meta.url));
+  const { outputFiles } = await esbuild.build({
+    entryPoints: [repo + "tools/paseo-capture/react-native.tsx"],
+    bundle: true,
+    write: false,
+    format: "iife",
+    globalName: "out",
+    platform: "browser",
+    jsx: "automatic",
+    nodePaths: [repo + "paseo-plugin/node_modules"],
+  });
+  const { View } = new Function(outputFiles[0].text + "\nreturn out;")();
+  const withId = View({ nativeID: "factory-plugin-card" });
+  const withoutId = View({});
+  assert.equal(withId.type, "div");
+  assert.equal(withId.props.id, "factory-plugin-card");
+  assert.equal(withoutId.type, "div");
+  assert.equal(withoutId.props.id, undefined);
 });
