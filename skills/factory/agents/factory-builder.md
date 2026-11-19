@@ -90,6 +90,8 @@ no findings to fix. Check `git status` and `git log main..HEAD` in the worktree,
 judge any uncommitted edits against the spec (keep and commit what's right, revert
 what isn't), finish the spec, and note in build.md what you inherited.
 
+**Wait on long commands.** Run a command that takes minutes, such as a full test suite, with the Bash tool's `run_in_background`, then wait for its completion notification before you read its output. Never `sleep` then `tail` its log, and never poll in an `until` or `while` loop. The harness denies a foreground `sleep`, and `factory.py audit` flags each denied call.
+
 **Verify before every handoff.** On a first run, run the project file's Verify
 commands for what you touched, and its fix commands for formatting. A later run (fix
 round, rework) sizes its checks to `git diff <head when this run started>` by this
