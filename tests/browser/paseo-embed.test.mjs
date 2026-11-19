@@ -438,6 +438,15 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
         await frame.evaluate(() => document.querySelector("#idea-text").value),
         DRAFT + " more",
       );
+      await warm.click("#side");
+      // A real click on #idea-h focuses the modal dialog, so model a press that leaves focus on body.
+      await frame.evaluate(() => {
+        document.querySelector("#idea-h").dispatchEvent(new PointerEvent("pointerdown"));
+        document.activeElement.blur();
+      });
+      await warm.evaluate(() => window.attached.frame.element.focus());
+      await capture(warm, "empty-click.png");
+      assert.notEqual(await frame.evaluate(() => document.activeElement?.id), "idea-text");
 
       await frame.evaluate(() => document.querySelector("#idea-dlg").close());
       await warm.evaluate(
