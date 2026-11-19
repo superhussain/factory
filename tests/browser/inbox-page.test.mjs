@@ -541,7 +541,7 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       const answerPuts = [];
       await page.setRequestInterception(true);
       page.on("request", (request) =>
-        request.method() === "PUT" &&
+        request.method() === "PATCH" &&
         new URL(request.url()).pathname === "/api/board" &&
         boardPuts++ === 0
           ? request.respond({ status: 503, body: "" })

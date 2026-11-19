@@ -49,6 +49,11 @@ function helpers(fetch, extra = {}) {
     poll: async () => context.polls++,
     renders: 0,
     polls: 0,
+    jobs: [],
+    boardUpdated: "",
+    boardMaxId: 0,
+    navigator: { onLine: true },
+    structuredClone,
     ...extra,
   });
   vm.runInContext(
@@ -76,12 +81,50 @@ function response(body, status = 200, etag = 'W/"1"') {
   };
 }
 
+// JSON with sorted keys, so rows from either realm compare by value.
+const canon = (v) =>
+  JSON.stringify(v, (_, x) =>
+    x && typeof x === "object" && !Array.isArray(x)
+      ? Object.fromEntries(
+          Object.keys(x)
+            .sort()
+            .map((k) => [k, x[k]]),
+        )
+      : x,
+  );
+
 // In-memory board.json and backlog.md behind the two API routes, with optional hooks.
+// Board writes are PATCH row changes, refused with a 409 conflict on a stale expect.
 function store(board, backlog, hooks = {}) {
   const state = { board, backlog, puts: [] };
   state.fetch = async (url, opts = {}) => {
     const key = url === "./api/board" ? "board" : url === "./api/backlog" ? "backlog" : null;
     assert.ok(key, "unexpected url " + url);
+    if (opts.method === "PATCH") {
+      assert.equal(key, "board");
+      const { updated, rows } = JSON.parse(opts.body);
+      const current = (id) => state.board.jobs.find((j) => j.id === id) ?? null;
+      const stale = rows.filter((e) => canon(current(e.id)) !== canon(e.expect));
+      if (stale.length)
+        return response(
+          {
+            error: "conflict",
+            rows: Object.fromEntries(stale.map((e) => [e.id, current(e.id)])),
+            max_id: 0,
+          },
+          409,
+        );
+      if (hooks.put) {
+        const r = await hooks.put(key, state, opts);
+        if (r) return r;
+      }
+      const sent = new Map(rows.map((e) => [e.id, e.row]));
+      state.board.jobs = state.board.jobs
+        .flatMap((j) => (sent.has(j.id) ? (sent.get(j.id) ? [sent.get(j.id)] : []) : [j]))
+        .concat(rows.filter((e) => e.expect === null).map((e) => e.row));
+      state.board.updated = updated;
+      return response("ok");
+    }
     if (opts.method !== "PUT") {
       assert.equal(opts.cache, "no-store");
       if (hooks.get) await hooks.get(key, state);
@@ -1449,7 +1492,7 @@ async function browserTest(url) {
 
     // A failed save keeps the draft.
     route = async (request) => {
-      if (request.method() !== "PUT" || !request.url().endsWith("/api/board")) return false;
+      if (request.method() !== "PATCH" || !request.url().endsWith("/api/board")) return false;
       await request.respond({ status: 500, body: "no" });
       return true;
     };

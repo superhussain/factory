@@ -203,14 +203,23 @@ function helpers(
   fetch = () => {
     throw new Error("unexpected fetch");
   },
+  board = { updated: "", jobs: [] },
 ) {
-  const context = vm.createContext({ fetch, setTimeout: (f) => f() });
+  const context = vm.createContext({
+    fetch,
+    setTimeout: (f) => f(),
+    jobs: clone(board.jobs),
+    boardUpdated: board.updated,
+    boardMaxId: 0,
+    navigator: { onLine: true },
+    structuredClone,
+  });
   vm.runInContext(
     script.slice(script.indexOf("function ideaSlug("), script.indexOf("let ideaEditor =")) +
       "\nthis.api = { canEditIdea, ideaTitle, editIdea, addIdea, casBoard, BOARD_UNCHANGED };",
     context,
   );
-  return context.api;
+  return Object.assign(context.api, { navigator: context.navigator });
 }
 
 function response(board, status = 200, etag = 'W/"1"') {
@@ -221,6 +230,41 @@ function response(board, status = 200, etag = 'W/"1"') {
     json: async () => clone(board),
     text: async () => "synthetic error <img src=x>",
   };
+}
+
+// JSON with sorted keys, so rows from either realm compare by value.
+const canon = (v) =>
+  JSON.stringify(v, (_, x) =>
+    x && typeof x === "object" && !Array.isArray(x)
+      ? Object.fromEntries(
+          Object.keys(x)
+            .sort()
+            .map((k) => [k, x[k]]),
+        )
+      : x,
+  );
+
+// The Worker's PATCH /api/board on an in-memory board: a 409 conflict with the current rows
+// for any stale expect, else the rows applied in place and new rows appended.
+function applyPatch(board, body) {
+  const { updated, rows } = JSON.parse(body);
+  const current = (id) => board.jobs.find((j) => j.id === id) ?? null;
+  const stale = rows.filter((e) => canon(current(e.id)) !== canon(e.expect));
+  if (stale.length)
+    return response(
+      {
+        error: "conflict",
+        rows: Object.fromEntries(stale.map((e) => [e.id, current(e.id)])),
+        max_id: 0,
+      },
+      409,
+    );
+  const sent = new Map(rows.map((e) => [e.id, e.row]));
+  board.jobs = board.jobs
+    .flatMap((j) => (sent.has(j.id) ? (sent.get(j.id) ? [sent.get(j.id)] : []) : [j]))
+    .concat(rows.filter((e) => e.expect === null).map((e) => e.row));
+  if (updated > board.updated) board.updated = updated;
+  return response(null);
 }
 
 async function offline() {
@@ -318,25 +362,15 @@ async function offline() {
   });
 
   async function race(mutate, message) {
-    let latest = fixture(),
-      puts = 0,
-      gets = 0;
+    const latest = fixture();
+    let patches = 0;
     const h = helpers(async (url, opts) => {
       assert.equal(url, "./api/board");
-      if (opts.method !== "PUT") {
-        gets++;
-        assert.equal(opts.cache, "no-store");
-        return response(latest);
-      }
-      puts++;
-      assert.equal(opts.headers["If-Match"], '"1"');
-      if (puts === 1) {
-        mutate(latest);
-        return response(null, 412);
-      }
-      latest = JSON.parse(opts.body);
-      return response(null);
-    });
+      assert.equal(opts.method, "PATCH");
+      assert.equal(opts.headers["Content-Type"], "application/json");
+      if (++patches === 1) mutate(latest);
+      return applyPatch(latest, opts.body);
+    }, fixture());
     const save = () =>
       h.casBoard((b) =>
         h.editIdea(b, identity.id, before, draft, now) === "unchanged"
@@ -347,13 +381,11 @@ async function offline() {
       const winner = fixture();
       mutate(winner);
       await assert.rejects(save(), { message });
-      assert.equal(puts, 1);
-      assert.equal(gets, 2);
+      assert.equal(patches, 1);
       assert.deepEqual(latest, winner);
     } else {
       await save();
-      assert.equal(puts, 2);
-      assert.equal(gets, 2);
+      assert.equal(patches, 2);
       const winner = fixture();
       mutate(winner);
       Object.assign(winner.jobs[0], { idea: draft, title: api.ideaTitle(draft), updated: now });
@@ -376,43 +408,45 @@ async function offline() {
     b.opaque.revision.push(3);
   });
 
-  for (const kind of ["missing-etag", "ten-412", "put-500", "get-500"]) {
-    let puts = 0,
-      gets = 0;
-    const h = helpers(async (url, opts) => {
-      if (opts.method !== "PUT") {
-        gets++;
-        return response(
-          fixture(),
-          kind === "get-500" ? 500 : 200,
-          kind === "missing-etag" ? null : '"1"',
-        );
-      }
-      puts++;
-      return response(null, kind === "ten-412" ? 412 : 500);
-    });
+  for (const kind of ["ten-conflicts", "busy", "unparsed-409", "patch-500", "offline"]) {
+    let patches = 0;
+    const h = helpers(async () => {
+      patches++;
+      if (kind === "ten-conflicts")
+        return response({ error: "conflict", rows: {}, max_id: 0 }, 409);
+      if (kind === "busy") return response({ error: "busy" }, 409);
+      if (kind === "unparsed-409")
+        return { ...response(null, 409), json: async () => JSON.parse("not json") };
+      return response(null, 500);
+    }, fixture());
+    if (kind === "offline") h.navigator.onLine = false;
     await assert.rejects(
       h.casBoard((b) => h.editIdea(b, identity.id, before, draft, now)),
-      new RegExp(
-        {
-          "missing-etag": "without an ETag",
-          "ten-412": "after 10 tries",
-          "put-500": "saving the board failed: 500",
-          "get-500": "reading the board failed: 500",
-        }[kind],
-      ),
+      (error) =>
+        error.message ===
+          {
+            "ten-conflicts": "the board kept changing, so nothing was saved after 10 tries",
+            busy: "the board kept changing, so nothing was saved after 10 tries",
+            "unparsed-409": "the board kept changing, so nothing was saved after 10 tries",
+            "patch-500": "saving the board failed: 500 synthetic error <img src=x>",
+            offline: "saving the board failed: you're offline, so nothing was saved",
+          }[kind] && !!error.uncertain === (kind === "patch-500"),
     );
-    assert.equal(puts, { "missing-etag": 0, "ten-412": 10, "put-500": 1, "get-500": 0 }[kind]);
-    assert.equal(gets, kind === "ten-412" ? 10 : 1);
+    assert.equal(
+      patches,
+      { "ten-conflicts": 10, busy: 1, "unparsed-409": 1, "patch-500": 1, offline: 0 }[kind],
+    );
   }
-  let latest = fixture(),
-    puts = 0;
+  const latest = fixture();
+  let patches = 0,
+    writes = 0;
   const h = helpers(async (url, opts) => {
-    if (opts.method !== "PUT") return response(latest);
-    puts++;
-    latest = JSON.parse(opts.body);
+    patches++;
+    const r = applyPatch(latest, opts.body);
+    if (r.status === 409) return r;
+    writes++;
     throw new Error("response lost");
-  });
+  }, fixture());
   const save = () =>
     h.casBoard((b) =>
       h.editIdea(b, identity.id, before, draft, now) === "unchanged"
@@ -422,22 +456,19 @@ async function offline() {
   await assert.rejects(save(), /response lost/);
   const committed = clone(latest);
   await save();
-  assert.equal(puts, 1);
+  assert.equal(writes, 1);
+  assert.equal(patches, 2, "the retry's stale row comes back as a conflict, then nothing to write");
   assert.deepEqual(latest, committed);
   latest.jobs[0].claim = {};
   await assert.rejects(save(), { message: picked });
-  assert.equal(puts, 1);
-  const brokenBody = helpers(async (url, opts) =>
-    opts.method !== "PUT"
-      ? response(fixture())
-      : {
-          ok: false,
-          status: 503,
-          text: async () => {
-            throw new Error("body interrupted");
-          },
-        },
-  );
+  assert.equal(writes, 1);
+  const brokenBody = helpers(async () => ({
+    ok: false,
+    status: 503,
+    text: async () => {
+      throw new Error("body interrupted");
+    },
+  }));
   await assert.rejects(
     brokenBody.casBoard((b) => b.jobs.push({ id: "new" })),
     (error) => error.uncertain === true && error.message === "saving the board failed: 503",
@@ -506,6 +537,8 @@ function fakeUI(fetch) {
   };
   const context = vm.createContext({
     fetch,
+    navigator: { onLine: true },
+    structuredClone,
     document,
     location: { hash: "", pathname: "/", search: "" },
     history: { replaceState() {} },
@@ -625,7 +658,7 @@ async function offlineUI() {
   const heldPut = deferred();
   let puts = 0;
   const x = fakeUI(async (url, opts = {}) => {
-    if (opts.method === "PUT") {
+    if (opts.method === "PATCH") {
       puts++;
       return heldPut.promise;
     }
@@ -709,7 +742,7 @@ async function browserTest(url) {
           await request.abort();
           return;
         }
-        if (request.url() === url + "/api/board" && request.method() === "PUT") puts++;
+        if (request.url() === url + "/api/board" && request.method() === "PATCH") puts++;
         if (route && (await route(request))) return;
         await request.continue();
       })().catch((error) => requestErrors.push(String(error))),
@@ -1023,7 +1056,7 @@ async function browserTest(url) {
     );
     assert.equal(await disabled("#edit-idea-save"), false);
 
-    held = hold("PUT", "/api/board");
+    held = hold("PATCH", "/api/board");
     const startWrites = puts;
     await page.click("#edit-idea-save");
     request = await held;
@@ -1067,7 +1100,7 @@ async function browserTest(url) {
       await open();
       await setDraft(draft);
       const start = puts;
-      held = hold("PUT", "/api/board");
+      held = hold("PATCH", "/api/board");
       await page.click("#edit-idea-save");
       request = await held;
       const winner = httpFixture();
@@ -1076,7 +1109,7 @@ async function browserTest(url) {
       await request.continue();
       await waitError(message);
       await poll();
-      assert.equal(puts - start, 1, "412 refusal never PUTs again");
+      assert.equal(puts - start, 1, "a 409 conflict never writes again");
       assert.deepEqual(await read(), winner);
       assert.equal(await value("#edit-idea-text"), draft);
       assert.equal(await disabled("#edit-idea-text"), false);
@@ -1091,7 +1124,7 @@ async function browserTest(url) {
     await reset();
     await open();
     await setDraft(draft);
-    held = hold("PUT", "/api/board");
+    held = hold("PATCH", "/api/board");
     const assignmentStart = puts;
     await page.click("#edit-idea-save");
     request = await held;
@@ -1108,12 +1141,12 @@ async function browserTest(url) {
     await reset();
     await open();
     await setDraft(draft);
-    held = hold("PUT", "/api/board");
+    held = hold("PATCH", "/api/board");
     await page.click("#edit-idea-save");
     request = await held;
     const accepted = await fetch(url + "/api/board", {
-      method: "PUT",
-      headers: { "If-Match": request.headers()["if-match"] },
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
       body: request.postData(),
     });
     assert.equal(accepted.status, 200);
@@ -1138,7 +1171,7 @@ async function browserTest(url) {
     await reset();
     await open();
     await setDraft(draft);
-    held = hold("PUT", "/api/board");
+    held = hold("PATCH", "/api/board");
     await page.click("#edit-idea-save");
     request = await held;
     await request.respond({ status: 500, body: "<img src=x onerror=alert(1)>" });
@@ -1173,7 +1206,7 @@ async function browserTest(url) {
     await reset();
     await open();
     await setDraft(draft);
-    held = hold("PUT", "/api/board");
+    held = hold("PATCH", "/api/board");
     await page.click("#edit-idea-save");
     request = await held;
     await page.evaluate(() => {
@@ -1329,12 +1362,12 @@ async function browserTest(url) {
       await page.evaluate(() => document.activeElement.getAttribute("aria-label")),
       /^Remove: Image 2: /,
     );
-    held = hold("PUT", "/api/board");
+    held = hold("PATCH", "/api/board");
     await page.keyboard.down("Meta");
     await page.keyboard.press("Enter");
     await page.keyboard.up("Meta");
     request = await held;
-    const frozen = JSON.parse(request.postData()).jobs.at(-1);
+    const frozen = JSON.parse(request.postData()).rows.at(-1).row;
     assert.equal(await page.$eval("#idea-add", (e) => e.textContent), "Saving…");
     assert.equal(await disabled("#idea-add"), true);
     // Cancel and Escape do nothing while the save runs: closing would drop the snapshot.
@@ -1380,14 +1413,19 @@ async function browserTest(url) {
     assert.equal(await disabled("#idea-upload"), true);
     assert.equal(await disabled("#idea-cancel"), true);
     assert.equal((await read()).jobs.length, 2);
-    held = hold("GET", "/api/board");
+    held = hold("PATCH", "/api/board");
     await page.click("#idea-add");
     request = await held;
-    await request.respond({ status: 503, body: "synthetic retry read failure" });
+    assert.equal(JSON.parse(request.postData()).rows.at(-1).row.capture_id, frozen.capture_id);
+    await request.respond({ status: 503, body: "synthetic retry failure" });
     await page.waitForFunction(
       () =>
         !inflight &&
-        document.getElementById("idea-err").textContent === "reading the board failed: 503",
+        document
+          .getElementById("idea-err")
+          .textContent.startsWith(
+            "Not confirmed: saving the board failed: 503 synthetic retry failure.",
+          ),
       { polling: 50 },
     );
     assert.equal(await page.evaluate(() => snap.capture_id), frozen.capture_id);
@@ -1475,7 +1513,7 @@ async function browserTest(url) {
     await reset(imageBoard);
     await open();
     await setDraft(draft);
-    held = hold("PUT", "/api/board");
+    held = hold("PATCH", "/api/board");
     const imageRaceWrites = puts;
     await page.click("#edit-idea-save");
     request = await held;
@@ -1533,7 +1571,7 @@ async function browserTest(url) {
     assert.deepEqual(requestErrors, []);
     assert.deepEqual(pageErrors, []);
     console.log(
-      "PASS browser: native keyboard/inertness, freshness, held writes, real Worker 412s, response loss, metadata, zero-project/assignment/create, safe HTML at desktop/mobile",
+      "PASS browser: native keyboard/inertness, freshness, held writes, real Worker 409 conflicts, response loss, metadata, zero-project/assignment/create, safe HTML at desktop/mobile",
     );
     console.log("Native Tab states: " + JSON.stringify(tabStates));
   } finally {
