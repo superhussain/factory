@@ -184,6 +184,55 @@ test("a write between head and get answers with the get's ETag and counts, then 
   assert.equal(reads(), 1);
 });
 
+// Counts board reads and holds each one 20 ms, so concurrent requests overlap.
+function slowGets(s, failFirst = false) {
+  const get = s.bucket.get;
+  const counter = { gets: 0 };
+  s.bucket.get = async (key) => {
+    counter.gets++;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    if (failFirst && counter.gets === 1) throw new Error("read failed");
+    return get(key);
+  };
+  return counter;
+}
+
+test("3 concurrent misses on one ETag make one get and return identical bodies", async () => {
+  const s = setup(JSON.stringify(board(32)));
+  const counter = slowGets(s);
+  const responses = await Promise.all([1, 2, 3].map(() => s.get("/board.json?view=slim")));
+  assert.equal(counter.gets, 1);
+  const bodies = await Promise.all(responses.map((r) => r.text()));
+  for (const r of responses) assert.equal(r.status, 200);
+  assert.equal(new Set(bodies).size, 1);
+});
+
+test("after a failed shared read, the next request reads again and answers 200", async () => {
+  const s = setup(JSON.stringify(board(33)));
+  const counter = slowGets(s, true);
+  await Promise.allSettled([1, 2].map(() => s.get("/board.json?view=slim")));
+  assert.equal(counter.gets, 1);
+  const third = await s.get("/board.json?view=slim");
+  assert.equal(third.status, 200);
+  assert.equal(counter.gets, 2);
+});
+
+test("a dropped starter hands its read to waitUntil and a second read still answers", async () => {
+  const s = setup(JSON.stringify(board(34)));
+  const counter = slowGets(s);
+  const kept = [];
+  const ctx = { waitUntil: (promise) => kept.push(promise) };
+  s.get = (path) =>
+    serveFactory(new Request("http://local" + path), { BUCKET: s.bucket }, person, ctx);
+  s.get("/board.json?view=slim");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(kept.length, 1);
+  const second = await s.get("/board.json?view=slim");
+  assert.equal(second.status, 200);
+  assert.equal(counter.gets, 1);
+  await Promise.all(kept);
+});
+
 test("a duplicate id counts once per stage", async () => {
   const row = (id, stage, n) => ({ id, project: "sample", stage, updated: at(n) });
   const stored = JSON.stringify({

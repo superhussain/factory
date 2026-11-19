@@ -288,24 +288,42 @@ async function getFile(env, key, type, headers = {}) {
 
 // The last slim body and the board ETag it came from, so this isolate slices each board version once.
 let slimMemo = { etag: "", body: "" };
+// The read in flight for one board ETag, so concurrent misses in this isolate parse the board once.
+let slimPending = { etag: "", read: null };
 
-// The dashboard's first read. A board that is not JSON with a jobs array goes out as stored.
-async function slimBoardGet(env) {
-  const head = await env.BUCKET.head("board.json");
-  if (!head) return notFound();
-  const send = (body, etag) =>
-    reply(body, 200, "application/json", { ETag: etag, "X-Factory-Version": DASHBOARD_VERSION });
-  if (slimMemo.etag === head.httpEtag) return send(slimMemo.body, head.httpEtag);
+// Resolves to plain strings only, so no R2 object crosses requests.
+async function readSlim(env) {
   const obj = await env.BUCKET.get("board.json");
-  if (!obj) return notFound();
+  if (!obj) return null;
   const text = await obj.text();
   let data = null;
   try {
     data = JSON.parse(text);
   } catch {}
-  if (!Array.isArray(data?.jobs)) return send(text, obj.httpEtag);
+  if (!Array.isArray(data?.jobs)) return { etag: obj.httpEtag, body: text };
   slimMemo = { etag: obj.httpEtag, body: JSON.stringify(slimBoard(data)) };
-  return send(slimMemo.body, obj.httpEtag);
+  return slimMemo;
+}
+
+// The dashboard's first read. A board that is not JSON with a jobs array goes out as stored.
+async function slimBoardGet(env, ctx) {
+  const head = await env.BUCKET.head("board.json");
+  if (!head) return notFound();
+  const send = (body, etag) =>
+    reply(body, 200, "application/json", { ETag: etag, "X-Factory-Version": DASHBOARD_VERSION });
+  if (slimMemo.etag === head.httpEtag) return send(slimMemo.body, head.httpEtag);
+  if (slimPending.etag !== head.httpEtag) {
+    const read = readSlim(env);
+    const clear = () => {
+      if (slimPending.read === read) slimPending = { etag: "", read: null };
+    };
+    // Keeps the read alive for the waiters if the request that started it is cancelled.
+    const settled = read.then(clear, clear);
+    if (ctx) ctx.waitUntil(settled);
+    slimPending = { etag: head.httpEtag, read };
+  }
+  const out = await slimPending.read;
+  return out ? send(out.body, out.etag) : notFound();
 }
 
 // MP4 and WebM play inline. Their names are content addresses, so a range never goes stale.
@@ -3026,7 +3044,7 @@ export async function serveFactory(request, env, principal, ctx) {
   if (path.startsWith("/assets/") || path === "/sw.js") return serveAsset(request, env.config);
   if (path === "/board.json")
     return new URL(request.url).searchParams.get("view") === "slim"
-      ? slimBoardGet(env)
+      ? slimBoardGet(env, ctx)
       : getFile(env, "board.json", "application/json", {
           "X-Factory-Version": DASHBOARD_VERSION,
         });

@@ -57,6 +57,33 @@ async function openPage(browser, origin, hash = "") {
   return { page, reads, errors };
 }
 
+// Paints the service worker's saved /board.json. The first network slim read waits for
+// window.releaseSlim; full and archive reads are counted.
+async function openSaved(browser, origin) {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1440, height: 900 });
+  await controlBoardPolling(page);
+  await page.evaluateOnNewDocument(() => {
+    const real = window.fetch;
+    window.fullReadCount = 0;
+    window.archiveReadCount = 0;
+    window.fetch = (url, options) => {
+      if (String(url).endsWith("api/board") && !options?.method) window.fullReadCount++;
+      if (String(url).includes("api/board/archive")) window.archiveReadCount++;
+      if (String(url).includes("board.json?view=slim") && !window.releaseSlim)
+        return new Promise((resolve) => {
+          window.releaseSlim = () => resolve(real(url, options));
+        });
+      return real(url, options);
+    };
+  });
+  await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => loaded === true && boardFromCache === true, wait);
+  // The boot reads projects before the slim fetch, so releaseSlim appears a moment later.
+  await page.waitForFunction(() => typeof window.releaseSlim === "function", wait);
+  return page;
+}
+
 const fullReads = (reads) => reads.filter((r) => r === "GET /api/board").length;
 const mergedCards = (page) => page.$$eval(".col.merged .card", (cards) => cards.length);
 const text = (page, selector) => page.$eval(selector, (el) => el.textContent);
@@ -201,31 +228,48 @@ test("slim board read", { timeout: 240000 }, async (t) => {
         return (await cache.keys()).some((r) => new URL(r.url).pathname === "/board.json");
       }, wait);
       await first.page.close();
-      const page = await browser.newPage();
-      await page.setViewport({ width: 1440, height: 900 });
-      await controlBoardPolling(page);
-      // The first network slim read waits for window.releaseSlim; full reads are counted.
-      await page.evaluateOnNewDocument(() => {
-        const real = window.fetch;
-        window.fullReadCount = 0;
-        window.fetch = (url, options) => {
-          if (String(url).endsWith("api/board") && !options?.method) window.fullReadCount++;
-          if (String(url).includes("board.json?view=slim") && !window.releaseSlim)
-            return new Promise((resolve) => {
-              window.releaseSlim = () => resolve(real(url, options));
-            });
-          return real(url, options);
-        };
-      });
-      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
-      await page.waitForFunction(() => loaded === true && boardFromCache === true, wait);
+      const page = await openSaved(browser, origin);
       assert.equal(await text(page, ".col.merged .count-narrow"), "10 / 30");
-      await page.evaluate(() => wantFullBoard());
+      const toggle = '.column-toggle[data-stage="merged"]';
+      if ((await page.$eval(toggle, (el) => el.getAttribute("aria-expanded"))) === "false")
+        await clickNow(page, toggle);
+      await clickNow(page, '.more[data-stage="merged"]');
+      assert.deepEqual(
+        await page.$eval('.more[data-stage="merged"]', (el) => [
+          el.getAttribute("aria-busy"),
+          el.getAttribute("aria-disabled"),
+        ]),
+        ["true", "true"],
+      );
       assert.equal(await page.evaluate(() => window.fullReadCount), 0);
       await page.evaluate(() => window.releaseSlim());
       await waitForBoard(page);
       await page.waitForFunction(() => boardComplete === true, wait);
       assert.equal(await page.evaluate(() => window.fullReadCount), 1);
+      await page.close();
+    });
+
+    await t.test("an offline link to an older merged job waits for the network", async () => {
+      const page = await openSaved(browser, origin);
+      await page.evaluate(() => {
+        setConnection("offline");
+        location.hash = "#500-synthetic-merged";
+      });
+      await page.waitForFunction(
+        () => document.getElementById("board-status").textContent !== "",
+        wait,
+      );
+      assert.equal(
+        await text(page, "#board-status"),
+        "You're offline. Job 500-synthetic-merged opens when you reconnect.",
+      );
+      assert.equal(await page.evaluate(() => window.archiveReadCount), 0);
+      await page.evaluate(() => window.releaseSlim());
+      await page.waitForFunction(
+        () => document.getElementById("d-title").textContent === "Synthetic merged 500",
+        wait,
+      );
+      assert.equal(await page.evaluate(() => window.archiveReadCount), 0);
       await page.close();
     });
 
@@ -237,12 +281,18 @@ test("slim board read", { timeout: 240000 }, async (t) => {
         page.evaluate(() => {
           const span = document.querySelector('.column-toggle[data-stage="merged"] > span');
           const more = document.querySelector('.more[data-stage="merged"]');
+          const box = (el) => {
+            const r = el.getBoundingClientRect();
+            return [r.x, r.y, r.width, r.height];
+          };
           return {
             shown: span.clientWidth,
             full: span.scrollWidth,
             more: more.textContent,
             busy: more.getAttribute("aria-busy"),
             title: span.parentElement.title,
+            rects: [box(more), box(more.closest("h2"))],
+            spin: getComputedStyle(more, "::after").animationName,
           };
         });
       await page.evaluate(() => {
@@ -272,6 +322,18 @@ test("slim board read", { timeout: 240000 }, async (t) => {
       }
       assert.equal(idle.busy, null);
       assert.equal(loading.busy, "true");
+      assert.deepEqual(loading.rects, idle.rects);
+      assert.equal(idle.spin, "none");
+      assert.equal(loading.spin, "more-spin");
+      // The busy text is transparent, so its focus underline is too; an outline marks focus.
+      await page.focus('.more[data-stage="merged"]');
+      assert.deepEqual(
+        await page.$eval('.more[data-stage="merged"]', (el) => [
+          el.matches(":focus-visible"),
+          getComputedStyle(el).outlineStyle,
+        ]),
+        [true, "solid"],
+      );
       assert.deepEqual(errors, []);
       await page.close();
     });
