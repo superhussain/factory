@@ -297,6 +297,7 @@ test(
           if (path === "/api/audit-flags/ack") {
             const { row, ack } = JSON.parse(request.postData());
             posts.push({ row, ack });
+            if (ackAnswer.abort) return request.abort("internetdisconnected");
             if (ackAnswer.status !== 200)
               return request.respond({ status: ackAnswer.status, body: ackAnswer.body });
             rows = rows.map((r) =>
@@ -407,6 +408,18 @@ test(
         assert.equal(
           await page.$eval("#audit-flags-err", (p) => p.textContent),
           "Could not save: that red flag is no longer in the index; reload",
+        );
+        assert.equal((await trs()).length, 1);
+        ackAnswer = { abort: true };
+        await page.click("#audit-flags-rows tr .btn");
+        await page.waitForFunction(
+          () =>
+            document.getElementById("audit-flags-err").textContent ===
+            "Could not reach the factory. Check your connection, then try again.",
+        );
+        assert.equal(
+          await page.evaluate(() => OFFLINE_MESSAGE),
+          await page.$eval("#audit-flags-err", (p) => p.textContent),
         );
         assert.equal((await trs()).length, 1);
 

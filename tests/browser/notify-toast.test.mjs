@@ -75,6 +75,17 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
         return meta ? "close " + meta : el.id;
       });
     const storage = () => page.evaluate(() => localStorage.getItem("factory-alerts-off"));
+    const log = () =>
+      page.evaluate(() =>
+        JSON.parse(localStorage.getItem("factory-notifications-log") || "[]").map(
+          ({ at: _at, ...entry }) => entry,
+        ),
+      );
+    const setHidden = (hidden) =>
+      page.evaluate((value) => {
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => value });
+        document.dispatchEvent(new Event("visibilitychange"));
+      }, hidden);
     const toSettings = async () => {
       await page.evaluate(() => {
         location.hash = "#/settings/notifications";
@@ -97,6 +108,7 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
           href: "#073-sample-retry",
         },
       ]);
+      assert.deepEqual(await log(), [{ kind: "spec", id: "073-sample-retry" }]);
       assert.deepEqual(
         await page.$eval(".notify-toast-close", (el) => [
           el.getAttribute("aria-label"),
@@ -127,6 +139,10 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
           meta: "Synthetic sample",
           href: "#/backlog/" + key,
         },
+      ]);
+      assert.deepEqual(await log(), [
+        { kind: "backlog", key, title: "Synthetic backlog idea", project: "sample" },
+        { kind: "spec", id: "073-sample-retry" },
       ]);
       await page.evaluate(() => refreshBacklog());
       assert.equal((await toasts()).length, 1);
@@ -173,12 +189,14 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
       await toSettings();
       await page.click("#alert-spec");
       assert.equal(await storage(), "spec");
+      await page.evaluate(() => localStorage.removeItem("factory-notifications-log"));
       await seedBoard(origin, [RETRY_WAITS, ...BURST, UNSAFE]);
       await page.evaluate(() => poll({ withBacklog: false }));
       assert.deepEqual(
         (await toasts()).map((x) => [x.chip, x.meta]),
         [["Needs you", "073-sample-retry"]],
       );
+      assert.deepEqual(await log(), [{ kind: "spec", id: "073-sample-retry" }]);
       await clear();
       await page.click("#alert-needs");
       assert.equal(await storage(), "spec,needs");
@@ -213,6 +231,41 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
       await page.keyboard.press("Enter");
       assert.deepEqual(await toasts(), []);
       assert.equal(await focused(), "notifications-button");
+    });
+
+    await t.test("toast T6 a toast for the open job focuses its drawer", async () => {
+      await page.evaluate(() => {
+        location.hash = "#073-sample-retry";
+      });
+      await page.waitForFunction(() => !document.getElementById("detail").hidden, wait);
+      await page.evaluate(() =>
+        showNotifyToast("needs", "#073-sample-retry", "Synthetic retry limit", "073-sample-retry"),
+      );
+      await page.focus("#notify-toasts a.notification-link");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(() => !document.querySelector(".notify-toast"), wait);
+      assert.equal(await focused(), "d-close");
+      await page.evaluate(() => {
+        location.hash = "";
+      });
+      await page.waitForFunction(() => document.getElementById("detail").hidden, wait);
+    });
+
+    await t.test("toast T7 a hidden tab holds toasts", async () => {
+      const ms = await page.evaluate(() => TOAST_MS);
+      await page.mouse.move(0, 0);
+      await page.evaluate(() => document.activeElement.blur());
+      await setHidden(true);
+      await page.evaluate(() =>
+        showNotifyToast("needs", "#073-sample-retry", "Synthetic retry limit", "073-sample-retry"),
+      );
+      await new Promise((resolve) => setTimeout(resolve, ms + 1000));
+      assert.equal((await toasts()).length, 1);
+      await setHidden(false);
+      await page.waitForFunction(() => !document.querySelector(".notify-toast"), {
+        ...wait,
+        timeout: ms + 2000,
+      });
     });
 
     assert.deepEqual(errors, []);
