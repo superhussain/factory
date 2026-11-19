@@ -28,4 +28,6 @@ then lints and format-checks only the staged `.js`/`.mjs`/`.cjs`/`.ts` files
 `pnpm run format:check` is a CI gate. Run `mise exec -- pnpm run format` to
 apply oxfmt over `worker tools tests paseo-plugin`; `.oxfmtrc.json` excludes `tests/fixtures/`.
 
+Repair a broken install with `mise exec -- pnpm install --frozen-lockfile`. Never delete `node_modules` recursively. Host hooks deny `rm -rf`, and `factory.py audit` flags it as `recursive-delete`.
+
 To set up a factory for a person, read `.claude/skills/factory-setup/SKILL.md` and follow it.

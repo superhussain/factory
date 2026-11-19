@@ -424,6 +424,11 @@ class RolesTest(IsolatedTestCase):
                       "list them. When it lacks one, add a task that extends the tool.",
                       flat("agents/factory-spec-writer.md"))
 
+    def test_builder_waits_in_background(self):
+        builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
+        self.assertIn("run_in_background", builder)
+        self.assertIn("Never `sleep` then `tail` its log", builder)
+
     def test_checks_are_sized_to_the_change(self):
         builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
         babysit = " ".join((SKILL / "references/commands/babysit.md").read_text(encoding="utf-8").split())
