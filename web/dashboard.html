@@ -242,11 +242,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .inbox-item[aria-current="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
   @media (min-width: 761px) {
-    body[data-inbox-split] { --split-drawer: min(var(--drawer-w, 760px), 100vw - 400px); }
-    body[data-inbox-split] .detail { width: var(--split-drawer); }
+    body[data-inbox-split], body[data-notifications-split] { --split-drawer: min(var(--drawer-w, 760px), 100vw - 400px); }
+    body[data-inbox-split] .detail, body[data-notifications-split] .detail { width: var(--split-drawer); }
     body[data-inbox-split] #inbox-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
-    body[data-inbox-split] .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; }
-    body[data-inbox-split] .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
+    body[data-notifications-split] #notifications-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
+    body[data-inbox-split] .inbox-item, body[data-notifications-split] .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; }
+    body[data-inbox-split] .inbox-actions, body[data-notifications-split] .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
   }
   #retros-list { display: grid; gap: 20px; }
   .settings-section.retro-run { padding: 20px 20px 12px; }
@@ -3935,9 +3936,11 @@ function renderNotificationsPage(items) {
   $('notifications-page-label').textContent = 'Page ' + (notificationsPage + 1) + ' of ' + pages;
   $('notifications-prev').disabled = notificationsPage === 0;
   $('notifications-next').disabled = notificationsPage === pages - 1;
+  const split = notificationsSplit();
   const html = shown.slice(start, start + NOTIFICATIONS_PAGE_ROWS).map((it, i) => {
     const row = notificationRow(it);
-    return '<li class="inbox-item"><span class="inbox-rank">' + (start + i + 1) + '</span>' +
+    const open = split && (it.job ? it.job.id === openId : it.item.key === backlogRoute());
+    return '<li class="inbox-item"' + (open ? ' aria-current="true"' : '') + '><span class="inbox-rank">' + (start + i + 1) + '</span>' +
       '<div><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span><p class="inbox-title">' + esc(row.title) + '</p>' +
       '<p class="inbox-meta">' + [row.project, row.id, ago(it.at)].filter(Boolean).map(esc).join(' · ') + '</p></div>' +
       '<div class="inbox-actions">' + notificationActions(it) + '</div></li>';
@@ -3945,6 +3948,11 @@ function renderNotificationsPage(items) {
   if (html === notificationsHtml) return;
   notificationsHtml = html;
   $('notifications-list').innerHTML = html;
+}
+// Focus the Open link of the row for a job id or backlog raw line, else the heading.
+function focusNotificationRow(id, raw) {
+  const href = raw !== null ? '#/backlog/' + backlog.find((b) => b.raw === raw)?.key : '#' + encodeURIComponent(id);
+  ([...$('notifications-list').querySelectorAll('.inbox-actions a')].find((a) => a.getAttribute('href') === href) ?? $('notifications-page-heading')).focus();
 }
 function openNotificationsMenu() {
   $('notifications-menu').hidden = false;
@@ -6412,6 +6420,7 @@ function closeDetail(keepHash = false) {
   drawerReturn = null;
   if (back && !keepHash) renderRoute();
   if (back === '#/inbox' && !keepHash) focusInboxRow(id, raw);
+  if (back === '#/notifications' && !keepHash) focusNotificationRow(id, raw);
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
