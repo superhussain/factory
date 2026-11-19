@@ -667,6 +667,8 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await seedBoard(origin, JOBS);
       await reload("#settings-notifications:not([hidden])");
       await page.waitForFunction(() => soundSeen !== null, wait);
+      await page.keyboard.press("Shift");
+      await page.waitForFunction(() => audio?.state === "running", wait);
       assert.equal(await page.$eval("#sound-on", (el) => el.checked), true);
       assert.deepEqual(await tones(), []);
       const moved = JOBS.map((j) =>
