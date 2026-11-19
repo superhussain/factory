@@ -36,8 +36,30 @@ const wait = { polling: 50 };
 // A synthetic VAPID public key: 0x04 and 64 bytes.
 const PUSH_KEY = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString("base64url");
 const ENDPOINT = "https://fcm.googleapis.com/fcm/send/sample";
+const IDEA = "- [ ] sample: Synthetic backlog idea\n";
+const SOUND_LABELS = [
+  ["backlog", "A new backlog item", "Someone adds an idea to the backlog."],
+  ["needs", "A job needs you", "A job stops and waits on your input."],
+  ["spec", "A spec is ready", "A job moves on from its spec stage."],
+  ["pr", "A pull request opens", "A job opens its pull request for review."],
+  ["merged", "A job merges", "A job's pull request merges."],
+];
 const PUSH_HELP =
   "Sends a push when a job starts waiting on you or merges. It shows the job id and title only.";
+
+async function seedBacklog(origin, text) {
+  const current = await fetch(origin + "/api/backlog");
+  const condition = current.ok
+    ? { "If-Match": current.headers.get("ETag") }
+    : { "If-None-Match": "*" };
+  await current.text();
+  const response = await fetch(origin + "/api/backlog", {
+    method: "PUT",
+    headers: { "Content-Type": "text/markdown", ...condition },
+    body: text,
+  });
+  assert.equal(response.status, 200);
+}
 
 test("notification settings", { timeout: 180000 }, async (t) => {
   await prepareAssets();
@@ -528,25 +550,42 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(await text('label[for="sound-on"]'), " Play a sound for board events");
       assert.equal(
         await text("#sound-help"),
-        "Each event has its own sound. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.",
+        "Pick which events play a sound in the Events list above. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.",
       );
       assert.equal(await page.$eval("#sound-on", (el) => el.checked), false);
       assert.equal(await storage("factory-sound"), null);
       assert.deepEqual(
-        await page.$$eval(".sound-kinds li", (els) =>
-          els.map((li) => [
-            li.querySelector("span").textContent,
-            li.querySelector("button").textContent,
-            li.querySelector("button").getAttribute("aria-label"),
-          ]),
+        await page.$$eval(".event-kinds li", (els) =>
+          els.map((li) => {
+            const box = li.querySelector("input[data-sound-kind]");
+            return [
+              li.querySelector("span").firstChild.textContent,
+              li.querySelector(".event-desc").textContent,
+              box.id,
+              box.dataset.soundKind,
+              box.checked,
+              box.getAttribute("aria-label"),
+              box.closest("label").textContent,
+              li.querySelector("button").textContent,
+              li.querySelector("button").getAttribute("aria-label"),
+            ];
+          }),
         ),
-        [
-          ["A job needs you", "Play", "Play the sound for: A job needs you"],
-          ["A pull request opens", "Play", "Play the sound for: A pull request opens"],
-          ["A job merges", "Play", "Play the sound for: A job merges"],
-        ],
+        SOUND_LABELS.map(([kind, label, desc]) => [
+          label,
+          desc,
+          "sound-" + kind,
+          kind,
+          true,
+          "Sound for " + label,
+          " Sound",
+          "Play",
+          "Play the sound for: " + label,
+        ]),
       );
       for (const [kind, expected] of [
+        ["backlog", [392, 494]],
+        ["spec", [659, 880]],
         ["pr", [523, 659]],
         ["needs", [880, 660, 880]],
         ["merged", [523, 659, 784]],
@@ -635,57 +674,94 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await toHash("#/settings/display", "#settings-display:not([hidden])");
     });
 
-    await t.test("sound S5 unticking a kind stops its tone", async () => {
-      // S4 left 001 and 004 merged. New jobs merge, so the jobs C1 reads stay as they are.
+    let afterS5;
+    await t.test("sound S5 sound and toast turn off on their own", async () => {
+      // S4 left 001 and 004 merged. New jobs move, so the jobs C1 reads stay as they are.
       const board = JOBS.map((j) => (j.id === "005-sample-needs" ? j : { ...j, stage: "merged" }));
-      const extra = (id, stage) => ({ ...JOBS[0], id, title: "Synthetic merge job", stage });
+      const extra = (id, stage) => ({ ...JOBS[0], id, title: "Synthetic job " + id, stage });
+      const toastKinds = (id) =>
+        page.$$eval(
+          "#notify-toasts a",
+          (els, href) =>
+            els
+              .filter((a) => a.getAttribute("href") === href)
+              .map((a) => a.querySelector(".inbox-kind").textContent),
+          "#" + id,
+        );
       await seedBoard(origin, [
         ...board,
         extra("007-sample-merge", "build"),
-        extra("008-sample-merge", "build"),
+        extra("073-sample-retry", "needs-human"),
       ]);
       await page.evaluate(() => poll());
       await page.evaluate(() => {
         window.tones = [];
       });
+      await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
+      await page.click("#sound-pr");
+      assert.equal(await storage("factory-sounds-off"), "pr");
+      assert.equal(await text("#alert-status"), "Sound settings saved for this browser.");
       await seedBoard(origin, [
         ...board,
         extra("007-sample-merge", "build"),
-        extra("008-sample-merge", "merged"),
+        extra("073-sample-retry", "pr-open"),
       ]);
       await page.evaluate(() => poll());
-      assert.deepEqual(await tones(), [523, 659, 784]);
-      await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
+      assert.deepEqual(await tones(), []);
+      assert.deepEqual(await toastKinds("073-sample-retry"), ["PR open"]);
       await page.click("#alert-merged");
       assert.equal(await storage("factory-alerts-off"), "merged");
       assert.equal(await text("#alert-status"), "Toast settings saved for this browser.");
-      await seedBoard(origin, [
+      afterS5 = [
         ...board,
         extra("007-sample-merge", "merged"),
-        extra("008-sample-merge", "merged"),
-      ]);
+        extra("073-sample-retry", "pr-open"),
+      ];
+      await seedBoard(origin, afterS5);
       await page.evaluate(() => poll());
       assert.deepEqual(await tones(), [523, 659, 784]);
+      assert.deepEqual(await toastKinds("007-sample-merge"), []);
       await toHash("#/settings/display", "#settings-display:not([hidden])");
     });
 
-    await t.test("sound S6 toast block copy and stored kinds", async () => {
+    await t.test("sound S6 events block copy and stored toast kinds", async () => {
       const boxes = () =>
-        page.$$eval(".alert-kinds input", (els) =>
-          els.map((el) => [el.id, el.dataset.alert, el.closest("label").textContent, el.checked]),
+        page.$$eval(".event-kinds input[data-alert]", (els) =>
+          els.map((el) => [
+            el.id,
+            el.dataset.alert,
+            el.getAttribute("aria-label"),
+            el.closest("label").textContent,
+            el.checked,
+          ]),
         );
-      const expected = (merged) => [
-        ["alert-backlog", "backlog", " A new backlog item", true],
-        ["alert-needs", "needs", " A job needs you", true],
-        ["alert-spec", "spec", " A spec is ready", true],
-        ["alert-pr", "pr", " A pull request opens", true],
-        ["alert-merged", "merged", " A job merges", merged],
-      ];
+      const expected = (merged) =>
+        SOUND_LABELS.map(([kind, label]) => [
+          "alert-" + kind,
+          kind,
+          "Toast for " + label,
+          " Toast",
+          kind === "merged" ? merged : true,
+        ]);
       await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
-      assert.equal(await text("#alert-heading"), "Toasts");
+      assert.equal(await text("#alert-heading"), "Events");
       assert.equal(
         await text("#alert-help"),
-        "Pick the board events that show a toast in this tab. A sound plays only for events picked here. This setting applies only to this browser.",
+        "Pick, for each board event, whether it shows a toast in this tab and whether it plays a sound. These settings apply only to this browser.",
+      );
+      // Each event's name, Toast box, Sound box and Play button share one row.
+      assert.deepEqual(
+        await page.$$eval(".event-kinds li", (els) =>
+          els.map((li) => {
+            const mid = (el) => {
+              const r = el.getBoundingClientRect();
+              return Math.round(r.top + r.height / 2);
+            };
+            const parts = li.querySelectorAll("input, button");
+            return [...parts].every((el) => Math.abs(mid(el) - mid(parts[0])) <= 2);
+          }),
+        ),
+        [true, true, true, true, true],
       );
       assert.deepEqual(await boxes(), expected(false));
       await setStorage("factory-alerts-off", "bogus,merged");
@@ -693,6 +769,32 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.deepEqual(await boxes(), expected(false));
       assert.deepEqual(await page.evaluate(() => [...alertsOff]), ["merged"]);
       await toHash("#/settings/display", "#settings-display:not([hidden])");
+    });
+
+    await t.test("sound S8 spec ready and backlog tones", async () => {
+      await page.waitForFunction(() => soundSeen !== null, wait);
+      const spec = {
+        ...JOBS[0],
+        id: "009-sample-spec",
+        title: "Synthetic spec job",
+        stage: "spec",
+      };
+      await seedBoard(origin, [...afterS5, spec]);
+      await page.evaluate(() => poll());
+      await page.evaluate(() => {
+        window.tones = [];
+      });
+      await seedBoard(origin, [...afterS5, { ...spec, stage: "build" }]);
+      await page.evaluate(() => poll());
+      assert.deepEqual(await tones(), [659, 880]);
+      await seedBacklog(origin, "- [ ] sample: Synthetic existing idea\n");
+      await page.evaluate(() => refreshBacklog());
+      await page.evaluate(() => {
+        window.tones = [];
+      });
+      await seedBacklog(origin, "- [ ] sample: Synthetic existing idea\n" + IDEA);
+      await page.evaluate(() => refreshBacklog());
+      assert.deepEqual(await tones(), [392, 494]);
     });
 
     await t.test("notify C1 card detail toggles", async () => {
@@ -756,6 +858,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(await storage("factory-sound"), "on");
       assert.equal(await storage("factory-notify-remind"), "1");
       assert.equal(await storage("factory-alerts-off"), "bogus,merged");
+      assert.equal(await storage("factory-sounds-off"), "pr");
       assert.equal(
         await page.$$eval("#display-card-fields input", (els) => els.every((el) => el.checked)),
         true,
@@ -800,11 +903,10 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(await page.evaluate(() => "AudioContext" in window), false);
       assert.equal(await page.$eval("#sound-on", (el) => el.disabled), true);
       assert.equal(await page.$eval("#sound-on", (el) => el.checked), false);
-      assert.deepEqual(await page.$$eval("[data-sound]", (els) => els.map((el) => el.disabled)), [
-        true,
-        true,
-        true,
-      ]);
+      assert.deepEqual(
+        await page.$$eval("[data-sound], [data-sound-kind]", (els) => els.map((el) => el.disabled)),
+        Array(10).fill(true),
+      );
       assert.equal(await text("#sound-help"), "This browser cannot play sounds.");
     });
 

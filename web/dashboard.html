@@ -366,10 +366,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #display-filter legend, #display-columns legend, #display-card-fields legend, #display-drawer-links legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #display-filter label, #display-columns label, #display-card-fields label, #display-drawer-links label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); }
   #settings-notifications label[for="notify-needs"], #settings-notifications label[for="notify-push"], #settings-notifications label[for="sound-on"] { display: flex; gap: 8px; align-items: baseline; color: var(--fg); font-size: 13px; }
-  .alert-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
-  .alert-kinds label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); font-size: 13px; }
-  .sound-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
-  .sound-kinds li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; margin: 0 0 4px; }
+  .event-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
+  .event-kinds li { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 4px 10px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .event-kinds .event-desc { display: block; font-size: 12px; color: var(--muted); }
+  .event-kinds label { display: flex; gap: 4px; align-items: center; margin: 0; color: var(--fg); font-size: 13px; }
   .scheduler-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
   .reference-scroll { overflow-x: auto; margin: 0 0 12px; }
   .reference-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -1042,24 +1042,19 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="notify-push"><input type="checkbox" id="notify-push" aria-describedby="push-help" disabled> Push to this device when the dashboard is closed</label>
       <p class="muted" id="push-help"></p>
       <p id="push-status" role="status"></p>
-      <h4 id="alert-heading">Toasts</h4>
-      <p class="muted" id="alert-help">Pick the board events that show a toast in this tab. A sound plays only for events picked here. This setting applies only to this browser.</p>
-      <ul class="alert-kinds" aria-labelledby="alert-heading" aria-describedby="alert-help">
-        <li><label for="alert-backlog"><input type="checkbox" id="alert-backlog" data-alert="backlog"> A new backlog item</label></li>
-        <li><label for="alert-needs"><input type="checkbox" id="alert-needs" data-alert="needs"> A job needs you</label></li>
-        <li><label for="alert-spec"><input type="checkbox" id="alert-spec" data-alert="spec"> A spec is ready</label></li>
-        <li><label for="alert-pr"><input type="checkbox" id="alert-pr" data-alert="pr"> A pull request opens</label></li>
-        <li><label for="alert-merged"><input type="checkbox" id="alert-merged" data-alert="merged"> A job merges</label></li>
+      <h4 id="alert-heading">Events</h4>
+      <p class="muted" id="alert-help">Pick, for each board event, whether it shows a toast in this tab and whether it plays a sound. These settings apply only to this browser.</p>
+      <ul class="event-kinds" aria-labelledby="alert-heading" aria-describedby="alert-help">
+        <li><span>A new backlog item<span class="event-desc">Someone adds an idea to the backlog.</span></span><label for="alert-backlog"><input type="checkbox" id="alert-backlog" data-alert="backlog" aria-label="Toast for A new backlog item"> Toast</label><label for="sound-backlog"><input type="checkbox" id="sound-backlog" data-sound-kind="backlog" aria-label="Sound for A new backlog item"> Sound</label><button class="btn" type="button" data-sound="backlog" aria-label="Play the sound for: A new backlog item">Play</button></li>
+        <li><span>A job needs you<span class="event-desc">A job stops and waits on your input.</span></span><label for="alert-needs"><input type="checkbox" id="alert-needs" data-alert="needs" aria-label="Toast for A job needs you"> Toast</label><label for="sound-needs"><input type="checkbox" id="sound-needs" data-sound-kind="needs" aria-label="Sound for A job needs you"> Sound</label><button class="btn" type="button" data-sound="needs" aria-label="Play the sound for: A job needs you">Play</button></li>
+        <li><span>A spec is ready<span class="event-desc">A job moves on from its spec stage.</span></span><label for="alert-spec"><input type="checkbox" id="alert-spec" data-alert="spec" aria-label="Toast for A spec is ready"> Toast</label><label for="sound-spec"><input type="checkbox" id="sound-spec" data-sound-kind="spec" aria-label="Sound for A spec is ready"> Sound</label><button class="btn" type="button" data-sound="spec" aria-label="Play the sound for: A spec is ready">Play</button></li>
+        <li><span>A pull request opens<span class="event-desc">A job opens its pull request for review.</span></span><label for="alert-pr"><input type="checkbox" id="alert-pr" data-alert="pr" aria-label="Toast for A pull request opens"> Toast</label><label for="sound-pr"><input type="checkbox" id="sound-pr" data-sound-kind="pr" aria-label="Sound for A pull request opens"> Sound</label><button class="btn" type="button" data-sound="pr" aria-label="Play the sound for: A pull request opens">Play</button></li>
+        <li><span>A job merges<span class="event-desc">A job's pull request merges.</span></span><label for="alert-merged"><input type="checkbox" id="alert-merged" data-alert="merged" aria-label="Toast for A job merges"> Toast</label><label for="sound-merged"><input type="checkbox" id="sound-merged" data-sound-kind="merged" aria-label="Sound for A job merges"> Sound</label><button class="btn" type="button" data-sound="merged" aria-label="Play the sound for: A job merges">Play</button></li>
       </ul>
       <p id="alert-status" role="status"></p>
       <h4 id="sound-heading">Sounds</h4>
       <label for="sound-on"><input type="checkbox" id="sound-on" aria-describedby="sound-help"> Play a sound for board events</label>
       <p class="muted" id="sound-help"></p>
-      <ul class="sound-kinds" aria-labelledby="sound-heading">
-        <li><span>A job needs you</span><button class="btn" type="button" data-sound="needs" aria-label="Play the sound for: A job needs you">Play</button></li>
-        <li><span>A pull request opens</span><button class="btn" type="button" data-sound="pr" aria-label="Play the sound for: A pull request opens">Play</button></li>
-        <li><span>A job merges</span><button class="btn" type="button" data-sound="merged" aria-label="Play the sound for: A job merges">Play</button></li>
-      </ul>
       <p id="sound-status" role="status"></p>
     </section>
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
@@ -1251,7 +1246,10 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
   </div>
   <div class="notifications-filters" id="notifications-filters" role="group" aria-label="Filter notifications" hidden>
     <button type="button" class="btn" data-notifications-filter="all" aria-pressed="true">All</button>
+    <button type="button" class="btn" data-notifications-filter="backlog" aria-pressed="false">Backlog</button>
     <button type="button" class="btn" data-notifications-filter="needs" aria-pressed="false">Needs you</button>
+    <button type="button" class="btn" data-notifications-filter="spec" aria-pressed="false">Spec ready</button>
+    <button type="button" class="btn" data-notifications-filter="pr" aria-pressed="false">PR open</button>
     <button type="button" class="btn" data-notifications-filter="merged" aria-pressed="false">Merged</button>
   </div>
   <p class="muted" id="notifications-status" role="status"></p>
@@ -1341,6 +1339,9 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
   remove: (k) => { try { localStorage.removeItem(k); } catch {} },
 };
+// A fetch that never reached the Worker rejects with a TypeError whose text differs by browser.
+const OFFLINE_MESSAGE = "Could not reach the factory. Check your connection, then try again.";
+function failText(x, prefix = '') { return x instanceof TypeError ? OFFLINE_MESSAGE : prefix + String(x.message || x); }
 // board.json is agent-written and the dashboard is public, so only exact PR URLs for a registered project's repo or archive become links.
 const prUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/pull/(\\d+)$');
 const runUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/actions/runs/(\\d+)$');
@@ -3410,7 +3411,7 @@ async function auditFlagsAck(row, ack, button) {
     const box = $('audit-flags-show-acked');
     (box.parentElement.parentElement.hidden ? $('audit-flags-wrap') : box).focus();
   } catch (x) {
-    err.textContent = 'Could not save: ' + (x.message || x);
+    err.textContent = failText(x, 'Could not save: ');
     err.hidden = false;
     button.disabled = false;
   }
@@ -3814,27 +3815,60 @@ $('inbox-list').addEventListener('submit', (e) => {
   submitInboxAnswer();
 });
 $('inbox-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
-// Notifications: board jobs waiting on you and merged jobs, newest first.
-// The kinds match boardPushes in worker/push.js, without stuck.
-const NOTIFICATION_LABELS = { needs: 'Needs you', merged: 'Merged' };
+// Notifications, newest first: board jobs waiting on you, with an open PR or merged, plus the
+// spec ready and backlog events this browser logged. Toasts share these labels.
+const NOTIFICATION_LABELS = { backlog: 'Backlog', needs: 'Needs you', spec: 'Spec ready', pr: 'PR open', merged: 'Merged' };
 const NOTIFICATIONS_MENU_ROWS = 8;
 const NOTIFICATIONS_PAGE_ROWS = 20;
 const NOTIFICATIONS_EMPTY = {
-  all: 'No notifications yet. Merged jobs and jobs waiting on you show up here.',
+  all: 'No notifications yet. New backlog items, ready specs, open pull requests, merged jobs and jobs waiting on you show up here.',
+  backlog: 'No new backlog items yet. This list keeps the ones a tab in this browser saw.',
   needs: 'Nothing needs you right now.',
+  spec: 'No specs ready yet. This list keeps the ones a tab in this browser saw.',
+  pr: 'No open pull requests.',
   merged: 'No merged jobs yet.',
 };
 // The page's filter and zero-based page, kept for this tab only.
 let notificationsFilter = 'all';
 let notificationsPage = 0;
 const NOTIFICATIONS_SEEN_KEY = 'factory-notifications-seen';
+// Spec ready and backlog events leave no board trace, so this browser logs the ones its tabs saw.
+const NOTIFICATIONS_LOG_KEY = 'factory-notifications-log';
+const NOTIFICATIONS_LOG_MAX = 50;
+function notificationLog() {
+  let log;
+  try { log = JSON.parse(store.get(NOTIFICATIONS_LOG_KEY) || '[]'); } catch { return []; }
+  if (!Array.isArray(log)) return [];
+  return log.filter((e) => typeof e?.at === 'string' && (e.kind === 'spec' ? typeof e.id === 'string'
+    : e.kind === 'backlog' && typeof e.key === 'string' && /^[0-9a-f]{12}$/.test(e.key) && typeof e.title === 'string' && typeof e.project === 'string'));
+}
+function logNotification(entry) {
+  const same = (e) => e.kind === entry.kind && (e.kind === 'spec' ? e.id === entry.id : e.key === entry.key);
+  const log = [{ ...entry, at: new Date().toISOString() }, ...notificationLog().filter((e) => !same(e))];
+  store.set(NOTIFICATIONS_LOG_KEY, JSON.stringify(log.slice(0, NOTIFICATIONS_LOG_MAX)));
+}
 let notificationsHtml = '';
 let notificationsMenuHtml = '';
 function notificationsRoute() { return location.hash === '#/notifications' ? true : null; }
 function notificationItems() {
-  return jobs.filter((j) => isShown(j.project) && (waitsOnYou(j) || j.stage === 'merged'))
-    .map((job) => job.stage === 'merged' ? { kind: 'merged', job, at: job.done || job.updated } : { kind: 'needs', job, at: job.updated })
-    .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+  const shown = jobs.filter((j) => isShown(j.project));
+  const items = [];
+  for (const job of shown) {
+    if (job.stage === 'merged') items.push({ kind: 'merged', job, at: job.done || job.updated });
+    else if (waitsOnYou(job)) items.push({ kind: 'needs', job, at: job.updated });
+    else if (job.stage === 'pr-open') items.push({ kind: 'pr', job, at: job.updated });
+  }
+  for (const e of notificationLog()) {
+    const job = e.kind === 'spec' && shown.find((j) => j.id === e.id);
+    if (job) items.push({ kind: 'spec', job, at: e.at });
+    if (e.kind === 'backlog' && isShown(e.project)) items.push({ kind: 'backlog', item: e, at: e.at });
+  }
+  return items.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+}
+function notificationRow(it) {
+  if (it.kind === 'backlog') return { href: '#/backlog/' + it.item.key, title: it.item.title, id: '', project: projectName(it.item) };
+  const j = it.job;
+  return { href: '#' + encodeURIComponent(j.id), title: j.title || j.id, id: j.id, project: projectName(j) };
 }
 function notificationsUnread(items) {
   return (Date.parse(items[0]?.at) || 0) > (Date.parse(store.get(NOTIFICATIONS_SEEN_KEY)) || 0);
@@ -3853,9 +3887,11 @@ function renderNotificationsMenu(items) {
   $('notifications-menu-status').textContent = boardLoadError ? "Couldn't load notifications. " + BOARD_LOAD_ERRORS[boardLoadError]
     : !loaded ? 'Loading notifications…' : items.length ? '' : 'No notifications yet.';
   $('notifications-menu-retry').hidden = !boardLoadError;
-  const html = items.slice(0, NOTIFICATIONS_MENU_ROWS).map((it) =>
-    '<li><a class="notification-link" href="#' + esc(encodeURIComponent(it.job.id)) + '"><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span>' +
-    '<span class="inbox-title">' + esc(it.job.title || it.job.id) + '</span><span class="inbox-meta">' + esc(it.job.id) + ' · ' + esc(ago(it.at)) + '</span></a></li>').join('');
+  const html = items.slice(0, NOTIFICATIONS_MENU_ROWS).map((it) => {
+    const row = notificationRow(it);
+    return '<li><a class="notification-link" href="' + esc(row.href) + '"><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span>' +
+      '<span class="inbox-title">' + esc(row.title) + '</span><span class="inbox-meta">' + [row.id, ago(it.at)].filter(Boolean).map(esc).join(' · ') + '</span></a></li>';
+  }).join('');
   if (html === notificationsMenuHtml) return;
   notificationsMenuHtml = html;
   // Rewriting drops focus, so return it to the row with the same href.
@@ -3865,6 +3901,7 @@ function renderNotificationsMenu(items) {
   if (href !== null) [...list.querySelectorAll('a')].find((a) => a.getAttribute('href') === href)?.focus();
 }
 function notificationActions(it) {
+  if (it.kind === 'backlog') return '<a class="btn" href="#/backlog/' + esc(it.item.key) + '">Open item</a>';
   const j = it.job, pr = prLink(j), paseo = paseoLinks(j), owner = sessionJob(j);
   const whose = owner && owner !== j ? 'the session of ' + owner.id : "this job's session";
   let html = '<a class="btn" href="#' + esc(encodeURIComponent(j.id)) + '">Open job</a>';
@@ -3892,10 +3929,10 @@ function renderNotificationsPage(items) {
   $('notifications-prev').disabled = notificationsPage === 0;
   $('notifications-next').disabled = notificationsPage === pages - 1;
   const html = shown.slice(start, start + NOTIFICATIONS_PAGE_ROWS).map((it, i) => {
-    const j = it.job;
+    const row = notificationRow(it);
     return '<li class="inbox-item"><span class="inbox-rank">' + (start + i + 1) + '</span>' +
-      '<div><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span><p class="inbox-title">' + esc(j.title || j.id) + '</p>' +
-      '<p class="inbox-meta">' + [projectName(j), j.id, ago(it.at)].map(esc).join(' · ') + '</p></div>' +
+      '<div><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span><p class="inbox-title">' + esc(row.title) + '</p>' +
+      '<p class="inbox-meta">' + [row.project, row.id, ago(it.at)].filter(Boolean).map(esc).join(' · ') + '</p></div>' +
       '<div class="inbox-actions">' + notificationActions(it) + '</div></li>';
   }).join('');
   if (html === notificationsHtml) return;
@@ -7926,7 +7963,7 @@ async function prioritizeAction(ctx, mode = '') {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -7945,7 +7982,7 @@ async function babysitAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -7964,7 +8001,7 @@ async function unbatchAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -7980,7 +8017,7 @@ async function removePriorityAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -7996,7 +8033,7 @@ async function pauseAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -8031,7 +8068,7 @@ async function rerunAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -8047,7 +8084,7 @@ async function resumeAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -9001,7 +9038,7 @@ $('notify-remind').addEventListener('change', () => {
   $('notify-status').textContent = remindHours ? 'Reminders are on: after ' + REMIND_LABEL[remindHours] + '.' : 'Reminders are off.';
 });
 
-// Each event kind can be turned off per browser. Off kinds show no toast and play no sound.
+// Each event kind's toast can be turned off per browser.
 const ALERT_KINDS = ['backlog', 'needs', 'spec', 'pr', 'merged'];
 const ALERTS_OFF_KEY = 'factory-alerts-off';
 const alertsOff = new Set((store.get(ALERTS_OFF_KEY) || '').split(',').filter((k) => ALERT_KINDS.includes(k)));
@@ -9033,13 +9070,17 @@ $('settings-notifications').addEventListener('change', (e) => {
   $('alert-status').textContent = 'Toast settings saved for this browser.';
 });
 
-// Board sounds are opt-in per browser and play in a visible or hidden tab. One read plays
-// at most one tone, the first kind in SOUND_ORDER that fired.
+// Board sounds are opt-in per browser and play in a visible or hidden tab. Each kind's sound
+// can be turned off on its own. One board read plays at most one tone, the first kind in
+// SOUND_ORDER that fired.
 const SOUND_KEY = 'factory-sound';
-const SOUNDS = { needs: [880, 660, 880], pr: [523, 659], merged: [523, 659, 784] };
-const SOUND_ORDER = ['needs', 'pr', 'merged'];
-const SOUND_HELP = 'Each event has its own sound. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.';
+const SOUNDS_OFF_KEY = 'factory-sounds-off';
+const SOUNDS = { backlog: [392, 494], needs: [880, 660, 880], spec: [659, 880], pr: [523, 659], merged: [523, 659, 784] };
+const SOUND_ORDER = ['needs', 'spec', 'pr', 'merged'];
+const SOUND_HELP = 'Pick which events play a sound in the Events list above. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.';
 let soundOn = store.get(SOUND_KEY) === 'on';
+const soundsOff = new Set((store.get(SOUNDS_OFF_KEY) || '').split(',').filter((k) => ALERT_KINDS.includes(k)));
+function soundKindOn(kind) { return !soundsOff.has(kind); }
 let soundSeen = null;
 let audio = null;
 function soundSupported() { return 'AudioContext' in window; }
@@ -9077,7 +9118,7 @@ function boardSound() {
   soundSeen = seen;
   if (!prev || !soundActive()) return;
   const fired = new Set();
-  for (const kinds of jobEvents(prev, seen).values()) for (const k of kinds) if (SOUNDS[k] && alertOn(k)) fired.add(k);
+  for (const kinds of jobEvents(prev, seen).values()) for (const k of kinds) if (soundKindOn(k)) fired.add(k);
   const kind = SOUND_ORDER.find((k) => fired.has(k));
   if (kind) playSound(kind);
 }
@@ -9086,6 +9127,10 @@ function renderSoundSettings() {
   $('sound-on').disabled = !supported;
   $('sound-on').checked = soundActive();
   for (const b of document.querySelectorAll('[data-sound]')) b.disabled = !supported;
+  for (const box of document.querySelectorAll('[data-sound-kind]')) {
+    box.checked = soundKindOn(box.dataset.soundKind);
+    box.disabled = !supported;
+  }
   $('sound-help').textContent = supported ? SOUND_HELP : 'This browser cannot play sounds.';
 }
 $('sound-on').addEventListener('change', () => {
@@ -9095,6 +9140,13 @@ $('sound-on').addEventListener('change', () => {
   syncLive(); schedulePoll();
   $('sound-status').textContent = soundOn ? 'Sounds are on in this browser.' : 'Sounds are off.';
 });
+$('settings-notifications').addEventListener('change', (e) => {
+  const kind = e.target.dataset.soundKind;
+  if (!kind) return;
+  if (e.target.checked) soundsOff.delete(kind); else soundsOff.add(kind);
+  if (soundsOff.size) store.set(SOUNDS_OFF_KEY, [...soundsOff].join(',')); else store.remove(SOUNDS_OFF_KEY);
+  $('alert-status').textContent = 'Sound settings saved for this browser.';
+});
 $('settings-notifications').addEventListener('click', (e) => {
   const b = e.target.closest('[data-sound]');
   if (b) playSound(b.dataset.sound);
@@ -9103,7 +9155,6 @@ for (const type of ['pointerdown', 'keydown']) document.addEventListener(type, (
 
 // New board and backlog events show a toast in this tab. The first read only fills toastSeen
 // and backlogSeen. Board text is agent-written, so toasts set textContent only.
-const TOAST_LABELS = { backlog: 'Backlog', needs: 'Needs you', spec: 'Spec ready', pr: 'PR open', merged: 'Merged' };
 const TOAST_MAX = 3, TOAST_MS = 10000;
 let toastSeen = null;
 let backlogSeen = null;
@@ -9114,7 +9165,7 @@ function showNotifyToast(kind, href, title, meta) {
   const link = document.createElement('a');
   link.className = 'notification-link';
   link.href = href;
-  const parts = [['chip inbox-kind', TOAST_LABELS[kind]], ['inbox-title', title], ['inbox-meta', meta]].map(([cls, text]) => {
+  const parts = [['chip inbox-kind', NOTIFICATION_LABELS[kind]], ['inbox-title', title], ['inbox-meta', meta]].map(([cls, text]) => {
     const span = document.createElement('span');
     span.className = cls;
     span.textContent = text;
@@ -9137,22 +9188,33 @@ function showNotifyToast(kind, href, title, meta) {
   const same = [...list.children].find((el) => el.firstChild.getAttribute('href') === href);
   if (same) same.replaceWith(li); else list.append(li);
   while (list.children.length > TOAST_MAX) list.firstElementChild.remove();
-  // A hovered or focused stack holds every toast for another TOAST_MS.
+  // A hovered or focused stack, or a hidden tab, holds every toast for another TOAST_MS.
   const expire = () => {
-    if (list.matches(':hover') || list.contains(document.activeElement)) setTimeout(expire, TOAST_MS);
+    if (document.hidden || list.matches(':hover') || list.contains(document.activeElement)) setTimeout(expire, TOAST_MS);
     else li.remove();
   };
   setTimeout(expire, TOAST_MS);
 }
 // Removal waits a task, since a disconnected link would not follow its href. A link moves focus
-// to the drawer it opens; a close button moves it to the next toast, the previous one or the bell.
+// to the drawer it opens, or the one already open; a close button moves it to the next toast,
+// the previous one or the bell.
 $('notify-toasts').addEventListener('click', (e) => {
   const target = e.target.closest('a, button');
   const li = target?.closest('.notify-toast');
   if (!li) return;
   if (target.tagName === 'A') {
-    if (target.getAttribute('href') !== location.hash) window.addEventListener('hashchange', () => $('d-close').focus(), { once: true });
-    setTimeout(() => li.remove());
+    if (target.getAttribute('href') !== location.hash) {
+      window.addEventListener('hashchange', () => $('d-close').focus(), { once: true });
+      setTimeout(() => li.remove());
+    } else {
+      // Like the job picker: a drawer closed with its hash kept reopens first.
+      setTimeout(() => {
+        li.remove();
+        const { id } = parseHash();
+        if (id && openId !== id) openJob(id);
+        if (!$('detail').hidden) $('d-close').focus();
+      });
+    }
     return;
   }
   const next = (li.nextElementSibling || li.previousElementSibling)?.querySelector('.notify-toast-close') || $('notifications-button');
@@ -9165,17 +9227,28 @@ function toastBoard() {
   const prev = toastSeen;
   toastSeen = seen;
   if (!prev) return;
+  let logged = false;
   for (const [id, kinds] of jobEvents(prev, seen)) {
     const j = jobs.find((x) => x.id === id);
+    if (kinds.includes('spec')) {
+      logNotification({ kind: 'spec', id });
+      logged = true;
+    }
     const kind = kinds.find(alertOn);
     if (kind && isShown(j.project)) showNotifyToast(kind, '#' + encodeURIComponent(id), j.title || id, id);
   }
+  if (logged) renderNotifications();
 }
 function toastBacklog() {
   const prev = backlogSeen;
   backlogSeen = new Set(backlog.map((b) => b.raw));
-  if (!prev || !alertOn('backlog')) return;
-  for (const b of backlog) if (!prev.has(b.raw) && isShown(b.project)) showNotifyToast('backlog', '#/backlog/' + b.key, b.text, projectName(b));
+  if (!prev) return;
+  const fresh = backlog.filter((b) => !prev.has(b.raw));
+  for (const b of fresh) logNotification({ kind: 'backlog', key: b.key, title: b.text, project: b.project });
+  const shown = fresh.filter((b) => isShown(b.project));
+  if (alertOn('backlog')) for (const b of shown) showNotifyToast('backlog', '#/backlog/' + b.key, b.text, projectName(b));
+  if (shown.length && soundActive() && soundKindOn('backlog')) playSound('backlog');
+  if (fresh.length) renderNotifications();
 }
 
 // Web Push reaches this device while the dashboard is closed. The Worker serves its VAPID

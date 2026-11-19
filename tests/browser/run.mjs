@@ -470,6 +470,7 @@ async function capture(outdir, referencePath) {
     let notifyBoard = false;
     let auditBoard = false;
     let flagsHosts = false;
+    let flagsAckAbort = false;
     let refusalBacklog = false;
     let leadAgentsBoard = false;
     let writerBoard = false;
@@ -597,6 +598,8 @@ async function capture(outdir, referencePath) {
                     contentType: "application/json",
                     body: JSON.stringify(CAPTURE_HOSTS),
                   });
+                if (flagsAckAbort && target.pathname === "/api/audit-flags/ack")
+                  return request.abort("internetdisconnected");
                 if (target.pathname === "/api/audit-flags")
                   return request.respond({
                     status: 200,
@@ -1181,6 +1184,27 @@ async function capture(outdir, referencePath) {
       await view("inbox-split-1280", 1280, 900, "light", openInboxSplit);
       await view("notify-toast-1280", 1280, 900, "light", openToasts);
       await view("notify-toast-390", 390, 844, "dark", openToasts);
+      await view("notifications-menu-kinds-1280", 1280, 900, "light", async (page) => {
+        await page.evaluate(() => {
+          const at = new Date(Date.now() - 60000).toISOString();
+          const backlogHash = "0123456789ab";
+          localStorage.setItem(
+            "factory-notifications-log",
+            JSON.stringify([
+              { kind: "spec", id: "120-sample-merged", at },
+              {
+                kind: "backlog",
+                key: backlogHash,
+                title: "Synthetic backlog idea",
+                project: "sample",
+                at,
+              },
+            ]),
+          );
+        });
+        await page.click("#notifications-button");
+        await page.waitForSelector("#notifications-menu-list .notification-link");
+      });
     } finally {
       notifyBoard = false;
     }
@@ -1432,7 +1456,7 @@ async function capture(outdir, referencePath) {
     await view("notify-alerts-390", 390, 844, "light", async (page) => {
       await openNotificationSettings(page);
       await page.evaluate(() =>
-        document.querySelector("#alert-heading, #sound-heading").scrollIntoView({ block: "start" }),
+        document.getElementById("alert-heading").scrollIntoView({ block: "start" }),
       );
     });
     const settleArchiveSettings = async (page, name) => {
@@ -1714,8 +1738,19 @@ async function capture(outdir, referencePath) {
         await page.click("#audit-flags-rows .btn + .btn");
         await page.waitForSelector("#idea-dlg[open]");
       });
+      flagsAckAbort = true;
+      await view("retros-flags-offline-desktop", 1440, 900, "light", async (page, side) => {
+        await openRetrosFlags(page, side);
+        await page.waitForSelector("#audit-flags-rows tr .btn");
+        await page.click("#audit-flags-rows tr .btn");
+        await page.waitForSelector("#audit-flags-err:not([hidden])");
+        await page.evaluate(() =>
+          document.getElementById("audit-flags-err").scrollIntoView({ block: "center" }),
+        );
+      });
     } finally {
       flagsHosts = false;
+      flagsAckAbort = false;
     }
     // A phone drawer on an idea with two attached files, at rest and scrolled 40 px.
     const openIdeaFiles = async (page) => {

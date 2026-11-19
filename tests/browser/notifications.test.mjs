@@ -44,6 +44,32 @@ const OLD = Array.from({ length: 22 }, (_, i) => {
   const nn = String(i + 1).padStart(2, "0");
   return job(`1${nn}-sample-old`, "merged", { done: `2025-12-${nn}T00:00:00Z` });
 });
+// A pr-open job that does not wait on you, a job with a logged spec ready event and one
+// logged backlog line, each newer than JOBS.
+const KINDS = [
+  job("080-sample-pr", "pr-open", { updated: "2026-01-06T00:00:00Z" }),
+  job("073-sample-retry", "build"),
+];
+const BACKLOG_HASH = "0123456789ab";
+const seedLog = (page) =>
+  page.evaluateOnNewDocument((key) => {
+    const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+    try {
+      localStorage.setItem(
+        "factory-notifications-log",
+        JSON.stringify([
+          { kind: "spec", id: "073-sample-retry", at: ago(1) },
+          {
+            kind: "backlog",
+            key,
+            title: "Synthetic backlog idea",
+            project: "sample",
+            at: ago(2),
+          },
+        ]),
+      );
+    } catch {}
+  }, BACKLOG_HASH);
 const EXPECTED = [
   ["Merged", "Synthetic 060-sample-merged"],
   ["Needs you", "Synthetic 051-sample-retry"],
@@ -201,6 +227,51 @@ test("notifications", { timeout: 180000 }, async (t) => {
       await seedBoard(origin, JOBS);
     });
 
+    await t.test("menu lists every kind", async () => {
+      await seedBoard(origin, [...JOBS, ...KINDS]);
+      const { page, errors } = await openPage("", seedLog);
+      await openMenu(page);
+      const rows = await page.$$eval("#notifications-menu-list .notification-link", (links) =>
+        links.map((a) => [
+          a.querySelector(".inbox-kind").textContent,
+          a.querySelector(".inbox-title").textContent,
+          a.getAttribute("href"),
+          a.querySelector(".inbox-meta").textContent,
+        ]),
+      );
+      assert.deepEqual(
+        rows.slice(0, 3).map((row) => row.slice(0, 3)),
+        [
+          ["Spec ready", "Synthetic 073-sample-retry", "#073-sample-retry"],
+          ["Backlog", "Synthetic backlog idea", "#/backlog/" + BACKLOG_HASH],
+          ["PR open", "Synthetic 080-sample-pr", "#080-sample-pr"],
+        ],
+      );
+      assert.match(rows[0][3], /^073-sample-retry · /);
+      assert.doesNotMatch(rows[1][3], /·/);
+      await page.click("#notifications-more");
+      await pageRows(page, 6);
+      assert.deepEqual(
+        await page.$$eval("#notifications-list .inbox-item", (items) =>
+          [...items[1].querySelectorAll(".inbox-actions a")].map((a) => [
+            a.textContent,
+            a.getAttribute("href"),
+          ]),
+        ),
+        [["Open item", "#/backlog/" + BACKLOG_HASH]],
+      );
+      assert.equal(
+        await page.$eval(
+          "#notifications-list .inbox-item:nth-child(2) .inbox-meta",
+          (el) => el.textContent.split(" · ")[0],
+        ),
+        "Synthetic sample",
+      );
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+      await seedBoard(origin, JOBS);
+    });
+
     let list;
     await t.test("see more opens the page", async () => {
       list = await openPage();
@@ -318,7 +389,10 @@ test("notifications", { timeout: 180000 }, async (t) => {
       assert.deepEqual(await kinds(), ["Merged"]);
       assert.deepEqual(await pressed(), [
         ["All", "false"],
+        ["Backlog", "false"],
         ["Needs you", "false"],
+        ["Spec ready", "false"],
+        ["PR open", "false"],
         ["Merged", "true"],
       ]);
       assert.equal(
@@ -341,9 +415,43 @@ test("notifications", { timeout: 180000 }, async (t) => {
         await only.page.$eval("#notifications-status", (el) => el.textContent),
         "Nothing needs you right now.",
       );
+      for (const [filter, copy] of [
+        [
+          "backlog",
+          "No new backlog items yet. This list keeps the ones a tab in this browser saw.",
+        ],
+        ["spec", "No specs ready yet. This list keeps the ones a tab in this browser saw."],
+        ["pr", "No open pull requests."],
+      ]) {
+        await only.page.click(`[data-notifications-filter="${filter}"]`);
+        await only.page.waitForFunction(
+          (c) => document.getElementById("notifications-status").textContent === c,
+          wait,
+          copy,
+        );
+      }
       assert.deepEqual(errors, []);
       assert.deepEqual(only.errors, []);
       await only.page.browserContext().close();
+      await seedBoard(origin, [...JOBS, ...KINDS]);
+      const every = await openPage("#/notifications", seedLog);
+      await pageRows(every.page, 6);
+      for (const [filter, chip] of [
+        ["backlog", "Backlog"],
+        ["spec", "Spec ready"],
+        ["pr", "PR open"],
+      ]) {
+        await every.page.click(`[data-notifications-filter="${filter}"]`);
+        await pageRows(every.page, 1);
+        assert.deepEqual(
+          await every.page.$$eval("#notifications-list .inbox-kind", (els) =>
+            els.map((el) => el.textContent),
+          ),
+          [chip],
+        );
+      }
+      assert.deepEqual(every.errors, []);
+      await every.page.browserContext().close();
       await seedBoard(origin, JOBS);
     });
 
@@ -459,7 +567,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
       );
       assert.equal(
         await page.$eval("#notifications-status", (el) => el.textContent),
-        "No notifications yet. Merged jobs and jobs waiting on you show up here.",
+        "No notifications yet. New backlog items, ready specs, open pull requests, merged jobs and jobs waiting on you show up here.",
       );
       assert.deepEqual(errors, []);
       await page.browserContext().close();
