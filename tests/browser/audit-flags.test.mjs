@@ -441,3 +441,58 @@ test(
     });
   },
 );
+
+test("a red flag row links its backlog decision", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    const context = await browser.createBrowserContext();
+    try {
+      const page = await context.newPage();
+      await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      const rows = STEP_4.slice(1, 3);
+      rows[0] = { ...rows[0], backlog: "- [ ] factory: Red flag: pipe-to-shell via Bash" };
+      await page.setRequestInterception(true);
+      page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (path !== "/api/audit-flags") return request.continue();
+        return request.respond({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ schema: "factory.audit-flags/1", rows }),
+        });
+      });
+      await page.goto(origin + "/#/retros", { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() =>
+        document.getElementById("audit-flags-status").textContent.startsWith("2 flagged"),
+      );
+      const links = await page.$$eval("#audit-flags-rows tr", (trs) =>
+        trs.map((tr) =>
+          [...tr.querySelectorAll(".audit-flag-actions a")].map((a) => [
+            a.className,
+            a.getAttribute("href"),
+            a.textContent,
+            a.title,
+            a.getAttribute("aria-label"),
+          ]),
+        ),
+      );
+      assert.deepEqual(links, [
+        [
+          [
+            "audit-flag-backlog",
+            "#/backlog/7f76477c9762",
+            "Backlog decision",
+            "factory: Red flag: pipe-to-shell via Bash",
+            "Open the backlog decision for the pipe-to-shell call in 1017-add-x",
+          ],
+        ],
+        [],
+      ]);
+      assert.deepEqual(errors, [], "no page errors");
+    } finally {
+      await context.close();
+    }
+  });
+});
