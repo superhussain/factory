@@ -514,12 +514,14 @@ async function rowSha256(row) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export const BOARD_PATCH_SHAPE =
+const BOARD_PATCH_SHAPE =
   "a board patch needs rows: [{id, expect, row}], one entry per id. Nothing was written.";
 const READS_SHAPE =
   "a board patch's reads need [{id, sha256}], one per id and none in rows. Nothing was written.";
 
-// PATCH /api/board: the body read and parse, then the shared core, then the reply.
+// Applies the dashboard's changed rows, each with the row it expects to replace, to the
+// stored board. A row that changed since the client read it comes back as a 409 conflict;
+// an R2 race with another writer is retried here.
 async function boardPatch(request, env, ctx) {
   const body = await readBody(request);
   if (body === null) return reply("body over 1 MiB", 413);
@@ -529,26 +531,6 @@ async function boardPatch(request, env, ctx) {
   } catch {
     return reply("body is not JSON", 400);
   }
-  const result = await applyBoardPatch(env, patch, ctx);
-  if (result.ok) {
-    await announce(env, "board.json");
-    return reply("ok", 200, "text/plain", { ETag: result.etag });
-  }
-  if (result.conflict)
-    return reply(
-      JSON.stringify({ error: "conflict", ...result.conflict }),
-      409,
-      "application/json",
-    );
-  if (result.busy) return reply(JSON.stringify({ error: "busy" }), 409, "application/json");
-  return reply(result.text, result.status);
-}
-
-// Applies the dashboard's changed rows, each with the row it expects to replace, to the
-// stored board. A row that changed since the client read it comes back as a conflict; an R2
-// race with another writer is retried here. Both PATCH /api/board and the live socket's
-// patch frames call it, and each announces a commit its own way.
-export async function applyBoardPatch(env, patch, ctx) {
   const rows = patch?.rows;
   const rowOf = (v, id) =>
     v === null || (typeof v === "object" && !Array.isArray(v) && v.id === id);
@@ -565,7 +547,7 @@ export async function applyBoardPatch(env, patch, ctx) {
     ) ||
     new Set(rows.map((e) => e.id)).size !== rows.length
   )
-    return { status: 400, text: BOARD_PATCH_SHAPE };
+    return reply(BOARD_PATCH_SHAPE, 400);
   const entries = new Map(rows.map((e) => [e.id, e]));
   const reads = patch.reads ?? [];
   if (
@@ -579,11 +561,11 @@ export async function applyBoardPatch(env, patch, ctx) {
     ) ||
     new Set(reads.map((r) => r.id)).size !== reads.length
   )
-    return { status: 400, text: READS_SHAPE };
+    return reply(READS_SHAPE, 400);
   for (let attempt = 0; attempt < 10; attempt++) {
     const stored = await storedBoard(env);
     if (stored.etag && !stored.doc)
-      return { status: 400, text: "the stored board is not readable JSON. Nothing was written." };
+      return reply("the stored board is not readable JSON. Nothing was written.", 400);
     const doc = stored.doc ?? { updated: "", jobs: [] };
     const byId = new Map(),
       captured = new Map();
@@ -609,12 +591,15 @@ export async function applyBoardPatch(env, patch, ctx) {
       if (!row || (await rowSha256(row)) !== r.sha256) conflicts.add(r.id);
     }
     if (conflicts.size)
-      return {
-        conflict: {
+      return reply(
+        JSON.stringify({
+          error: "conflict",
           rows: Object.fromEntries([...conflicts].map((id) => [id, byId.get(id) ?? null])),
           max_id: maxId,
-        },
-      };
+        }),
+        409,
+        "application/json",
+      );
     const jobs = [];
     for (const j of stored.jobs) {
       const e = entries.get(j?.id);
@@ -628,21 +613,22 @@ export async function applyBoardPatch(env, patch, ctx) {
         : doc.updated;
     const data = { ...doc, jobs, updated };
     const bad = await boardRefusal(env, stored, data, true);
-    if (bad) return { status: 400, text: bad };
+    if (bad) return reply(bad, 400);
     const text = JSON.stringify(data);
     if (new TextEncoder().encode(text).length > MAX_BOARD)
-      return { status: 413, text: "board over 16 MiB. Nothing was written." };
+      return reply("board over 16 MiB. Nothing was written.", 413);
     const obj = await env.BUCKET.put("board.json", text, {
       onlyIf: new Headers(stored.etag ? { "If-Match": stored.etag } : { "If-None-Match": "*" }),
       httpMetadata: { contentType: "application/json" },
     });
     if (obj) {
+      await announce(env, "board.json");
       await boardCommitted(env, stored.jobs, data.jobs, ctx);
-      return { ok: true, etag: obj.httpEtag };
+      return reply("ok", 200, "text/plain", { ETag: obj.httpEtag });
     }
     await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 80));
   }
-  return { busy: true };
+  return reply(JSON.stringify({ error: "busy" }), 409, "application/json");
 }
 
 // The R2 onlyIf for exactly one well-formed If-Match or If-None-Match: *, or the error reply.
