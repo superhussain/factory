@@ -1715,7 +1715,7 @@ window.addEventListener('message', (e) => {
 let embedFocus = null;
 document.addEventListener('focusin', (e) => { if (e.target instanceof HTMLDialogElement && e.target.contains(embedFocus)) return; embedFocus = e.target; });
 const EMBED_FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, label, [tabindex], [contenteditable]:not([contenteditable="false"])';
-function onScrollbar(e) { const t = e.target; if (t === document.documentElement) return e.clientX >= t.clientWidth || e.clientY >= t.clientHeight; const r = t.getBoundingClientRect(); return e.clientX >= r.left + t.clientLeft + t.clientWidth || e.clientY >= r.top + t.clientTop + t.clientHeight; }
+function onScrollbar(e) { const t = e.target; if (t === document.documentElement) return e.clientX >= t.clientWidth || e.clientY >= t.clientHeight; if (!t.clientWidth && !t.clientHeight) return false; const r = t.getBoundingClientRect(); return e.clientX >= r.left + t.clientLeft + t.clientWidth || e.clientY >= r.top + t.clientTop + t.clientHeight; }
 document.addEventListener('pointerdown', (e) => { if (!(e.target instanceof Element && (e.target.closest(EMBED_FOCUSABLE) || onScrollbar(e)))) embedFocus = null; }, true);
 window.addEventListener('focus', () => {
   const el = embedFocus;

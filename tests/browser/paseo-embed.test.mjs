@@ -510,6 +510,15 @@ test("scrollbar press keeps the draft field", { timeout: 120000 }, async () => {
         };
       });
       assert.ok(dlg.bar > 0, "scrollbars hidden");
+      assert.equal(
+        await frame.evaluate(() => {
+          const s = document.querySelector("#idea-key-help");
+          const r = s.getBoundingClientRect();
+          return onScrollbar({ target: s, clientX: r.left + 1, clientY: r.top + 1 });
+        }),
+        false,
+        "an inline span press is not a scrollbar press",
+      );
       const box = await (await page.$("iframe")).boundingBox();
       await page.mouse.click(box.x + dlg.x + dlg.bar / 2, box.y + dlg.y);
       assert.equal(await frame.evaluate(() => document.activeElement?.id), "idea-dlg");
