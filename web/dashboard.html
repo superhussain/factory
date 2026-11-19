@@ -9018,7 +9018,14 @@ function showNotifyToast(kind, href, title, meta) {
   close.type = 'button';
   close.className = 'btn icon notify-toast-close';
   close.setAttribute('aria-label', 'Dismiss notification');
-  close.textContent = '×';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M4 4l8 8M12 4l-8 8');
+  svg.append(path);
+  close.append(svg);
   li.append(link, close);
   const same = [...list.children].find((el) => el.firstChild.getAttribute('href') === href);
   if (same) same.replaceWith(li); else list.append(li);
@@ -9030,10 +9037,21 @@ function showNotifyToast(kind, href, title, meta) {
   };
   setTimeout(expire, TOAST_MS);
 }
-// Removal waits a task, since a disconnected link would not follow its href.
+// Removal waits a task, since a disconnected link would not follow its href. A link moves focus
+// to the drawer it opens; a close button moves it to the next toast, the previous one or the bell.
 $('notify-toasts').addEventListener('click', (e) => {
-  const li = e.target.closest('a, button')?.closest('.notify-toast');
-  if (li) setTimeout(() => li.remove());
+  const target = e.target.closest('a, button');
+  const li = target?.closest('.notify-toast');
+  if (!li) return;
+  if (target.tagName === 'A') {
+    if (target.getAttribute('href') !== location.hash) window.addEventListener('hashchange', () => $('d-close').focus(), { once: true });
+    setTimeout(() => li.remove());
+    return;
+  }
+  const next = (li.nextElementSibling || li.previousElementSibling)?.querySelector('.notify-toast-close') || $('notifications-button');
+  const hadFocus = li.contains(document.activeElement);
+  li.remove();
+  if (hadFocus) next.focus();
 });
 function toastBoard() {
   const seen = boardSnapshot();

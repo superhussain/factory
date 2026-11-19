@@ -68,6 +68,12 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
       );
     const clear = () =>
       page.evaluate(() => document.getElementById("notify-toasts").replaceChildren());
+    const focused = () =>
+      page.evaluate(() => {
+        const el = document.activeElement;
+        const meta = el.closest(".notify-toast")?.querySelector(".inbox-meta").textContent;
+        return meta ? "close " + meta : el.id;
+      });
     const storage = () => page.evaluate(() => localStorage.getItem("factory-alerts-off"));
     const toSettings = async () => {
       await page.evaluate(() => {
@@ -91,15 +97,18 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
           href: "#073-sample-retry",
         },
       ]);
-      assert.equal(
-        await page.$eval(".notify-toast-close", (el) =>
-          [el.getAttribute("aria-label"), el.textContent].join("|"),
-        ),
-        "Dismiss notification|×",
+      assert.deepEqual(
+        await page.$eval(".notify-toast-close", (el) => [
+          el.getAttribute("aria-label"),
+          el.querySelector("svg path").getAttribute("d"),
+        ]),
+        ["Dismiss notification", "M4 4l8 8M12 4l-8 8"],
       );
-      await page.click("#notify-toasts a.notification-link");
+      await page.focus("#notify-toasts a.notification-link");
+      await page.keyboard.press("Enter");
       await page.waitForFunction(() => location.hash === "#073-sample-retry", wait);
       await page.waitForFunction(() => !document.querySelector(".notify-toast"), wait);
+      assert.equal(await focused(), "d-close");
       await page.evaluate(() => {
         location.hash = "";
       });
@@ -139,11 +148,13 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
           ["Needs you", "078-sample-e"],
         ],
       );
-      await page.click(".notify-toast:nth-child(2) .notify-toast-close");
+      await page.focus(".notify-toast:nth-child(2) .notify-toast-close");
+      await page.keyboard.press("Enter");
       await page.waitForFunction(
         () => document.querySelectorAll(".notify-toast").length === 2,
         wait,
       );
+      assert.equal(await focused(), "close 078-sample-e");
       await page.mouse.move(0, 0);
       await page.evaluate(() => document.activeElement.blur());
       const started = Date.now();
@@ -198,6 +209,10 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
       );
       assert.equal(await page.$("#notify-toasts img"), null);
       assert.equal(await page.evaluate(() => window.injected), undefined);
+      await page.focus(".notify-toast-close");
+      await page.keyboard.press("Enter");
+      assert.deepEqual(await toasts(), []);
+      assert.equal(await focused(), "notifications-button");
     });
 
     assert.deepEqual(errors, []);
