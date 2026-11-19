@@ -33,8 +33,8 @@ test("person claims carry kind user and email; mixed or malformed claims stay se
       JSON.stringify(claims),
     );
   await check(
-    { type: "app", email: "person@example.test" },
-    { verified: true, kind: "user", email: "person@example.test" },
+    { type: "app", email: "person@example.test", exp: 4102444800 },
+    { verified: true, kind: "user", email: "person@example.test", exp: 4102444800 },
   );
   await check(
     { email: "person@example.test", common_name: "device" },

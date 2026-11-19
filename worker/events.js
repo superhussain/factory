@@ -17,6 +17,13 @@ export class BoardEvents {
       if (this.ctx.getWebSockets().length >= MAX_SOCKETS)
         return new Response("room full", { status: 503 });
       const [client, server] = Object.values(new WebSocketPair());
+      // Access checks only this upgrade, so the socket keeps its sign-in expiry and origin
+      // through hibernation and refuses writes after that expiry.
+      const exp = Number(request.headers.get("X-Factory-Access-Exp"));
+      server.serializeAttachment({
+        exp: Number.isFinite(exp) ? exp : 0,
+        origin: new URL(request.url).origin,
+      });
       this.ctx.acceptWebSocket(server);
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -54,10 +61,12 @@ export async function announce(env, key) {
   } catch {}
 }
 
-// The room sees only the upgrade itself, never the browser's query or other headers.
-export function connectEvents(request, env) {
+// The room sees only the upgrade itself, never the browser's query or other headers, plus
+// the verified sign-in's expiry in seconds, which only the Worker sets.
+export function connectEvents(request, env, exp) {
   const headers = new Headers();
   for (const [name, value] of request.headers)
     if (name === "upgrade" || name.startsWith("sec-websocket-")) headers.set(name, value);
+  if (Number.isFinite(exp)) headers.set("X-Factory-Access-Exp", String(exp));
   return room(env).fetch(new URL(EVENTS_PATH, request.url), { headers });
 }

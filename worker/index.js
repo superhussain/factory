@@ -3030,7 +3030,7 @@ export async function serveFactory(request, env, principal, ctx) {
       return notFound();
     if (request.headers.get("Origin") !== new URL(request.url).origin)
       return reply("forbidden", 403);
-    return connectEvents(request, env);
+    return connectEvents(request, env, principal.exp);
   }
   if (path.startsWith("/api/")) return api(request, env, path, principal, ctx);
   if (request.method !== "GET") return notFound();
