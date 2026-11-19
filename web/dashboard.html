@@ -444,6 +444,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .column-toggle > span:first-child { margin-inline-end: auto; }
   .col { container: col / inline-size; }
   .count-wide { text-transform: none; }
+  .count-wide, .count-narrow { white-space: nowrap; }
+  /* A header that no longer fits drops its show all button to the next line instead of overlapping it. */
+  .col:not(.collapsed-col) .column-toggle { min-width: min-content; }
   .count-narrow { display: none; }
   @container col (max-width: 240px) { .count-wide { display: none; } .count-narrow { display: inline; } }
   .column-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
@@ -4912,7 +4915,7 @@ function renderBoard() {
     }
     const label = s === 'needs-you' ? 'needs you' : s;
     // A finished column the slim read cut short says how much of it is loaded.
-    const count = TERMINAL.includes(s) && !boardComplete
+    const count = TERMINAL.includes(s) && !boardComplete && lists[i].length < totals[i]
       ? '<span class="count-wide">showing ' + list.length + ' of ' + totals[i] + '</span><span class="count-narrow">' + list.length + ' / ' + totals[i] + '</span>'
       : totals[i];
     return '<section class="col ' + s + (lists[i].length ? '' : ' empty-col') + (collapsed[i] ? ' collapsed-col' : '') + '"><h2>' +
