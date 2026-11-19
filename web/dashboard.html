@@ -209,8 +209,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (hover: hover) { .filter-menu label:hover { background: var(--line); } }
   @media (pointer: coarse) { .filter-menu label { min-height: 44px; } .filter-menu .filter-title { white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; } }
   .header-actions { display: flex; gap: inherit; }
-  body[data-view="settings"] #board, body[data-view="settings"] #detail,
-  body[data-view="retros"] #board, body[data-view="retros"] #detail,
+  body[data-view="settings"] #board, body[data-view="settings"]:not([data-settings-split]) #detail,
+  body[data-view="retros"] #board, body[data-view="retros"]:not([data-retros-split]) #detail,
   body[data-view="inbox"] #board,
   body[data-view="notifications"] #board { display: none; }
   #retros-page { max-width: 1040px; }
@@ -242,12 +242,25 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .inbox-item[aria-current="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
   @media (min-width: 761px) {
-    body[data-inbox-split], body[data-notifications-split] { --split-drawer: min(var(--drawer-w, 760px), 100vw - 400px); }
-    body[data-inbox-split] .detail, body[data-notifications-split] .detail { width: var(--split-drawer); }
+    body[data-inbox-split], body[data-notifications-split], body[data-retros-split], body[data-settings-split] { --split-drawer: min(var(--drawer-w, 760px), 100vw - 400px); }
+    body[data-inbox-split] .detail, body[data-notifications-split] .detail, body[data-retros-split] .detail, body[data-settings-split] .detail { width: var(--split-drawer); }
     body[data-inbox-split] #inbox-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
     body[data-notifications-split] #notifications-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
     body[data-inbox-split] .inbox-item, body[data-notifications-split] .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; }
     body[data-inbox-split] .inbox-actions, body[data-notifications-split] .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
+    body[data-retros-split] #retros-page, body[data-settings-split] #settings-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
+    body[data-retros-split] .settings-section.retro-run { padding: 16px 14px 8px; }
+    body[data-retros-split] .retro-findings-head { display: none; }
+    body[data-retros-split] .retro-finding { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding: 12px 4px; }
+    body[data-retros-split] .retro-share, body[data-retros-split] .retro-cards, body[data-retros-split] .retro-why { grid-column: 2; }
+    body[data-retros-split] .retro-share { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    body[data-retros-split] .retro-share-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; margin-left: -4px; font-weight: 400; color: var(--muted); }
+    body[data-retros-split] .retro-share-bar { flex: none; width: 64px; margin-top: 0; }
+    body[data-retros-split] .retro-cards { margin-top: 8px; }
+    body[data-retros-split] .retro-why-body { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    body[data-settings-split] .settings-layout { grid-template-columns: 1fr; gap: 12px; }
+    body[data-settings-split] .settings-section:has(> .settings-main) { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    body[data-settings-split] .settings-nav { flex-direction: row; overflow-x: auto; }
   }
   #retros-list { display: grid; gap: 20px; }
   .settings-section.retro-run { padding: 20px 20px 12px; }
