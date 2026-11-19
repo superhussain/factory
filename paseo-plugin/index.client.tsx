@@ -6,7 +6,7 @@ import { dashboardScreen } from "./client/dashboard-screen";
 import { startElection } from "./client/election";
 import { useFrameInboxCount } from "./client/frame-inbox";
 import { SettingsScreen } from "./client/settings-screen";
-import { dropWarmFrame, showNeedsNotification } from "./client/web";
+import { dropWarmFrame, noteSidebarOpen, showNeedsNotification } from "./client/web";
 import { createInbox, type Inbox } from "./shared/arrivals";
 import { shownInboxCount } from "./shared/badge";
 import { dashboardHost } from "./shared/embed";
@@ -23,7 +23,11 @@ function factoryItem(inbox: Inbox, reload: Reload) {
       <SidebarRow
         icon="Factory"
         active={active}
-        onPress={() => (active ? reload.fire() : openScreen({ screenId: "dashboard" }))}
+        onPress={() => {
+          if (active) return reload.fire();
+          noteSidebarOpen();
+          openScreen({ screenId: "dashboard" });
+        }}
         trailing={shown > 0 ? <InboxBadge count={shown} theme={theme} /> : undefined}
       />
     );
