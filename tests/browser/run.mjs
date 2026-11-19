@@ -1147,6 +1147,18 @@ async function capture(outdir, referencePath) {
         { timeout: 30000 },
       );
     };
+    // The reference page has no toast stack, so both sides crop the same bottom right corner.
+    const openToasts = async (page, side) => {
+      if (side === "after")
+        await page.evaluate(() => {
+          showNotifyToast("spec", "#073-sample-retry", "Synthetic retry limit", "073-sample-retry");
+          showNotifyToast("backlog", "#/backlog/0123456789ab", "Synthetic backlog idea", "sample");
+        });
+      return page.evaluate(() => {
+        const width = Math.min(innerWidth, 380);
+        return { x: innerWidth - width, y: innerHeight - 220, width, height: 220 };
+      });
+    };
     notifyBoard = true;
     try {
       await view("notifications-menu-1280", 1280, 900, "light", openNotificationsMenu("click"));
@@ -1163,6 +1175,8 @@ async function capture(outdir, referencePath) {
       );
       await view("inbox-split-900", 900, 900, "light", openInboxSplit);
       await view("inbox-split-1280", 1280, 900, "light", openInboxSplit);
+      await view("notify-toast-1280", 1280, 900, "light", openToasts);
+      await view("notify-toast-390", 390, 844, "dark", openToasts);
     } finally {
       notifyBoard = false;
     }
@@ -1411,6 +1425,12 @@ async function capture(outdir, referencePath) {
     };
     await view("notify-settings-desktop", 1280, 900, "light", openNotificationSettings);
     await view("notify-settings-mobile", 390, 844, "light", openNotificationSettings, true);
+    await view("notify-alerts-390", 390, 844, "light", async (page) => {
+      await openNotificationSettings(page);
+      await page.evaluate(() =>
+        document.querySelector("#alert-heading, #sound-heading").scrollIntoView({ block: "start" }),
+      );
+    });
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
