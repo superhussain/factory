@@ -362,6 +362,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #display-filter legend, #display-columns legend, #display-card-fields legend, #display-drawer-links legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #display-filter label, #display-columns label, #display-card-fields label, #display-drawer-links label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); }
   #settings-notifications label[for="notify-needs"], #settings-notifications label[for="notify-push"], #settings-notifications label[for="sound-on"] { display: flex; gap: 8px; align-items: baseline; color: var(--fg); font-size: 13px; }
+  .alert-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
+  .alert-kinds label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); font-size: 13px; }
   .sound-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
   .sound-kinds li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; margin: 0 0 4px; }
   .scheduler-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
@@ -1036,6 +1038,16 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="notify-push"><input type="checkbox" id="notify-push" aria-describedby="push-help" disabled> Push to this device when the dashboard is closed</label>
       <p class="muted" id="push-help"></p>
       <p id="push-status" role="status"></p>
+      <h4 id="alert-heading">Toasts</h4>
+      <p class="muted" id="alert-help">Pick the board events that show a toast in this tab. A sound plays only for events picked here. This setting applies only to this browser.</p>
+      <ul class="alert-kinds" aria-labelledby="alert-heading" aria-describedby="alert-help">
+        <li><label for="alert-backlog"><input type="checkbox" id="alert-backlog" data-alert="backlog"> A new backlog item</label></li>
+        <li><label for="alert-needs"><input type="checkbox" id="alert-needs" data-alert="needs"> A job needs you</label></li>
+        <li><label for="alert-spec"><input type="checkbox" id="alert-spec" data-alert="spec"> A spec is ready</label></li>
+        <li><label for="alert-pr"><input type="checkbox" id="alert-pr" data-alert="pr"> A pull request opens</label></li>
+        <li><label for="alert-merged"><input type="checkbox" id="alert-merged" data-alert="merged"> A job merges</label></li>
+      </ul>
+      <p id="alert-status" role="status"></p>
       <h4 id="sound-heading">Sounds</h4>
       <label for="sound-on"><input type="checkbox" id="sound-on" aria-describedby="sound-help"> Play a sound for board events</label>
       <p class="muted" id="sound-help"></p>
@@ -8866,7 +8878,7 @@ function renderNotifySettings() {
   $('notify-remind').disabled = !notifyActive();
   $('notify-remind').value = remindHours ? String(remindHours) : '';
 }
-function enterNotificationsSection() { renderNotifySettings(); renderSoundSettings(); loadPushState(); $('notify-needs').focus(); }
+function enterNotificationsSection() { renderNotifySettings(); renderAlertSettings(); renderSoundSettings(); loadPushState(); $('notify-needs').focus(); }
 $('notify-needs').addEventListener('change', async () => {
   if ($('notify-needs').checked && notifySupported() && Notification.permission === 'default') await Notification.requestPermission();
   notifyOn = $('notify-needs').checked && notifySupported() && Notification.permission === 'granted';
@@ -8903,6 +8915,16 @@ function jobEvents(prev, seen) {
   }
   return events;
 }
+function renderAlertSettings() {
+  for (const box of document.querySelectorAll('[data-alert]')) box.checked = alertOn(box.dataset.alert);
+}
+$('settings-notifications').addEventListener('change', (e) => {
+  const kind = e.target.dataset.alert;
+  if (!kind) return;
+  if (e.target.checked) alertsOff.delete(kind); else alertsOff.add(kind);
+  if (alertsOff.size) store.set(ALERTS_OFF_KEY, [...alertsOff].join(',')); else store.remove(ALERTS_OFF_KEY);
+  $('alert-status').textContent = 'Toast settings saved for this browser.';
+});
 
 // Board sounds are opt-in per browser and play in a visible or hidden tab. One read plays
 // at most one tone, the first kind in SOUND_ORDER that fired.
