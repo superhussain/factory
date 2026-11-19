@@ -522,7 +522,7 @@ function fakeUI(fetch) {
     setTimeout: (f) => f(),
   });
   vm.runInContext(
-    script.slice(0, script.indexOf("loadProjects().then(")) +
+    script.slice(0, script.indexOf("paintCached().then(")) +
       `
     renderBoard = () => {}; syncDetail = () => {}; renderDetail = () => {}; writeHash = () => {}; loadTracerSetting = async () => {};
     // setConnection() reads pollEvery(), which the page declares after this slice ends.

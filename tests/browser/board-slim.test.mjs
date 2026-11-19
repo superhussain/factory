@@ -188,6 +188,42 @@ test("slim board read", { timeout: 240000 }, async (t) => {
       await page.close();
     });
 
+    await t.test("a saved slim copy waits for the network read before the full read", async () => {
+      // An earlier page leaves the service worker's saved /board.json, the slim body.
+      const first = await openPage(browser, origin);
+      await first.page.waitForFunction(async () => {
+        const cache = await caches.open("factory-v2");
+        return (await cache.keys()).some((r) => new URL(r.url).pathname === "/board.json");
+      }, wait);
+      await first.page.close();
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1440, height: 900 });
+      await controlBoardPolling(page);
+      // The first network slim read waits for window.releaseSlim; full reads are counted.
+      await page.evaluateOnNewDocument(() => {
+        const real = window.fetch;
+        window.fullReadCount = 0;
+        window.fetch = (url, options) => {
+          if (String(url).endsWith("api/board") && !options?.method) window.fullReadCount++;
+          if (String(url).includes("board.json?view=slim") && !window.releaseSlim)
+            return new Promise((resolve) => {
+              window.releaseSlim = () => resolve(real(url, options));
+            });
+          return real(url, options);
+        };
+      });
+      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => loaded === true && boardFromCache === true, wait);
+      assert.equal(await text(page, ".col.merged .count-narrow"), "10 / 30");
+      await page.evaluate(() => wantFullBoard());
+      assert.equal(await page.evaluate(() => window.fullReadCount), 0);
+      await page.evaluate(() => window.releaseSlim());
+      await waitForBoard(page);
+      await page.waitForFunction(() => boardComplete === true, wait);
+      assert.equal(await page.evaluate(() => window.fullReadCount), 1);
+      await page.close();
+    });
+
     await t.test("a 160px column with a 4-digit total keeps the stage name", async () => {
       const { page, errors } = await openPage(browser, origin);
       await clickNow(page, '.column-toggle[data-stage="merged"]');

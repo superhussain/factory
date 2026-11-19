@@ -1205,17 +1205,15 @@ async function capture(outdir, referencePath) {
     } finally {
       refBoard = false;
     }
-    // The reference page has no bell or notifications route, so its menu and page views show the board.
-    const openNotificationsMenu = (press) => async (page, side) => {
-      if (side === "before") return;
+    const openNotificationsMenu = (press) => async (page) => {
       await page[press]("#notifications-button");
       await page.waitForSelector("#notifications-menu-list .notification-link");
     };
-    const openNotificationsPage = async (page, side) => {
+    const openNotificationsPage = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/notifications";
       });
-      if (side === "after") await page.waitForSelector("#notifications-list .inbox-item");
+      await page.waitForSelector("#notifications-list .inbox-item");
     };
     const openInboxSplit = async (page) => {
       await page.evaluate(() => {
@@ -1243,11 +1241,11 @@ async function capture(outdir, referencePath) {
         { timeout: 30000 },
       );
     };
-    const openNotificationsHiddenLinks = async (page, side) => {
+    const openNotificationsHiddenLinks = async (page) => {
       await page.evaluate(() => localStorage.setItem("factory-hidden-drawer-links", "web"));
       await page.reload({ waitUntil: "networkidle0" });
       await page.waitForSelector(".card");
-      await openNotificationsPage(page, side);
+      await openNotificationsPage(page);
     };
     // The reference page has no toast stack, so both sides crop the same bottom right corner.
     const openToasts = async (page, side) => {

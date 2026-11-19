@@ -1,6 +1,7 @@
-// Board ready: the dashboard's first board read has rendered (poll sets the top-level loaded flag after renderBoard).
+// Board ready: the first network board read has rendered. paintCached() sets loaded and
+// boardFromCache for the saved copy, and poll() clears boardFromCache when the network board lands.
 async function waitForBoard(page) {
-  await page.waitForFunction(() => loaded === true, { polling: 50 });
+  await page.waitForFunction(() => loaded === true && !boardFromCache, { polling: 50 });
 }
 // Every poll re-renders the board and replaces each card.
 // Find and click in one evaluate so the card cannot detach between them. page.$eval

@@ -41,7 +41,8 @@ test("project history", { timeout: 180000 }, async (t) => {
     page.on("pageerror", (error) => errors.push(String(error)));
     page.on("dialog", (dialog) => dialog.accept());
     await page.goto(origin + "/#/settings/projects", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector("#settings-tab-notes:not([disabled])", wait);
+    // The tab is never disabled at boot, so wait until the Projects section lays it out.
+    await page.waitForSelector("#settings-tab-notes:not([disabled])", { ...wait, visible: true });
     await page.click("#settings-tab-notes");
     await page.waitForFunction(
       (v2) => document.getElementById("settings-document").value === v2,

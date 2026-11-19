@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
+import { waitForBoard } from "../support/board-ready.cjs";
 import {
   withBrowserFixture,
   seedProject,
@@ -122,6 +123,8 @@ test("w key opens the next waiting job", { timeout: 120000 }, async () => {
 
     await seedBoard(origin, [IDLE]);
     await page.reload({ waitUntil: "domcontentloaded" });
+    // The saved board still has the waiting job, so wait for the reseeded one.
+    await waitForBoard(page);
     await page.waitForSelector('#board .card[data-id="001-sample"]', wait);
     await page.keyboard.press("w");
     assert.equal(await hash(), "");
