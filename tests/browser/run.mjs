@@ -1453,7 +1453,7 @@ async function capture(outdir, referencePath) {
     await view("notify-alerts-390", 390, 844, "light", async (page) => {
       await openNotificationSettings(page);
       await page.evaluate(() =>
-        document.querySelector("#alert-heading, #sound-heading").scrollIntoView({ block: "start" }),
+        document.getElementById("alert-heading").scrollIntoView({ block: "start" }),
       );
     });
     const settleArchiveSettings = async (page, name) => {

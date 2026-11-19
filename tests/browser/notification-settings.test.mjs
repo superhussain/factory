@@ -38,11 +38,11 @@ const PUSH_KEY = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString
 const ENDPOINT = "https://fcm.googleapis.com/fcm/send/sample";
 const IDEA = "- [ ] sample: Synthetic backlog idea\n";
 const SOUND_LABELS = [
-  ["backlog", "A new backlog item"],
-  ["needs", "A job needs you"],
-  ["spec", "A spec is ready"],
-  ["pr", "A pull request opens"],
-  ["merged", "A job merges"],
+  ["backlog", "A new backlog item", "Someone adds an idea to the backlog."],
+  ["needs", "A job needs you", "A job stops and waits on your input."],
+  ["spec", "A spec is ready", "A job moves on from its spec stage."],
+  ["pr", "A pull request opens", "A job opens its pull request for review."],
+  ["merged", "A job merges", "A job's pull request merges."],
 ];
 const PUSH_HELP =
   "Sends a push when a job starts waiting on you or merges. It shows the job id and title only.";
@@ -550,29 +550,35 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(await text('label[for="sound-on"]'), " Play a sound for board events");
       assert.equal(
         await text("#sound-help"),
-        "Each event has its own sound. Pick the events that play one. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.",
+        "Pick which events play a sound under Events. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.",
       );
       assert.equal(await page.$eval("#sound-on", (el) => el.checked), false);
       assert.equal(await storage("factory-sound"), null);
       assert.deepEqual(
-        await page.$$eval(".sound-kinds li", (els) =>
+        await page.$$eval(".event-kinds li", (els) =>
           els.map((li) => {
             const box = li.querySelector("input[data-sound-kind]");
             return [
+              li.querySelector("span").firstChild.textContent,
+              li.querySelector(".event-desc").textContent,
               box.id,
               box.dataset.soundKind,
               box.checked,
-              li.querySelector("label").textContent,
+              box.getAttribute("aria-label"),
+              box.closest("label").textContent,
               li.querySelector("button").textContent,
               li.querySelector("button").getAttribute("aria-label"),
             ];
           }),
         ),
-        SOUND_LABELS.map(([kind, label]) => [
+        SOUND_LABELS.map(([kind, label, desc]) => [
+          label,
+          desc,
           "sound-" + kind,
           kind,
           true,
-          " " + label,
+          "Sound for " + label,
+          " Sound",
           "Play",
           "Play the sound for: " + label,
         ]),
@@ -718,23 +724,44 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await toHash("#/settings/display", "#settings-display:not([hidden])");
     });
 
-    await t.test("sound S6 toast block copy and stored kinds", async () => {
+    await t.test("sound S6 events block copy and stored toast kinds", async () => {
       const boxes = () =>
-        page.$$eval(".alert-kinds input", (els) =>
-          els.map((el) => [el.id, el.dataset.alert, el.closest("label").textContent, el.checked]),
+        page.$$eval(".event-kinds input[data-alert]", (els) =>
+          els.map((el) => [
+            el.id,
+            el.dataset.alert,
+            el.getAttribute("aria-label"),
+            el.closest("label").textContent,
+            el.checked,
+          ]),
         );
-      const expected = (merged) => [
-        ["alert-backlog", "backlog", " A new backlog item", true],
-        ["alert-needs", "needs", " A job needs you", true],
-        ["alert-spec", "spec", " A spec is ready", true],
-        ["alert-pr", "pr", " A pull request opens", true],
-        ["alert-merged", "merged", " A job merges", merged],
-      ];
+      const expected = (merged) =>
+        SOUND_LABELS.map(([kind, label]) => [
+          "alert-" + kind,
+          kind,
+          "Toast for " + label,
+          " Toast",
+          kind === "merged" ? merged : true,
+        ]);
       await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
-      assert.equal(await text("#alert-heading"), "Toasts");
+      assert.equal(await text("#alert-heading"), "Events");
       assert.equal(
         await text("#alert-help"),
-        "Pick the board events that show a toast in this tab. This setting applies only to this browser.",
+        "Pick, for each board event, whether it shows a toast in this tab and whether it plays a sound. These settings apply only to this browser.",
+      );
+      // Each event's name, Toast box, Sound box and Play button share one row.
+      assert.deepEqual(
+        await page.$$eval(".event-kinds li", (els) =>
+          els.map((li) => {
+            const mid = (el) => {
+              const r = el.getBoundingClientRect();
+              return Math.round(r.top + r.height / 2);
+            };
+            const parts = li.querySelectorAll("input, button");
+            return [...parts].every((el) => Math.abs(mid(el) - mid(parts[0])) <= 2);
+          }),
+        ),
+        [true, true, true, true, true],
       );
       assert.deepEqual(await boxes(), expected(false));
       await setStorage("factory-alerts-off", "bogus,merged");

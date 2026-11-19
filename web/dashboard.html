@@ -364,10 +364,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #display-filter legend, #display-columns legend, #display-card-fields legend, #display-drawer-links legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #display-filter label, #display-columns label, #display-card-fields label, #display-drawer-links label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); }
   #settings-notifications label[for="notify-needs"], #settings-notifications label[for="notify-push"], #settings-notifications label[for="sound-on"] { display: flex; gap: 8px; align-items: baseline; color: var(--fg); font-size: 13px; }
-  .alert-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
-  .alert-kinds label, .sound-kinds label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); font-size: 13px; }
-  .sound-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
-  .sound-kinds li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; margin: 0 0 4px; }
+  .event-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
+  .event-kinds li { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 4px 10px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .event-kinds .event-desc { display: block; font-size: 12px; color: var(--muted); }
+  .event-kinds label { display: flex; gap: 4px; align-items: center; margin: 0; color: var(--fg); font-size: 13px; }
   .scheduler-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
   .reference-scroll { overflow-x: auto; margin: 0 0 12px; }
   .reference-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -1040,26 +1040,19 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="notify-push"><input type="checkbox" id="notify-push" aria-describedby="push-help" disabled> Push to this device when the dashboard is closed</label>
       <p class="muted" id="push-help"></p>
       <p id="push-status" role="status"></p>
-      <h4 id="alert-heading">Toasts</h4>
-      <p class="muted" id="alert-help">Pick the board events that show a toast in this tab. This setting applies only to this browser.</p>
-      <ul class="alert-kinds" aria-labelledby="alert-heading" aria-describedby="alert-help">
-        <li><label for="alert-backlog"><input type="checkbox" id="alert-backlog" data-alert="backlog"> A new backlog item</label></li>
-        <li><label for="alert-needs"><input type="checkbox" id="alert-needs" data-alert="needs"> A job needs you</label></li>
-        <li><label for="alert-spec"><input type="checkbox" id="alert-spec" data-alert="spec"> A spec is ready</label></li>
-        <li><label for="alert-pr"><input type="checkbox" id="alert-pr" data-alert="pr"> A pull request opens</label></li>
-        <li><label for="alert-merged"><input type="checkbox" id="alert-merged" data-alert="merged"> A job merges</label></li>
+      <h4 id="alert-heading">Events</h4>
+      <p class="muted" id="alert-help">Pick, for each board event, whether it shows a toast in this tab and whether it plays a sound. These settings apply only to this browser.</p>
+      <ul class="event-kinds" aria-labelledby="alert-heading" aria-describedby="alert-help">
+        <li><span>A new backlog item<span class="event-desc">Someone adds an idea to the backlog.</span></span><label for="alert-backlog"><input type="checkbox" id="alert-backlog" data-alert="backlog" aria-label="Toast for A new backlog item"> Toast</label><label for="sound-backlog"><input type="checkbox" id="sound-backlog" data-sound-kind="backlog" aria-label="Sound for A new backlog item"> Sound</label><button class="btn" type="button" data-sound="backlog" aria-label="Play the sound for: A new backlog item">Play</button></li>
+        <li><span>A job needs you<span class="event-desc">A job stops and waits on your input.</span></span><label for="alert-needs"><input type="checkbox" id="alert-needs" data-alert="needs" aria-label="Toast for A job needs you"> Toast</label><label for="sound-needs"><input type="checkbox" id="sound-needs" data-sound-kind="needs" aria-label="Sound for A job needs you"> Sound</label><button class="btn" type="button" data-sound="needs" aria-label="Play the sound for: A job needs you">Play</button></li>
+        <li><span>A spec is ready<span class="event-desc">A job moves on from its spec stage.</span></span><label for="alert-spec"><input type="checkbox" id="alert-spec" data-alert="spec" aria-label="Toast for A spec is ready"> Toast</label><label for="sound-spec"><input type="checkbox" id="sound-spec" data-sound-kind="spec" aria-label="Sound for A spec is ready"> Sound</label><button class="btn" type="button" data-sound="spec" aria-label="Play the sound for: A spec is ready">Play</button></li>
+        <li><span>A pull request opens<span class="event-desc">A job opens its pull request for review.</span></span><label for="alert-pr"><input type="checkbox" id="alert-pr" data-alert="pr" aria-label="Toast for A pull request opens"> Toast</label><label for="sound-pr"><input type="checkbox" id="sound-pr" data-sound-kind="pr" aria-label="Sound for A pull request opens"> Sound</label><button class="btn" type="button" data-sound="pr" aria-label="Play the sound for: A pull request opens">Play</button></li>
+        <li><span>A job merges<span class="event-desc">A job's pull request merges.</span></span><label for="alert-merged"><input type="checkbox" id="alert-merged" data-alert="merged" aria-label="Toast for A job merges"> Toast</label><label for="sound-merged"><input type="checkbox" id="sound-merged" data-sound-kind="merged" aria-label="Sound for A job merges"> Sound</label><button class="btn" type="button" data-sound="merged" aria-label="Play the sound for: A job merges">Play</button></li>
       </ul>
       <p id="alert-status" role="status"></p>
       <h4 id="sound-heading">Sounds</h4>
       <label for="sound-on"><input type="checkbox" id="sound-on" aria-describedby="sound-help"> Play a sound for board events</label>
       <p class="muted" id="sound-help"></p>
-      <ul class="sound-kinds" aria-labelledby="sound-heading">
-        <li><label for="sound-backlog"><input type="checkbox" id="sound-backlog" data-sound-kind="backlog"> A new backlog item</label><button class="btn" type="button" data-sound="backlog" aria-label="Play the sound for: A new backlog item">Play</button></li>
-        <li><label for="sound-needs"><input type="checkbox" id="sound-needs" data-sound-kind="needs"> A job needs you</label><button class="btn" type="button" data-sound="needs" aria-label="Play the sound for: A job needs you">Play</button></li>
-        <li><label for="sound-spec"><input type="checkbox" id="sound-spec" data-sound-kind="spec"> A spec is ready</label><button class="btn" type="button" data-sound="spec" aria-label="Play the sound for: A spec is ready">Play</button></li>
-        <li><label for="sound-pr"><input type="checkbox" id="sound-pr" data-sound-kind="pr"> A pull request opens</label><button class="btn" type="button" data-sound="pr" aria-label="Play the sound for: A pull request opens">Play</button></li>
-        <li><label for="sound-merged"><input type="checkbox" id="sound-merged" data-sound-kind="merged"> A job merges</label><button class="btn" type="button" data-sound="merged" aria-label="Play the sound for: A job merges">Play</button></li>
-      </ul>
       <p id="sound-status" role="status"></p>
     </section>
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
@@ -9058,7 +9051,7 @@ const SOUND_KEY = 'factory-sound';
 const SOUNDS_OFF_KEY = 'factory-sounds-off';
 const SOUNDS = { backlog: [392, 494], needs: [880, 660, 880], spec: [659, 880], pr: [523, 659], merged: [523, 659, 784] };
 const SOUND_ORDER = ['needs', 'spec', 'pr', 'merged'];
-const SOUND_HELP = 'Each event has its own sound. Pick the events that play one. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.';
+const SOUND_HELP = 'Pick which events play a sound under Events. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.';
 let soundOn = store.get(SOUND_KEY) === 'on';
 const soundsOff = new Set((store.get(SOUNDS_OFF_KEY) || '').split(',').filter((k) => ALERT_KINDS.includes(k)));
 function soundKindOn(kind) { return !soundsOff.has(kind); }
