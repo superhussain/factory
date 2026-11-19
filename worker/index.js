@@ -286,8 +286,16 @@ async function getFile(env, key, type, headers = {}) {
   return obj ? reply(obj.body, 200, type, { ETag: obj.httpEtag, ...headers }) : notFound();
 }
 
+// The last slim body and the board ETag it came from, so this isolate slices each board version once.
+let slimMemo = { etag: "", body: "" };
+
 // The dashboard's first read. A board that is not JSON with a jobs array goes out as stored.
 async function slimBoardGet(env) {
+  const head = await env.BUCKET.head("board.json");
+  if (!head) return notFound();
+  const send = (body, etag) =>
+    reply(body, 200, "application/json", { ETag: etag, "X-Factory-Version": DASHBOARD_VERSION });
+  if (slimMemo.etag === head.httpEtag) return send(slimMemo.body, head.httpEtag);
   const obj = await env.BUCKET.get("board.json");
   if (!obj) return notFound();
   const text = await obj.text();
@@ -295,12 +303,9 @@ async function slimBoardGet(env) {
   try {
     data = JSON.parse(text);
   } catch {}
-  return reply(
-    Array.isArray(data?.jobs) ? JSON.stringify(slimBoard(data)) : text,
-    200,
-    "application/json",
-    { ETag: obj.httpEtag, "X-Factory-Version": DASHBOARD_VERSION },
-  );
+  if (!Array.isArray(data?.jobs)) return send(text, obj.httpEtag);
+  slimMemo = { etag: obj.httpEtag, body: JSON.stringify(slimBoard(data)) };
+  return send(slimMemo.body, obj.httpEtag);
 }
 
 // MP4 and WebM play inline. Their names are content addresses, so a range never goes stale.
