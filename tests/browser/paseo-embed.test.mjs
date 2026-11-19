@@ -421,6 +421,24 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       assert.deepEqual(await draftState(frame), { marker: 1, text: DRAFT, open: true });
       await capture(warm, "after-return.png");
 
+      await warm.evaluate(() => {
+        const side = document.createElement("button");
+        side.id = "side";
+        side.textContent = "Synthetic session row";
+        document.body.append(side);
+      });
+      await warm.click("#side");
+      await park(warm);
+      assert.equal(await attach(warm), true);
+      await warm.evaluate(() => window.attached.frame.element.focus());
+      frame = await warmFrame(warm);
+      assert.equal(await frame.evaluate(() => document.activeElement?.id), "idea-text");
+      await warm.keyboard.type(" more");
+      assert.equal(
+        await frame.evaluate(() => document.querySelector("#idea-text").value),
+        DRAFT + " more",
+      );
+
       await frame.evaluate(() => document.querySelector("#idea-dlg").close());
       await warm.evaluate(
         (src) => window.keeper.jumpTo(window.attached.frame, src),

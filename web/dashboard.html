@@ -220,7 +220,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #audit-flags td a + a { margin-left: 8px; }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #audit-flags td:nth-child(8) { min-width: 14em; }
-  .audit-flag-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .audit-flag-actions { display: flex; flex-wrap: nowrap; gap: 8px; }
+  #audit-flags td:last-child { white-space: nowrap; }
   #audit-flags tr.acked { color: var(--muted); }
   .audit-flags-pager { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
   #audit-flags-pager[hidden] { display: none; }
@@ -1704,6 +1705,16 @@ window.addEventListener('message', (e) => {
   window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, e.origin);
   postEmbedLocation();
   syncInboxLink();
+});
+// In a Paseo frame, a warm return focuses the frame. Put focus back on the last focused element.
+// Chrome has already moved activeElement to body when window blur fires, so track focusin instead.
+let embedFocus = null;
+document.addEventListener('focusin', (e) => { embedFocus = e.target; });
+window.addEventListener('focus', () => {
+  const el = embedFocus;
+  if (!embedParent || !el || !el.isConnected || !el.checkVisibility()) return;
+  if (document.activeElement && document.activeElement !== document.body) return;
+  el.focus({ preventScroll: true });
 });
 document.addEventListener('click', (e) => {
   if (!embedParent) return;
