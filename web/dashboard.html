@@ -6624,6 +6624,9 @@ function closeDetail(keepHash = false) {
   const raw = openBacklogRaw;
   const id = openId;
   const refocus = $('detail').contains(document.activeElement) || document.activeElement === document.body;
+  const back = drawerReturn;
+  // Returning to a page keeps its scroll, so the board refocus is skipped.
+  const pageY = back && !keepHash ? window.scrollY : null;
   drawerVersion++;
   openId = null;
   openBacklogRaw = null;
@@ -6632,17 +6635,20 @@ function closeDetail(keepHash = false) {
   closeJobActions(false);
   syncIdeaEditor();
   renderBoard();
-  const target = raw !== null ? focusBacklogControl(raw) : id && refocus ? focusJobCard(id) : null;
+  const target = pageY !== null ? null : raw !== null ? focusBacklogControl(raw) : id && refocus ? focusJobCard(id) : null;
   target?.scrollIntoView({ block: 'nearest' });
   refreshPicker();
   if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null) replaceUrl(location.pathname + location.search + (drawerReturn ?? ''));
-  const back = drawerReturn;
   drawerReturn = null;
   if (back && !keepHash) renderRoute();
   if (back === '#/inbox' && !keepHash) focusInboxRow(id, raw);
   if (back === '#/notifications' && !keepHash) focusNotificationRow(id, raw);
   if (back && !keepHash && retrosRoute(back)) focusRetrosOpener();
   if (back && !keepHash && settingsRoute(back)) $('settings-nav-' + settingsRoute()).focus();
+  if (pageY === null) return;
+  window.scrollTo(0, pageY);
+  const r = document.activeElement.getBoundingClientRect();
+  if (r.bottom < 0 || r.top > innerHeight) document.activeElement.scrollIntoView({ block: 'nearest' });
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
