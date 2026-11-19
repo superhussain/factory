@@ -1677,6 +1677,7 @@ window.addEventListener('message', (e) => {
   if (!(window.parent !== window && e.source === window.parent && EMBED_ORIGINS.includes(e.origin) &&
         e.data?.type === 'factory-embed-hello' && e.data.v === 1)) return;
   embedParent = e.origin;
+  embedLinksExternal = e.data.links === 'external';
   window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, e.origin);
   postEmbedLocation();
   syncInboxLink();
@@ -1689,6 +1690,21 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   window.parent.postMessage({ type: 'factory-open-agent', v: 1, ...ids }, embedParent);
 }, true);
+let embedLinksExternal = false;
+// In Paseo desktop, a link that would open a new window goes to the system browser instead.
+function openOutside(e) {
+  if (!embedParent || !embedLinksExternal || e.defaultPrevented) return;
+  if (e.type === 'click' ? e.button !== 0 : e.button !== 1) return;
+  const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
+  if (!a || a.hasAttribute('download')) return;
+  if (!(a.target === '_blank' || e.button === 1 || e.metaKey || e.ctrlKey || e.shiftKey)) return;
+  const url = new URL(a.href);
+  if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.href.length > 2048) return;
+  e.preventDefault();
+  window.parent.postMessage({ type: 'factory-open-url', v: 1, url: url.href }, embedParent);
+}
+document.addEventListener('click', openOutside);
+document.addEventListener('auxclick', openOutside);
 // Tells the framing Paseo screen where the board is, so it can reopen here.
 function postEmbedLocation() {
   if (embedParent) window.parent.postMessage({ type: 'factory-embed-location', v: 1, hash: location.hash }, embedParent);

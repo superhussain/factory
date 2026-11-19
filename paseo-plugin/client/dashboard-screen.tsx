@@ -166,7 +166,9 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
         markLoaded(origin);
         setReady(true);
         setStalled(false);
-      } else if (navigation)
+      } else if (message.type === "factory-open-url")
+        openExternalUrl(message.url).catch(() => toast.error("Paseo could not open that link."));
+      else if (navigation)
         navigation.openAgent({ agentId: message.agent, serverId: message.server });
       else toast.error("This Paseo app cannot open agents from plugins.");
     };
