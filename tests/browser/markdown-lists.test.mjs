@@ -11,6 +11,8 @@ const context = { URL };
 vm.runInNewContext(
   [
     "let docDir = null, docBase = null, docRepo = null; let jobs = []; const factoryConfig = { image_origins: [] };",
+    "let boardComplete = true;",
+    slice("function knownJobId(", "let boardReadVersion"),
     slice("function esc(", "function ago("),
     slice("const JOB_IMG", "// Board writes."),
     "globalThis.md = md;",

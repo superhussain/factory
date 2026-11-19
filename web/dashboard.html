@@ -456,6 +456,22 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     padding: 6px 4px; display: flex; align-items: center; gap: 8px; flex: 1;
   }
   .column-toggle > span:first-child { margin-inline-end: auto; }
+  .col { container: col / inline-size; }
+  .count-wide { text-transform: none; }
+  .count-wide, .count-narrow { white-space: nowrap; }
+  /* A short finished column keeps its header on one line, so its cards line up with the next column's.
+     The stage name gives way first, down to 4ch; past that, show all drops to a second line. */
+  .col.partial-col .column-toggle { min-width: min-content; }
+  .col.partial-col .column-toggle > span:first-child {
+    contain: inline-size; flex: 1 1 0; min-width: 4ch; margin-inline-end: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start;
+  }
+  .count-narrow { display: none; }
+  @container col (max-width: 280px) {
+    .count-wide { display: none; }
+    .count-narrow { display: inline; }
+    .col.partial-col .column-toggle { gap: 4px; }
+  }
   .column-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
   .collapsed-col h2 { margin-bottom: 0; }
   .collapsed-col .column-toggle { writing-mode: vertical-rl; align-items: flex-start; height: auto; flex: none; width: 36px; }
@@ -468,7 +484,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .archive-head { margin: 4px 0 0; }
   .archive-count { font-size: 12px; color: var(--muted); margin: 0; }
   .archive-error { font-size: 12px; color: var(--alert); margin: 0; }
-  .archive-more[aria-disabled="true"] { opacity: .6; cursor: default; }
+  .more[aria-disabled="true"], .archive-more[aria-disabled="true"] { opacity: .6; cursor: default; }
   .blank { grid-column: 1 / -1; text-align: center; padding: 64px 16px; color: var(--muted); }
   .blank h2 { margin: 0 0 8px; font-size: 16px; color: var(--fg); }
   .blank p { margin: 4px 0; font-size: 13px; }
@@ -1554,6 +1570,66 @@ let boardArchived = false;
 let archiveSearch = null;
 // Pages of GET /api/board/archive?page=N, shown under the merged and closed columns.
 const archiveList = { open: false, rows: [], page: 0, pages: 0, total: 0, busy: false, error: '', errorStage: '' };
+// The board read is GET /board.json?view=slim: unfinished rows, the newest finished ones and slim.counts.
+// A view that needs older finished rows reads /api/board once; its finished rows stay in fullFinished.
+let fullFinished = null;
+let fullEtag = '';
+let fullWanted = false;
+let boardComplete = true;
+let slimCounts = {};
+let fullRead = null;
+function loadFullBoard() {
+  if (!fullRead) {
+    fullRead = (async () => {
+      try {
+        const r = await fetch('./api/board', { cache: 'no-store' });
+        if (!r.ok) throw new Error(r.status);
+        const data = await r.json();
+        fullFinished = (Array.isArray(data.jobs) ? data.jobs : []).filter((j) => TERMINAL.includes(j.stage));
+        fullEtag = (r.headers.get('ETag') || '').replace(/^W\//, '');
+      } catch {
+        fullRead = null;
+        if (loaded) renderBoard();
+        showBoardStatus('Could not load merged and closed jobs. Try again.');
+        return;
+      } finally {
+        fullRead = null;
+      }
+      await poll({ withBacklog: false });
+      if (openId) await openJob(openId);
+    })();
+    if (loaded) renderBoard();
+  }
+  return fullRead;
+}
+// A saved copy only records the wish; the first network read then loads the full board.
+function wantFullBoard() {
+  fullWanted = true;
+  return loaded && !boardFromCache && !boardComplete ? loadFullBoard() : Promise.resolve();
+}
+// Finished rows of stage s over the shown projects, counted by the Worker.
+function finishedShown(s) {
+  return Object.entries(slimCounts).reduce((n, [p, c]) => n + (isShown(p) ? c[s] || 0 : 0), 0);
+}
+// A board read's rows plus any loaded older finished rows. A body without slim (an old cache) is the whole board.
+function slimRows(data) {
+  const rows = Array.isArray(data.jobs) ? data.jobs : [];
+  if (!data.slim) {
+    boardComplete = true;
+    return rows;
+  }
+  slimCounts = data.slim.counts || {};
+  const ids = new Set(rows.map((j) => j.id));
+  const all = fullFinished ? rows.concat(fullFinished.filter((j) => !ids.has(j.id))) : rows;
+  // slim.counts counts each id once per stage, so the rows are compared the same way.
+  boardComplete = TERMINAL.every((s) => new Set(all.filter((j) => j.stage === s).map((j) => j.id)).size ===
+    Object.values(slimCounts).reduce((n, c) => n + (c[s] || 0), 0));
+  return all;
+}
+// Until the full board loads, a ref may name a finished row the slim read left out.
+function knownJobId(id) {
+  return jobs.some((x) => x.id === id) || !boardComplete;
+}
 let boardReadVersion = 0;
 const BACKLOG_POLL_MS = 120000;
 let backlogReadAt = 0;
@@ -1585,7 +1661,7 @@ function refreshBacklog() {
 }
 
 function takeBoard(data) {
-  jobs = Array.isArray(data.jobs) ? data.jobs : [];
+  jobs = slimRows(data);
   boardArchived = Number.isInteger(data.archived?.max_id);
   boardUpdated = data.updated || '';
 }
@@ -1609,7 +1685,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
   const version = ++boardReadVersion;
   try {
     if (withBacklog) refreshBacklog();
-    const r = await fetch('./board.json', { cache: 'no-store' });
+    const r = await fetch('./board.json?view=slim', { cache: 'no-store' });
     if (r.status === 401 || r.status === 403) {
       setConnection('signin');
       noteBoardLoadError('signin');
@@ -1648,6 +1724,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     syncBacklogRoute();
     syncIdeaEditor();
     if ($('job-picker').open) renderJobResults();
+    if (!boardComplete && fullWanted && etag.replace(/^W\//, '') !== fullEtag) loadFullBoard();
     return true;
   } catch (e) {
     if (version !== boardReadVersion) return false;
@@ -2127,7 +2204,7 @@ function line(cls, text) {
 
 // A ref to a job on the board is a mouse target that opens it; card() adds its keyboard stand-in. Others stay text.
 function refLine(r) {
-  const id = jobs.some((x) => x.id === r.id) ? '<span class="ref-link" data-ref="' + esc(r.id) + '">' + esc(r.id) + '</span>' : esc(r.id);
+  const id = knownJobId(r.id) ? '<span class="ref-link" data-ref="' + esc(r.id) + '">' + esc(r.id) + '</span>' : esc(r.id);
   return esc(REF_KINDS[r.kind]) + ' ' + id;
 }
 
@@ -2181,7 +2258,7 @@ function card(j, inNeeds, archived = false) {
     (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub" title="">PR #' + esc(pr.n) + '</a>' : '') +
     (archived ? '' : '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
     ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') +
-    refs(j).filter((r) => jobs.some((x) => x.id === r.id)).map((r) => standIn(r.id, REF_KINDS[r.kind] + ' ' + r.id)).join('') +
+    refs(j).filter((r) => knownJobId(r.id)).map((r) => standIn(r.id, REF_KINDS[r.kind] + ' ' + r.id)).join('') +
     (dupOnBoard ? standIn(dup, 'possible duplicate of ' + dup) : '') +
     riders.map((id) => standIn(id, 'batches ' + id)).join('') + '</div>';
 }
@@ -2451,6 +2528,7 @@ function actionsOpener() {
 
 function openJobPicker() {
   if (document.querySelector('dialog[open]:not(#job-picker)')) return;
+  wantFullBoard();
   if ($('job-picker').open && pickerMode === 'actions') {
     // Cmd+K in actions mode swaps to the normal jumper.
     pickerFocus = actionsOpener();
@@ -3197,6 +3275,7 @@ function settingsSplit() {
   return drawerReturn !== null && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null ? settingsRoute(drawerReturn) : null;
 }
 function renderRoute() {
+  if (location.hash.length > 1 && location.hash !== '#/inbox' && !parseHash().id) wantFullBoard();
   const routed = settingsRoute(), section = routed ?? settingsSplit(), was = settingsShown;
   if (routed && location.hash !== '#/settings/' + routed)
     replaceUrl(location.pathname + location.search + '#/settings/' + routed);
@@ -4903,7 +4982,9 @@ function renderBoard() {
   for (const s of COLUMNS) if (s !== 'backlog' && !TERMINAL.includes(s)) starredFirst(lists[COLUMNS.indexOf(s)]);
   if (!settingsShown && !retrosShown() && !inboxShown() && !notificationsShown()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
-  const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
+  // Until the full board loads, a finished column counts every row the Worker counted.
+  const totals = COLUMNS.map((s, i) => TERMINAL.includes(s) && !boardComplete ? finishedShown(s) : lists[i].length);
+  const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (totals[i] === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
   const starredOnly = starView === 'only' && !noneShown;
   const starredLine = starredOnly ? '<p class="filter-empty" id="starred-only">' +
@@ -4918,20 +4999,31 @@ function renderBoard() {
     if (hiddenColumns.has(s)) return '';
     let list = lists[i];
     let more = '';
+    // A finished column the slim read cut short.
+    const partial = TERMINAL.includes(s) && !boardComplete && lists[i].length < totals[i];
     if (TERMINAL.includes(s)) {
       const t = (j) => Date.parse(j.done || j.updated) || 0;
       starredFirst(list.sort((a, b) => t(b) - t(a)));
-      if (list.length > CAP) {
-        const open = expanded.has(s);
-        more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '">' +
-          (open ? 'show ' + CAP : 'show all ' + list.length) + '</button>';
+      if (totals[i] > CAP) {
+        const open = expanded.has(s) && boardComplete;
+        const loading = !boardComplete && fullRead;
+        // A short column's header already shows the total, so only its accessible name repeats it.
+        // While the full read runs the text stays put; the button is dimmed and busy.
+        more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '"' +
+          (loading ? ' aria-disabled="true" aria-busy="true"' : '') +
+          (partial ? ' aria-label="show all ' + totals[i] + ' ' + s + '"' : '') + '>' +
+          (open ? 'show ' + CAP : 'show all' + (partial ? '' : ' ' + totals[i])) + '</button>';
         if (!open) list = list.slice(0, CAP);
       }
     }
     const label = s === 'needs-you' ? 'needs you' : s;
-    return '<section class="col ' + s + (lists[i].length ? '' : ' empty-col') + (collapsed[i] ? ' collapsed-col' : '') + '"><h2>' +
-      '<button type="button" class="column-toggle" data-stage="' + s + '" aria-label="' + (collapsed[i] ? 'Expand ' : 'Collapse ') + label +
-      ' column" aria-expanded="' + !collapsed[i] + '" aria-controls="column-cards-' + s + '"><span>' + label + '</span><span>' + lists[i].length +
+    // A finished column the slim read cut short says how much of it is loaded.
+    const count = partial
+      ? '<span class="count-wide">showing ' + list.length + ' of ' + totals[i] + '</span><span class="count-narrow">' + list.length + ' / ' + totals[i] + '</span>'
+      : totals[i];
+    return '<section class="col ' + s + (lists[i].length ? '' : ' empty-col') + (collapsed[i] ? ' collapsed-col' : partial ? ' partial-col' : '') + '"><h2>' +
+      '<button type="button" class="column-toggle" data-stage="' + s + '" title="' + label + '" aria-label="' + (collapsed[i] ? 'Expand ' : 'Collapse ') + label +
+      ' column" aria-expanded="' + !collapsed[i] + '" aria-controls="column-cards-' + s + '"><span>' + label + '</span><span>' + count +
       '</span><span aria-hidden="true">' + (collapsed[i] ? '+' : '−') + '</span></button>' + (collapsed[i] ? '' : more) +
       '</h2><div class="cards" id="column-cards-' + s + '"' + (collapsed[i] ? ' hidden' : '') + '>' +
       (list.length ? list.map((j, k) => s === 'backlog' ? backlogCard(j, k === 0) : card(j, s === 'needs-you')).join('') : '<div class="empty">none</div>') +
@@ -4978,6 +5070,11 @@ $('board').addEventListener('click', (e) => {
   const m = e.target.closest('.more');
   if (m) {
     const s = m.dataset.stage;
+    if (!boardComplete && TERMINAL.includes(s)) {
+      expanded.add(s);
+      wantFullBoard();
+      return;
+    }
     if (!expanded.delete(s)) expanded.add(s);
     renderBoard();
     return;
@@ -5418,6 +5515,10 @@ async function loadArchivePage(stage) {
 
 async function openJob(id) {
   let j = jobs.find((x) => x.id === id) ?? archivedJobs.get(id);
+  if (!j && loaded) {
+    await wantFullBoard();
+    j = jobs.find((x) => x.id === id);
+  }
   if (!j && loaded) {
     const got = await loadArchivedJob(id);
     if (parseHash().id !== id) return;
@@ -6746,7 +6847,7 @@ const NEW_TAB = '<span class="new-tab" aria-hidden="true">&#8599;</span><span cl
 function autolink(s) {
   return s.replace(REF, (m, id, num, key, n, pr) => {
     let href = null;
-    if (id) href = jobs.some((j) => j.id === id) ? '#' + encodeURIComponent(id) : null;
+    if (id) href = knownJobId(id) ? '#' + encodeURIComponent(id) : null;
     else if (num) {
       const hits = jobs.filter((j) => String(j.id).startsWith(num + '-'));
       href = hits.length === 1 ? '#' + encodeURIComponent(hits[0].id) : null;
@@ -7077,6 +7178,7 @@ async function openBacklogRoute(key) {
       if (openBacklogRaw !== item.raw) openBacklogItem(item);
       return;
     }
+    await wantFullBoard();
     let job = null;
     for (const j of jobs) if (typeof j.backlog?.line === 'string' && await sha12(j.backlog.line) === key) job = j;
     if (backlogRoute() !== key) return;
@@ -8821,6 +8923,7 @@ function backlogHistoryHtml(history) {
 
 // Earlier rounds of a reworked item may be archived, so missing rework-of ids load from the archive.
 async function fetchReworkHistory(item) {
+  await wantFullBoard();
   const known = () => [...jobs, ...archivedJobs.values()];
   const next = (r) => (Array.isArray(r) ? r : []).find((x) => x && x.kind === 'rework-of' && typeof x.id === 'string');
   const seen = new Set();
@@ -9456,8 +9559,10 @@ function setStarView(v) {
   starView = pickDisplay(v, STAR_VIEWS);
   if (starView === 'float') store.remove(DISPLAY_KEYS.starred); else store.set(DISPLAY_KEYS.starred, starView);
   $('display-starred').value = starView;
+  if (starView === 'only') wantFullBoard();
   if (loaded) renderBoard();
 }
+if (starView === 'only') wantFullBoard();
 const DRAWER_LINKS = [['pr', 'PR'], ...['app', 'web'].filter(k => factoryConfig.agent_links[k]).map(k => [k, factoryConfig.agent_links[k].label]), ['tracer', 'Tracer']];
 const hiddenDrawerLinks = new Set((store.get(DISPLAY_KEYS.drawerLinks) || '').split(',').filter(f => DRAWER_LINKS.some(([k]) => k === f)));
 let pollTimer = 0, pollStarted = false;

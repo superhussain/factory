@@ -642,6 +642,7 @@ test("simultaneous board claims preserve the single winner and exact ETag", asyn
   const response = await s.request("/board.json");
   assert.equal(await response.text(), bodies[winner]);
   assert.equal(response.headers.get("ETag"), responses[winner].headers.get("ETag"));
+  assert.equal(await (await s.request("/api/board")).text(), bodies[winner]);
 });
 
 test("a board write cannot change an existing row's id", async () => {

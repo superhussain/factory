@@ -70,6 +70,8 @@ async function makePage(browser, origin, support, width, theme) {
   await page.setViewport({ width, height: width === 1280 ? 900 : 844, deviceScaleFactor: 1 });
   await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: theme }]);
   page.on("pageerror", (error) => errors.push(error.message));
+  // The service worker's own network reads would skip the full-board rewrite below.
+  await page.setBypassServiceWorker(true);
   await page.setRequestInterception(true);
   page.on("request", async (request) => {
     const target = new URL(request.url());
@@ -77,6 +79,10 @@ async function makePage(browser, origin, support, width, theme) {
       violations.push(request.method() + " " + request.url());
       return request.abort();
     }
+    // This suite is about collapse on a complete board, so it reads the whole board, as a
+    // saved copy from before the slim read would; board-slim.test.mjs covers the slim read.
+    if (target.pathname === "/board.json" && target.search === "?view=slim")
+      return request.continue({ url: origin + "/board.json" });
     return request.continue();
   });
   await page.goto(origin + "/dashboard.html", { waitUntil: "domcontentloaded" });
