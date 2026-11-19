@@ -1676,6 +1676,7 @@ window.addEventListener('message', (e) => {
         e.data?.type === 'factory-embed-hello' && e.data.v === 1)) return;
   embedParent = e.origin;
   window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, e.origin);
+  postEmbedLocation();
   syncInboxLink();
 });
 document.addEventListener('click', (e) => {
@@ -1686,6 +1687,15 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   window.parent.postMessage({ type: 'factory-open-agent', v: 1, ...ids }, embedParent);
 }, true);
+// Tells the framing Paseo screen where the board is, so it can reopen here.
+function postEmbedLocation() {
+  if (embedParent) window.parent.postMessage({ type: 'factory-embed-location', v: 1, hash: location.hash }, embedParent);
+}
+function replaceUrl(url) {
+  history.replaceState(null, '', url);
+  postEmbedLocation();
+}
+window.addEventListener('hashchange', postEmbedLocation);
 // Tell a listed Paseo parent the Inbox count, once the board and backlog have loaded.
 function postInboxCount(n) {
   if (!embedParent || !loaded || (!backlogLoaded && !backlogFailed)) return;
@@ -3084,7 +3094,7 @@ function settingsRoute() {
 function renderRoute() {
   const section = settingsRoute(), was = settingsShown;
   if (section && location.hash !== '#/settings/' + section)
-    history.replaceState(null, '', location.pathname + location.search + '#/settings/' + section);
+    replaceUrl(location.pathname + location.search + '#/settings/' + section);
   const focusInside = $('settings-page').contains(document.activeElement);
   const retrosWas = $('retros-page').hidden === false;
   settingsShown = section;
@@ -3127,7 +3137,7 @@ function renderRoute() {
 }
 function leaveSettings() {
   location.hash = '';
-  history.replaceState(null, '', location.pathname + location.search);
+  replaceUrl(location.pathname + location.search);
 }
 $('settings-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
 $('board-link').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
@@ -5271,7 +5281,7 @@ function pendingTab() {
 
 // replaceState, so a tab switch adds no history entry and fires no hashchange.
 function writeHash() {
-  history.replaceState(null, '', '#' + encodeURIComponent(openId) + '/' + activeFile.replace(/\.md$/, ''));
+  replaceUrl('#' + encodeURIComponent(openId) + '/' + activeFile.replace(/\.md$/, ''));
 }
 
 function label(name) {
@@ -6212,7 +6222,7 @@ function closeDetail(keepHash = false) {
   const target = raw !== null ? focusBacklogControl(raw) : id && refocus ? focusJobCard(id) : null;
   target?.scrollIntoView({ block: 'nearest' });
   refreshPicker();
-  if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null) history.replaceState(null, '', location.pathname + location.search + (drawerReturn ?? ''));
+  if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null) replaceUrl(location.pathname + location.search + (drawerReturn ?? ''));
   const back = drawerReturn;
   drawerReturn = null;
   if (back && !keepHash) renderRoute();
@@ -6800,7 +6810,7 @@ async function openBacklogRoute(key) {
     for (const j of jobs) if (typeof j.backlog?.line === 'string' && await sha12(j.backlog.line) === key) job = j;
     if (backlogRoute() !== key) return;
     if (job) {
-      history.replaceState(null, '', location.pathname + location.search + '#' + encodeURIComponent(job.id));
+      replaceUrl(location.pathname + location.search + '#' + encodeURIComponent(job.id));
       openJob(job.id);
     } else {
       closeDetail();
@@ -8486,7 +8496,7 @@ function openBacklogItem(item) {
   docDir = null;
   docBase = null;
   docRepo = projects?.get(item.project)?.repo || null;
-  if (settingsRoute() === null && retrosRoute() === null) history.replaceState(null, '', location.pathname + location.search + '#/backlog/' + item.key);
+  if (settingsRoute() === null && retrosRoute() === null) replaceUrl(location.pathname + location.search + '#/backlog/' + item.key);
   $('detail').hidden = false;
   $('d-title').textContent = 'Backlog item';
   $('d-meta').textContent = projectName({ project: item.project }) + ' · backlog';

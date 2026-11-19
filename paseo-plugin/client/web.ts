@@ -10,6 +10,7 @@ import {
 } from "../shared/embed";
 import { needsBody, needsTitle, type WaitingJob } from "../shared/arrivals";
 import * as firstLogin from "../shared/first-login";
+import { readLocation, writeLocation } from "../shared/location";
 import { setFrameInboxCount } from "./frame-inbox";
 
 // This plugin typechecks without the DOM library. Declare only what this module uses.
@@ -28,6 +29,7 @@ declare const localStorage: {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
 };
+declare const sessionStorage: firstLogin.SeenStorage;
 declare const location: { origin: string };
 type Permission = "granted" | "denied" | "default";
 declare const Notification: {
@@ -43,6 +45,16 @@ declare const Notification: {
 };
 
 const WEB: firstLogin.WebGlobals = { storage: () => localStorage, origin: () => location.origin };
+
+const SESSION = () => sessionStorage;
+
+export function savedLocation(origin: string): string {
+  return readLocation(Platform.OS === "web" ? SESSION : null, origin);
+}
+
+export function saveLocation(origin: string, hash: string): void {
+  writeLocation(Platform.OS === "web" ? SESSION : null, origin, hash);
+}
 
 function webGlobals() {
   return Platform.OS === "web" ? WEB : null;

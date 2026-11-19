@@ -4,11 +4,13 @@ export const EMBED_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const ORIGIN =
   /^https:\/\/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)\/?$/i;
 export const JOB_ID = /^[A-Za-z0-9-]{1,128}$/;
+export const EMBED_HASH = /^(?:#[A-Za-z0-9\-_.!~*'()%/]{1,256})?$/;
 
 export type EmbedMessage =
   | { type: "factory-embed-ready" }
   | { type: "factory-open-agent"; server: string; agent: string }
-  | { type: "factory-inbox-count"; count: number };
+  | { type: "factory-inbox-count"; count: number }
+  | { type: "factory-embed-location"; hash: string };
 
 export function parseDashboardOrigin(value: string): string | null {
   const match = ORIGIN.exec(value.trim());
@@ -33,6 +35,7 @@ export function readEmbedMessage(data: unknown): EmbedMessage | null {
     server?: unknown;
     agent?: unknown;
     count?: unknown;
+    hash?: unknown;
   };
   if (message.v !== 1) return null;
   if (message.type === "factory-embed-ready") return { type: "factory-embed-ready" };
@@ -51,6 +54,12 @@ export function readEmbedMessage(data: unknown): EmbedMessage | null {
     message.count >= 0
   )
     return { type: "factory-inbox-count", count: message.count };
+  if (
+    message.type === "factory-embed-location" &&
+    typeof message.hash === "string" &&
+    EMBED_HASH.test(message.hash)
+  )
+    return { type: "factory-embed-location", hash: message.hash };
   return null;
 }
 

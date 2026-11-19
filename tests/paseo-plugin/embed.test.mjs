@@ -89,6 +89,17 @@ test("signed in", () => {
   assert.equal(readEmbedMessage(signedIn), null);
 });
 
+test("location", () => {
+  const base = { type: "factory-embed-location", v: 1 };
+  for (const hash of ["", "#/settings/display"])
+    assert.deepEqual(readEmbedMessage({ ...base, hash }), {
+      type: "factory-embed-location",
+      hash,
+    });
+  for (const data of [{ ...base, hash: "#a b" }, base, { ...base, hash: "#/x", v: 2 }])
+    assert.equal(readEmbedMessage(data), null, JSON.stringify(data));
+});
+
 test("a frame load clears the count, then says hello", () => {
   const calls = [];
   const target = { postMessage: (message, origin) => calls.push(["hello", message, origin]) };
