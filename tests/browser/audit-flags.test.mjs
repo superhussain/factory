@@ -437,6 +437,8 @@ test(
         );
         assert.equal((await trs()).length, 1);
 
+        // The idea button reads the job's project from the board, which can land after the flag rows.
+        await page.waitForFunction(() => jobs.some((j) => j.id === "1017-add-x"));
         const idea = await page.$(
           '#audit-flags-rows button[aria-label="Make an idea from the pipe-to-shell call in 1017-add-x"]',
         );
