@@ -57,7 +57,7 @@ export const SLIM_RECENT = 10;
 
 /** The board with every unfinished row, the newest finished rows of each stage by `updated`, and per-project finished counts. */
 export function slimBoard(data) {
-  const counts = {};
+  const counts = Object.create(null);
   const finished = { merged: [], closed: [] };
   for (const job of data.jobs) {
     if (!terminal(job)) continue;
