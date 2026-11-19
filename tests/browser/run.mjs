@@ -247,6 +247,26 @@ const CAPTURE_JOBS = [
     note: "gate: spec-approval",
     needs: "approve spec.md, then run /factory approve-spec 110-spec-gate to start the build",
   },
+  {
+    id: "111-tracer-gate",
+    project: "sample",
+    title: "Synthetic Tracer scope hold",
+    stage: "needs-human",
+    updated: "2026-01-01T12:00:00Z",
+    note: "gate: tracer-scope",
+    tracer: { url: "https://tracer.example.test/scope/111" },
+  },
+  {
+    id: "112-held-pr",
+    project: "sample",
+    title: "Synthetic held PR",
+    stage: "pr-open",
+    updated: "2026-01-01T12:00:00Z",
+    branch: "factory/112-held-pr",
+    round: 1,
+    pr: "https://github.com/example/sample/pull/112",
+    needs: "review and merge PR #112: this project's pipeline holds every PR for a person",
+  },
 ];
 // More merged rows than the slim board read carries, so the merged column loads the rest on demand.
 const CAPTURE_MERGED = Array.from({ length: 30 }, (_, n) => {
@@ -2012,6 +2032,17 @@ async function capture(outdir, referencePath) {
           el.textContent.includes("110-spec-gate"),
         ),
       );
+    });
+    await view("inbox-unblock-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/inbox";
+      });
+      await page.waitForFunction(() => {
+        const meta = [...document.querySelectorAll("#inbox-list .inbox-meta")];
+        return ["111-tracer-gate", "112-held-pr"].every((id) =>
+          meta.some((el) => el.textContent.includes(id)),
+        );
+      });
     });
     const openCardActions = (id) => async (page) => {
       const wrap = `.card-wrap:has(.card[data-id="${id}"])`;
