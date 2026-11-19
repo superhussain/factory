@@ -182,6 +182,18 @@ test("approve spec", { timeout: 240000 }, async (t) => {
         ]);
       });
 
+      await t.test(`the focused bar button shows a ring ${width}`, async () => {
+        await openDrawer(page, "042-sample-export");
+        await page.focus("#d-approve-spec-bar");
+        assert.deepEqual(
+          await page.$eval("#d-approve-spec-bar", (el) => [
+            el.matches(":focus-visible"),
+            getComputedStyle(el).outlineStyle,
+          ]),
+          [true, "solid"],
+        );
+      });
+
       await t.test(`a dismissed confirm writes nothing ${width}`, async () => {
         const before = await (await fetch(origin + "/api/board")).text();
         await openDrawer(page, "042-sample-export");
@@ -198,6 +210,7 @@ test("approve spec", { timeout: 240000 }, async (t) => {
           () => document.getElementById("d-approve-spec-bar").hidden,
           wait,
         );
+        assert.equal(await page.evaluate(() => document.activeElement.id), "d-actions");
         const j = await boardJob(origin, "042-sample-export");
         assert.deepEqual(
           [j.stage, j.note, "needs" in j, j.updated],
