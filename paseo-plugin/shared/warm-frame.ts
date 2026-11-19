@@ -1,7 +1,7 @@
 // One warm dashboard frame per plugin installation. It parks while the Factory screen is away
 // and is dropped after WARM_FRAME_MS. Only Element.moveBefore keeps a moved iframe's document;
 // appendChild reloads it, so without moveBefore the frame is dropped instead of parked.
-export const WARM_FRAME_MS = 30 * 60_000;
+export const WARM_FRAME_MS = 4 * 60 * 60_000;
 
 export type FrameNode = { src: string; remove(): void };
 export type FrameParent<E> = {
