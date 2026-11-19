@@ -169,9 +169,41 @@ async function slimRead() {
   return { sent: 0, received: read.received };
 }
 
+// The writing tab's own socket: one patch frame, timed until the ack with its op.
+const writer = new WebSocket(origin.replace(/^http/, "ws") + "/events/board", {
+  headers: { Origin: origin },
+});
+await new Promise((resolve, reject) => {
+  writer.addEventListener("open", resolve, { once: true });
+  writer.addEventListener("error", () => reject(new Error("/events/board: writer socket failed")));
+});
+let ops = 0;
+async function socketIdea() {
+  const row = newRow();
+  const op = "t" + ++ops;
+  const frame = JSON.stringify({
+    type: "patch",
+    op,
+    updated: row.updated,
+    rows: [{ id: row.id, expect: null, row }],
+  });
+  const reply = await new Promise((resolve) => {
+    const onMessage = (e) => {
+      if (JSON.parse(e.data).op !== op) return;
+      writer.removeEventListener("message", onMessage);
+      resolve(e.data);
+    };
+    writer.addEventListener("message", onMessage);
+    writer.send(frame);
+  });
+  if (JSON.parse(reply).type !== "ack") throw new Error(`socket new idea: ${reply}`);
+  return { sent: Buffer.byteLength(frame), received: Buffer.byteLength(reply) };
+}
+
 const STEPS = [
   ["rest new idea", restIdea],
   ["patch new idea", patchIdea],
+  ["socket new idea", socketIdea],
   ["rest backlog accept", () => acceptLine(restIdea)],
   ["patch backlog accept", () => acceptLine(patchIdea)],
   ["second tab frame", frameAfterPatch],
@@ -186,6 +218,7 @@ for (let run = 0; run < RUNS; run++)
   }
 
 socket.destroy();
+writer.close();
 await service?.close();
 await rm(dir, { recursive: true, force: true });
 
@@ -205,3 +238,11 @@ for (const [name, list] of results) {
   );
 }
 console.log("The dashboard waits LIVE_READ_MS (2000 ms) after a frame before its read.");
+const median = (name) =>
+  pick(
+    results.get(name).map((r) => r.ms),
+    0.5,
+  );
+console.log(
+  `socket new idea median is ${Math.round((100 * median("socket new idea")) / median("patch new idea"))}% of patch new idea`,
+);
