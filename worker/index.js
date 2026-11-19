@@ -288,6 +288,22 @@ async function getFile(env, key, type, headers = {}) {
 
 // The last slim body and the board ETag it came from, so this isolate slices each board version once.
 let slimMemo = { etag: "", body: "" };
+// The read in flight for one board ETag, so concurrent misses in this isolate parse the board once.
+let slimPending = { etag: "", read: null };
+
+// Resolves to plain strings only, so no R2 object crosses requests.
+async function readSlim(env) {
+  const obj = await env.BUCKET.get("board.json");
+  if (!obj) return null;
+  const text = await obj.text();
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch {}
+  if (!Array.isArray(data?.jobs)) return { etag: obj.httpEtag, body: text };
+  slimMemo = { etag: obj.httpEtag, body: JSON.stringify(slimBoard(data)) };
+  return slimMemo;
+}
 
 // The dashboard's first read. A board that is not JSON with a jobs array goes out as stored.
 async function slimBoardGet(env) {
@@ -296,16 +312,16 @@ async function slimBoardGet(env) {
   const send = (body, etag) =>
     reply(body, 200, "application/json", { ETag: etag, "X-Factory-Version": DASHBOARD_VERSION });
   if (slimMemo.etag === head.httpEtag) return send(slimMemo.body, head.httpEtag);
-  const obj = await env.BUCKET.get("board.json");
-  if (!obj) return notFound();
-  const text = await obj.text();
-  let data = null;
-  try {
-    data = JSON.parse(text);
-  } catch {}
-  if (!Array.isArray(data?.jobs)) return send(text, obj.httpEtag);
-  slimMemo = { etag: obj.httpEtag, body: JSON.stringify(slimBoard(data)) };
-  return send(slimMemo.body, obj.httpEtag);
+  if (slimPending.etag !== head.httpEtag) {
+    const read = readSlim(env);
+    const clear = () => {
+      if (slimPending.read === read) slimPending = { etag: "", read: null };
+    };
+    read.then(clear, clear);
+    slimPending = { etag: head.httpEtag, read };
+  }
+  const out = await slimPending.read;
+  return out ? send(out.body, out.etag) : notFound();
 }
 
 // MP4 and WebM play inline. Their names are content addresses, so a range never goes stale.
