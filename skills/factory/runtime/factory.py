@@ -6416,7 +6416,7 @@ ROLE_ALIASES = {"builder": "build", "factory-builder": "build",
                 "approver": "approve", "factory-approver": "approve",
                 "factory-review-security": "review-security", "factory-review-ux": "review-ux",
                 "factory-review-ui": "review-ui", "factory-review-code": "review-code"}
-VIA_ALIASES = {"subagent": "native"}
+VIA_ALIASES = {"subagent": "native", "agent": "native", "local": "native"}
 PROMPT_USAGE = "usage: prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]"
 PROMPT_HELP = ("roles and flags: spec | approve | build [--round N] [--port P] | review-security, review-ux, "
                "review-ui or review-code --round N. Every role also takes --out <path>.\n"
