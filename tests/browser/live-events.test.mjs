@@ -13,7 +13,6 @@ const job = (stage) => ({
   stage,
   updated: "2026-01-01T00:00:00Z",
 });
-const CHANGED = '{"type":"changed","key":"board.json"}';
 const wait = { polling: 50, timeout: 10000 };
 
 test("live board events", { timeout: 240000 }, async (t) => {
@@ -141,6 +140,7 @@ test("live board events", { timeout: 240000 }, async (t) => {
     await t.test("live L1 a board write reaches the open dashboard", async () => {
       const { context, page, frames, errors, boardReads } = await open();
       const etag = (await fetch(origin + "/board.json")).headers.get("ETag");
+      const readsBefore = boardReads.count;
       // The clock covers only the write and the frame it causes, not page or seed reads.
       const started = Date.now();
       const write = await fetch(origin + "/api/board", {
@@ -152,11 +152,16 @@ test("live board events", { timeout: 240000 }, async (t) => {
       while (!frames.length && Date.now() - started < 2000)
         await new Promise((resolve) => setTimeout(resolve, 20));
       assert.deepEqual(
-        frames.map((frame) => frame.data),
-        [CHANGED],
+        frames.map((frame) => JSON.parse(frame.data).type),
+        ["rows"],
       );
-      const elapsed = frames[0].at - started;
-      assert.ok(elapsed < 2000, `board change reached the dashboard after ${elapsed} ms`);
+      const sent = JSON.parse(frames[0].data);
+      assert.equal(sent.prev, etag.replace(/^W\//, ""));
+      assert.equal(sent.etag, write.headers.get("ETag"));
+      assert.deepEqual(
+        sent.rows.map((row) => [row.id, row.stage]),
+        [["001-sample", "pr-open"]],
+      );
       await page.waitForFunction(
         () =>
           document
@@ -165,6 +170,9 @@ test("live board events", { timeout: 240000 }, async (t) => {
             .classList.contains("pr-open"),
         wait,
       );
+      const elapsed = Date.now() - started;
+      assert.ok(elapsed < 1000, `the card moved ${elapsed} ms after the write`);
+      assert.equal(boardReads.count, readsBefore, "the rows frame applied with no board read");
       const [socketOpen, pending, closes] = await page.evaluate(() => [
         liveOpen,
         [...window.pollTimers.values()],
@@ -508,6 +516,32 @@ test("live board events", { timeout: 240000 }, async (t) => {
       await fireTimers(page);
       assert.deepEqual(await page.evaluate("window.liveFetches"), { board: 2, backlog: 0 });
       assert.deepEqual(await page.evaluate("window.liveTimers"), []);
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+    await t.test("live L15 a rows frame with another prev reads once", async () => {
+      const { context, page, errors } = await open();
+      await catchLiveReads(page);
+      const stage = await stageOf(page);
+      await page.evaluate(() =>
+        liveSocket.dispatchEvent(
+          new MessageEvent("message", {
+            data: JSON.stringify({
+              type: "rows",
+              etag: '"synthetic-next"',
+              prev: '"synthetic-other"',
+              updated: "2026-01-01T00:00:00Z",
+              rows: [{ id: "001-sample", project: "sample", stage: "spec" }],
+              removed: [],
+            }),
+          }),
+        ),
+      );
+      assert.deepEqual(await page.evaluate("window.liveTimers"), [{ ms: 2000, key: "board.json" }]);
+      assert.equal(await stageOf(page), stage, "a frame on another version is not applied");
+      await fireTimers(page);
+      assert.deepEqual(await page.evaluate("window.liveFetches"), { board: 1, backlog: 0 });
       assert.deepEqual(errors, []);
       await context.close();
     });

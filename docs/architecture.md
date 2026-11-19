@@ -84,6 +84,8 @@ conditional semantics. A board write that names the stored version also
 cannot change a row's id: one write may not drop a stored id and add a row.
 It also cannot add `move`, `priority`, `paused` or `close` to a row with a
 `batched-into` ref, since a rider follows its lead.
+It cannot add a new `idea` row with `priority.batch: true` (`checkNewStarters`): Run batch
+now marks only a held idea already on the board, so a read can cover every starter.
 Remove from batch may drop the ref from a rider that is not stacked, from
 `spec` to `idea`, while its lead is at `spec`.
 New device clients always send conditions; the blind
@@ -271,8 +273,9 @@ rather than loosens. The measured limit result is recorded in
 
 The `BoardEvents` Durable Object (`worker/events.js`, a plain Durable Object on the WebSocket
 Hibernation API) tells open dashboards when `board.json` or `backlog.md` changed. It
-stores nothing and never carries board content. The room holds at most 100 open sockets
-and answers a further upgrade with 503.
+stores nothing. After a board `PATCH` or `If-Match` `PUT` it carries the rows that write
+changed, only to sockets whose Access sign-in has not expired. The room holds at most 100
+open sockets and answers a further upgrade with 503.
 
 ```mermaid
 sequenceDiagram
@@ -287,6 +290,46 @@ sequenceDiagram
   W-->>D: 200 ETag (unchanged)
   B->>W: GET /board.json?view=slim
 ```
+
+After a board `PATCH`, or a `PUT` whose `If-Match` names the stored board, `rowsFrame` in
+`worker/index.js` sends the rows it committed instead:
+
+```mermaid
+sequenceDiagram
+  participant W as Worker
+  participant R as BoardEvents room
+  participant B as tab B at e1
+  W->>W: rowsFrame stored, data, e2
+  W->>R: POST notify body rows frame
+  R-->>B: type rows, etag e2, prev e1
+  B->>B: takeRows, renderBoard
+```
+
+- Frame: `{"type":"rows","etag":"\"e2\"","prev":"\"e1\"","updated":"...","rows":[...],"removed":[...]}`.
+  `rows` holds each new or changed row in full, `removed` the ids that left.
+
+| Tab state | Action |
+| --- | --- |
+| loaded, not from cache, `bareEtag(boardEtag) === prev` | `takeRows`: replace, drop, append, `boardEtag = etag`, redraw, no read |
+| any other `prev`, or a cached board | one slim board read after 2 s |
+| `changed` frame | re-reads its key |
+
+| Socket | Gets |
+| --- | --- |
+| upgrade `exp` in the future | the `rows` frame |
+| `exp` past, or no attachment (opened before the frame shipped) | `changed`, so its read hits Access |
+
+The Worker passes the verified user principal's `exp` to the room in an `X-Factory-Exp`
+header it sets itself, and the upgrade stores it with `serializeAttachment`. Browser
+headers other than the upgrade ones are still dropped.
+
+| Write that keeps the `changed` ping | Why |
+| --- | --- |
+| `PUT` with `If-None-Match: *`, or a first write | no `prev` |
+| a changed or removed row is `merged` or `closed` on either side | slim rows and `slim.counts` need the Worker |
+| top-level fields other than `jobs` and `updated` changed | `archived` and the like |
+| duplicate or non-string ids | no safe diff |
+| over 100 changed rows, or a frame over 262,144 bytes | frame size |
 
 - `casPut` announces only a committed write. A 412 announces nothing, and a
   failed announcement leaves the reply unchanged.
@@ -306,7 +349,8 @@ sequenceDiagram
   rows per project and stage, under the stored `ETag`. Finished column headers then say
   `showing 10 of N`. Once a view needs older rows (show all, the jumper, a link to an older
   job, another route, the starred-only view) it reads `/api/board` once and keeps those rows.
-  `/board.json` without the query still returns the stored bytes.
+  `/board.json` without the query still returns the stored bytes. Concurrent slim misses in
+  one isolate share one read, `slimPending`, keyed by board `ETag`.
 
 | Request to `/events/board` | Result |
 | --- | --- |
@@ -340,6 +384,10 @@ sequenceDiagram
 - The body is `{"updated", "rows": [{"id", "expect", "row"}]}`, 1 to 100 entries, one per id,
   at most 1 MiB. `expect` is the row the client saw, or null for a new row. `row` is the new
   row, or null to remove it. Rows match by JSON with sorted keys.
+- Optional `"reads": [{"id", "sha256"}]` names the rows the edit decided from but did not
+  change, such as the other held ideas Run batch now checks. `sha256` is the lowercase hex
+  SHA-256 of the row's JSON with sorted keys (`rowDigest` in the dashboard, `rowSha256` in
+  the Worker). One per id, none also in `rows`, and no count cap beyond the 1 MiB body.
 - The Worker builds the whole board from the stored rows, runs the same checks as `PUT`
   (`boardRefusal`, always against the stored base), writes with `onlyIf`, and retries its own
   R2 412 up to 10 times. A commit announces `board.json` and sends pushes as `PUT` does.
@@ -349,10 +397,11 @@ sequenceDiagram
 | Case | Worker reply | Client |
 | --- | --- | --- |
 | `expect` differs from the stored row | 409 `conflict`, current rows | replaces those rows, reruns `change` |
+| A `reads` digest differs, or its row is gone | 409 `conflict`, that row or null | replaces it, reruns `change` |
 | New id number at or below the stored max | 409 `conflict`, `max_id` | raises its max id and reruns, so the id becomes the next free number |
 | New row's `capture_id` is already stored | 409 `conflict`, that row | `addIdea` finds the prior id, sends nothing |
 | A `PUT` check refuses | 400, same text | same message as a `PUT` refusal |
-| Malformed body, or unreadable stored board | 400 | shows the text |
+| Malformed body or `reads`, or unreadable stored board | 400 | shows the text |
 | Merged board over 16 MiB | 413, nothing written | shows the text |
 | R2 412 ten times | 409 `busy` | "the board kept changing" |
 

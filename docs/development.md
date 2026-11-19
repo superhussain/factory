@@ -144,7 +144,7 @@ records matched before and after views. Each `view(...)` line in
 
 | Viewport | Used by |
 | --- | --- |
-| 1440x900 | desktop views, `retros-flags-offline-desktop`, `board-merged-all-1440`, `board-merged-header-1440`, `board-merged-loading-1440`, `board-merged-160-1763`, `board-merged-160-1763-loading`, `header-badges-1440` |
+| 1440x900 | desktop views, `retros-flags-offline-desktop`, `board-merged-all-1440`, `board-merged-header-1440`, `board-merged-loading-1440`, `board-merged-saved-click-1440`, `board-banner-saved-1440`, `board-offline-deeplink-1440`, `board-merged-160-1763`, `board-merged-160-1763-loading`, `header-badges-1440` |
 | 1280x900 | settings, archive and agent-run views, `notify-toast-1280`, `notifications-menu-kinds-1280`, `notifications-split-1280`, `notifications-page-hidden-links-1280`, `notify-sound-wait-1280`, `retros-split-1280`, `settings-split-1280`, `approve-spec-drawer-1280`, `inbox-spec-1280`, `inbox-unblock-1280` |
 | 390x844 | mobile views, `notify-toast-390`, `notify-alerts-390`, `board-merged-header-390` and `approve-spec-drawer-390` |
 | 375x667 | `drawer-mobile-scrolled` |
@@ -154,6 +154,17 @@ records matched before and after views. Each `view(...)` line in
 - Board data is the fixed `CAPTURE_JOBS`, `CAPTURE_MERGED` and `CAPTURE_BACKLOG` fixtures.
 - `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
 - A spec that needs another size or state adds a task for a new `view(...)` line.
+
+### Paseo plugin cards
+
+`node tools/capture-plugin-cards.mjs --capture <outdir>` renders the Factory screen's three cards (first login, stall, sign-in expired) from the real `paseo-plugin/client/dashboard-screen.tsx`. It writes `plugin-card-<card>-1280.png` (1280x800) and `plugin-card-<card>-390.png` (390x844, compact layout). It needs `pnpm --dir paseo-plugin install --frozen-lockfile` and the provisioned browser.
+
+Set `FACTORY_CAPTURE_PROBE_URL` to make the page request that URL; the run must then fail with "requests during plugin card capture" and write no PNG. `node --test tests/paseo-plugin/card-capture-guard.test.mjs` proves it.
+
+- Settings are synthetic: dashboard `https://factory.example.test`, Paseo origin `https://app.example.test`.
+- Before images: `git archive <base> paseo-plugin | tar -x -C .context/base`, then add `--plugin .context/base/paseo-plugin`.
+- `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
+- Owned stubs in `tools/paseo-capture/` stand in for React Native, the Paseo plugin API and the frame. Layout is close to Paseo's, not identical. Icons are outlined squares, and the palette is a synthetic dark theme. Compare before and after from this tool only, never against app screenshots.
 
 ## Pre-commit checks
 

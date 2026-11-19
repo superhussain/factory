@@ -343,6 +343,20 @@ async function offline() {
   await assert.rejects(helpers(async () => response("", 500)).api.casBacklog(mark), {
     message: "reading the backlog failed: 500",
   });
+  // The service worker's saved backlog answers 200 with X-Factory-Offline; nothing is written.
+  const methods = [];
+  const offlineRead = {
+    ...response("- [ ] sample: First item  \n"),
+    headers: { get: (k) => (k === "X-Factory-Offline" ? "1" : null) },
+  };
+  await assert.rejects(
+    helpers(async (url, opts = {}) => {
+      methods.push(opts.method || "GET");
+      return offlineRead;
+    }).api.casBacklog(mark),
+    { message: "reading the backlog failed: you're offline, so nothing was saved" },
+  );
+  assert.deepEqual(methods, ["GET"]);
 
   // decideBacklog: board first, then the line; an uncertain failure keeps the capture_id,
   // so the retry reuses the same job; a vanished line removes the job it created.

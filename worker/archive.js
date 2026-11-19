@@ -13,7 +13,7 @@ const DAY = 86400000;
 const ID_PREFIX = /^(\d{3,})-/;
 const SEARCH_FIELDS = ["id", "title", "project", "jira", "pr", "idea", "goal"];
 const PR_QUERY = /^(?:pr\s*)?#(\d+)$/i;
-const terminal = (job) => job?.stage === "merged" || job?.stage === "closed";
+export const terminal = (job) => job?.stage === "merged" || job?.stage === "closed";
 const doneAt = (job) => Date.parse(job?.done);
 const newestFirst = (a, b) =>
   doneAt(b) - doneAt(a) || (String(a.id) < String(b.id) ? 1 : String(a.id) > String(b.id) ? -1 : 0);

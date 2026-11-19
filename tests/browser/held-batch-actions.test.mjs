@@ -32,7 +32,7 @@ const WAITS = "Waits for a batch (2 of 3, 3h of 24h)";
 const boardJob = async (origin, id) =>
   (await (await fetch(origin + "/api/board")).json()).jobs.find((j) => j.id === id);
 
-test("held batch actions", { timeout: 180000 }, async () => {
+test("held batch actions", { timeout: 180000 }, async (t) => {
   await prepareAssets();
   await withBrowserFixture(async ({ browser, origin }) => {
     await seedProject(
@@ -150,6 +150,34 @@ test("held batch actions", { timeout: 180000 }, async () => {
     await page.waitForSelector(`${MENU}:not([hidden])`);
     assert.equal(await page.$eval(`${MENU} [data-action="d-run-batch"]`, (b) => b.hidden), false);
     await page.keyboard.press("Escape");
+
+    await t.test("Run batch now with 120 held ideas", async () => {
+      await seedProject(
+        origin,
+        "sample",
+        "---\nrepo: example/sample\nbase: main\ntitle: Sample\n---\n",
+      );
+      const held = Array.from({ length: 120 }, (_, k) => ({
+        ...idea(`${1880 + k}-held-follow-up`),
+        project: "sample",
+      }));
+      await seedBoard(origin, held);
+      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      await waitForBoard(page);
+      await page.evaluate(() => (location.hash = "#1880-held-follow-up"));
+      await page.waitForFunction(() =>
+        document.getElementById("d-meta").textContent.includes("1880-held-follow-up"),
+      );
+      await openJobActions(page);
+      const [saved] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.url().endsWith("/api/board") && r.request().method() === "PATCH",
+        ),
+        page.click("#d-run-batch"),
+      ]);
+      assert.equal(saved.status(), 200);
+      assert.equal((await boardJob(origin, "1880-held-follow-up")).priority?.batch, true);
+    });
     assert.deepEqual(errors, []);
   });
 });

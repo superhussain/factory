@@ -1139,6 +1139,36 @@ async function capture(outdir, referencePath) {
       await clickMore(page);
       return clipOf(page, ".col.pr-open h2", ".col.merged .card");
     });
+    // The saved slim copy is on screen, so a click on show all turns busy until the network read.
+    await view("board-merged-saved-click-1440", 1440, 900, "light", async (page) => {
+      await holdFullRead(page);
+      await expandMerged(page);
+      await page.evaluate(() => {
+        if (typeof boardFromCache !== "undefined") boardFromCache = true;
+      });
+      await clickMore(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    });
+    await view("board-banner-saved-1440", 1440, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        boardFromCache = true;
+        setConnection("unreachable");
+      });
+      return clipOf(page, "#conn-banner");
+    });
+    await view("board-offline-deeplink-1440", 1440, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        const fetchNow = window.fetch;
+        window.fetch = (url, options) =>
+          /api\/board(\/archive|$)/.test(new URL(url, location.href).pathname)
+            ? Promise.reject(new TypeError("offline"))
+            : fetchNow(url, options);
+        boardFromCache = true;
+        setConnection("offline");
+        location.hash = "#500-synthetic-merged";
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    });
     // The merged column at 160px with a production-sized total. The reference page has no
     // slim counts, so its before shot keeps the fixture's own total.
     const narrowThousands = async (page) => {

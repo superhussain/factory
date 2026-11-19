@@ -27,7 +27,7 @@ export default {
     serveFactory(
       request,
       { ...env, config },
-      { verified: true, kind: "user", email: "operator@example.test" },
+      { verified: true, kind: "user", email: "operator@example.test", exp: 4102444800 },
       ctx,
     ),
 };

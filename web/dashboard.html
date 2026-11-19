@@ -502,6 +502,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .archive-count { font-size: 12px; color: var(--muted); margin: 0; }
   .archive-error { font-size: 12px; color: var(--alert); margin: 0; }
   .more[aria-disabled="true"], .archive-more[aria-disabled="true"] { opacity: .6; cursor: default; }
+  .more[aria-busy="true"] { position: relative; color: transparent; }
+  .more[aria-busy="true"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .more[aria-busy="true"]::after { content: ''; position: absolute; top: 50%; left: calc(50% + 3px); width: 10px; height: 10px; margin: -5px 0 0 -5px; box-sizing: border-box; border: 2px solid var(--muted); border-right-color: transparent; border-radius: 50%; animation: more-spin .8s linear infinite; }
+  @keyframes more-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .more[aria-busy="true"]::after { animation: none; } }
   .blank { grid-column: 1 / -1; text-align: center; padding: 64px 16px; color: var(--muted); }
   .blank h2 { margin: 0 0 8px; font-size: 16px; color: var(--fg); }
   .blank p { margin: 4px 0; font-size: 13px; }
@@ -1509,20 +1514,21 @@ const CONNECTION = {
   signin: ['Your sign-in has expired.', 'dot err', 'sign-in expired'],
   unreachable: ["Can't reach the factory. The board loads when it answers.", 'dot err', 'board.json unreachable'],
 };
+const UNREACHABLE_SAVED = "Can't reach the factory. Showing the saved board until it answers.";
 function drawDot(className, label) { const dot = $('dot'); dot.className = className; dot.title = label; dot.setAttribute('aria-label', label); }
 let connState = '';
 function setConnection(state) {
   const was = connState; connState = state;
   const [text, dot, title] = CONNECTION[state];
   $('conn-banner').hidden = state === 'online';
-  $('conn-text').textContent = text;
+  $('conn-text').textContent = state === 'unreachable' && boardFromCache ? UNREACHABLE_SAVED : text;
   $('conn-signin').hidden = state !== 'signin';
   const polling = state === 'online' && !liveOpen;
   const every = pollEvery();
   const cadence = every ? 'Polling every ' + every + ' seconds until live updates reconnect' : 'Polling paused while this window is hidden or unfocused';
   const label = polling ? cadence + (liveNote && '. ' + liveNote) : title;
   drawDot(polling ? dot + ' polling' : dot, label);
-  if (was === 'signin' && state !== 'signin') { syncLive(); syncAppBadge(badgeCount); }
+  if (was === 'signin' && state !== 'signin') { syncLive(); syncAppBadge(badgeCount); postEmbedReady(); }
   if (state === 'signin') syncAppBadge(badgeCount);
   if (state === 'signin' && was !== 'signin') postEmbedSignin();
 }
@@ -1709,6 +1715,39 @@ async function paintCached() {
   } catch {}
 }
 
+// Cloudflare's edge may hand the page a weak W/"..." ETag; a rows frame names the bare one.
+function bareEtag(e) { return e.replace(/^W\//, ''); }
+
+// Redraws everything that shows the board after a read or a rows frame changes it.
+function boardTaken() {
+  drawUpdated();
+  renderBoard();
+  loadHoldConfigs();
+  notifyNeeds();
+  boardSound();
+  toastBoard();
+  if (settingsShown === 'projects') renderProjectList();
+  syncDetail();
+  syncBacklogRoute();
+  syncIdeaEditor();
+  if ($('job-picker').open) renderJobResults();
+}
+
+// A rows frame built on the board this tab holds applies in place, with no read. It
+// returns false when the tab holds another version or a saved copy, so the caller reads.
+function takeRows(frame) {
+  if (!loaded || boardFromCache || bareEtag(boardEtag) !== frame.prev) return false;
+  ++boardReadVersion;
+  const rows = new Map(frame.rows.map((j) => [j.id, j]));
+  const removed = new Set(frame.removed);
+  jobs = jobs.filter((j) => !removed.has(j.id)).map((j) => rows.get(j.id) || j)
+    .concat(frame.rows.filter((j) => !jobs.some((x) => x.id === j.id)));
+  boardUpdated = frame.updated || '';
+  boardEtag = frame.etag;
+  boardTaken();
+  return true;
+}
+
 async function poll({ ifChanged = false, withBacklog = true } = {}) {
   const version = ++boardReadVersion;
   try {
@@ -1728,7 +1767,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     noteDeployedVersion(r);
     // A socket open or a timer tick redraws only a changed board, so a focused card is not read again.
     // syncDetail() still reopens a deep-linked tab or archived job that has not loaded.
-    if (ifChanged && loaded && etag && etag === boardEtag) {
+    if (ifChanged && loaded && etag && bareEtag(etag) === boardEtag) {
       syncDetail();
       return true;
     }
@@ -1738,20 +1777,10 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     }
     takeBoard(data);
     boardFromCache = false;
-    boardEtag = etag;
+    boardEtag = bareEtag(etag);
     boardLoadError = '';
     loaded = true;
-    drawUpdated();
-    renderBoard();
-    loadHoldConfigs();
-    notifyNeeds();
-    boardSound();
-    toastBoard();
-    if (settingsShown === 'projects') renderProjectList();
-    syncDetail();
-    syncBacklogRoute();
-    syncIdeaEditor();
-    if ($('job-picker').open) renderJobResults();
+    boardTaken();
     if (!boardComplete && fullWanted && etag.replace(/^W\//, '') !== fullEtag) loadFullBoard();
     return true;
   } catch (e) {
@@ -1847,11 +1876,12 @@ window.addEventListener('message', (e) => {
         e.data?.type === 'factory-embed-hello' && e.data.v === 1)) return;
   embedParent = e.origin;
   embedLinksExternal = e.data.links === 'external';
-  window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, e.origin);
+  postEmbedReady();
   if (connState === 'signin') postEmbedSignin();
   postEmbedLocation();
   syncInboxLink();
 });
+function postEmbedReady() { if (embedParent) window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, embedParent); }
 function postEmbedSignin() { if (embedParent) window.parent.postMessage({ type: 'factory-embed-signin', v: 1 }, embedParent); }
 // In a Paseo frame, a warm return focuses the frame. Put focus back on the last focused element.
 // Chrome has already moved activeElement to body when window blur fires, so track focusin instead.
@@ -5069,9 +5099,9 @@ function renderBoard() {
       starredFirst(list.sort((a, b) => t(b) - t(a)));
       if (totals[i] > CAP) {
         const open = expanded.has(s) && boardComplete;
-        const loading = !boardComplete && fullRead;
+        const loading = !boardComplete && (fullRead || (fullWanted && boardFromCache && expanded.has(s)));
         // A short column's header already shows the total, so only its accessible name repeats it.
-        // While the full read runs the text stays put; the button is dimmed and busy.
+        // While the full read runs the text keeps its width under a spinner; the button is dimmed and busy.
         more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '"' +
           (loading ? ' aria-disabled="true" aria-busy="true"' : '') +
           (partial ? ' aria-label="show all ' + totals[i] + ' ' + s + '"' : '') + '>' +
@@ -5136,6 +5166,7 @@ $('board').addEventListener('click', (e) => {
     if (!boardComplete && TERMINAL.includes(s)) {
       expanded.add(s);
       wantFullBoard();
+      if (boardFromCache) renderBoard();
       return;
     }
     if (!expanded.delete(s)) expanded.add(s);
@@ -5578,6 +5609,14 @@ async function loadArchivePage(stage) {
 
 async function openJob(id) {
   let j = jobs.find((x) => x.id === id) ?? archivedJobs.get(id);
+  // The saved copy or an offline board may lack an older finished row. The next network read's syncDetail() reopens it.
+  if (!j && loaded && (boardFromCache || connState === 'offline')) {
+    if (connState === 'offline' && archiveFailNoted !== id) {
+      archiveFailNoted = id;
+      showBoardStatus(`You're offline. Job ${id} opens when you reconnect.`);
+    }
+    return;
+  }
   if (!j && loaded) {
     await wantFullBoard();
     j = jobs.find((x) => x.id === id);
@@ -7508,11 +7547,22 @@ function rowChanges(before, after) {
   return rows;
 }
 
+// JSON.stringify with object keys sorted at every depth, the same as the Worker's.
+function canonicalJson(value) {
+  return JSON.stringify(value, (_, v) =>
+    v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v);
+}
+// Lowercase hex SHA-256 of the row's canonical JSON, the digest the Worker checks a read against.
+async function rowDigest(row) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalJson(row)));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 // change(board) in place over a copy of the rows this tab holds, then PATCH only the rows it
 // changed, each with the row it expects to replace. A 409 conflict brings the current rows,
 // and change runs again on them. change throws to abort with nothing written.
 // reads(board) names the other rows change decides from, read before it runs. A write sends
-// each as an unchanged row, so a stale one comes back as a conflict too.
+// each as a digest of the row this tab holds, so a stale one comes back as a conflict too.
 const BOARD_UNCHANGED = Symbol('board unchanged');
 let boardWrites = 0;
 async function casBoard(change, { reads } = {}) {
@@ -7528,12 +7578,11 @@ async function casBoard(change, { reads } = {}) {
       if (result === BOARD_UNCHANGED) return result;
       const rows = rowChanges(before, board.jobs);
       if (!rows.length) return result;
-      for (const id of readIds)
-        if (known.has(id) && !rows.some((e) => e.id === id)) rows.push({ id, expect: known.get(id), row: known.get(id) });
+      const digests = await Promise.all(readIds.filter((id) => known.has(id) && !rows.some((e) => e.id === id)).map(async (id) => ({ id, sha256: await rowDigest(known.get(id)) })));
       if (!navigator.onLine) throw new Error("saving the board failed: you're offline, so nothing was saved");
       let r;
       try {
-        r = await fetch('./api/board', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updated: board.updated, rows }) });
+        r = await fetch('./api/board', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updated: board.updated, rows, ...(digests.length && { reads: digests }) }) });
       } catch (x) {
         x.uncertain = true; // the request may have landed before the connection dropped
         throw x;
@@ -9763,8 +9812,10 @@ function schedulePoll() {
   drawLiveDot();
 }
 document.addEventListener('visibilitychange', () => { syncLive(); if (pollStarted && !document.hidden) readBoard(); schedulePoll(); });
-// Live board events: the Worker sends {"type":"changed","key":...} after each board or
-// backlog write, and the matching key re-reads once, 2 s after the first frame; frames during a read add one more read. A dropped socket retries with backoff
+// Live board events: after a board PATCH or If-Match PUT the Worker sends {"type":"rows",...}
+// with the changed rows, which a tab at the frame's prev ETag applies with no read. Other
+// writes, and other tabs, get {"type":"changed","key":...} or a read: the matching key
+// re-reads once, 2 s after the first frame; frames during a read add one more read. A dropped socket retries with backoff
 // (1, 2, 4 ... 30 s), then every 30 s while a socket is wanted. An expired sign-in stops retries until a board read succeeds.
 const LIVE_PATH = '/events/board';
 const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000;
@@ -9791,8 +9842,10 @@ function openLive() {
   });
   ws.addEventListener('message', (e) => {
     if (ws !== liveSocket) return;
-    let key;
-    try { key = JSON.parse(e.data).key; } catch {}
+    let frame;
+    try { frame = JSON.parse(e.data); } catch {}
+    if (frame?.type === 'rows') { if (!takeRows(frame)) queueLiveRead('board.json'); return; }
+    const key = frame?.key;
     if (Object.hasOwn(liveReads, key)) queueLiveRead(key);
     else { queueLiveRead('board.json'); queueLiveRead('backlog.md'); }
   });

@@ -9,7 +9,14 @@ import {
   HOST_NAME,
   validatePipeline,
 } from "./admission.js";
-import { ARCHIVE_KEY, archiveGet, needsTriageKey, runArchive, slimBoard } from "./archive.js";
+import {
+  ARCHIVE_KEY,
+  archiveGet,
+  needsTriageKey,
+  runArchive,
+  slimBoard,
+  terminal,
+} from "./archive.js";
 import {
   DASHBOARD_VERSION,
   escapeHtml,
@@ -288,24 +295,42 @@ async function getFile(env, key, type, headers = {}) {
 
 // The last slim body and the board ETag it came from, so this isolate slices each board version once.
 let slimMemo = { etag: "", body: "" };
+// The read in flight for one board ETag, so concurrent misses in this isolate parse the board once.
+let slimPending = { etag: "", read: null };
 
-// The dashboard's first read. A board that is not JSON with a jobs array goes out as stored.
-async function slimBoardGet(env) {
-  const head = await env.BUCKET.head("board.json");
-  if (!head) return notFound();
-  const send = (body, etag) =>
-    reply(body, 200, "application/json", { ETag: etag, "X-Factory-Version": DASHBOARD_VERSION });
-  if (slimMemo.etag === head.httpEtag) return send(slimMemo.body, head.httpEtag);
+// Resolves to plain strings only, so no R2 object crosses requests.
+async function readSlim(env) {
   const obj = await env.BUCKET.get("board.json");
-  if (!obj) return notFound();
+  if (!obj) return null;
   const text = await obj.text();
   let data = null;
   try {
     data = JSON.parse(text);
   } catch {}
-  if (!Array.isArray(data?.jobs)) return send(text, obj.httpEtag);
+  if (!Array.isArray(data?.jobs)) return { etag: obj.httpEtag, body: text };
   slimMemo = { etag: obj.httpEtag, body: JSON.stringify(slimBoard(data)) };
-  return send(slimMemo.body, obj.httpEtag);
+  return slimMemo;
+}
+
+// The dashboard's first read. A board that is not JSON with a jobs array goes out as stored.
+async function slimBoardGet(env, ctx) {
+  const head = await env.BUCKET.head("board.json");
+  if (!head) return notFound();
+  const send = (body, etag) =>
+    reply(body, 200, "application/json", { ETag: etag, "X-Factory-Version": DASHBOARD_VERSION });
+  if (slimMemo.etag === head.httpEtag) return send(slimMemo.body, head.httpEtag);
+  if (slimPending.etag !== head.httpEtag) {
+    const read = readSlim(env);
+    const clear = () => {
+      if (slimPending.read === read) slimPending = { etag: "", read: null };
+    };
+    // Keeps the read alive for the waiters if the request that started it is cancelled.
+    const settled = read.then(clear, clear);
+    if (ctx) ctx.waitUntil(settled);
+    slimPending = { etag: head.httpEtag, read };
+  }
+  const out = await slimPending.read;
+  return out ? send(out.body, out.etag) : notFound();
 }
 
 // MP4 and WebM play inline. Their names are content addresses, so a range never goes stale.
@@ -443,7 +468,8 @@ async function boardRefusal(env, stored, data, sameBase) {
         checkArchived(stored, data) ??
         checkNewIds(stored.jobs, data.jobs) ??
         checkRiderControls(stored.jobs, data.jobs) ??
-        checkBatchRefs(stored.jobs, data.jobs))
+        checkBatchRefs(stored.jobs, data.jobs) ??
+        checkNewStarters(stored.jobs, data.jobs))
       : null)
   );
 }
@@ -455,6 +481,57 @@ async function boardCommitted(env, storedJobs, jobs, ctx) {
   const send = sendPushes(env, events).catch(() => {});
   if (ctx) ctx.waitUntil(send);
   else await send;
+}
+
+const MAX_FRAME_ROWS = 100;
+const MAX_FRAME_BYTES = 262144;
+
+// The rows frame for a committed board write from stored to data at etag, or "" when
+// open tabs must read instead: no prior version, a top-level change other than jobs and
+// updated, ids that cannot be diffed, a finished row, or a frame too large.
+function rowsFrame(stored, data, etag) {
+  if (!stored.etag || !stored.doc) return "";
+  for (const k of new Set([...Object.keys(stored.doc), ...Object.keys(data)]))
+    if (
+      k !== "jobs" &&
+      k !== "updated" &&
+      JSON.stringify(stored.doc[k]) !== JSON.stringify(data[k])
+    )
+      return "";
+  const ids = (jobs) => {
+    const byId = new Map();
+    for (const j of jobs) {
+      if (typeof j?.id !== "string" || byId.has(j.id)) return null;
+      byId.set(j.id, j);
+    }
+    return byId;
+  };
+  const before = ids(stored.jobs),
+    after = ids(data.jobs);
+  if (!before || !after) return "";
+  const rows = [],
+    removed = [];
+  for (const [id, row] of after) {
+    const old = before.get(id);
+    if (old === row || (old && JSON.stringify(old) === JSON.stringify(row))) continue;
+    if (terminal(old) || terminal(row)) return "";
+    rows.push(row);
+  }
+  for (const [id, old] of before) {
+    if (after.has(id)) continue;
+    if (terminal(old)) return "";
+    removed.push(id);
+  }
+  if (rows.length + removed.length > MAX_FRAME_ROWS) return "";
+  const frame = JSON.stringify({
+    type: "rows",
+    etag,
+    prev: stored.etag,
+    updated: data.updated,
+    rows,
+    removed,
+  });
+  return new TextEncoder().encode(frame).length > MAX_FRAME_BYTES ? "" : frame;
 }
 
 const needsCondition = () => reply('PUT needs If-Match: "<etag>" or If-None-Match: *', 428);
@@ -482,10 +559,10 @@ async function casPut(request, env, key, type, ctx) {
     onlyIf: cond,
     httpMetadata: { contentType: type },
   });
-  if (obj) await announce(env, key);
   // The stored board is the true prior version only when the write named its ETag.
-  if (obj && stored && cond.has("If-Match") && stored.etag === cond.get("If-Match"))
-    await boardCommitted(env, stored.jobs, data.jobs, ctx);
+  const sameBase = obj && stored && cond.has("If-Match") && stored.etag === cond.get("If-Match");
+  if (obj) await announce(env, key, sameBase ? rowsFrame(stored, data, obj.httpEtag) : "");
+  if (sameBase) await boardCommitted(env, stored.jobs, data.jobs, ctx);
   return obj
     ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
     : reply("precondition failed", 412);
@@ -504,8 +581,19 @@ function canonicalJson(value) {
   );
 }
 
+// Lowercase hex SHA-256 of the row's canonical JSON, the digest a patch's reads carry.
+async function rowSha256(row) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson(row)),
+  );
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 const BOARD_PATCH_SHAPE =
   "a board patch needs rows: [{id, expect, row}], one entry per id. Nothing was written.";
+const READS_SHAPE =
+  "a board patch's reads need [{id, sha256}], one per id and none in rows. Nothing was written.";
 
 // Applies the dashboard's changed rows, each with the row it expects to replace, to the
 // stored board. A row that changed since the client read it comes back as a 409 conflict;
@@ -537,6 +625,19 @@ async function boardPatch(request, env, ctx) {
   )
     return reply(BOARD_PATCH_SHAPE, 400);
   const entries = new Map(rows.map((e) => [e.id, e]));
+  const reads = patch.reads ?? [];
+  if (
+    !Array.isArray(reads) ||
+    !reads.every(
+      (r) =>
+        typeof r?.id === "string" &&
+        typeof r.sha256 === "string" &&
+        /^[0-9a-f]{64}$/.test(r.sha256) &&
+        !entries.has(r.id),
+    ) ||
+    new Set(reads.map((r) => r.id)).size !== reads.length
+  )
+    return reply(READS_SHAPE, 400);
   for (let attempt = 0; attempt < 10; attempt++) {
     const stored = await storedBoard(env);
     if (stored.etag && !stored.doc)
@@ -560,6 +661,10 @@ async function boardPatch(request, env, ctx) {
       if (m && Number(m[1]) <= maxId) conflicts.add(e.id);
       if (typeof e.row.capture_id === "string" && captured.has(e.row.capture_id))
         conflicts.add(captured.get(e.row.capture_id));
+    }
+    for (const r of reads) {
+      const row = byId.get(r.id);
+      if (!row || (await rowSha256(row)) !== r.sha256) conflicts.add(r.id);
     }
     if (conflicts.size)
       return reply(
@@ -593,7 +698,7 @@ async function boardPatch(request, env, ctx) {
       httpMetadata: { contentType: "application/json" },
     });
     if (obj) {
-      await announce(env, "board.json");
+      await announce(env, "board.json", rowsFrame(stored, data, obj.httpEtag));
       await boardCommitted(env, stored.jobs, data.jobs, ctx);
       return reply("ok", 200, "text/plain", { ETag: obj.httpEtag });
     }
@@ -2454,6 +2559,18 @@ function checkNewIds(storedJobs, jobs) {
   return null;
 }
 
+// An error message, or null. Run batch now marks a held idea already on the board as the
+// starter, and no read can cover a row that arrives new with that mark.
+function checkNewStarters(storedJobs, jobs) {
+  const ids = new Set(storedJobs.map((j) => j?.id));
+  const row = jobs.find(
+    (j) => !ids.has(j?.id) && j?.stage === "idea" && j.priority?.batch === true,
+  );
+  return row
+    ? `a board write cannot add ${quoteIdCut(row.id, QUOTED_ID_MAX)} as a batch starter: start a batch from a held idea already on the board. Nothing was written.`
+    : null;
+}
+
 // An error message, or null. Only the archive pass writes `archived`, and a client that
 // ignores its id floor must not hand out an archived job's id again.
 function checkArchived(stored, data) {
@@ -2975,7 +3092,7 @@ export async function serveFactory(request, env, principal, ctx) {
       return notFound();
     if (request.headers.get("Origin") !== new URL(request.url).origin)
       return reply("forbidden", 403);
-    return connectEvents(request, env);
+    return connectEvents(request, env, principal.exp);
   }
   if (path.startsWith("/api/")) return api(request, env, path, principal, ctx);
   if (request.method !== "GET") return notFound();
@@ -2985,7 +3102,7 @@ export async function serveFactory(request, env, principal, ctx) {
   if (path.startsWith("/assets/") || path === "/sw.js") return serveAsset(request, env.config);
   if (path === "/board.json")
     return new URL(request.url).searchParams.get("view") === "slim"
-      ? slimBoardGet(env)
+      ? slimBoardGet(env, ctx)
       : getFile(env, "board.json", "application/json", {
           "X-Factory-Version": DASHBOARD_VERSION,
         });
