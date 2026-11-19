@@ -356,6 +356,18 @@ const CAPTURE_HOSTS = JSON.parse(
   await readFile(new URL("../fixtures/hosts-list.json", import.meta.url), "utf8"),
 );
 CAPTURE_HOSTS.push({ ...CAPTURE_HOSTS[0], id: "example-host", label: "Example Mac" });
+// Two retro runs this browser never opened, for the header-badges view's Retros count.
+const CAPTURE_RETROS = ["20261020T090000Z-a1b2c3", "20261013T090000Z-d4e5f6"].map((run) => ({
+  schema: "factory.retro-run/1",
+  run,
+  host: "mac",
+  from: "2026-10-06",
+  to: "2026-10-19",
+  sessions: 40,
+  rejected: 0,
+  findings: [],
+  cards: [],
+}));
 // The archived running example: answered by interception, never on the board.
 const CAPTURE_ARCHIVED = {
   id: "412-fix-login",
@@ -483,6 +495,7 @@ async function capture(outdir, referencePath) {
     let notifyBoard = false;
     let auditBoard = false;
     let flagsHosts = false;
+    let retrosBadge = false;
     let flagsAckAbort = false;
     let refusalBacklog = false;
     let leadAgentsBoard = false;
@@ -604,6 +617,12 @@ async function capture(outdir, referencePath) {
                     body:
                       CAPTURE_BACKLOG +
                       "  Depends on: sample: Synthetic follow-on slice (sub-job-of 001-capture)\n",
+                  });
+                if (retrosBadge && target.pathname === "/api/retros")
+                  return request.respond({
+                    status: 200,
+                    contentType: "application/json",
+                    body: JSON.stringify(CAPTURE_RETROS),
                   });
                 if (flagsHosts && target.pathname === "/api/hosts")
                   return request.respond({
@@ -1137,6 +1156,12 @@ async function capture(outdir, referencePath) {
     });
     await view("header-inbox-dark-390", 390, 844, "dark", (page) => clipOf(page, "header"));
     await view("header-inbox-dark-1440", 1440, 900, "dark", (page) => clipOf(page, "header"));
+    retrosBadge = true;
+    try {
+      await view("header-badges-1440", 1440, 900, "light", (page) => clipOf(page, "header"));
+    } finally {
+      retrosBadge = false;
+    }
     await view("drawer-desktop", 1440, 900, "light", openDrawer);
     await view("drawer-mobile", 390, 844, "dark", openDrawer);
     await view("drawer-mobile-scrolled", 375, 667, "dark", openScrolled);
@@ -1558,6 +1583,15 @@ async function capture(outdir, referencePath) {
       await openNotificationSettings(page);
       await page.evaluate(() =>
         document.getElementById("alert-heading").scrollIntoView({ block: "start" }),
+      );
+    });
+    await view("notify-sound-wait-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => localStorage.setItem("factory-sound", "on"));
+      await page.reload({ waitUntil: "networkidle0" });
+      await page.waitForSelector(".card");
+      await openNotificationSettings(page);
+      await page.evaluate(() =>
+        document.getElementById("sound-heading").scrollIntoView({ block: "start" }),
       );
     });
     const settleArchiveSettings = async (page, name) => {
@@ -2010,9 +2044,8 @@ async function capture(outdir, referencePath) {
       });
       await page.waitForSelector("#settings-reference:not([hidden])");
       await page.evaluate(() =>
-        document.getElementById("reference-keys").scrollIntoView({ block: "center" }),
+        document.getElementById("reference-keys-heading").scrollIntoView({ block: "start" }),
       );
-      return clipOf(page, "#reference-keys");
     };
     await view("reference-keys-1280", 1280, 900, "light", openReferenceKeys);
     // The reference keeps 001-capture open behind the sign-in banner; the candidate closes it.

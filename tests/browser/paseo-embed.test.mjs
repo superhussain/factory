@@ -50,6 +50,8 @@ if (location.search === "?links=external") hello.links = "external";
 frame.addEventListener("load", () => frame.contentWindow.postMessage(hello, "${DASHBOARD}"));
 addEventListener("message", (e) => window.received.push(e.data));
 </script>`;
+const ACCESS_LOGIN = "https://example-team.cloudflareaccess.com/cdn-cgi/access/login";
+let accessExpired = false;
 
 function proxy(origin, parent) {
   return async (request) => {
@@ -57,6 +59,8 @@ function proxy(origin, parent) {
     if (url.origin === parent && url.pathname === "/")
       return request.respond({ status: 200, contentType: "text/html", body: PARENT });
     if (url.origin !== DASHBOARD) return request.abort();
+    if (accessExpired && url.pathname === "/board.json")
+      return request.respond({ status: 302, headers: { Location: ACCESS_LOGIN }, body: "" });
     const { host: _host, ...headers } = request.headers();
     const response = await fetch(origin + url.pathname + url.search, {
       method: request.method(),
@@ -385,6 +389,59 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       assert.deepEqual(await other.evaluate(() => window.received), []);
     });
 
+    await t.test("expired sign-in posts signin", async () => {
+      const expired = await framedPage(browser, origin, LISTED);
+      const embedTypes = () =>
+        expired.evaluate(() =>
+          window.received
+            .filter((m) => m?.type === "factory-embed-ready" || m?.type === "factory-embed-signin")
+            .map((m) => m.type),
+        );
+      try {
+        await expired.waitForFunction(
+          () => window.received.some((m) => m?.type === "factory-embed-ready"),
+          { timeout: 5000, polling: 50 },
+        );
+        await childFrame(expired).waitForFunction(
+          () => document.body.innerText.includes("Synthetic linked job"),
+          { timeout: 8000 },
+        );
+        accessExpired = true;
+        await childFrame(expired).evaluate(() => poll());
+        if (CAPTURE_DIR)
+          await expired.screenshot({ path: join(CAPTURE_DIR, "frame-sign-in-expired.png") });
+        assert.deepEqual(
+          await expired.evaluate(() =>
+            window.received.filter((m) => m?.type === "factory-embed-signin"),
+          ),
+          [{ type: "factory-embed-signin", v: 1 }],
+        );
+        const banner = await childFrame(expired).evaluate(() => ({
+          text: document.querySelector("#conn-text").textContent,
+          button: document.querySelector("#conn-signin").checkVisibility(),
+        }));
+        assert.deepEqual(banner, { text: "Your sign-in has expired.", button: true });
+        await expired.evaluate((dashboard) => {
+          document
+            .querySelector("iframe")
+            .contentWindow.postMessage({ type: "factory-embed-hello", v: 1 }, dashboard);
+        }, DASHBOARD);
+        await expired.waitForFunction(
+          () => window.received.filter((m) => m?.type === "factory-embed-signin").length === 2,
+          { timeout: 5000, polling: 50 },
+        );
+        assert.deepEqual(await embedTypes(), [
+          "factory-embed-ready",
+          "factory-embed-signin",
+          "factory-embed-ready",
+          "factory-embed-signin",
+        ]);
+      } finally {
+        accessExpired = false;
+        await expired.browserContext().close();
+      }
+    });
+
     await t.test("warm frame keeps the draft", async () => {
       const source = await readFile(
         new URL("../../paseo-plugin/shared/warm-frame.ts", import.meta.url),
@@ -542,4 +599,53 @@ test("scrollbar press keeps the draft field", { timeout: 120000 }, async () => {
     },
     { scrollbars: true },
   );
+});
+
+test("warm return scrolls the draft field into view", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    await seedBoard(origin, [JOB]);
+    const page = await framedPage(browser, origin, LISTED);
+    await page.waitForFunction(
+      () => window.received.some((m) => m?.type === "factory-embed-ready" && m.v === 1),
+      { timeout: 5000, polling: 50 },
+    );
+    const frame = childFrame(page);
+    await frame.waitForSelector("#board");
+    await typeDraft(frame);
+    // Whether #idea-text lies inside the dialog's client box. scrollTop snaps to whole
+    // pixels while the field sits on a half pixel, so allow 1px.
+    const inView = () =>
+      frame.evaluate(() => {
+        const dlg = document.querySelector("#idea-dlg");
+        const top = dlg.getBoundingClientRect().top + dlg.clientTop;
+        const t = document.querySelector("#idea-text").getBoundingClientRect();
+        return t.top >= top - 1 && t.bottom <= top + dlg.clientHeight + 1;
+      });
+    await frame.evaluate(() => {
+      const d = document.querySelector("#idea-dlg");
+      d.style.maxHeight = "240px";
+      d.style.overflowY = "scroll";
+      d.scrollTop = d.scrollHeight;
+      // A scrollbar press leaves focus on the dialog, as in the scrollbar test.
+      d.focus({ preventScroll: true });
+    });
+    assert.equal(await inView(), false, "draft field not clipped");
+
+    await page.evaluate(() => {
+      const side = document.createElement("button");
+      side.id = "side";
+      side.textContent = "Synthetic session row";
+      document.body.append(side);
+    });
+    await page.click("#side");
+    await page.evaluate(() => document.querySelector("iframe").focus());
+    assert.equal(await frame.evaluate(() => document.activeElement?.id), "idea-text");
+    assert.equal(await inView(), true, "draft field still clipped");
+  });
 });

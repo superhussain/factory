@@ -127,7 +127,10 @@ const keeper = createFrameKeeper<FrameElement, EmbedMessage>({
     element.addEventListener("load", () => {
       // A new document must post ready again, so a parked frame that reloaded shows the stall card on return.
       const kept = keeper.current();
-      if (kept?.element === element) kept.ready = false;
+      if (kept?.element === element) {
+        kept.ready = false;
+        kept.signedOut = false;
+      }
       frameLoaded(
         element.contentWindow,
         origin,
@@ -192,7 +195,11 @@ function route(event: FrameMessage): void {
   else if (message.type === "factory-embed-location") saveLocation(frame.origin, message.hash);
   else if (message.type === "factory-embed-ready") {
     frame.ready = true;
+    frame.signedOut = false;
     markLoaded(frame.origin);
+  } else if (message.type === "factory-embed-signin") {
+    frame.ready = false;
+    frame.signedOut = true;
   }
   frame.onMessage?.(message);
 }
@@ -210,6 +217,11 @@ export function dropWarmFrame(): void {
 export function frameReady(origin: string): boolean {
   const frame = keeper.current();
   return !!frame && frame.origin === origin && frame.parkedAt === null && frame.ready;
+}
+
+export function frameSignedOut(origin: string): boolean {
+  const frame = keeper.current();
+  return !!frame && frame.origin === origin && frame.signedOut;
 }
 
 export function DashboardFrame({
