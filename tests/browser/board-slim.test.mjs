@@ -318,6 +318,15 @@ test("slim board read", { timeout: 240000 }, async (t) => {
       assert.deepEqual(loading.rects, idle.rects);
       assert.equal(idle.spin, "none");
       assert.equal(loading.spin, "more-spin");
+      // The busy text is transparent, so its focus underline is too; an outline marks focus.
+      await page.focus('.more[data-stage="merged"]');
+      assert.deepEqual(
+        await page.$eval('.more[data-stage="merged"]', (el) => [
+          el.matches(":focus-visible"),
+          getComputedStyle(el).outlineStyle,
+        ]),
+        [true, "solid"],
+      );
       assert.deepEqual(errors, []);
       await page.close();
     });
