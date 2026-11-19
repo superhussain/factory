@@ -271,8 +271,10 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   lines after that pointer. Each agent writes only its own file.
 - Pipeline configuration. Before a session first dispatches an agent for a job or
   merges its PR, run `python3 <this skill's dir>/runtime/factory.py pipeline "$SLUG"`
-  and keep its JSON as `$PIPELINE`. Patch `{"pipeline": <$PIPELINE.versions>}` onto
-  the job. Any non-zero exit moves the job to `needs-human` with the stderr line as
+  and keep its JSON as `$PIPELINE`. Patch the versions onto the job with
+  `set -o pipefail; python3 <this skill's dir>/runtime/factory.py pipeline "$SLUG" --board | python3 "$RUNTIME" board "$FACTORY" <id>`.
+  Read `$PIPELINE` fields from the printed JSON, and never echo it through the shell
+  into another parser. Any non-zero exit moves the job to `needs-human` with the stderr line as
   the note and `needs` set to `fix the pipeline configuration, then resume the job`,
   and dispatches nothing. Then run `python3 <this skill's dir>/runtime/factory.py documents "$SLUG"` and keep its stdout line as `$DOCUMENTS`. A non-zero exit is handled the same way, with the stderr line as the note and `needs` set to `fix the project document, then resume the job`. `prompt` ends each prompt with `$PIPELINE.prompts.<stage>` verbatim. Never
   paraphrase, split or summarize it, and never copy note text into the board, a PR,
