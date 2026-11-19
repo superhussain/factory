@@ -2,7 +2,6 @@ import { openExternalUrl } from "@getpaseo/plugin/client";
 import { createElement, useEffect, useLayoutEffect, useRef } from "react";
 import { Platform } from "react-native";
 import {
-  JOB_ID,
   dashboardSrc,
   frameLoaded,
   readEmbedMessage,
@@ -182,12 +181,14 @@ export function frameReady(origin: string): boolean {
 export function DashboardFrame({
   src,
   origin,
-  job,
+  jump,
+  jumpKey,
   onMessage,
 }: {
   src: string;
   origin: string;
-  job?: string;
+  jump: string | null;
+  jumpKey: string;
   onMessage(message: EmbedMessage): void;
 }) {
   const host = useRef<DivElement | null>(null);
@@ -200,8 +201,8 @@ export function DashboardFrame({
     if (Platform.OS !== "web" || !node) return;
     const { frame, warm } = keeper.attach(node, origin, src);
     frame.onMessage = (message) => handler.current(message);
-    if (warm && job && JOB_ID.test(job)) keeper.jumpTo(frame, dashboardSrc(origin, job));
-    jumped.current = job;
+    if (warm && jump) keeper.jumpTo(frame, jump);
+    jumped.current = jumpKey;
     attached.current = frame;
     return () => {
       attached.current = null;
@@ -210,10 +211,10 @@ export function DashboardFrame({
   }, [origin]);
   useEffect(() => {
     const frame = attached.current;
-    if (!frame || job === jumped.current) return;
-    jumped.current = job;
-    if (job && JOB_ID.test(job)) keeper.jumpTo(frame, dashboardSrc(origin, job));
-  }, [job]);
+    if (!frame || jumpKey === jumped.current) return;
+    jumped.current = jumpKey;
+    if (jump) keeper.jumpTo(frame, jump);
+  }, [jumpKey]);
   if (Platform.OS !== "web") return null;
   return createElement("div", { ref: host, style: { width: "100%", height: "100%" } });
 }
