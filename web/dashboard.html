@@ -483,6 +483,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .archive-count { font-size: 12px; color: var(--muted); margin: 0; }
   .archive-error { font-size: 12px; color: var(--alert); margin: 0; }
   .more[aria-disabled="true"], .archive-more[aria-disabled="true"] { opacity: .6; cursor: default; }
+  .more[aria-busy="true"] { position: relative; color: transparent; }
+  .more[aria-busy="true"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .more[aria-busy="true"]::after { content: ''; position: absolute; top: 50%; left: calc(50% + 3px); width: 10px; height: 10px; margin: -5px 0 0 -5px; box-sizing: border-box; border: 2px solid var(--muted); border-right-color: transparent; border-radius: 50%; animation: more-spin .8s linear infinite; }
+  @keyframes more-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .more[aria-busy="true"]::after { animation: none; } }
   .blank { grid-column: 1 / -1; text-align: center; padding: 64px 16px; color: var(--muted); }
   .blank h2 { margin: 0 0 8px; font-size: 16px; color: var(--fg); }
   .blank p { margin: 4px 0; font-size: 13px; }
@@ -1484,13 +1489,14 @@ const CONNECTION = {
   signin: ['Your sign-in has expired.', 'dot err', 'sign-in expired'],
   unreachable: ["Can't reach the factory. The board loads when it answers.", 'dot err', 'board.json unreachable'],
 };
+const UNREACHABLE_SAVED = "Can't reach the factory. Showing the saved board until it answers.";
 function drawDot(className, label) { const dot = $('dot'); dot.className = className; dot.title = label; dot.setAttribute('aria-label', label); }
 let connState = '';
 function setConnection(state) {
   const was = connState; connState = state;
   const [text, dot, title] = CONNECTION[state];
   $('conn-banner').hidden = state === 'online';
-  $('conn-text').textContent = text;
+  $('conn-text').textContent = state === 'unreachable' && boardFromCache ? UNREACHABLE_SAVED : text;
   $('conn-signin').hidden = state !== 'signin';
   const polling = state === 'online' && !liveOpen;
   const every = pollEvery();
@@ -5036,9 +5042,9 @@ function renderBoard() {
       starredFirst(list.sort((a, b) => t(b) - t(a)));
       if (totals[i] > CAP) {
         const open = expanded.has(s) && boardComplete;
-        const loading = !boardComplete && fullRead;
+        const loading = !boardComplete && (fullRead || (fullWanted && boardFromCache && expanded.has(s)));
         // A short column's header already shows the total, so only its accessible name repeats it.
-        // While the full read runs the text stays put; the button is dimmed and busy.
+        // While the full read runs the text keeps its width under a spinner; the button is dimmed and busy.
         more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '"' +
           (loading ? ' aria-disabled="true" aria-busy="true"' : '') +
           (partial ? ' aria-label="show all ' + totals[i] + ' ' + s + '"' : '') + '>' +
@@ -5103,6 +5109,7 @@ $('board').addEventListener('click', (e) => {
     if (!boardComplete && TERMINAL.includes(s)) {
       expanded.add(s);
       wantFullBoard();
+      if (boardFromCache) renderBoard();
       return;
     }
     if (!expanded.delete(s)) expanded.add(s);
@@ -5545,6 +5552,14 @@ async function loadArchivePage(stage) {
 
 async function openJob(id) {
   let j = jobs.find((x) => x.id === id) ?? archivedJobs.get(id);
+  // The saved copy or an offline board may lack an older finished row. The next network read's syncDetail() reopens it.
+  if (!j && loaded && (boardFromCache || connState === 'offline')) {
+    if (connState === 'offline' && archiveFailNoted !== id) {
+      archiveFailNoted = id;
+      showBoardStatus(`You're offline. Job ${id} opens when you reconnect.`);
+    }
+    return;
+  }
   if (!j && loaded) {
     await wantFullBoard();
     j = jobs.find((x) => x.id === id);

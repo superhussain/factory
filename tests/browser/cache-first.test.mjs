@@ -214,9 +214,9 @@ test("cache-first board boot", async (t) => {
         if (captureDir)
           await page.screenshot({ path: join(captureDir, "board-unreachable-1440.png") });
         assert.equal(await cardTitle(page, "001-alpha"), "Synthetic alpha");
-        assert.match(
+        assert.equal(
           await page.$eval("#conn-text", (el) => el.textContent),
-          /^Can't reach the factory/,
+          "Can't reach the factory. Showing the saved board until it answers.",
         );
         assert.deepEqual(errors, []);
       } finally {
