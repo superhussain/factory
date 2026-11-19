@@ -3185,7 +3185,7 @@ function renderRoute() {
   if (inboxOpen) renderInboxPage();
   if (notificationsOpen && !notificationsWas) { notificationsHtml = ''; $('notifications-page-heading').focus(); }
   renderNotifications();
-  if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); }
+  if (retrosOpen && !retrosWas) { retrosOpener = null; retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
@@ -3552,6 +3552,18 @@ function renderRetrosPage() {
 }
 
 $('retros-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
+// The Retros link that opened a drawer, so closing it focuses that link again.
+let retrosOpener = null;
+$('retros-page').addEventListener('click', (e) => {
+  const el = e.target.closest('a[href^="#"]');
+  retrosOpener = el ? { el, href: el.getAttribute('href') } : null;
+});
+function focusRetrosOpener() {
+  const link = retrosOpener?.el.isConnected ? retrosOpener.el
+    : retrosOpener && [...$('retros-page').querySelectorAll('a')].find((a) => a.getAttribute('href') === retrosOpener.href);
+  if (link) link.focus(); else $('retros-page-heading').focus({ preventScroll: true });
+  retrosOpener = null;
+}
 
 // Inbox page: the '#/inbox' view ranks every job and backlog line waiting on a person.
 let inboxHtml = '';
@@ -6437,6 +6449,8 @@ function closeDetail(keepHash = false) {
   if (back && !keepHash) renderRoute();
   if (back === '#/inbox' && !keepHash) focusInboxRow(id, raw);
   if (back === '#/notifications' && !keepHash) focusNotificationRow(id, raw);
+  if (back && !keepHash && retrosRoute(back)) focusRetrosOpener();
+  if (back && !keepHash && settingsRoute(back)) $('settings-nav-' + settingsRoute()).focus();
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
