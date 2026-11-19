@@ -127,6 +127,21 @@ class HttpV1Test(unittest.TestCase):
         for home, job_id in zip(homes, ids):
             self.assertTrue((home / "jobs" / "sample" / job_id).is_dir())
 
+    def test_concurrent_slim_reads_all_answer(self):
+        status, headers, body = self.request("/api/board")
+        if status == 404:
+            status, _, _ = self.request("/api/board", "PUT", b'{"jobs": []}',
+                                        {"Content-Type": "application/json", "If-None-Match": "*"})
+        else:
+            data = json.loads(body)
+            status, _, _ = self.request("/api/board", "PUT", (json.dumps(data, indent=1) + "\n").encode(),
+                                        {"Content-Type": "application/json", "If-Match": headers["ETag"]})
+        self.assertIn(status, (200, 201))
+        with concurrent.futures.ThreadPoolExecutor(8) as pool:
+            replies = list(pool.map(lambda _: self.request("/board.json?view=slim"), range(8)))
+        self.assertEqual([r[0] for r in replies], [200] * 8)
+        self.assertEqual(len({r[2] for r in replies}), 1)
+
     def test_project_conditional_registration_race(self):
         path = "/api/projects/http-sample.md"
         self.assertEqual(self.request(path)[0], 404, "complete runs require fresh job-local persistence")
