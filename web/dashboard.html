@@ -1074,6 +1074,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <p id="push-status" role="status"></p>
       <h4 id="sound-heading">Sounds</h4>
       <label for="sound-on"><input type="checkbox" id="sound-on" aria-describedby="sound-help"> Play a sound for board events</label>
+      <p class="muted" id="sound-wait" hidden>Sounds start after your first click or key press in this tab.</p>
       <p class="muted" id="sound-help"></p>
       <p id="sound-status" role="status"></p>
       <h4 id="alert-heading">Events</h4>
@@ -9301,7 +9302,7 @@ function watchAway() { return notifyActive() || soundActive(); }
 // Browsers keep an AudioContext suspended until the page gets a click or key.
 function wakeAudio() {
   try {
-    audio ||= new AudioContext();
+    if (!audio) { audio = new AudioContext(); audio.addEventListener('statechange', renderSoundWait); }
     if (audio.state === 'suspended') audio.resume();
   } catch {}
 }
@@ -9349,6 +9350,10 @@ function renderSoundSettings() {
     if (box.disabled) box.setAttribute('aria-describedby', 'sound-help'); else box.removeAttribute('aria-describedby');
   }
   $('sound-help').textContent = supported ? (soundOn ? SOUND_HELP : SOUND_OFF_HELP) : 'This browser cannot play sounds.';
+  renderSoundWait();
+}
+function renderSoundWait() {
+  $('sound-wait').hidden = !soundActive() || audio?.state === 'running';
 }
 $('sound-on').addEventListener('change', () => {
   soundOn = $('sound-on').checked;

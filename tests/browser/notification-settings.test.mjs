@@ -131,12 +131,13 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       window.tones = [];
       window.toneStarts = [];
       const param = () => ({ value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} });
-      window.AudioContext = class {
+      window.AudioContext = class extends EventTarget {
         state = "suspended";
         currentTime = 0;
         destination = {};
         async resume() {
           this.state = "running";
+          this.dispatchEvent(new Event("statechange"));
         }
         createGain() {
           return { gain: param(), connect: (node) => node };
@@ -899,6 +900,20 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await page.evaluate(() => poll());
       assert.deepEqual(await tones(), [523, 659, 784]);
       assert.equal(await page.evaluate(() => window.toneStarts[0]), 0.02);
+    });
+
+    await t.test("sound S11 a hint shows until the first click", async () => {
+      await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
+      await setStorage("factory-sound", "on");
+      await reload("#settings-notifications:not([hidden])");
+      assert.equal(await page.$eval("#sound-wait", (el) => el.hidden), false);
+      assert.equal(
+        await text("#sound-wait"),
+        "Sounds start after your first click or key press in this tab.",
+      );
+      await page.click("#sound-heading");
+      await page.waitForSelector("#sound-wait[hidden]", wait);
+      await toHash("#/settings/display", "#settings-display:not([hidden])");
     });
 
     await t.test("notify C1 card detail toggles", async () => {
