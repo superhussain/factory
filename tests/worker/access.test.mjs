@@ -37,6 +37,17 @@ test("person claims carry kind user and email; mixed or malformed claims stay se
     { type: "app", email: "person@example.test", exp },
     { verified: true, kind: "user", email: "person@example.test", exp },
   );
+  await assert.rejects(
+    authenticate(
+      f.request(
+        await sign(
+          currentKey,
+          f.claims({ type: "app", email: "person@example.test", exp: undefined }),
+        ),
+      ),
+      f.config,
+    ),
+  );
   await check(
     { email: "person@example.test", common_name: "device" },
     { verified: true, kind: "service", client_id: "device" },

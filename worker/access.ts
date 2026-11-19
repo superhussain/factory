@@ -45,22 +45,22 @@ export async function authenticate(
     requiredClaims: ["exp"],
     clockTolerance: 30,
   });
-  for (const name of ["exp", "nbf", "iat"]) {
-    if (
-      (name === "exp" || name in payload) &&
-      (typeof payload[name] !== "number" || !Number.isFinite(payload[name]))
-    ) {
+  const exp = payload.exp;
+  if (typeof exp !== "number" || !Number.isFinite(exp)) throw new Error("invalid assertion");
+  for (const name of ["nbf", "iat"]) {
+    if (name in payload && (typeof payload[name] !== "number" || !Number.isFinite(payload[name]))) {
       throw new Error("invalid assertion");
     }
   }
-  if ((payload.iat as number) > Date.now() / 1000 + 30) throw new Error("invalid assertion");
+  if (typeof payload.iat === "number" && payload.iat > Date.now() / 1000 + 30)
+    throw new Error("invalid assertion");
   // A person's assertion carries an email; a service token's carries a common_name.
   if (
     typeof payload.email === "string" &&
     /^[^\s@<>"]{1,64}@[^\s@<>"]{1,255}$/.test(payload.email) &&
     !("common_name" in payload)
   ) {
-    return { verified: true, kind: "user", email: payload.email, exp: payload.exp as number };
+    return { verified: true, kind: "user", email: payload.email, exp };
   }
   const client_id =
     typeof payload.common_name === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(payload.common_name)
