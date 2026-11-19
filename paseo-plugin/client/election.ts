@@ -32,7 +32,9 @@ export function startElection(
       const origin = parsed?.success ? parseDashboardOrigin(parsed.data.origin) : null;
       report = () => member.online(origin);
     } catch {
-      report = () => member.offline();
+      report = () => {
+        if (member.miss()) void check();
+      };
     } finally {
       clearTimeout(timer);
     }
@@ -46,6 +48,7 @@ export function startElection(
   const stopFocus = onWindowFocus(() => void check());
   return {
     elected: member.elected,
+    recheck: () => void check(),
     stop() {
       clearInterval(poll);
       stopFocus();

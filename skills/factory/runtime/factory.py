@@ -55,6 +55,7 @@
                                             print one JSON line when every job file has a valid first
                                             line, one keeps an invalid first line, --pr's next leaves
                                             wait, or S seconds pass (default and max 540); runs hold first
+                                            when a session tag is set
   factory.py round-wait <project-slug>/<job-id> <round> [--timeout S]
                                             block until all four review files of round N have a verdict
                                             line, write each verdict to the board's rounds entry as it
@@ -6424,7 +6425,7 @@ ROLE_ALIASES = {"builder": "build", "factory-builder": "build",
                 "approver": "approve", "factory-approver": "approve",
                 "factory-review-security": "review-security", "factory-review-ux": "review-ux",
                 "factory-review-ui": "review-ui", "factory-review-code": "review-code"}
-VIA_ALIASES = {"subagent": "native"}
+VIA_ALIASES = {"subagent": "native", "agent": "native", "local": "native"}
 PROMPT_USAGE = "usage: prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]"
 PROMPT_HELP = ("roles and flags: spec | approve | build [--round N] [--port P] | review-security, review-ux, "
                "review-ui or review-code --round N. Every role also takes --out <path>.\n"
@@ -6777,9 +6778,9 @@ WATCH_USAGE = "usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--ti
 
 
 def watch_cmd(target, *args):
-    """Run hold once, then print one JSON line when every artifact has a valid first line, --pr's next
-    leaves wait, --timeout passes, or a file keeps an invalid non-empty first line for two reads,
-    reading files once a second and the PR every 30 seconds."""
+    """Run hold once when a session tag is set, then print one JSON line when every artifact has a
+    valid first line, --pr's next leaves wait, --timeout passes, or a file keeps an invalid non-empty
+    first line for two reads, reading files once a second and the PR every 30 seconds."""
     home, slug, job_id = r2_target(target, True)
     artifacts, timeout, watch_pr = [], None, False
     i = 0
@@ -6802,7 +6803,14 @@ def watch_cmd(target, *args):
             fail(f"bad artifact {args[i]!r}. " + WATCH_USAGE, 2)
     if not artifacts and not watch_pr:
         fail(WATCH_USAGE, 2)
-    hold(target)
+    if os.environ.get("FACTORY_SESSION"):
+        hold(target)
+    else:
+        job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
+        if job is None:
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
+        if job.get("project") != slug:
+            fail(f"{job_id} belongs to {job.get('project')}, not {slug}", 2)
     folder = home / "jobs" / slug / job_id
     if watch_pr:
         pr = board_pr(home, slug, job_id, archive=True)

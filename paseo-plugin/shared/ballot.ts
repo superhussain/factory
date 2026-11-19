@@ -2,12 +2,15 @@
 // All installations in one Paseo window share the ballot through globalThis.
 
 export const BALLOT_KEY = "factory-plugin:ballot:v1";
+export const OFFLINE_AFTER_MISSES = 2;
 
 export type Seat = { origin: string | null; online: boolean; known: boolean };
 export type Ballot = { seats: Seat[]; members: Set<() => void> };
 export type Member = {
   online(origin: string | null): void;
   offline(): void;
+  /** Counts one failed read. Returns true while the seat stays online and the caller should read again now. */
+  miss(): boolean;
   elected(): boolean;
   leave(): void;
 };
@@ -31,6 +34,7 @@ export function joinBallot(
   let unregister: (() => void) | null = null;
   let registered: string | null = null;
   let left = false;
+  let misses = 0;
   const sync = () => {
     const win = isElected(ballot.seats, seat);
     if (unregister && (!win || registered !== seat.origin)) {
@@ -51,12 +55,21 @@ export function joinBallot(
       seat.origin = origin;
       seat.online = true;
       seat.known = true;
+      misses = 0;
       notify();
     },
     offline() {
       if (left || !seat.known) return;
       seat.online = false;
       notify();
+    },
+    miss() {
+      if (left || !seat.known) return false;
+      misses += 1;
+      if (misses < OFFLINE_AFTER_MISSES) return true;
+      seat.online = false;
+      notify();
+      return false;
     },
     elected: () => !left && isElected(ballot.seats, seat),
     leave() {
