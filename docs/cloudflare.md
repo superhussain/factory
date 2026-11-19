@@ -326,9 +326,11 @@ client-supplied headers.
   badge. iPhone and iPad show it only after the Home Screen app is allowed to
   send notifications.
 - The service worker caches only the page, `/assets/*`, `/board.json`,
-  `/projects.json` and `/jobs/*`, and never `/api/*`. Board and job reads try the
-  network first and fall back to this device's saved copy under an offline
-  banner. Offline is read-only: writes fail until the connection returns, and
+  `/projects.json`, `/jobs/*` and `GET /api/backlog`, and no other `/api/*` path.
+  Board, backlog and job reads try the network first and fall back to this
+  device's saved copy under an offline banner. At boot the dashboard paints the
+  saved board, projects and backlog at once, then the network read replaces
+  them. Offline is read-only: writes fail until the connection returns, and
   nothing queues or replays them. The service worker clears its cache on Access
   logout (`/cdn-cgi/access/logout`) and whenever a read meets an Access
   redirect, 401 or 403. A device that goes offline before its next request keeps

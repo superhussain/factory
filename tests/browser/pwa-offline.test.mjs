@@ -1,4 +1,4 @@
-// Installable offline dashboard: the service worker caches only the shell and board reads,
+// Installable offline dashboard: the service worker caches only the shell, board and backlog reads,
 // serves the saved board under the offline banner, refreshes on reconnect, clears itself on
 // an Access redirect and never replays a write. A loopback proxy plays the network. node --test.
 import assert from "node:assert/strict";
@@ -87,6 +87,12 @@ test("PWA offline board, reconnect refresh, Access sign-out and no write replay"
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
     );
     await seedBoard(origin, JOBS);
+    const backlog = await fetch(origin + "/api/backlog", {
+      method: "PUT",
+      headers: { "If-None-Match": "*", "Content-Type": "text/markdown" },
+      body: "# Backlog\n\n- [ ] sample: Synthetic backlog idea\n",
+    });
+    assert.equal(backlog.status, 200);
     const proxy = await startProxy(origin);
     assertBrowserTarget(proxy.origin, { [owned.OWNED_ORIGIN_ENV]: proxy.origin });
     const context = await browser.createBrowserContext();
@@ -105,18 +111,28 @@ test("PWA offline board, reconnect refresh, Access sign-out and no write replay"
       await page.reload({ waitUntil: "domcontentloaded" });
       await waitForBoard(page);
       await page.waitForSelector('.card[data-id="002-beta"]');
+      await page.waitForFunction(() => backlogLoaded);
       const online = await cacheState(page);
       assert.deepEqual(online.names, ["factory-v2"]);
-      for (const path of ["/", "/board.json", "/projects.json", "/assets/mermaid.min.js"])
+      for (const path of [
+        "/",
+        "/board.json",
+        "/projects.json",
+        "/api/backlog",
+        "/assets/mermaid.min.js",
+      ])
         assert.ok(online.paths.includes(path), `${path} is cached`);
       for (const path of online.paths) {
         assert.ok(
-          ["/", "/board.json", "/projects.json"].includes(path) ||
+          ["/", "/board.json", "/projects.json", "/api/backlog"].includes(path) ||
             path.startsWith("/assets/") ||
             path.startsWith("/jobs/"),
           `${path} is an allowed cache key`,
         );
-        assert.ok(!path.startsWith("/api/"), `${path} is not an API path`);
+        assert.ok(
+          !path.startsWith("/api/") || path === "/api/backlog",
+          `${path} is not another API path`,
+        );
       }
       assert.equal((await banner(page)).hidden, true);
 
