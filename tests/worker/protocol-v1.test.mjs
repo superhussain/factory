@@ -50,7 +50,7 @@ function fixtureBody(name) {
   if (name === "text-overflow") return Buffer.alloc((1 << 20) + 1, 120);
   if (name === "image-overflow") return Buffer.alloc((5 << 20) + 1, 120);
   if (name.endsWith("-stream-overflow")) {
-    const max = { text: 1 << 20, board: 4 << 20, image: 5 << 20 }[name.split("-")[0]];
+    const max = { text: 1 << 20, board: 16 << 20, image: 5 << 20 }[name.split("-")[0]];
     return new ReadableStream({
       start(controller) {
         controller.enqueue(Buffer.alloc(max, 120));
@@ -749,7 +749,7 @@ test("a board write cannot add a row whose id is not a job id", async () => {
   }
 });
 
-test("board accepts a document over 1 MiB up to the 4 MiB board cap", async () => {
+test("board accepts a document over 1 MiB up to the 16 MiB board cap", async () => {
   const s = await setup();
   const etag = s.bucket.objects.get("board.json").httpEtag;
   const body = JSON.stringify({ jobs: [{ id: "001-big", note: "x".repeat(2 << 20) }] });

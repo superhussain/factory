@@ -84,18 +84,35 @@ function offlineSourceChecks() {
     "e.target.closest('input, textarea, select, [contenteditable], #d-resize, video')",
     "document.querySelector('dialog[open]')",
     "e.repeat",
-    "$('new-idea').hidden",
   ]) {
     assert.ok(body.includes(guard), "handler guard: " + guard);
   }
-  assert.ok(script.includes("e.key === 'j' || e.key === '/'"), "/ shares the j opener");
+  const global = script.indexOf("function handleGlobalKeys(e)");
+  assert.equal(
+    script.split("document.addEventListener('keydown', handleGlobalKeys);").length - 1,
+    1,
+    "handleGlobalKeys registered once",
+  );
+  const globalBody = script.slice(
+    global,
+    script.indexOf("document.addEventListener('keydown', handleGlobalKeys);"),
+  );
+  for (const guard of [
+    "e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing",
+    "e.target.closest('textarea, [contenteditable], #d-resize, video, input:not([type=radio]):not([type=checkbox])')",
+    "document.querySelector('dialog[open]')",
+    "$('new-idea').hidden",
+  ]) {
+    assert.ok(globalBody.includes(guard), "global handler guard: " + guard);
+  }
+  assert.ok(globalBody.includes("e.key === 'j' || e.key === '/'"), "/ shares the j opener");
   for (const opener of [
     "openIdeaDialog()",
     "openJobPicker()",
     "openProjectPicker()",
     "location.hash = '#/settings/projects';",
   ]) {
-    assert.ok(body.includes(opener), "handler opener: " + opener);
+    assert.ok(globalBody.includes(opener), "global handler opener: " + opener);
   }
   console.log(
     "PASS offline source checks: helpers, guards, openers and byte-identical legacy handlers",

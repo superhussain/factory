@@ -18,7 +18,8 @@ const MERGED = Array.from({ length: 30 }, (_, n) => ({
   project: "sample",
   title: `Synthetic merged ${500 + n}`,
   stage: "merged",
-  updated: at(n),
+  // Row 500 was touched after it merged: its updated is newest, its done oldest.
+  updated: n === 0 ? at(100) : at(n),
   done: at(n),
 }));
 const ACTIVE = [
@@ -100,6 +101,10 @@ test("slim board read", { timeout: 240000 }, async (t) => {
       assert.ok(reads.includes("GET /board.json?view=slim"), reads.join(", "));
       assert.equal(fullReads(reads), 0);
       assert.equal(await mergedCards(page), 10);
+      assert.deepEqual(
+        await page.$$eval(".col.merged .card", (c) => c.map((x) => x.dataset.id)),
+        Array.from({ length: 10 }, (_, i) => `${529 - i}-synthetic-merged`),
+      );
       assert.equal(await text(page, ".col.merged .count-wide"), "showing 10 of 30");
       assert.equal(await text(page, ".col.merged .count-narrow"), "10 / 30");
       await clickNow(page, '.column-toggle[data-stage="merged"]');

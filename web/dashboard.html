@@ -217,10 +217,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .retros-runs-heading { font-size: 15px; margin: 24px 0 12px; }
   #audit-flags td a { color: var(--accent); }
   #audit-flags td a { white-space: nowrap; }
-  #audit-flags td a + a { margin-left: 8px; }
+  #audit-flags td:nth-child(5) a { display: block; }
+  #audit-flags td:nth-child(5) a + a { margin-top: 4px; }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #audit-flags td:nth-child(8) { min-width: 14em; }
-  .audit-flag-actions { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 8px; }
+  .audit-flag-actions { display: grid; grid-template-columns: max-content; justify-content: start; gap: 8px; }
   .audit-flag-actions a { grid-column: 1 / -1; justify-self: start; padding: 6px 0; }
   #audit-flags td:last-child { white-space: nowrap; }
   #audit-flags tr.acked { color: var(--muted); }
@@ -1079,6 +1080,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <p id="push-status" role="status"></p>
       <h4 id="sound-heading">Sounds</h4>
       <label for="sound-on"><input type="checkbox" id="sound-on" aria-describedby="sound-help"> Play a sound for board events</label>
+      <p class="muted" id="sound-wait" hidden>Sounds start after your first click or key press in this tab.</p>
       <p class="muted" id="sound-help"></p>
       <p id="sound-status" role="status"></p>
       <h4 id="alert-heading">Events</h4>
@@ -1217,7 +1219,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
         <thead><tr><th scope="col">Agent link kind</th><th scope="col">Label</th></tr></thead><tbody></tbody>
       </table></div>
       <h4 id="reference-keys-heading">Keyboard shortcuts</h4>
-      <p class="muted">Single keys work on the board when no dialog is open and no text field has focus.</p>
+      <p class="muted">Single keys work on every page when no dialog is open and no text field has focus. The arrow keys, B, A, D and . act only where their row says.</p>
       <div class="reference-scroll"><table class="reference-table" id="reference-keys" aria-labelledby="reference-keys-heading">
         <thead><tr><th scope="col">Key</th><th scope="col">What it does</th></tr></thead><tbody>
           <tr><td>J or /</td><td>Open the jumper</td></tr>
@@ -1230,7 +1232,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
           <tr><td>I</td><td>Open the Inbox</td></tr>
           <tr><td>W</td><td>Open the next job waiting on you</td></tr>
           <tr><td>A or .</td><td>Open the jumper with actions for the hovered or focused job card, or the open job</td></tr>
-          <tr><td>B</td><td>Open the first backlog item</td></tr>
+          <tr><td>B</td><td>Open the first backlog item from the board</td></tr>
           <tr><td>A or D</td><td>Approve or deny the open backlog item</td></tr>
           <tr><td>Right or Left arrow</td><td>Move between cards and job pages</td></tr>
           <tr><td>Right or Left arrow in the Inbox</td><td>Move between Inbox rows, with the open one beside the list</td></tr>
@@ -6631,7 +6633,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && openId && !document.querySelector('dialog[open]')) closeDetail();
 });
 
-// Arrow navigation over cards and job pages, plus n, j or /, p, s, r, w and a single-key openers.
+// Arrow navigation over cards and job pages, plus a single-key opener. handleGlobalKeys holds the openers that work on every page.
 // A separate listener, so the Esc/Cmd+K handler above stays byte-identical.
 function handleBoardKeys(e) {
   if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null || notificationsRoute() !== null) return;
@@ -6667,6 +6669,20 @@ function handleBoardKeys(e) {
     return;
   }
   if (e.repeat) return;
+  if (e.key === 'a' || e.key === '.') {
+    if (openBacklogRaw !== null) return;
+    const target = cardShortcutTarget(e);
+    if (!target) return;
+    e.preventDefault();
+    openJobActionsPicker(target);
+  }
+}
+document.addEventListener('keydown', handleBoardKeys);
+
+function handleGlobalKeys(e) {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
+  if (e.target.closest('textarea, [contenteditable], #d-resize, video, input:not([type=radio]):not([type=checkbox])')) return;
+  if (document.querySelector('dialog[open]')) return;
   if (e.key === 'n') {
     if ($('new-idea').hidden) return;
     e.preventDefault();
@@ -6678,12 +6694,15 @@ function handleBoardKeys(e) {
     e.preventDefault();
     openProjectPicker();
   } else if (e.key === 's') {
+    if (settingsRoute() !== null) return;
     e.preventDefault();
     location.hash = '#/settings/projects';
   } else if (e.key === 'r') {
+    if (retrosRoute() !== null) return;
     e.preventDefault();
     location.hash = '#/retros';
   } else if (e.key === 'i') {
+    if (inboxRoute() !== null) return;
     e.preventDefault();
     location.hash = '#/inbox';
   } else if (e.key === 'w') {
@@ -6691,15 +6710,9 @@ function handleBoardKeys(e) {
     if (!j) return;
     e.preventDefault();
     openCard(j.id);
-  } else if (e.key === 'a' || e.key === '.') {
-    if (openBacklogRaw !== null) return;
-    const target = cardShortcutTarget(e);
-    if (!target) return;
-    e.preventDefault();
-    openJobActionsPicker(target);
   }
 }
-document.addEventListener('keydown', handleBoardKeys);
+document.addEventListener('keydown', handleGlobalKeys);
 
 // b opens the first backlog item. a and d approve or deny the open one, which opens the next.
 function handleBacklogKeys(e) {
@@ -9305,7 +9318,7 @@ function watchAway() { return notifyActive() || soundActive(); }
 // Browsers keep an AudioContext suspended until the page gets a click or key.
 function wakeAudio() {
   try {
-    audio ||= new AudioContext();
+    if (!audio) { audio = new AudioContext(); audio.addEventListener('statechange', renderSoundWait); }
     if (audio.state === 'suspended') audio.resume();
   } catch {}
 }
@@ -9353,6 +9366,11 @@ function renderSoundSettings() {
     if (box.disabled) box.setAttribute('aria-describedby', 'sound-help'); else box.removeAttribute('aria-describedby');
   }
   $('sound-help').textContent = supported ? (soundOn ? SOUND_HELP : SOUND_OFF_HELP) : 'This browser cannot play sounds.';
+  renderSoundWait();
+}
+function renderSoundWait() {
+  $('sound-wait').hidden = !soundActive() || audio?.state === 'running';
+  $('sound-on').setAttribute('aria-describedby', $('sound-wait').hidden ? 'sound-help' : 'sound-help sound-wait');
 }
 $('sound-on').addEventListener('change', () => {
   soundOn = $('sound-on').checked;

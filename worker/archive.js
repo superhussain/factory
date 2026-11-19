@@ -55,7 +55,7 @@ export function planArchive(jobs, setting, now, tracerOff = false) {
 
 export const SLIM_RECENT = 10;
 
-/** The board with every unfinished row, the newest finished rows of each stage by `updated`, and per-project finished counts. */
+/** The board with every unfinished row, the newest finished rows of each stage by done, else updated, and per-project finished counts. */
 export function slimBoard(data) {
   const counts = Object.create(null);
   const finished = { merged: [], closed: [] };
@@ -70,7 +70,8 @@ export function slimBoard(data) {
     counts[project] ??= { merged: 0, closed: 0 };
     counts[project][job.stage] += 1;
   }
-  const at = (job) => Date.parse(job.updated) || 0;
+  // Same key as the finished-column sort in renderBoard.
+  const at = (job) => Date.parse(job.done || job.updated) || 0;
   const recent = new Set(
     Object.values(finished).flatMap((rows) =>
       rows.sort((a, b) => at(b) - at(a)).slice(0, SLIM_RECENT),

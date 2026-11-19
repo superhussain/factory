@@ -52,7 +52,7 @@ const KEYS = [
   ["I", "Open the Inbox"],
   ["W", "Open the next job waiting on you"],
   ["A or .", "Open the jumper with actions for the hovered or focused job card, or the open job"],
-  ["B", "Open the first backlog item"],
+  ["B", "Open the first backlog item from the board"],
   ["A or D", "Approve or deny the open backlog item"],
   ["Right or Left arrow", "Move between cards and job pages"],
   [

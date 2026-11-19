@@ -138,11 +138,13 @@ test("settings page", { timeout: 180000 }, async (t) => {
       assert.equal(await page.evaluate(() => location.hash), "#/settings/projects");
     });
 
-    await t.test("settings S5 board keys are inert", async () => {
+    await t.test("settings S5 board-only keys are inert", async () => {
       await page.evaluate(() => document.activeElement?.blur());
-      for (const key of ["ArrowRight", "j", "/", "n", "p", "s"]) {
+      for (const key of ["ArrowRight", "b"]) {
         await page.keyboard.press(key);
         assert.equal(await page.evaluate(() => location.hash), "#/settings/projects");
+        assert.equal(await page.$eval("#settings-page", (el) => el.hidden), false);
+        assert.equal(await page.$eval("#detail", (el) => el.hidden), true);
         assert.equal(await page.evaluate(() => document.querySelector("dialog[open]")), null);
       }
     });
