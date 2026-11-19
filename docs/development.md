@@ -145,8 +145,8 @@ records matched before and after views. Each `view(...)` line in
 | Viewport | Used by |
 | --- | --- |
 | 1440x900 | desktop views |
-| 1280x900 | settings, archive and agent-run views |
-| 390x844 | mobile views |
+| 1280x900 | settings, archive and agent-run views, `notify-toast-1280` |
+| 390x844 | mobile views, `notify-toast-390` and `notify-alerts-390` |
 | 375x667 | `drawer-mobile-scrolled` |
 | 320x844 | `header-notifications-320` |
 | 900x900 | `inbox-split-900` |

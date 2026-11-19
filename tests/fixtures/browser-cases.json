@@ -168,6 +168,7 @@
   "tests/browser/pwa-install.test.mjs",
   "tests/browser/install-app.test.mjs",
   "tests/browser/notification-settings.test.mjs",
+  "tests/browser/notify-toast.test.mjs",
   "tests/browser/app-badge.test.mjs",
   "tests/browser/scheduler-settings.test.mjs",
   "tests/browser/reference-settings.test.mjs",
