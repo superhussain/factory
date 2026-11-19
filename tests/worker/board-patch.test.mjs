@@ -232,6 +232,34 @@ test("same refusals", async () => {
   );
 });
 
+test("new starter", async () => {
+  const TEXT =
+    'a board write cannot add "2001-add-csv-export" as a batch starter: start a batch from a held idea already on the board. Nothing was written.';
+  const starter = { ...IDEA, priority: { at: "2026-11-19T12:00:00Z", batch: true } };
+  const s = setup();
+  const before = s.etag();
+  const patched = await s.patch({ rows: [add(starter)] });
+  assert.equal(patched.status, 400);
+  assert.equal(await patched.text(), TEXT);
+  const put = await serveFactory(
+    new Request("http://local/api/board", {
+      method: "PUT",
+      headers: { "If-Match": before },
+      body: JSON.stringify({ updated: "", jobs: [BUILD, SPEC, starter] }),
+    }),
+    { BUCKET: s.bucket },
+    person,
+  );
+  assert.equal(put.status, 400);
+  assert.equal(await put.text(), TEXT);
+  assert.equal(s.etag(), before);
+
+  const ok = await s.patch({ rows: [add()] });
+  assert.equal(ok.status, 200);
+  const marked = await s.patch({ rows: [{ id: IDEA.id, expect: IDEA, row: starter }] });
+  assert.equal(marked.status, 200, "an idea already on the board can become the starter");
+});
+
 test("retries", async () => {
   const s = setup();
   const put = s.bucket.put.bind(s.bucket);

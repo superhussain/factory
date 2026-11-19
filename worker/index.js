@@ -443,7 +443,8 @@ async function boardRefusal(env, stored, data, sameBase) {
         checkArchived(stored, data) ??
         checkNewIds(stored.jobs, data.jobs) ??
         checkRiderControls(stored.jobs, data.jobs) ??
-        checkBatchRefs(stored.jobs, data.jobs))
+        checkBatchRefs(stored.jobs, data.jobs) ??
+        checkNewStarters(stored.jobs, data.jobs))
       : null)
   );
 }
@@ -2480,6 +2481,18 @@ function checkNewIds(storedJobs, jobs) {
     return `a board write cannot add ${quoteIdCut(String(id), QUOTED_ID_MAX)}: a job id has no project prefix and is never a bare number, like 003-rate-limiting. Nothing was written. Upgrade the factory skill, or claim new ids with factory.py claim.`;
   }
   return null;
+}
+
+// An error message, or null. Run batch now marks a held idea already on the board as the
+// starter, and no read can cover a row that arrives new with that mark.
+function checkNewStarters(storedJobs, jobs) {
+  const ids = new Set(storedJobs.map((j) => j?.id));
+  const row = jobs.find(
+    (j) => !ids.has(j?.id) && j?.stage === "idea" && j.priority?.batch === true,
+  );
+  return row
+    ? `a board write cannot add ${quoteIdCut(row.id, QUOTED_ID_MAX)} as a batch starter: start a batch from a held idea already on the board. Nothing was written.`
+    : null;
 }
 
 // An error message, or null. Only the archive pass writes `archived`, and a client that
