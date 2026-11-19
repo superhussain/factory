@@ -1410,6 +1410,8 @@ let openId = null;
 let tracerOff = true;
 const TRACER_WAIT_MS = 3000;
 let tracerSettingRead = null;
+// True once the first pipeline read settles, so only the first board draw waits for it.
+let tracerSettingKnown = false;
 // The backlog line open in the drawer's decision page, or null. Never set together with openId.
 let openBacklogRaw = null;
 // '#/inbox' while the open drawer was opened from the inbox, so closing it goes back there.
@@ -1614,7 +1616,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
       syncDetail();
       return true;
     }
-    if (!loaded) {
+    if (!tracerSettingKnown) {
       await Promise.race([tracerSettingRead, new Promise((res) => setTimeout(res, TRACER_WAIT_MS))]);
       if (version !== boardReadVersion) return false;
     }
@@ -4555,6 +4557,7 @@ async function loadTracerSetting() {
     if (r.status === 404) off = true;
     else if (r.status === 200 && !r.redirected) off = (await r.json())?.tracer?.enabled !== true;
   } catch {}
+  tracerSettingKnown = true;
   if (off === tracerOff) return;
   tracerOff = off;
   if (loaded) renderBoard();
