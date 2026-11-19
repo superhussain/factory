@@ -44,6 +44,10 @@ const SOUND_LABELS = [
   ["pr", "A pull request opens", "A job opens its pull request for review."],
   ["merged", "A job merges", "A job's pull request merges."],
 ];
+const SOUND_HELP =
+  "Pick which events play a sound in the Events list below. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.";
+const SOUND_OFF_HELP =
+  "Sounds are off, so the Sound boxes in the Events list below are greyed out. Turn this on to pick which events play a sound. Play still previews each sound.";
 const PUSH_HELP =
   "Sends a push when a job starts waiting on you or merges. It shows the job id and title only.";
 
@@ -125,6 +129,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
         return;
       }
       window.tones = [];
+      window.toneStarts = [];
       const param = () => ({ value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} });
       window.AudioContext = class {
         state = "suspended";
@@ -140,7 +145,10 @@ test("notification settings", { timeout: 180000 }, async (t) => {
           const osc = {
             frequency: param(),
             connect: (node) => node,
-            start: () => window.tones.push(osc.frequency.value),
+            start: (at) => {
+              window.tones.push(osc.frequency.value);
+              window.toneStarts.push(at);
+            },
             stop() {},
           };
           return osc;
@@ -232,6 +240,8 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(covering, null, `${selector} is covered by ${covering}`);
     };
     const tones = () => page.evaluate(() => window.tones);
+    const soundBoxes = () =>
+      page.$$eval("[data-sound-kind]", (els) => els.map((el) => [el.checked, el.disabled]));
     const shown = () =>
       page.evaluate(() => window.shown.map(({ title, body, tag }) => ({ title, body, tag })));
 
@@ -548,11 +558,22 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
       assert.equal(await text("#sound-heading"), "Sounds");
       assert.equal(await text('label[for="sound-on"]'), " Play a sound for board events");
-      assert.equal(
-        await text("#sound-help"),
-        "Pick which events play a sound in the Events list above. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.",
+      assert.ok(
+        await page.evaluate(
+          () =>
+            document
+              .getElementById("sound-heading")
+              .compareDocumentPosition(document.getElementById("alert-heading")) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
       );
+      assert.equal(await text("#sound-help"), SOUND_OFF_HELP);
       assert.equal(await page.$eval("#sound-on", (el) => el.checked), false);
+      assert.deepEqual(await soundBoxes(), Array(5).fill([true, true]));
+      assert.deepEqual(
+        await page.$$eval("[data-sound]", (els) => els.map((el) => el.disabled)),
+        Array(5).fill(false),
+      );
       assert.equal(await storage("factory-sound"), null);
       assert.deepEqual(
         await page.$$eval(".event-kinds li", (els) =>
@@ -607,12 +628,16 @@ test("notification settings", { timeout: 180000 }, async (t) => {
         wait,
       );
       assert.equal(await storage("factory-sound"), "on");
+      assert.deepEqual(await soundBoxes(), Array(5).fill([true, false]));
+      assert.equal(await text("#sound-help"), SOUND_HELP);
       await page.click("#sound-on");
       await page.waitForFunction(
         () => document.getElementById("sound-status").textContent === "Sounds are off.",
         wait,
       );
       assert.equal(await storage("factory-sound"), null);
+      assert.deepEqual(await soundBoxes(), Array(5).fill([true, true]));
+      assert.equal(await text("#sound-help"), SOUND_OFF_HELP);
     });
 
     await t.test("sound S3 hidden tab polls while sounds are on", async () => {
@@ -795,6 +820,35 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await seedBacklog(origin, "- [ ] sample: Synthetic existing idea\n" + IDEA);
       await page.evaluate(() => refreshBacklog());
       assert.deepEqual(await tones(), [392, 494]);
+    });
+
+    await t.test("sound S9 a board tone and a backlog tone from one poll take turns", async () => {
+      const both = {
+        ...JOBS[0],
+        id: "010-sample-both",
+        title: "Synthetic both job",
+        stage: "build",
+      };
+      const backlog = "- [ ] sample: Synthetic existing idea\n" + IDEA;
+      await seedBoard(origin, [...afterS5, both]);
+      await page.evaluate(() => poll());
+      await page.evaluate(() => refreshBacklog());
+      await page.evaluate(() => {
+        window.tones = [];
+        window.toneStarts = [];
+        soundEnd = -Infinity;
+      });
+      await seedBoard(origin, [...afterS5, { ...both, stage: "needs-human" }]);
+      await seedBacklog(origin, backlog + "- [ ] sample: Synthetic second idea\n");
+      await page.evaluate(() => poll());
+      await page.waitForFunction(() => window.tones.length === 5, wait);
+      assert.deepEqual(
+        (await tones()).sort((a, b) => a - b),
+        [392, 494, 660, 880, 880],
+      );
+      const starts = (await page.evaluate(() => window.toneStarts)).sort((a, b) => a - b);
+      for (let i = 1; i < starts.length; i++)
+        assert.ok(starts[i] - starts[i - 1] >= 0.149, `${starts}`);
     });
 
     await t.test("notify C1 card detail toggles", async () => {
