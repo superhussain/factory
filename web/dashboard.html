@@ -1708,8 +1708,11 @@ window.addEventListener('message', (e) => {
 });
 // In a Paseo frame, a warm return focuses the frame. Put focus back on the last focused element.
 // Chrome has already moved activeElement to body when window blur fires, so track focusin instead.
+// A press outside any focusable element forgets it.
 let embedFocus = null;
 document.addEventListener('focusin', (e) => { embedFocus = e.target; });
+const EMBED_FOCUSABLE = 'a[href], button, input, select, textarea, summary, label, [tabindex], [contenteditable]';
+document.addEventListener('pointerdown', (e) => { if (!(e.target instanceof Element && e.target.closest(EMBED_FOCUSABLE))) embedFocus = null; }, true);
 window.addEventListener('focus', () => {
   const el = embedFocus;
   if (!embedParent || !el || !el.isConnected || !el.checkVisibility()) return;
