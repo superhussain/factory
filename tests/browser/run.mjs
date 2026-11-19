@@ -1184,6 +1184,25 @@ async function capture(outdir, referencePath) {
         { timeout: 30000 },
       );
     };
+    const openNotificationsSplit = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/notifications";
+      });
+      await page.waitForSelector('#notifications-list a[href="#001-capture"]');
+      await page.click('#notifications-list a[href="#001-capture"]');
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#d-meta")?.textContent.includes("001-capture") &&
+          document.querySelector("#d-doc").textContent !== "loading files",
+        { timeout: 30000 },
+      );
+    };
+    const openNotificationsHiddenLinks = async (page, side) => {
+      await page.evaluate(() => localStorage.setItem("factory-hidden-drawer-links", "web"));
+      await page.reload({ waitUntil: "networkidle0" });
+      await page.waitForSelector(".card");
+      await openNotificationsPage(page, side);
+    };
     // The reference page has no toast stack, so both sides crop the same bottom right corner.
     const openToasts = async (page, side) => {
       if (side === "after")
@@ -1202,6 +1221,14 @@ async function capture(outdir, referencePath) {
       await view("notifications-menu-390", 390, 844, "dark", openNotificationsMenu("tap"), true);
       await view("notifications-page-1280", 1280, 900, "light", openNotificationsPage);
       await view("notifications-page-390", 390, 844, "dark", openNotificationsPage);
+      await view("notifications-split-1280", 1280, 900, "light", openNotificationsSplit);
+      await view(
+        "notifications-page-hidden-links-1280",
+        1280,
+        900,
+        "light",
+        openNotificationsHiddenLinks,
+      );
       await view(
         "header-notifications-320",
         320,
@@ -1762,6 +1789,11 @@ async function capture(outdir, referencePath) {
     try {
       await view("retros-flags-desktop", 1440, 900, "light", openRetrosFlags);
       await view("retros-flags-mobile", 390, 844, "dark", openRetrosFlags);
+      await view("retros-flags-web-hidden-desktop", 1440, 900, "light", async (page, side) => {
+        await page.evaluate(() => localStorage.setItem("factory-hidden-drawer-links", "web"));
+        await page.reload({ waitUntil: "networkidle0" });
+        await openRetrosFlags(page, side);
+      });
       await view("retros-flags-idea-desktop", 1440, 900, "light", async (page, side) => {
         await openRetrosFlags(page, side);
         if (side !== "after") return;
