@@ -35,7 +35,7 @@ class WatchTest(IsolatedTestCase):
     def hold(self, target):
         self.holds.append((target, sorted(p.name for p in self.folder.iterdir()), self.now))
 
-    def watch(self, *args, readings=((view(), checks("pass")),), pr=PR, hold=None):
+    def watch(self, *args, readings=((view(), checks("pass")),), pr=PR, hold=None, session=None, target=f"sample/{JOB}"):
         """Run watch with gh answering each (view, checks) reading in turn, repeating the last."""
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open"}
         if pr is not None:
@@ -56,7 +56,8 @@ class WatchTest(IsolatedTestCase):
                     patch.object(factory, "gh_cli", lambda *a: gh(*a[1:])), \
                     patch.object(factory.time, "sleep", self.sleep), \
                     patch.object(factory.time, "monotonic", lambda: self.now):
-                return invoke(factory, ["--home", str(self.home), "watch", f"sample/{JOB}", *args])
+                tag = ["--session", session] if session else []
+                return invoke(factory, ["--home", str(self.home), *tag, "watch", target, *args])
 
     def result(self, *args, **kwargs):
         code, out, err = self.watch(*args, **kwargs)
@@ -126,10 +127,10 @@ class WatchTest(IsolatedTestCase):
 
     def test_hold_once_first(self):
         self.sleeps[3] = lambda: self.write("spec.md", "# Spec: sample export\n")
-        self.result("spec.md")
+        self.result("spec.md", session="a1b2c3")
         self.assertEqual(self.holds, [(f"sample/{JOB}", [], 0.0)])
         self.holds.clear()
-        self.result("--pr")
+        self.result("--pr", session="a1b2c3")
         self.assertEqual(len(self.holds), 1)
 
     def test_hold_exit_stops_watch(self):
@@ -138,8 +139,19 @@ class WatchTest(IsolatedTestCase):
         def hold(target):
             raise SystemExit(6)
 
-        code, out, _ = self.watch("spec.md", "--pr", hold=hold)
+        code, out, _ = self.watch("spec.md", "--pr", hold=hold, session="a1b2c3")
         self.assertEqual((code, out, self.gh_calls), (6, "", []))
+
+    def test_no_session_reads_only(self):
+        self.write("spec.md", "# Spec: sample export\n")
+        self.assertEqual(self.result("spec.md")["event"], "files")
+        self.assertEqual(self.holds, [])
+
+    def test_no_session_missing_job_exits_4(self):
+        code, out, err = self.watch("spec.md", target="sample/043-missing")
+        self.assertEqual((code, out), (4, ""))
+        self.assertIn("no job 043-missing on the board. Nothing was written.", err)
+        self.assertEqual(self.holds, [])
 
     def test_bad_usage_exits_2(self):
         for args in (["--timeout", "0"], ["--timeout", "541"], ["--pr", "--pr"], ["notes.md"], ["--hold"],
