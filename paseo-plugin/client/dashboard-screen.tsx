@@ -168,7 +168,9 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
       if (message.type === "factory-embed-ready") {
         setReady(true);
         setStalled(false);
-      } else if (message.type === "factory-open-agent") {
+      } else if (message.type === "factory-open-url")
+        openExternalUrl(message.url).catch(() => toast.error("Paseo could not open that link."));
+      else if (message.type === "factory-open-agent") {
         if (navigation) navigation.openAgent({ agentId: message.agent, serverId: message.server });
         else toast.error("This Paseo app cannot open agents from plugins.");
       }

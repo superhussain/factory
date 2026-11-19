@@ -45,8 +45,9 @@ const PARENT = `<!doctype html><title>Synthetic Paseo</title>
 <script>
 window.received = [];
 const frame = document.querySelector("iframe");
-frame.addEventListener("load", () =>
-  frame.contentWindow.postMessage({ type: "factory-embed-hello", v: 1 }, "${DASHBOARD}"));
+const hello = { type: "factory-embed-hello", v: 1 };
+if (location.search === "?links=external") hello.links = "external";
+frame.addEventListener("load", () => frame.contentWindow.postMessage(hello, "${DASHBOARD}"));
 addEventListener("message", (e) => window.received.push(e.data));
 </script>`;
 
@@ -88,10 +89,10 @@ async function stubbed(page, viewport, handler) {
   page.on("request", handler);
 }
 
-async function framedPage(browser, origin, parent) {
+async function framedPage(browser, origin, parent, path = "/") {
   const page = await (await browser.createBrowserContext()).newPage();
   await stubbed(page, { width: 1280, height: 900 }, proxy(origin, parent));
-  await page.goto(parent + "/", { waitUntil: "domcontentloaded" });
+  await page.goto(parent + path, { waitUntil: "domcontentloaded" });
   return page;
 }
 
@@ -302,6 +303,74 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       await waitFor("#/inbox");
       await childFrame(page).evaluate(() => replaceUrl("/#/settings/display"));
       await waitFor("#/settings/display");
+    });
+
+    await t.test("external link posts url", async () => {
+      const ext = await framedPage(browser, origin, LISTED, "/?links=external");
+      await ext.waitForFunction(
+        () => window.received.some((m) => m?.type === "factory-embed-ready"),
+        { timeout: 5000, polling: 50 },
+      );
+      const frame = childFrame(ext);
+      await frame.waitForSelector("#d-paseo:not([hidden])");
+      const before = frame.url();
+      await frame.evaluate(() => {
+        document.body.insertAdjacentHTML(
+          "beforeend",
+          '<a id="synthetic-out" href="https://docs.example.test/page" target="_blank">out</a>' +
+            '<a id="synthetic-hash" href="#/inbox">hash</a>',
+        );
+      });
+      const target = ext
+        .browserContext()
+        .waitForTarget((x) => x.url().includes("docs.example.test"), { timeout: 2000 })
+        .catch(() => null);
+      await frame.evaluate(() => document.querySelector("#synthetic-out").click());
+      await ext.waitForFunction(() => window.received.some((m) => m?.type === "factory-open-url"), {
+        timeout: 5000,
+        polling: 50,
+      });
+      assert.equal(await target, null);
+      assert.deepEqual(
+        await ext.evaluate(() => window.received.filter((m) => m?.type === "factory-open-url")),
+        [{ type: "factory-open-url", v: 1, url: "https://docs.example.test/page" }],
+      );
+      assert.equal(childFrame(ext).url(), before);
+      await ext.evaluate(() => {
+        window.received = [];
+      });
+      await frame.evaluate(() => document.querySelector("#synthetic-hash").click());
+      await frame.evaluate(() => document.querySelector("#d-paseo").click());
+      await ext.waitForFunction(
+        () => window.received.some((m) => m?.type === "factory-open-agent"),
+        { timeout: 5000, polling: 50 },
+      );
+      assert.equal(
+        await ext.evaluate(() => window.received.some((m) => m?.type === "factory-open-url")),
+        false,
+      );
+    });
+
+    await t.test("links stay default without opt-in", async () => {
+      const frame = childFrame(page);
+      await frame.evaluate(() => {
+        document.body.insertAdjacentHTML(
+          "beforeend",
+          '<a id="synthetic-out" href="https://docs.example.test/page" target="_blank">out</a>',
+        );
+      });
+      await page.evaluate(() => {
+        window.received = [];
+      });
+      const target = page
+        .browserContext()
+        .waitForTarget((x) => x.url().includes("docs.example.test"), { timeout: 5000 });
+      await frame.evaluate(() => document.querySelector("#synthetic-out").click());
+      assert.ok(await target);
+      assert.equal(
+        await page.evaluate(() => window.received.some((m) => m?.type === "factory-open-url")),
+        false,
+      );
     });
 
     await t.test("unlisted origin", async () => {

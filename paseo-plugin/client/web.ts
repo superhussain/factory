@@ -111,7 +111,12 @@ const keeper = createFrameKeeper<FrameElement, EmbedMessage>({
     element.style.cssText = "border:0;width:100%;height:100%;display:block";
     element.src = src;
     element.addEventListener("load", () =>
-      frameLoaded(element.contentWindow, origin, setFrameInboxCount),
+      frameLoaded(
+        element.contentWindow,
+        origin,
+        setFrameInboxCount,
+        !firstLogin.isBrowserOrigin(paseoOrigin()),
+      ),
     );
     listen();
     return element;
@@ -156,7 +161,9 @@ function route(event: FrameMessage): void {
   else if (message.type === "factory-embed-ready") {
     frame.ready = true;
     markLoaded(frame.origin);
-  }
+  } else if (message.type === "factory-open-url" && !frame.onMessage)
+    // A parked frame has no screen to show a failure toast; the screen handles attached links.
+    openExternalUrl(message.url).catch(() => {});
   frame.onMessage?.(message);
 }
 
