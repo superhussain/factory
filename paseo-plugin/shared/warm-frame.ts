@@ -17,6 +17,7 @@ export type KeptFrame<E, M> = {
   origin: string;
   element: E;
   ready: boolean;
+  signedOut: boolean;
   parkedAt: number | null;
   onMessage: ((message: M) => void) | null;
 };
@@ -62,7 +63,7 @@ export function createFrameKeeper<E extends FrameNode, M>(
     drop();
     const element = dom.create(origin, src);
     host.appendChild(element);
-    kept = { origin, element, ready: false, parkedAt: null, onMessage: null };
+    kept = { origin, element, ready: false, signedOut: false, parkedAt: null, onMessage: null };
     return { frame: kept, warm: false };
   }
   function park(frame: KeptFrame<E, M>): void {

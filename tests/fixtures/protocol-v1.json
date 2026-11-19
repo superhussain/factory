@@ -399,7 +399,7 @@
     {
       "id": "closed-method-patch",
       "method": "PATCH",
-      "path": "/api/board",
+      "path": "/api/backlog",
       "headers": {},
       "body": null,
       "expected": {

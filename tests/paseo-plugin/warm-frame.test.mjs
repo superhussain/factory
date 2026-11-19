@@ -45,6 +45,7 @@ test("first attach creates and appends", () => {
   const { calls, keeper, named } = setup();
   const result = keeper.attach(parent("host", calls), A, A + "/");
   assert.equal(result.warm, false);
+  assert.equal(result.frame.signedOut, false);
   assert.equal(named("create").length, 1);
   assert.deepEqual(named("host"), [["host", "appendChild", 1]]);
 });

@@ -265,7 +265,7 @@ test("needs you form", { timeout: 180000 }, async (t) => {
     await t.test("board write fails", async () => {
       await page.setRequestInterception(true);
       const fail = (request) =>
-        request.method() === "PUT" && new URL(request.url()).pathname === "/api/board"
+        request.method() === "PATCH" && new URL(request.url()).pathname === "/api/board"
           ? request.respond({ status: 500, body: "fixture failure" })
           : request.continue();
       page.on("request", fail);

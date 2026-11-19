@@ -301,7 +301,8 @@ sequenceDiagram
 - A socket open or a poll timer tick re-reads `board.json` but redraws only when its `ETag` changed, so a focused card is not read again. A tick still reopens the job when the link names a tab or archived job that has not loaded.
   The header dot is solid while live and a ring while polling.
 - The dashboard reads `GET /board.json?view=slim` (`slimBoard` in `worker/archive.js`): every
-  unfinished row, the 10 newest rows of each finished stage and `slim.counts`, the finished
+  unfinished row, the 10 newest rows of each finished stage by `done`, else `updated` (the
+  column sort) and `slim.counts`, the finished
   rows per project and stage, under the stored `ETag`. Finished column headers then say
   `showing 10 of N`. Once a view needs older rows (show all, the jumper, a link to an older
   job, another route, the starred-only view) it reads `/api/board` once and keeps those rows.
@@ -317,6 +318,49 @@ sequenceDiagram
 | user, same origin, upgrade | 101 from the room |
 
 An open dashboard socket sends `ping` every 25 s. The room answers `pong` through `setWebSocketAutoResponse`, which does not wake it, so proxies that close quiet connections keep the socket. A socket with no `pong` for 60 s is closed and the tab polls. While polling, the dot's title names how the last socket closed: code, reason and time open, or that it never opened.
+
+## Dashboard board writes
+
+Every dashboard edit goes through `casBoard` in `web/dashboard.html`. It runs the edit's
+pure helper (`addIdea`, `discardIdea`, `assignProject`, ...) on a copy of the rows the tab
+already holds, diffs them by id with `rowChanges`, and sends only the changed rows to
+`PATCH /api/board`. Devices and `factory.py` keep `GET`/`PUT /api/board`.
+
+```mermaid
+sequenceDiagram
+  participant D as dashboard casBoard
+  participant W as Worker boardPatch
+  participant R as R2 board.json
+  D->>D: change(copy of jobs), rowChanges
+  D->>W: PATCH rows id, expect null, row
+  W->>R: get, check expect, boardRefusal
+  W->>R: put onlyIf ETag, retry 412 up to 10
+  W-->>D: 200 ok plus ETag
+```
+
+- The body is `{"updated", "rows": [{"id", "expect", "row"}]}`, 1 to 100 entries, one per id,
+  at most 1 MiB. `expect` is the row the client saw, or null for a new row. `row` is the new
+  row, or null to remove it. Rows match by JSON with sorted keys.
+- The Worker builds the whole board from the stored rows, runs the same checks as `PUT`
+  (`boardRefusal`, always against the stored base), writes with `onlyIf`, and retries its own
+  R2 412 up to 10 times. A commit announces `board.json` and sends pushes as `PUT` does.
+- A committed write's rows replace the tab's own copies, so a second write in the same
+  action builds on it. The next board read replaces them.
+
+| Case | Worker reply | Client |
+| --- | --- | --- |
+| `expect` differs from the stored row | 409 `conflict`, current rows | replaces those rows, reruns `change` |
+| New id number at or below the stored max | 409 `conflict`, `max_id` | raises its max id and reruns, so the id becomes the next free number |
+| New row's `capture_id` is already stored | 409 `conflict`, that row | `addIdea` finds the prior id, sends nothing |
+| A `PUT` check refuses | 400, same text | same message as a `PUT` refusal |
+| Malformed body, or unreadable stored board | 400 | shows the text |
+| Merged board over 16 MiB | 413, nothing written | shows the text |
+| R2 412 ten times | 409 `busy` | "the board kept changing" |
+
+A network error or 5xx marks the save uncertain ("Not confirmed: ..."), and a retry with the
+same `capture_id` gets the saved row back as a conflict, so it adds no duplicate. With
+`navigator.onLine` false, `casBoard` refuses before sending. `tools/board-timing.mjs` times
+the old and new paths on a synthetic board.
 
 ## Web Push
 

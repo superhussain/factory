@@ -169,13 +169,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .btn.icon .teeth { stroke-width: 2.5; stroke-linecap: butt; }
   #d-star[aria-pressed="true"] { color: var(--accent); }
   #d-star[aria-pressed="true"] svg { fill: currentColor; }
-  #inbox-link { position: relative; }
-  #inbox-count { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--alert); color: var(--panel); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
-  #inbox-count[hidden] { display: none; }
+  #inbox-link, #notifications-button, #retros-link { position: relative; }
+  .icon-count { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--alert); color: var(--panel); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
+  .icon-count[hidden] { display: none; }
   .notifications-wrap { position: relative; display: flex; }
-  #notifications-button { position: relative; }
-  #notifications-dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--alert); pointer-events: none; }
-  #notifications-dot[hidden] { display: none; }
   .notifications-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; width: 360px; max-height: 70vh; overflow-y: auto; padding: 8px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .notifications-menu[hidden] { display: none; }
   .notifications-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 8px 8px; font-size: 13px; font-weight: 600; }
@@ -217,10 +214,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .retros-runs-heading { font-size: 15px; margin: 24px 0 12px; }
   #audit-flags td a { color: var(--accent); }
   #audit-flags td a { white-space: nowrap; }
-  #audit-flags td a + a { margin-left: 8px; }
+  #audit-flags td:nth-child(5) a { display: block; }
+  #audit-flags td:nth-child(5) a + a { margin-top: 4px; }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #audit-flags td:nth-child(8) { min-width: 14em; }
-  .audit-flag-actions { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 8px; }
+  .audit-flag-actions { display: grid; grid-template-columns: max-content; justify-content: start; gap: 8px; }
   .audit-flag-actions a { grid-column: 1 / -1; justify-self: start; padding: 6px 0; }
   #audit-flags td:last-child { white-space: nowrap; }
   #audit-flags tr.acked { color: var(--muted); }
@@ -778,8 +776,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     <div class="filter-menu" id="filter-menu" role="group" aria-label="Show jobs from" hidden></div>
   </div>
   <div class="header-actions">
+    <a class="btn icon" id="inbox-link" href="#/inbox" aria-label="Inbox" title="Inbox (I)" aria-keyshortcuts="i"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9.5V13h11V9.5L12 4H4z"/></svg><span class="icon-count" id="inbox-count" aria-hidden="true" hidden></span></a>
     <div class="notifications-wrap" id="notifications-wrap">
-      <button class="btn icon" id="notifications-button" type="button" aria-label="Notifications" title="Notifications" aria-expanded="false" aria-controls="notifications-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.5 1.5h-11z"/><path d="M6.5 14a1.5 1.5 0 0 0 3 0"/></svg><span id="notifications-dot" aria-hidden="true" hidden></span></button>
+      <button class="btn icon" id="notifications-button" type="button" aria-label="Notifications" title="Notifications" aria-expanded="false" aria-controls="notifications-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.5 1.5h-11z"/><path d="M6.5 14a1.5 1.5 0 0 0 3 0"/></svg><span class="icon-count" id="notifications-count" aria-hidden="true" hidden></span></button>
       <div class="notifications-menu" id="notifications-menu" role="region" aria-label="Recent notifications" hidden>
         <div class="notifications-menu-head"><span>Notifications</span><a class="btn" id="notifications-see-all" href="#/notifications">See all</a></div>
         <p class="muted" id="notifications-menu-status" role="status"></p>
@@ -787,11 +786,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <ol id="notifications-menu-list"></ol>
       </div>
     </div>
-    <a class="btn icon" id="inbox-link" href="#/inbox" aria-label="Inbox" title="Inbox (I)" aria-keyshortcuts="i"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9.5V13h11V9.5L12 4H4z"/></svg><span id="inbox-count" aria-hidden="true" hidden></span></a>
+    <a class="btn icon" id="retros-link" href="#/retros" aria-label="Retros" title="Retros (R)" aria-keyshortcuts="r"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2 2v2.6h2.6"/><path d="M8 5v3l2 1.5"/></svg><span class="icon-count" id="retros-count" aria-hidden="true" hidden></span></a>
+    <a class="btn icon" id="settings-link" href="#/settings" aria-label="Settings" title="Settings (S)" aria-keyshortcuts="s"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="4.5"/><path class="teeth" d="M8 1v3M8 12v3M1 8h3M12 8h3M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12"/></svg></a>
     <button class="btn icon" id="new-idea" aria-label="New idea" title="New idea (N)" aria-keyshortcuts="n" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2c.4.3.6.7.6 1.2V12h4v-1.1c0-.5.2-.9.6-1.2A4.5 4.5 0 0 0 8 1.5zM6.5 14.5h3"/></svg></button>
     <button class="btn icon" id="job-jump" aria-label="Jump to job" title="Jump to job (J, /, ⌘K or Ctrl+K)" aria-keyshortcuts="j / Meta+K Control+K"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 4 4"/></svg></button>
-    <a class="btn icon" id="retros-link" href="#/retros" aria-label="Retros" title="Retros (R)" aria-keyshortcuts="r"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2 2v2.6h2.6"/><path d="M8 5v3l2 1.5"/></svg></a>
-    <a class="btn icon" id="settings-link" href="#/settings" aria-label="Settings" title="Settings (S)" aria-keyshortcuts="s"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="4.5"/><path class="teeth" d="M8 1v3M8 12v3M1 8h3M12 8h3M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12"/></svg></a>
   </div>
   <div class="status"><span id="updated">loading</span><span class="dot" id="dot" role="img" aria-label="connection" title="connection"></span></div>
 </header>
@@ -1074,6 +1072,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <p id="push-status" role="status"></p>
       <h4 id="sound-heading">Sounds</h4>
       <label for="sound-on"><input type="checkbox" id="sound-on" aria-describedby="sound-help"> Play a sound for board events</label>
+      <p class="muted" id="sound-wait" hidden>Sounds start after your first click or key press in this tab.</p>
       <p class="muted" id="sound-help"></p>
       <p id="sound-status" role="status"></p>
       <h4 id="alert-heading">Events</h4>
@@ -1212,7 +1211,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
         <thead><tr><th scope="col">Agent link kind</th><th scope="col">Label</th></tr></thead><tbody></tbody>
       </table></div>
       <h4 id="reference-keys-heading">Keyboard shortcuts</h4>
-      <p class="muted">Single keys work on the board when no dialog is open and no text field has focus.</p>
+      <p class="muted">Single keys work on every page when no dialog is open and no text field has focus. The arrow keys, B, A, D and . act only where their row says.</p>
       <div class="reference-scroll"><table class="reference-table" id="reference-keys" aria-labelledby="reference-keys-heading">
         <thead><tr><th scope="col">Key</th><th scope="col">What it does</th></tr></thead><tbody>
           <tr><td>J or /</td><td>Open the jumper</td></tr>
@@ -1225,7 +1224,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
           <tr><td>I</td><td>Open the Inbox</td></tr>
           <tr><td>W</td><td>Open the next job waiting on you</td></tr>
           <tr><td>A or .</td><td>Open the jumper with actions for the hovered or focused job card, or the open job</td></tr>
-          <tr><td>B</td><td>Open the first backlog item</td></tr>
+          <tr><td>B</td><td>Open the first backlog item from the board</td></tr>
           <tr><td>A or D</td><td>Approve or deny the open backlog item</td></tr>
           <tr><td>Right or Left arrow</td><td>Move between cards and job pages</td></tr>
           <tr><td>Right or Left arrow in the Inbox</td><td>Move between Inbox rows, with the open one beside the list</td></tr>
@@ -1500,6 +1499,7 @@ function setConnection(state) {
   drawDot(polling ? dot + ' polling' : dot, label);
   if (was === 'signin' && state !== 'signin') { syncLive(); syncAppBadge(badgeCount); }
   if (state === 'signin') syncAppBadge(badgeCount);
+  if (state === 'signin' && was !== 'signin') postEmbedSignin();
 }
 function drawLiveDot() { if ($('dot').classList.contains('ok')) setConnection('online'); }
 // Keepalive: an open socket sends "ping" every 25 s and the room's auto-response answers "pong", so proxies that drop quiet connections keep it. No pong for 60 s closes it. liveNote names how the last socket closed, for the polling dot.
@@ -1635,6 +1635,7 @@ const BACKLOG_POLL_MS = 120000;
 let backlogReadAt = 0;
 let boardUpdated = '';
 let boardEtag = '';
+let boardMaxId = 0;
 
 // The live socket can leave the board unread for hours, so a timer beside the live
 // client redraws this age label on its own.
@@ -1653,6 +1654,7 @@ function drawUpdated() {
 
 function refreshBacklog() {
   backlogReadAt = Date.now();
+  if (Date.now() - retrosReadAt >= RETROS_POLL_MS) loadRetros();
   tracerSettingRead = loadTracerSetting();
   const version = boardReadVersion;
   // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
@@ -1664,6 +1666,7 @@ function takeBoard(data) {
   jobs = slimRows(data);
   boardArchived = Number.isInteger(data.archived?.max_id);
   boardUpdated = data.updated || '';
+  boardMaxId = Number.isInteger(data.archived?.max_id) ? data.archived.max_id : 0;
 }
 
 // Saved copies paint the board at once. The network read that follows replaces them.
@@ -1685,8 +1688,8 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
   const version = ++boardReadVersion;
   try {
     if (withBacklog) refreshBacklog();
-    const r = await fetch('./board.json?view=slim', { cache: 'no-store' });
-    if (r.status === 401 || r.status === 403) {
+    const r = await fetch('./board.json?view=slim', { cache: 'no-store', redirect: 'manual' });
+    if (r.type === 'opaqueredirect' || r.status === 401 || r.status === 403) {
       setConnection('signin');
       noteBoardLoadError('signin');
       return false;
@@ -1820,12 +1823,15 @@ window.addEventListener('message', (e) => {
   embedParent = e.origin;
   embedLinksExternal = e.data.links === 'external';
   window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, e.origin);
+  if (connState === 'signin') postEmbedSignin();
   postEmbedLocation();
   syncInboxLink();
 });
+function postEmbedSignin() { if (embedParent) window.parent.postMessage({ type: 'factory-embed-signin', v: 1 }, embedParent); }
 // In a Paseo frame, a warm return focuses the frame. Put focus back on the last focused element.
 // Chrome has already moved activeElement to body when window blur fires, so track focusin instead.
 // A press outside any focusable element forgets it. A scrollbar press keeps it, and a focused dialog holding it gives focus back.
+// The restored field then scrolls only as far as needed to be fully seen.
 let embedFocus = null;
 document.addEventListener('focusin', (e) => { if (e.target instanceof HTMLDialogElement && e.target.contains(embedFocus)) return; embedFocus = e.target; });
 const EMBED_FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, label, [tabindex], [contenteditable]:not([contenteditable="false"])';
@@ -1836,6 +1842,7 @@ window.addEventListener('focus', () => {
   if (!embedParent || !el || !el.isConnected || !el.checkVisibility()) return;
   const a = document.activeElement; if (a && a !== document.body && !(a instanceof HTMLDialogElement && a.contains(el))) return;
   el.focus({ preventScroll: true });
+  el.scrollIntoView({ block: 'nearest' });
 });
 document.addEventListener('click', (e) => {
   if (!embedParent) return;
@@ -3305,6 +3312,7 @@ function renderRoute() {
   if (retrosOpen && !retrosWas) { retrosOpener = null; retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
+  syncRetrosLink();
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
   if (retrosOpen) $('retros-link').setAttribute('aria-current', 'page'); else $('retros-link').removeAttribute('aria-current');
   if (inboxOpen) $('inbox-link').setAttribute('aria-current', 'page'); else $('inbox-link').removeAttribute('aria-current');
@@ -3338,6 +3346,9 @@ let retros = null;
 let retrosFailed = false;
 let retrosScrolled = '';
 let retrosHtml = '';
+const RETROS_SEEN_KEY = 'factory-retros-seen';
+const RETROS_POLL_MS = 1800000;
+let retrosReadAt = 0;
 const RETRO_MARK = /^Retro: run [A-Za-z0-9_-]{1,64}, fingerprint ([0-9a-f]{16}), created \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
 
 function retrosRoute(hash = location.hash) {
@@ -3407,15 +3418,28 @@ function retroCardStatus(card, marks) {
   return { text: 'Not logged: ' + card.result, href: null, job: null };
 }
 
+// A failed read keeps the last good list, so a background read never empties the page.
 async function loadRetros() {
+  retrosReadAt = Date.now();
   try {
     const r = await fetch('./api/retros', { cache: 'no-store' });
     if (r.status !== 200) throw new Error(String(r.status));
     retros = await r.json();
     retrosFailed = false;
-  } catch { retros = null; retrosFailed = true; }
+  } catch { if (!Array.isArray(retros)) retrosFailed = true; }
   renderRetrosPage();
   if ($('job-picker').open && pickerMode === 'job') renderJobResults();
+  syncRetrosLink();
+}
+
+// Run ids start with a UTC timestamp, so string order is date order.
+function syncRetrosLink() {
+  const runs = Array.isArray(retros) ? retros : [];
+  if (retrosRoute() && runs.length && runs[0].run > (store.get(RETROS_SEEN_KEY) ?? '')) store.set(RETROS_SEEN_KEY, runs[0].run);
+  const seen = store.get(RETROS_SEEN_KEY) ?? '';
+  const n = runs.filter((r) => r.run > seen).length;
+  setIconCount('retros-count', n);
+  $('retros-link').setAttribute('aria-label', n ? 'Retros, ' + n + ' new' : 'Retros');
 }
 
 // Red flags: the flagged tool calls of every job, newest first, from the Worker's index.
@@ -3728,10 +3752,15 @@ function inboxOpenIndex(items) {
   return items.findIndex((it) => it.item ? it.item.raw === openBacklogRaw : it.job.id === openId);
 }
 
+function setIconCount(id, n) {
+  const el = $(id);
+  el.textContent = n > 99 ? '99+' : String(n);
+  el.hidden = !n;
+}
+
 function syncInboxLink() {
   const n = loaded && (backlogLoaded || backlogFailed) ? inboxItems().length : 0;
-  $('inbox-count').textContent = n > 99 ? '99+' : String(n);
-  $('inbox-count').hidden = !n;
+  setIconCount('inbox-count', n);
   $('inbox-link').setAttribute('aria-label', n ? 'Inbox, ' + n + ' waiting' : 'Inbox');
   postInboxCount(n);
 }
@@ -4024,16 +4053,17 @@ function notificationRow(it) {
   const j = it.job;
   return { href: '#' + encodeURIComponent(j.id), title: j.title || j.id, id: j.id, project: projectName(j) };
 }
-function notificationsUnread(items) {
-  return (Date.parse(items[0]?.at) || 0) > (Date.parse(store.get(NOTIFICATIONS_SEEN_KEY)) || 0);
+function notificationsUnreadCount(items) {
+  const seen = Date.parse(store.get(NOTIFICATIONS_SEEN_KEY)) || 0;
+  return items.filter((it) => Date.parse(it.at) > seen).length;
 }
 function renderNotifications() {
   const items = loaded ? notificationItems() : [];
   const menuOpen = !$('notifications-menu').hidden;
-  if ((menuOpen || notificationsShown()) && notificationsUnread(items)) store.set(NOTIFICATIONS_SEEN_KEY, items[0].at);
-  const unread = notificationsUnread(items);
-  $('notifications-dot').hidden = !unread;
-  $('notifications-button').setAttribute('aria-label', unread ? 'Notifications, new' : 'Notifications');
+  if ((menuOpen || notificationsShown()) && notificationsUnreadCount(items) > 0) store.set(NOTIFICATIONS_SEEN_KEY, items[0].at);
+  const n = notificationsUnreadCount(items);
+  setIconCount('notifications-count', n);
+  $('notifications-button').setAttribute('aria-label', n ? 'Notifications, ' + n + ' new' : 'Notifications');
   if (menuOpen) renderNotificationsMenu(items);
   if (notificationsShown()) renderNotificationsPage(items);
 }
@@ -6616,7 +6646,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && openId && !document.querySelector('dialog[open]')) closeDetail();
 });
 
-// Arrow navigation over cards and job pages, plus n, j or /, p, s, r, w and a single-key openers.
+// Arrow navigation over cards and job pages, plus a single-key opener. handleGlobalKeys holds the openers that work on every page.
 // A separate listener, so the Esc/Cmd+K handler above stays byte-identical.
 function handleBoardKeys(e) {
   if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null || notificationsRoute() !== null) return;
@@ -6652,6 +6682,20 @@ function handleBoardKeys(e) {
     return;
   }
   if (e.repeat) return;
+  if (e.key === 'a' || e.key === '.') {
+    if (openBacklogRaw !== null) return;
+    const target = cardShortcutTarget(e);
+    if (!target) return;
+    e.preventDefault();
+    openJobActionsPicker(target);
+  }
+}
+document.addEventListener('keydown', handleBoardKeys);
+
+function handleGlobalKeys(e) {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
+  if (e.target.closest('textarea, [contenteditable], #d-resize, video, input:not([type=radio]):not([type=checkbox])')) return;
+  if (document.querySelector('dialog[open]')) return;
   if (e.key === 'n') {
     if ($('new-idea').hidden) return;
     e.preventDefault();
@@ -6663,12 +6707,15 @@ function handleBoardKeys(e) {
     e.preventDefault();
     openProjectPicker();
   } else if (e.key === 's') {
+    if (settingsRoute() !== null) return;
     e.preventDefault();
     location.hash = '#/settings/projects';
   } else if (e.key === 'r') {
+    if (retrosRoute() !== null) return;
     e.preventDefault();
     location.hash = '#/retros';
   } else if (e.key === 'i') {
+    if (inboxRoute() !== null) return;
     e.preventDefault();
     location.hash = '#/inbox';
   } else if (e.key === 'w') {
@@ -6676,15 +6723,9 @@ function handleBoardKeys(e) {
     if (!j) return;
     e.preventDefault();
     openCard(j.id);
-  } else if (e.key === 'a' || e.key === '.') {
-    if (openBacklogRaw !== null) return;
-    const target = cardShortcutTarget(e);
-    if (!target) return;
-    e.preventDefault();
-    openJobActionsPicker(target);
   }
 }
-document.addEventListener('keydown', handleBoardKeys);
+document.addEventListener('keydown', handleGlobalKeys);
 
 // b opens the first backlog item. a and d approve or deny the open one, which opens the next.
 function handleBacklogKeys(e) {
@@ -7412,38 +7453,69 @@ function followTracer(board, id, now) {
   return null;
 }
 
-// GET, change(board) in place, then PUT only if nobody wrote in between. Retries a 412.
-// change throws to abort with nothing written.
+// The {id, expect, row} entries that turn the rows before into the rows after: each new or
+// changed row with the row it replaces, then each dropped row with a null row.
+function rowChanges(before, after) {
+  const old = new Map(before.map((j) => [j.id, j]));
+  const ids = new Set(after.map((j) => j.id));
+  const rows = [];
+  for (const j of after) {
+    const prev = old.get(j.id);
+    if (!prev || JSON.stringify(prev) !== JSON.stringify(j)) rows.push({ id: j.id, expect: prev ?? null, row: j });
+  }
+  for (const j of before) if (!ids.has(j.id)) rows.push({ id: j.id, expect: j, row: null });
+  return rows;
+}
+
+// change(board) in place over a copy of the rows this tab holds, then PATCH only the rows it
+// changed, each with the row it expects to replace. A 409 conflict brings the current rows,
+// and change runs again on them. change throws to abort with nothing written.
+// reads(board) names the other rows change decides from, read before it runs. A write sends
+// each as an unchanged row, so a stale one comes back as a conflict too.
 const BOARD_UNCHANGED = Symbol('board unchanged');
 let boardWrites = 0;
-async function casBoard(change) {
+async function casBoard(change, { reads } = {}) {
   boardWrites++;
   try {
+    const known = new Map(jobs.map((j) => [j.id, j]));
+    let maxId = boardMaxId;
     for (let i = 0; i < 10; i++) {
-      const r = await fetch('./api/board', { cache: 'no-store' });
-      if (!r.ok && r.status !== 404) throw new Error('reading the board failed: ' + r.status);
-      const board = r.ok ? await r.json() : { updated: '', jobs: [] };
+      const before = [...known.values()];
+      const board = { updated: boardUpdated, ...(maxId && { archived: { max_id: maxId } }), jobs: structuredClone(before) };
+      const readIds = reads ? reads(board) : [];
       const result = change(board);
       if (result === BOARD_UNCHANGED) return result;
-      // Cloudflare's edge may weaken the ETag. R2 compares the strong form.
-      const etag = r.headers.get('ETag');
-      if (r.ok && !etag) throw new Error('the board came back without an ETag, so nothing was saved');
-      const cond = r.ok ? { 'If-Match': etag.replace(/^W\//, '') } : { 'If-None-Match': '*' };
-      let put;
+      const rows = rowChanges(before, board.jobs);
+      if (!rows.length) return result;
+      for (const id of readIds)
+        if (known.has(id) && !rows.some((e) => e.id === id)) rows.push({ id, expect: known.get(id), row: known.get(id) });
+      if (!navigator.onLine) throw new Error("saving the board failed: you're offline, so nothing was saved");
+      let r;
       try {
-        put = await fetch('./api/board', { method: 'PUT', headers: cond, body: JSON.stringify(board) + '\n' });
+        r = await fetch('./api/board', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updated: board.updated, rows }) });
       } catch (x) {
         x.uncertain = true; // the request may have landed before the connection dropped
         throw x;
       }
-      if (put.ok) return result;
-      if (put.status !== 412) {
-        const x = new Error('saving the board failed: ' + put.status);
-        x.uncertain = put.status >= 500; // classified before the body read: an aborted body read must not erase it
-        try { x.message += ' ' + (await put.text()).slice(0, 200); } catch {}
-        throw x;
+      if (r.ok) {
+        // The page holds the commit at once, so a second write in the same action, such as
+        // a backlog deny that removes the job it just added, starts from it.
+        const sent = new Map(rows.map((e) => [e.id, e.row]));
+        jobs = jobs.map((j) => (sent.has(j.id) ? sent.get(j.id) : j)).filter(Boolean)
+          .concat(rows.filter((e) => e.row && !jobs.some((j) => j.id === e.id)).map((e) => e.row));
+        return result;
       }
-      await new Promise((res) => setTimeout(res, 50 + Math.random() * 450));
+      if (r.status === 409) {
+        const body = await r.json().catch(() => null);
+        if (body?.error !== 'conflict') break;
+        for (const [id, row] of Object.entries(body.rows ?? {})) row ? known.set(id, row) : known.delete(id);
+        maxId = Math.max(maxId, Number.isInteger(body.max_id) ? body.max_id : 0);
+        continue;
+      }
+      const x = new Error('saving the board failed: ' + r.status);
+      x.uncertain = r.status >= 500; // classified before the body read: an aborted body read must not erase it
+      try { x.message += ' ' + (await r.text()).slice(0, 200); } catch {}
+      throw x;
     }
     throw new Error('the board kept changing, so nothing was saved after 10 tries');
   } finally { boardWrites--; }
@@ -7733,6 +7805,13 @@ function rerunJob(board, id, host, now) {
 
 const PRIORITY_STAGES = ['idea', ...MOVE_STAGES];
 
+// The held ideas of the job's project, which a batch start checks for an earlier starter: only a
+// held idea can become one, so a start that landed meanwhile is a conflict.
+function prioritizeReads(board, id, mode) {
+  const project = board.jobs.find((x) => x.id === id)?.project;
+  return mode === 'batch' && project ? board.jobs.filter((x) => x.id !== id && x.project === project && batchHeld(x)).map((x) => x.id) : [];
+}
+
 // factory.py pickup claims prioritized jobs first and nudges a running agent once.
 // Returns an error message, 'unchanged', or '' once the board is changed.
 function prioritizeJob(board, id, now, mode = '') {
@@ -7774,6 +7853,12 @@ function babysitJob(board, id, now) {
 function canUnbatch(j, rows = jobs) {
   const lead = leadOf(j);
   return !!lead && j.stage === 'spec' && j.stacked !== true && rows.find((x) => x.id === lead)?.stage === 'spec';
+}
+
+// The lead row unbatchJob checks, so a lead that left spec meanwhile is a conflict.
+function unbatchReads(board, id) {
+  const lead = leadOf(board.jobs.find((x) => x.id === id) ?? {});
+  return lead ? [lead] : [];
 }
 
 // Drops the batched-into ref and sends the rider back to idea, so pickup runs it on its own.
@@ -8156,7 +8241,7 @@ async function prioritizeAction(ctx, mode = '') {
       const message = prioritizeJob(board, ctx.id, isoNow(), mode);
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
-    });
+    }, { reads: (board) => prioritizeReads(board, ctx.id, mode) });
     await poll();
   } catch (x) {
     if (ctx.live()) ctx.report(failText(x));
@@ -8194,7 +8279,7 @@ async function unbatchAction(ctx) {
       const message = unbatchJob(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
-    });
+    }, { reads: (board) => unbatchReads(board, ctx.id) });
     await poll();
   } catch (x) {
     if (ctx.live()) ctx.report(failText(x));
@@ -9290,7 +9375,7 @@ function watchAway() { return notifyActive() || soundActive(); }
 // Browsers keep an AudioContext suspended until the page gets a click or key.
 function wakeAudio() {
   try {
-    audio ||= new AudioContext();
+    if (!audio) { audio = new AudioContext(); audio.addEventListener('statechange', renderSoundWait); }
     if (audio.state === 'suspended') audio.resume();
   } catch {}
 }
@@ -9338,6 +9423,11 @@ function renderSoundSettings() {
     if (box.disabled) box.setAttribute('aria-describedby', 'sound-help'); else box.removeAttribute('aria-describedby');
   }
   $('sound-help').textContent = supported ? (soundOn ? SOUND_HELP : SOUND_OFF_HELP) : 'This browser cannot play sounds.';
+  renderSoundWait();
+}
+function renderSoundWait() {
+  $('sound-wait').hidden = !soundActive() || audio?.state === 'running';
+  $('sound-on').setAttribute('aria-describedby', $('sound-wait').hidden ? 'sound-help' : 'sound-help sound-wait');
 }
 $('sound-on').addEventListener('change', () => {
   soundOn = $('sound-on').checked;

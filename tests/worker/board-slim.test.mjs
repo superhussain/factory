@@ -76,6 +76,33 @@ test("slim keeps active rows and the 10 newest rows of each finished stage, with
   assert.equal(await plain.text(), stored);
 });
 
+test("slim ranks finished rows by done, else updated", async () => {
+  const jobs = [];
+  for (let n = 1; n <= 11; n++)
+    jobs.push({
+      id: `${1000 + n}-synthetic`,
+      project: "sample",
+      stage: "merged",
+      done: at(n),
+      updated: at(n),
+    });
+  jobs.push({
+    id: "980-touched",
+    project: "sample",
+    stage: "merged",
+    done: at(0),
+    updated: at(100),
+  });
+  jobs.push({ id: "981-no-done", project: "sample", stage: "merged", updated: at(50) });
+  const body = await (await setup(JSON.stringify({ jobs })).get("/board.json?view=slim")).json();
+  const merged = body.jobs.filter((j) => j.stage === "merged").map((j) => j.id);
+  const expected = [];
+  for (let n = 3; n <= 11; n++) expected.push(`${1000 + n}-synthetic`);
+  expected.push("981-no-done");
+  assert.deepEqual(merged.toSorted(), expected.toSorted());
+  assert.ok(!merged.includes("980-touched"));
+});
+
 test("a missing board is a 404 and an unparseable one goes out as stored", async () => {
   assert.equal((await setup().get("/board.json?view=slim")).status, 404);
   for (const stored of ["{not json", '{"jobs":"none"}']) {

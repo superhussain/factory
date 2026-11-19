@@ -1,6 +1,7 @@
 // The notifications menu and page against one owned local Worker, with a synthetic board for
 // project sample.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import {
@@ -70,6 +71,19 @@ const seedLog = (page) =>
       );
     } catch {}
   }, BACKLOG_HASH);
+async function seedBacklog(origin, text) {
+  const current = await fetch(origin + "/api/backlog");
+  const condition = current.ok
+    ? { "If-Match": current.headers.get("ETag") }
+    : { "If-None-Match": "*" };
+  await current.text();
+  const response = await fetch(origin + "/api/backlog", {
+    method: "PUT",
+    headers: { "Content-Type": "text/markdown", ...condition },
+    body: text,
+  });
+  assert.equal(response.status, 200);
+}
 const EXPECTED = [
   ["Merged", "Synthetic 060-sample-merged"],
   ["Needs you", "Synthetic 051-sample-retry"],
@@ -110,7 +124,14 @@ test("notifications", { timeout: 180000 }, async (t) => {
     await t.test("menu lists recent notifications", async () => {
       first = await openPage();
       const { page, errors } = first;
-      await page.waitForSelector("#notifications-dot:not([hidden])", wait);
+      await page.waitForFunction(
+        () => document.querySelector("#notifications-count:not([hidden])")?.textContent === "3",
+        wait,
+      );
+      assert.equal(
+        await page.$eval("#notifications-button", (el) => el.getAttribute("aria-label")),
+        "Notifications, 3 new",
+      );
       await openMenu(page);
       assert.equal(
         await page.$eval("#notifications-button", (el) => el.getAttribute("aria-expanded")),
@@ -149,7 +170,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
         menu.left >= 0 && menu.right <= menu.innerWidth,
         `menu off screen: ${JSON.stringify(menu)}`,
       );
-      assert.equal(await page.$eval("#notifications-dot", (el) => el.hidden), true);
+      assert.equal(await page.$eval("#notifications-count", (el) => el.hidden), true);
       assert.deepEqual(errors, []);
     });
 
@@ -158,7 +179,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.waitForSelector("#notifications-button[aria-label]", wait);
       await page.waitForFunction(() => document.querySelector(".card"), wait);
-      assert.equal(await page.$eval("#notifications-dot", (el) => el.hidden), true);
+      assert.equal(await page.$eval("#notifications-count", (el) => el.hidden), true);
       assert.equal(
         await page.evaluate(() => localStorage.getItem("factory-notifications-seen")),
         "2026-01-04T00:00:00Z",
@@ -629,6 +650,46 @@ test("notifications", { timeout: 180000 }, async (t) => {
         ]),
         [false, true],
       );
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
+    await t.test("open backlog row returns to the page", async () => {
+      const line = "- [ ] sample: Synthetic backlog idea";
+      const key = createHash("sha256").update(line).digest("hex").slice(0, 12);
+      await seedBacklog(origin, line + "\n");
+      const { page, errors } = await openPage("#/notifications", (p) =>
+        p.evaluateOnNewDocument((k) => {
+          localStorage.setItem(
+            "factory-notifications-log",
+            JSON.stringify([
+              {
+                kind: "backlog",
+                key: k,
+                title: "Synthetic backlog idea",
+                project: "sample",
+                at: new Date().toISOString(),
+              },
+            ]),
+          );
+        }, key),
+      );
+      await pageRows(page, 4);
+      const link = `#notifications-list a[href="#/backlog/${key}"]`;
+      await page.click(link);
+      await page.waitForFunction(
+        () => document.body.hasAttribute("data-notifications-split"),
+        wait,
+      );
+      assert.deepEqual(
+        await page.$$eval("#notifications-list .inbox-item", (items) =>
+          items.map((li) => li.getAttribute("aria-current")),
+        ),
+        ["true", null, null, null],
+      );
+      await page.click("#d-close");
+      await page.waitForFunction(() => location.hash === "#/notifications", wait);
+      assert.equal(await page.evaluate((s) => document.activeElement.matches(s), link), true);
       assert.deepEqual(errors, []);
       await page.browserContext().close();
     });

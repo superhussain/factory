@@ -447,6 +447,32 @@ function condition(request) {
   return cond;
 }
 
+// The first reason a board write of data over stored is refused, or null. The row checks
+// compare against the stored rows, so they run only when data was built on that version.
+async function boardRefusal(env, stored, data, sameBase) {
+  return (
+    checkGoals(data.jobs) ??
+    (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
+    (await checkIdeaFiles(env, data.jobs, stored.jobs)) ??
+    (sameBase
+      ? (checkRowIds(stored.jobs, data.jobs) ??
+        checkArchived(stored, data) ??
+        checkNewIds(stored.jobs, data.jobs) ??
+        checkRiderControls(stored.jobs, data.jobs) ??
+        checkBatchRefs(stored.jobs, data.jobs))
+      : null)
+  );
+}
+
+// Sends the pushes a committed board write from storedJobs to jobs earns.
+async function boardCommitted(env, storedJobs, jobs, ctx) {
+  const events = boardPushes(storedJobs, jobs);
+  if (!events.length) return;
+  const send = sendPushes(env, events).catch(() => {});
+  if (ctx) ctx.waitUntil(send);
+  else await send;
+}
+
 const needsCondition = () => reply('PUT needs If-Match: "<etag>" or If-None-Match: *', 428);
 
 // Board and backlog writes must name the exact version they replace, or create the
@@ -465,17 +491,7 @@ async function casPut(request, env, key, type, ctx) {
     }
     if (!Array.isArray(data?.jobs)) return reply("body needs a jobs array", 400);
     stored = await storedBoard(env);
-    const bad =
-      checkGoals(data.jobs) ??
-      (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
-      (await checkIdeaFiles(env, data.jobs, stored.jobs)) ??
-      (stored.etag === cond.get("If-Match")
-        ? (checkRowIds(stored.jobs, data.jobs) ??
-          checkArchived(stored, data) ??
-          checkNewIds(stored.jobs, data.jobs) ??
-          checkRiderControls(stored.jobs, data.jobs) ??
-          checkBatchRefs(stored.jobs, data.jobs))
-        : null);
+    const bad = await boardRefusal(env, stored, data, stored.etag === cond.get("If-Match"));
     if (bad) return reply(bad, 400);
   }
   const obj = await env.BUCKET.put(key, body, {
@@ -484,17 +500,122 @@ async function casPut(request, env, key, type, ctx) {
   });
   if (obj) await announce(env, key);
   // The stored board is the true prior version only when the write named its ETag.
-  if (obj && stored && cond.has("If-Match") && stored.etag === cond.get("If-Match")) {
-    const events = boardPushes(stored.jobs, data.jobs);
-    if (events.length) {
-      const send = sendPushes(env, events).catch(() => {});
-      if (ctx) ctx.waitUntil(send);
-      else await send;
-    }
-  }
+  if (obj && stored && cond.has("If-Match") && stored.etag === cond.get("If-Match"))
+    await boardCommitted(env, stored.jobs, data.jobs, ctx);
   return obj
     ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
     : reply("precondition failed", 412);
+}
+
+// JSON.stringify with object keys sorted at every depth, so equal rows compare equal.
+function canonicalJson(value) {
+  return JSON.stringify(value, (_, v) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(
+          Object.keys(v)
+            .sort()
+            .map((k) => [k, v[k]]),
+        )
+      : v,
+  );
+}
+
+const BOARD_PATCH_SHAPE =
+  "a board patch needs rows: [{id, expect, row}], one entry per id. Nothing was written.";
+
+// Applies the dashboard's changed rows, each with the row it expects to replace, to the
+// stored board. A row that changed since the client read it comes back as a 409 conflict;
+// an R2 race with another writer is retried here.
+async function boardPatch(request, env, ctx) {
+  const body = await readBody(request);
+  if (body === null) return reply("body over 1 MiB", 413);
+  let patch;
+  try {
+    patch = JSON.parse(body);
+  } catch {
+    return reply("body is not JSON", 400);
+  }
+  const rows = patch?.rows;
+  const rowOf = (v, id) =>
+    v === null || (typeof v === "object" && !Array.isArray(v) && v.id === id);
+  if (
+    !Array.isArray(rows) ||
+    rows.length < 1 ||
+    rows.length > 100 ||
+    !rows.every(
+      (e) =>
+        typeof e?.id === "string" &&
+        rowOf(e.expect, e.id) &&
+        rowOf(e.row, e.id) &&
+        (e.expect !== null || e.row !== null),
+    ) ||
+    new Set(rows.map((e) => e.id)).size !== rows.length
+  )
+    return reply(BOARD_PATCH_SHAPE, 400);
+  const entries = new Map(rows.map((e) => [e.id, e]));
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const stored = await storedBoard(env);
+    if (stored.etag && !stored.doc)
+      return reply("the stored board is not readable JSON. Nothing was written.", 400);
+    const doc = stored.doc ?? { updated: "", jobs: [] };
+    const byId = new Map(),
+      captured = new Map();
+    let maxId = Number.isInteger(stored.archived?.max_id) ? stored.archived.max_id : 0;
+    for (const j of stored.jobs) {
+      if (!byId.has(j?.id)) byId.set(j?.id, j);
+      if (typeof j?.capture_id === "string" && !captured.has(j.capture_id))
+        captured.set(j.capture_id, j.id);
+      const m = typeof j?.id === "string" && /^(\d{3,})-/.exec(j.id);
+      if (m) maxId = Math.max(maxId, Number(m[1]));
+    }
+    const conflicts = new Set();
+    for (const e of rows) {
+      if (canonicalJson(byId.get(e.id) ?? null) !== canonicalJson(e.expect)) conflicts.add(e.id);
+      if (e.expect !== null) continue;
+      const m = /^(\d{3,})-/.exec(e.id);
+      if (m && Number(m[1]) <= maxId) conflicts.add(e.id);
+      if (typeof e.row.capture_id === "string" && captured.has(e.row.capture_id))
+        conflicts.add(captured.get(e.row.capture_id));
+    }
+    if (conflicts.size)
+      return reply(
+        JSON.stringify({
+          error: "conflict",
+          rows: Object.fromEntries([...conflicts].map((id) => [id, byId.get(id) ?? null])),
+          max_id: maxId,
+        }),
+        409,
+        "application/json",
+      );
+    const jobs = [];
+    for (const j of stored.jobs) {
+      const e = entries.get(j?.id);
+      if (!e) jobs.push(j);
+      else if (e.row) jobs.push(e.row);
+    }
+    for (const e of rows) if (e.expect === null) jobs.push(e.row);
+    const updated =
+      typeof patch.updated === "string" && patch.updated > (doc.updated ?? "")
+        ? patch.updated
+        : doc.updated;
+    const data = { ...doc, jobs, updated };
+    const bad = await boardRefusal(env, stored, data, true);
+    if (bad) return reply(bad, 400);
+    const text = JSON.stringify(data);
+    if (new TextEncoder().encode(text).length > MAX_BOARD)
+      return reply("board over 16 MiB. Nothing was written.", 413);
+    const obj = await env.BUCKET.put("board.json", text, {
+      onlyIf: new Headers(stored.etag ? { "If-Match": stored.etag } : { "If-None-Match": "*" }),
+      httpMetadata: { contentType: "application/json" },
+    });
+    if (obj) {
+      await announce(env, "board.json");
+      await boardCommitted(env, stored.jobs, data.jobs, ctx);
+      return reply("ok", 200, "text/plain", { ETag: obj.httpEtag });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 80));
+  }
+  return reply(JSON.stringify({ error: "busy" }), 409, "application/json");
 }
 
 // The R2 onlyIf for exactly one well-formed If-Match or If-None-Match: *, or the error reply.
@@ -2259,15 +2380,22 @@ async function jobPut(request, env, key, ctx) {
     : reply("precondition failed", 412);
 }
 
-// The stored board's version, rows and archived field. An unreadable board has no rows.
+// The stored board's version, rows, archived field and parsed document. An unreadable board
+// has no rows and a null doc.
 async function storedBoard(env) {
   const object = await env.BUCKET.get("board.json");
-  if (!object) return { etag: null, jobs: [] };
+  if (!object) return { etag: null, jobs: [], doc: null };
   try {
-    const { jobs, archived } = JSON.parse(await object.text());
-    return { etag: object.httpEtag, jobs: Array.isArray(jobs) ? jobs : [], archived };
+    const doc = JSON.parse(await object.text());
+    const { jobs, archived } = doc;
+    return {
+      etag: object.httpEtag,
+      jobs: Array.isArray(jobs) ? jobs : [],
+      archived,
+      doc: typeof doc === "object" && !Array.isArray(doc) ? doc : null,
+    };
   } catch {
-    return { etag: object.httpEtag, jobs: [] };
+    return { etag: object.httpEtag, jobs: [], doc: null };
   }
 }
 
@@ -2755,6 +2883,7 @@ async function api(request, env, path, principal, ctx) {
       path === "/api/board" ? ["board.json", "application/json"] : ["backlog.md", "text/markdown"];
     if (method === "GET") return getFile(env, key, type);
     if (method === "PUT") return casPut(request, env, key, type, ctx);
+    if (method === "PATCH" && key === "board.json") return boardPatch(request, env, ctx);
     return notFound();
   }
   m = path.match(PROJECT_RETRO);

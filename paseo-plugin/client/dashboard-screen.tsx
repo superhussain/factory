@@ -13,6 +13,7 @@ import {
   DashboardFrame,
   dropWarmFrame,
   frameReady,
+  frameSignedOut,
   hasLoadedBefore,
   paseoOrigin,
   savedLocation,
@@ -28,6 +29,7 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
     const [load, setLoad] = useState(0);
     const [ready, setReady] = useState(false);
     const [stalled, setStalled] = useState(false);
+    const [expired, setExpired] = useState(false);
     const origin =
       settings.status === "ready" ? parseDashboardOrigin(settings.values.origin) : null;
     const [saved, setSaved] = useState<string | null>(() =>
@@ -53,10 +55,18 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
       if (frameReady(origin)) {
         setReady(true);
         setStalled(false);
+        setExpired(false);
+        return;
+      }
+      if (frameSignedOut(origin)) {
+        setReady(false);
+        setStalled(true);
+        setExpired(true);
         return;
       }
       setReady(false);
       setStalled(false);
+      setExpired(false);
       const timer = setTimeout(() => setStalled(true), READY_TIMEOUT_MS);
       return () => clearTimeout(timer);
     }, [origin, load, showing]);
@@ -172,6 +182,11 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
       if (message.type === "factory-embed-ready") {
         setReady(true);
         setStalled(false);
+        setExpired(false);
+      } else if (message.type === "factory-embed-signin") {
+        setReady(false);
+        setStalled(true);
+        setExpired(true);
       } else if (message.type === "factory-open-url") {
         if (allowOpen())
           openExternalUrl(message.url).catch(() => toast.error("Paseo could not open that link."));
@@ -201,14 +216,20 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
               <View style={styles.card}>
                 <Icon name="Factory" size={28} color={theme.colors.accent} />
                 <Text style={styles.title}>
-                  {returning ? "Factory did not load" : "Sign in to your factory"}
+                  {expired
+                    ? "Your sign-in has expired"
+                    : returning
+                      ? "Factory did not load"
+                      : "Sign in to your factory"}
                 </Text>
                 <Text style={styles.body22}>
-                  {returning
-                    ? "Your session may have ended, or the dashboard is unreachable. Sign in again, or reload once you are back online."
-                    : `Paseo shows your factory dashboard from ${origin.replace("https://", "")} right here. It sits behind Cloudflare Access, so this device needs to sign in once.`}
+                  {expired
+                    ? "Sign in again to keep using your board here."
+                    : returning
+                      ? "Your session may have ended, or the dashboard is unreachable. Sign in again, or reload once you are back online."
+                      : `Paseo shows your factory dashboard from ${origin.replace("https://", "")} right here. It sits behind Cloudflare Access, so this device needs to sign in once.`}
                 </Text>
-                {returning ? null : (
+                {returning || expired ? null : (
                   <View style={{ gap: 12 }}>
                     {firstLoginSteps(browser).map((text, i) => step(i + 1, text))}
                   </View>
@@ -223,10 +244,12 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
                     true,
                   )}
                 </View>
-                <Text style={styles.footnote}>
-                  {`Signed in and still blank? Ask your factory operator to add ${here ?? "this Paseo origin"} to embed_origins.`}
-                </Text>
-                {browser && returning ? (
+                {expired ? null : (
+                  <Text style={styles.footnote}>
+                    {`Signed in and still blank? Ask your factory operator to add ${here ?? "this Paseo origin"} to embed_origins.`}
+                  </Text>
+                )}
+                {browser && returning && !expired ? (
                   <Text style={styles.footnote}>
                     Using Safari, or another browser that blocks third-party cookies? The board
                     cannot load here. Select Open in a browser tab.

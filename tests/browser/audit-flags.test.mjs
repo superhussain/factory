@@ -158,17 +158,16 @@ test(
         const layout = await page.$$eval("#audit-flags-rows tr", (trs) =>
           trs.map((tr) => {
             const [a, b] = tr.querySelectorAll(".audit-flag-actions button");
-            return {
-              side: a.getBoundingClientRect().top === b.getBoundingClientRect().top,
-              height: Math.round(tr.getBoundingClientRect().height),
-            };
+            return a.getBoundingClientRect().bottom <= b.getBoundingClientRect().top;
           }),
         );
-        assert.ok(
-          layout.every((row) => row.side),
-          JSON.stringify(layout),
-        );
-        assert.ok(layout[2].height <= 48, JSON.stringify(layout));
+        assert.ok(layout.every(Boolean), JSON.stringify(layout));
+        // Row 0 holds both session links and Make an idea, and the table still fits at 1440x900.
+        const fit = await page.$eval("#audit-flags-wrap", (wrap) => [
+          wrap.scrollWidth,
+          wrap.clientWidth,
+        ]);
+        assert.ok(fit[0] <= fit[1], JSON.stringify(fit));
         assert.deepEqual(
           shown.rows.map((row) => row[7]),
           STEP_4.map((row) => row.target),
