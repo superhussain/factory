@@ -305,7 +305,8 @@ sequenceDiagram
   rows per project and stage, under the stored `ETag`. Finished column headers then say
   `showing 10 of N`. Once a view needs older rows (show all, the jumper, a link to an older
   job, another route, the starred-only view) it reads `/api/board` once and keeps those rows.
-  `/board.json` without the query still returns the stored bytes.
+  `/board.json` without the query still returns the stored bytes. Concurrent slim misses in
+  one isolate share one read, `slimPending`, keyed by board `ETag`.
 
 | Request to `/events/board` | Result |
 | --- | --- |
