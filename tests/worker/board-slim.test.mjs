@@ -29,7 +29,7 @@ function board(finished, idea = "") {
     jobs.push({
       id: `${String(1000 + n)}-synthetic`,
       project: n % 3 === 0 ? "other" : "sample",
-      stage: n % 10 === 0 ? "closed" : "merged",
+      stage: n % 2 ? "closed" : "merged",
       updated: at(n),
       done: at(n),
       idea,
@@ -39,7 +39,7 @@ function board(finished, idea = "") {
   return { updated: at(0), jobs };
 }
 
-test("slim keeps active rows and the 20 newest finished rows, with counts, ETag and version", async () => {
+test("slim keeps active rows and the 10 newest rows of each finished stage, with counts, ETag and version", async () => {
   const data = board(30);
   data.jobs.push({ id: "950-no-project", stage: "closed", updated: at(-5) });
   const stored = JSON.stringify(data, null, 2) + "\n";
@@ -59,13 +59,14 @@ test("slim keeps active rows and the 20 newest finished rows, with counts, ETag 
     body.jobs.map((j) => j.id),
     expected.map((j) => j.id),
   );
-  assert.equal(body.jobs.filter(finished).length, 20);
+  assert.equal(body.jobs.filter((j) => j.stage === "merged").length, 10);
+  assert.equal(body.jobs.filter((j) => j.stage === "closed").length, 10);
   assert.equal(body.updated, data.updated);
   assert.deepEqual(body.slim, {
-    recent: 20,
+    recent: 10,
     counts: {
-      other: { merged: 9, closed: 1 },
-      sample: { merged: 18, closed: 2 },
+      other: { merged: 5, closed: 5 },
+      sample: { merged: 10, closed: 10 },
       "": { merged: 0, closed: 1 },
     },
   });
