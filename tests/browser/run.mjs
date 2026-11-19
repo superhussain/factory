@@ -1560,6 +1560,15 @@ async function capture(outdir, referencePath) {
         document.getElementById("alert-heading").scrollIntoView({ block: "start" }),
       );
     });
+    await view("notify-sound-wait-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => localStorage.setItem("factory-sound", "on"));
+      await page.reload({ waitUntil: "networkidle0" });
+      await page.waitForSelector(".card");
+      await openNotificationSettings(page);
+      await page.evaluate(() =>
+        document.getElementById("sound-heading").scrollIntoView({ block: "start" }),
+      );
+    });
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
@@ -2010,9 +2019,8 @@ async function capture(outdir, referencePath) {
       });
       await page.waitForSelector("#settings-reference:not([hidden])");
       await page.evaluate(() =>
-        document.getElementById("reference-keys").scrollIntoView({ block: "center" }),
+        document.getElementById("reference-keys-heading").scrollIntoView({ block: "start" }),
       );
-      return clipOf(page, "#reference-keys");
     };
     await view("reference-keys-1280", 1280, 900, "light", openReferenceKeys);
     // The reference keeps 001-capture open behind the sign-in banner; the candidate closes it.

@@ -175,6 +175,7 @@
   "tests/browser/scheduler-settings.test.mjs",
   "tests/browser/reference-settings.test.mjs",
   "tests/browser/home-key.test.mjs",
+  "tests/browser/global-keys.test.mjs",
   "tests/browser/next-waiting.test.mjs",
   "tests/browser/retros-page.test.mjs",
   "tests/browser/audit-flags.test.mjs",
