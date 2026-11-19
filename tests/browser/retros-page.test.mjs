@@ -638,6 +638,39 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await t.test("a route link on the page is not the drawer opener", async () => {
+      const { page, errors } = await openPage(RUN_HASH);
+      const row = '#notifications-menu-list a[href="#1490-guard-the-ls-alias"]';
+      await page.waitForSelector(CHIP, wait);
+      // The page renders no finding links today, so the test adds one to the list.
+      await page.evaluate(() => {
+        const link = document.createElement("a");
+        link.href = "#/retros/20261105T090000Z-d4e5f6/2";
+        link.id = "finding-link";
+        link.textContent = "Finding 2";
+        document.getElementById("retros-page-heading").after(link);
+        link.click();
+      });
+      await page.waitForFunction(() => location.hash.endsWith("/2"), wait);
+      await page.click("#notifications-button");
+      await page.waitForSelector(row, wait);
+      await page.click(row);
+      await page.waitForSelector("#detail:not([hidden])", wait);
+      await page.click("#d-close");
+      await page.waitForSelector("#detail[hidden]", wait);
+      assert.equal(await page.evaluate(() => document.activeElement.id), "retros-page-heading");
+
+      const backlog = '#retros-list a.retro-chip[href^="#/backlog/"]';
+      await page.focus(backlog);
+      await page.keyboard.press("Enter");
+      await page.waitForSelector("#detail:not([hidden])", wait);
+      await page.click("#d-close");
+      await page.waitForSelector("#detail[hidden]", wait);
+      assert.equal(await page.evaluate((s) => document.activeElement.matches(s), backlog), true);
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
     const scrolledClose = async (selector, open) => {
       const { page } = await openPage("", { width: 390, height: 844 });
       await page.waitForSelector(selector, wait);

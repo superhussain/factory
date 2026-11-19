@@ -3568,7 +3568,7 @@ $('retros-back').addEventListener('click', e => { e.preventDefault(); leaveSetti
 // The Retros link that opened a drawer, so closing it focuses that link again.
 let retrosOpener = null;
 $('retros-page').addEventListener('click', (e) => {
-  const el = e.target.closest('a[href^="#"]');
+  const el = e.target.closest('a[href^="#"]:not([href^="#/"]), a[href^="#/backlog/"]');
   retrosOpener = el ? { el, href: el.getAttribute('href') } : null;
 });
 function focusRetrosOpener() {
