@@ -59,6 +59,12 @@ test("notification settings", { timeout: 180000 }, async (t) => {
     const errors = [];
     page.on("pageerror", (error) => errors.push(String(error)));
     await blockLiveEvents(page);
+    // Board events here would raise toasts over the controls; notify-toast.test.mjs covers them.
+    await page.evaluateOnNewDocument(() => {
+      document.addEventListener("DOMContentLoaded", () => {
+        document.getElementById("notify-toasts").style.display = "none";
+      });
+    });
     await page.evaluateOnNewDocument(() => {
       const interval = window.setInterval;
       const clear = window.clearInterval;
@@ -629,6 +635,51 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await toHash("#/settings/display", "#settings-display:not([hidden])");
     });
 
+    await t.test("sound S5 unticking a kind stops its tone", async () => {
+      await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
+      await page.click("#alert-merged");
+      assert.equal(await storage("factory-alerts-off"), "merged");
+      assert.equal(await text("#alert-status"), "Toast settings saved for this browser.");
+      // S4 left 001 and 004 merged. A new job merges, so the jobs C1 reads stay as they are.
+      const board = JOBS.map((j) => (j.id === "005-sample-needs" ? j : { ...j, stage: "merged" }));
+      const extra = { ...JOBS[0], id: "007-sample-merge", title: "Synthetic merge job" };
+      await seedBoard(origin, [...board, { ...extra, stage: "build" }]);
+      await page.evaluate(() => poll());
+      await page.evaluate(() => {
+        window.tones = [];
+      });
+      await seedBoard(origin, [...board, { ...extra, stage: "merged" }]);
+      await page.evaluate(() => poll());
+      assert.deepEqual(await tones(), []);
+      await toHash("#/settings/display", "#settings-display:not([hidden])");
+    });
+
+    await t.test("sound S6 toast block copy and stored kinds", async () => {
+      const boxes = () =>
+        page.$$eval(".alert-kinds input", (els) =>
+          els.map((el) => [el.id, el.dataset.alert, el.closest("label").textContent, el.checked]),
+        );
+      const expected = (merged) => [
+        ["alert-backlog", "backlog", " A new backlog item", true],
+        ["alert-needs", "needs", " A job needs you", true],
+        ["alert-spec", "spec", " A spec is ready", true],
+        ["alert-pr", "pr", " A pull request opens", true],
+        ["alert-merged", "merged", " A job merges", merged],
+      ];
+      await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
+      assert.equal(await text("#alert-heading"), "Toasts");
+      assert.equal(
+        await text("#alert-help"),
+        "Pick the board events that show a toast in this tab. A sound plays only for events picked here. This setting applies only to this browser.",
+      );
+      assert.deepEqual(await boxes(), expected(false));
+      await setStorage("factory-alerts-off", "bogus,merged");
+      await reload("#settings-notifications:not([hidden])");
+      assert.deepEqual(await boxes(), expected(false));
+      assert.deepEqual(await page.evaluate(() => [...alertsOff]), ["merged"]);
+      await toHash("#/settings/display", "#settings-display:not([hidden])");
+    });
+
     await t.test("notify C1 card detail toggles", async () => {
       for (const f of ["note", "meta", "pr"]) await page.click("#display-card-field-" + f);
       assert.equal(await storage("factory-hidden-card-fields"), "note,meta,pr");
@@ -689,6 +740,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(await storage("factory-notify"), "on");
       assert.equal(await storage("factory-sound"), "on");
       assert.equal(await storage("factory-notify-remind"), "1");
+      assert.equal(await storage("factory-alerts-off"), "bogus,merged");
       assert.equal(
         await page.$$eval("#display-card-fields input", (els) => els.every((el) => el.checked)),
         true,
@@ -727,7 +779,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       );
     });
 
-    await t.test("sound S5 no Web Audio", async () => {
+    await t.test("sound S7 no Web Audio", async () => {
       await page.evaluate(() => sessionStorage.setItem("no-audio", "1"));
       await reload("#settings-notifications:not([hidden])");
       assert.equal(await page.evaluate(() => "AudioContext" in window), false);
