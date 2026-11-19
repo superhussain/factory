@@ -679,6 +679,8 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await seedBoard(origin, JOBS);
       await reload("#settings-notifications:not([hidden])");
       await page.waitForFunction(() => soundSeen !== null, wait);
+      await page.keyboard.press("Shift");
+      await page.waitForFunction(() => audio?.state === "running", wait);
       assert.equal(await page.$eval("#sound-on", (el) => el.checked), true);
       assert.deepEqual(await tones(), []);
       const moved = JOBS.map((j) =>
@@ -861,6 +863,42 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       const starts = (await page.evaluate(() => window.toneStarts)).sort((a, b) => a - b);
       for (let i = 1; i < starts.length; i++)
         assert.ok(starts[i] - starts[i - 1] >= 0.149, `${starts}`);
+    });
+
+    await t.test("sound S10 no tones queue while audio is suspended", async () => {
+      const quiet = {
+        ...JOBS[0],
+        id: "011-sample-quiet",
+        title: "Synthetic quiet job",
+        stage: "build",
+      };
+      await seedBoard(origin, [...afterS5, quiet]);
+      await reload("#settings-display:not([hidden])");
+      await page.waitForFunction(() => soundSeen !== null, wait);
+      assert.equal(await page.evaluate(() => audio), null);
+      // Like a real browser, resume() does nothing until the page gets a click or key.
+      // page.evaluate runs with user activation, so a flag stands in for the gesture.
+      await page.evaluate(() => {
+        const resume = AudioContext.prototype.resume;
+        AudioContext.prototype.resume = async function () {
+          if (window.gestured) await resume.call(this);
+        };
+        window.tones = [];
+        window.toneStarts = [];
+      });
+      await seedBoard(origin, [...afterS5, { ...quiet, stage: "needs-human" }]);
+      await page.evaluate(() => poll());
+      assert.deepEqual(await tones(), []);
+      assert.equal(await page.evaluate(() => soundEnd), -Infinity);
+      await page.evaluate(() => {
+        window.gestured = true;
+      });
+      await page.keyboard.press("Shift");
+      await page.waitForFunction(() => audio?.state === "running", wait);
+      await seedBoard(origin, [...afterS5, { ...quiet, stage: "merged" }]);
+      await page.evaluate(() => poll());
+      assert.deepEqual(await tones(), [523, 659, 784]);
+      assert.equal(await page.evaluate(() => window.toneStarts[0]), 0.02);
     });
 
     await t.test("notify C1 card detail toggles", async () => {

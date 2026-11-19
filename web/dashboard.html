@@ -9103,6 +9103,8 @@ function wakeAudio() {
 }
 function playSound(kind) {
   wakeAudio();
+  // A suspended clock does not move, so tones queued now would all play at once on the first click.
+  if (audio?.state !== 'running') return;
   try {
     const start = Math.max(audio.currentTime + 0.02, soundEnd + SOUND_GAP);
     SOUNDS[kind].forEach((hz, i) => {
@@ -9161,7 +9163,7 @@ $('settings-notifications').addEventListener('change', (e) => {
 });
 $('settings-notifications').addEventListener('click', (e) => {
   const b = e.target.closest('[data-sound]');
-  if (b) playSound(b.dataset.sound);
+  if (b) { wakeAudio(); audio?.resume().then(() => playSound(b.dataset.sound), () => {}); }
 });
 for (const type of ['pointerdown', 'keydown']) document.addEventListener(type, () => { if (soundActive() && audio?.state !== 'running') wakeAudio(); });
 
