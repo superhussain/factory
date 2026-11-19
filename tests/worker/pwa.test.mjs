@@ -136,6 +136,53 @@ test("service worker leaves walkthrough.html to the network", async (t) => {
   assert.deepEqual(calls, [serverEnv.FACTORY_ORIGIN + "/jobs/sample/001/spec.md"]);
 });
 
+test("service worker caches GET /api/backlog and no other API read", async (t) => {
+  const saved = Object.fromEntries(
+    ["self", "location", "caches", "fetch"].map((k) => [k, globalThis[k]]),
+  );
+  t.after(() => Object.assign(globalThis, saved));
+  const handlers = {};
+  globalThis.self = {
+    addEventListener: (type, fn) => (handlers[type] = fn),
+    skipWaiting() {},
+    clients: { claim: async () => {} },
+  };
+  globalThis.location = { origin: serverEnv.FACTORY_ORIGIN };
+  const puts = [];
+  globalThis.caches = {
+    open: async () => ({
+      match: async () => {},
+      put: async (key) => puts.push(key),
+      delete: async () => {},
+    }),
+    delete: async () => {},
+    keys: async () => [],
+  };
+  globalThis.fetch = async () => ({ type: "basic", status: 200, clone: () => ({}) });
+  serviceWorker();
+  const calls = [];
+  const waits = [];
+  for (const [path, method] of [
+    ["/api/backlog", "GET"],
+    ["/api/backlog/triage", "GET"],
+    ["/api/pipeline/global", "GET"],
+    ["/api/board", "GET"],
+    ["/api/backlog", "PUT"],
+  ]) {
+    handlers.fetch({
+      request: { method, url: serverEnv.FACTORY_ORIGIN + path, mode: "cors" },
+      respondWith: (p) => {
+        calls.push(`${method} ${path}`);
+        waits.push(p);
+      },
+      waitUntil() {},
+    });
+  }
+  await Promise.all(waits);
+  assert.deepEqual(calls, ["GET /api/backlog"]);
+  assert.deepEqual(puts, ["/api/backlog"]);
+});
+
 test("service worker shows a push and opens only same-origin URLs on click", async (t) => {
   const saved = Object.fromEntries(["self", "location"].map((k) => [k, globalThis[k]]));
   t.after(() => Object.assign(globalThis, saved));

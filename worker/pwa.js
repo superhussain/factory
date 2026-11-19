@@ -124,7 +124,7 @@ export function serviceWorker() {
     if (
       request.method !== "GET" ||
       url.origin !== location.origin ||
-      path.startsWith("/api/") ||
+      (path.startsWith("/api/") && path !== "/api/backlog") ||
       path === "/sw.js" ||
       // A job's walkthroughs go straight to the network, so the Worker sees the frame's own
       // Sec-Fetch-Dest. A service worker re-fetch would send "empty" and be refused.
@@ -136,7 +136,12 @@ export function serviceWorker() {
       event.waitUntil(caches.delete(CACHE));
     else if ((navigate && path === "/") || path.startsWith("/assets/"))
       event.respondWith(sw.staleWhileRevalidate(event, path));
-    else if (path === "/board.json" || path === "/projects.json" || path.startsWith("/jobs/"))
+    else if (
+      path === "/board.json" ||
+      path === "/projects.json" ||
+      path.startsWith("/jobs/") ||
+      path === "/api/backlog"
+    )
       event.respondWith(sw.update(request.url, path, navigate).catch(() => sw.offline(path)));
   });
 }
