@@ -6,7 +6,11 @@
 // A listed parent gets the frame's hash on ready and on every change.
 // A listed parent also gets the Inbox count, which follows the frame's project filter.
 // The config also lists paseo://app, the desktop origin; Chrome here cannot load that scheme, so this proves the extra source leaves https framing intact.
+// The plugin's warm frame keeper parks a frame with moveBefore and brings it back with the same document.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { stripTypeScriptTypes } from "node:module";
+import { join } from "node:path";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { withBrowserFixture, seedProject, seedBoard } from "../support/browser-server.mjs";
@@ -106,6 +110,87 @@ async function signInPopup(page, origin, parent) {
 }
 
 const childFrame = (page) => page.mainFrame().childFrames()[0];
+
+const DRAFT = "Synthetic draft: keep me warm";
+const CAPTURE_DIR = process.env.FACTORY_PASEO_CAPTURE_DIR;
+
+// The plugin's DOM adapter, without moveBefore on the park when withMove is false.
+function installKeeper(withMove) {
+  const SANDBOX =
+    "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals";
+  const adapter = {
+    create(origin, src) {
+      const element = document.createElement("iframe");
+      element.title = "Factory dashboard";
+      element.setAttribute("sandbox", SANDBOX);
+      element.style.cssText = "border:0;width:100%;height:100%;display:block";
+      element.src = src;
+      element.addEventListener("load", () => {
+        window.loads++;
+        element.contentWindow.postMessage({ type: "factory-embed-hello", v: 1 }, origin);
+      });
+      return element;
+    },
+    park(element) {
+      if (!withMove) return { appendChild: (node) => document.body.appendChild(node) };
+      let park = document.getElementById("factory-plugin-warm-park");
+      if (!park) {
+        park = document.createElement("div");
+        park.id = "factory-plugin-warm-park";
+        park.setAttribute("inert", "");
+        park.setAttribute("aria-hidden", "true");
+        park.style.cssText =
+          "position:fixed;left:-100000px;top:0;visibility:hidden;pointer-events:none";
+        document.body.appendChild(park);
+      }
+      park.style.width = element.clientWidth + "px";
+      park.style.height = element.clientHeight + "px";
+      return park;
+    },
+    dropped() {},
+  };
+  window.keeper = window.createFrameKeeper(adapter, () => window.fakeNow);
+}
+
+async function warmFrame(page) {
+  const handle = await page.waitForSelector("#warm-host iframe");
+  const frame = await handle.contentFrame();
+  await frame.waitForSelector("#board");
+  await frame.waitForFunction(() => document.readyState === "complete");
+  return frame;
+}
+
+async function capture(page, name) {
+  if (!CAPTURE_DIR) return;
+  const host = await page.$("#warm-host");
+  await host.screenshot({ path: join(CAPTURE_DIR, name) });
+}
+
+async function typeDraft(frame) {
+  await frame.evaluate("openIdeaDialog()");
+  await frame.type("#idea-text", DRAFT);
+  await frame.evaluate(() => {
+    window.warmMarker = 1;
+  });
+}
+
+const attach = (page) =>
+  page.evaluate((src) => {
+    window.attached = window.keeper.attach(
+      document.getElementById("warm-host"),
+      "https://factory.example.test",
+      src,
+    );
+    return window.attached.warm;
+  }, DASHBOARD + "/#042-sample-links");
+const park = (page) => page.evaluate(() => window.keeper.park(window.attached.frame));
+const loads = (page) => page.evaluate(() => window.loads);
+const draftState = (frame) =>
+  frame.evaluate(() => ({
+    marker: window.warmMarker ?? null,
+    text: document.querySelector("#idea-text").value,
+    open: document.querySelector("#idea-dlg").open,
+  }));
 
 test("paseo embed", { timeout: 180000 }, async (t) => {
   await prepareAssets();
@@ -298,6 +383,72 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
         .catch(() => false);
       assert.equal(board, false);
       assert.deepEqual(await other.evaluate(() => window.received), []);
+    });
+
+    await t.test("warm frame keeps the draft", async () => {
+      const source = await readFile(
+        new URL("../../paseo-plugin/shared/warm-frame.ts", import.meta.url),
+        "utf8",
+      );
+      const content =
+        stripTypeScriptTypes(source) +
+        "\nwindow.createFrameKeeper = createFrameKeeper; window.WARM_FRAME_MS = WARM_FRAME_MS;\n";
+      const warm = await framedPage(browser, origin, LISTED);
+      await warm.evaluate(() => {
+        document.querySelector("iframe").remove();
+        const host = document.createElement("div");
+        host.id = "warm-host";
+        host.style.cssText = "width:1280px;height:720px";
+        document.body.prepend(host);
+        window.loads = 0;
+        window.fakeNow = 0;
+      });
+      await warm.addScriptTag({ type: "module", content });
+      await warm.waitForFunction(() => typeof window.createFrameKeeper === "function");
+      await warm.evaluate(installKeeper, true);
+
+      assert.equal(await attach(warm), false);
+      await typeDraft(await warmFrame(warm));
+
+      await park(warm);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await warm.evaluate(() => {
+        window.fakeNow += 120_000;
+      });
+      assert.equal(await attach(warm), true);
+      let frame = await warmFrame(warm);
+      assert.equal(await loads(warm), 1);
+      assert.deepEqual(await draftState(frame), { marker: 1, text: DRAFT, open: true });
+      await capture(warm, "after-return.png");
+
+      await frame.evaluate(() => document.querySelector("#idea-dlg").close());
+      await warm.evaluate(
+        (src) => window.keeper.jumpTo(window.attached.frame, src),
+        DASHBOARD + "/#043-sample-ask",
+      );
+      await frame.waitForFunction(() => location.hash === "#043-sample-ask", { timeout: 5000 });
+      assert.equal(await loads(warm), 1);
+      assert.equal(await frame.evaluate(() => window.warmMarker), 1);
+
+      await park(warm);
+      await warm.evaluate(() => {
+        window.fakeNow += window.WARM_FRAME_MS;
+      });
+      assert.equal(await attach(warm), false);
+      await warm.waitForFunction(() => window.loads === 2, { timeout: 8000 });
+      frame = await warmFrame(warm);
+      assert.equal(await frame.evaluate(() => window.warmMarker), undefined);
+
+      await warm.evaluate(() => window.keeper.drop());
+      await warm.evaluate(installKeeper, false);
+      assert.equal(await attach(warm), false);
+      await typeDraft(await warmFrame(warm));
+      await park(warm);
+      assert.equal(await attach(warm), false);
+      await warm.waitForFunction(() => window.loads === 4, { timeout: 8000 });
+      frame = await warmFrame(warm);
+      assert.deepEqual(await draftState(frame), { marker: null, text: "", open: false });
+      await capture(warm, "before-return.png");
     });
   });
 });

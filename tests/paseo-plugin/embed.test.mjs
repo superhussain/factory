@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  dashboardHost,
   dashboardSrc,
   frameLoaded,
   parseDashboardOrigin,
@@ -23,6 +24,18 @@ test("origin", () => {
     "",
   ])
     assert.equal(parseDashboardOrigin(value), null, value);
+});
+
+test("host", () => {
+  assert.equal(
+    dashboardHost(parseDashboardOrigin("https://factory.example.test/")),
+    "factory.example.test",
+  );
+  assert.equal(
+    dashboardHost(parseDashboardOrigin("https://Deets.Example.test")),
+    "deets.example.test",
+  );
+  assert.equal(dashboardHost("https://localhost:8220"), "localhost:8220");
 });
 
 test("src", () => {

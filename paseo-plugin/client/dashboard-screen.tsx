@@ -1,7 +1,7 @@
 import type { PluginClientContext, PluginScreenProps } from "@getpaseo/plugin/client";
 import { openExternalUrl, useSettings } from "@getpaseo/plugin/client";
 import { ExternalLink, Icon, Loading, ScrollView, useToast } from "@getpaseo/plugin/client/ui";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import { parseDashboardOrigin, type EmbedMessage } from "../shared/embed";
 import { frameUrl, startUrl } from "../shared/location";
@@ -9,13 +9,12 @@ import type { Reload } from "../shared/reload";
 import { firstLoginSteps, isBrowserOrigin, openLabel } from "../shared/first-login";
 import { createOpenLimiter } from "../shared/open-limit";
 import { factorySettings } from "../shared/settings";
-import { setFrameInboxCount } from "./frame-inbox";
 import {
   DashboardFrame,
+  dropWarmFrame,
+  frameReady,
   hasLoadedBefore,
-  markLoaded,
   paseoOrigin,
-  saveLocation,
   savedLocation,
   useSignInPopup,
 } from "./web";
@@ -31,12 +30,15 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
     const [stalled, setStalled] = useState(false);
     const origin =
       settings.status === "ready" ? parseDashboardOrigin(settings.values.origin) : null;
-    const [saved, setSaved] = useState<string | null>(null);
+    const [saved, setSaved] = useState<string | null>(() =>
+      origin ? startUrl(origin, params.job, savedLocation(origin)) : null,
+    );
     useEffect(() => {
       if (origin) setSaved(startUrl(origin, params.job, savedLocation(origin)));
     }, [origin, params.job]);
     const src = origin && saved?.startsWith(origin + "/") ? saved : null;
     const reloadFrame = () => {
+      dropWarmFrame();
       if (origin) setSaved(frameUrl(origin, savedLocation(origin)));
       setLoad((n) => n + 1);
     };
@@ -45,14 +47,19 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
     useEffect(() => reload.listen(() => reloadRef.current()), []);
     const [allowOpen] = useState(() => createOpenLimiter());
     const signIn = useSignInPopup(origin ?? "", reloadFrame);
-    useEffect(() => {
-      if (!origin || Platform.OS !== "web") return;
+    const showing = src !== null;
+    useLayoutEffect(() => {
+      if (!origin || !showing || Platform.OS !== "web") return;
+      if (frameReady(origin)) {
+        setReady(true);
+        setStalled(false);
+        return;
+      }
       setReady(false);
       setStalled(false);
       const timer = setTimeout(() => setStalled(true), READY_TIMEOUT_MS);
       return () => clearTimeout(timer);
-    }, [origin, load, src]);
-    useEffect(() => () => setFrameInboxCount(null), [origin, load]);
+    }, [origin, load, showing]);
 
     const styles = {
       screen: { flex: 1, backgroundColor: theme.colors.surface0 },
@@ -162,18 +169,16 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
       );
 
     const onMessage = (message: EmbedMessage) => {
-      if (message.type === "factory-inbox-count") setFrameInboxCount(message.count);
-      else if (message.type === "factory-embed-location") saveLocation(origin, message.hash);
-      else if (message.type === "factory-embed-ready") {
-        markLoaded(origin);
+      if (message.type === "factory-embed-ready") {
         setReady(true);
         setStalled(false);
       } else if (message.type === "factory-open-url") {
         if (allowOpen())
           openExternalUrl(message.url).catch(() => toast.error("Paseo could not open that link."));
-      } else if (navigation)
-        navigation.openAgent({ agentId: message.agent, serverId: message.server });
-      else toast.error("This Paseo app cannot open agents from plugins.");
+      } else if (message.type === "factory-open-agent") {
+        if (navigation) navigation.openAgent({ agentId: message.agent, serverId: message.server });
+        else toast.error("This Paseo app cannot open agents from plugins.");
+      }
     };
     const returning = hasLoadedBefore(origin);
     const here = paseoOrigin();
@@ -181,7 +186,13 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
     return (
       <View style={styles.screen}>
         <View style={{ flex: 1 }}>
-          <DashboardFrame key={load} src={src} origin={origin} onMessage={onMessage} />
+          <DashboardFrame
+            key={load}
+            src={src}
+            origin={origin}
+            job={params.job}
+            onMessage={onMessage}
+          />
         </View>
         {ready ? null : (
           <ScrollView style={styles.overlay} contentContainerStyle={styles.overlayContent}>
