@@ -1506,7 +1506,7 @@ window.addEventListener('offline', () => { setConnection('offline'); syncLive();
 window.addEventListener('online', async () => {
   syncLive(); schedulePoll();
   await loadProjects();
-  poll();
+  readBoard();
 });
 
 let loaded = false;
@@ -9366,7 +9366,7 @@ paintCached().then(() => loadProjects()).then(() => {
   if (settingsShown === 'display') enterDisplaySection();
   if (settingsShown === 'notifications') enterNotificationsSection();
   referenceReady = true; if (settingsShown === 'reference') loadReferenceEffective();
-  pollStarted = true; loadHosts(); poll(); syncLive(); schedulePoll();
+  pollStarted = true; loadHosts(); syncLive(); readBoard(); schedulePoll();
 });
 setInterval(remindWaiting, REMIND_CHECK_MS);
 
@@ -9416,7 +9416,7 @@ function schedulePoll() {
   pollTimer = ms ? setInterval(pollTick, ms) : 0;
   drawLiveDot();
 }
-document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); syncLive(); schedulePoll(); });
+document.addEventListener('visibilitychange', () => { syncLive(); if (pollStarted && !document.hidden) readBoard(); schedulePoll(); });
 // Live board events: the Worker sends {"type":"changed","key":...} after each board or
 // backlog write, and the matching key re-reads once, 2 s after the first frame; frames during a read add one more read. A dropped socket retries with backoff
 // (1, 2, 4 ... 30 s), then every 30 s while a socket is wanted. An expired sign-in stops retries until a board read succeeds.
@@ -9437,6 +9437,9 @@ function openLive() {
     liveNote = '';
     liveOpen = true;
     liveRetries = 0;
+    clearTimeout(liveOwedTimer);
+    liveOwedTimer = 0;
+    liveReadOwed = null;
     schedulePoll();
     poll({ ifChanged: true });
   });
@@ -9451,6 +9454,7 @@ function openLive() {
     if (ws !== liveSocket) return;
     liveSocket = null;
     liveOpen = false;
+    flushLiveRead();
     schedulePoll();
     if (liveWanted())
       liveRetryTimer = setTimeout(openLive, Math.min(LIVE_FIRST_RETRY_MS * 2 ** liveRetries++, LIVE_MAX_RETRY_MS));
@@ -9463,8 +9467,26 @@ function closeLive() {
   const ws = liveSocket;
   liveSocket = null;
   liveOpen = false;
+  flushLiveRead();
   // A status code lets the room finish the closing handshake.
   ws?.close(1000);
+}
+// While the socket connects, a board read waits for its open, which reads the board anyway
+// and also catches a write that lands before the subscription. A close before the open,
+// or an open slower than LIVE_OPEN_WAIT_MS, reads at once instead.
+const LIVE_OPEN_WAIT_MS = 2000;
+let liveReadOwed = null, liveOwedTimer = 0;
+function readBoard(read = poll) {
+  if (liveSocket?.readyState !== 0) return read();
+  liveReadOwed ||= read;
+  if (!liveOwedTimer) liveOwedTimer = setTimeout(flushLiveRead, LIVE_OPEN_WAIT_MS);
+}
+function flushLiveRead() {
+  clearTimeout(liveOwedTimer);
+  liveOwedTimer = 0;
+  const read = liveReadOwed;
+  liveReadOwed = null;
+  read?.();
 }
 function syncLive() {
   if (!liveWanted()) closeLive();
@@ -9485,7 +9507,7 @@ function runLiveRead(key) {
   });
 }
 window.addEventListener('blur', () => setTimeout(schedulePoll, 0));
-window.addEventListener('focus', () => { if (pollStarted && !liveOpen && !document.hidden) pollTick(); syncLive(); schedulePoll(); });
+window.addEventListener('focus', () => { syncLive(); if (pollStarted && !liveOpen && !document.hidden) readBoard(pollTick); schedulePoll(); });
 // A redraw while a card has focus or its menu is open would move them, so the chips wait for the next tick.
 function clockTick() {
   if (document.hidden) return;
