@@ -6,6 +6,8 @@ import { runElection } from "../../paseo-plugin/shared/election.ts";
 
 const A = "https://factory.example.test";
 const B = "https://other.example.test";
+const SA = { origin: A, factoryLinkButtons: true };
+const SB = { origin: B, factoryLinkButtons: false };
 
 const settle = () => new Promise((r) => setImmediate(r));
 
@@ -34,32 +36,47 @@ async function run(t, results) {
   const mac = member(ballot, log, "mac");
   const windows = member(ballot, log, "windows");
   windows.online(A);
+  const settings = [];
   const { read, count } = stubRead(results);
-  const election = runElection(mac, read, () => () => {});
+  const election = runElection(
+    mac,
+    read,
+    () => () => {},
+    (origin, flag) => settings.push([origin, flag]),
+  );
   t.after(() => election.stop());
   await settle();
   election.recheck();
   await settle();
-  return { log, mac, windows, count };
+  return { log, settings, mac, windows, count };
 }
 
 test("one failure retries at once", async (t) => {
-  const { log, mac, count } = await run(t, [A, "fail", A]);
+  const { log, settings, mac, count } = await run(t, [SA, "fail", SA]);
   assert.equal(count(), 3);
   assert.deepEqual(log, ["+windows", "+mac", "-windows"]);
+  assert.deepEqual(settings, [
+    [A, true],
+    [A, true],
+  ]);
   assert.equal(mac.elected(), true);
 });
 
 test("two failures hand over", async (t) => {
-  const { log, windows, count } = await run(t, [A, "fail", "fail"]);
+  const { log, settings, windows, count } = await run(t, [SA, "fail", "fail"]);
   assert.equal(count(), 3);
   assert.deepEqual(log, ["+windows", "+mac", "-windows", "-mac", "+windows"]);
+  assert.deepEqual(settings, [[A, true]]);
   assert.equal(windows.elected(), true);
 });
 
 test("recheck reads again", async (t) => {
-  const { log, mac, count } = await run(t, [A, B]);
+  const { log, settings, mac, count } = await run(t, [SA, SB]);
   assert.equal(count(), 2);
   assert.deepEqual(log, ["+windows", "+mac", "-windows", "-mac", "+mac B", "+windows"]);
+  assert.deepEqual(settings, [
+    [A, true],
+    [B, false],
+  ]);
   assert.equal(mac.elected(), true);
 });
