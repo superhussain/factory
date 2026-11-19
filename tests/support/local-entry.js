@@ -27,12 +27,7 @@ export default {
     serveFactory(
       request,
       { ...env, config },
-      {
-        verified: true,
-        kind: "user",
-        email: "operator@example.test",
-        exp: Math.floor(Date.now() / 1000) + 3600,
-      },
+      { verified: true, kind: "user", email: "operator@example.test" },
       ctx,
     ),
 };

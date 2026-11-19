@@ -1,7 +1,7 @@
 import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
 
 export type VerifiedPrincipal =
-  | { verified: true; kind: "user"; email: string; exp: number }
+  | { verified: true; kind: "user"; email: string }
   | { verified: true; kind: "service"; client_id: string | null };
 export type AuthConfig = { issuer: string; audience: string };
 
@@ -60,7 +60,7 @@ export async function authenticate(
     /^[^\s@<>"]{1,64}@[^\s@<>"]{1,255}$/.test(payload.email) &&
     !("common_name" in payload)
   ) {
-    return { verified: true, kind: "user", email: payload.email, exp: payload.exp as number };
+    return { verified: true, kind: "user", email: payload.email };
   }
   const client_id =
     typeof payload.common_name === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(payload.common_name)
