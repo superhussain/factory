@@ -79,6 +79,16 @@ export function createFrameKeeper<E extends FrameNode, M>(
   return { attach, park, drop, jumpTo, current: () => kept };
 }
 
+export const CARD_ID = "factory-plugin-card";
+
+// When ready clears the card while focus sits inside it, the frame takes focus so it is not lost to the page body.
+export function shouldRefocusFrame(
+  card: { contains(node: unknown): boolean } | null,
+  active: unknown,
+): boolean {
+  return !!card && !!active && card.contains(active);
+}
+
 export type InputKind = "pointer" | "keyboard";
 export type ActiveElement = { tagName: string; isContentEditable: boolean } | null;
 

@@ -5,6 +5,8 @@ const card = globalThis.FACTORY_CAPTURE_CARD;
 export const savedLocation = () => "";
 export const dropWarmFrame = () => {};
 export const frameReady = () => false;
+export const cardHeldFocus = () => false;
+export const focusFrame = () => {};
 export const frameSignedOut = () => card === "expired";
 export const hasLoadedBefore = () => card === "stall";
 export const paseoOrigin = () => "https://app.example.test";

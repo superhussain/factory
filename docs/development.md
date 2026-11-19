@@ -87,7 +87,7 @@ runs `format:check`, the workflow contracts and the affected `auth`, `protocol`,
 suites, picked by `FACTORY_BROWSER_SHARD=<n>/4`; unset runs them all. The `paseo-plugin` job installs `paseo-plugin/` from its own lockfile, then runs its `typecheck` and `pnpm run test:paseo-plugin`, which also checks that every plugin lockfile entry has a public registry tarball URL. Its packages are not in the cached store, so that install downloads them each run. The `ci`
 job runs unless the run was cancelled, prints each job's name with its result,
 and passes only when every other job succeeds. `local` binds
-`127.0.0.1:8220`/`8221` and `browser` binds owned ephemeral ports,
+`127.0.0.1:8220`/`8221`/`8222` and `browser` binds owned ephemeral ports,
 so the two run side by side with no Nx dependency between them. A pull request that
 changes only docs selects nothing in the `browser` shards, which skip their
 gated provision. `targets` always provisions the browser because `assets` runs a
@@ -124,7 +124,7 @@ both Worker suites. `worker-hosted`'s suites depend on `web-dashboard:assets`
 because they import the `.build` artifacts it writes, so a clean checkout builds
 assets first. The `local` and `browser` suites are cached like the rest: a
 cache hit replays the stored output without executing. Only `local` binds
-`127.0.0.1:8220`/`8221`; `browser` starts its local services on owned ephemeral
+`127.0.0.1:8220`/`8221`/`8222`; `browser` starts its local services on owned ephemeral
 ports, so the two never contend for a port. Their inputs cover
 `tests/`, `worker/` and `web/` sources only — `skills/` stays outside.
 

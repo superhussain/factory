@@ -12,9 +12,11 @@ import { needsBody, needsTitle, type WaitingJob } from "../shared/arrivals";
 import * as firstLogin from "../shared/first-login";
 import { readLocation, writeLocation } from "../shared/location";
 import {
+  CARD_ID,
   createFrameKeeper,
   freshPress,
   shouldFocusFrame,
+  shouldRefocusFrame,
   type InputKind,
   type KeptFrame,
   type Press,
@@ -43,6 +45,7 @@ type DivElement = {
   setAttribute(name: string, value: string): void;
   appendChild(node: FrameElement): unknown;
   moveBefore?: (node: FrameElement, child: null) => void;
+  contains(node: unknown): boolean;
 };
 declare const document: {
   createElement(tag: "iframe"): FrameElement;
@@ -222,6 +225,18 @@ export function frameReady(origin: string): boolean {
 export function frameSignedOut(origin: string): boolean {
   const frame = keeper.current();
   return !!frame && frame.origin === origin && frame.signedOut;
+}
+
+export function cardHeldFocus(): boolean {
+  return (
+    Platform.OS === "web" &&
+    shouldRefocusFrame(document.getElementById(CARD_ID), document.activeElement)
+  );
+}
+
+export function focusFrame(origin: string): void {
+  const frame = keeper.current();
+  if (frame && frame.origin === origin && frame.parkedAt === null) frame.element.focus();
 }
 
 export function DashboardFrame({

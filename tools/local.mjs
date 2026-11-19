@@ -1,13 +1,18 @@
 // Owned local hosted verification: fixed loopback Wrangler services with fresh
 // job-local R2 persistence. `--port 8220|8221` serves the fixed test entry;
-// `--check` runs the complete local integration and tears everything down.
+// `--check` runs the complete local integration and tears everything down. The cancel
+// drill runs against direct Miniflare on 8222, because wrangler dev never passes a
+// client reset on to the worker.
 import { spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { isIP } from "node:net";
+import { build } from "esbuild";
+import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { prepareAssets } from "./assets.mjs";
 
 const wrangler = new URL("../node_modules/.bin/wrangler", import.meta.url).pathname;
 const LOCAL_CONFIG = new URL("../tests/support/wrangler.json", import.meta.url).pathname;
+const LOCAL_ENTRY = new URL("../tests/support/local-entry.js", import.meta.url).pathname;
 const AUTH_CONFIG = new URL("../tests/support/auth-wrangler.json", import.meta.url).pathname;
 const PORTS = [8220, 8221];
 const OWNED_PORT_ENV = "FACTORY_OWNED_LOCAL_PORT";
@@ -151,6 +156,32 @@ export async function startLocal({ port, persistDir, ip = "127.0.0.1" } = {}) {
   return startWorkerd({ port, persistDir, config: LOCAL_CONFIG, ip });
 }
 
+export async function startCancelWorker({ persistDir }) {
+  const { outputFiles } = await build({
+    entryPoints: [LOCAL_ENTRY],
+    bundle: true,
+    format: "esm",
+    write: false,
+    platform: "neutral",
+    conditions: ["workerd", "worker", "browser"],
+    mainFields: ["module", "main"],
+    loader: { ".html": "text", ".txt": "text" },
+  });
+  const mf = new Miniflare(
+    convertV4MiniflareOptions({
+      modules: [{ type: "ESModule", path: "local-entry.js", contents: outputFiles[0].text }],
+      compatibilityDate: "2026-06-01",
+      r2Buckets: ["BUCKET"],
+      durableObjects: { BoardEvents: { className: "BoardEvents", useSQLite: true } },
+      defaultPersistRoot: persistDir,
+      host: "127.0.0.1",
+      port: 8222,
+    }),
+  );
+  await mf.ready;
+  return { origin: "http://127.0.0.1:8222", close: () => mf.dispose() };
+}
+
 function python(args, env) {
   return new Promise((resolve) => {
     const child = spawn("python3", args, { env: { ...process.env, ...env } });
@@ -207,20 +238,25 @@ async function check() {
   await mkdir(dir, { recursive: true });
   await prepareAssets();
   const service = await startLocal({ port: 8220, persistDir: dir + "r2" });
-  let auth;
+  let auth, cancel;
   const onSignal = () => {
-    (auth ? auth.close() : Promise.resolve()).finally(() =>
-      service.close().finally(() => process.exit(1)),
-    );
+    (auth ? auth.close() : Promise.resolve())
+      .finally(() => (cancel ? cancel.close() : undefined))
+      .finally(() => service.close().finally(() => process.exit(1)));
   };
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
   const totals = { executed: 0, passed: 0, failed: 0, errors: 0, skipped: 0 };
   try {
     auth = await startWorkerd({ port: 8221, persistDir: dir + "r2-auth", config: AUTH_CONFIG });
+    cancel = await startCancelWorker({ persistDir: dir + "r2-cancel" });
     const suite = await python(
       ["-B", "-m", "unittest", "discover", "-s", "tests/worker", "-p", "test_*.py", "-v"],
-      { FACTORY_TEST_URL: service.origin, PYTHONDONTWRITEBYTECODE: "1" },
+      {
+        FACTORY_TEST_URL: service.origin,
+        FACTORY_CANCEL_TEST_URL: cancel.origin,
+        PYTHONDONTWRITEBYTECODE: "1",
+      },
     );
     console.log(suite.output);
     const counts = unittestCounts(suite.output);
@@ -256,9 +292,11 @@ async function check() {
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
     if (auth) await auth.close();
+    if (cancel) await cancel.close();
     await service.close();
     await rm(dir + "r2", { recursive: true, force: true });
     await rm(dir + "r2-auth", { recursive: true, force: true });
+    await rm(dir + "r2-cancel", { recursive: true, force: true });
   }
 }
 

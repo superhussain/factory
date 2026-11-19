@@ -46,7 +46,7 @@ context see [cloudflare.md](cloudflare.md), [device.md](device.md) and
 
 ## Occupied ports
 
-Local tests bind `127.0.0.1:8220`/`8221` or owned ephemeral ports. Stop only the
+Local tests bind `127.0.0.1:8220`/`8221`/`8222` or owned ephemeral ports. Stop only the
 process you own that holds the port; never kill another operator's or job's
 service. A stuck owned process can be found with `lsof -i :8220` and restarted
 afterwards.
