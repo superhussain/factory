@@ -585,7 +585,10 @@ async function boardPatch(request, env, ctx) {
     const data = { ...doc, jobs, updated };
     const bad = await boardRefusal(env, stored, data, true);
     if (bad) return reply(bad, 400);
-    const obj = await env.BUCKET.put("board.json", JSON.stringify(data), {
+    const text = JSON.stringify(data);
+    if (new TextEncoder().encode(text).length > MAX_BOARD)
+      return reply("board over 16 MiB. Nothing was written.", 413);
+    const obj = await env.BUCKET.put("board.json", text, {
       onlyIf: new Headers(stored.etag ? { "If-Match": stored.etag } : { "If-None-Match": "*" }),
       httpMetadata: { contentType: "application/json" },
     });

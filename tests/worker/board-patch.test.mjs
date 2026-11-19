@@ -225,6 +225,16 @@ test("shape", async () => {
   assert.equal(await big.text(), "body over 1 MiB");
   assert.equal(s.etag(), before);
 
+  const full = setup({
+    updated: "",
+    jobs: [{ ...BUILD, idea: "x".repeat((16 << 20) - 200) }],
+  });
+  const fullBefore = full.etag();
+  const over = await full.patch({ rows: [add()] });
+  assert.equal(over.status, 413);
+  assert.equal(await over.text(), "board over 16 MiB. Nothing was written.");
+  assert.equal(full.etag(), fullBefore);
+
   const broken = setup();
   broken.bucket.objects.get("board.json").bytes = Buffer.from("{not json");
   const unreadable = await broken.patch({ rows: [add()] });
