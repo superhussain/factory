@@ -693,6 +693,26 @@ test("retros page", { timeout: 180000 }, async (t) => {
       retros = { status: 200, body: JSON.stringify(RUNS) };
     });
 
+    await t.test("a failed background read keeps the last good list", async () => {
+      const { page, errors } = await openPage("#/retros");
+      await page.waitForFunction(
+        () => document.querySelectorAll("#retros-list .retro-summary").length === 2,
+        wait,
+      );
+      retros = { status: 500, body: "boom" };
+      await page.evaluate(() => loadRetros());
+      assert.deepEqual(
+        await page.evaluate(() => [
+          document.querySelectorAll("#retros-list .retro-summary").length,
+          document.querySelector("#retros-status").textContent,
+        ]),
+        [2, ""],
+      );
+      retros = { status: 200, body: JSON.stringify(RUNS) };
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
     await t.test("captures", async () => {
       if (!process.env.RETROS_SHOTS) return;
       await mkdir(process.env.RETROS_SHOTS, { recursive: true });

@@ -3278,6 +3278,7 @@ function retroCardStatus(card, marks) {
   return { text: 'Not logged: ' + card.result, href: null, job: null };
 }
 
+// A failed read keeps the last good list, so a background read never empties the page.
 async function loadRetros() {
   retrosReadAt = Date.now();
   try {
@@ -3285,7 +3286,7 @@ async function loadRetros() {
     if (r.status !== 200) throw new Error(String(r.status));
     retros = await r.json();
     retrosFailed = false;
-  } catch { retros = null; retrosFailed = true; }
+  } catch { if (!Array.isArray(retros)) retrosFailed = true; }
   renderRetrosPage();
   if ($('job-picker').open && pickerMode === 'job') renderJobResults();
   syncRetrosLink();
