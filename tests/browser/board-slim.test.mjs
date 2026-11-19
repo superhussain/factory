@@ -242,12 +242,18 @@ test("slim board read", { timeout: 240000 }, async (t) => {
         page.evaluate(() => {
           const span = document.querySelector('.column-toggle[data-stage="merged"] > span');
           const more = document.querySelector('.more[data-stage="merged"]');
+          const box = (el) => {
+            const r = el.getBoundingClientRect();
+            return [r.x, r.y, r.width, r.height];
+          };
           return {
             shown: span.clientWidth,
             full: span.scrollWidth,
             more: more.textContent,
             busy: more.getAttribute("aria-busy"),
             title: span.parentElement.title,
+            rects: [box(more), box(more.closest("h2"))],
+            spin: getComputedStyle(more, "::after").animationName,
           };
         });
       await page.evaluate(() => {
@@ -277,6 +283,9 @@ test("slim board read", { timeout: 240000 }, async (t) => {
       }
       assert.equal(idle.busy, null);
       assert.equal(loading.busy, "true");
+      assert.deepEqual(loading.rects, idle.rects);
+      assert.equal(idle.spin, "none");
+      assert.equal(loading.spin, "more-spin");
       assert.deepEqual(errors, []);
       await page.close();
     });

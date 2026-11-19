@@ -485,6 +485,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .archive-count { font-size: 12px; color: var(--muted); margin: 0; }
   .archive-error { font-size: 12px; color: var(--alert); margin: 0; }
   .more[aria-disabled="true"], .archive-more[aria-disabled="true"] { opacity: .6; cursor: default; }
+  .more[aria-busy="true"] { position: relative; color: transparent; }
+  .more[aria-busy="true"]::after { content: ''; position: absolute; top: 50%; left: calc(50% + 3px); width: 10px; height: 10px; margin: -5px 0 0 -5px; box-sizing: border-box; border: 2px solid var(--muted); border-right-color: transparent; border-radius: 50%; animation: more-spin .8s linear infinite; }
+  @keyframes more-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .more[aria-busy="true"]::after { animation: none; } }
   .blank { grid-column: 1 / -1; text-align: center; padding: 64px 16px; color: var(--muted); }
   .blank h2 { margin: 0 0 8px; font-size: 16px; color: var(--fg); }
   .blank p { margin: 4px 0; font-size: 13px; }
@@ -5008,7 +5012,7 @@ function renderBoard() {
         const open = expanded.has(s) && boardComplete;
         const loading = !boardComplete && (fullRead || (fullWanted && boardFromCache && expanded.has(s)));
         // A short column's header already shows the total, so only its accessible name repeats it.
-        // While the full read runs the text stays put; the button is dimmed and busy.
+        // While the full read runs the text keeps its width under a spinner; the button is dimmed and busy.
         more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '"' +
           (loading ? ' aria-disabled="true" aria-busy="true"' : '') +
           (partial ? ' aria-label="show all ' + totals[i] + ' ' + s + '"' : '') + '>' +
