@@ -335,6 +335,24 @@ test("notifications", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await t.test("row links honor hidden panel links", async () => {
+      const { page, errors } = await openPage("#/notifications", (p) =>
+        p.evaluateOnNewDocument(() =>
+          localStorage.setItem("factory-hidden-drawer-links", "pr,web"),
+        ),
+      );
+      await pageRows(page, 3);
+      assert.deepEqual(
+        await page.$$eval(
+          '#notifications-list .inbox-item:has(a[href="#060-sample-merged"]) .inbox-actions a',
+          (links) => links.map((a) => a.textContent),
+        ),
+        ["Open job", "Open in Session app"],
+      );
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
     const ranks = (page) =>
       page.$$eval("#notifications-list .inbox-rank", (els) => els.map((el) => el.textContent));
 
@@ -541,9 +559,36 @@ test("notifications", { timeout: 180000 }, async (t) => {
         () => document.querySelector("#d-meta")?.textContent.includes("051-sample-retry"),
         wait,
       );
+      const split = await page.evaluate(() => {
+        const list = document.getElementById("notifications-page");
+        const detail = document.getElementById("detail");
+        return {
+          view: document.body.dataset.view,
+          split: document.body.hasAttribute("data-notifications-split"),
+          visible: [list.checkVisibility(), detail.checkVisibility()],
+          beside: list.getBoundingClientRect().right <= detail.getBoundingClientRect().left + 1,
+          current: [...document.querySelectorAll("#notifications-list .inbox-item")].map((li) =>
+            li.getAttribute("aria-current"),
+          ),
+        };
+      });
+      assert.deepEqual(split, {
+        view: "notifications",
+        split: true,
+        visible: [true, true],
+        beside: true,
+        current: [null, "true", null],
+      });
       await page.click("#d-close");
       await page.waitForFunction(() => location.hash === "#/notifications", wait);
       assert.equal(await page.$eval("#notifications-page", (el) => el.checkVisibility()), true);
+      assert.deepEqual(
+        await page.evaluate(() => [
+          document.body.hasAttribute("data-notifications-split"),
+          document.activeElement.matches('#notifications-list a[href="#051-sample-retry"]'),
+        ]),
+        [false, true],
+      );
       assert.deepEqual(errors, []);
       await page.browserContext().close();
     });

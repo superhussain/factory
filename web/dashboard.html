@@ -242,11 +242,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .inbox-item[aria-current="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
   @media (min-width: 761px) {
-    body[data-inbox-split] { --split-drawer: min(var(--drawer-w, 760px), 100vw - 400px); }
-    body[data-inbox-split] .detail { width: var(--split-drawer); }
+    body[data-inbox-split], body[data-notifications-split] { --split-drawer: min(var(--drawer-w, 760px), 100vw - 400px); }
+    body[data-inbox-split] .detail, body[data-notifications-split] .detail { width: var(--split-drawer); }
     body[data-inbox-split] #inbox-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
-    body[data-inbox-split] .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; }
-    body[data-inbox-split] .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
+    body[data-notifications-split] #notifications-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
+    body[data-inbox-split] .inbox-item, body[data-notifications-split] .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; }
+    body[data-inbox-split] .inbox-actions, body[data-notifications-split] .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
   }
   #retros-list { display: grid; gap: 20px; }
   .settings-section.retro-run { padding: 20px 20px 12px; }
@@ -1021,7 +1022,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
       <p class="muted" id="display-card-fields-help">Cards in the needs you column always show what the job is waiting on.</p>
       <fieldset id="display-drawer-links" aria-describedby="display-drawer-links-help"><legend>Job panel links</legend></fieldset>
-      <p class="muted" id="display-drawer-links-help">Unchecked links are hidden in the job panel header.</p>
+      <p class="muted" id="display-drawer-links-help">Unchecked links are hidden in the job panel header and on the Notifications page.</p>
       <label for="display-idea-project">New idea project<select id="display-idea-project" aria-describedby="display-idea-project-help"></select></label>
       <p class="muted" id="display-idea-project-help">New idea starts with this project unless the board is filtered to one project.</p>
       <p class="muted" id="display-drawer"></p>
@@ -3181,13 +3182,14 @@ function renderRoute() {
   const inboxWas = $('inbox-page').hidden === false;
   const inboxOpen = !section && inboxShown();
   const notificationsWas = $('notifications-page').hidden === false;
-  const notificationsOpen = !section && !retrosOpen && !inboxOpen && notificationsRoute() !== null;
+  const notificationsOpen = !section && !retrosOpen && !inboxOpen && notificationsShown();
   document.body.dataset.view = section ? 'settings' : retrosOpen ? 'retros' : inboxOpen ? 'inbox' : notificationsOpen ? 'notifications' : 'board';
   $('settings-page').hidden = !section;
   $('retros-page').hidden = !retrosOpen;
   $('inbox-page').hidden = !inboxOpen;
   $('notifications-page').hidden = !notificationsOpen;
   document.body.toggleAttribute('data-inbox-split', inboxSplit());
+  document.body.toggleAttribute('data-notifications-split', notificationsSplit());
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : notificationsOpen ? 'Notifications · ' + baseTitle : baseTitle;
   if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxFocusRow = -1; inboxAnswer = null; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
@@ -3875,6 +3877,8 @@ function logNotification(entry) {
 let notificationsHtml = '';
 let notificationsMenuHtml = '';
 function notificationsRoute() { return location.hash === '#/notifications' ? true : null; }
+function notificationsSplit() { return drawerReturn === '#/notifications' && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null; }
+function notificationsShown() { return notificationsRoute() !== null || notificationsSplit(); }
 function notificationItems() {
   const shown = jobs.filter((j) => isShown(j.project));
   const items = [];
@@ -3901,12 +3905,12 @@ function notificationsUnread(items) {
 function renderNotifications() {
   const items = loaded ? notificationItems() : [];
   const menuOpen = !$('notifications-menu').hidden;
-  if ((menuOpen || notificationsRoute() !== null) && notificationsUnread(items)) store.set(NOTIFICATIONS_SEEN_KEY, items[0].at);
+  if ((menuOpen || notificationsShown()) && notificationsUnread(items)) store.set(NOTIFICATIONS_SEEN_KEY, items[0].at);
   const unread = notificationsUnread(items);
   $('notifications-dot').hidden = !unread;
   $('notifications-button').setAttribute('aria-label', unread ? 'Notifications, new' : 'Notifications');
   if (menuOpen) renderNotificationsMenu(items);
-  if (notificationsRoute() !== null) renderNotificationsPage(items);
+  if (notificationsShown()) renderNotificationsPage(items);
 }
 function renderNotificationsMenu(items) {
   $('notifications-menu-status').textContent = boardLoadError ? "Couldn't load notifications. " + BOARD_LOAD_ERRORS[boardLoadError]
@@ -3930,9 +3934,9 @@ function notificationActions(it) {
   const j = it.job, pr = prLink(j), paseo = paseoLinks(j), owner = sessionJob(j);
   const whose = owner && owner !== j ? 'the session of ' + owner.id : "this job's session";
   let html = '<a class="btn" href="#' + esc(encodeURIComponent(j.id)) + '">Open job</a>';
-  if (pr) html += '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>';
+  if (pr && !hiddenDrawerLinks.has('pr')) html += '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>';
   for (const kind of ['app', 'web']) {
-    if (!paseo?.[kind]) continue;
+    if (!paseo?.[kind] || hiddenDrawerLinks.has(kind)) continue;
     const label = factoryConfig.agent_links[kind].label;
     html += '<a class="btn" href="' + esc(paseo[kind]) + '"' + (kind === 'web' ? ' target="_blank" rel="noopener noreferrer"' : '') +
       ' aria-label="' + esc('Open ' + whose + ' in ' + label) + '">' + esc('Open in ' + label) + '</a>';
@@ -3953,9 +3957,11 @@ function renderNotificationsPage(items) {
   $('notifications-page-label').textContent = 'Page ' + (notificationsPage + 1) + ' of ' + pages;
   $('notifications-prev').disabled = notificationsPage === 0;
   $('notifications-next').disabled = notificationsPage === pages - 1;
+  const split = notificationsSplit();
   const html = shown.slice(start, start + NOTIFICATIONS_PAGE_ROWS).map((it, i) => {
     const row = notificationRow(it);
-    return '<li class="inbox-item"><span class="inbox-rank">' + (start + i + 1) + '</span>' +
+    const open = split && (it.job ? it.job.id === openId : it.item.key === backlogRoute());
+    return '<li class="inbox-item"' + (open ? ' aria-current="true"' : '') + '><span class="inbox-rank">' + (start + i + 1) + '</span>' +
       '<div><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span><p class="inbox-title">' + esc(row.title) + '</p>' +
       '<p class="inbox-meta">' + [row.project, row.id, ago(it.at)].filter(Boolean).map(esc).join(' · ') + '</p></div>' +
       '<div class="inbox-actions">' + notificationActions(it) + '</div></li>';
@@ -3963,6 +3969,11 @@ function renderNotificationsPage(items) {
   if (html === notificationsHtml) return;
   notificationsHtml = html;
   $('notifications-list').innerHTML = html;
+}
+// Focus the Open link of the row for a job id or backlog raw line, else the heading.
+function focusNotificationRow(id, raw) {
+  const href = raw !== null ? '#/backlog/' + backlog.find((b) => b.raw === raw)?.key : '#' + encodeURIComponent(id);
+  ([...$('notifications-list').querySelectorAll('.inbox-actions a')].find((a) => a.getAttribute('href') === href) ?? $('notifications-page-heading')).focus();
 }
 function openNotificationsMenu() {
   $('notifications-menu').hidden = false;
@@ -4817,7 +4828,7 @@ function renderBoard() {
       '<p>Jobs show up here as they move through the loop.</p>' +
       (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
-    if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsRoute()) document.title = BASE_TITLE;
+    if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsShown()) document.title = BASE_TITLE;
     syncAppBadge(0);
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
@@ -4838,7 +4849,7 @@ function renderBoard() {
   waiting.splice(0, waiting.length, ...waitingJobs());
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   for (const s of COLUMNS) if (s !== 'backlog' && !TERMINAL.includes(s)) starredFirst(lists[COLUMNS.indexOf(s)]);
-  if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsRoute()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
+  if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsShown()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
@@ -6430,6 +6441,7 @@ function closeDetail(keepHash = false) {
   drawerReturn = null;
   if (back && !keepHash) renderRoute();
   if (back === '#/inbox' && !keepHash) focusInboxRow(id, raw);
+  if (back === '#/notifications' && !keepHash) focusNotificationRow(id, raw);
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
