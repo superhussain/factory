@@ -1709,7 +1709,7 @@ async function capture(outdir, referencePath) {
       auditBoard = false;
     }
     // Both sides scroll to the Red flags card when the page has one, so each pair frames the same region.
-    const openRetrosFlags = async (page, side) => {
+    const openRetrosFlags = async (page, _side) => {
       await page.evaluate(() => (location.hash = "#/retros"));
       await page.waitForFunction(() => {
         const status = document.getElementById("retros-status").textContent;
