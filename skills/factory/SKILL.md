@@ -499,7 +499,8 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   command is `python3`, `git`, or `gh`.
 - Orchestrators run `suggest approve`, `backlog decide`, `control` and `needs answer` only with
   person text in files, per [chat decisions](references/chat-decisions.md). They never run `autonomy
-  resume`, `autonomy allow` or `/factory approve-spec`, or approve scope in Tracer; a human does.
+  resume`, `autonomy allow` or `/factory approve-spec`, or approve scope in Tracer; a human does, there or by pressing Approve spec on the
+  dashboard.
 
 ## Security floors
 
@@ -549,7 +550,8 @@ moves the job to `build` with note `spec approved in Tracer`, and pickup launche
 either hold patch into `build` with note `spec approved in Tracer`. The printed job
 shows it. Dispatch nothing, and pickup launches `/factory recover <id>`. With the
 gate off, Tracer never holds the build. Only a person passes this gate: by
-`/factory approve-spec`, or by approving scope in Tracer.
+`/factory approve-spec`, by approving scope in Tracer, or by pressing Approve spec on the
+dashboard, which moves the job to `build` with note `spec approved on the dashboard`.
 
 ## Builds
 

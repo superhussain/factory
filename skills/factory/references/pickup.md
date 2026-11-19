@@ -72,7 +72,7 @@ Each run, in order:
 - Reads the board and lists the `stage: idea` jobs whose project has a checkout
   in `paths.md` on this host.
 - Also lists `build` jobs with note `spec approved in Tracer`, which Tracer scope
-  approval released, and launches `/factory recover <id>` for them instead of
+  approval released, or `spec approved on the dashboard`, which Approve spec released, and launches `/factory recover <id>` for them instead of
   `/factory idea <id>`. They follow the same skips, claim and caps as ideas.
 - Skips ideas that are gated, held by a live claim, waiting on a human, or whose
   `not_before` is still in the future (`skip <id> <project>: not before <time>`), or
