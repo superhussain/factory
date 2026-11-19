@@ -343,6 +343,18 @@ class PickupTest(PickupFixture):
         self.assertEqual(record["env"]["FACTORY_PROMPT"],
                          f"/factory recover 001-sample --session {tag}\n\n" + factory.UNATTENDED)
 
+    def test_launches_recover_for_dashboard_approved_build(self):
+        self.views["alpha"] = (200, effective("alpha", {"pickup": ON}))
+        self.board["jobs"] = [{"id": "001-sample", "stage": "build", "project": "alpha",
+                               "note": "spec approved on the dashboard", "updated": stamp()}]
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        tag = self.job("001-sample")["claim"]["session"]
+        self.assertEqual(out, f"launched 001-sample alpha on primary session {tag}\n")
+        [record] = self.launched()
+        self.assertEqual(record["env"]["FACTORY_PROMPT"],
+                         f"/factory recover 001-sample --session {tag}\n\n" + factory.UNATTENDED)
+
     def test_skips_build_without_tracer_note(self):
         self.views["alpha"] = (200, effective("alpha", {"pickup": ON}))
         released = {"id": "002-sample", "stage": "build", "project": "alpha", "note": "spec approved in Tracer",
