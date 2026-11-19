@@ -1,6 +1,6 @@
-// W opens the needs you jobs in column order, oldest wait first, and wraps. W does nothing in a
-// text field, with a dialog open or on Settings, or when no shown job waits, including when the
-// filter hides the waiting project.
+// W opens the needs you jobs in column order, oldest wait first, and wraps. From Settings it opens the
+// first one. W does nothing in a text field, with a dialog open, or when no shown job waits, including
+// when the filter hides the waiting project.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -108,8 +108,8 @@ test("w key opens the next waiting job", { timeout: 120000 }, async () => {
 
     await page.evaluate(() => (location.hash = "#/settings/projects"));
     await page.waitForSelector("#settings-projects:not([hidden])", wait);
-    await page.keyboard.press("w");
-    assert.equal(await hash(), "#/settings/projects");
+    // Settings has no open job, so W starts from the first waiting job.
+    await pressW("#1901-sample-a");
 
     await page.evaluate(() => (location.hash = ""));
     await page.waitForSelector("#settings-page[hidden]", wait);
