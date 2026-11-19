@@ -3144,21 +3144,28 @@ const SETTINGS_SECTIONS = ['projects', 'pipeline', 'hosts', 'display', 'notifica
 const baseTitle = document.title;
 let settingsShown = null;
 // '#/settings[/<section>]' → section name (unknown → first); anything else → null.
-function settingsRoute() {
+function settingsRoute(hash = location.hash) {
   let h = '';
-  try { h = decodeURIComponent(location.hash.slice(1)); } catch {}
+  try { h = decodeURIComponent(hash.slice(1)); } catch {}
   if (h !== '/settings' && !h.startsWith('/settings/')) return null;
   const name = h.slice('/settings/'.length);
   return SETTINGS_SECTIONS.includes(name) ? name : SETTINGS_SECTIONS[0];
 }
+// A page a drawer opened from stays beside it, and close returns to its hash.
+function splitPage(hash) {
+  return hash === '#/inbox' || hash === '#/notifications' || retrosRoute(hash) !== null || settingsRoute(hash) !== null;
+}
+function settingsSplit() {
+  return drawerReturn !== null && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null ? settingsRoute(drawerReturn) : null;
+}
 function renderRoute() {
-  const section = settingsRoute(), was = settingsShown;
-  if (section && location.hash !== '#/settings/' + section)
-    replaceUrl(location.pathname + location.search + '#/settings/' + section);
+  const routed = settingsRoute(), section = routed ?? settingsSplit(), was = settingsShown;
+  if (routed && location.hash !== '#/settings/' + routed)
+    replaceUrl(location.pathname + location.search + '#/settings/' + routed);
   const focusInside = $('settings-page').contains(document.activeElement);
   const retrosWas = $('retros-page').hidden === false;
   settingsShown = section;
-  const retrosOpen = !section && retrosRoute() !== null;
+  const retrosOpen = !section && retrosShown() !== null;
   const inboxWas = $('inbox-page').hidden === false;
   const inboxOpen = !section && inboxShown();
   const notificationsWas = $('notifications-page').hidden === false;
@@ -3168,8 +3175,11 @@ function renderRoute() {
   $('retros-page').hidden = !retrosOpen;
   $('inbox-page').hidden = !inboxOpen;
   $('notifications-page').hidden = !notificationsOpen;
+  const splitWas = document.body.matches('[data-retros-split], [data-settings-split]');
   document.body.toggleAttribute('data-inbox-split', inboxSplit());
   document.body.toggleAttribute('data-notifications-split', notificationsSplit());
+  document.body.toggleAttribute('data-retros-split', retrosSplit() !== null);
+  document.body.toggleAttribute('data-settings-split', settingsSplit() !== null);
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : notificationsOpen ? 'Notifications · ' + baseTitle : baseTitle;
   if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxFocusRow = -1; inboxAnswer = null; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
@@ -3195,6 +3205,7 @@ function renderRoute() {
   if (section === 'reference' && was !== 'reference') enterReferenceSection();
   if (retrosWas && !retrosOpen && !section) $($('detail').hidden ? 'retros-link' : 'd-close').focus();
   if (!section && was && (focusInside || document.activeElement === document.body)) $('settings-link').focus();
+  if (!splitWas && document.body.matches('[data-retros-split], [data-settings-split]')) $('d-close').focus();
 }
 function leaveSettings() {
   location.hash = '';
@@ -3211,12 +3222,16 @@ let retrosScrolled = '';
 let retrosHtml = '';
 const RETRO_MARK = /^Retro: run [A-Za-z0-9_-]{1,64}, fingerprint ([0-9a-f]{16}), created \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
 
-function retrosRoute() {
+function retrosRoute(hash = location.hash) {
   let h = '';
-  try { h = decodeURIComponent(location.hash.slice(1)); } catch {}
+  try { h = decodeURIComponent(hash.slice(1)); } catch {}
   const m = /^\/retros(?:\/([A-Za-z0-9_-]{1,64})(?:\/([1-9]\d?))?)?$/.exec(h);
   return m ? { run: m[1] ?? null, rank: m[2] ? Number(m[2]) : null } : null;
 }
+function retrosSplit() {
+  return drawerReturn !== null && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null ? retrosRoute(drawerReturn) : null;
+}
+function retrosShown() { return retrosRoute() ?? retrosSplit(); }
 
 // Jumper rows for retro runs and findings that hold every query token, in API order; finding rows stop at 20.
 function retroPickerRows(tokens) {
@@ -3474,7 +3489,7 @@ const retroShort = (title) => title.length > 24 ? title.slice(0, 23) + '…' : t
 const RETRO_CHEVRON = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"/></svg>';
 
 function renderRetrosPage() {
-  const route = retrosRoute();
+  const route = retrosShown();
   if (!route) return;
   $('retros-status').textContent = retrosFailed ? 'Could not load retros. Reload to try again.'
     : retros?.length === 0 ? 'No retro runs yet. Each retro admit uploads its findings here.' : '';
@@ -4808,7 +4823,7 @@ function renderBoard() {
       '<p>Jobs show up here as they move through the loop.</p>' +
       (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
-    if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsShown()) document.title = BASE_TITLE;
+    if (!settingsShown && !retrosShown() && !inboxShown() && !notificationsShown()) document.title = BASE_TITLE;
     syncAppBadge(0);
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
@@ -4829,7 +4844,7 @@ function renderBoard() {
   waiting.splice(0, waiting.length, ...waitingJobs());
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   for (const s of COLUMNS) if (s !== 'backlog' && !TERMINAL.includes(s)) starredFirst(lists[COLUMNS.indexOf(s)]);
-  if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsShown()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
+  if (!settingsShown && !retrosShown() && !inboxShown() && !notificationsShown()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
@@ -6640,7 +6655,7 @@ window.addEventListener('hashchange', (e) => {
   if (id !== archiveFailNoted) archiveFailNoted = '';
   const key = backlogRoute();
   const from = new URL(e.oldURL).hash;
-  if (key || id) drawerReturn = from === '#/inbox' || from === '#/notifications' ? from : openId || openBacklogRaw !== null ? drawerReturn : null;
+  if (key || id) drawerReturn = splitPage(from) ? from : openId || openBacklogRaw !== null ? drawerReturn : null;
   else drawerReturn = null;
   if (key) openBacklogRoute(key);
   else if (id) openJob(id);
