@@ -7,6 +7,7 @@ import { parseDashboardOrigin, type EmbedMessage } from "../shared/embed";
 import { frameUrl, startUrl } from "../shared/location";
 import type { Reload } from "../shared/reload";
 import { firstLoginSteps, isBrowserOrigin, openLabel } from "../shared/first-login";
+import { createOpenLimiter } from "../shared/open-limit";
 import { factorySettings } from "../shared/settings";
 import { setFrameInboxCount } from "./frame-inbox";
 import {
@@ -42,6 +43,7 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
     const reloadRef = useRef(reloadFrame);
     reloadRef.current = reloadFrame;
     useEffect(() => reload.listen(() => reloadRef.current()), []);
+    const [allowOpen] = useState(() => createOpenLimiter());
     const signIn = useSignInPopup(origin ?? "", reloadFrame);
     useEffect(() => {
       if (!origin || Platform.OS !== "web") return;
@@ -166,9 +168,10 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
         markLoaded(origin);
         setReady(true);
         setStalled(false);
-      } else if (message.type === "factory-open-url")
-        openExternalUrl(message.url).catch(() => toast.error("Paseo could not open that link."));
-      else if (navigation)
+      } else if (message.type === "factory-open-url") {
+        if (allowOpen())
+          openExternalUrl(message.url).catch(() => toast.error("Paseo could not open that link."));
+      } else if (navigation)
         navigation.openAgent({ agentId: message.agent, serverId: message.server });
       else toast.error("This Paseo app cannot open agents from plugins.");
     };
