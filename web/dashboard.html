@@ -1635,6 +1635,7 @@ const BACKLOG_POLL_MS = 120000;
 let backlogReadAt = 0;
 let boardUpdated = '';
 let boardEtag = '';
+let boardMaxId = 0;
 
 // The live socket can leave the board unread for hours, so a timer beside the live
 // client redraws this age label on its own.
@@ -1664,6 +1665,7 @@ function takeBoard(data) {
   jobs = slimRows(data);
   boardArchived = Number.isInteger(data.archived?.max_id);
   boardUpdated = data.updated || '';
+  boardMaxId = Number.isInteger(data.archived?.max_id) ? data.archived.max_id : 0;
 }
 
 // Saved copies paint the board at once. The network read that follows replaces them.
@@ -7412,38 +7414,57 @@ function followTracer(board, id, now) {
   return null;
 }
 
-// GET, change(board) in place, then PUT only if nobody wrote in between. Retries a 412.
-// change throws to abort with nothing written.
+// The {id, expect, row} entries that turn the rows before into the rows after: each new or
+// changed row with the row it replaces, then each dropped row with a null row.
+function rowChanges(before, after) {
+  const old = new Map(before.map((j) => [j.id, j]));
+  const ids = new Set(after.map((j) => j.id));
+  const rows = [];
+  for (const j of after) {
+    const prev = old.get(j.id);
+    if (!prev || JSON.stringify(prev) !== JSON.stringify(j)) rows.push({ id: j.id, expect: prev ?? null, row: j });
+  }
+  for (const j of before) if (!ids.has(j.id)) rows.push({ id: j.id, expect: j, row: null });
+  return rows;
+}
+
+// change(board) in place over a copy of the rows this tab holds, then PATCH only the rows it
+// changed, each with the row it expects to replace. A 409 conflict brings the current rows,
+// and change runs again on them. change throws to abort with nothing written.
 const BOARD_UNCHANGED = Symbol('board unchanged');
 let boardWrites = 0;
 async function casBoard(change) {
   boardWrites++;
   try {
+    const known = new Map(jobs.map((j) => [j.id, j]));
+    let maxId = boardMaxId;
     for (let i = 0; i < 10; i++) {
-      const r = await fetch('./api/board', { cache: 'no-store' });
-      if (!r.ok && r.status !== 404) throw new Error('reading the board failed: ' + r.status);
-      const board = r.ok ? await r.json() : { updated: '', jobs: [] };
+      const before = [...known.values()];
+      const board = { updated: boardUpdated, ...(maxId && { archived: { max_id: maxId } }), jobs: structuredClone(before) };
       const result = change(board);
       if (result === BOARD_UNCHANGED) return result;
-      // Cloudflare's edge may weaken the ETag. R2 compares the strong form.
-      const etag = r.headers.get('ETag');
-      if (r.ok && !etag) throw new Error('the board came back without an ETag, so nothing was saved');
-      const cond = r.ok ? { 'If-Match': etag.replace(/^W\//, '') } : { 'If-None-Match': '*' };
-      let put;
+      const rows = rowChanges(before, board.jobs);
+      if (!rows.length) return result;
+      if (!navigator.onLine) throw new Error("saving the board failed: you're offline, so nothing was saved");
+      let r;
       try {
-        put = await fetch('./api/board', { method: 'PUT', headers: cond, body: JSON.stringify(board) + '\n' });
+        r = await fetch('./api/board', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updated: board.updated, rows }) });
       } catch (x) {
         x.uncertain = true; // the request may have landed before the connection dropped
         throw x;
       }
-      if (put.ok) return result;
-      if (put.status !== 412) {
-        const x = new Error('saving the board failed: ' + put.status);
-        x.uncertain = put.status >= 500; // classified before the body read: an aborted body read must not erase it
-        try { x.message += ' ' + (await put.text()).slice(0, 200); } catch {}
-        throw x;
+      if (r.ok) return result;
+      if (r.status === 409) {
+        const body = await r.json().catch(() => null);
+        if (body?.error !== 'conflict') break;
+        for (const [id, row] of Object.entries(body.rows ?? {})) row ? known.set(id, row) : known.delete(id);
+        maxId = Math.max(maxId, Number.isInteger(body.max_id) ? body.max_id : 0);
+        continue;
       }
-      await new Promise((res) => setTimeout(res, 50 + Math.random() * 450));
+      const x = new Error('saving the board failed: ' + r.status);
+      x.uncertain = r.status >= 500; // classified before the body read: an aborted body read must not erase it
+      try { x.message += ' ' + (await r.text()).slice(0, 200); } catch {}
+      throw x;
     }
     throw new Error('the board kept changing, so nothing was saved after 10 tries');
   } finally { boardWrites--; }
