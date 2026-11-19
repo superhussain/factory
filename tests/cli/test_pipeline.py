@@ -174,3 +174,10 @@ class PipelineTest(IsolatedTestCase):
         row = recover.split("| pr-open, `automerge` true |")[1].split(" |")[0]
         self.assertIn('re-running `factory.py pipeline "$SLUG"` right before `gh pr merge`', row)
         self.assertIn("`merge` `human` holds the PR for a person with `automerge` false", row)
+
+    def test_skill_pipes_the_board_patch(self):
+        text = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("Patch the versions onto the job with `python3 <this skill's dir>/runtime/factory.py "
+                      'pipeline "$SLUG" --board | python3 "$RUNTIME" board "$FACTORY" <id>`.', text)
+        self.assertIn("Read `$PIPELINE` fields from the printed JSON, and never echo it through the shell "
+                      "into another parser.", text)
