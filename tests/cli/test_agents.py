@@ -106,9 +106,11 @@ class AgentRecordTest(BoardFixture):
         self.assertEqual([row["role"] for row in self.job()["agents"]], ["build", "review-code"])
 
     def test_accepts_subagent_via(self):
-        code, out, err = self.record("review-code", "claude", "subagent", "claude-opus-5-5", "medium")
-        self.assertEqual((code, err), (0, ""))
-        self.assertEqual([json.loads(out)["via"], self.job()["agents"][0]["via"]], ["native", "native"])
+        for via in ("subagent", "agent", "local"):
+            with self.subTest(via):
+                code, out, err = self.record("review-code", "claude", via, "claude-opus-5-5", "medium")
+                self.assertEqual((code, err), (0, ""))
+                self.assertEqual([json.loads(out)["via"], self.job()["agents"][-1]["via"]], ["native", "native"])
 
     def test_refuses(self):
         roles = "orchestrator, spec, build, review-security, review-ux, review-ui, review-code, approve"

@@ -36,7 +36,9 @@ export function startElection(
         onSettings(origin, parsed?.success ? parsed.data.factoryLinkButtons : false);
       };
     } catch {
-      report = () => member.offline();
+      report = () => {
+        if (member.miss()) void check();
+      };
     } finally {
       clearTimeout(timer);
     }

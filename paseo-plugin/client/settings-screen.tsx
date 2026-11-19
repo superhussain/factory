@@ -51,8 +51,10 @@ export function settingsScreen(onSaved: () => void) {
         return;
       }
       setError(null);
-      if (await ready.save({ ...ready.values, origin }, ready.revision))
+      if (await ready.save({ ...ready.values, origin }, ready.revision)) {
         toast.show("Factory URL saved", { variant: "success" });
+        onSaved();
+      }
     };
     return (
       <>

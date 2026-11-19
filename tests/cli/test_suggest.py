@@ -858,6 +858,16 @@ class RetroBacklogTest(SuggestCase):
             return 200, {}, json.dumps({"decision": "queue", "confidence": 99, "threshold": 80, "reason": "r"})
         return super().request(home, method, path, body, ok, headers)
 
+    def test_red_flag_card_queued_once(self):
+        self.board["autonomy"] = dict(ALLOWED)
+        card = example_card(kind="security", title="Red flag: pipe-to-shell via Bash", paths=[])
+        self.admit(retro(card))
+        self.assertEqual(self.result(), {"admitted": [f"{card['project']}: Red flag: pipe-to-shell via Bash"],
+                                         "skipped": []})
+        self.admit(retro(dict(card, summary="Two more jobs piped a download into sh.")), 3)
+        self.assertEqual(self.result()["skipped"],
+                         [{"title": "Red flag: pipe-to-shell via Bash", "reason": "duplicate in backlog"}])
+
     def admit(self, doc, code=0):
         self.output.seek(0)
         self.output.truncate()
