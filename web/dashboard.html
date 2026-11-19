@@ -7431,9 +7431,11 @@ function rowChanges(before, after) {
 // change(board) in place over a copy of the rows this tab holds, then PATCH only the rows it
 // changed, each with the row it expects to replace. A 409 conflict brings the current rows,
 // and change runs again on them. change throws to abort with nothing written.
+// reads(board) names the other rows change decides from, read before it runs. A write sends
+// each as an unchanged row, so a stale one comes back as a conflict too.
 const BOARD_UNCHANGED = Symbol('board unchanged');
 let boardWrites = 0;
-async function casBoard(change) {
+async function casBoard(change, { reads } = {}) {
   boardWrites++;
   try {
     const known = new Map(jobs.map((j) => [j.id, j]));
@@ -7441,10 +7443,13 @@ async function casBoard(change) {
     for (let i = 0; i < 10; i++) {
       const before = [...known.values()];
       const board = { updated: boardUpdated, ...(maxId && { archived: { max_id: maxId } }), jobs: structuredClone(before) };
+      const readIds = reads ? reads(board) : [];
       const result = change(board);
       if (result === BOARD_UNCHANGED) return result;
       const rows = rowChanges(before, board.jobs);
       if (!rows.length) return result;
+      for (const id of readIds)
+        if (known.has(id) && !rows.some((e) => e.id === id)) rows.push({ id, expect: known.get(id), row: known.get(id) });
       if (!navigator.onLine) throw new Error("saving the board failed: you're offline, so nothing was saved");
       let r;
       try {
@@ -7761,6 +7766,13 @@ function rerunJob(board, id, host, now) {
 
 const PRIORITY_STAGES = ['idea', ...MOVE_STAGES];
 
+// The held ideas of the job's project, which a batch start checks for an earlier starter: only a
+// held idea can become one, so a start that landed meanwhile is a conflict.
+function prioritizeReads(board, id, mode) {
+  const project = board.jobs.find((x) => x.id === id)?.project;
+  return mode === 'batch' && project ? board.jobs.filter((x) => x.id !== id && x.project === project && batchHeld(x)).map((x) => x.id) : [];
+}
+
 // factory.py pickup claims prioritized jobs first and nudges a running agent once.
 // Returns an error message, 'unchanged', or '' once the board is changed.
 function prioritizeJob(board, id, now, mode = '') {
@@ -7802,6 +7814,12 @@ function babysitJob(board, id, now) {
 function canUnbatch(j, rows = jobs) {
   const lead = leadOf(j);
   return !!lead && j.stage === 'spec' && j.stacked !== true && rows.find((x) => x.id === lead)?.stage === 'spec';
+}
+
+// The lead row unbatchJob checks, so a lead that left spec meanwhile is a conflict.
+function unbatchReads(board, id) {
+  const lead = leadOf(board.jobs.find((x) => x.id === id) ?? {});
+  return lead ? [lead] : [];
 }
 
 // Drops the batched-into ref and sends the rider back to idea, so pickup runs it on its own.
@@ -8184,7 +8202,7 @@ async function prioritizeAction(ctx, mode = '') {
       const message = prioritizeJob(board, ctx.id, isoNow(), mode);
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
-    });
+    }, { reads: (board) => prioritizeReads(board, ctx.id, mode) });
     await poll();
   } catch (x) {
     if (ctx.live()) ctx.report(failText(x));
@@ -8222,7 +8240,7 @@ async function unbatchAction(ctx) {
       const message = unbatchJob(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
-    });
+    }, { reads: (board) => unbatchReads(board, ctx.id) });
     await poll();
   } catch (x) {
     if (ctx.live()) ctx.report(failText(x));

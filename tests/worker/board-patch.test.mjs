@@ -80,6 +80,27 @@ test("commits a new row", async () => {
   assert.deepEqual(s.stored().jobs, [asked, IDEA]);
 });
 
+test("an unchanged read row is a no-op that still conflicts when stale", async () => {
+  const s = setup();
+  const read = { id: SPEC.id, expect: SPEC, row: SPEC };
+  const done = { ...BUILD, stage: "review" };
+  const ok = await s.patch({ rows: [{ id: BUILD.id, expect: BUILD, row: done }, read] });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(s.stored().jobs, [done, SPEC]);
+
+  const moved = { ...SPEC, stage: "build" };
+  await s.patch({ rows: [{ id: SPEC.id, expect: SPEC, row: moved }] });
+  const before = s.etag();
+  const stale = await s.patch({ rows: [{ id: BUILD.id, expect: done, row: BUILD }, read] });
+  assert.equal(stale.status, 409);
+  assert.deepEqual(await stale.json(), {
+    error: "conflict",
+    rows: { [SPEC.id]: moved },
+    max_id: 2000,
+  });
+  assert.equal(s.etag(), before);
+});
+
 test("conflicts", async () => {
   const conflict = async (s, rows, body) => {
     const before = s.etag();
