@@ -5520,6 +5520,14 @@ async function loadArchivePage(stage) {
 
 async function openJob(id) {
   let j = jobs.find((x) => x.id === id) ?? archivedJobs.get(id);
+  // The saved copy or an offline board may lack an older finished row. The next network read's syncDetail() reopens it.
+  if (!j && loaded && (boardFromCache || connState === 'offline')) {
+    if (connState === 'offline' && archiveFailNoted !== id) {
+      archiveFailNoted = id;
+      showBoardStatus(`You're offline. Job ${id} opens when you reconnect.`);
+    }
+    return;
+  }
   if (!j && loaded) {
     await wantFullBoard();
     j = jobs.find((x) => x.id === id);
