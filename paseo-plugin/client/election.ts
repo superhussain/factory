@@ -11,8 +11,12 @@ export const ELECTION_TIMEOUT_MS = 5_000;
 export function startElection(client: PluginClientContext, register: () => () => void) {
   const member = joinBallot(sharedBallot(globalThis), register);
   const read = settingsRpc(factorySettings.id).read;
+  let started = 0;
+  let settled = 0;
   const check = async () => {
+    const seq = ++started;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let report: () => void;
     try {
       const result = await Promise.race([
         client.rpc(read, {}),
@@ -22,12 +26,17 @@ export function startElection(client: PluginClientContext, register: () => () =>
       ]);
       const parsed =
         result.status === "ready" ? factorySettings.schema.safeParse(result.values) : null;
-      member.online(parsed?.success ? parseDashboardOrigin(parsed.data.origin) : null);
+      const origin = parsed?.success ? parseDashboardOrigin(parsed.data.origin) : null;
+      report = () => member.online(origin);
     } catch {
-      member.offline();
+      report = () => member.offline();
     } finally {
       clearTimeout(timer);
     }
+    // A slower, older check must not override a newer result.
+    if (seq < settled) return;
+    settled = seq;
+    report();
   };
   void check();
   const poll = setInterval(() => void check(), ELECTION_POLL_MS);
