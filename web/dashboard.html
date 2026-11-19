@@ -1022,7 +1022,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <fieldset id="display-card-fields" aria-describedby="display-card-fields-help"><legend>Card details</legend></fieldset>
       <p class="muted" id="display-card-fields-help">Cards in the needs you column always show what the job is waiting on.</p>
       <fieldset id="display-drawer-links" aria-describedby="display-drawer-links-help"><legend>Job panel links</legend></fieldset>
-      <p class="muted" id="display-drawer-links-help">Unchecked links are hidden in the job panel header and on the Notifications page.</p>
+      <p class="muted" id="display-drawer-links-help">Unchecked links are hidden in the job panel header, on the Notifications page and in the Red flags table.</p>
       <label for="display-idea-project">New idea project<select id="display-idea-project" aria-describedby="display-idea-project-help"></select></label>
       <p class="muted" id="display-idea-project-help">New idea starts with this project unless the board is filtered to one project.</p>
       <p class="muted" id="display-drawer"></p>
@@ -3370,7 +3370,7 @@ function renderAuditFlags() {
     cell(row.agent);
     const session = document.createElement('td'), links = paseoLinksFor(row.paseo) || {};
     for (const kind of ['app', 'web']) {
-      if (!links[kind]) continue;
+      if (!links[kind] || hiddenDrawerLinks.has(kind)) continue;
       const a = document.createElement('a'), linkLabel = factoryConfig.agent_links[kind].label;
       a.href = links[kind];
       a.textContent = linkLabel;
@@ -9647,6 +9647,7 @@ $('display-drawer-links').addEventListener('change', e => {
   if (e.target.checked) hiddenDrawerLinks.delete(k); else hiddenDrawerLinks.add(k);
   if (hiddenDrawerLinks.size) store.set(DISPLAY_KEYS.drawerLinks, [...hiddenDrawerLinks].join(',')); else store.remove(DISPLAY_KEYS.drawerLinks);
   renderOpenDrawerLinks();
+  if (!$('retros-page').hidden) renderAuditFlags();
   displaySaved();
 });
 $('display-idea-project').addEventListener('change', () => {
