@@ -56,12 +56,12 @@ test("header icons share one row and match the filter height", { timeout: 120000
       const header = await page.evaluate(() => {
         const rect = (id) => document.getElementById(id).getBoundingClientRect();
         const icons = [
-          "notifications-button",
           "inbox-link",
-          "new-idea",
-          "job-jump",
+          "notifications-button",
           "retros-link",
           "settings-link",
+          "new-idea",
+          "job-jump",
         ];
         const el = document.querySelector("header");
         const boxes = [...el.children]
@@ -88,6 +88,7 @@ test("header icons share one row and match the filter height", { timeout: 120000
           })(),
           text: document.getElementById("updated").textContent,
           order: getComputedStyle(document.querySelector(".header-actions")).order,
+          children: [...document.querySelector(".header-actions").children].map((c) => c.id),
         };
       });
       const shots = { "320px": "320", "700px touch": "700-touch", "390px touch": "390-touch" };
@@ -112,6 +113,18 @@ test("header icons share one row and match the filter height", { timeout: 120000
       assert.equal(header.wordShown, viewport.width !== 320, `updated word shown at ${label}`);
       assert.equal(header.wordRead, true, `updated word read at ${label}`);
       assert.ok(header.text.startsWith("updated "), `updated text at ${label}: ${header.text}`);
+      assert.deepEqual(
+        header.children,
+        [
+          "inbox-link",
+          "notifications-wrap",
+          "retros-link",
+          "settings-link",
+          "new-idea",
+          "job-jump",
+        ],
+        `header order at ${label}`,
+      );
       if (label === "700px touch") {
         assert.equal(header.rows, 1, `header rows at ${label}: height ${header.headerHeight}`);
         assert.equal(header.order, "0", `header-actions order at ${label}`);
@@ -133,7 +146,7 @@ test("header icons share one row and match the filter height", { timeout: 120000
         }));
         assert.deepEqual(link, {
           next: "settings-link",
-          previous: "job-jump",
+          previous: "notifications-wrap",
           href: "#/retros",
           label: "Retros",
           title: "Retros (R)",
@@ -152,6 +165,78 @@ test("header icons share one row and match the filter height", { timeout: 120000
         assert.equal(back, 44, `settings-back height at ${label}`);
       }
     }
+  });
+});
+
+// Two runs shaped like RUNS in retros-page.test.mjs, so the Retros badge shows 2.
+const RETROS = ["20261112T090000Z-a1b2c3", "20261105T090000Z-d4e5f6"].map((run) => ({
+  schema: "factory.retro-run/1",
+  run,
+  host: "mac",
+  from: "2026-10-29",
+  to: "2026-11-11",
+  sessions: 40,
+  rejected: 0,
+  findings: [],
+  cards: [],
+}));
+
+test("the three header badges match", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    await seedBoard(origin, JOBS);
+    const context = await browser.createBrowserContext();
+    const page = await context.newPage();
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.setRequestInterception(true);
+    page.on("request", (request) =>
+      new URL(request.url()).pathname === "/api/retros"
+        ? request.respond({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify(RETROS),
+          })
+        : request.continue(),
+    );
+    await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+    const badges = ["inbox-count", "notifications-count", "retros-count"];
+    await page.waitForFunction(
+      (ids) => ids.every((id) => !document.getElementById(id).hidden),
+      {},
+      badges,
+    );
+    const looks = await page.evaluate(
+      (ids) =>
+        ids.map((id) => {
+          const el = document.getElementById(id);
+          const style = getComputedStyle(el);
+          const box = el.getBoundingClientRect();
+          const parent = el.parentElement.getBoundingClientRect();
+          return {
+            text: el.textContent,
+            width: style.width,
+            height: style.height,
+            background: style.backgroundColor,
+            color: style.color,
+            fontSize: style.fontSize,
+            radius: style.borderRadius,
+            offset: [box.top - parent.top, parent.right - box.right],
+          };
+        }),
+      badges,
+    );
+    assert.deepEqual(
+      looks.map((l) => l.text),
+      ["1", "1", "2"],
+    );
+    for (const look of looks.slice(1))
+      assert.deepEqual({ ...look, text: "" }, { ...looks[0], text: "" });
+    await context.close();
   });
 });
 

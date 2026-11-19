@@ -543,3 +543,52 @@ test("scrollbar press keeps the draft field", { timeout: 120000 }, async () => {
     { scrollbars: true },
   );
 });
+
+test("warm return scrolls the draft field into view", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    await seedBoard(origin, [JOB]);
+    const page = await framedPage(browser, origin, LISTED);
+    await page.waitForFunction(
+      () => window.received.some((m) => m?.type === "factory-embed-ready" && m.v === 1),
+      { timeout: 5000, polling: 50 },
+    );
+    const frame = childFrame(page);
+    await frame.waitForSelector("#board");
+    await typeDraft(frame);
+    // Whether #idea-text lies inside the dialog's client box. scrollTop snaps to whole
+    // pixels while the field sits on a half pixel, so allow 1px.
+    const inView = () =>
+      frame.evaluate(() => {
+        const dlg = document.querySelector("#idea-dlg");
+        const top = dlg.getBoundingClientRect().top + dlg.clientTop;
+        const t = document.querySelector("#idea-text").getBoundingClientRect();
+        return t.top >= top - 1 && t.bottom <= top + dlg.clientHeight + 1;
+      });
+    await frame.evaluate(() => {
+      const d = document.querySelector("#idea-dlg");
+      d.style.maxHeight = "240px";
+      d.style.overflowY = "scroll";
+      d.scrollTop = d.scrollHeight;
+      // A scrollbar press leaves focus on the dialog, as in the scrollbar test.
+      d.focus({ preventScroll: true });
+    });
+    assert.equal(await inView(), false, "draft field not clipped");
+
+    await page.evaluate(() => {
+      const side = document.createElement("button");
+      side.id = "side";
+      side.textContent = "Synthetic session row";
+      document.body.append(side);
+    });
+    await page.click("#side");
+    await page.evaluate(() => document.querySelector("iframe").focus());
+    assert.equal(await frame.evaluate(() => document.activeElement?.id), "idea-text");
+    assert.equal(await inView(), true, "draft field still clipped");
+  });
+});
