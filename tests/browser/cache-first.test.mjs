@@ -203,12 +203,16 @@ test("cache-first board boot", async (t) => {
       const page = await context.newPage();
       const errors = [];
       page.on("pageerror", (error) => errors.push(String(error)));
+      await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
       await controlBoardPolling(page);
       try {
         await saveCopies(page, proxy.origin);
         proxy.mode = "fail";
         await page.reload({ waitUntil: "domcontentloaded" });
         await page.waitForSelector("#conn-banner:not([hidden])");
+        if (captureDir)
+          await page.screenshot({ path: join(captureDir, "board-unreachable-1440.png") });
         assert.equal(await cardTitle(page, "001-alpha"), "Synthetic alpha");
         assert.match(
           await page.$eval("#conn-text", (el) => el.textContent),
