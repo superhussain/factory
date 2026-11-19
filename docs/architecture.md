@@ -348,10 +348,11 @@ sequenceDiagram
 | Case | Worker reply | Client |
 | --- | --- | --- |
 | `expect` differs from the stored row | 409 `conflict`, current rows | replaces those rows, reruns `change` |
-| New id number at or below the stored max | 409 `conflict`, `max_id` | raises `boardMaxId`, reruns, so the id becomes the next free number |
+| New id number at or below the stored max | 409 `conflict`, `max_id` | raises its max id and reruns, so the id becomes the next free number |
 | New row's `capture_id` is already stored | 409 `conflict`, that row | `addIdea` finds the prior id, sends nothing |
 | A `PUT` check refuses | 400, same text | same message as a `PUT` refusal |
 | Malformed body, or unreadable stored board | 400 | shows the text |
+| Merged board over 16 MiB | 413, nothing written | shows the text |
 | R2 412 ten times | 409 `busy` | "the board kept changing" |
 
 A network error or 5xx marks the save uncertain ("Not confirmed: ..."), and a retry with the
