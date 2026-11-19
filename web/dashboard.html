@@ -365,6 +365,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #display-filter legend, #display-columns legend, #display-card-fields legend, #display-drawer-links legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #display-filter label, #display-columns label, #display-card-fields label, #display-drawer-links label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); }
   #settings-notifications label[for="notify-needs"], #settings-notifications label[for="notify-push"], #settings-notifications label[for="sound-on"] { display: flex; gap: 8px; align-items: baseline; color: var(--fg); font-size: 13px; }
+  .alert-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
+  .alert-kinds label { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; color: var(--fg); font-size: 13px; }
   .sound-kinds { list-style: none; padding: 0; margin: 0 0 10px; }
   .sound-kinds li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; margin: 0 0 4px; }
   .scheduler-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
@@ -531,6 +533,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .board-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); overflow-wrap: anywhere; }
   .board-status:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .board-status[hidden] { display: none; }
+  .notify-toasts { position: fixed; right: 16px; bottom: 16px; z-index: 31; width: 340px; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .notify-toast { display: flex; align-items: flex-start; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .notify-toast .notification-link { flex: 1; min-width: 0; border-bottom: 0; }
+  @media (max-width: 760px) { .notify-toasts { left: 16px; right: 16px; width: auto; } }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
   @media (hover: hover) { .pr-link:hover { text-decoration: underline; } }
   .pr-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -761,6 +767,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
 <main class="board" id="board"></main>
 <div class="job-actions-menu card-actions-menu" id="card-actions-menu" role="menu" aria-label="Job actions" hidden></div>
 <p class="board-status" id="board-status" role="status" tabindex="-1" hidden></p>
+<ol class="notify-toasts" id="notify-toasts" aria-label="New notifications" aria-live="polite"></ol>
 <aside class="detail" id="detail" hidden>
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
@@ -1034,6 +1041,16 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="notify-push"><input type="checkbox" id="notify-push" aria-describedby="push-help" disabled> Push to this device when the dashboard is closed</label>
       <p class="muted" id="push-help"></p>
       <p id="push-status" role="status"></p>
+      <h4 id="alert-heading">Toasts</h4>
+      <p class="muted" id="alert-help">Pick the board events that show a toast in this tab. A sound plays only for events picked here. This setting applies only to this browser.</p>
+      <ul class="alert-kinds" aria-labelledby="alert-heading" aria-describedby="alert-help">
+        <li><label for="alert-backlog"><input type="checkbox" id="alert-backlog" data-alert="backlog"> A new backlog item</label></li>
+        <li><label for="alert-needs"><input type="checkbox" id="alert-needs" data-alert="needs"> A job needs you</label></li>
+        <li><label for="alert-spec"><input type="checkbox" id="alert-spec" data-alert="spec"> A spec is ready</label></li>
+        <li><label for="alert-pr"><input type="checkbox" id="alert-pr" data-alert="pr"> A pull request opens</label></li>
+        <li><label for="alert-merged"><input type="checkbox" id="alert-merged" data-alert="merged"> A job merges</label></li>
+      </ul>
+      <p id="alert-status" role="status"></p>
       <h4 id="sound-heading">Sounds</h4>
       <label for="sound-on"><input type="checkbox" id="sound-on" aria-describedby="sound-help"> Play a sound for board events</label>
       <p class="muted" id="sound-help"></p>
@@ -1544,7 +1561,7 @@ function refreshBacklog() {
   const version = boardReadVersion;
   // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
   const seen = backlog.map((b) => b.raw).join('\n');
-  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); renderInboxPage(); });
+  return loadBacklog().then(() => { if (backlogLoaded) toastBacklog(); if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); renderInboxPage(); });
 }
 
 async function poll({ ifChanged = false, withBacklog = true } = {}) {
@@ -1585,6 +1602,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     loadHoldConfigs();
     notifyNeeds();
     boardSound();
+    toastBoard();
     if (settingsShown === 'projects') renderProjectList();
     syncDetail();
     syncBacklogRoute();
@@ -8952,7 +8970,7 @@ function renderNotifySettings() {
   $('notify-remind').disabled = !notifyActive();
   $('notify-remind').value = remindHours ? String(remindHours) : '';
 }
-function enterNotificationsSection() { renderNotifySettings(); renderSoundSettings(); loadPushState(); $('notify-needs').focus(); }
+function enterNotificationsSection() { renderNotifySettings(); renderAlertSettings(); renderSoundSettings(); loadPushState(); $('notify-needs').focus(); }
 $('notify-needs').addEventListener('change', async () => {
   if ($('notify-needs').checked && notifySupported() && Notification.permission === 'default') await Notification.requestPermission();
   notifyOn = $('notify-needs').checked && notifySupported() && Notification.permission === 'granted';
@@ -8966,6 +8984,38 @@ $('notify-remind').addEventListener('change', () => {
   remindHours = REMIND_HOURS.includes(n) ? n : 0;
   if (remindHours) store.set(REMIND_KEY, String(remindHours)); else store.remove(REMIND_KEY);
   $('notify-status').textContent = remindHours ? 'Reminders are on: after ' + REMIND_LABEL[remindHours] + '.' : 'Reminders are off.';
+});
+
+// Each event kind can be turned off per browser. Off kinds show no toast and play no sound.
+const ALERT_KINDS = ['backlog', 'needs', 'spec', 'pr', 'merged'];
+const ALERTS_OFF_KEY = 'factory-alerts-off';
+const alertsOff = new Set((store.get(ALERTS_OFF_KEY) || '').split(',').filter((k) => ALERT_KINDS.includes(k)));
+function alertOn(kind) { return !alertsOff.has(kind); }
+function boardSnapshot() { return new Map(jobs.map((j) => [j.id, { stage: j.stage, waits: waitsOnYou(j) }])); }
+// Each job's kinds fired since the previous read, in the order spec, needs, pr, merged.
+// spec, pr and merged need a previous entry for the job.
+function jobEvents(prev, seen) {
+  const events = new Map();
+  for (const [id, now] of seen) {
+    const was = prev.get(id);
+    const kinds = [];
+    if (was?.stage === 'spec' && now.stage !== 'spec' && !TERMINAL.includes(now.stage)) kinds.push('spec');
+    if (now.waits && !was?.waits) kinds.push('needs');
+    if (was && now.stage === 'pr-open' && was.stage !== 'pr-open' && !now.waits) kinds.push('pr');
+    if (was && now.stage === 'merged' && was.stage !== 'merged') kinds.push('merged');
+    if (kinds.length) events.set(id, kinds);
+  }
+  return events;
+}
+function renderAlertSettings() {
+  for (const box of document.querySelectorAll('[data-alert]')) box.checked = alertOn(box.dataset.alert);
+}
+$('settings-notifications').addEventListener('change', (e) => {
+  const kind = e.target.dataset.alert;
+  if (!kind) return;
+  if (e.target.checked) alertsOff.delete(kind); else alertsOff.add(kind);
+  if (alertsOff.size) store.set(ALERTS_OFF_KEY, [...alertsOff].join(',')); else store.remove(ALERTS_OFF_KEY);
+  $('alert-status').textContent = 'Toast settings saved for this browser.';
 });
 
 // Board sounds are opt-in per browser and play in a visible or hidden tab. One read plays
@@ -9005,19 +9055,14 @@ function playSound(kind) {
     });
   } catch {}
 }
-// The first read only fills soundSeen. pr and merged need a previous entry for the job.
+// The first read only fills soundSeen.
 function boardSound() {
-  const seen = new Map(jobs.map((j) => [j.id, { stage: j.stage, waits: waitsOnYou(j) }]));
+  const seen = boardSnapshot();
   const prev = soundSeen;
   soundSeen = seen;
   if (!prev || !soundActive()) return;
   const fired = new Set();
-  for (const [id, now] of seen) {
-    const was = prev.get(id);
-    if (now.waits && !was?.waits) fired.add('needs');
-    if (was && now.stage === 'pr-open' && was.stage !== 'pr-open' && !now.waits) fired.add('pr');
-    if (was && now.stage === 'merged' && was.stage !== 'merged') fired.add('merged');
-  }
+  for (const kinds of jobEvents(prev, seen).values()) for (const k of kinds) if (SOUNDS[k] && alertOn(k)) fired.add(k);
   const kind = SOUND_ORDER.find((k) => fired.has(k));
   if (kind) playSound(kind);
 }
@@ -9040,6 +9085,83 @@ $('settings-notifications').addEventListener('click', (e) => {
   if (b) playSound(b.dataset.sound);
 });
 for (const type of ['pointerdown', 'keydown']) document.addEventListener(type, () => { if (soundActive() && audio?.state !== 'running') wakeAudio(); });
+
+// New board and backlog events show a toast in this tab. The first read only fills toastSeen
+// and backlogSeen. Board text is agent-written, so toasts set textContent only.
+const TOAST_LABELS = { backlog: 'Backlog', needs: 'Needs you', spec: 'Spec ready', pr: 'PR open', merged: 'Merged' };
+const TOAST_MAX = 3, TOAST_MS = 10000;
+let toastSeen = null;
+let backlogSeen = null;
+function showNotifyToast(kind, href, title, meta) {
+  const list = $('notify-toasts');
+  const li = document.createElement('li');
+  li.className = 'notify-toast';
+  const link = document.createElement('a');
+  link.className = 'notification-link';
+  link.href = href;
+  const parts = [['chip inbox-kind', TOAST_LABELS[kind]], ['inbox-title', title], ['inbox-meta', meta]].map(([cls, text]) => {
+    const span = document.createElement('span');
+    span.className = cls;
+    span.textContent = text;
+    return span;
+  });
+  link.append(...parts);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn icon notify-toast-close';
+  close.setAttribute('aria-label', 'Dismiss notification');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M4 4l8 8M12 4l-8 8');
+  svg.append(path);
+  close.append(svg);
+  li.append(link, close);
+  const same = [...list.children].find((el) => el.firstChild.getAttribute('href') === href);
+  if (same) same.replaceWith(li); else list.append(li);
+  while (list.children.length > TOAST_MAX) list.firstElementChild.remove();
+  // A hovered or focused stack holds every toast for another TOAST_MS.
+  const expire = () => {
+    if (list.matches(':hover') || list.contains(document.activeElement)) setTimeout(expire, TOAST_MS);
+    else li.remove();
+  };
+  setTimeout(expire, TOAST_MS);
+}
+// Removal waits a task, since a disconnected link would not follow its href. A link moves focus
+// to the drawer it opens; a close button moves it to the next toast, the previous one or the bell.
+$('notify-toasts').addEventListener('click', (e) => {
+  const target = e.target.closest('a, button');
+  const li = target?.closest('.notify-toast');
+  if (!li) return;
+  if (target.tagName === 'A') {
+    if (target.getAttribute('href') !== location.hash) window.addEventListener('hashchange', () => $('d-close').focus(), { once: true });
+    setTimeout(() => li.remove());
+    return;
+  }
+  const next = (li.nextElementSibling || li.previousElementSibling)?.querySelector('.notify-toast-close') || $('notifications-button');
+  const hadFocus = li.contains(document.activeElement);
+  li.remove();
+  if (hadFocus) next.focus();
+});
+function toastBoard() {
+  const seen = boardSnapshot();
+  const prev = toastSeen;
+  toastSeen = seen;
+  if (!prev) return;
+  for (const [id, kinds] of jobEvents(prev, seen)) {
+    const j = jobs.find((x) => x.id === id);
+    const kind = kinds.find(alertOn);
+    if (kind && isShown(j.project)) showNotifyToast(kind, '#' + encodeURIComponent(id), j.title || id, id);
+  }
+}
+function toastBacklog() {
+  const prev = backlogSeen;
+  backlogSeen = new Set(backlog.map((b) => b.raw));
+  if (!prev || !alertOn('backlog')) return;
+  for (const b of backlog) if (!prev.has(b.raw) && isShown(b.project)) showNotifyToast('backlog', '#/backlog/' + b.key, b.text, projectName(b));
+}
 
 // Web Push reaches this device while the dashboard is closed. The Worker serves its VAPID
 // public key only when the instance has one, and stores one subscription per browser.

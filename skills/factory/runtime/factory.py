@@ -10307,6 +10307,24 @@ def retro_patterns(rows, pick):
     return sorted(merged.values(), key=lambda e: (-e["count"], e["text"]))[:20]
 
 
+def retro_red_flags(index, board, projects, rows):
+    """The red-flag index rows without an ack whose job is a board job of a registered project, in index
+    order, each with that project and up to 5 digest refs of the same job on the same host. paseo is dropped."""
+    owner = {j.get("id"): j.get("project") for j in board["jobs"]}
+    listed = retro_dict(index).get("rows")
+    out = []
+    for flag in listed if isinstance(listed, list) else []:
+        if not isinstance(flag, dict) or "ack" in flag or owner.get(flag.get("job")) not in projects:
+            continue
+        number = flag["job"].split("-", 1)[0]
+        refs = dict.fromkeys(f"{r['host']}/{r['session']}" for r in rows
+                             if r["host"] == flag.get("host") and str(r.get("job")) == number)
+        out.append({"time": flag.get("time"), "job": flag["job"], "project": owner[flag["job"]],
+                    "host": flag.get("host"), "agent": flag.get("agent"), "tool": flag.get("tool"),
+                    "flags": flag.get("flags"), "target": flag.get("target"), "sessions": list(refs)[:5]})
+    return out
+
+
 def retro_aggregate(days):
     """Pull every host's digest for the last days into <home>/retro/<run>/ for the retro agent."""
     home = factory_home()
@@ -10419,6 +10437,8 @@ def retro_aggregate(days):
                      for j in board["jobs"] if j.get("stage") == "merged" and isinstance(j.get("done"), str)
                      and j["done"][:10] >= dates[0] and j.get("project") in projects), key=lambda m: m["id"])
     agg["merged"] = sorted(merged, key=lambda m: m["merged"], reverse=True)[:RETRO_MERGED_MAX]
+    status, _, text = api(home, "GET", "/api/audit-flags", ok=(200, 404))
+    agg["red_flags"] = retro_red_flags(json.loads(text) if status == 200 else {}, board, projects, rows)
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
