@@ -1635,6 +1635,7 @@ const BACKLOG_POLL_MS = 120000;
 let backlogReadAt = 0;
 let boardUpdated = '';
 let boardEtag = '';
+let boardMaxId = 0;
 
 // The live socket can leave the board unread for hours, so a timer beside the live
 // client redraws this age label on its own.
@@ -1665,6 +1666,7 @@ function takeBoard(data) {
   jobs = slimRows(data);
   boardArchived = Number.isInteger(data.archived?.max_id);
   boardUpdated = data.updated || '';
+  boardMaxId = Number.isInteger(data.archived?.max_id) ? data.archived.max_id : 0;
 }
 
 // Saved copies paint the board at once. The network read that follows replaces them.
@@ -7451,38 +7453,69 @@ function followTracer(board, id, now) {
   return null;
 }
 
-// GET, change(board) in place, then PUT only if nobody wrote in between. Retries a 412.
-// change throws to abort with nothing written.
+// The {id, expect, row} entries that turn the rows before into the rows after: each new or
+// changed row with the row it replaces, then each dropped row with a null row.
+function rowChanges(before, after) {
+  const old = new Map(before.map((j) => [j.id, j]));
+  const ids = new Set(after.map((j) => j.id));
+  const rows = [];
+  for (const j of after) {
+    const prev = old.get(j.id);
+    if (!prev || JSON.stringify(prev) !== JSON.stringify(j)) rows.push({ id: j.id, expect: prev ?? null, row: j });
+  }
+  for (const j of before) if (!ids.has(j.id)) rows.push({ id: j.id, expect: j, row: null });
+  return rows;
+}
+
+// change(board) in place over a copy of the rows this tab holds, then PATCH only the rows it
+// changed, each with the row it expects to replace. A 409 conflict brings the current rows,
+// and change runs again on them. change throws to abort with nothing written.
+// reads(board) names the other rows change decides from, read before it runs. A write sends
+// each as an unchanged row, so a stale one comes back as a conflict too.
 const BOARD_UNCHANGED = Symbol('board unchanged');
 let boardWrites = 0;
-async function casBoard(change) {
+async function casBoard(change, { reads } = {}) {
   boardWrites++;
   try {
+    const known = new Map(jobs.map((j) => [j.id, j]));
+    let maxId = boardMaxId;
     for (let i = 0; i < 10; i++) {
-      const r = await fetch('./api/board', { cache: 'no-store' });
-      if (!r.ok && r.status !== 404) throw new Error('reading the board failed: ' + r.status);
-      const board = r.ok ? await r.json() : { updated: '', jobs: [] };
+      const before = [...known.values()];
+      const board = { updated: boardUpdated, ...(maxId && { archived: { max_id: maxId } }), jobs: structuredClone(before) };
+      const readIds = reads ? reads(board) : [];
       const result = change(board);
       if (result === BOARD_UNCHANGED) return result;
-      // Cloudflare's edge may weaken the ETag. R2 compares the strong form.
-      const etag = r.headers.get('ETag');
-      if (r.ok && !etag) throw new Error('the board came back without an ETag, so nothing was saved');
-      const cond = r.ok ? { 'If-Match': etag.replace(/^W\//, '') } : { 'If-None-Match': '*' };
-      let put;
+      const rows = rowChanges(before, board.jobs);
+      if (!rows.length) return result;
+      for (const id of readIds)
+        if (known.has(id) && !rows.some((e) => e.id === id)) rows.push({ id, expect: known.get(id), row: known.get(id) });
+      if (!navigator.onLine) throw new Error("saving the board failed: you're offline, so nothing was saved");
+      let r;
       try {
-        put = await fetch('./api/board', { method: 'PUT', headers: cond, body: JSON.stringify(board) + '\n' });
+        r = await fetch('./api/board', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updated: board.updated, rows }) });
       } catch (x) {
         x.uncertain = true; // the request may have landed before the connection dropped
         throw x;
       }
-      if (put.ok) return result;
-      if (put.status !== 412) {
-        const x = new Error('saving the board failed: ' + put.status);
-        x.uncertain = put.status >= 500; // classified before the body read: an aborted body read must not erase it
-        try { x.message += ' ' + (await put.text()).slice(0, 200); } catch {}
-        throw x;
+      if (r.ok) {
+        // The page holds the commit at once, so a second write in the same action, such as
+        // a backlog deny that removes the job it just added, starts from it.
+        const sent = new Map(rows.map((e) => [e.id, e.row]));
+        jobs = jobs.map((j) => (sent.has(j.id) ? sent.get(j.id) : j)).filter(Boolean)
+          .concat(rows.filter((e) => e.row && !jobs.some((j) => j.id === e.id)).map((e) => e.row));
+        return result;
       }
-      await new Promise((res) => setTimeout(res, 50 + Math.random() * 450));
+      if (r.status === 409) {
+        const body = await r.json().catch(() => null);
+        if (body?.error !== 'conflict') break;
+        for (const [id, row] of Object.entries(body.rows ?? {})) row ? known.set(id, row) : known.delete(id);
+        maxId = Math.max(maxId, Number.isInteger(body.max_id) ? body.max_id : 0);
+        continue;
+      }
+      const x = new Error('saving the board failed: ' + r.status);
+      x.uncertain = r.status >= 500; // classified before the body read: an aborted body read must not erase it
+      try { x.message += ' ' + (await r.text()).slice(0, 200); } catch {}
+      throw x;
     }
     throw new Error('the board kept changing, so nothing was saved after 10 tries');
   } finally { boardWrites--; }
@@ -7772,6 +7805,13 @@ function rerunJob(board, id, host, now) {
 
 const PRIORITY_STAGES = ['idea', ...MOVE_STAGES];
 
+// The held ideas of the job's project, which a batch start checks for an earlier starter: only a
+// held idea can become one, so a start that landed meanwhile is a conflict.
+function prioritizeReads(board, id, mode) {
+  const project = board.jobs.find((x) => x.id === id)?.project;
+  return mode === 'batch' && project ? board.jobs.filter((x) => x.id !== id && x.project === project && batchHeld(x)).map((x) => x.id) : [];
+}
+
 // factory.py pickup claims prioritized jobs first and nudges a running agent once.
 // Returns an error message, 'unchanged', or '' once the board is changed.
 function prioritizeJob(board, id, now, mode = '') {
@@ -7813,6 +7853,12 @@ function babysitJob(board, id, now) {
 function canUnbatch(j, rows = jobs) {
   const lead = leadOf(j);
   return !!lead && j.stage === 'spec' && j.stacked !== true && rows.find((x) => x.id === lead)?.stage === 'spec';
+}
+
+// The lead row unbatchJob checks, so a lead that left spec meanwhile is a conflict.
+function unbatchReads(board, id) {
+  const lead = leadOf(board.jobs.find((x) => x.id === id) ?? {});
+  return lead ? [lead] : [];
 }
 
 // Drops the batched-into ref and sends the rider back to idea, so pickup runs it on its own.
@@ -8195,7 +8241,7 @@ async function prioritizeAction(ctx, mode = '') {
       const message = prioritizeJob(board, ctx.id, isoNow(), mode);
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
-    });
+    }, { reads: (board) => prioritizeReads(board, ctx.id, mode) });
     await poll();
   } catch (x) {
     if (ctx.live()) ctx.report(failText(x));
@@ -8233,7 +8279,7 @@ async function unbatchAction(ctx) {
       const message = unbatchJob(board, ctx.id, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
-    });
+    }, { reads: (board) => unbatchReads(board, ctx.id) });
     await poll();
   } catch (x) {
     if (ctx.live()) ctx.report(failText(x));

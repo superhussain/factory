@@ -132,11 +132,11 @@ test("close job", { timeout: 240000 }, async (t) => {
       page.on("request", async (request) => {
         if (
           readFails &&
-          request.method() === "GET" &&
+          request.method() === "PATCH" &&
           new URL(request.url()).pathname === "/api/board"
         )
           return request.abort("failed");
-        if (request.method() !== "PUT" || new URL(request.url()).pathname !== "/api/board")
+        if (request.method() !== "PATCH" || new URL(request.url()).pathname !== "/api/board")
           return request.continue();
         const mode = putMode;
         putMode = null;
@@ -146,16 +146,12 @@ test("close job", { timeout: 240000 }, async (t) => {
             contentType: "text/plain",
             body: "Storage is busy.",
           });
-        if (mode === "land") {
-          const headers = request.headers();
+        if (mode === "land")
           await fetch(request.url(), {
-            method: "PUT",
-            headers: Object.fromEntries(
-              ["if-match", "if-none-match"].filter((h) => headers[h]).map((h) => [h, headers[h]]),
-            ),
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
             body: request.postData(),
           });
-        }
         if (mode) return request.abort("failed");
         return request.continue();
       });

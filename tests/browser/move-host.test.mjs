@@ -121,17 +121,14 @@ test("move host", { timeout: 240000 }, async (t) => {
       page.on("request", async (request) => {
         if (
           !landPut ||
-          request.method() !== "PUT" ||
+          request.method() !== "PATCH" ||
           new URL(request.url()).pathname !== "/api/board"
         )
           return;
         landPut = false;
-        const headers = request.headers();
         await fetch(request.url(), {
-          method: "PUT",
-          headers: Object.fromEntries(
-            ["if-match", "if-none-match"].filter((h) => headers[h]).map((h) => [h, headers[h]]),
-          ),
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
           body: request.postData(),
         });
         return request.abort("failed", 1);
@@ -139,7 +136,7 @@ test("move host", { timeout: 240000 }, async (t) => {
       page.on("request", (request) => {
         if (
           !readFails ||
-          request.method() !== "GET" ||
+          request.method() !== "PATCH" ||
           new URL(request.url()).pathname !== "/api/board"
         )
           return;
