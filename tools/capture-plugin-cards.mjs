@@ -58,6 +58,7 @@ async function capture(outdir, pluginDir) {
   const puppeteer = (await import("puppeteer-core")).default;
   const { browserExecutable } = await import("../tests/support/browser-server.mjs");
   const only = process.env.FACTORY_CAPTURE_VIEWS?.split(",");
+  const probe = process.env.FACTORY_CAPTURE_PROBE_URL;
   const requests = [];
   await mkdir(outdir, { recursive: true });
   const browser = await puppeteer.launch({ executablePath: browserExecutable(), headless: true });
@@ -77,6 +78,7 @@ async function capture(outdir, pluginDir) {
         });
         await page.setContent(
           '<!doctype html><meta charset="utf-8"><style>html,body,#root{margin:0;height:100%}#root{display:flex;flex-direction:column}</style><div id="root"></div>' +
+            (probe ? `<img alt="" src="${encodeURI(probe)}">` : "") +
             `<script>globalThis.FACTORY_CAPTURE_CARD=${JSON.stringify(card)}</script>` +
             `<script>${code.replaceAll("</script", "<\\/script")}</script>`,
         );

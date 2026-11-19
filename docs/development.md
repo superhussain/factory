@@ -159,6 +159,8 @@ records matched before and after views. Each `view(...)` line in
 
 `node tools/capture-plugin-cards.mjs --capture <outdir>` renders the Factory screen's three cards (first login, stall, sign-in expired) from the real `paseo-plugin/client/dashboard-screen.tsx`. It writes `plugin-card-<card>-1280.png` (1280x800) and `plugin-card-<card>-390.png` (390x844, compact layout). It needs `pnpm --dir paseo-plugin install --frozen-lockfile` and the provisioned browser.
 
+Set `FACTORY_CAPTURE_PROBE_URL` to make the page request that URL; the run must then fail with "requests during plugin card capture" and write no PNG. `node --test tests/paseo-plugin/card-capture-guard.test.mjs` proves it.
+
 - Settings are synthetic: dashboard `https://factory.example.test`, Paseo origin `https://app.example.test`.
 - Before images: `git archive <base> paseo-plugin | tar -x -C .context/base`, then add `--plugin .context/base/paseo-plugin`.
 - `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.

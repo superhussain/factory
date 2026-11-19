@@ -51,3 +51,13 @@ test("pretty-printed events split into records, a brace inside a string included
   const text = JSON.stringify(first, null, 2) + "\n" + JSON.stringify(read(2, 7), null, 2) + "\n";
   assert.deepEqual(splitRecords(text), [first, read(2, 7)]);
 });
+
+test("full board.json reads are not slim misses", () => {
+  const full = {
+    ...read(7, 40),
+    event: { request: { url: "https://factory.example.test/board.json" } },
+  };
+  const s = summarize([...events(12), full]);
+  assert.equal(s.reads, 11);
+  assert.equal(s.misses, 6);
+});

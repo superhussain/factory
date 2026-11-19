@@ -304,8 +304,9 @@ client-supplied headers.
   Cloudflare stops storing new events, but requests still succeed.
 - Slim board read CPU is measured with
   `node tests/live/slim-cpu.mjs --worker <worker name> --minutes 30`. It needs
-  `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in the environment, prints
-  one aggregate row and a share line, and stores no tail output.
+  `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in the environment, counts
+  only `view=slim` reads, prints one aggregate row and a share line, and stores
+  no tail output.
 - Drafts are bound to the origin's storage, not to any client; preserving the
   same origin across deploys preserves drafts. Legacy job-file writes without
   conditions remain possible for old clients and are unsafe under concurrent
