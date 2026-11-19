@@ -147,7 +147,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
   #settings-document { font-family: var(--font-mono); height: 50dvh; min-height: 240px; resize: vertical; }
   #settings-status, #pipeline-status, #project-pickup-status { overflow-wrap: anywhere; margin: 12px 0; }
-  #settings-status[role="alert"], #pipeline-status[role="alert"], #project-pickup-status[role="alert"] { color: var(--alert); }
+  #settings-status[role="alert"], #pipeline-status[role="alert"], #project-pickup-status[role="alert"], #audit-flags-err[role="alert"] { color: var(--alert); }
   #settings-hint { overflow-wrap: anywhere; margin: -4px 0 12px; }
   #settings-hint:empty { margin: 0; }
   @media (max-width: 760px) {
@@ -219,7 +219,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #audit-flags td a { white-space: nowrap; }
   #audit-flags td a + a { margin-left: 8px; }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
-  #audit-flags td:last-child { min-width: 14em; }
+  #audit-flags td:nth-child(8) { min-width: 14em; }
+  .audit-flag-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  #audit-flags tr.acked { color: var(--muted); }
   .audit-flags-pager { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
   #audit-flags-pager[hidden] { display: none; }
   #inbox-page { max-width: 1040px; }
@@ -1196,9 +1198,11 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
   <section class="settings-section" id="audit-flags" aria-labelledby="audit-flags-heading">
     <h3 id="audit-flags-heading">Red flags</h3>
     <p class="muted" id="audit-flags-status" role="status"></p>
+    <p><label><input type="checkbox" id="audit-flags-show-acked"> Show acknowledged</label></p>
+    <p class="muted" id="audit-flags-err" role="alert" hidden></p>
     <div class="reference-scroll" id="audit-flags-wrap" tabindex="0" role="region" aria-label="Red flags" hidden>
       <table class="reference-table">
-        <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Job</th><th scope="col">Host</th><th scope="col">Agent</th><th scope="col">Session</th><th scope="col">Tool</th><th scope="col">Flags</th><th scope="col">Target</th></tr></thead>
+        <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Job</th><th scope="col">Host</th><th scope="col">Agent</th><th scope="col">Session</th><th scope="col">Tool</th><th scope="col">Flags</th><th scope="col">Target</th><th scope="col">Actions</th></tr></thead>
         <tbody id="audit-flags-rows"></tbody>
       </table>
     </div>
@@ -2648,6 +2652,7 @@ async function loadProjects() {
   $('d-project').value = projects?.has(drawerProject) ? drawerProject : '';
   $('d-project').disabled = !projects?.size;
   $('new-idea').hidden = false;
+  renderAuditFlags();
   refreshPicker();
   return loaded;
 }
@@ -3260,13 +3265,20 @@ async function loadAuditFlags() {
 }
 
 function renderAuditFlags() {
-  const rows = auditFlags ?? [];
-  const jobCount = new Set(rows.map((row) => row.job)).size;
+  const all = auditFlags ?? [], open = all.filter((row) => !row.ack), hidden = all.length - open.length;
+  if (!hidden) $('audit-flags-show-acked').checked = false;
+  const showAcked = $('audit-flags-show-acked').checked;
+  const rows = showAcked ? all : open;
+  const jobCount = new Set(open.map((row) => row.job)).size;
+  const plural = (n, one, many) => n + (n === 1 ? one : many);
+  const note = hidden ? ' ' + plural(hidden, ' acknowledged call ', ' acknowledged calls ') + (showAcked ? 'shown.' : 'hidden.') : '';
+  $('audit-flags-show-acked').parentElement.parentElement.hidden = !hidden;
   $('audit-flags-status').textContent = auditFlagsFailed ? 'Could not load red flags. Reload to try again.'
     : auditFlags === null ? 'Loading red flags\u2026'
-    : !rows.length ? 'No flagged tool calls yet. Each audit push adds its job\'s flagged calls here.'
-    : rows.length + (rows.length === 1 ? ' flagged call' : ' flagged calls') + ' across ' + jobCount + (jobCount === 1 ? ' job' : ' jobs')
-      + ', newest first. Each host redacted its targets before upload.';
+    : !all.length ? 'No flagged tool calls yet. Each audit push adds its job\'s flagged calls here.'
+    : !open.length ? 'No open flagged calls.' + note
+    : plural(open.length, ' flagged call', ' flagged calls') + ' across ' + plural(jobCount, ' job', ' jobs')
+      + ', newest first. Each host redacted its targets before upload.' + note;
   $('audit-flags-wrap').hidden = !rows.length;
   const pages = Math.ceil(rows.length / AUDIT_FLAGS_PAGE);
   auditFlagsPage = Math.max(0, Math.min(auditFlagsPage, pages - 1));
@@ -3306,6 +3318,29 @@ function renderAuditFlags() {
     const code = document.createElement('code');
     code.textContent = row.target;
     cell('').append(code);
+    if (row.ack) tr.className = 'acked';
+    const actions = document.createElement('div'), summary = row.flags.join(', ') + ' call in ' + row.job;
+    const ack = document.createElement('button');
+    ack.type = 'button';
+    ack.className = 'btn';
+    ack.textContent = row.ack ? 'Unacknowledge' : 'Acknowledge';
+    ack.setAttribute('aria-label', (row.ack ? 'Unacknowledge the ' : 'Acknowledge the ') + summary);
+    ack.addEventListener('click', () => auditFlagsAck(row, !row.ack, ack));
+    actions.className = 'audit-flag-actions';
+    cell('').append(actions);
+    actions.append(ack);
+    if (!$('new-idea').hidden) {
+      const idea = document.createElement('button');
+      idea.type = 'button';
+      idea.className = 'btn';
+      idea.textContent = 'Make an idea';
+      idea.setAttribute('aria-label', 'Make an idea from the ' + summary);
+      idea.addEventListener('click', () => openIdeaDialog(null, {
+        project: jobs.find((j) => j.id === row.job)?.project,
+        text: auditFlagIdeaText(row),
+      }));
+      actions.append(idea);
+    }
     return tr;
   }));
   const prev = $('audit-flags-prev'), next = $('audit-flags-next');
@@ -3313,6 +3348,47 @@ function renderAuditFlags() {
   $('audit-flags-page').textContent = 'Rows ' + (start + 1) + ' to ' + (start + shown.length) + ' of ' + rows.length;
   prev.disabled = auditFlagsPage === 0;
   next.disabled = auditFlagsPage >= pages - 1;
+}
+
+async function auditFlagsAck(row, ack, button) {
+  const err = $('audit-flags-err');
+  err.hidden = true;
+  button.disabled = true;
+  try {
+    const r = await fetch('./api/audit-flags/ack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ row, ack }),
+    });
+    if (r.status !== 200) throw new Error(await r.text());
+    auditFlags = (await r.json()).rows;
+    renderAuditFlags();
+    const box = $('audit-flags-show-acked');
+    (box.parentElement.parentElement.hidden ? $('audit-flags-wrap') : box).focus();
+  } catch (x) {
+    err.textContent = 'Could not save: ' + (x.message || x);
+    err.hidden = false;
+    button.disabled = false;
+  }
+}
+$('audit-flags-show-acked').addEventListener('change', () => {
+  auditFlagsPage = 0;
+  renderAuditFlags();
+});
+
+// The New idea text for a red flag row: what was flagged, where, and a link to the session when there is one.
+function auditFlagIdeaText(row) {
+  const flags = row.flags.join(', '), label = hostName(row.host), links = paseoLinksFor(row.paseo) || {};
+  return [
+    'Look into the ' + flags + ' red flag in ' + row.job + '.',
+    '',
+    'Flags: ' + flags,
+    'Target: ' + row.target,
+    'Job: ' + row.job,
+    'Host: ' + (label === row.host ? label : label + ' (' + row.host + ')'),
+    'Agent: ' + row.agent + ', tool ' + row.tool + ', at ' + row.time + ' UTC',
+    ...(links.web || links.app ? ['Session: ' + (links.web || links.app)] : []),
+  ].join('\n');
 }
 
 function auditFlagsMove(step, button, other) {
@@ -7736,17 +7812,22 @@ $('edit-idea-form').addEventListener('submit', async (e) => {
 
 // One opener for the New idea dialog, used by the button, the jumper's command row and the drawer's follow-up item.
 let ideaFollowUp = null;
-function openIdeaDialog(followUp = null) {
+function openIdeaDialog(followUp = null, prefill = null) {
   ideaFollowUp = followUp ? followUp.id : null;
   const ideaDefault = store.get('factory-idea-project');
   $('idea-project').value = followUp ? (projects?.has(followUp.project) ? followUp.project : '')
+    : projects?.has(prefill?.project) ? prefill.project
     : soleProject() || (projects?.has(ideaDefault) ? ideaDefault : '');
+  if (prefill) {
+    const draft = $('idea-text');
+    draft.value = draft.value ? draft.value + '\n\n' + prefill.text : prefill.text;
+  }
   $('idea-ref').replaceChildren(...(followUp ? ['Follow-up of ', Object.assign(document.createElement('code'), { textContent: followUp.id })] : []));
   $('idea-ref').hidden = !followUp;
   $('idea-h').textContent = followUp ? 'New follow-up idea' : 'New idea';
   $('idea-err').hidden = true;
   $('idea-dlg').showModal();
-  if (followUp) $('idea-text').focus();
+  if (followUp || prefill) $('idea-text').focus();
 }
 $('new-idea').addEventListener('click', () => openIdeaDialog());
 function followUpAction(ctx) {

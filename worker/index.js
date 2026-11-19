@@ -99,6 +99,7 @@ const AUDIT_FILE = /^\/api\/audit\/([^/]+)\/([^/]+)\.jsonl$/;
 const AUDIT_JOB_ID = /^\d+-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // The red-flag index of flagged calls across jobs.
 const AUDIT_FLAGS = /^\/api\/audit-flags$/;
+const AUDIT_FLAGS_ACK = /^\/api\/audit-flags\/ack$/;
 // Retro runs: one factory.retro-run/1 record per admitted run, and the newest 30 listed.
 const RETROS = /^\/api\/retros(?:\/([A-Za-z0-9_-]{1,64}))?$/;
 // board.json holds every job, merged ones included, so it outgrows the per-file cap.
@@ -1798,14 +1799,26 @@ function auditFlagsKeep(rows) {
     .slice(0, AUDIT_FLAGS_MAX);
 }
 
-// Replaces the job and host's rows in the index. False after ten lost conditional puts.
+const auditFlagKey = (row) =>
+  JSON.stringify([row.time, row.job, row.host, row.agent, row.tool, row.target]);
+
+// Replaces the job and host's rows in the index and keeps their acks. False after ten lost conditional puts.
 async function auditFlagsUpdate(env, job, host, rows) {
   const fresh = auditFlagRows(rows, job, host);
   for (let attempt = 0; attempt < 10; attempt++) {
     const prev = await env.BUCKET.get(AUDIT_FLAGS_KEY);
-    const kept = prev
-      ? JSON.parse(await prev.text()).rows.filter((row) => row.job !== job || row.host !== host)
-      : [];
+    const old = prev ? JSON.parse(await prev.text()).rows : [];
+    const kept = old.filter((row) => row.job !== job || row.host !== host);
+    const acks = new Map(
+      old
+        .filter((row) => row.ack && row.job === job && row.host === host)
+        .map((row) => [auditFlagKey(row), row.ack]),
+    );
+    for (const row of fresh) {
+      const ack = acks.get(auditFlagKey(row));
+      if (ack) row.ack = ack;
+      else delete row.ack;
+    }
     const next = auditFlagsKeep([...kept, ...fresh]);
     const saved = await env.BUCKET.put(
       AUDIT_FLAGS_KEY,
@@ -1827,6 +1840,41 @@ async function auditFlagsGet(env) {
     200,
     "application/json",
   );
+}
+
+const AUDIT_FLAGS_ACK_BODY =
+  'body must be {"row": {time, job, host, agent, tool, target}, "ack": true or false}';
+
+// Sets or clears one row's ack time in the index. Only a signed-in person may.
+async function auditFlagsAck(request, env, principal) {
+  if (principal.kind !== "user")
+    return reply("red flags are acknowledged only by a signed-in person", 403);
+  const body = await readJson(request);
+  if (body instanceof Response) return body;
+  const row = body?.row;
+  const fields = ["time", "job", "host", "agent", "tool", "target"];
+  if (
+    typeof body?.ack !== "boolean" ||
+    !row ||
+    typeof row !== "object" ||
+    !fields.every((field) => typeof row[field] === "string")
+  )
+    return reply(AUDIT_FLAGS_ACK_BODY, 400);
+  const key = auditFlagKey(row);
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const prev = await env.BUCKET.get(AUDIT_FLAGS_KEY);
+    const index = prev ? JSON.parse(await prev.text()) : { schema: AUDIT_FLAGS_SCHEMA, rows: [] };
+    const target = index.rows.find((r) => auditFlagKey(r) === key);
+    if (!target) return reply("that red flag is no longer in the index; reload", 409);
+    if (body.ack) target.ack = new Date().toISOString().slice(0, 19) + "Z";
+    else delete target.ack;
+    const saved = await env.BUCKET.put(AUDIT_FLAGS_KEY, JSON.stringify(index), {
+      ...JSON_TYPE,
+      onlyIf: new Headers({ "If-Match": prev.httpEtag }),
+    });
+    if (saved) return reply(JSON.stringify(index), 200, "application/json");
+  }
+  return reply("the red-flag index kept changing; try again", 503);
 }
 
 // Every host's rows for the job, in host record order, each file ending in a newline.
@@ -2561,6 +2609,8 @@ async function api(request, env, path, principal, ctx) {
     return getFile(env, retroKey(id, date), "application/x-ndjson");
   }
   if (AUDIT_FLAGS.test(path)) return method === "GET" ? auditFlagsGet(env) : notFound();
+  if (AUDIT_FLAGS_ACK.test(path))
+    return method === "POST" ? auditFlagsAck(request, env, principal) : notFound();
   m = path.match(AUDIT_JOB);
   if (m) {
     if (method !== "GET" || !AUDIT_JOB_ID.test(m[1])) return notFound();

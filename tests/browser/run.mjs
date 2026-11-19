@@ -333,6 +333,7 @@ const CAPTURE_AUDIT_FLAGS = [
   flags,
   target,
   paseo: { server: "srv-a", agent: "agent-build" },
+  ...(flags[0] === "force-push" && { ack: "2026-11-11T09:00:00Z" }),
 }));
 // Settings > Hosts for the retros-flags views: the fixture list plus the capture host.
 const CAPTURE_HOSTS = JSON.parse(
@@ -1669,15 +1670,27 @@ async function capture(outdir, referencePath) {
       });
       if (side === "after") {
         await page.waitForSelector("#audit-flags-rows tr");
-        await page.evaluate(() =>
-          document.getElementById("audit-flags-pager").scrollIntoView({ block: "end" }),
-        );
+        await page.evaluate(() => {
+          if (innerWidth > 600)
+            return document
+              .getElementById("audit-flags-heading")
+              .scrollIntoView({ block: "start" });
+          document.getElementById("audit-flags-pager").scrollIntoView({ block: "end" });
+          const wrap = document.getElementById("audit-flags-wrap");
+          wrap.scrollLeft = wrap.scrollWidth;
+        });
       }
     };
     flagsHosts = true;
     try {
       await view("retros-flags-desktop", 1440, 900, "light", openRetrosFlags);
       await view("retros-flags-mobile", 390, 844, "dark", openRetrosFlags);
+      await view("retros-flags-idea-desktop", 1440, 900, "light", async (page, side) => {
+        await openRetrosFlags(page, side);
+        if (side !== "after") return;
+        await page.click("#audit-flags-rows .btn + .btn");
+        await page.waitForSelector("#idea-dlg[open]");
+      });
     } finally {
       flagsHosts = false;
     }
