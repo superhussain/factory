@@ -5,7 +5,7 @@ import { InboxBadge } from "./client/inbox-badge";
 import { dashboardScreen } from "./client/dashboard-screen";
 import { useFrameInboxCount } from "./client/frame-inbox";
 import { SettingsScreen } from "./client/settings-screen";
-import { showNeedsNotification } from "./client/web";
+import { dropWarmFrame, showNeedsNotification } from "./client/web";
 import { createInbox, type Inbox } from "./shared/arrivals";
 import { shownInboxCount } from "./shared/badge";
 import { factoryInbox } from "./shared/inbox";
@@ -52,5 +52,8 @@ export default function contribute(client: PluginClientContext) {
     icon: "Settings",
     Component: SettingsScreen,
   });
-  return () => subscription.release();
+  return () => {
+    subscription.release();
+    dropWarmFrame();
+  };
 }
