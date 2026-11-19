@@ -1,12 +1,8 @@
 // Live board events: one Durable Object room on the WebSocket Hibernation API.
-// It stores nothing. It sends changed frames, and applies a person's board patch frames
-// with the same core as PATCH /api/board.
-import { applyBoardPatch, BOARD_PATCH_SHAPE } from "./index.js";
-
+// It stores nothing and never carries board content.
 export const EVENTS_PATH = "/events/board";
 const KEYS = ["board.json", "backlog.md"];
 const MAX_SOCKETS = 100;
-const MAX_FRAME = 1 << 20;
 
 export class BoardEvents {
   constructor(ctx, env) {
@@ -35,55 +31,16 @@ export class BoardEvents {
     const key = url.searchParams.get("key");
     if (request.method !== "POST" || url.pathname !== "/notify" || !KEYS.includes(key))
       return new Response("not found", { status: 404 });
-    this.broadcast(key);
-    return new Response(null, { status: 204 });
-  }
-
-  broadcast(key) {
     const frame = JSON.stringify({ type: "changed", key });
     for (const socket of this.ctx.getWebSockets()) {
       try {
         socket.send(frame);
       } catch {}
     }
+    return new Response(null, { status: 204 });
   }
 
-  // A patch frame, {type: "patch", op, updated, rows, reads}, is the PATCH /api/board body
-  // on the open socket. It gets an ack or a typed error with its op, and a commit tells
-  // every socket, as /notify does.
-  async webSocketMessage(socket, message) {
-    const send = (frame) => {
-      try {
-        socket.send(JSON.stringify(frame));
-      } catch {}
-    };
-    const refuse = (op, status, text) =>
-      send({ type: "error", op, error: "refused", status, message: text });
-    if (typeof message !== "string" || new TextEncoder().encode(message).length > MAX_FRAME)
-      return refuse(null, 413, "body over 1 MiB");
-    let frame;
-    try {
-      frame = JSON.parse(message);
-    } catch {
-      return refuse(null, 400, "body is not JSON");
-    }
-    const op =
-      typeof frame?.op === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(frame.op) ? frame.op : null;
-    if (frame?.type !== "patch" || !op) return refuse(op, 400, BOARD_PATCH_SHAPE);
-    const { exp, origin } = socket.deserializeAttachment() ?? {};
-    if (!(exp * 1000 > Date.now())) return send({ type: "error", op, error: "expired" });
-    const result = await applyBoardPatch(
-      { ...this.env, config: { origin } },
-      { updated: frame.updated, rows: frame.rows, reads: frame.reads },
-      this.ctx,
-    );
-    if (result.ok) {
-      send({ type: "ack", op, etag: result.etag });
-      this.broadcast("board.json");
-    } else if (result.conflict) send({ type: "error", op, error: "conflict", ...result.conflict });
-    else if (result.busy) send({ type: "error", op, error: "busy" });
-    else refuse(op, result.status, result.text);
-  }
+  webSocketMessage() {}
 
   webSocketClose(socket) {
     try {
