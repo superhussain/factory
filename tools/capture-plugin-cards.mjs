@@ -5,11 +5,12 @@
 // `node tools/capture-plugin-cards.mjs --capture <outdir> [--plugin <paseo-plugin dir>]`.
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import * as esbuild from "esbuild";
 
-const REPO = new URL("..", import.meta.url).pathname;
+const REPO = fileURLToPath(new URL("..", import.meta.url));
 const DEFAULT_PLUGIN = REPO + "paseo-plugin";
 const CARDS = ["first-login", "stall", "expired"];
 const VIEWPORTS = [
@@ -18,7 +19,7 @@ const VIEWPORTS = [
 ];
 
 export async function bundleCards(pluginDir = DEFAULT_PLUGIN) {
-  const screen = `${pluginDir}/client/dashboard-screen.tsx`;
+  const screen = resolve(pluginDir, "client/dashboard-screen.tsx");
   if (!existsSync(screen)) throw new Error(`no client/dashboard-screen.tsx under ${pluginDir}`);
   if (!existsSync(REPO + "paseo-plugin/node_modules/react-dom"))
     throw new Error("react-dom missing: run pnpm --dir paseo-plugin install --frozen-lockfile");
@@ -88,13 +89,13 @@ async function capture(outdir, pluginDir) {
         });
         const png = await page.screenshot();
         if (png.length >= 5 * 1024 * 1024) throw new Error(`${name}.png is 5 MiB or more`);
+        if (requests.length)
+          throw new Error(`requests during plugin card capture: ${requests.join(", ")}`);
         await writeFile(`${outdir}/${name}.png`, png);
         console.log(JSON.stringify({ file: `${name}.png`, bytes: png.length }));
         await context.close();
       }
     }
-    if (requests.length)
-      throw new Error(`requests during plugin card capture: ${requests.join(", ")}`);
   } finally {
     await browser.close();
   }
