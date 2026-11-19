@@ -1184,14 +1184,14 @@ async function capture(outdir, referencePath) {
       await view("notifications-menu-kinds-1280", 1280, 900, "light", async (page) => {
         await page.evaluate(() => {
           const at = new Date(Date.now() - 60000).toISOString();
-          const line = "0123456789ab";
+          const backlogHash = "0123456789ab";
           localStorage.setItem(
             "factory-notifications-log",
             JSON.stringify([
               { kind: "spec", id: "120-sample-merged", at },
               {
                 kind: "backlog",
-                key: line,
+                key: backlogHash,
                 title: "Synthetic backlog idea",
                 project: "sample",
                 at,
