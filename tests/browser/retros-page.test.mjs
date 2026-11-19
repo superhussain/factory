@@ -358,6 +358,38 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await t.test("the retros badge counts unopened runs", async () => {
+      const { page, errors } = await openPage("");
+      const badge = () =>
+        page.$eval("#retros-count", (el) => [
+          el.hidden,
+          el.textContent,
+          el.parentElement.getAttribute("aria-label"),
+        ]);
+      await page.waitForSelector("#retros-count:not([hidden])", wait);
+      assert.deepEqual(await badge(), [false, "2", "Retros, 2 new"]);
+      await page.evaluate(() => (location.hash = "#/retros"));
+      await page.waitForSelector("#retros-count", { hidden: true, ...wait });
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem("factory-retros-seen")),
+        "20261112T090000Z-a1b2c3",
+      );
+      await page.evaluate(() => (location.hash = ""));
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => Array.isArray(retros), wait);
+      assert.deepEqual(await badge(), [true, "0", "Retros"]);
+      retros = {
+        status: 200,
+        body: JSON.stringify([{ ...RUNS[0], run: "20261119T090000Z-0a0b0c" }, ...RUNS]),
+      };
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#retros-count:not([hidden])", wait);
+      assert.deepEqual(await badge(), [false, "1", "Retros, 1 new"]);
+      retros = { status: 200, body: JSON.stringify(RUNS) };
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
     await t.test("going from retros to settings focuses the project picker", async () => {
       const { page } = await openPage("#/retros");
       await page.waitForSelector("#retros-page:not([hidden])", wait);
@@ -377,12 +409,11 @@ test("retros page", { timeout: 180000 }, async (t) => {
         ]),
       );
     const count = (page) => page.$eval("#job-count", (el) => el.textContent);
-    // Presses j and resolves once the jumper's GET /api/retros has answered.
+    // Waits for the boot GET /api/retros to answer, then presses j.
     const openJumper = async (page) => {
-      const answered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/retros");
+      await page.waitForFunction(() => Array.isArray(retros) || retrosFailed, wait);
       await page.keyboard.press("j");
       await page.waitForSelector("#job-picker[open]", wait);
-      await answered;
     };
     const setQuery = (page, value) =>
       page.$eval(
