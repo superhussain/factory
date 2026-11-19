@@ -35,8 +35,10 @@
   factory.py pickup setup [--install]      check every pickup prerequisite on this host and print each fix; --install writes and loads the 5 minute timer
   factory.py host pair <id> <code>          pair this device with a host added in Settings and set
                                             device: <id> in config.md
-  factory.py pipeline <project-slug>        print the project's effective pipeline configuration as JSON,
-                                            with stage notes wrapped as operator-preferences data
+  factory.py pipeline <project-slug> [--board]
+                                            print the project's effective pipeline configuration as JSON,
+                                            with stage notes wrapped as operator-preferences data;
+                                            --board prints only the one-line board patch {"pipeline": <versions>}
   factory.py documents <project-slug>       write the project's notes, decisions and runbook, wrapped as
                                             operator-preferences data, to projects/<slug>.documents.md
                                             and print its path
@@ -6374,11 +6376,15 @@ def fetch_pipeline(home, slug):
     return pipeline_view(slug, data)
 
 
-def pipeline_cmd(slug):
-    """Print the project's effective pipeline configuration."""
-    if not SLUG.fullmatch(slug):
-        fail("usage: pipeline <project-slug>", 2)
-    print(json.dumps(fetch_pipeline(factory_home(), slug), indent=2))
+def pipeline_cmd(slug, flag=None):
+    """Print the project's effective pipeline configuration, or with --board only its board patch."""
+    if flag not in (None, "--board") or not SLUG.fullmatch(slug):
+        fail("usage: pipeline <project-slug> [--board]", 2)
+    view = fetch_pipeline(factory_home(), slug)
+    if flag:
+        print(json.dumps({"pipeline": view["versions"]}))
+    else:
+        print(json.dumps(view, indent=2))
 
 
 def documents_cmd(slug):
@@ -11013,7 +11019,7 @@ COMMANDS["control"] = (control_cmd, 4, 6)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
 COMMANDS["experiment"] = (experiment_cmd, 2, 2)
 COMMANDS["unclaim"] = (unclaim, 1, 1)
-COMMANDS["pipeline"] = (pipeline_cmd, 1, 1)
+COMMANDS["pipeline"] = (pipeline_cmd, 1, 2)
 COMMANDS["documents"] = (documents_cmd, 1, 1)
 COMMANDS["prompt"] = (prompt_cmd, 2, 8)
 COMMANDS["wait"] = (wait_cmd, 2, 23)

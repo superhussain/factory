@@ -129,7 +129,21 @@ class PipelineTest(IsolatedTestCase):
 
     def test_bad_slug_exits_2(self):
         code, out, err = invoke(factory, ["--home", str(self.home), "pipeline", "a/b"])
-        self.assertEqual((code, out, err), (2, "", "factory.py: usage: pipeline <project-slug>\n"))
+        self.assertEqual((code, out, err), (2, "", "factory.py: usage: pipeline <project-slug> [--board]\n"))
+
+    def test_board_flag_prints_the_patch(self):
+        with http_fixture({PATH: (200, VIEW)}) as server:
+            (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
+            before = snapshot(self.home)
+            code, out, err = invoke(factory, ["--home", str(self.home), "pipeline", "sample", "--board"])
+        self.assertEqual((code, out, err), (0, '{"pipeline": {"global": 3, "project": 2}}\n', ""))
+        self.assertEqual(snapshot(self.home), before)
+        factory.check_pipeline(json.loads(out)["pipeline"])
+
+    def test_unknown_flag_exits_2(self):
+        with patch.object(factory, "api", side_effect=AssertionError("no request")):
+            code, out, err = invoke(factory, ["--home", str(self.home), "pipeline", "sample", "--json"])
+        self.assertEqual((code, out, err), (2, "", "factory.py: usage: pipeline <project-slug> [--board]\n"))
 
     def test_board_rejects_a_malformed_pipeline_before_any_request(self):
         for value in ({"global": 1}, {"global": True, "project": 1}, {"global": -1, "project": 0},
