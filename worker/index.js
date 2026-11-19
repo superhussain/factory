@@ -461,7 +461,8 @@ async function boardRefusal(env, stored, data, sameBase) {
         checkArchived(stored, data) ??
         checkNewIds(stored.jobs, data.jobs) ??
         checkRiderControls(stored.jobs, data.jobs) ??
-        checkBatchRefs(stored.jobs, data.jobs))
+        checkBatchRefs(stored.jobs, data.jobs) ??
+        checkNewStarters(stored.jobs, data.jobs))
       : null)
   );
 }
@@ -522,8 +523,19 @@ function canonicalJson(value) {
   );
 }
 
+// Lowercase hex SHA-256 of the row's canonical JSON, the digest a patch's reads carry.
+async function rowSha256(row) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson(row)),
+  );
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 const BOARD_PATCH_SHAPE =
   "a board patch needs rows: [{id, expect, row}], one entry per id. Nothing was written.";
+const READS_SHAPE =
+  "a board patch's reads need [{id, sha256}], one per id and none in rows. Nothing was written.";
 
 // Applies the dashboard's changed rows, each with the row it expects to replace, to the
 // stored board. A row that changed since the client read it comes back as a 409 conflict;
@@ -555,6 +567,19 @@ async function boardPatch(request, env, ctx) {
   )
     return reply(BOARD_PATCH_SHAPE, 400);
   const entries = new Map(rows.map((e) => [e.id, e]));
+  const reads = patch.reads ?? [];
+  if (
+    !Array.isArray(reads) ||
+    !reads.every(
+      (r) =>
+        typeof r?.id === "string" &&
+        typeof r.sha256 === "string" &&
+        /^[0-9a-f]{64}$/.test(r.sha256) &&
+        !entries.has(r.id),
+    ) ||
+    new Set(reads.map((r) => r.id)).size !== reads.length
+  )
+    return reply(READS_SHAPE, 400);
   for (let attempt = 0; attempt < 10; attempt++) {
     const stored = await storedBoard(env);
     if (stored.etag && !stored.doc)
@@ -578,6 +603,10 @@ async function boardPatch(request, env, ctx) {
       if (m && Number(m[1]) <= maxId) conflicts.add(e.id);
       if (typeof e.row.capture_id === "string" && captured.has(e.row.capture_id))
         conflicts.add(captured.get(e.row.capture_id));
+    }
+    for (const r of reads) {
+      const row = byId.get(r.id);
+      if (!row || (await rowSha256(row)) !== r.sha256) conflicts.add(r.id);
     }
     if (conflicts.size)
       return reply(
@@ -2470,6 +2499,18 @@ function checkNewIds(storedJobs, jobs) {
     return `a board write cannot add ${quoteIdCut(String(id), QUOTED_ID_MAX)}: a job id has no project prefix and is never a bare number, like 003-rate-limiting. Nothing was written. Upgrade the factory skill, or claim new ids with factory.py claim.`;
   }
   return null;
+}
+
+// An error message, or null. Run batch now marks a held idea already on the board as the
+// starter, and no read can cover a row that arrives new with that mark.
+function checkNewStarters(storedJobs, jobs) {
+  const ids = new Set(storedJobs.map((j) => j?.id));
+  const row = jobs.find(
+    (j) => !ids.has(j?.id) && j?.stage === "idea" && j.priority?.batch === true,
+  );
+  return row
+    ? `a board write cannot add ${quoteIdCut(row.id, QUOTED_ID_MAX)} as a batch starter: start a batch from a held idea already on the board. Nothing was written.`
+    : null;
 }
 
 // An error message, or null. Only the archive pass writes `archived`, and a client that

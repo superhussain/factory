@@ -122,6 +122,12 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
       releaseLate = resolve;
     });
     const verdictReads = [];
+    // The page sends a verdict read as it renders, but this process sees the request a little
+    // later, so a check right after the render waits for the count to arrive.
+    const readsReach = async (count) => {
+      for (const end = Date.now() + 5000; verdictReads.length < count && Date.now() < end;)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+    };
     let itemReads = 0;
     await page.setRequestInterception(true);
     page.on("request", async (request) => {
@@ -304,6 +310,7 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
         () => document.querySelectorAll(".backlog-card").length === 8,
         wait,
       );
+      await readsReach(3);
       assert.equal(verdictReads.length, 3);
       assert.deepEqual(verdictReads[2], [MISSING_ITEM, LATE_ITEM]);
       await open(LATE_ITEM);
@@ -345,6 +352,7 @@ test("backlog triage section", { timeout: 180000 }, async (t) => {
         () => document.querySelectorAll(".backlog-card").length === 10,
         wait,
       );
+      await readsReach(4);
       assert.deepEqual(verdictReads[3], [MISSING_ITEM, LONG_ITEM, NEIGHBOR_ITEM]);
       await page.waitForFunction(
         (line) => backlogTriageSeen.get("- [ ] " + line)?.decision === "hold",
