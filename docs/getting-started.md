@@ -93,7 +93,7 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | Keep project notes, decisions and a runbook | Settings, Projects, document tabs | [configuration.md](configuration.md) |
 | Deploy every merge to main | `deploy-main` workflow | [cloudflare.md](cloudflare.md#8-continuous-deployment-from-main) |
 | PR screenshots, Paseo, Tracer | device config | [integrations.md](integrations.md) |
-| Browser sounds, notifications, reminders and display | Settings, Notifications and Display | none |
+| Browser toasts, sounds, notifications, reminders and display | Settings, Notifications and Display | none |
 | Let agents manage the instance, such as Access settings or an `up` rerun | `CLOUDFLARE_API_TOKEN` in the factory home `.env` | [cloudflare.md](cloudflare.md#device-token) |
 | Upgrade later | `git pull` here, then `install.py --replace` on each host | [upgrade.md](upgrade.md) |
 
