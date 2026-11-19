@@ -1,7 +1,7 @@
 // Live slim board CPU run: tails the deployed Worker for n minutes and prints one aggregate row
 // and a share line. Tail output stays in memory and is never printed. Never part of CI. Usage:
 // node tests/live/slim-cpu.mjs --worker <name> --minutes <n> with CLOUDFLARE_API_TOKEN and
-// CLOUDFLARE_ACCOUNT_ID in the environment.
+// CLOUDFLARE_ACCOUNT_ID in the environment. Counts only /board.json?view=slim reads.
 import { spawn } from "node:child_process";
 
 export const MISS_MS = 5;
@@ -32,7 +32,10 @@ export function splitRecords(text) {
 }
 
 export function summarize(events) {
-  const reads = events.filter((e) => new URL(e.event.request.url).pathname === "/board.json");
+  const reads = events.filter((e) => {
+    const url = new URL(e.event.request.url);
+    return url.pathname === "/board.json" && url.searchParams.get("view") === "slim";
+  });
   const misses = reads.filter((e) => e.cpuTime >= MISS_MS);
   const missMs = misses.map((e) => e.cpuTime).sort((a, b) => a - b);
   const mid = missMs.length >> 1;
