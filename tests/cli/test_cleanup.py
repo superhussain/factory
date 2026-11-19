@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from support import IsolatedTestCase, invoke, load_runtime
 
@@ -37,9 +37,12 @@ class CleanupTest(IsolatedTestCase):
         return subprocess.run(["git", "-C", str(cwd), *args], check=True,
                               capture_output=True, text=True).stdout.strip()
 
-    def board(self, stage, head):
-        job = {"id": "001-test", "project": "sample", "stage": stage,
-               "github": {"merged": "2026-11-18T00:00:00Z", "head": head}}
+    def board(self, stage, head, pr=None):
+        job = {"id": "001-test", "project": "sample", "stage": stage}
+        if head is not None:
+            job["github"] = {"merged": "2026-11-18T00:00:00Z", "head": head}
+        if pr:
+            job["pr"] = pr
         if stage == "closed":
             job["close"] = {"closed": "2026-11-18T00:00:00Z"}
         self.read_board.return_value = {"updated": "", "jobs": [job]}
@@ -232,6 +235,46 @@ class CleanupTest(IsolatedTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out, {"removed": [f"worktree {self.wt}", "branch factory/001-test"], "left": []})
         self.assertFalse(self.branch_exists())
+
+    PR = "https://github.com/sample/alpha/pull/7"
+
+    def test_pr_head_deletes_a_merged_branch(self):
+        self.board("merged", None, pr=self.PR)
+        head = self.git(self.wt, "rev-parse", "HEAD")
+        with patch.object(factory, "pr_states", return_value=({7: ("MERGED", head)}, None)) as states:
+            code, out, _ = self.cleanup()
+        self.assertEqual(code, 0)
+        self.assertEqual(out, {"removed": [f"worktree {self.wt}", "branch factory/001-test"], "left": []})
+        states.assert_called_once_with("sample/alpha", [7], ANY)
+        self.assertFalse(self.branch_exists())
+
+    def test_board_head_skips_the_pr_lookup(self):
+        self.board("merged", self.git(self.wt, "rev-parse", "HEAD"), pr=self.PR)
+        with patch.object(factory, "pr_states") as states:
+            code, _, _ = self.cleanup()
+        self.assertEqual(code, 0)
+        states.assert_not_called()
+        self.assertFalse(self.branch_exists())
+
+    def test_open_pr_keeps_the_branch(self):
+        self.board("merged", None, pr=self.PR)
+        head = self.git(self.wt, "rev-parse", "HEAD")
+        with patch.object(factory, "pr_states", return_value=({7: ("OPEN", head)}, None)):
+            code, out, err = self.cleanup()
+        self.assertEqual(code, 1)
+        self.assertEqual(out["left"], ["branch factory/001-test: not merged into main"])
+        self.assertEqual(err, "")
+        self.assertTrue(self.branch_exists())
+
+    def test_pr_lookup_failure_keeps_the_local_rule(self):
+        self.board("merged", None, pr=self.PR)
+        with patch.object(factory, "pr_states", return_value=(None, "gh is not installed on host-a")):
+            code, out, err = self.cleanup()
+        self.assertEqual(code, 1)
+        self.assertEqual(out["left"], ["branch factory/001-test: not merged into main"])
+        self.assertEqual(err, "factory.py: cleanup could not read pull request https://github.com/sample/alpha/pull/7 "
+                              "(gh is not installed on host-a), so it keeps a branch HEAD does not contain\n")
+        self.assertTrue(self.branch_exists())
 
     def test_board_head_behind_the_branch_keeps_it(self):
         self.board("merged", self.git(self.repo, "rev-parse", "main"))
