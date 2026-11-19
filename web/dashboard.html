@@ -3601,8 +3601,9 @@ function inboxOpenIndex(items) {
 }
 
 function setIconCount(id, n) {
-  $(id).textContent = n > 99 ? '99+' : String(n);
-  $(id).hidden = !n;
+  const el = $(id);
+  el.textContent = n > 99 ? '99+' : String(n);
+  el.hidden = !n;
 }
 
 function syncInboxLink() {
