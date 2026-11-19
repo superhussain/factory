@@ -379,3 +379,73 @@ test("a retry after a lost put drops an ack cleared in the meantime", async () =
   assert.equal(lost, 1);
   assert.deepEqual(await s.flags(), STEP_4);
 });
+
+const LINE = "- [ ] sample: Red flag: pipe-to-shell via Bash";
+const key = ({ time, job, host, agent, tool, target }) => ({
+  time,
+  job,
+  host,
+  agent,
+  tool,
+  target,
+});
+const linkBody = (backlog, rows) => ({
+  body: JSON.stringify({ backlog, rows }),
+  type: "application/json",
+  principal: mac,
+});
+
+test("backlog link sets matching rows", async () => {
+  const s = await setup();
+  await s.put(SIX);
+  const r = await s.send(
+    "POST",
+    "/api/audit-flags/backlog",
+    linkBody(LINE, [key(R), { ...key(R), target: "gone" }]),
+  );
+  assert.deepEqual([r.status, JSON.parse(r.text)], [200, { linked: 1 }]);
+  const rows = await s.flags();
+  assert.equal(rows[1].backlog, LINE);
+  assert.deepEqual({ ...rows[1], backlog: undefined }, { ...R, backlog: undefined });
+  assert.equal(rows.filter((row) => "backlog" in row).length, 1);
+});
+
+test("backlog link refuses", async () => {
+  const s = await setup();
+  await s.put(SIX);
+  const refused = await s.send("POST", "/api/audit-flags/backlog", {
+    ...linkBody(LINE, [key(R)]),
+    principal: person,
+  });
+  assert.deepEqual(
+    [refused.status, refused.text],
+    [403, "red-flag backlog links are written only by a bound host's service token"],
+  );
+  for (const [backlog, rows] of [
+    ["sample: x", [key(R)]],
+    [LINE, []],
+  ]) {
+    const r = await s.send("POST", "/api/audit-flags/backlog", linkBody(backlog, rows));
+    assert.deepEqual(
+      [r.status, r.text],
+      [
+        400,
+        'body must be {"backlog": "- [ ] <project>: <title>", "rows": [{time, job, host, agent, tool, target}, ...]} with 1 to 500 rows',
+      ],
+    );
+  }
+  assert.equal((await s.send("GET", "/api/audit-flags/backlog")).status, 404);
+  assert.deepEqual(await s.flags(), STEP_4);
+});
+
+test("re-push and ack keep backlog", async () => {
+  const s = await setup();
+  await s.put(SIX);
+  await s.send("POST", "/api/audit-flags/backlog", linkBody(LINE, [key(R)]));
+  const linked = async () => (await s.flags()).find((r) => r.target === R.target).backlog;
+  assert.equal(await linked(), LINE);
+  assert.equal((await s.put(SIX)).status, 200);
+  assert.equal(await linked(), LINE);
+  assert.equal((await s.send("POST", "/api/audit-flags/ack", ackBody(R, true))).status, 200);
+  assert.equal(await linked(), LINE);
+});

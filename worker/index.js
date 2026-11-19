@@ -100,6 +100,7 @@ const AUDIT_JOB_ID = /^\d+-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // The red-flag index of flagged calls across jobs.
 const AUDIT_FLAGS = /^\/api\/audit-flags$/;
 const AUDIT_FLAGS_ACK = /^\/api\/audit-flags\/ack$/;
+const AUDIT_FLAGS_BACKLOG_PATH = /^\/api\/audit-flags\/backlog$/;
 // Retro runs: one factory.retro-run/1 record per admitted run, and the newest 30 listed.
 const RETROS = /^\/api\/retros(?:\/([A-Za-z0-9_-]{1,64}))?$/;
 // board.json holds every job, merged ones included, so it outgrows the per-file cap.
@@ -1802,22 +1803,24 @@ function auditFlagsKeep(rows) {
 const auditFlagKey = (row) =>
   JSON.stringify([row.time, row.job, row.host, row.agent, row.tool, row.target]);
 
-// Replaces the job and host's rows in the index and keeps their acks. False after ten lost conditional puts.
+// Replaces the job and host's rows in the index and keeps their ack and backlog. False after ten lost conditional puts.
 async function auditFlagsUpdate(env, job, host, rows) {
   const fresh = auditFlagRows(rows, job, host);
   for (let attempt = 0; attempt < 10; attempt++) {
     const prev = await env.BUCKET.get(AUDIT_FLAGS_KEY);
     const old = prev ? JSON.parse(await prev.text()).rows : [];
     const kept = old.filter((row) => row.job !== job || row.host !== host);
-    const acks = new Map(
+    const prior = new Map(
       old
-        .filter((row) => row.ack && row.job === job && row.host === host)
-        .map((row) => [auditFlagKey(row), row.ack]),
+        .filter((row) => (row.ack || row.backlog) && row.job === job && row.host === host)
+        .map((row) => [auditFlagKey(row), row]),
     );
     for (const row of fresh) {
-      const ack = acks.get(auditFlagKey(row));
-      if (ack) row.ack = ack;
+      const was = prior.get(auditFlagKey(row));
+      if (was?.ack) row.ack = was.ack;
       else delete row.ack;
+      if (was?.backlog) row.backlog = was.backlog;
+      else delete row.backlog;
     }
     const next = auditFlagsKeep([...kept, ...fresh]);
     const saved = await env.BUCKET.put(
@@ -1873,6 +1876,48 @@ async function auditFlagsAck(request, env, principal) {
       onlyIf: new Headers({ "If-Match": prev.httpEtag }),
     });
     if (saved) return reply(JSON.stringify(index), 200, "application/json");
+  }
+  return reply("the red-flag index kept changing; try again", 503);
+}
+
+const AUDIT_FLAGS_BACKLOG = /^- \[ \] [\w-]+: \S[^\p{Cc}\u2028\u2029]*$/u;
+const AUDIT_FLAGS_BACKLOG_BODY =
+  'body must be {"backlog": "- [ ] <project>: <title>", "rows": [{time, job, host, agent, tool, target}, ...]} with 1 to 500 rows';
+
+// Stores a retro's backlog line on each listed row. Only a bound host may.
+async function auditFlagsBacklog(request, env, principal) {
+  if (!(await boundHost(env, principal)))
+    return reply("red-flag backlog links are written only by a bound host's service token", 403);
+  const body = await readJson(request, 256 << 10);
+  if (body instanceof Response) return body;
+  const fields = ["time", "job", "host", "agent", "tool", "target"];
+  const line = body?.backlog;
+  const rows = body?.rows;
+  if (
+    typeof line !== "string" ||
+    line.length > 240 ||
+    !AUDIT_FLAGS_BACKLOG.test(line) ||
+    !Array.isArray(rows) ||
+    rows.length < 1 ||
+    rows.length > AUDIT_FLAGS_MAX ||
+    !rows.every(
+      (row) => row && typeof row === "object" && fields.every((f) => typeof row[f] === "string"),
+    )
+  )
+    return reply(AUDIT_FLAGS_BACKLOG_BODY, 400);
+  const keys = new Set(rows.map(auditFlagKey));
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const prev = await env.BUCKET.get(AUDIT_FLAGS_KEY);
+    if (!prev) return reply(JSON.stringify({ linked: 0 }), 200, "application/json");
+    const index = JSON.parse(await prev.text());
+    const hits = index.rows.filter((r) => keys.has(auditFlagKey(r)));
+    if (!hits.length) return reply(JSON.stringify({ linked: 0 }), 200, "application/json");
+    for (const r of hits) r.backlog = line;
+    const saved = await env.BUCKET.put(AUDIT_FLAGS_KEY, JSON.stringify(index), {
+      ...JSON_TYPE,
+      onlyIf: new Headers({ "If-Match": prev.httpEtag }),
+    });
+    if (saved) return reply(JSON.stringify({ linked: hits.length }), 200, "application/json");
   }
   return reply("the red-flag index kept changing; try again", 503);
 }
@@ -2611,6 +2656,8 @@ async function api(request, env, path, principal, ctx) {
   if (AUDIT_FLAGS.test(path)) return method === "GET" ? auditFlagsGet(env) : notFound();
   if (AUDIT_FLAGS_ACK.test(path))
     return method === "POST" ? auditFlagsAck(request, env, principal) : notFound();
+  if (AUDIT_FLAGS_BACKLOG_PATH.test(path))
+    return method === "POST" ? auditFlagsBacklog(request, env, principal) : notFound();
   m = path.match(AUDIT_JOB);
   if (m) {
     if (method !== "GET" || !AUDIT_JOB_ID.test(m[1])) return notFound();

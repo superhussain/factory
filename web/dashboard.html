@@ -220,7 +220,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #audit-flags td a + a { margin-left: 8px; }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #audit-flags td:nth-child(8) { min-width: 14em; }
-  .audit-flag-actions { display: flex; flex-wrap: nowrap; gap: 8px; }
+  .audit-flag-actions { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 8px; }
+  .audit-flag-actions a { grid-column: 1 / -1; justify-self: start; padding: 6px 0; }
   #audit-flags td:last-child { white-space: nowrap; }
   #audit-flags tr.acked { color: var(--muted); }
   .audit-flags-pager { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
@@ -3280,6 +3281,11 @@ async function loadRetros() {
 const AUDIT_FLAGS_PAGE = 10;
 let auditFlags = null, auditFlagsFailed = false, auditFlagsPage = 0;
 
+async function auditFlagsKeyed(rows) {
+  for (const row of rows) if (typeof row.backlog === 'string') row.backlogKey = await sha12(row.backlog);
+  return rows;
+}
+
 async function loadAuditFlags() {
   auditFlagsPage = 0;
   renderAuditFlags();
@@ -3287,7 +3293,7 @@ async function loadAuditFlags() {
     const r = await fetch('./api/audit-flags', { cache: 'no-store' });
     if (r.status === 404) auditFlags = [];
     else if (r.status !== 200) throw new Error(String(r.status));
-    else auditFlags = (await r.json()).rows;
+    else auditFlags = await auditFlagsKeyed((await r.json()).rows);
     auditFlagsFailed = false;
   } catch { auditFlags = null; auditFlagsFailed = true; }
   renderAuditFlags();
@@ -3370,6 +3376,15 @@ function renderAuditFlags() {
       }));
       actions.append(idea);
     }
+    if (row.backlogKey) {
+      const link = document.createElement('a');
+      link.className = 'audit-flag-backlog';
+      link.href = '#/backlog/' + row.backlogKey;
+      link.textContent = 'Backlog decision';
+      link.title = row.backlog.slice(6);
+      link.setAttribute('aria-label', 'Open the backlog decision for the ' + summary);
+      actions.append(link);
+    }
     return tr;
   }));
   const prev = $('audit-flags-prev'), next = $('audit-flags-next');
@@ -3390,7 +3405,7 @@ async function auditFlagsAck(row, ack, button) {
       body: JSON.stringify({ row, ack }),
     });
     if (r.status !== 200) throw new Error(await r.text());
-    auditFlags = (await r.json()).rows;
+    auditFlags = await auditFlagsKeyed((await r.json()).rows);
     renderAuditFlags();
     const box = $('audit-flags-show-acked');
     (box.parentElement.parentElement.hidden ? $('audit-flags-wrap') : box).focus();
