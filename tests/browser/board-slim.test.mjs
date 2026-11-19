@@ -222,6 +222,7 @@ test("slim board read", { timeout: 240000 }, async (t) => {
       assert.equal(await text(page, ".col.merged .count-narrow"), "10 / 30");
       await page.evaluate(() => wantFullBoard());
       assert.equal(await page.evaluate(() => window.fullReadCount), 0);
+      await page.waitForFunction(() => typeof window.releaseSlim === "function", wait);
       await page.evaluate(() => window.releaseSlim());
       await waitForBoard(page);
       await page.waitForFunction(() => boardComplete === true, wait);
