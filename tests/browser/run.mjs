@@ -333,6 +333,7 @@ const CAPTURE_AUDIT_FLAGS = [
   flags,
   target,
   paseo: { server: "srv-a", agent: "agent-build" },
+  ...(flags[0] === "force-push" && { ack: "2026-11-11T09:00:00Z" }),
 }));
 // Settings > Hosts for the retros-flags views: the fixture list plus the capture host.
 const CAPTURE_HOSTS = JSON.parse(
@@ -1147,6 +1148,18 @@ async function capture(outdir, referencePath) {
         { timeout: 30000 },
       );
     };
+    // The reference page has no toast stack, so both sides crop the same bottom right corner.
+    const openToasts = async (page, side) => {
+      if (side === "after")
+        await page.evaluate(() => {
+          showNotifyToast("spec", "#073-sample-retry", "Synthetic retry limit", "073-sample-retry");
+          showNotifyToast("backlog", "#/backlog/0123456789ab", "Synthetic backlog idea", "sample");
+        });
+      return page.evaluate(() => {
+        const width = Math.min(innerWidth, 380);
+        return { x: innerWidth - width, y: innerHeight - 220, width, height: 220 };
+      });
+    };
     notifyBoard = true;
     try {
       await view("notifications-menu-1280", 1280, 900, "light", openNotificationsMenu("click"));
@@ -1163,6 +1176,8 @@ async function capture(outdir, referencePath) {
       );
       await view("inbox-split-900", 900, 900, "light", openInboxSplit);
       await view("inbox-split-1280", 1280, 900, "light", openInboxSplit);
+      await view("notify-toast-1280", 1280, 900, "light", openToasts);
+      await view("notify-toast-390", 390, 844, "dark", openToasts);
     } finally {
       notifyBoard = false;
     }
@@ -1411,6 +1426,12 @@ async function capture(outdir, referencePath) {
     };
     await view("notify-settings-desktop", 1280, 900, "light", openNotificationSettings);
     await view("notify-settings-mobile", 390, 844, "light", openNotificationSettings, true);
+    await view("notify-alerts-390", 390, 844, "light", async (page) => {
+      await openNotificationSettings(page);
+      await page.evaluate(() =>
+        document.querySelector("#alert-heading, #sound-heading").scrollIntoView({ block: "start" }),
+      );
+    });
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
@@ -1669,15 +1690,27 @@ async function capture(outdir, referencePath) {
       });
       if (side === "after") {
         await page.waitForSelector("#audit-flags-rows tr");
-        await page.evaluate(() =>
-          document.getElementById("audit-flags-pager").scrollIntoView({ block: "end" }),
-        );
+        await page.evaluate(() => {
+          if (innerWidth > 600)
+            return document
+              .getElementById("audit-flags-heading")
+              .scrollIntoView({ block: "start" });
+          document.getElementById("audit-flags-pager").scrollIntoView({ block: "end" });
+          const wrap = document.getElementById("audit-flags-wrap");
+          wrap.scrollLeft = wrap.scrollWidth;
+        });
       }
     };
     flagsHosts = true;
     try {
       await view("retros-flags-desktop", 1440, 900, "light", openRetrosFlags);
       await view("retros-flags-mobile", 390, 844, "dark", openRetrosFlags);
+      await view("retros-flags-idea-desktop", 1440, 900, "light", async (page, side) => {
+        await openRetrosFlags(page, side);
+        if (side !== "after") return;
+        await page.click("#audit-flags-rows .btn + .btn");
+        await page.waitForSelector("#idea-dlg[open]");
+      });
     } finally {
       flagsHosts = false;
     }

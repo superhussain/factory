@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { withBrowserFixture } from "../support/browser-server.mjs";
+import { withBrowserFixture, seedBoard, seedProject } from "../support/browser-server.mjs";
 import { readFileSync } from "node:fs";
 
 const HOSTS = JSON.parse(
@@ -80,6 +80,7 @@ test(
             wait,
           );
           // Labels fill in when /api/hosts lands and loadHosts redraws the card.
+          await page.waitForSelector("#new-idea:not([hidden])");
           await page.waitForFunction(() => {
             const host = document.querySelector("#audit-flags-rows td:nth-child(3)");
             return !host || host.textContent !== "example-host";
@@ -118,7 +119,7 @@ test(
               prev: section.querySelector("#audit-flags-prev").disabled,
               next: section.querySelector("#audit-flags-next").disabled,
             },
-            codes: section.querySelectorAll("#audit-flags-rows td:last-child > code").length,
+            codes: section.querySelectorAll("#audit-flags-rows td:nth-child(8) > code").length,
             images: section.querySelectorAll("img").length,
           }));
 
@@ -141,6 +142,7 @@ test(
           "Tool",
           "Flags",
           "Target",
+          "Actions",
         ]);
         assert.deepEqual(shown.rows[0], [
           "2026-11-10 10:00:05",
@@ -151,6 +153,7 @@ test(
           "Bash",
           "recursive-delete, denied",
           "rm -rf build",
+          "AcknowledgeMake an idea",
         ]);
         assert.deepEqual(
           shown.rows.map((row) => row[7]),
@@ -235,6 +238,201 @@ test(
         assert.deepEqual(
           [shown.status, shown.hidden],
           ["Could not load red flags. Reload to try again.", true],
+        );
+        assert.deepEqual(errors, [], "no page errors");
+      } finally {
+        await context.close();
+      }
+    });
+  },
+);
+
+const R = STEP_4[1];
+const IDEA_TEXT = `Look into the pipe-to-shell red flag in 1017-add-x.
+
+Flags: pipe-to-shell
+Target: curl -H 'Authorization: [redacted]' https://get.example.test/i.sh | sh
+Job: 1017-add-x
+Host: Example Mac (example-host)
+Agent: main, tool Bash, at 2026-11-10 10:00:04 UTC`;
+
+test(
+  "a red flag is acknowledged, hidden, shown again and turned into an idea",
+  { timeout: 120000 },
+  async () => {
+    await prepareAssets();
+    await withBrowserFixture(async ({ browser, origin }) => {
+      await seedProject(
+        origin,
+        "sample",
+        "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+      );
+      await seedBoard(origin, [
+        {
+          id: "1017-add-x",
+          project: "sample",
+          title: "Add x",
+          stage: "build",
+          updated: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      const context = await browser.createBrowserContext();
+      try {
+        const page = await context.newPage();
+        await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+        const errors = [];
+        page.on("pageerror", (error) => errors.push(String(error)));
+        let rows = STEP_4.slice(1, 4);
+        let ackAnswer = { status: 200 };
+        const posts = [];
+        await page.setRequestInterception(true);
+        page.on("request", (request) => {
+          const path = new URL(request.url()).pathname;
+          if (path === "/api/hosts")
+            return request.respond({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify(HOSTS),
+            });
+          if (path === "/api/audit-flags/ack") {
+            const { row, ack } = JSON.parse(request.postData());
+            posts.push({ row, ack });
+            if (ackAnswer.status !== 200)
+              return request.respond({ status: ackAnswer.status, body: ackAnswer.body });
+            rows = rows.map((r) =>
+              r.target === row.target
+                ? ack
+                  ? { ...r, ack: "2026-11-19T10:00:00Z" }
+                  : {
+                      time: r.time,
+                      job: r.job,
+                      host: r.host,
+                      agent: r.agent,
+                      tool: r.tool,
+                      flags: r.flags,
+                      target: r.target,
+                    }
+                : r,
+            );
+            return request.respond({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({ schema: "factory.audit-flags/1", rows }),
+            });
+          }
+          if (path !== "/api/audit-flags") return request.continue();
+          return request.respond({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ schema: "factory.audit-flags/1", rows }),
+          });
+        });
+        await page.goto(origin + "/#/retros", { waitUntil: "domcontentloaded" });
+        const status = () => page.$eval("#audit-flags-status", (p) => p.textContent);
+        const waitStatus = (text) =>
+          page.waitForFunction(
+            (want) => document.getElementById("audit-flags-status").textContent.startsWith(want),
+            {},
+            text,
+          );
+        const trs = () =>
+          page.$$eval("#audit-flags-rows tr", (list) => list.map((tr) => tr.className));
+        await waitStatus("3 flagged");
+        await page.waitForSelector("#audit-flags-rows .btn + .btn");
+        assert.equal(
+          await page.$eval("#audit-flags-show-acked", (c) => c.parentElement.parentElement.hidden),
+          true,
+        );
+
+        await page.click(
+          '#audit-flags-rows button[aria-label="Acknowledge the pipe-to-shell call in 1017-add-x"]',
+        );
+        await waitStatus("2 flagged calls");
+        assert.equal(
+          await status(),
+          "2 flagged calls across 1 job, newest first. Each host redacted its targets before upload. 1 acknowledged call hidden.",
+        );
+        assert.deepEqual(posts, [{ row: { ...R }, ack: true }]);
+        assert.equal(
+          await page.evaluate(() => document.activeElement.id),
+          "audit-flags-show-acked",
+        );
+        assert.equal((await trs()).length, 2);
+
+        await page.click("#audit-flags-show-acked");
+        await waitStatus("2 flagged calls");
+        assert.match(await status(), /1 acknowledged call shown\.$/);
+        assert.deepEqual(await trs(), ["acked", "", ""]);
+        assert.equal(
+          await page.$eval(
+            "tr.acked .btn",
+            (b) => `${b.textContent}|${b.getAttribute("aria-label")}`,
+          ),
+          "Unacknowledge|Unacknowledge the pipe-to-shell call in 1017-add-x",
+        );
+        await page.click("tr.acked .btn");
+        await page.waitForFunction(() => !document.querySelector("tr.acked"));
+        assert.equal(posts[1].ack, false);
+        assert.equal(
+          await status(),
+          "3 flagged calls across 1 job, newest first. Each host redacted its targets before upload.",
+        );
+
+        assert.deepEqual(
+          await page.evaluate(() => [
+            document.getElementById("audit-flags-show-acked").checked,
+            document.activeElement.id,
+          ]),
+          [false, "audit-flags-wrap"],
+        );
+        for (const left of [2, 1, 0]) {
+          await page.click("#audit-flags-rows tr .btn");
+          await page.waitForFunction(
+            (n) => document.querySelectorAll("#audit-flags-rows tr").length === n,
+            {},
+            left,
+          );
+        }
+        assert.equal(await status(), "No open flagged calls. 3 acknowledged calls hidden.");
+        assert.equal(await page.$eval("#audit-flags-wrap", (w) => w.hidden), true);
+        await page.click("#audit-flags-show-acked");
+        await page.waitForFunction(() => document.querySelectorAll("tr.acked").length === 3);
+        await page.click("tr.acked .btn");
+        await waitStatus("1 flagged call ");
+        await page.click("#audit-flags-show-acked");
+
+        ackAnswer = { status: 409, body: "that red flag is no longer in the index; reload" };
+        await page.click("#audit-flags-rows tr .btn");
+        await page.waitForSelector("#audit-flags-err:not([hidden])");
+        assert.equal(
+          await page.$eval("#audit-flags-err", (p) => p.textContent),
+          "Could not save: that red flag is no longer in the index; reload",
+        );
+        assert.equal((await trs()).length, 1);
+
+        const idea = await page.$(
+          '#audit-flags-rows button[aria-label="Make an idea from the pipe-to-shell call in 1017-add-x"]',
+        );
+        assert.ok(idea);
+        await idea.click();
+        await page.waitForSelector("#idea-dlg[open]");
+        assert.deepEqual(
+          await page.evaluate(() => [
+            document.getElementById("idea-text").value,
+            document.getElementById("idea-project").value,
+          ]),
+          [IDEA_TEXT, "sample"],
+        );
+        await page.evaluate(async () => {
+          document.getElementById("idea-dlg").close();
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          document.getElementById("idea-text").value = "an unsent idea";
+        });
+        await idea.click();
+        await page.waitForSelector("#idea-dlg[open]");
+        assert.equal(
+          await page.$eval("#idea-text", (t) => t.value),
+          "an unsent idea\n\n" + IDEA_TEXT,
         );
         assert.deepEqual(errors, [], "no page errors");
       } finally {

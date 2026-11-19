@@ -1,6 +1,7 @@
 # `/factory retro [--days N]`
 
 Turns every host's pushed session digests for the last N days (default 7, at most 30)
+and the unacknowledged red flags (`red_flags` in `aggregate.json`)
 into a ranked `findings.md`, up to 5 backlog lines that wait for a person, and up to 2
 stage-note edits that retro admit saves as restorable pipeline versions.
 

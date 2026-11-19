@@ -59,7 +59,7 @@ new idea with a `follow-up-of` ref to the open job. `build` is set only on merge
 device build. Jobs whose `runs` match rode the same build. Both are optional, and
 `factory.py` rejects a malformed one.
 `pipeline` holds the pipeline configuration versions the job last ran under, from
-`factory.py pipeline`. `factory.py` rejects a malformed one.
+`factory.py pipeline <slug> --board`. `factory.py` rejects a malformed one.
 `not_before` holds a job back from pickup, `ideas` and `stuck` until that UTC time, and the job
 does not count toward `max_inflight`. `{"not_before": null}` clears it, and a past time has no
 effect. Setting it on an open job releases the writer's own claim, so a session parks a job with

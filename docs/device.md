@@ -212,7 +212,7 @@ tag is the UTC time plus 6 random hex digits. It writes `digest.jsonl`, the rows
 and `aggregate.json`: token sums, context medians, error, denial and command
 patterns with counts and up to 5 `host/session` refs, the registered
 projects, and `merged`: up to 100 board jobs of registered projects merged in the
-window, each with `id`, `project`, `title` and `merged` time, newest first. Every ad-hoc row's `project` becomes `ad-hoc` in both files, so neither
+window, each with `id`, `project`, `title` and `merged` time, newest first. It also writes `red_flags`: each row of the red-flag index without an `ack` whose job is a board job of a registered project, newest first, as `{time, job, project, host, agent, tool, flags, target, sessions}`. `sessions` lists up to 5 digest `host/session` refs of that job on that host. A Worker that answers 404 gives `[]`. Every ad-hoc row's `project` becomes `ad-hoc` in both files, so neither
 names that work. Lines that are not digest rows count as `skipped`. So do rows
 whose `host` is not the host that pushed them or whose `session` is not a
 transcript id. It prints the run, the file paths, this host's transcripts root, and
