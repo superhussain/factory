@@ -36,6 +36,14 @@ class BoardIdTest(IsolatedTestCase):
     def ids(self):
         return [j["id"] for j in json.loads(self.text)["jobs"]]
 
+    def test_refuses_empty_stdin(self):
+        for body in ("", "  \n"):
+            with self.subTest(body=body):
+                self.assertEqual(self.patch_board("412-fix-login", body), (2, "", (
+                    "factory.py: usage: board <factory-home> <job-id> with a JSON object on stdin. "
+                    "stdin was empty, so nothing was written.\n")))
+        self.assertEqual(self.puts, 0)
+
     def test_refuses_a_malformed_new_id(self):
         for job_id in ("412-fix-login 413-add-export", "fix-login", "412", "412-", "-fix", "412-Fix",
                        "412_fix", "412-fix_login", "412--fix", "412-fix-", "412-fix\n", "４１２-fix", ""):
