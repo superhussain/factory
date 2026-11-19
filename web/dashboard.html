@@ -1660,6 +1660,7 @@ function paseoLinksFor(p) {
 // Framed by a listed Paseo origin, app links go to the parent instead of the OS handler.
 const EMBED_ORIGINS = Array.isArray(factoryConfig.embed_origins) ? factoryConfig.embed_origins : [];
 let embedParent = null;
+let embedLinksExternal = false;
 // Opened as a sign-in popup by a listed Paseo origin: say sign-in finished.
 // Chrome throws on a non-http target such as paseo://app, so each origin is tried alone.
 if (window.opener && window.parent === window) for (const o of EMBED_ORIGINS) try { window.opener.postMessage({ type: 'factory-embed-signed-in', v: 1 }, o); } catch {}
@@ -1690,7 +1691,6 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   window.parent.postMessage({ type: 'factory-open-agent', v: 1, ...ids }, embedParent);
 }, true);
-let embedLinksExternal = false;
 // In Paseo desktop, a link that would open a new window goes to the system browser instead.
 function openOutside(e) {
   if (!embedParent || !embedLinksExternal || e.defaultPrevented) return;

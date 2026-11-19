@@ -238,7 +238,7 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       });
       const target = ext
         .browserContext()
-        .waitForTarget((x) => x.url().includes("docs.example.test"), 2000)
+        .waitForTarget((x) => x.url().includes("docs.example.test"), { timeout: 2000 })
         .catch(() => null);
       await frame.evaluate(() => document.querySelector("#synthetic-out").click());
       await ext.waitForFunction(() => window.received.some((m) => m?.type === "factory-open-url"), {
@@ -279,7 +279,7 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       });
       const target = page
         .browserContext()
-        .waitForTarget((x) => x.url().includes("docs.example.test"), 5000);
+        .waitForTarget((x) => x.url().includes("docs.example.test"), { timeout: 5000 });
       await frame.evaluate(() => document.querySelector("#synthetic-out").click());
       assert.ok(await target);
       assert.equal(
