@@ -542,7 +542,7 @@ def load_board(text):
 
 
 def dump_board(data):
-    return json.dumps(data, indent=2) + "\n"
+    return json.dumps(data, separators=(",", ":")) + "\n"
 
 
 def patch_job(data, job_id, patch):

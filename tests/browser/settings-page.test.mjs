@@ -336,6 +336,43 @@ test("settings page", { timeout: 180000 }, async (t) => {
       );
     });
 
+    await t.test("settings S13 a drawer keeps the page beside it", async () => {
+      const split = await (await browser.createBrowserContext()).newPage();
+      await split.setViewport({ width: 1280, height: 900 });
+      const splitErrors = [];
+      split.on("pageerror", (error) => splitErrors.push(String(error)));
+      await split.goto(origin + "/#/settings/display", { waitUntil: "domcontentloaded" });
+      await split.waitForSelector("#settings-display:not([hidden])", wait);
+      await split.waitForSelector(".card", wait);
+      // Like a bell menu or toast link, which sets the job hash from outside the page.
+      await split.evaluate(() => {
+        location.hash = "#001-sample";
+      });
+      await split.waitForSelector("#detail:not([hidden])", wait);
+      assert.deepEqual(
+        await split.evaluate(() => {
+          const section = document.getElementById("settings-display").getBoundingClientRect();
+          const drawer = document.getElementById("detail").getBoundingClientRect();
+          return {
+            view: document.body.dataset.view,
+            split: document.body.hasAttribute("data-settings-split"),
+            sideBySide: section.width > 0 && drawer.width > 0 && section.right <= drawer.left,
+            columns: getComputedStyle(
+              document.querySelector(".settings-layout"),
+            ).gridTemplateColumns.split(" ").length,
+            focus: document.activeElement.id,
+          };
+        }),
+        { view: "settings", split: true, sideBySide: true, columns: 1, focus: "d-close" },
+      );
+      await split.click("#d-close");
+      await split.waitForSelector("#detail[hidden]", wait);
+      assert.equal(await split.evaluate(() => location.hash), "#/settings/display");
+      assert.equal(await split.evaluate(() => document.activeElement.id), "settings-nav-display");
+      assert.deepEqual(splitErrors, []);
+      await split.browserContext().close();
+    });
+
     assert.deepEqual(errors, []);
   });
 });

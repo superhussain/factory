@@ -9,7 +9,7 @@ import {
   HOST_NAME,
   validatePipeline,
 } from "./admission.js";
-import { ARCHIVE_KEY, archiveGet, needsTriageKey, runArchive } from "./archive.js";
+import { ARCHIVE_KEY, archiveGet, needsTriageKey, runArchive, slimBoard } from "./archive.js";
 import {
   DASHBOARD_VERSION,
   escapeHtml,
@@ -104,7 +104,7 @@ const AUDIT_FLAGS_BACKLOG_PATH = /^\/api\/audit-flags\/backlog$/;
 // Retro runs: one factory.retro-run/1 record per admitted run, and the newest 30 listed.
 const RETROS = /^\/api\/retros(?:\/([A-Za-z0-9_-]{1,64}))?$/;
 // board.json holds every job, merged ones included, so it outgrows the per-file cap.
-const MAX_BOARD = 4 << 20;
+const MAX_BOARD = 16 << 20;
 const MAX_IMAGE = 5 << 20;
 // The server picks the type from the extension and never trusts a client header.
 const IMAGE_TYPES = {
@@ -286,6 +286,28 @@ async function getFile(env, key, type, headers = {}) {
   return obj ? reply(obj.body, 200, type, { ETag: obj.httpEtag, ...headers }) : notFound();
 }
 
+// The last slim body and the board ETag it came from, so this isolate slices each board version once.
+let slimMemo = { etag: "", body: "" };
+
+// The dashboard's first read. A board that is not JSON with a jobs array goes out as stored.
+async function slimBoardGet(env) {
+  const head = await env.BUCKET.head("board.json");
+  if (!head) return notFound();
+  const send = (body, etag) =>
+    reply(body, 200, "application/json", { ETag: etag, "X-Factory-Version": DASHBOARD_VERSION });
+  if (slimMemo.etag === head.httpEtag) return send(slimMemo.body, head.httpEtag);
+  const obj = await env.BUCKET.get("board.json");
+  if (!obj) return notFound();
+  const text = await obj.text();
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch {}
+  if (!Array.isArray(data?.jobs)) return send(text, obj.httpEtag);
+  slimMemo = { etag: obj.httpEtag, body: JSON.stringify(slimBoard(data)) };
+  return send(slimMemo.body, obj.httpEtag);
+}
+
 // MP4 and WebM play inline. Their names are content addresses, so a range never goes stale.
 const VIDEO_HEADERS = (name) => ({
   "Content-Disposition": `inline; filename="${name}"`,
@@ -417,7 +439,7 @@ async function casPut(request, env, key, type, ctx) {
   const cond = condition(request);
   if (!cond) return needsCondition();
   const body = await readBody(request, MAX_BOARD);
-  if (body === null) return reply("body over 4 MiB", 413);
+  if (body === null) return reply("body over 16 MiB", 413);
   let data, stored;
   if (key === "board.json") {
     try {
@@ -2833,9 +2855,11 @@ export async function serveFactory(request, env, principal, ctx) {
     return reply(null, 302, "text/plain", { Location: "/" + new URL(request.url).search });
   if (path.startsWith("/assets/") || path === "/sw.js") return serveAsset(request, env.config);
   if (path === "/board.json")
-    return getFile(env, "board.json", "application/json", {
-      "X-Factory-Version": DASHBOARD_VERSION,
-    });
+    return new URL(request.url).searchParams.get("view") === "slim"
+      ? slimBoardGet(env)
+      : getFile(env, "board.json", "application/json", {
+          "X-Factory-Version": DASHBOARD_VERSION,
+        });
   if (path === "/projects.json") return projects(env);
   if (JOB_FILE.test(path)) return getJobFile(request, env, principal, path.slice(1));
   return notFound();

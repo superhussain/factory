@@ -144,14 +144,14 @@ records matched before and after views. Each `view(...)` line in
 
 | Viewport | Used by |
 | --- | --- |
-| 1440x900 | desktop views, `retros-flags-offline-desktop`, `header-badges-1440` |
-| 1280x900 | settings, archive and agent-run views, `notify-toast-1280`, `notifications-menu-kinds-1280`, `notifications-split-1280`, `notifications-page-hidden-links-1280` |
-| 390x844 | mobile views, `notify-toast-390` and `notify-alerts-390` |
+| 1440x900 | desktop views, `retros-flags-offline-desktop`, `board-merged-all-1440`, `board-merged-header-1440`, `board-merged-loading-1440`, `board-merged-160-1763`, `board-merged-160-1763-loading`, `header-badges-1440` |
+| 1280x900 | settings, archive and agent-run views, `notify-toast-1280`, `notifications-menu-kinds-1280`, `notifications-split-1280`, `notifications-page-hidden-links-1280`, `retros-split-1280`, `settings-split-1280` |
+| 390x844 | mobile views, `notify-toast-390`, `notify-alerts-390` and `board-merged-header-390` |
 | 375x667 | `drawer-mobile-scrolled` |
 | 320x844 | `header-notifications-320` |
 | 900x900 | `inbox-split-900` |
 
-- Board data is the fixed `CAPTURE_JOBS` and `CAPTURE_BACKLOG` fixtures.
+- Board data is the fixed `CAPTURE_JOBS`, `CAPTURE_MERGED` and `CAPTURE_BACKLOG` fixtures.
 - `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
 - A spec that needs another size or state adds a task for a new `view(...)` line.
 

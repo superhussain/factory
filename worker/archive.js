@@ -53,6 +53,33 @@ export function planArchive(jobs, setting, now, tracerOff = false) {
   );
 }
 
+export const SLIM_RECENT = 10;
+
+/** The board with every unfinished row, the newest finished rows of each stage by `updated`, and per-project finished counts. */
+export function slimBoard(data) {
+  const counts = Object.create(null);
+  const finished = { merged: [], closed: [] };
+  // The dashboard counts each id once per stage, so a duplicate row cannot leave it short forever.
+  const counted = { merged: new Set(), closed: new Set() };
+  for (const job of data.jobs) {
+    if (!terminal(job)) continue;
+    finished[job.stage].push(job);
+    if (counted[job.stage].has(job.id)) continue;
+    counted[job.stage].add(job.id);
+    const project = typeof job.project === "string" ? job.project : "";
+    counts[project] ??= { merged: 0, closed: 0 };
+    counts[project][job.stage] += 1;
+  }
+  const at = (job) => Date.parse(job.updated) || 0;
+  const recent = new Set(
+    Object.values(finished).flatMap((rows) =>
+      rows.sort((a, b) => at(b) - at(a)).slice(0, SLIM_RECENT),
+    ),
+  );
+  const jobs = data.jobs.filter((job) => !terminal(job) || recent.has(job));
+  return { ...data, jobs, slim: { recent: SLIM_RECENT, counts } };
+}
+
 /** Archive rows not back on the board plus the moved rows, newest finished first. */
 export function mergeArchive(archiveJobs, moved, boardIds) {
   return [...archiveJobs.filter((j) => !boardIds.has(j?.id)), ...moved].sort(newestFirst);
@@ -128,7 +155,7 @@ export async function runArchive(env, now) {
     jobs: jobs.filter((j) => !ids.has(j.id)),
     archived: nextArchived(board.data.archived, moved),
   };
-  const written = await env.BUCKET.put("board.json", JSON.stringify(next, null, 2) + "\n", {
+  const written = await env.BUCKET.put("board.json", JSON.stringify(next) + "\n", {
     onlyIf: new Headers({ "If-Match": board.etag }),
     httpMetadata: { contentType: "application/json" },
   });

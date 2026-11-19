@@ -16,6 +16,8 @@ vm.runInNewContext(
     "let docDir = null, docBase = null, docRepo = 'example/web';",
     "let jobs = [{ id: '175-sample-dates' }, { id: '133-a' }, { id: '133-b' }];",
     "const factoryConfig = { image_origins: ['https://x.example.test'], jira_origin: 'https://jira.example.test' };",
+    "let boardComplete = true;",
+    slice("function knownJobId(", "let boardReadVersion"),
     slice("function esc(", "function ago("),
     slice("const JOB_IMG", "// Board writes."),
     "globalThis.md = md;",

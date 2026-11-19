@@ -68,7 +68,7 @@ migration or reset; installing or deploying never rewrites existing state.
 
 The Worker preserves the v1 wire and storage contracts: exact routes, status
 codes, bodies, header order, validation order and limits. Text resources are
-capped at 1 MiB (board and backlog at 4 MiB), images at 5 MiB (declared-length and streamed), idea files at 10 MiB (PDF), 1 MiB (CSV, text) and 25 MiB (MP4, WebM), image envelopes
+capped at 1 MiB (board and backlog at 16 MiB), images at 5 MiB (declared-length and streamed), idea files at 10 MiB (PDF), 1 MiB (CSV, text) and 25 MiB (MP4, WebM), image envelopes
 at 4096 pixels per side and 16,000,000 pixels. MP4 and WebM idea files play inline: their GET answers one byte range with 206, or 416 past the end. Storage keys, `httpEtag` handling,
 quoted ETags, uppercase weak `W/` normalization, 412 on null conditional puts,
 original-byte hashes, no CORS headers, no delete endpoint and no pagination
@@ -285,7 +285,7 @@ sequenceDiagram
   W->>R: POST notify?key=board.json
   R-->>B: {"type":"changed","key":"board.json"}
   W-->>D: 200 ETag (unchanged)
-  B->>W: GET /board.json
+  B->>W: GET /board.json?view=slim
 ```
 
 - `casPut` announces only a committed write. A 412 announces nothing, and a
@@ -300,6 +300,12 @@ sequenceDiagram
   re-reads only its key, once within 2 seconds of the first frame however many frames arrive; a frame during that read adds one more read.
 - A socket open or a poll timer tick re-reads `board.json` but redraws only when its `ETag` changed, so a focused card is not read again. A tick still reopens the job when the link names a tab or archived job that has not loaded.
   The header dot is solid while live and a ring while polling.
+- The dashboard reads `GET /board.json?view=slim` (`slimBoard` in `worker/archive.js`): every
+  unfinished row, the 10 newest rows of each finished stage and `slim.counts`, the finished
+  rows per project and stage, under the stored `ETag`. Finished column headers then say
+  `showing 10 of N`. Once a view needs older rows (show all, the jumper, a link to an older
+  job, another route, the starred-only view) it reads `/api/board` once and keeps those rows.
+  `/board.json` without the query still returns the stored bytes.
 
 | Request to `/events/board` | Result |
 | --- | --- |

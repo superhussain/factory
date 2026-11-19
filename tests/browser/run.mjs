@@ -250,6 +250,19 @@ const CAPTURE_JOBS = [
     updated: "2026-01-01T12:00:00Z",
   },
 ];
+// More merged rows than the slim board read carries, so the merged column loads the rest on demand.
+const CAPTURE_MERGED = Array.from({ length: 30 }, (_, n) => {
+  const at = new Date(Date.UTC(2026, 0, 1) + n * 3600000).toISOString();
+  return {
+    id: `${500 + n}-synthetic-merged`,
+    project: "sample",
+    title: `Synthetic merged ${500 + n}`,
+    stage: "merged",
+    updated: at,
+    done: at,
+  };
+});
+const CAPTURE_BOARD = [...CAPTURE_JOBS, ...CAPTURE_MERGED];
 const CAPTURE_BACKLOG_CONTEXT = [
   "Recommend: approve",
   "",
@@ -433,7 +446,7 @@ async function capture(outdir, referencePath) {
     await put(
       origin,
       "/api/board",
-      JSON.stringify({ updated: "2026-01-01T12:00:00Z", jobs: CAPTURE_JOBS }),
+      JSON.stringify({ updated: "2026-01-01T12:00:00Z", jobs: CAPTURE_BOARD }),
       "application/json",
     );
     await put(origin, "/api/backlog", CAPTURE_BACKLOG, "text/markdown");
@@ -1078,6 +1091,69 @@ async function capture(outdir, referencePath) {
     await view("board-desktop", 1440, 900, "light", async () => {});
     await view("board-desktop-dark", 1440, 900, "dark", async () => {});
     await view("board-mobile", 390, 844, "dark", async () => {});
+    const expandMerged = (page) =>
+      page.evaluate(() => document.querySelector('.column-toggle[data-stage="merged"]').click());
+    const mergedHeader = async (page) => {
+      await expandMerged(page);
+      return clipOf(page, ".col.merged h2");
+    };
+    // At 1440 the clip takes in the pr-open column too, so card tops can be compared.
+    const mergedBeside = async (page) => {
+      await expandMerged(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    };
+    await view("board-merged-header-1440", 1440, 900, "light", mergedBeside);
+    await view("board-merged-header-390", 390, 844, "dark", mergedHeader);
+    // The full read never answers, so the button stays in its loading state.
+    const holdFullRead = (page) =>
+      page.evaluate(() => {
+        const fetchNow = window.fetch;
+        window.fetch = (url, options) =>
+          String(url).endsWith("api/board") && !options?.method
+            ? new Promise(() => {})
+            : fetchNow(url, options);
+      });
+    const clickMore = (page) =>
+      page.evaluate(() => document.querySelector('.more[data-stage="merged"]').click());
+    await view("board-merged-loading-1440", 1440, 900, "light", async (page) => {
+      await holdFullRead(page);
+      await expandMerged(page);
+      await clickMore(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    });
+    // The merged column at 160px with a production-sized total. The reference page has no
+    // slim counts, so its before shot keeps the fixture's own total.
+    const narrowThousands = async (page) => {
+      await holdFullRead(page);
+      await expandMerged(page);
+      await page.evaluate(() => {
+        const style = document.createElement("style");
+        style.textContent = ".col.merged { width: 160px; max-width: 160px; }";
+        document.head.append(style);
+        if (typeof slimCounts !== "undefined") {
+          slimCounts.sample.merged = 1763;
+          renderBoard();
+        }
+      });
+    };
+    await view("board-merged-160-1763", 1440, 900, "light", async (page) => {
+      await narrowThousands(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    });
+    await view("board-merged-160-1763-loading", 1440, 900, "light", async (page) => {
+      await narrowThousands(page);
+      await clickMore(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    });
+    await view("board-merged-all-1440", 1440, 900, "light", async (page) => {
+      await expandMerged(page);
+      await page.evaluate(() => document.querySelector('.more[data-stage="merged"]').click());
+      await page.waitForFunction(
+        (n) => document.querySelectorAll(".col.merged .card").length === n,
+        {},
+        CAPTURE_BOARD.filter((j) => j.stage === "merged").length,
+      );
+    });
     await view("header-inbox-dark-390", 390, 844, "dark", (page) => clipOf(page, "header"));
     await view("header-inbox-dark-1440", 1440, 900, "dark", (page) => clipOf(page, "header"));
     retrosBadge = true;
@@ -1154,17 +1230,15 @@ async function capture(outdir, referencePath) {
     } finally {
       refBoard = false;
     }
-    // The reference page has no bell or notifications route, so its menu and page views show the board.
-    const openNotificationsMenu = (press) => async (page, side) => {
-      if (side === "before") return;
+    const openNotificationsMenu = (press) => async (page) => {
       await page[press]("#notifications-button");
       await page.waitForSelector("#notifications-menu-list .notification-link");
     };
-    const openNotificationsPage = async (page, side) => {
+    const openNotificationsPage = async (page) => {
       await page.evaluate(() => {
         location.hash = "#/notifications";
       });
-      if (side === "after") await page.waitForSelector("#notifications-list .inbox-item");
+      await page.waitForSelector("#notifications-list .inbox-item");
     };
     const openInboxSplit = async (page) => {
       await page.evaluate(() => {
@@ -1192,11 +1266,11 @@ async function capture(outdir, referencePath) {
         { timeout: 30000 },
       );
     };
-    const openNotificationsHiddenLinks = async (page, side) => {
+    const openNotificationsHiddenLinks = async (page) => {
       await page.evaluate(() => localStorage.setItem("factory-hidden-drawer-links", "web"));
       await page.reload({ waitUntil: "networkidle0" });
       await page.waitForSelector(".card");
-      await openNotificationsPage(page, side);
+      await openNotificationsPage(page);
     };
     // The reference page has no toast stack, so both sides crop the same bottom right corner.
     const openToasts = async (page, side) => {
@@ -1809,6 +1883,41 @@ async function capture(outdir, referencePath) {
       flagsHosts = false;
       flagsAckAbort = false;
     }
+    // A drawer opened from Retros or Settings keeps that page beside it.
+    const openDrawerFrom = (hash, open) => async (page) => {
+      await page.evaluate((h) => {
+        location.hash = h;
+      }, hash);
+      await open(page);
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#d-meta")?.textContent.includes("001-capture") &&
+          document.querySelector("#d-doc").textContent !== "loading files",
+        { timeout: 30000 },
+      );
+    };
+    await view(
+      "retros-split-1280",
+      1280,
+      900,
+      "light",
+      openDrawerFrom("#/retros", async (page) => {
+        await page.waitForSelector('#audit-flags-rows a[href="#001-capture"]');
+        await page.click('#audit-flags-rows a[href="#001-capture"]');
+      }),
+    );
+    await view(
+      "settings-split-1280",
+      1280,
+      900,
+      "light",
+      openDrawerFrom("#/settings/display", async (page) => {
+        await page.waitForSelector("#settings-display:not([hidden])");
+        await page.evaluate(() => {
+          location.hash = "#001-capture";
+        });
+      }),
+    );
     // A phone drawer on an idea with two attached files, at rest and scrolled 40 px.
     const openIdeaFiles = async (page) => {
       await page.evaluate(() => {
@@ -2114,7 +2223,7 @@ async function capture(outdir, referencePath) {
         provenance: {
           reference: { path: referencePath, sha256: sha(reference) },
           candidate: { path: "web/dashboard.html", sha256: sha(candidate) },
-          board: { jobs: CAPTURE_JOBS.length, sha256: sha(JSON.stringify(CAPTURE_JOBS)) },
+          board: { jobs: CAPTURE_BOARD.length, sha256: sha(JSON.stringify(CAPTURE_BOARD)) },
           origin,
           viewport: ["1440x900", "1280x900", "390x844", "375x667"],
           themes: ["light", "dark"],

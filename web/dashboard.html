@@ -159,7 +159,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #pipeline-gates legend, #pipeline-pickup legend, #pipeline-triage legend, #pipeline-hold legend, #pipeline-archive legend, #pipeline-tracer legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   #pipeline-gates label { display: flex; gap: 8px; align-items: baseline; margin: 0; color: var(--fg); }
   a.btn { display: inline-block; text-decoration: none; }
-  a.btn[aria-current="page"] { border-color: var(--accent); }
+  a.btn[aria-current="page"], #notifications-button[aria-current="page"] { border-color: var(--accent); }
   /* Icon-only actions: aria-label names them, title shows the shortcut. #filter shares their height: 36px, 32px on phones, 44px on touch. */
   :root { --icon-size: 36px; }
   .btn.icon { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-size); height: var(--icon-size); padding: 0; }
@@ -175,7 +175,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .notifications-wrap { position: relative; display: flex; }
   .notifications-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; width: 360px; max-height: 70vh; overflow-y: auto; padding: 8px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .notifications-menu[hidden] { display: none; }
-  .notifications-menu-head { margin: 4px 8px 8px; font-size: 13px; font-weight: 600; }
+  .notifications-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 8px 8px; font-size: 13px; font-weight: 600; }
+  .notifications-menu-head .btn { font-weight: normal; }
   #notifications-menu-status { margin: 4px 8px 8px; }
   #notifications-menu-status:empty { display: none; }
   #notifications-menu-list, #notifications-list { list-style: none; margin: 0; padding: 0; }
@@ -183,8 +184,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .notification-link .inbox-title, .notification-link .inbox-meta { display: block; }
   .notification-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   @media (hover: hover) { .notification-link:hover { background: var(--line); } }
-  #notifications-more { display: block; padding: 10px 8px 4px; font-size: 13px; font-weight: 600; color: var(--accent); }
-  @media (pointer: coarse) { .notification-link, #notifications-more { min-height: 44px; box-sizing: border-box; } }
+  @media (pointer: coarse) { .notification-link { min-height: 44px; box-sizing: border-box; } #notifications-see-all { display: inline-flex; align-items: center; } }
   #notifications-page { max-width: 1040px; }
   .notifications-filters, .notifications-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .notifications-filters { margin: 0 0 12px; }
@@ -206,8 +206,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (hover: hover) { .filter-menu label:hover { background: var(--line); } }
   @media (pointer: coarse) { .filter-menu label { min-height: 44px; } .filter-menu .filter-title { white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; } }
   .header-actions { display: flex; gap: inherit; }
-  body[data-view="settings"] #board, body[data-view="settings"] #detail,
-  body[data-view="retros"] #board, body[data-view="retros"] #detail,
+  body[data-view="settings"] #board, body[data-view="settings"]:not([data-settings-split]) #detail,
+  body[data-view="retros"] #board, body[data-view="retros"]:not([data-retros-split]) #detail,
   body[data-view="inbox"] #board,
   body[data-view="notifications"] #board { display: none; }
   #retros-page { max-width: 1040px; }
@@ -239,12 +239,25 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   }
   .inbox-item[aria-current="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
   @media (min-width: 761px) {
-    body[data-inbox-split], body[data-notifications-split] { --split-drawer: min(var(--drawer-w, 760px), 100vw - 400px); }
-    body[data-inbox-split] .detail, body[data-notifications-split] .detail { width: var(--split-drawer); }
+    body[data-inbox-split], body[data-notifications-split], body[data-retros-split], body[data-settings-split] { --split-drawer: min(var(--drawer-w, 760px), 100vw - 400px); }
+    body[data-inbox-split] .detail, body[data-notifications-split] .detail, body[data-retros-split] .detail, body[data-settings-split] .detail { width: var(--split-drawer); }
     body[data-inbox-split] #inbox-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
     body[data-notifications-split] #notifications-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
     body[data-inbox-split] .inbox-item, body[data-notifications-split] .inbox-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; }
     body[data-inbox-split] .inbox-actions, body[data-notifications-split] .inbox-actions { grid-column: 2; justify-content: flex-start; margin-top: 8px; }
+    body[data-retros-split] #retros-page, body[data-settings-split] #settings-page { max-width: none; margin: 0 var(--split-drawer) 0 0; }
+    body[data-retros-split] .settings-section.retro-run { padding: 16px 14px 8px; }
+    body[data-retros-split] .retro-findings-head { display: none; }
+    body[data-retros-split] .retro-finding { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding: 12px 4px; }
+    body[data-retros-split] .retro-share, body[data-retros-split] .retro-cards, body[data-retros-split] .retro-why { grid-column: 2; }
+    body[data-retros-split] .retro-share { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    body[data-retros-split] .retro-share-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; margin-left: -4px; font-weight: 400; color: var(--muted); }
+    body[data-retros-split] .retro-share-bar { flex: none; width: 64px; margin-top: 0; }
+    body[data-retros-split] .retro-cards { margin-top: 8px; }
+    body[data-retros-split] .retro-why-body { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    body[data-settings-split] .settings-layout { grid-template-columns: 1fr; gap: 12px; }
+    body[data-settings-split] .settings-section:has(> .settings-main) { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    body[data-settings-split] .settings-nav { flex-direction: row; overflow-x: auto; }
   }
   #retros-list { display: grid; gap: 20px; }
   .settings-section.retro-run { padding: 20px 20px 12px; }
@@ -440,6 +453,22 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     padding: 6px 4px; display: flex; align-items: center; gap: 8px; flex: 1;
   }
   .column-toggle > span:first-child { margin-inline-end: auto; }
+  .col { container: col / inline-size; }
+  .count-wide { text-transform: none; }
+  .count-wide, .count-narrow { white-space: nowrap; }
+  /* A short finished column keeps its header on one line, so its cards line up with the next column's.
+     The stage name gives way first, down to 4ch; past that, show all drops to a second line. */
+  .col.partial-col .column-toggle { min-width: min-content; }
+  .col.partial-col .column-toggle > span:first-child {
+    contain: inline-size; flex: 1 1 0; min-width: 4ch; margin-inline-end: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start;
+  }
+  .count-narrow { display: none; }
+  @container col (max-width: 280px) {
+    .count-wide { display: none; }
+    .count-narrow { display: inline; }
+    .col.partial-col .column-toggle { gap: 4px; }
+  }
   .column-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
   .collapsed-col h2 { margin-bottom: 0; }
   .collapsed-col .column-toggle { writing-mode: vertical-rl; align-items: flex-start; height: auto; flex: none; width: 36px; }
@@ -452,7 +481,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .archive-head { margin: 4px 0 0; }
   .archive-count { font-size: 12px; color: var(--muted); margin: 0; }
   .archive-error { font-size: 12px; color: var(--alert); margin: 0; }
-  .archive-more[aria-disabled="true"] { opacity: .6; cursor: default; }
+  .more[aria-disabled="true"], .archive-more[aria-disabled="true"] { opacity: .6; cursor: default; }
   .blank { grid-column: 1 / -1; text-align: center; padding: 64px 16px; color: var(--muted); }
   .blank h2 { margin: 0 0 8px; font-size: 16px; color: var(--fg); }
   .blank p { margin: 4px 0; font-size: 13px; }
@@ -750,11 +779,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     <div class="notifications-wrap" id="notifications-wrap">
       <button class="btn icon" id="notifications-button" type="button" aria-label="Notifications" title="Notifications" aria-expanded="false" aria-controls="notifications-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.5 1.5h-11z"/><path d="M6.5 14a1.5 1.5 0 0 0 3 0"/></svg><span class="icon-count" id="notifications-count" aria-hidden="true" hidden></span></button>
       <div class="notifications-menu" id="notifications-menu" role="region" aria-label="Recent notifications" hidden>
-        <p class="notifications-menu-head">Notifications</p>
+        <div class="notifications-menu-head"><span>Notifications</span><a class="btn" id="notifications-see-all" href="#/notifications">See all</a></div>
         <p class="muted" id="notifications-menu-status" role="status"></p>
         <button type="button" class="btn" id="notifications-menu-retry" hidden>Retry</button>
         <ol id="notifications-menu-list"></ol>
-        <a id="notifications-more" href="#/notifications">See more</a>
       </div>
     </div>
     <a class="btn icon" id="retros-link" href="#/retros" aria-label="Retros" title="Retros (R)" aria-keyshortcuts="r"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2 2v2.6h2.6"/><path d="M8 5v3l2 1.5"/></svg><span class="icon-count" id="retros-count" aria-hidden="true" hidden></span></a>
@@ -1407,6 +1435,8 @@ let openId = null;
 let tracerOff = true;
 const TRACER_WAIT_MS = 3000;
 let tracerSettingRead = null;
+// True once the first pipeline read settles, so only the first board draw waits for it.
+let tracerSettingKnown = false;
 // The backlog line open in the drawer's decision page, or null. Never set together with openId.
 let openBacklogRaw = null;
 // '#/inbox' while the open drawer was opened from the inbox, so closing it goes back there.
@@ -1504,10 +1534,12 @@ window.addEventListener('offline', () => { setConnection('offline'); syncLive();
 window.addEventListener('online', async () => {
   syncLive(); schedulePoll();
   await loadProjects();
-  poll();
+  readBoard();
 });
 
 let loaded = false;
+// True while the board on screen is the saved copy, so a failed first network read still shows its banner.
+let boardFromCache = false;
 // Why the first board read failed while nothing has loaded: '', 'signin', 'offline' or 'unreachable'.
 let boardLoadError = '';
 // True while a Retry button's board read runs, so other redraws keep the Retrying… copy.
@@ -1518,7 +1550,7 @@ const BOARD_LOAD_ERRORS = {
   unreachable: "Can't reach the factory. Check your connection, then retry.",
 };
 function noteBoardLoadError(state) {
-  if (loaded) return;
+  if (loaded && !boardFromCache) return;
   boardLoadError = state;
   renderNotifications();
   renderInboxPage();
@@ -1535,6 +1567,66 @@ let boardArchived = false;
 let archiveSearch = null;
 // Pages of GET /api/board/archive?page=N, shown under the merged and closed columns.
 const archiveList = { open: false, rows: [], page: 0, pages: 0, total: 0, busy: false, error: '', errorStage: '' };
+// The board read is GET /board.json?view=slim: unfinished rows, the newest finished ones and slim.counts.
+// A view that needs older finished rows reads /api/board once; its finished rows stay in fullFinished.
+let fullFinished = null;
+let fullEtag = '';
+let fullWanted = false;
+let boardComplete = true;
+let slimCounts = {};
+let fullRead = null;
+function loadFullBoard() {
+  if (!fullRead) {
+    fullRead = (async () => {
+      try {
+        const r = await fetch('./api/board', { cache: 'no-store' });
+        if (!r.ok) throw new Error(r.status);
+        const data = await r.json();
+        fullFinished = (Array.isArray(data.jobs) ? data.jobs : []).filter((j) => TERMINAL.includes(j.stage));
+        fullEtag = (r.headers.get('ETag') || '').replace(/^W\//, '');
+      } catch {
+        fullRead = null;
+        if (loaded) renderBoard();
+        showBoardStatus('Could not load merged and closed jobs. Try again.');
+        return;
+      } finally {
+        fullRead = null;
+      }
+      await poll({ withBacklog: false });
+      if (openId) await openJob(openId);
+    })();
+    if (loaded) renderBoard();
+  }
+  return fullRead;
+}
+// A saved copy only records the wish; the first network read then loads the full board.
+function wantFullBoard() {
+  fullWanted = true;
+  return loaded && !boardFromCache && !boardComplete ? loadFullBoard() : Promise.resolve();
+}
+// Finished rows of stage s over the shown projects, counted by the Worker.
+function finishedShown(s) {
+  return Object.entries(slimCounts).reduce((n, [p, c]) => n + (isShown(p) ? c[s] || 0 : 0), 0);
+}
+// A board read's rows plus any loaded older finished rows. A body without slim (an old cache) is the whole board.
+function slimRows(data) {
+  const rows = Array.isArray(data.jobs) ? data.jobs : [];
+  if (!data.slim) {
+    boardComplete = true;
+    return rows;
+  }
+  slimCounts = data.slim.counts || {};
+  const ids = new Set(rows.map((j) => j.id));
+  const all = fullFinished ? rows.concat(fullFinished.filter((j) => !ids.has(j.id))) : rows;
+  // slim.counts counts each id once per stage, so the rows are compared the same way.
+  boardComplete = TERMINAL.every((s) => new Set(all.filter((j) => j.stage === s).map((j) => j.id)).size ===
+    Object.values(slimCounts).reduce((n, c) => n + (c[s] || 0), 0));
+  return all;
+}
+// Until the full board loads, a ref may name a finished row the slim read left out.
+function knownJobId(id) {
+  return jobs.some((x) => x.id === id) || !boardComplete;
+}
 let boardReadVersion = 0;
 const BACKLOG_POLL_MS = 120000;
 let backlogReadAt = 0;
@@ -1566,11 +1658,32 @@ function refreshBacklog() {
   return loadBacklog().then(() => { if (backlogLoaded) toastBacklog(); if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); renderInboxPage(); });
 }
 
+function takeBoard(data) {
+  jobs = slimRows(data);
+  boardArchived = Number.isInteger(data.archived?.max_id);
+  boardUpdated = data.updated || '';
+}
+
+// Saved copies paint the board at once. The network read that follows replaces them.
+async function paintCached() {
+  if (!('caches' in window)) return;
+  try {
+    await loadProjects(true);
+    await loadBacklog(true);
+    const hit = await caches.match('/board.json');
+    if (!hit || loaded) return;
+    takeBoard(await hit.json());
+    loaded = boardFromCache = true;
+    drawUpdated();
+    renderBoard();
+  } catch {}
+}
+
 async function poll({ ifChanged = false, withBacklog = true } = {}) {
   const version = ++boardReadVersion;
   try {
     if (withBacklog) refreshBacklog();
-    const r = await fetch('./board.json', { cache: 'no-store' });
+    const r = await fetch('./board.json?view=slim', { cache: 'no-store' });
     if (r.status === 401 || r.status === 403) {
       setConnection('signin');
       noteBoardLoadError('signin');
@@ -1589,13 +1702,12 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
       syncDetail();
       return true;
     }
-    if (!loaded) {
+    if (!tracerSettingKnown) {
       await Promise.race([tracerSettingRead, new Promise((res) => setTimeout(res, TRACER_WAIT_MS))]);
       if (version !== boardReadVersion) return false;
     }
-    jobs = Array.isArray(data.jobs) ? data.jobs : [];
-    boardArchived = Number.isInteger(data.archived?.max_id);
-    boardUpdated = data.updated || '';
+    takeBoard(data);
+    boardFromCache = false;
     boardEtag = etag;
     boardLoadError = '';
     loaded = true;
@@ -1610,13 +1722,14 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     syncBacklogRoute();
     syncIdeaEditor();
     if ($('job-picker').open) renderJobResults();
+    if (!boardComplete && fullWanted && etag.replace(/^W\//, '') !== fullEtag) loadFullBoard();
     return true;
   } catch (e) {
     if (version !== boardReadVersion) return false;
     drawDot('dot err', 'board.json unreachable');
-    if (!loaded) $('updated').textContent = "can't reach the factory";
+    if (!loaded || boardFromCache) $('updated').textContent = "can't reach the factory";
     if (e instanceof TypeError) setConnection('offline');
-    else if (!loaded) setConnection('unreachable');
+    else if (!loaded || boardFromCache) setConnection('unreachable');
     noteBoardLoadError(e instanceof TypeError ? 'offline' : 'unreachable');
     return false;
   }
@@ -2091,7 +2204,7 @@ function line(cls, text) {
 
 // A ref to a job on the board is a mouse target that opens it; card() adds its keyboard stand-in. Others stay text.
 function refLine(r) {
-  const id = jobs.some((x) => x.id === r.id) ? '<span class="ref-link" data-ref="' + esc(r.id) + '">' + esc(r.id) + '</span>' : esc(r.id);
+  const id = knownJobId(r.id) ? '<span class="ref-link" data-ref="' + esc(r.id) + '">' + esc(r.id) + '</span>' : esc(r.id);
   return esc(REF_KINDS[r.kind]) + ' ' + id;
 }
 
@@ -2145,7 +2258,7 @@ function card(j, inNeeds, archived = false) {
     (pr ? '<a class="pr-link" href="' + esc(pr.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open PR #' + esc(pr.n) + ' on GitHub" title="">PR #' + esc(pr.n) + '</a>' : '') +
     (archived ? '' : '<button type="button" class="card-actions" data-actions="' + esc(j.id) + '"' + (inNeeds ? ' data-in-needs' : '') +
     ' aria-label="Job actions for ' + esc(j.id) + '" title="Job actions" aria-haspopup="menu" aria-expanded="false" aria-controls="card-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>') +
-    refs(j).filter((r) => jobs.some((x) => x.id === r.id)).map((r) => standIn(r.id, REF_KINDS[r.kind] + ' ' + r.id)).join('') +
+    refs(j).filter((r) => knownJobId(r.id)).map((r) => standIn(r.id, REF_KINDS[r.kind] + ' ' + r.id)).join('') +
     (dupOnBoard ? standIn(dup, 'possible duplicate of ' + dup) : '') +
     riders.map((id) => standIn(id, 'batches ' + id)).join('') + '</div>';
 }
@@ -2415,6 +2528,7 @@ function actionsOpener() {
 
 function openJobPicker() {
   if (document.querySelector('dialog[open]:not(#job-picker)')) return;
+  wantFullBoard();
   if ($('job-picker').open && pickerMode === 'actions') {
     // Cmd+K in actions mode swaps to the normal jumper.
     pickerFocus = actionsOpener();
@@ -2648,10 +2762,12 @@ function changeProjectFilter(e) {
 $('filter-menu').addEventListener('change', changeProjectFilter);
 $('display-filter').addEventListener('change', changeProjectFilter);
 
-async function loadProjects() {
+async function loadProjects(cached = false) {
+  if (cached && !('caches' in window)) return false;
   let loaded = false;
   try {
-    const r = await fetch('./projects.json', { cache: 'no-store' });
+    const r = cached ? await caches.match('/projects.json') : await fetch('./projects.json', { cache: 'no-store' });
+    if (!r) return false;
     if (!r.ok) throw new Error(r.status);
     const list = await r.json();
     projects = new Map(list.map((p) => [p.slug, { title: p.title, repo: p.repo || '', archive: p.archive || '', base: p.base || '', autoBabysit: p.auto_babysit || 0, re: p.repo ? prUrl(p.repo) : null, archiveRe: p.archive ? prUrl(p.archive) : null, runRe: p.repo ? runUrl(p.repo) : null }]));
@@ -3144,21 +3260,29 @@ const SETTINGS_SECTIONS = ['projects', 'pipeline', 'hosts', 'display', 'notifica
 const baseTitle = document.title;
 let settingsShown = null;
 // '#/settings[/<section>]' → section name (unknown → first); anything else → null.
-function settingsRoute() {
+function settingsRoute(hash = location.hash) {
   let h = '';
-  try { h = decodeURIComponent(location.hash.slice(1)); } catch {}
+  try { h = decodeURIComponent(hash.slice(1)); } catch {}
   if (h !== '/settings' && !h.startsWith('/settings/')) return null;
   const name = h.slice('/settings/'.length);
   return SETTINGS_SECTIONS.includes(name) ? name : SETTINGS_SECTIONS[0];
 }
+// A page a drawer opened from stays beside it, and close returns to its hash.
+function splitPage(hash) {
+  return hash === '#/inbox' || hash === '#/notifications' || retrosRoute(hash) !== null || settingsRoute(hash) !== null;
+}
+function settingsSplit() {
+  return drawerReturn !== null && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null ? settingsRoute(drawerReturn) : null;
+}
 function renderRoute() {
-  const section = settingsRoute(), was = settingsShown;
-  if (section && location.hash !== '#/settings/' + section)
-    replaceUrl(location.pathname + location.search + '#/settings/' + section);
+  if (location.hash.length > 1 && location.hash !== '#/inbox' && !parseHash().id) wantFullBoard();
+  const routed = settingsRoute(), section = routed ?? settingsSplit(), was = settingsShown;
+  if (routed && location.hash !== '#/settings/' + routed)
+    replaceUrl(location.pathname + location.search + '#/settings/' + routed);
   const focusInside = $('settings-page').contains(document.activeElement);
   const retrosWas = $('retros-page').hidden === false;
   settingsShown = section;
-  const retrosOpen = !section && retrosRoute() !== null;
+  const retrosOpen = !section && retrosShown() !== null;
   const inboxWas = $('inbox-page').hidden === false;
   const inboxOpen = !section && inboxShown();
   const notificationsWas = $('notifications-page').hidden === false;
@@ -3168,20 +3292,24 @@ function renderRoute() {
   $('retros-page').hidden = !retrosOpen;
   $('inbox-page').hidden = !inboxOpen;
   $('notifications-page').hidden = !notificationsOpen;
+  const splitWas = document.body.matches('[data-retros-split], [data-settings-split]');
   document.body.toggleAttribute('data-inbox-split', inboxSplit());
   document.body.toggleAttribute('data-notifications-split', notificationsSplit());
+  document.body.toggleAttribute('data-retros-split', retrosSplit() !== null);
+  document.body.toggleAttribute('data-settings-split', settingsSplit() !== null);
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : notificationsOpen ? 'Notifications · ' + baseTitle : baseTitle;
   if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxFocusRow = -1; inboxAnswer = null; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
   if (notificationsOpen && !notificationsWas) { notificationsHtml = ''; $('notifications-page-heading').focus(); }
   renderNotifications();
-  if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); }
+  if (retrosOpen && !retrosWas) { retrosOpener = null; retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
   syncRetrosLink();
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
   if (retrosOpen) $('retros-link').setAttribute('aria-current', 'page'); else $('retros-link').removeAttribute('aria-current');
   if (inboxOpen) $('inbox-link').setAttribute('aria-current', 'page'); else $('inbox-link').removeAttribute('aria-current');
+  if (notificationsOpen) $('notifications-button').setAttribute('aria-current', 'page'); else $('notifications-button').removeAttribute('aria-current');
   for (const name of SETTINGS_SECTIONS) {
     $('settings-' + name).hidden = name !== section;
     if (name === section) $('settings-nav-' + name).setAttribute('aria-current', 'page'); else $('settings-nav-' + name).removeAttribute('aria-current');
@@ -3196,6 +3324,7 @@ function renderRoute() {
   if (section === 'reference' && was !== 'reference') enterReferenceSection();
   if (retrosWas && !retrosOpen && !section) $($('detail').hidden ? 'retros-link' : 'd-close').focus();
   if (!section && was && (focusInside || document.activeElement === document.body)) $('settings-link').focus();
+  if (!splitWas && document.body.matches('[data-retros-split], [data-settings-split]')) $('d-close').focus();
 }
 function leaveSettings() {
   location.hash = '';
@@ -3215,12 +3344,16 @@ const RETROS_POLL_MS = 1800000;
 let retrosReadAt = 0;
 const RETRO_MARK = /^Retro: run [A-Za-z0-9_-]{1,64}, fingerprint ([0-9a-f]{16}), created \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
 
-function retrosRoute() {
+function retrosRoute(hash = location.hash) {
   let h = '';
-  try { h = decodeURIComponent(location.hash.slice(1)); } catch {}
+  try { h = decodeURIComponent(hash.slice(1)); } catch {}
   const m = /^\/retros(?:\/([A-Za-z0-9_-]{1,64})(?:\/([1-9]\d?))?)?$/.exec(h);
   return m ? { run: m[1] ?? null, rank: m[2] ? Number(m[2]) : null } : null;
 }
+function retrosSplit() {
+  return drawerReturn !== null && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null ? retrosRoute(drawerReturn) : null;
+}
+function retrosShown() { return retrosRoute() ?? retrosSplit(); }
 
 // Jumper rows for retro runs and findings that hold every query token, in API order; finding rows stop at 20.
 function retroPickerRows(tokens) {
@@ -3491,7 +3624,7 @@ const retroShort = (title) => title.length > 24 ? title.slice(0, 23) + '…' : t
 const RETRO_CHEVRON = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"/></svg>';
 
 function renderRetrosPage() {
-  const route = retrosRoute();
+  const route = retrosShown();
   if (!route) return;
   $('retros-status').textContent = retrosFailed ? 'Could not load retros. Reload to try again.'
     : retros?.length === 0 ? 'No retro runs yet. Each retro admit uploads its findings here.' : '';
@@ -3554,6 +3687,18 @@ function renderRetrosPage() {
 }
 
 $('retros-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
+// The Retros link that opened a drawer, so closing it focuses that link again.
+let retrosOpener = null;
+$('retros-page').addEventListener('click', (e) => {
+  const el = e.target.closest('a[href^="#"]:not([href^="#/"]), a[href^="#/backlog/"]');
+  retrosOpener = el ? { el, href: el.getAttribute('href') } : null;
+});
+function focusRetrosOpener() {
+  const link = retrosOpener?.el.isConnected ? retrosOpener.el
+    : retrosOpener && [...$('retros-page').querySelectorAll('a')].find((a) => a.getAttribute('href') === retrosOpener.href);
+  if (link) link.focus(); else $('retros-page-heading').focus({ preventScroll: true });
+  retrosOpener = null;
+}
 
 // Inbox page: the '#/inbox' view ranks every job and backlog line waiting on a person.
 let inboxHtml = '';
@@ -3998,7 +4143,12 @@ $('notifications-wrap').addEventListener('keydown', (e) => {
 });
 document.addEventListener('pointerdown', (e) => { if (!$('notifications-wrap').contains(e.target)) closeNotificationsMenu(false); });
 $('notifications-wrap').addEventListener('focusout', (e) => { if (e.relatedTarget && !$('notifications-wrap').contains(e.relatedTarget)) closeNotificationsMenu(false); });
-$('notifications-menu').addEventListener('click', (e) => { if (e.target.closest('a')) closeNotificationsMenu(false); });
+$('notifications-menu').addEventListener('click', (e) => {
+  const a = e.target.closest('a');
+  if (!a) return;
+  closeNotificationsMenu(false);
+  if (a.id === 'notifications-see-all' && location.hash === '#/notifications') $('notifications-page-heading').focus();
+});
 $('notifications-back').addEventListener('click', (e) => { e.preventDefault(); leaveSettings(); });
 $('notifications-filters').addEventListener('click', (e) => {
   const b = e.target.closest('[data-notifications-filter]');
@@ -4028,7 +4178,7 @@ async function retryBoardLoad(e) {
   renderInboxPage();
   if (document.activeElement !== document.body) return;
   if (!ok) { button.focus(); return; }
-  if (id === 'notifications-menu-retry') ($('notifications-menu-list').querySelector('a') || $('notifications-more')).focus();
+  if (id === 'notifications-menu-retry') ($('notifications-menu-list').querySelector('a') || $('notifications-see-all')).focus();
   else $(id === 'notifications-retry' ? 'notifications-page-heading' : 'inbox-page-heading').focus();
 }
 for (const id of Object.keys(RETRY_STATUS)) $(id).addEventListener('click', retryBoardLoad);
@@ -4555,6 +4705,7 @@ async function loadTracerSetting() {
     if (r.status === 404) off = true;
     else if (r.status === 200 && !r.redirected) off = (await r.json())?.tracer?.enabled !== true;
   } catch {}
+  tracerSettingKnown = true;
   if (off === tracerOff) return;
   tracerOff = off;
   if (loaded) renderBoard();
@@ -4831,7 +4982,7 @@ function renderBoard() {
       '<p>Jobs show up here as they move through the loop.</p>' +
       (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
-    if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsShown()) document.title = BASE_TITLE;
+    if (!settingsShown && !retrosShown() && !inboxShown() && !notificationsShown()) document.title = BASE_TITLE;
     syncAppBadge(0);
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
@@ -4852,9 +5003,11 @@ function renderBoard() {
   waiting.splice(0, waiting.length, ...waitingJobs());
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   for (const s of COLUMNS) if (s !== 'backlog' && !TERMINAL.includes(s)) starredFirst(lists[COLUMNS.indexOf(s)]);
-  if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsShown()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
+  if (!settingsShown && !retrosShown() && !inboxShown() && !notificationsShown()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
-  const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
+  // Until the full board loads, a finished column counts every row the Worker counted.
+  const totals = COLUMNS.map((s, i) => TERMINAL.includes(s) && !boardComplete ? finishedShown(s) : lists[i].length);
+  const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (totals[i] === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
   const starredOnly = starView === 'only' && !noneShown;
   const starredLine = starredOnly ? '<p class="filter-empty" id="starred-only">' +
@@ -4869,20 +5022,31 @@ function renderBoard() {
     if (hiddenColumns.has(s)) return '';
     let list = lists[i];
     let more = '';
+    // A finished column the slim read cut short.
+    const partial = TERMINAL.includes(s) && !boardComplete && lists[i].length < totals[i];
     if (TERMINAL.includes(s)) {
       const t = (j) => Date.parse(j.done || j.updated) || 0;
       starredFirst(list.sort((a, b) => t(b) - t(a)));
-      if (list.length > CAP) {
-        const open = expanded.has(s);
-        more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '">' +
-          (open ? 'show ' + CAP : 'show all ' + list.length) + '</button>';
+      if (totals[i] > CAP) {
+        const open = expanded.has(s) && boardComplete;
+        const loading = !boardComplete && fullRead;
+        // A short column's header already shows the total, so only its accessible name repeats it.
+        // While the full read runs the text stays put; the button is dimmed and busy.
+        more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '"' +
+          (loading ? ' aria-disabled="true" aria-busy="true"' : '') +
+          (partial ? ' aria-label="show all ' + totals[i] + ' ' + s + '"' : '') + '>' +
+          (open ? 'show ' + CAP : 'show all' + (partial ? '' : ' ' + totals[i])) + '</button>';
         if (!open) list = list.slice(0, CAP);
       }
     }
     const label = s === 'needs-you' ? 'needs you' : s;
-    return '<section class="col ' + s + (lists[i].length ? '' : ' empty-col') + (collapsed[i] ? ' collapsed-col' : '') + '"><h2>' +
-      '<button type="button" class="column-toggle" data-stage="' + s + '" aria-label="' + (collapsed[i] ? 'Expand ' : 'Collapse ') + label +
-      ' column" aria-expanded="' + !collapsed[i] + '" aria-controls="column-cards-' + s + '"><span>' + label + '</span><span>' + lists[i].length +
+    // A finished column the slim read cut short says how much of it is loaded.
+    const count = partial
+      ? '<span class="count-wide">showing ' + list.length + ' of ' + totals[i] + '</span><span class="count-narrow">' + list.length + ' / ' + totals[i] + '</span>'
+      : totals[i];
+    return '<section class="col ' + s + (lists[i].length ? '' : ' empty-col') + (collapsed[i] ? ' collapsed-col' : partial ? ' partial-col' : '') + '"><h2>' +
+      '<button type="button" class="column-toggle" data-stage="' + s + '" title="' + label + '" aria-label="' + (collapsed[i] ? 'Expand ' : 'Collapse ') + label +
+      ' column" aria-expanded="' + !collapsed[i] + '" aria-controls="column-cards-' + s + '"><span>' + label + '</span><span>' + count +
       '</span><span aria-hidden="true">' + (collapsed[i] ? '+' : '−') + '</span></button>' + (collapsed[i] ? '' : more) +
       '</h2><div class="cards" id="column-cards-' + s + '"' + (collapsed[i] ? ' hidden' : '') + '>' +
       (list.length ? list.map((j, k) => s === 'backlog' ? backlogCard(j, k === 0) : card(j, s === 'needs-you')).join('') : '<div class="empty">none</div>') +
@@ -4929,6 +5093,11 @@ $('board').addEventListener('click', (e) => {
   const m = e.target.closest('.more');
   if (m) {
     const s = m.dataset.stage;
+    if (!boardComplete && TERMINAL.includes(s)) {
+      expanded.add(s);
+      wantFullBoard();
+      return;
+    }
     if (!expanded.delete(s)) expanded.add(s);
     renderBoard();
     return;
@@ -5369,6 +5538,10 @@ async function loadArchivePage(stage) {
 
 async function openJob(id) {
   let j = jobs.find((x) => x.id === id) ?? archivedJobs.get(id);
+  if (!j && loaded) {
+    await wantFullBoard();
+    j = jobs.find((x) => x.id === id);
+  }
   if (!j && loaded) {
     const got = await loadArchivedJob(id);
     if (parseHash().id !== id) return;
@@ -6445,6 +6618,8 @@ function closeDetail(keepHash = false) {
   if (back && !keepHash) renderRoute();
   if (back === '#/inbox' && !keepHash) focusInboxRow(id, raw);
   if (back === '#/notifications' && !keepHash) focusNotificationRow(id, raw);
+  if (back && !keepHash && retrosRoute(back)) focusRetrosOpener();
+  if (back && !keepHash && settingsRoute(back)) $('settings-nav-' + settingsRoute()).focus();
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
@@ -6663,7 +6838,7 @@ window.addEventListener('hashchange', (e) => {
   if (id !== archiveFailNoted) archiveFailNoted = '';
   const key = backlogRoute();
   const from = new URL(e.oldURL).hash;
-  if (key || id) drawerReturn = from === '#/inbox' || from === '#/notifications' ? from : openId || openBacklogRaw !== null ? drawerReturn : null;
+  if (key || id) drawerReturn = splitPage(from) ? from : openId || openBacklogRaw !== null ? drawerReturn : null;
   else drawerReturn = null;
   if (key) openBacklogRoute(key);
   else if (id) openJob(id);
@@ -6695,7 +6870,7 @@ const NEW_TAB = '<span class="new-tab" aria-hidden="true">&#8599;</span><span cl
 function autolink(s) {
   return s.replace(REF, (m, id, num, key, n, pr) => {
     let href = null;
-    if (id) href = jobs.some((j) => j.id === id) ? '#' + encodeURIComponent(id) : null;
+    if (id) href = knownJobId(id) ? '#' + encodeURIComponent(id) : null;
     else if (num) {
       const hits = jobs.filter((j) => String(j.id).startsWith(num + '-'));
       href = hits.length === 1 ? '#' + encodeURIComponent(hits[0].id) : null;
@@ -6980,9 +7155,11 @@ function backlogAnswersText(questions, answers) {
 }
 
 // A failed read keeps the last good list, so the board never waits on the backlog.
-async function loadBacklog() {
+async function loadBacklog(cached = false) {
+  if (cached && !('caches' in window)) return;
   try {
-    const r = await fetch('./api/backlog', { cache: 'no-store' });
+    const r = cached ? await caches.match('/api/backlog') : await fetch('./api/backlog', { cache: 'no-store' });
+    if (!r) return;
     // Always read the body, so the request finishes even on a 404.
     const text = await r.text();
     if (r.status === 200) {
@@ -7024,6 +7201,7 @@ async function openBacklogRoute(key) {
       if (openBacklogRaw !== item.raw) openBacklogItem(item);
       return;
     }
+    await wantFullBoard();
     let job = null;
     for (const j of jobs) if (typeof j.backlog?.line === 'string' && await sha12(j.backlog.line) === key) job = j;
     if (backlogRoute() !== key) return;
@@ -7130,6 +7308,7 @@ function removeBacklogJob(board, id, captureId) {
 async function casBacklog(change) {
   for (let i = 0; i < 10; i++) {
     const r = await fetch('./api/backlog', { cache: 'no-store' });
+    if (r.headers.get('X-Factory-Offline')) throw new Error("reading the backlog failed: you're offline, so nothing was saved");
     if (!r.ok && r.status !== 404) throw new Error('reading the backlog failed: ' + r.status);
     const { text, state } = change(r.ok ? await r.text() : null);
     if (state !== 'marked') return state;
@@ -7275,7 +7454,7 @@ async function casBoard(change) {
       const cond = r.ok ? { 'If-Match': etag.replace(/^W\//, '') } : { 'If-None-Match': '*' };
       let put;
       try {
-        put = await fetch('./api/board', { method: 'PUT', headers: cond, body: JSON.stringify(board, null, 2) + '\n' });
+        put = await fetch('./api/board', { method: 'PUT', headers: cond, body: JSON.stringify(board) + '\n' });
       } catch (x) {
         x.uncertain = true; // the request may have landed before the connection dropped
         throw x;
@@ -8767,6 +8946,7 @@ function backlogHistoryHtml(history) {
 
 // Earlier rounds of a reworked item may be archived, so missing rework-of ids load from the archive.
 async function fetchReworkHistory(item) {
+  await wantFullBoard();
   const known = () => [...jobs, ...archivedJobs.values()];
   const next = (r) => (Array.isArray(r) ? r : []).find((x) => x && x.kind === 'rework-of' && typeof x.id === 'string');
   const seen = new Set();
@@ -9372,14 +9552,14 @@ async function setPush(on) {
 }
 $('notify-push').addEventListener('change', () => setPush($('notify-push').checked));
 
-loadProjects().then(() => {
+paintCached().then(() => loadProjects()).then(() => {
   if (settingsShown === 'projects') enterProjectsSection(!$('settings-page').contains(document.activeElement) || document.activeElement === $('settings-nav-projects'));
   if (settingsShown === 'pipeline') enterPipelineSection();
   if (settingsShown === 'hosts') enterHostsSection();
   if (settingsShown === 'display') enterDisplaySection();
   if (settingsShown === 'notifications') enterNotificationsSection();
   referenceReady = true; if (settingsShown === 'reference') loadReferenceEffective();
-  pollStarted = true; loadHosts(); poll(); syncLive(); schedulePoll();
+  pollStarted = true; loadHosts(); syncLive(); readBoard(); schedulePoll();
 });
 setInterval(remindWaiting, REMIND_CHECK_MS);
 
@@ -9402,8 +9582,10 @@ function setStarView(v) {
   starView = pickDisplay(v, STAR_VIEWS);
   if (starView === 'float') store.remove(DISPLAY_KEYS.starred); else store.set(DISPLAY_KEYS.starred, starView);
   $('display-starred').value = starView;
+  if (starView === 'only') wantFullBoard();
   if (loaded) renderBoard();
 }
+if (starView === 'only') wantFullBoard();
 const DRAWER_LINKS = [['pr', 'PR'], ...['app', 'web'].filter(k => factoryConfig.agent_links[k]).map(k => [k, factoryConfig.agent_links[k].label]), ['tracer', 'Tracer']];
 const hiddenDrawerLinks = new Set((store.get(DISPLAY_KEYS.drawerLinks) || '').split(',').filter(f => DRAWER_LINKS.some(([k]) => k === f)));
 let pollTimer = 0, pollStarted = false;
@@ -9429,7 +9611,7 @@ function schedulePoll() {
   pollTimer = ms ? setInterval(pollTick, ms) : 0;
   drawLiveDot();
 }
-document.addEventListener('visibilitychange', () => { if (pollStarted && !document.hidden) poll(); syncLive(); schedulePoll(); });
+document.addEventListener('visibilitychange', () => { syncLive(); if (pollStarted && !document.hidden) readBoard(); schedulePoll(); });
 // Live board events: the Worker sends {"type":"changed","key":...} after each board or
 // backlog write, and the matching key re-reads once, 2 s after the first frame; frames during a read add one more read. A dropped socket retries with backoff
 // (1, 2, 4 ... 30 s), then every 30 s while a socket is wanted. An expired sign-in stops retries until a board read succeeds.
@@ -9450,6 +9632,9 @@ function openLive() {
     liveNote = '';
     liveOpen = true;
     liveRetries = 0;
+    clearTimeout(liveOwedTimer);
+    liveOwedTimer = 0;
+    liveReadOwed = null;
     schedulePoll();
     poll({ ifChanged: true });
   });
@@ -9464,6 +9649,7 @@ function openLive() {
     if (ws !== liveSocket) return;
     liveSocket = null;
     liveOpen = false;
+    flushLiveRead();
     schedulePoll();
     if (liveWanted())
       liveRetryTimer = setTimeout(openLive, Math.min(LIVE_FIRST_RETRY_MS * 2 ** liveRetries++, LIVE_MAX_RETRY_MS));
@@ -9476,8 +9662,26 @@ function closeLive() {
   const ws = liveSocket;
   liveSocket = null;
   liveOpen = false;
+  flushLiveRead();
   // A status code lets the room finish the closing handshake.
   ws?.close(1000);
+}
+// While the socket connects, a board read waits for its open, which reads the board anyway
+// and also catches a write that lands before the subscription. A close before the open,
+// or an open slower than LIVE_OPEN_WAIT_MS, reads at once instead.
+const LIVE_OPEN_WAIT_MS = 2000;
+let liveReadOwed = null, liveOwedTimer = 0;
+function readBoard(read = poll) {
+  if (liveSocket?.readyState !== 0) return read();
+  liveReadOwed ||= read;
+  if (!liveOwedTimer) liveOwedTimer = setTimeout(flushLiveRead, LIVE_OPEN_WAIT_MS);
+}
+function flushLiveRead() {
+  clearTimeout(liveOwedTimer);
+  liveOwedTimer = 0;
+  const read = liveReadOwed;
+  liveReadOwed = null;
+  read?.();
 }
 function syncLive() {
   if (!liveWanted()) closeLive();
@@ -9498,7 +9702,7 @@ function runLiveRead(key) {
   });
 }
 window.addEventListener('blur', () => setTimeout(schedulePoll, 0));
-window.addEventListener('focus', () => { if (pollStarted && !liveOpen && !document.hidden) pollTick(); syncLive(); schedulePoll(); });
+window.addEventListener('focus', () => { syncLive(); if (pollStarted && !liveOpen && !document.hidden) readBoard(pollTick); schedulePoll(); });
 // A redraw while a card has focus or its menu is open would move them, so the chips wait for the next tick.
 function clockTick() {
   if (document.hidden) return;

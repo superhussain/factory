@@ -147,8 +147,20 @@ test("notifications", { timeout: 180000 }, async (t) => {
         EXPECTED,
       );
       assert.deepEqual(
-        await page.$eval("#notifications-more", (a) => [a.textContent, a.getAttribute("href")]),
-        ["See more", "#/notifications"],
+        await page.$eval("#notifications-see-all", (a) => [
+          a.textContent,
+          a.getAttribute("href"),
+          a.closest(".notifications-menu-head") !== null,
+          Boolean(
+            a.compareDocumentPosition(document.getElementById("notifications-menu-list")) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        ]),
+        ["See all", "#/notifications", true, true],
+      );
+      assert.equal(
+        await page.$eval("#notifications-button", (el) => el.getAttribute("aria-current")),
+        null,
       );
       const menu = await page.$eval("#notifications-menu", (el) => {
         const box = el.getBoundingClientRect();
@@ -270,7 +282,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
       );
       assert.match(rows[0][3], /^073-sample-retry · /);
       assert.doesNotMatch(rows[1][3], /·/);
-      await page.click("#notifications-more");
+      await page.click("#notifications-see-all");
       await pageRows(page, 6);
       assert.deepEqual(
         await page.$$eval("#notifications-list .inbox-item", (items) =>
@@ -294,17 +306,33 @@ test("notifications", { timeout: 180000 }, async (t) => {
     });
 
     let list;
-    await t.test("see more opens the page", async () => {
+    await t.test("see all opens the page", async () => {
       list = await openPage();
       const { page, errors } = list;
       await openMenu(page);
-      await page.click("#notifications-more");
+      await page.click("#notifications-see-all");
       await pageRows(page, 3);
       assert.deepEqual(
         await page.evaluate(() => [document.body.dataset.view, document.activeElement.id]),
         ["notifications", "notifications-page-heading"],
       );
       assert.match(await page.title(), /^Notifications · /);
+      assert.equal(
+        await page.$eval("#notifications-button", (el) => el.getAttribute("aria-current")),
+        "page",
+      );
+      // .btn transitions border-color over .15s, so wait for it to settle on the accent.
+      await page.waitForFunction(() => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--accent)";
+        document.body.append(probe);
+        const accent = getComputedStyle(probe).color;
+        probe.remove();
+        return (
+          getComputedStyle(document.getElementById("notifications-button")).borderTopColor ===
+          accent
+        );
+      }, wait);
       assert.deepEqual(
         await page.$$eval("#notifications-list .inbox-item", (items) =>
           items.map((item) =>
@@ -320,6 +348,16 @@ test("notifications", { timeout: 180000 }, async (t) => {
           [...el.children].map((a) => a.textContent),
         ),
         ["Open job", "Open PR #60", "Open in Session app", "Open in Session"],
+      );
+      await page.click("#notifications-button");
+      await page.waitForSelector("#notifications-menu-list .notification-link", wait);
+      await page.click("#notifications-see-all");
+      assert.deepEqual(
+        await page.evaluate(() => [
+          document.getElementById("notifications-menu").hidden,
+          document.activeElement.id,
+        ]),
+        [true, "notifications-page-heading"],
       );
       assert.deepEqual(errors, []);
     });
@@ -591,6 +629,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
           current: [...document.querySelectorAll("#notifications-list .inbox-item")].map((li) =>
             li.getAttribute("aria-current"),
           ),
+          bell: document.getElementById("notifications-button").getAttribute("aria-current"),
         };
       });
       assert.deepEqual(split, {
@@ -599,6 +638,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
         visible: [true, true],
         beside: true,
         current: [null, "true", null],
+        bell: "page",
       });
       await page.click("#d-close");
       await page.waitForFunction(() => location.hash === "#/notifications", wait);
@@ -660,6 +700,10 @@ test("notifications", { timeout: 180000 }, async (t) => {
       await page.keyboard.press("h");
       await page.waitForFunction(() => location.hash === "", wait);
       await page.waitForFunction(() => document.body.dataset.view === "board", wait);
+      assert.equal(
+        await page.$eval("#notifications-button", (el) => el.getAttribute("aria-current")),
+        null,
+      );
       assert.deepEqual(errors, []);
       await page.browserContext().close();
     });
