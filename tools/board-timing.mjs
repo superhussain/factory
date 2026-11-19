@@ -21,6 +21,10 @@ const { values } = parseArgs({
     origin: { type: "string" },
   },
 });
+if (values.serve && values.origin) {
+  console.error("--serve starts a local server, so it cannot time --origin");
+  process.exit(2);
+}
 const ROWS = Number(values.rows);
 const RUNS = Number(values.runs);
 const dir = new URL(`../.context/board-timing-${process.pid}/`, import.meta.url).pathname;
