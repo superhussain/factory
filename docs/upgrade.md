@@ -46,7 +46,8 @@ Then replace the installed skill bundle on each host from this checkout:
 python3 tools/install.py --destination <absolute-directory> --replace
 ```
 
-The old bundle stays beside it as `factory.backup-<uuid>`. See
+The installer deletes the old bundle once the new one is live. Older
+`factory.backup-<uuid>` folders stay until you remove them. See
 [device.md](device.md) for the lock and backup rules.
 
 Settings, Hosts flags a host whose `bundle_behind_since` is more than a day
