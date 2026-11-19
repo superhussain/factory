@@ -528,6 +528,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .board-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); overflow-wrap: anywhere; }
   .board-status:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .board-status[hidden] { display: none; }
+  .notify-toasts { position: fixed; right: 16px; bottom: 16px; z-index: 31; width: 340px; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .notify-toast { display: flex; align-items: flex-start; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .notify-toast .notification-link { flex: 1; min-width: 0; border-bottom: 0; }
+  @media (max-width: 760px) { .notify-toasts { left: 16px; right: 16px; width: auto; } }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
   @media (hover: hover) { .pr-link:hover { text-decoration: underline; } }
   .pr-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -758,6 +762,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
 <main class="board" id="board"></main>
 <div class="job-actions-menu card-actions-menu" id="card-actions-menu" role="menu" aria-label="Job actions" hidden></div>
 <p class="board-status" id="board-status" role="status" tabindex="-1" hidden></p>
+<ol class="notify-toasts" id="notify-toasts" aria-label="New notifications" aria-live="polite"></ol>
 <aside class="detail" id="detail" hidden>
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
@@ -1539,7 +1544,7 @@ function refreshBacklog() {
   const version = boardReadVersion;
   // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
   const seen = backlog.map((b) => b.raw).join('\n');
-  return loadBacklog().then(() => { if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); renderInboxPage(); });
+  return loadBacklog().then(() => { if (backlogLoaded) toastBacklog(); if (loaded && version === boardReadVersion && backlog.map((b) => b.raw).join('\n') !== seen) renderBoard(); syncBacklogDetail(); syncBacklogRoute(); renderRetrosPage(); renderInboxPage(); });
 }
 
 async function poll({ ifChanged = false, withBacklog = true } = {}) {
@@ -1580,6 +1585,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     loadHoldConfigs();
     notifyNeeds();
     boardSound();
+    toastBoard();
     if (settingsShown === 'projects') renderProjectList();
     syncDetail();
     syncBacklogRoute();
@@ -8965,6 +8971,65 @@ $('settings-notifications').addEventListener('click', (e) => {
   if (b) playSound(b.dataset.sound);
 });
 for (const type of ['pointerdown', 'keydown']) document.addEventListener(type, () => { if (soundActive() && audio?.state !== 'running') wakeAudio(); });
+
+// New board and backlog events show a toast in this tab. The first read only fills toastSeen
+// and backlogSeen. Board text is agent-written, so toasts set textContent only.
+const TOAST_LABELS = { backlog: 'Backlog', needs: 'Needs you', spec: 'Spec ready', pr: 'PR open', merged: 'Merged' };
+const TOAST_MAX = 3, TOAST_MS = 10000;
+let toastSeen = null;
+let backlogSeen = null;
+function showNotifyToast(kind, href, title, meta) {
+  const list = $('notify-toasts');
+  const li = document.createElement('li');
+  li.className = 'notify-toast';
+  const link = document.createElement('a');
+  link.className = 'notification-link';
+  link.href = href;
+  const parts = [['chip inbox-kind', TOAST_LABELS[kind]], ['inbox-title', title], ['inbox-meta', meta]].map(([cls, text]) => {
+    const span = document.createElement('span');
+    span.className = cls;
+    span.textContent = text;
+    return span;
+  });
+  link.append(...parts);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn icon notify-toast-close';
+  close.setAttribute('aria-label', 'Dismiss notification');
+  close.textContent = '×';
+  li.append(link, close);
+  const same = [...list.children].find((el) => el.firstChild.getAttribute('href') === href);
+  if (same) same.replaceWith(li); else list.append(li);
+  while (list.children.length > TOAST_MAX) list.firstElementChild.remove();
+  // A hovered or focused stack holds every toast for another TOAST_MS.
+  const expire = () => {
+    if (list.matches(':hover') || list.contains(document.activeElement)) setTimeout(expire, TOAST_MS);
+    else li.remove();
+  };
+  setTimeout(expire, TOAST_MS);
+}
+// Removal waits a task, since a disconnected link would not follow its href.
+$('notify-toasts').addEventListener('click', (e) => {
+  const li = e.target.closest('a, button')?.closest('.notify-toast');
+  if (li) setTimeout(() => li.remove());
+});
+function toastBoard() {
+  const seen = boardSnapshot();
+  const prev = toastSeen;
+  toastSeen = seen;
+  if (!prev) return;
+  for (const [id, kinds] of jobEvents(prev, seen)) {
+    const j = jobs.find((x) => x.id === id);
+    const kind = kinds.find(alertOn);
+    if (kind && isShown(j.project)) showNotifyToast(kind, '#' + encodeURIComponent(id), j.title || id, id);
+  }
+}
+function toastBacklog() {
+  const prev = backlogSeen;
+  backlogSeen = new Set(backlog.map((b) => b.raw));
+  if (!prev || !alertOn('backlog')) return;
+  for (const b of backlog) if (!prev.has(b.raw) && isShown(b.project)) showNotifyToast('backlog', '#/backlog/' + b.key, b.text, projectName(b));
+}
 
 // Web Push reaches this device while the dashboard is closed. The Worker serves its VAPID
 // public key only when the instance has one, and stores one subscription per browser.
