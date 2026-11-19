@@ -6796,8 +6796,12 @@ def watch_cmd(target, *args):
         fail(WATCH_USAGE, 2)
     if os.environ.get("FACTORY_SESSION"):
         hold(target)
-    elif not any(j.get("id") == job_id for j in read_board(home)["jobs"]):
-        fail(f"no job {job_id} on the board. Nothing was written.", 4)
+    else:
+        job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
+        if job is None:
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
+        if job.get("project") != slug:
+            fail(f"{job_id} belongs to {job.get('project')}, not {slug}", 2)
     folder = home / "jobs" / slug / job_id
     if watch_pr:
         pr = board_pr(home, slug, job_id, archive=True)

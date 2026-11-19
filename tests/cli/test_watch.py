@@ -153,6 +153,13 @@ class WatchTest(IsolatedTestCase):
         self.assertIn("no job 043-missing on the board. Nothing was written.", err)
         self.assertEqual(self.holds, [])
 
+    def test_no_session_other_project_exits_2(self):
+        (self.home / "projects" / "other.md").write_text("---\nrepo: example/other\nbase: main\n---\n# Other\n")
+        code, out, err = self.watch("spec.md", target=f"other/{JOB}")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn(f"{JOB} belongs to sample, not other", err)
+        self.assertEqual(self.holds, [])
+
     def test_bad_usage_exits_2(self):
         for args in (["--timeout", "0"], ["--timeout", "541"], ["--pr", "--pr"], ["notes.md"], ["--hold"],
                      ["spec.md", "--timeout"], ["spec.md", "--timeout", "1", "--timeout", "1"]):
