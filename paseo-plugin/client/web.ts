@@ -1,7 +1,8 @@
 import { openExternalUrl } from "@getpaseo/plugin/client";
-import { createElement, useEffect, useRef } from "react";
+import { createElement, useEffect, useLayoutEffect, useRef } from "react";
 import { Platform } from "react-native";
 import {
+  JOB_ID,
   dashboardSrc,
   frameLoaded,
   readEmbedMessage,
@@ -11,12 +12,37 @@ import {
 import { needsBody, needsTitle, type WaitingJob } from "../shared/arrivals";
 import * as firstLogin from "../shared/first-login";
 import { readLocation, writeLocation } from "../shared/location";
+import { createFrameKeeper, type KeptFrame } from "../shared/warm-frame";
 import { setFrameInboxCount } from "./frame-inbox";
 
 // This plugin typechecks without the DOM library. Declare only what this module uses.
 type MessageSource = { postMessage(message: unknown, targetOrigin: string): void };
 type FrameMessage = { source: unknown; origin: string; data: unknown };
 type SignInWindow = { closed: boolean; close(): void; focus(): void };
+type FrameElement = {
+  src: string;
+  title: string;
+  style: { cssText: string };
+  setAttribute(name: string, value: string): void;
+  addEventListener(type: "load", listener: () => void): void;
+  remove(): void;
+  contentWindow: MessageSource | null;
+  clientWidth: number;
+  clientHeight: number;
+};
+type DivElement = {
+  id: string;
+  style: { cssText: string; width: string; height: string };
+  setAttribute(name: string, value: string): void;
+  appendChild(node: FrameElement): unknown;
+  moveBefore?: (node: FrameElement, child: null) => void;
+};
+declare const document: {
+  createElement(tag: "iframe"): FrameElement;
+  createElement(tag: "div"): DivElement;
+  getElementById(id: string): DivElement | null;
+  body: { appendChild(node: DivElement): unknown };
+};
 declare const window: {
   focus(): void;
   open(url: string, target: string, features: string): SignInWindow | null;
@@ -75,44 +101,121 @@ export function paseoOrigin(): string | null {
 const SANDBOX =
   "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals";
 
+const PARK_ID = "factory-plugin-warm-park";
+
+const keeper = createFrameKeeper<FrameElement, EmbedMessage>({
+  create(origin, src) {
+    const element = document.createElement("iframe");
+    element.title = "Factory dashboard";
+    element.setAttribute("sandbox", SANDBOX);
+    element.style.cssText = "border:0;width:100%;height:100%;display:block";
+    element.src = src;
+    element.addEventListener("load", () => {
+      // A new document must post ready again, so a parked frame that reloaded shows the stall card on return.
+      const kept = keeper.current();
+      if (kept?.element === element) kept.ready = false;
+      frameLoaded(
+        element.contentWindow,
+        origin,
+        setFrameInboxCount,
+        !firstLogin.isBrowserOrigin(paseoOrigin()),
+      );
+    });
+    listen();
+    return element;
+  },
+  park(element) {
+    let park = document.getElementById(PARK_ID);
+    if (!park) {
+      park = document.createElement("div");
+      park.id = PARK_ID;
+      park.setAttribute("inert", "");
+      park.setAttribute("aria-hidden", "true");
+      park.style.cssText =
+        "position:fixed;left:-100000px;top:0;visibility:hidden;pointer-events:none";
+      document.body.appendChild(park);
+    }
+    park.style.width = element.clientWidth + "px";
+    park.style.height = element.clientHeight + "px";
+    return park;
+  },
+  dropped() {
+    setFrameInboxCount(null);
+  },
+});
+
+let listening = false;
+
+function listen(): void {
+  if (listening) return;
+  listening = true;
+  window.addEventListener("message", route);
+}
+
+// One router for the kept frame, attached or parked, so a parked page keeps its saved page and count current.
+function route(event: FrameMessage): void {
+  const frame = keeper.current();
+  if (!frame || event.source !== frame.element.contentWindow || event.origin !== frame.origin)
+    return;
+  const message = readEmbedMessage(event.data);
+  if (!message) return;
+  if (message.type === "factory-inbox-count") setFrameInboxCount(message.count);
+  else if (message.type === "factory-embed-location") saveLocation(frame.origin, message.hash);
+  else if (message.type === "factory-embed-ready") {
+    frame.ready = true;
+    markLoaded(frame.origin);
+  }
+  frame.onMessage?.(message);
+}
+
+export function dropWarmFrame(): void {
+  keeper.drop();
+  window.removeEventListener("message", route);
+  listening = false;
+}
+
+export function frameReady(origin: string): boolean {
+  const frame = keeper.current();
+  return !!frame && frame.origin === origin && frame.parkedAt === null && frame.ready;
+}
+
 export function DashboardFrame({
   src,
   origin,
+  job,
   onMessage,
 }: {
   src: string;
   origin: string;
+  job?: string;
   onMessage(message: EmbedMessage): void;
 }) {
-  const frame = useRef<{ contentWindow: MessageSource | null } | null>(null);
+  const host = useRef<DivElement | null>(null);
+  const attached = useRef<KeptFrame<FrameElement, EmbedMessage> | null>(null);
+  const jumped = useRef<string | undefined>(undefined);
   const handler = useRef(onMessage);
   handler.current = onMessage;
-  useEffect(() => {
-    if (Platform.OS !== "web") return;
-    const listener = (event: FrameMessage) => {
-      if (!frame.current || event.source !== frame.current.contentWindow || event.origin !== origin)
-        return;
-      const message = readEmbedMessage(event.data);
-      if (message) handler.current(message);
+  useLayoutEffect(() => {
+    const node = host.current;
+    if (Platform.OS !== "web" || !node) return;
+    const { frame, warm } = keeper.attach(node, origin, src);
+    frame.onMessage = (message) => handler.current(message);
+    if (warm && job && JOB_ID.test(job)) keeper.jumpTo(frame, dashboardSrc(origin, job));
+    jumped.current = job;
+    attached.current = frame;
+    return () => {
+      attached.current = null;
+      keeper.park(frame);
     };
-    window.addEventListener("message", listener);
-    return () => window.removeEventListener("message", listener);
   }, [origin]);
+  useEffect(() => {
+    const frame = attached.current;
+    if (!frame || job === jumped.current) return;
+    jumped.current = job;
+    if (job && JOB_ID.test(job)) keeper.jumpTo(frame, dashboardSrc(origin, job));
+  }, [job]);
   if (Platform.OS !== "web") return null;
-  return createElement("iframe", {
-    src,
-    title: "Factory dashboard",
-    sandbox: SANDBOX,
-    style: { border: 0, width: "100%", height: "100%" },
-    ref: frame,
-    onLoad: () =>
-      frameLoaded(
-        frame.current?.contentWindow,
-        origin,
-        setFrameInboxCount,
-        !firstLogin.isBrowserOrigin(paseoOrigin()),
-      ),
-  });
+  return createElement("div", { ref: host, style: { width: "100%", height: "100%" } });
 }
 
 export function useSignInPopup(origin: string, onClosed: () => void): () => void {

@@ -6,7 +6,7 @@ import { dashboardScreen } from "./client/dashboard-screen";
 import { startElection } from "./client/election";
 import { useFrameInboxCount } from "./client/frame-inbox";
 import { SettingsScreen } from "./client/settings-screen";
-import { showNeedsNotification } from "./client/web";
+import { dropWarmFrame, showNeedsNotification } from "./client/web";
 import { createInbox, type Inbox } from "./shared/arrivals";
 import { shownInboxCount } from "./shared/badge";
 import { dashboardHost } from "./shared/embed";
@@ -50,6 +50,7 @@ export default function contribute(client: PluginClientContext) {
       Component: factoryItem(inbox, reload),
     });
     return () => {
+      dropWarmFrame();
       void removeItem();
       void removeScreen();
     };
@@ -64,5 +65,6 @@ export default function contribute(client: PluginClientContext) {
   return () => {
     election.stop();
     subscription.release();
+    dropWarmFrame();
   };
 }
