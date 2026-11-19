@@ -10080,10 +10080,12 @@ def audit_target(raw):
     return AUDIT_CONTROL.sub("?", " ".join(retro_redact(folded).split()))[:120]
 
 
-def audit_flags(name, inp, raw, denied):
+def audit_flags(name, inp, raw, denied, main=False):
     """The names of the risky shapes one call matches, in AUDIT_FLAGS order, then sandbox-off,
-    secret-file and denied. They match the raw target, never the redacted one."""
-    flags = [flag for flag, pattern in AUDIT_FLAGS if name == "Bash" and pattern.search(raw)]
+    secret-file and denied. They match the raw target, never the redacted one.
+    main=True drops pr-merge, since the orchestrator merges approved PRs."""
+    flags = [flag for flag, pattern in AUDIT_FLAGS
+             if name == "Bash" and not (main and flag == "pr-merge") and pattern.search(raw)]
     if name == "Bash" and inp.get("dangerouslyDisableSandbox") is True:
         flags.append("sandbox-off")
     path = inp.get("path") if name == "Grep" else raw if name == "Bash" or name in AUDIT_FILE_TOOLS else None
@@ -10120,7 +10122,7 @@ def audit_scan(path, main):
     rows = []
     for call_id, stamp, name, inp in calls:
         raw = audit_target_raw(name, inp)
-        rows.append({"time": stamp, "tool": name, "flags": audit_flags(name, inp, raw, call_id in denied),
+        rows.append({"time": stamp, "tool": name, "flags": audit_flags(name, inp, raw, call_id in denied, main),
                      "target": audit_target(raw) or "-"})
     return rows
 

@@ -14,6 +14,8 @@ import {
 } from "../support/browser-server.mjs";
 
 const wait = { polling: 50 };
+const BOARD_COPY =
+  "Couldn't load the inbox. Can't reach the factory. Check your connection, then retry.";
 const SHOTS = process.env.INBOX_SHOTS;
 const BEFORE = process.env.INBOX_SHOT_STAGE === "before";
 const job = (id, stage, extra = {}) => ({
@@ -199,6 +201,62 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       await (await page.$("#reference-keys")).screenshot({ path: `${SHOTS}/${name}` });
       await page.browserContext().close();
     };
+    const openFailedBoard = async () => {
+      const page = await (await browser.createBrowserContext()).newPage();
+      await page.setViewport({ width: 1280, height: 900 });
+      await blockLiveEvents(page);
+      await page.setBypassServiceWorker(true);
+      await page.setRequestInterception(true);
+      const state = { fail: true, hold: null };
+      page.on("request", async (request) => {
+        if (
+          state.fail &&
+          request.method() === "GET" &&
+          new URL(request.url()).pathname === "/board.json"
+        ) {
+          await state.hold;
+          request.respond({ status: 503, body: "" });
+        } else request.continue();
+      });
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await page.goto(origin + "/#/inbox", { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(
+        (copy) => document.querySelector("#inbox-status").textContent === copy,
+        wait,
+        BOARD_COPY,
+      );
+      return { page, errors, state };
+    };
+    const heldRetry = async (page, state) => {
+      // The log starts at the Retry click, so a redraw that lands before it never counts.
+      await page.evaluate(() => {
+        const status = document.querySelector("#inbox-status");
+        window.inboxStatusLog = [];
+        document.addEventListener(
+          "click",
+          () =>
+            new MutationObserver(() => window.inboxStatusLog.push(status.textContent)).observe(
+              status,
+              { childList: true, characterData: true, subtree: true },
+            ),
+          { capture: true, once: true },
+        );
+      });
+      let release;
+      state.hold = new Promise((resolve) => (release = resolve));
+      const backlog = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/backlog",
+      );
+      // Stands in for the first load's backlog redraw landing just before the click (CI run 44478429364).
+      await page.evaluate(() => renderInboxPage());
+      await page.click("#inbox-retry");
+      await backlog;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return release;
+    };
+    const statusLog = (page) =>
+      page.evaluate(() => window.inboxStatusLog.filter((text, i, log) => text !== log[i - 1]));
 
     if (BEFORE && SHOTS)
       await t.test("before capture", async () => {
@@ -216,6 +274,15 @@ test("inbox page", { timeout: 180000 }, async (t) => {
         await openRow3(opened.page);
         await opened.page.screenshot({ path: `${SHOTS}/before-inbox-open-job-desktop.png` });
         await opened.page.browserContext().close();
+        const held = await openFailedBoard();
+        const release = await heldRetry(held.page, held.state);
+        await (
+          await held.page.$("#inbox-page")
+        ).screenshot({
+          path: `${SHOTS}/before-inbox-retrying.png`,
+        });
+        release();
+        await held.page.browserContext().close();
       });
 
     const it = (name, fn) => t.test(name, { skip: BEFORE }, fn);
@@ -894,32 +961,40 @@ test("inbox page", { timeout: 180000 }, async (t) => {
 
     await it("board load failure", async () => {
       await reset();
-      let fail = true;
-      const page = await (await browser.createBrowserContext()).newPage();
-      await page.setViewport({ width: 1280, height: 900 });
-      await blockLiveEvents(page);
-      await page.setBypassServiceWorker(true);
-      await page.setRequestInterception(true);
-      page.on("request", (request) =>
-        fail && request.method() === "GET" && new URL(request.url()).pathname === "/board.json"
-          ? request.respond({ status: 503, body: "" })
-          : request.continue(),
-      );
-      const errors = [];
-      page.on("pageerror", (error) => errors.push(String(error)));
-      await page.goto(origin + "/#/inbox", { waitUntil: "domcontentloaded" });
-      await page.waitForFunction(
-        () =>
-          document.querySelector("#inbox-status").textContent ===
-          "Couldn't load the inbox. Can't reach the factory. Check your connection, then retry.",
-        wait,
-      );
+      const { page, errors, state } = await openFailedBoard();
       assert.equal(await page.$eval("#inbox-retry", (el) => el.hidden), false);
-      fail = false;
+      state.fail = false;
       await page.click("#inbox-retry");
       await page.waitForSelector("#inbox-list .inbox-item", wait);
       await page.waitForFunction(() => document.activeElement.id === "inbox-page-heading", wait);
       assert.equal(await page.$eval("#inbox-retry", (el) => el.hidden), true);
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
+    await it("retrying holds until the board read settles", async () => {
+      await reset();
+      const { page, errors, state } = await openFailedBoard();
+      const release = await heldRetry(page, state);
+      assert.equal(await page.$eval("#inbox-status", (el) => el.textContent), "Retrying\u2026");
+      assert.deepEqual(await statusLog(page), ["Retrying\u2026"]);
+      if (SHOTS) {
+        await mkdir(SHOTS, { recursive: true });
+        await (
+          await page.$("#inbox-page")
+        ).screenshot({
+          path: `${SHOTS}/after-inbox-retrying.png`,
+        });
+      }
+      release();
+      await page.waitForFunction(
+        (copy) => document.querySelector("#inbox-status").textContent === copy,
+        wait,
+        BOARD_COPY,
+      );
+      await page.waitForFunction(() => document.activeElement.id === "inbox-retry", wait);
+      assert.equal(await page.$eval("#inbox-retry", (el) => el.disabled), false);
+      assert.deepEqual(await statusLog(page), ["Retrying\u2026", BOARD_COPY]);
       assert.deepEqual(errors, []);
       await page.browserContext().close();
     });

@@ -117,12 +117,37 @@ test("a frame load clears the count, then says hello", () => {
   const calls = [];
   const target = { postMessage: (message, origin) => calls.push(["hello", message, origin]) };
   const clear = (count) => calls.push(["clear", count]);
-  frameLoaded(target, ORIGIN, clear);
+  frameLoaded(target, ORIGIN, clear, false);
   assert.deepEqual(calls, [
     ["clear", null],
     ["hello", { type: "factory-embed-hello", v: 1 }, ORIGIN],
   ]);
   calls.length = 0;
-  frameLoaded(null, ORIGIN, clear);
+  frameLoaded(null, ORIGIN, clear, false);
   assert.deepEqual(calls, [["clear", null]]);
+});
+
+test("desktop hello opts in to external links", () => {
+  const calls = [];
+  const target = { postMessage: (message, origin) => calls.push([message, origin]) };
+  frameLoaded(target, ORIGIN, () => {}, true);
+  assert.deepEqual(calls, [[{ type: "factory-embed-hello", v: 1, links: "external" }, ORIGIN]]);
+});
+
+test("open url", () => {
+  const base = { type: "factory-open-url", v: 1 };
+  const url = "https://github.com/example/sample/pull/7";
+  assert.deepEqual(readEmbedMessage({ ...base, url }), { type: "factory-open-url", url });
+  for (const bad of [
+    "javascript:alert(1)",
+    "data:text/html,x",
+    "paseo://x",
+    "https://user:pw@example.test/",
+    "https://example.test/a b",
+    "https://example.test/a\nb",
+    "https://example.test/" + "a".repeat(2049),
+    "",
+  ])
+    assert.equal(readEmbedMessage({ ...base, url: bad }), null, bad.slice(0, 40));
+  assert.equal(readEmbedMessage(base), null);
 });

@@ -1487,6 +1487,8 @@ window.addEventListener('online', async () => {
 let loaded = false;
 // Why the first board read failed while nothing has loaded: '', 'signin', 'offline' or 'unreachable'.
 let boardLoadError = '';
+// True while a Retry button's board read runs, so other redraws keep the Retrying… copy.
+let boardRetrying = false;
 const BOARD_LOAD_ERRORS = {
   signin: 'Your sign-in has expired. Sign in again, then retry.',
   offline: "You're offline and this device has no saved board. Reconnect, then retry.",
@@ -1658,6 +1660,7 @@ function paseoLinksFor(p) {
 // Framed by a listed Paseo origin, app links go to the parent instead of the OS handler.
 const EMBED_ORIGINS = Array.isArray(factoryConfig.embed_origins) ? factoryConfig.embed_origins : [];
 let embedParent = null;
+let embedLinksExternal = false;
 // Opened as a sign-in popup by a listed Paseo origin: say sign-in finished.
 // Chrome throws on a non-http target such as paseo://app, so each origin is tried alone.
 if (window.opener && window.parent === window) for (const o of EMBED_ORIGINS) try { window.opener.postMessage({ type: 'factory-embed-signed-in', v: 1 }, o); } catch {}
@@ -1675,6 +1678,7 @@ window.addEventListener('message', (e) => {
   if (!(window.parent !== window && e.source === window.parent && EMBED_ORIGINS.includes(e.origin) &&
         e.data?.type === 'factory-embed-hello' && e.data.v === 1)) return;
   embedParent = e.origin;
+  embedLinksExternal = e.data.links === 'external';
   window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, e.origin);
   postEmbedLocation();
   syncInboxLink();
@@ -1687,6 +1691,20 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   window.parent.postMessage({ type: 'factory-open-agent', v: 1, ...ids }, embedParent);
 }, true);
+// In Paseo desktop, a link that would open a new window goes to the system browser instead.
+function openOutside(e) {
+  if (!embedParent || !embedLinksExternal || e.defaultPrevented) return;
+  if (e.type === 'click' ? e.button !== 0 : e.button !== 1) return;
+  const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
+  if (!a || a.hasAttribute('download')) return;
+  if (!(a.target === '_blank' || e.button === 1 || e.metaKey || e.ctrlKey || e.shiftKey)) return;
+  const url = new URL(a.href);
+  if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.href.length > 2048) return;
+  e.preventDefault();
+  window.parent.postMessage({ type: 'factory-open-url', v: 1, url: url.href }, embedParent);
+}
+document.addEventListener('click', openOutside);
+document.addEventListener('auxclick', openOutside);
 // Tells the framing Paseo screen where the board is, so it can reopen here.
 function postEmbedLocation() {
   if (embedParent) window.parent.postMessage({ type: 'factory-embed-location', v: 1, hash: location.hash }, embedParent);
@@ -3453,7 +3471,7 @@ function renderInboxPage() {
   if (!inboxShown()) return;
   $('inbox-retry').hidden = !boardLoadError;
   if (!loaded || (!backlogLoaded && !backlogFailed)) {
-    $('inbox-status').textContent = inboxError || (boardLoadError ? "Couldn't load the inbox. " + BOARD_LOAD_ERRORS[boardLoadError] : 'Loading the inbox\u2026');
+    $('inbox-status').textContent = inboxError || (boardRetrying ? 'Retrying\u2026' : boardLoadError ? "Couldn't load the inbox. " + BOARD_LOAD_ERRORS[boardLoadError] : 'Loading the inbox\u2026');
     $('inbox-list').innerHTML = '';
     inboxHtml = '';
     return;
@@ -3806,9 +3824,12 @@ async function retryBoardLoad(e) {
   const button = e.currentTarget, id = button.id;
   // Disabled while the read runs, so repeated clicks cannot start parallel polls.
   button.disabled = true;
+  boardRetrying = true;
   $(RETRY_STATUS[id]).textContent = 'Retrying\u2026';
   const ok = await poll();
+  boardRetrying = false;
   button.disabled = false;
+  renderInboxPage();
   if (document.activeElement !== document.body) return;
   if (!ok) { button.focus(); return; }
   if (id === 'notifications-menu-retry') ($('notifications-menu-list').querySelector('a') || $('notifications-more')).focus();
