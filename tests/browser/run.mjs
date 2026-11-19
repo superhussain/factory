@@ -1560,6 +1560,15 @@ async function capture(outdir, referencePath) {
         document.getElementById("alert-heading").scrollIntoView({ block: "start" }),
       );
     });
+    await view("notify-sound-wait-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => localStorage.setItem("factory-sound", "on"));
+      await page.reload({ waitUntil: "networkidle0" });
+      await page.waitForSelector(".card");
+      await openNotificationSettings(page);
+      await page.evaluate(() =>
+        document.getElementById("sound-heading").scrollIntoView({ block: "start" }),
+      );
+    });
     const settleArchiveSettings = async (page, name) => {
       try {
         await page.waitForFunction(() => {
