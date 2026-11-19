@@ -10,6 +10,7 @@ export const EMBED_HASH = /^(?:#[A-Za-z0-9\-_.!~*'()%/]{1,256})?$/;
 
 export type EmbedMessage =
   | { type: "factory-embed-ready" }
+  | { type: "factory-embed-signin" }
   | { type: "factory-open-agent"; server: string; agent: string }
   | { type: "factory-open-url"; url: string }
   | { type: "factory-inbox-count"; count: number }
@@ -47,6 +48,7 @@ export function readEmbedMessage(data: unknown): EmbedMessage | null {
   };
   if (message.v !== 1) return null;
   if (message.type === "factory-embed-ready") return { type: "factory-embed-ready" };
+  if (message.type === "factory-embed-signin") return { type: "factory-embed-signin" };
   if (
     message.type === "factory-open-agent" &&
     typeof message.server === "string" &&
