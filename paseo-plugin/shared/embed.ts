@@ -4,11 +4,14 @@ export const EMBED_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const ORIGIN =
   /^https:\/\/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)\/?$/i;
 export const JOB_ID = /^[A-Za-z0-9-]{1,128}$/;
+export const OPEN_URL = /^https?:\/\/[^\/?#@\s\x00-\x1f\x7f]+(?:[\/?#][^\s\x00-\x1f\x7f]*)?$/i;
+export const OPEN_URL_MAX = 2048;
 export const EMBED_HASH = /^(?:#[A-Za-z0-9\-_.!~*'()%/]{1,256})?$/;
 
 export type EmbedMessage =
   | { type: "factory-embed-ready" }
   | { type: "factory-open-agent"; server: string; agent: string }
+  | { type: "factory-open-url"; url: string }
   | { type: "factory-inbox-count"; count: number }
   | { type: "factory-embed-location"; hash: string };
 
@@ -36,6 +39,7 @@ export function readEmbedMessage(data: unknown): EmbedMessage | null {
     agent?: unknown;
     count?: unknown;
     hash?: unknown;
+    url?: unknown;
   };
   if (message.v !== 1) return null;
   if (message.type === "factory-embed-ready") return { type: "factory-embed-ready" };
@@ -47,6 +51,13 @@ export function readEmbedMessage(data: unknown): EmbedMessage | null {
     EMBED_ID.test(message.agent)
   )
     return { type: "factory-open-agent", server: message.server, agent: message.agent };
+  if (
+    message.type === "factory-open-url" &&
+    typeof message.url === "string" &&
+    message.url.length <= OPEN_URL_MAX &&
+    OPEN_URL.test(message.url)
+  )
+    return { type: "factory-open-url", url: message.url };
   if (
     message.type === "factory-inbox-count" &&
     typeof message.count === "number" &&
@@ -70,7 +81,13 @@ export function frameLoaded(
   target: HelloTarget | null | undefined,
   origin: string,
   clearCount: (count: null) => void,
+  externalLinks: boolean,
 ): void {
   clearCount(null);
-  target?.postMessage({ type: "factory-embed-hello", v: 1 }, origin);
+  target?.postMessage(
+    externalLinks
+      ? { type: "factory-embed-hello", v: 1, links: "external" }
+      : { type: "factory-embed-hello", v: 1 },
+    origin,
+  );
 }
