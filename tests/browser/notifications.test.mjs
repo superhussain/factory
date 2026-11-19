@@ -9,6 +9,7 @@ import {
   seedBoard,
   blockLiveEvents,
 } from "../support/browser-server.mjs";
+import { waitForBoard } from "../support/board-ready.cjs";
 
 const wait = { polling: 50 };
 const job = (id, stage, extra = {}) => ({
@@ -68,6 +69,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
       return { page, errors };
     };
     const openMenu = async (page) => {
+      await waitForBoard(page);
       await page.click("#notifications-button");
       await page.waitForSelector("#notifications-menu-list .notification-link", wait);
     };
