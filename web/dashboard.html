@@ -1503,7 +1503,7 @@ function setConnection(state) {
   const cadence = every ? 'Polling every ' + every + ' seconds until live updates reconnect' : 'Polling paused while this window is hidden or unfocused';
   const label = polling ? cadence + (liveNote && '. ' + liveNote) : title;
   drawDot(polling ? dot + ' polling' : dot, label);
-  if (was === 'signin' && state !== 'signin') { syncLive(); syncAppBadge(badgeCount); }
+  if (was === 'signin' && state !== 'signin') { syncLive(); syncAppBadge(badgeCount); postEmbedReady(); }
   if (state === 'signin') syncAppBadge(badgeCount);
   if (state === 'signin' && was !== 'signin') postEmbedSignin();
 }
@@ -1828,11 +1828,12 @@ window.addEventListener('message', (e) => {
         e.data?.type === 'factory-embed-hello' && e.data.v === 1)) return;
   embedParent = e.origin;
   embedLinksExternal = e.data.links === 'external';
-  window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, e.origin);
+  postEmbedReady();
   if (connState === 'signin') postEmbedSignin();
   postEmbedLocation();
   syncInboxLink();
 });
+function postEmbedReady() { if (embedParent) window.parent.postMessage({ type: 'factory-embed-ready', v: 1 }, embedParent); }
 function postEmbedSignin() { if (embedParent) window.parent.postMessage({ type: 'factory-embed-signin', v: 1 }, embedParent); }
 // In a Paseo frame, a warm return focuses the frame. Put focus back on the last focused element.
 // Chrome has already moved activeElement to body when window blur fires, so track focusin instead.

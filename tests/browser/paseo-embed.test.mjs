@@ -442,6 +442,54 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       }
     });
 
+    await t.test("leaving signin posts ready", async () => {
+      const recovered = await framedPage(browser, origin, LISTED);
+      try {
+        await recovered.waitForFunction(
+          () => window.received.some((m) => m?.type === "factory-embed-ready"),
+          { timeout: 5000, polling: 50 },
+        );
+        await childFrame(recovered).waitForFunction(
+          () => document.body.innerText.includes("Synthetic linked job"),
+          { timeout: 8000 },
+        );
+        accessExpired = true;
+        await childFrame(recovered).evaluate(() => poll());
+        await recovered.waitForFunction(
+          () => window.received.filter((m) => m?.type === "factory-embed-signin").length === 1,
+          { timeout: 5000, polling: 50 },
+        );
+        accessExpired = false;
+        await childFrame(recovered).evaluate(() => poll());
+        assert.equal(
+          await childFrame(recovered).evaluate(() => document.querySelector("#conn-banner").hidden),
+          true,
+        );
+        if (CAPTURE_DIR)
+          await recovered.screenshot({
+            path: join(CAPTURE_DIR, "frame-sign-in-recovered.png"),
+            fullPage: true,
+          });
+        await recovered.waitForFunction(
+          () => window.received.filter((m) => m?.type === "factory-embed-ready").length === 2,
+          { timeout: 5000, polling: 50 },
+        );
+        assert.deepEqual(
+          await recovered.evaluate(() =>
+            window.received
+              .filter(
+                (m) => m?.type === "factory-embed-ready" || m?.type === "factory-embed-signin",
+              )
+              .map((m) => m.type),
+          ),
+          ["factory-embed-ready", "factory-embed-signin", "factory-embed-ready"],
+        );
+      } finally {
+        accessExpired = false;
+        await recovered.browserContext().close();
+      }
+    });
+
     await t.test("warm frame keeps the draft", async () => {
       const source = await readFile(
         new URL("../../paseo-plugin/shared/warm-frame.ts", import.meta.url),
