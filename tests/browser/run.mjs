@@ -1102,7 +1102,7 @@ async function capture(outdir, referencePath) {
       await clickMore(page);
       return clipOf(page, ".col.pr-open h2", ".col.merged .card");
     });
-    // The saved slim copy is on screen, so a click on show all only records the wish.
+    // The saved slim copy is on screen, so a click on show all turns busy until the network read.
     await view("board-merged-saved-click-1440", 1440, 900, "light", async (page) => {
       await holdFullRead(page);
       await expandMerged(page);
