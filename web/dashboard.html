@@ -217,10 +217,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .retros-runs-heading { font-size: 15px; margin: 24px 0 12px; }
   #audit-flags td a { color: var(--accent); }
   #audit-flags td a { white-space: nowrap; }
-  #audit-flags td a + a { margin-left: 8px; }
+  #audit-flags td:nth-child(5) a { display: block; }
+  #audit-flags td:nth-child(5) a + a { margin-top: 4px; }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #audit-flags td:nth-child(8) { min-width: 14em; }
-  .audit-flag-actions { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 8px; }
+  .audit-flag-actions { display: grid; grid-template-columns: max-content; justify-content: start; gap: 8px; }
   .audit-flag-actions a { grid-column: 1 / -1; justify-self: start; padding: 6px 0; }
   #audit-flags td:last-child { white-space: nowrap; }
   #audit-flags tr.acked { color: var(--muted); }
