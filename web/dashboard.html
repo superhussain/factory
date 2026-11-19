@@ -5006,7 +5006,7 @@ function renderBoard() {
       starredFirst(list.sort((a, b) => t(b) - t(a)));
       if (totals[i] > CAP) {
         const open = expanded.has(s) && boardComplete;
-        const loading = !boardComplete && fullRead;
+        const loading = !boardComplete && (fullRead || (fullWanted && boardFromCache && expanded.has(s)));
         // A short column's header already shows the total, so only its accessible name repeats it.
         // While the full read runs the text stays put; the button is dimmed and busy.
         more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '"' +
@@ -5073,6 +5073,7 @@ $('board').addEventListener('click', (e) => {
     if (!boardComplete && TERMINAL.includes(s)) {
       expanded.add(s);
       wantFullBoard();
+      if (boardFromCache) renderBoard();
       return;
     }
     if (!expanded.delete(s)) expanded.add(s);

@@ -215,7 +215,17 @@ test("slim board read", { timeout: 240000 }, async (t) => {
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => loaded === true && boardFromCache === true, wait);
       assert.equal(await text(page, ".col.merged .count-narrow"), "10 / 30");
-      await page.evaluate(() => wantFullBoard());
+      const toggle = '.column-toggle[data-stage="merged"]';
+      if ((await page.$eval(toggle, (el) => el.getAttribute("aria-expanded"))) === "false")
+        await clickNow(page, toggle);
+      await clickNow(page, '.more[data-stage="merged"]');
+      assert.deepEqual(
+        await page.$eval('.more[data-stage="merged"]', (el) => [
+          el.getAttribute("aria-busy"),
+          el.getAttribute("aria-disabled"),
+        ]),
+        ["true", "true"],
+      );
       assert.equal(await page.evaluate(() => window.fullReadCount), 0);
       await page.evaluate(() => window.releaseSlim());
       await waitForBoard(page);
