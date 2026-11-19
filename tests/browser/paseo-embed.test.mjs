@@ -479,3 +479,67 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
     });
   });
 });
+
+test("scrollbar press keeps the draft field", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(
+    async ({ browser, origin }) => {
+      await seedProject(
+        origin,
+        "sample",
+        "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+      );
+      await seedBoard(origin, [JOB]);
+      const page = await framedPage(browser, origin, LISTED);
+      await page.waitForFunction(
+        () => window.received.some((m) => m?.type === "factory-embed-ready" && m.v === 1),
+        { timeout: 5000, polling: 50 },
+      );
+      const frame = childFrame(page);
+      await frame.waitForSelector("#board");
+      await typeDraft(frame);
+      const dlg = await frame.evaluate(() => {
+        const d = document.querySelector("#idea-dlg");
+        d.style.maxHeight = "200px";
+        d.style.overflowY = "scroll";
+        const r = d.getBoundingClientRect();
+        return {
+          bar: d.offsetWidth - d.clientWidth - 2 * d.clientLeft,
+          x: r.left + d.clientLeft + d.clientWidth,
+          y: r.top + r.height / 2,
+        };
+      });
+      assert.ok(dlg.bar > 0, "scrollbars hidden");
+      assert.equal(
+        await frame.evaluate(() => {
+          const s = document.querySelector("#idea-key-help");
+          const r = s.getBoundingClientRect();
+          return onScrollbar({ target: s, clientX: r.left + 1, clientY: r.top + 1 });
+        }),
+        false,
+        "an inline span press is not a scrollbar press",
+      );
+      const box = await (await page.$("iframe")).boundingBox();
+      await page.mouse.click(box.x + dlg.x + dlg.bar / 2, box.y + dlg.y);
+      assert.equal(await frame.evaluate(() => document.activeElement?.id), "idea-dlg");
+
+      await page.evaluate(() => {
+        const side = document.createElement("button");
+        side.id = "side";
+        side.textContent = "Synthetic session row";
+        document.body.append(side);
+      });
+      await page.click("#side");
+      await page.evaluate(() => document.querySelector("iframe").focus());
+      if (CAPTURE_DIR)
+        await (
+          await page.$("iframe")
+        ).screenshot({
+          path: join(CAPTURE_DIR, "scrollbar-return.png"),
+        });
+      assert.equal(await frame.evaluate(() => document.activeElement?.id), "idea-text");
+      assert.equal(await frame.evaluate(() => document.querySelector("#idea-text").value), DRAFT);
+    },
+    { scrollbars: true },
+  );
+});
