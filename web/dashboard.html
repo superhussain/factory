@@ -3580,10 +3580,14 @@ function inboxOpenIndex(items) {
   return items.findIndex((it) => it.item ? it.item.raw === openBacklogRaw : it.job.id === openId);
 }
 
+function setIconCount(id, n) {
+  $(id).textContent = n > 99 ? '99+' : String(n);
+  $(id).hidden = !n;
+}
+
 function syncInboxLink() {
   const n = loaded && (backlogLoaded || backlogFailed) ? inboxItems().length : 0;
-  $('inbox-count').textContent = n > 99 ? '99+' : String(n);
-  $('inbox-count').hidden = !n;
+  setIconCount('inbox-count', n);
   $('inbox-link').setAttribute('aria-label', n ? 'Inbox, ' + n + ' waiting' : 'Inbox');
   postInboxCount(n);
 }
@@ -3876,16 +3880,17 @@ function notificationRow(it) {
   const j = it.job;
   return { href: '#' + encodeURIComponent(j.id), title: j.title || j.id, id: j.id, project: projectName(j) };
 }
-function notificationsUnread(items) {
-  return (Date.parse(items[0]?.at) || 0) > (Date.parse(store.get(NOTIFICATIONS_SEEN_KEY)) || 0);
+function notificationsUnreadCount(items) {
+  const seen = Date.parse(store.get(NOTIFICATIONS_SEEN_KEY)) || 0;
+  return items.filter((it) => Date.parse(it.at) > seen).length;
 }
 function renderNotifications() {
   const items = loaded ? notificationItems() : [];
   const menuOpen = !$('notifications-menu').hidden;
-  if ((menuOpen || notificationsShown()) && notificationsUnread(items)) store.set(NOTIFICATIONS_SEEN_KEY, items[0].at);
-  const unread = notificationsUnread(items);
-  $('notifications-dot').hidden = !unread;
-  $('notifications-button').setAttribute('aria-label', unread ? 'Notifications, new' : 'Notifications');
+  if ((menuOpen || notificationsShown()) && notificationsUnreadCount(items) > 0) store.set(NOTIFICATIONS_SEEN_KEY, items[0].at);
+  const n = notificationsUnreadCount(items);
+  setIconCount('notifications-count', n);
+  $('notifications-button').setAttribute('aria-label', n ? 'Notifications, ' + n + ' new' : 'Notifications');
   if (menuOpen) renderNotificationsMenu(items);
   if (notificationsShown()) renderNotificationsPage(items);
 }

@@ -110,7 +110,14 @@ test("notifications", { timeout: 180000 }, async (t) => {
     await t.test("menu lists recent notifications", async () => {
       first = await openPage();
       const { page, errors } = first;
-      await page.waitForSelector("#notifications-dot:not([hidden])", wait);
+      await page.waitForFunction(
+        () => document.querySelector("#notifications-count:not([hidden])")?.textContent === "3",
+        wait,
+      );
+      assert.equal(
+        await page.$eval("#notifications-button", (el) => el.getAttribute("aria-label")),
+        "Notifications, 3 new",
+      );
       await openMenu(page);
       assert.equal(
         await page.$eval("#notifications-button", (el) => el.getAttribute("aria-expanded")),
@@ -137,7 +144,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
         menu.left >= 0 && menu.right <= menu.innerWidth,
         `menu off screen: ${JSON.stringify(menu)}`,
       );
-      assert.equal(await page.$eval("#notifications-dot", (el) => el.hidden), true);
+      assert.equal(await page.$eval("#notifications-count", (el) => el.hidden), true);
       assert.deepEqual(errors, []);
     });
 
@@ -146,7 +153,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.waitForSelector("#notifications-button[aria-label]", wait);
       await page.waitForFunction(() => document.querySelector(".card"), wait);
-      assert.equal(await page.$eval("#notifications-dot", (el) => el.hidden), true);
+      assert.equal(await page.$eval("#notifications-count", (el) => el.hidden), true);
       assert.equal(
         await page.evaluate(() => localStorage.getItem("factory-notifications-seen")),
         "2026-01-04T00:00:00Z",
