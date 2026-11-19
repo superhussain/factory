@@ -1670,10 +1670,12 @@ async function capture(outdir, referencePath) {
       });
       if (side === "after") {
         await page.waitForSelector("#audit-flags-rows tr");
-        await page.evaluate(() =>
-          document.getElementById("audit-flags-pager").scrollIntoView({ block: "end" }),
-        );
         await page.evaluate(() => {
+          if (innerWidth > 600)
+            return document
+              .getElementById("audit-flags-heading")
+              .scrollIntoView({ block: "start" });
+          document.getElementById("audit-flags-pager").scrollIntoView({ block: "end" });
           const wrap = document.getElementById("audit-flags-wrap");
           wrap.scrollLeft = wrap.scrollWidth;
         });

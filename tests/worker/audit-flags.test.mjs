@@ -358,3 +358,24 @@ test("re-push keeps ack", async () => {
   assert.equal(rows.find((r) => r.target === "sudo new").ack, undefined);
   assert.equal(rows.filter((r) => "ack" in r).length, 1);
 });
+
+test("a retry after a lost put drops an ack cleared in the meantime", async () => {
+  const s = await setup();
+  await s.put(SIX);
+  await s.send("POST", "/api/audit-flags/ack", ackBody(R, true));
+  const put = s.bucket.put;
+  let lost = 0;
+  s.bucket.put = async (key, value, options = {}) => {
+    if (key === "audit-flags.json" && options.onlyIf && !lost) {
+      lost = 1;
+      const { rows } = JSON.parse(await (await s.bucket.get(key)).text());
+      for (const row of rows) delete row.ack;
+      await put(key, JSON.stringify({ schema: "factory.audit-flags/1", rows }));
+      return null;
+    }
+    return put(key, value, options);
+  };
+  assert.equal((await s.put(SIX)).status, 200);
+  assert.equal(lost, 1);
+  assert.deepEqual(await s.flags(), STEP_4);
+});
