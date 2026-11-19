@@ -370,6 +370,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .event-kinds li { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 4px 10px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
   .event-kinds .event-desc { display: block; font-size: 12px; color: var(--muted); }
   .event-kinds label { display: flex; gap: 4px; align-items: center; margin: 0; color: var(--fg); font-size: 13px; }
+  .event-kinds label:has(input:disabled) { color: var(--muted); }
   .scheduler-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
   .reference-scroll { overflow-x: auto; margin: 0 0 12px; }
   .reference-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -1042,6 +1043,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <label for="notify-push"><input type="checkbox" id="notify-push" aria-describedby="push-help" disabled> Push to this device when the dashboard is closed</label>
       <p class="muted" id="push-help"></p>
       <p id="push-status" role="status"></p>
+      <h4 id="sound-heading">Sounds</h4>
+      <label for="sound-on"><input type="checkbox" id="sound-on" aria-describedby="sound-help"> Play a sound for board events</label>
+      <p class="muted" id="sound-help"></p>
+      <p id="sound-status" role="status"></p>
       <h4 id="alert-heading">Events</h4>
       <p class="muted" id="alert-help">Pick, for each board event, whether it shows a toast in this tab and whether it plays a sound. These settings apply only to this browser.</p>
       <ul class="event-kinds" aria-labelledby="alert-heading" aria-describedby="alert-help">
@@ -1052,10 +1057,6 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <li><span>A job merges<span class="event-desc">A job's pull request merges.</span></span><label for="alert-merged"><input type="checkbox" id="alert-merged" data-alert="merged" aria-label="Toast for A job merges"> Toast</label><label for="sound-merged"><input type="checkbox" id="sound-merged" data-sound-kind="merged" aria-label="Sound for A job merges"> Sound</label><button class="btn" type="button" data-sound="merged" aria-label="Play the sound for: A job merges">Play</button></li>
       </ul>
       <p id="alert-status" role="status"></p>
-      <h4 id="sound-heading">Sounds</h4>
-      <label for="sound-on"><input type="checkbox" id="sound-on" aria-describedby="sound-help"> Play a sound for board events</label>
-      <p class="muted" id="sound-help"></p>
-      <p id="sound-status" role="status"></p>
     </section>
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
       <h3 id="scheduler-settings-heading" tabindex="-1">Scheduler</h3>
@@ -9077,7 +9078,8 @@ const SOUND_KEY = 'factory-sound';
 const SOUNDS_OFF_KEY = 'factory-sounds-off';
 const SOUNDS = { backlog: [392, 494], needs: [880, 660, 880], spec: [659, 880], pr: [523, 659], merged: [523, 659, 784] };
 const SOUND_ORDER = ['needs', 'spec', 'pr', 'merged'];
-const SOUND_HELP = 'Pick which events play a sound in the Events list above. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.';
+const SOUND_HELP = 'Pick which events play a sound in the Events list below. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.';
+const SOUND_OFF_HELP = 'Sounds are off, so the Sound boxes in the Events list below are greyed out. Turn this on to pick which events play a sound. Play still previews each sound.';
 let soundOn = store.get(SOUND_KEY) === 'on';
 const soundsOff = new Set((store.get(SOUNDS_OFF_KEY) || '').split(',').filter((k) => ALERT_KINDS.includes(k)));
 function soundKindOn(kind) { return !soundsOff.has(kind); }
@@ -9129,13 +9131,14 @@ function renderSoundSettings() {
   for (const b of document.querySelectorAll('[data-sound]')) b.disabled = !supported;
   for (const box of document.querySelectorAll('[data-sound-kind]')) {
     box.checked = soundKindOn(box.dataset.soundKind);
-    box.disabled = !supported;
+    box.disabled = !soundActive();
   }
-  $('sound-help').textContent = supported ? SOUND_HELP : 'This browser cannot play sounds.';
+  $('sound-help').textContent = supported ? (soundOn ? SOUND_HELP : SOUND_OFF_HELP) : 'This browser cannot play sounds.';
 }
 $('sound-on').addEventListener('change', () => {
   soundOn = $('sound-on').checked;
   if (soundOn) store.set(SOUND_KEY, 'on'); else store.remove(SOUND_KEY);
+  renderSoundSettings();
   wakeAudio();
   syncLive(); schedulePoll();
   $('sound-status').textContent = soundOn ? 'Sounds are on in this browser.' : 'Sounds are off.';
