@@ -104,7 +104,7 @@ const AUDIT_FLAGS_BACKLOG_PATH = /^\/api\/audit-flags\/backlog$/;
 // Retro runs: one factory.retro-run/1 record per admitted run, and the newest 30 listed.
 const RETROS = /^\/api\/retros(?:\/([A-Za-z0-9_-]{1,64}))?$/;
 // board.json holds every job, merged ones included, so it outgrows the per-file cap.
-const MAX_BOARD = 4 << 20;
+const MAX_BOARD = 16 << 20;
 const MAX_IMAGE = 5 << 20;
 // The server picks the type from the extension and never trusts a client header.
 const IMAGE_TYPES = {
@@ -417,7 +417,7 @@ async function casPut(request, env, key, type, ctx) {
   const cond = condition(request);
   if (!cond) return needsCondition();
   const body = await readBody(request, MAX_BOARD);
-  if (body === null) return reply("body over 4 MiB", 413);
+  if (body === null) return reply("body over 16 MiB", 413);
   let data, stored;
   if (key === "board.json") {
     try {

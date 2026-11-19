@@ -68,7 +68,7 @@ migration or reset; installing or deploying never rewrites existing state.
 
 The Worker preserves the v1 wire and storage contracts: exact routes, status
 codes, bodies, header order, validation order and limits. Text resources are
-capped at 1 MiB (board and backlog at 4 MiB), images at 5 MiB (declared-length and streamed), idea files at 10 MiB (PDF), 1 MiB (CSV, text) and 25 MiB (MP4, WebM), image envelopes
+capped at 1 MiB (board and backlog at 16 MiB), images at 5 MiB (declared-length and streamed), idea files at 10 MiB (PDF), 1 MiB (CSV, text) and 25 MiB (MP4, WebM), image envelopes
 at 4096 pixels per side and 16,000,000 pixels. MP4 and WebM idea files play inline: their GET answers one byte range with 206, or 416 past the end. Storage keys, `httpEtag` handling,
 quoted ETags, uppercase weak `W/` normalization, 412 on null conditional puts,
 original-byte hashes, no CORS headers, no delete endpoint and no pagination
