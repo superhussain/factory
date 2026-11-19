@@ -53,6 +53,7 @@
                                             print one JSON line when every job file has a valid first
                                             line, one keeps an invalid first line, --pr's next leaves
                                             wait, or S seconds pass (default and max 540); runs hold first
+                                            when a session tag is set
   factory.py round-wait <project-slug>/<job-id> <round> [--timeout S]
                                             block until all four review files of round N have a verdict
                                             line, write each verdict to the board's rounds entry as it
@@ -6793,7 +6794,10 @@ def watch_cmd(target, *args):
             fail(f"bad artifact {args[i]!r}. " + WATCH_USAGE, 2)
     if not artifacts and not watch_pr:
         fail(WATCH_USAGE, 2)
-    hold(target)
+    if os.environ.get("FACTORY_SESSION"):
+        hold(target)
+    elif not any(j.get("id") == job_id for j in read_board(home)["jobs"]):
+        fail(f"no job {job_id} on the board. Nothing was written.", 4)
     folder = home / "jobs" / slug / job_id
     if watch_pr:
         pr = board_pr(home, slug, job_id, archive=True)
