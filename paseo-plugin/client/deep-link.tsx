@@ -1,6 +1,6 @@
 import type { PluginClientContext, PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { openExternalUrl } from "@getpaseo/plugin/client";
-import { Icon, Markdown } from "@getpaseo/plugin/client/ui";
+import { Icon, Markdown, useToast } from "@getpaseo/plugin/client/ui";
 import { Pressable, Text, View } from "react-native";
 import { z } from "zod";
 import {
@@ -10,6 +10,7 @@ import {
   screenOpeners,
   type DashboardLink,
 } from "../shared/deep-link";
+import { EMBED_HASH, parseDashboardOrigin } from "../shared/embed";
 
 const KIND = "dashboard-links";
 
@@ -21,24 +22,29 @@ const schema = z.object({
     .max(MAX_DASHBOARD_LINKS),
 });
 
-function open(link: DashboardLink) {
-  const opener = screenOpeners(globalThis).get(link.origin);
+// Rebuilds the URL from checked parts, so an item from anywhere opens only a dashboard page.
+function open(link: DashboardLink, onError: () => void) {
+  const origin = parseDashboardOrigin(link.origin);
+  if (!origin || !EMBED_HASH.test(link.hash)) return;
+  const opener = screenOpeners(globalThis).get(origin);
   if (opener) opener(link.hash);
-  else void openExternalUrl(link.url);
+  else openExternalUrl(origin + "/" + link.hash).catch(onError);
 }
 
 function DashboardLinksReply({ item, theme }: PluginTimelineItemProps<z.infer<typeof schema>>) {
   const { text, phase, links } = item.data;
+  const toast = useToast();
   return (
     <View>
       <Markdown>{text}</Markdown>
       {phase === "complete" ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
           {links.map((link) => (
             <Pressable
               key={link.url}
               accessibilityRole="link"
-              onPress={() => open(link)}
+              hitSlop={8}
+              onPress={() => open(link, () => toast.error("Paseo could not open that link."))}
               style={{
                 flexDirection: "row",
                 alignItems: "center",

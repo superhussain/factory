@@ -27,7 +27,7 @@ const NOTIFICATION_HINTS: Record<Exclude<NotificationState, "unsupported">, stri
 };
 
 const LINK_BUTTONS_HINT =
-  "Adds Open in Factory buttons under agent replies that link to your dashboard. Paseo then shows those replies through this plugin, so they lose command links, and phones lose streaming pacing. Off by default.";
+  'Adds Open in Factory buttons under agent replies that link to your dashboard. Paseo then shows those replies through this plugin, so they lose command links, the copy button and the "Worked for" footer, and phones lose streaming pacing. Off by default.';
 
 export function settingsScreen(onSaved: () => void) {
   return function SettingsScreen({ theme }: PluginSurfaceProps) {
@@ -35,6 +35,7 @@ export function settingsScreen(onSaved: () => void) {
     const toast = useToast();
     const [value, setValue] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [lastSave, setLastSave] = useState<"url" | "switch">("url");
     const [permission, setPermission] = useState(notificationState);
     useEffect(() => {
       const refresh = () => setPermission(notificationState());
@@ -51,6 +52,7 @@ export function settingsScreen(onSaved: () => void) {
         return;
       }
       setError(null);
+      setLastSave("url");
       if (await ready.save({ ...ready.values, origin }, ready.revision)) {
         toast.show("Factory URL saved", { variant: "success" });
         onSaved();
@@ -70,7 +72,7 @@ export function settingsScreen(onSaved: () => void) {
                 setError(null);
               }}
               disabled={ready.saving}
-              error={error ?? ready.saveError}
+              error={error ?? (lastSave === "url" ? ready.saveError : null)}
             />
             <SettingsAction
               label="Save changes"
@@ -100,11 +102,13 @@ export function settingsScreen(onSaved: () => void) {
               hint={LINK_BUTTONS_HINT}
               value={ready.values.factoryLinkButtons}
               disabled={ready.saving}
-              onValueChange={(factoryLinkButtons) =>
+              error={lastSave === "switch" ? ready.saveError : null}
+              onValueChange={(factoryLinkButtons) => {
+                setLastSave("switch");
                 void ready
                   .save({ ...ready.values, factoryLinkButtons }, ready.revision)
-                  .then(onSaved)
-              }
+                  .then(onSaved);
+              }}
             />
           </SettingsCard>
         </SettingsSection>

@@ -5,7 +5,7 @@ Factory shows your factory dashboard on its own Paseo screen. A Factory row in t
 - In Settings, Plugins, Factory, enter your factory dashboard URL, such as `https://factory.example.com`. Each host keeps its own URL.
 - Your factory server must list this Paseo origin in its `embed_origins` profile key. Without it, the dashboard refuses to load inside Paseo. The desktop app's origin is `paseo://app`; the web app's is the scheme and host from your browser's address bar, such as `https://app.paseo.sh`, with no path.
 - Your factory runs behind Cloudflare Access. Set the Access application's cookie SameSite attribute to None, or the framed board shows the Access login instead of your jobs.
-- Turn on Open in Factory buttons under Agent replies in these settings. When an agent's reply links to your dashboard URL, an Open in Factory button under the reply opens that page on the Factory screen. The link itself still opens your browser, because Paseo does not let plugins change links. The button needs the plugin on the agent's host with the same dashboard URL and the switch on there. Replies with buttons lose command links.
+- Turn on Open in Factory buttons under Agent replies in these settings. When an agent's reply links to your dashboard URL, an Open in Factory button under the reply opens that page on the Factory screen. The link itself still opens your browser, because Paseo does not let plugins change links. The button needs the plugin on the agent's host with the same dashboard URL and the switch on there. Replies with buttons lose command links, the copy button and the "Worked for" footer.
 
 ## What it reads and sends
 
