@@ -1078,8 +1078,26 @@ async function capture(outdir, referencePath) {
       await expandMerged(page);
       return clipOf(page, ".col.merged h2");
     };
-    await view("board-merged-header-1440", 1440, 900, "light", mergedHeader);
+    // At 1440 the clip takes in the pr-open column too, so card tops can be compared.
+    const mergedBeside = async (page) => {
+      await expandMerged(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    };
+    await view("board-merged-header-1440", 1440, 900, "light", mergedBeside);
     await view("board-merged-header-390", 390, 844, "dark", mergedHeader);
+    // The full read never answers, so the button stays in its loading state.
+    await view("board-merged-loading-1440", 1440, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        const fetchNow = window.fetch;
+        window.fetch = (url, options) =>
+          String(url).endsWith("api/board") && !options?.method
+            ? new Promise(() => {})
+            : fetchNow(url, options);
+      });
+      await expandMerged(page);
+      await page.evaluate(() => document.querySelector('.more[data-stage="merged"]').click());
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    });
     await view("board-merged-all-1440", 1440, 900, "light", async (page) => {
       await expandMerged(page);
       await page.evaluate(() => document.querySelector('.more[data-stage="merged"]').click());
