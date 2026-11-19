@@ -425,6 +425,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
 
     await t.test("open job returns to the page", async () => {
       const { page, errors } = list;
+      await pageRows(page, 3);
       await page.$$eval("#notifications-list .inbox-item", (items) =>
         items[1].querySelector('a[href="#051-sample-retry"]').click(),
       );
