@@ -447,10 +447,12 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .count-wide { text-transform: none; }
   .count-wide, .count-narrow { white-space: nowrap; }
   /* A short finished column keeps its header on one line, so its cards line up with the next column's.
-     The stage name gives way first. */
-  .col.partial-col h2 { flex-wrap: nowrap; }
-  .col.partial-col .column-toggle { min-width: 0; }
-  .col.partial-col .column-toggle > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+     The stage name gives way first, down to 4ch; past that, show all drops to a second line. */
+  .col.partial-col .column-toggle { min-width: min-content; }
+  .col.partial-col .column-toggle > span:first-child {
+    contain: inline-size; flex: 1 1 0; min-width: 4ch; margin-inline-end: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start;
+  }
   .count-narrow { display: none; }
   @container col (max-width: 280px) {
     .count-wide { display: none; }
@@ -1602,7 +1604,8 @@ function slimRows(data) {
   slimCounts = data.slim.counts || {};
   const ids = new Set(rows.map((j) => j.id));
   const all = fullFinished ? rows.concat(fullFinished.filter((j) => !ids.has(j.id))) : rows;
-  boardComplete = TERMINAL.every((s) => all.filter((j) => j.stage === s).length ===
+  // slim.counts counts each id once per stage, so the rows are compared the same way.
+  boardComplete = TERMINAL.every((s) => new Set(all.filter((j) => j.stage === s).map((j) => j.id)).size ===
     Object.values(slimCounts).reduce((n, c) => n + (c[s] || 0), 0));
   return all;
 }
@@ -4931,9 +4934,12 @@ function renderBoard() {
       if (totals[i] > CAP) {
         const open = expanded.has(s) && boardComplete;
         const loading = !boardComplete && fullRead;
-        // A short column's header already names the total, so its button leaves the number out.
-        more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '"' + (loading ? ' aria-disabled="true"' : '') + '>' +
-          (open ? 'show ' + CAP : (loading ? 'loading all' : 'show all') + (partial ? '' : ' ' + totals[i])) + '</button>';
+        // A short column's header already shows the total, so only its accessible name repeats it.
+        // While the full read runs the text stays put; the button is dimmed and busy.
+        more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '"' +
+          (loading ? ' aria-disabled="true" aria-busy="true"' : '') +
+          (partial ? ' aria-label="show all ' + totals[i] + ' ' + s + '"' : '') + '>' +
+          (open ? 'show ' + CAP : 'show all' + (partial ? '' : ' ' + totals[i])) + '</button>';
         if (!open) list = list.slice(0, CAP);
       }
     }
@@ -4943,7 +4949,7 @@ function renderBoard() {
       ? '<span class="count-wide">showing ' + list.length + ' of ' + totals[i] + '</span><span class="count-narrow">' + list.length + ' / ' + totals[i] + '</span>'
       : totals[i];
     return '<section class="col ' + s + (lists[i].length ? '' : ' empty-col') + (collapsed[i] ? ' collapsed-col' : partial ? ' partial-col' : '') + '"><h2>' +
-      '<button type="button" class="column-toggle" data-stage="' + s + '" aria-label="' + (collapsed[i] ? 'Expand ' : 'Collapse ') + label +
+      '<button type="button" class="column-toggle" data-stage="' + s + '" title="' + label + '" aria-label="' + (collapsed[i] ? 'Expand ' : 'Collapse ') + label +
       ' column" aria-expanded="' + !collapsed[i] + '" aria-controls="column-cards-' + s + '"><span>' + label + '</span><span>' + count +
       '</span><span aria-hidden="true">' + (collapsed[i] ? '+' : '−') + '</span></button>' + (collapsed[i] ? '' : more) +
       '</h2><div class="cards" id="column-cards-' + s + '"' + (collapsed[i] ? ' hidden' : '') + '>' +

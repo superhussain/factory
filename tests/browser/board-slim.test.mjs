@@ -118,9 +118,14 @@ test("slim board read", { timeout: 240000 }, async (t) => {
       const loading = await page.evaluate(() => {
         document.querySelector('.more[data-stage="merged"]').click();
         const more = document.querySelector('.more[data-stage="merged"]');
-        return [more.textContent, more.getAttribute("aria-disabled")];
+        return [
+          more.textContent,
+          more.getAttribute("aria-disabled"),
+          more.getAttribute("aria-busy"),
+          more.getAttribute("aria-label"),
+        ];
       });
-      assert.deepEqual(loading, ["loading all", "true"]);
+      assert.deepEqual(loading, ["show all", "true", "true", "show all 30 merged"]);
       await page.waitForFunction(
         () => document.querySelectorAll(".col.merged .card").length === 30,
         wait,
@@ -179,6 +184,53 @@ test("slim board read", { timeout: 240000 }, async (t) => {
         wait,
       );
       assert.equal(fullReads(reads), 1);
+      assert.deepEqual(errors, []);
+      await page.close();
+    });
+
+    await t.test("a 160px column with a 4-digit total keeps the stage name", async () => {
+      const { page, errors } = await openPage(browser, origin);
+      await clickNow(page, '.column-toggle[data-stage="merged"]');
+      // Probe values: the merged column at 160px, as many merged rows as production has.
+      const name = () =>
+        page.evaluate(() => {
+          const span = document.querySelector('.column-toggle[data-stage="merged"] > span');
+          const more = document.querySelector('.more[data-stage="merged"]');
+          return {
+            shown: span.clientWidth,
+            full: span.scrollWidth,
+            more: more.textContent,
+            busy: more.getAttribute("aria-busy"),
+            title: span.parentElement.title,
+          };
+        });
+      await page.evaluate(() => {
+        const style = document.createElement("style");
+        style.textContent = ".col.merged { width: 160px; max-width: 160px; }";
+        document.head.append(style);
+        slimCounts.sample.merged = 1763;
+        renderBoard();
+        window.fetch = new Proxy(window.fetch, {
+          apply: (fetchNow, self, [url, options]) =>
+            String(url).endsWith("api/board") && !options?.method
+              ? new Promise(() => {})
+              : fetchNow.call(self, url, options),
+        });
+      });
+      assert.equal(await text(page, ".col.merged .count-narrow"), "10 / 1763");
+      const idle = await name();
+      await clickNow(page, '.more[data-stage="merged"]');
+      const loading = await name();
+      for (const [state, n] of [
+        ["idle", idle],
+        ["loading", loading],
+      ]) {
+        assert.ok(n.shown * 2 >= n.full, `${state}: name ${n.shown} of ${n.full}px`);
+        assert.equal(n.title, "merged");
+        assert.equal(n.more, "show all");
+      }
+      assert.equal(idle.busy, null);
+      assert.equal(loading.busy, "true");
       assert.deepEqual(errors, []);
       await page.close();
     });
