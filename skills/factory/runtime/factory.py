@@ -10731,6 +10731,36 @@ def check_retro_card(s, run, i):
     return err and err.replace("suggestions[0]", f"suggestions[{i}]", 1)
 
 
+RED_FLAG_TITLE = re.compile(r"Red flag: (\S+) via (\S+)")
+
+
+def retro_link_red_flags(home, agg, cards, outcomes):
+    """POST each admitted red-flag card's backlog line onto the aggregate red_flags rows it groups.
+    Errors print to stderr and never change the exit code."""
+    admitted = {o["fingerprint"] for o in outcomes if o["result"] == "admitted"}
+    for s in cards:
+        m = RED_FLAG_TITLE.fullmatch(s["title"])
+        if not m or fingerprint(s["project"], s) not in admitted:
+            continue
+        flag, tool = m.groups()
+        rows = [{k: r[k] for k in ("time", "job", "host", "agent", "tool", "target")}
+                for r in agg.get("red_flags", []) if r.get("tool") == tool and flag in (r.get("flags") or [])][:500]
+        if not rows:
+            continue
+        item = f"{s['project']}: {s['title']}"
+        try:
+            status, _, text = api(home, "POST", "/api/audit-flags/backlog",
+                                  json.dumps({"backlog": f"- [ ] {item}", "rows": rows}),
+                                  ok=(200, 400, 403, 404, 413, 503), headers={"Content-Type": "application/json"})
+        except SystemExit:
+            continue
+        if status == 200:
+            n = json.loads(text)["linked"]
+            print(f"linked {n} red-flag row{'' if n == 1 else 's'} to {item}")
+        else:
+            print(f"red-flag link failed: {status} {printable_line(text, 200)}", file=sys.stderr)
+
+
 def retro_upload(home, run, agg, kept, rejected, cards, links, outcomes):
     """PUT the run's checked findings and logged cards as a factory.retro-run/1 record. kept holds each
     reply finding in order, None where admission rejected it or a merged job fixed it; rejected counts the
@@ -10861,6 +10891,7 @@ def retro_admit(run):
         write_atomic(suggestions, json.dumps(cards, indent=2) + "\n")
         retro_backlog_admit(cards, outcomes)
     finally:
+        retro_link_red_flags(home, agg, upload[0], outcomes)
         retro_upload(home, run, agg, reply_findings, len(rejected), *upload, outcomes)
 
 
