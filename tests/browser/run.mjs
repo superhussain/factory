@@ -1708,14 +1708,14 @@ async function capture(outdir, referencePath) {
     } finally {
       auditBoard = false;
     }
-    // The reference retros page has no Red flags section.
+    // Both sides scroll to the Red flags card when the page has one, so each pair frames the same region.
     const openRetrosFlags = async (page, side) => {
       await page.evaluate(() => (location.hash = "#/retros"));
       await page.waitForFunction(() => {
         const status = document.getElementById("retros-status").textContent;
         return status && !status.startsWith("Loading");
       });
-      if (side === "after") {
+      if (await page.$("#audit-flags-heading")) {
         await page.waitForSelector("#audit-flags-rows tr");
         await page.evaluate(() => {
           if (innerWidth > 600)
