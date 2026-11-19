@@ -1345,6 +1345,9 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
   remove: (k) => { try { localStorage.removeItem(k); } catch {} },
 };
+// A fetch that never reached the Worker rejects with a TypeError whose text differs by browser.
+const OFFLINE_MESSAGE = "Could not reach the factory. Check your connection, then try again.";
+function failText(x, prefix = '') { return x instanceof TypeError ? OFFLINE_MESSAGE : prefix + String(x.message || x); }
 // board.json is agent-written and the dashboard is public, so only exact PR URLs for a registered project's repo or archive become links.
 const prUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/pull/(\\d+)$');
 const runUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/actions/runs/(\\d+)$');
@@ -3390,7 +3393,7 @@ async function auditFlagsAck(row, ack, button) {
     const box = $('audit-flags-show-acked');
     (box.parentElement.parentElement.hidden ? $('audit-flags-wrap') : box).focus();
   } catch (x) {
-    err.textContent = 'Could not save: ' + (x.message || x);
+    err.textContent = failText(x, 'Could not save: ');
     err.hidden = false;
     button.disabled = false;
   }
@@ -7942,7 +7945,7 @@ async function prioritizeAction(ctx, mode = '') {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -7961,7 +7964,7 @@ async function babysitAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -7980,7 +7983,7 @@ async function unbatchAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -7996,7 +7999,7 @@ async function removePriorityAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -8012,7 +8015,7 @@ async function pauseAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -8047,7 +8050,7 @@ async function rerunAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -8063,7 +8066,7 @@ async function resumeAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(String(x.message || x));
+    if (ctx.live()) ctx.report(failText(x));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
