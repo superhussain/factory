@@ -7467,11 +7467,22 @@ function rowChanges(before, after) {
   return rows;
 }
 
+// JSON.stringify with object keys sorted at every depth, the same as the Worker's.
+function canonicalJson(value) {
+  return JSON.stringify(value, (_, v) =>
+    v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v);
+}
+// Lowercase hex SHA-256 of the row's canonical JSON, the digest the Worker checks a read against.
+async function rowDigest(row) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalJson(row)));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 // change(board) in place over a copy of the rows this tab holds, then PATCH only the rows it
 // changed, each with the row it expects to replace. A 409 conflict brings the current rows,
 // and change runs again on them. change throws to abort with nothing written.
 // reads(board) names the other rows change decides from, read before it runs. A write sends
-// each as an unchanged row, so a stale one comes back as a conflict too.
+// each as a digest of the row this tab holds, so a stale one comes back as a conflict too.
 const BOARD_UNCHANGED = Symbol('board unchanged');
 let boardWrites = 0;
 async function casBoard(change, { reads } = {}) {
@@ -7487,12 +7498,11 @@ async function casBoard(change, { reads } = {}) {
       if (result === BOARD_UNCHANGED) return result;
       const rows = rowChanges(before, board.jobs);
       if (!rows.length) return result;
-      for (const id of readIds)
-        if (known.has(id) && !rows.some((e) => e.id === id)) rows.push({ id, expect: known.get(id), row: known.get(id) });
+      const digests = await Promise.all(readIds.filter((id) => known.has(id) && !rows.some((e) => e.id === id)).map(async (id) => ({ id, sha256: await rowDigest(known.get(id)) })));
       if (!navigator.onLine) throw new Error("saving the board failed: you're offline, so nothing was saved");
       let r;
       try {
-        r = await fetch('./api/board', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updated: board.updated, rows }) });
+        r = await fetch('./api/board', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updated: board.updated, rows, ...(digests.length && { reads: digests }) }) });
       } catch (x) {
         x.uncertain = true; // the request may have landed before the connection dropped
         throw x;

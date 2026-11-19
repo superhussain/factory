@@ -2,6 +2,7 @@
 // made-up running example: the idea 2001-add-csv-export lands on a board whose pickup host
 // writes 1999-synthetic-build at the same moment.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { loadProduction, memoryBucket } from "../support/worker.mjs";
 
@@ -98,6 +99,74 @@ test("an unchanged read row is a no-op that still conflicts when stale", async (
     rows: { [SPEC.id]: moved },
     max_id: 2000,
   });
+  assert.equal(s.etag(), before);
+});
+
+// The digest a read carries: SHA-256 over the row's JSON with keys sorted at every depth.
+const sha256 = (row) =>
+  createHash("sha256")
+    .update(
+      JSON.stringify(row, (_, v) =>
+        v && typeof v === "object" && !Array.isArray(v)
+          ? Object.fromEntries(
+              Object.keys(v)
+                .sort()
+                .map((k) => [k, v[k]]),
+            )
+          : v,
+      ),
+    )
+    .digest("hex");
+
+test("reads", async () => {
+  const held = Array.from({ length: 150 }, (_, k) => ({
+    id: `${1700 + k}-held-follow-up`,
+    project: "sample",
+    stage: "idea",
+    refs: [{ id: "1600-sample-old", kind: "follow-up-of" }],
+  }));
+  const s = setup({ updated: "", jobs: [BUILD, ...held] });
+  const reads = held.map((row) => ({ id: row.id, sha256: sha256(row) }));
+  const done = { ...BUILD, stage: "review" };
+  const ok = await s.patch({ rows: [{ id: BUILD.id, expect: BUILD, row: done }], reads });
+  assert.equal(ok.status, 200, "150 reads commit, past the 100-entry rows cap");
+  assert.deepEqual(s.stored().jobs, [done, ...held]);
+
+  const before = s.etag();
+  const stale = [...reads];
+  stale[7] = { id: held[7].id, sha256: sha256({ ...held[7], stage: "spec" }) };
+  const response = await s.patch({
+    rows: [{ id: BUILD.id, expect: done, row: BUILD }],
+    reads: stale,
+  });
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), {
+    error: "conflict",
+    rows: { [held[7].id]: held[7] },
+    max_id: 1999,
+  });
+  const gone = await s.patch({
+    rows: [{ id: BUILD.id, expect: done, row: BUILD }],
+    reads: [{ id: "1999-missing", sha256: reads[0].sha256 }],
+  });
+  assert.equal(gone.status, 409);
+  assert.deepEqual((await gone.json()).rows, { "1999-missing": null });
+  assert.equal(s.etag(), before);
+
+  const SHAPE =
+    "a board patch's reads need [{id, sha256}], one per id and none in rows. Nothing was written.";
+  const row = [{ id: BUILD.id, expect: done, row: BUILD }];
+  for (const bad of [
+    "x",
+    [{ id: held[0].id }],
+    [{ id: held[0].id, sha256: reads[0].sha256.toUpperCase() }],
+    [reads[0], reads[0]],
+    [{ id: BUILD.id, sha256: reads[0].sha256 }],
+  ]) {
+    const refused = await s.patch({ rows: row, reads: bad });
+    assert.equal(refused.status, 400, JSON.stringify(bad).slice(0, 80));
+    assert.equal(await refused.text(), SHAPE);
+  }
   assert.equal(s.etag(), before);
 });
 

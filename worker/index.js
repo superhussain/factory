@@ -504,8 +504,19 @@ function canonicalJson(value) {
   );
 }
 
+// Lowercase hex SHA-256 of the row's canonical JSON, the digest a patch's reads carry.
+async function rowSha256(row) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson(row)),
+  );
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 const BOARD_PATCH_SHAPE =
   "a board patch needs rows: [{id, expect, row}], one entry per id. Nothing was written.";
+const READS_SHAPE =
+  "a board patch's reads need [{id, sha256}], one per id and none in rows. Nothing was written.";
 
 // Applies the dashboard's changed rows, each with the row it expects to replace, to the
 // stored board. A row that changed since the client read it comes back as a 409 conflict;
@@ -537,6 +548,19 @@ async function boardPatch(request, env, ctx) {
   )
     return reply(BOARD_PATCH_SHAPE, 400);
   const entries = new Map(rows.map((e) => [e.id, e]));
+  const reads = patch.reads ?? [];
+  if (
+    !Array.isArray(reads) ||
+    !reads.every(
+      (r) =>
+        typeof r?.id === "string" &&
+        typeof r.sha256 === "string" &&
+        /^[0-9a-f]{64}$/.test(r.sha256) &&
+        !entries.has(r.id),
+    ) ||
+    new Set(reads.map((r) => r.id)).size !== reads.length
+  )
+    return reply(READS_SHAPE, 400);
   for (let attempt = 0; attempt < 10; attempt++) {
     const stored = await storedBoard(env);
     if (stored.etag && !stored.doc)
@@ -560,6 +584,10 @@ async function boardPatch(request, env, ctx) {
       if (m && Number(m[1]) <= maxId) conflicts.add(e.id);
       if (typeof e.row.capture_id === "string" && captured.has(e.row.capture_id))
         conflicts.add(captured.get(e.row.capture_id));
+    }
+    for (const r of reads) {
+      const row = byId.get(r.id);
+      if (!row || (await rowSha256(row)) !== r.sha256) conflicts.add(r.id);
     }
     if (conflicts.size)
       return reply(
