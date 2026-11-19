@@ -24,6 +24,9 @@ importers:
       mermaid:
         specifier: 12.2.0
         version: 12.2.0
+      miniflare:
+        specifier: 5.20261023.1-beta
+        version: 5.20261023.1-beta
       nx:
         specifier: 24.0.2
         version: 24.0.2
