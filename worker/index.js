@@ -431,6 +431,32 @@ function condition(request) {
   return cond;
 }
 
+// The first reason a board write of data over stored is refused, or null. The row checks
+// compare against the stored rows, so they run only when data was built on that version.
+async function boardRefusal(env, stored, data, sameBase) {
+  return (
+    checkGoals(data.jobs) ??
+    (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
+    (await checkIdeaFiles(env, data.jobs, stored.jobs)) ??
+    (sameBase
+      ? (checkRowIds(stored.jobs, data.jobs) ??
+        checkArchived(stored, data) ??
+        checkNewIds(stored.jobs, data.jobs) ??
+        checkRiderControls(stored.jobs, data.jobs) ??
+        checkBatchRefs(stored.jobs, data.jobs))
+      : null)
+  );
+}
+
+// Sends the pushes a committed board write from storedJobs to jobs earns.
+async function boardCommitted(env, storedJobs, jobs, ctx) {
+  const events = boardPushes(storedJobs, jobs);
+  if (!events.length) return;
+  const send = sendPushes(env, events).catch(() => {});
+  if (ctx) ctx.waitUntil(send);
+  else await send;
+}
+
 const needsCondition = () => reply('PUT needs If-Match: "<etag>" or If-None-Match: *', 428);
 
 // Board and backlog writes must name the exact version they replace, or create the
@@ -449,17 +475,7 @@ async function casPut(request, env, key, type, ctx) {
     }
     if (!Array.isArray(data?.jobs)) return reply("body needs a jobs array", 400);
     stored = await storedBoard(env);
-    const bad =
-      checkGoals(data.jobs) ??
-      (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
-      (await checkIdeaFiles(env, data.jobs, stored.jobs)) ??
-      (stored.etag === cond.get("If-Match")
-        ? (checkRowIds(stored.jobs, data.jobs) ??
-          checkArchived(stored, data) ??
-          checkNewIds(stored.jobs, data.jobs) ??
-          checkRiderControls(stored.jobs, data.jobs) ??
-          checkBatchRefs(stored.jobs, data.jobs))
-        : null);
+    const bad = await boardRefusal(env, stored, data, stored.etag === cond.get("If-Match"));
     if (bad) return reply(bad, 400);
   }
   const obj = await env.BUCKET.put(key, body, {
@@ -468,14 +484,8 @@ async function casPut(request, env, key, type, ctx) {
   });
   if (obj) await announce(env, key);
   // The stored board is the true prior version only when the write named its ETag.
-  if (obj && stored && cond.has("If-Match") && stored.etag === cond.get("If-Match")) {
-    const events = boardPushes(stored.jobs, data.jobs);
-    if (events.length) {
-      const send = sendPushes(env, events).catch(() => {});
-      if (ctx) ctx.waitUntil(send);
-      else await send;
-    }
-  }
+  if (obj && stored && cond.has("If-Match") && stored.etag === cond.get("If-Match"))
+    await boardCommitted(env, stored.jobs, data.jobs, ctx);
   return obj
     ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
     : reply("precondition failed", 412);
@@ -2243,15 +2253,22 @@ async function jobPut(request, env, key, ctx) {
     : reply("precondition failed", 412);
 }
 
-// The stored board's version, rows and archived field. An unreadable board has no rows.
+// The stored board's version, rows, archived field and parsed document. An unreadable board
+// has no rows and a null doc.
 async function storedBoard(env) {
   const object = await env.BUCKET.get("board.json");
-  if (!object) return { etag: null, jobs: [] };
+  if (!object) return { etag: null, jobs: [], doc: null };
   try {
-    const { jobs, archived } = JSON.parse(await object.text());
-    return { etag: object.httpEtag, jobs: Array.isArray(jobs) ? jobs : [], archived };
+    const doc = JSON.parse(await object.text());
+    const { jobs, archived } = doc;
+    return {
+      etag: object.httpEtag,
+      jobs: Array.isArray(jobs) ? jobs : [],
+      archived,
+      doc: Array.isArray(doc) ? null : doc,
+    };
   } catch {
-    return { etag: object.httpEtag, jobs: [] };
+    return { etag: object.httpEtag, jobs: [], doc: null };
   }
 }
 
