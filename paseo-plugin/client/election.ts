@@ -11,6 +11,7 @@ export const ELECTION_TIMEOUT_MS = 5_000;
 export function startElection(
   client: PluginClientContext,
   register: (origin: string | null) => () => void,
+  onSettings: (origin: string | null, factoryLinkButtons: boolean) => void,
 ) {
   const member = joinBallot(sharedBallot(globalThis), register);
   const read = settingsRpc(factorySettings.id).read;
@@ -30,7 +31,10 @@ export function startElection(
       const parsed =
         result.status === "ready" ? factorySettings.schema.safeParse(result.values) : null;
       const origin = parsed?.success ? parseDashboardOrigin(parsed.data.origin) : null;
-      report = () => member.online(origin);
+      report = () => {
+        member.online(origin);
+        onSettings(origin, parsed?.success ? parsed.data.factoryLinkButtons : false);
+      };
     } catch {
       report = () => {
         if (member.miss()) void check();
