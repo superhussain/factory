@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { openJobActions } from "../support/board-ready.cjs";
+import { openJobActions, waitForBoard } from "../support/board-ready.cjs";
 import {
   withBrowserFixture,
   seedProject,
@@ -64,6 +64,8 @@ test("remove from batch", { timeout: 180000 }, async () => {
     const fresh = async (jobs) => {
       await seedBoard(origin, jobs);
       await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      // The saved board paints first, so wait for the reseeded one from the network.
+      await waitForBoard(page);
       await page.waitForSelector('.card[data-id="109-batch-rider"]');
     };
     const cardItem = async () => {

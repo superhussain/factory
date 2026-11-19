@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
-import { openJobActions } from "../support/board-ready.cjs";
+import { openJobActions, waitForBoard } from "../support/board-ready.cjs";
 import {
   withBrowserFixture,
   seedProject,
@@ -139,6 +139,7 @@ test("held batch actions", { timeout: 180000 }, async () => {
       { ...idea("202-wait-b"), priority: starter, paused: { at: RECENT } },
     ]);
     await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+    await waitForBoard(page);
     await page.waitForFunction(() =>
       document
         .querySelector('.card[data-id="201-wait-a"] .chip.held')

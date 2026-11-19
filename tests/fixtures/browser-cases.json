@@ -165,6 +165,7 @@
   "tests/browser/header-icons.test.mjs",
   "tests/browser/btn-tap-target.test.mjs",
   "tests/browser/pwa-offline.test.mjs",
+  "tests/browser/cache-first.test.mjs",
   "tests/browser/pwa-install.test.mjs",
   "tests/browser/install-app.test.mjs",
   "tests/browser/notification-settings.test.mjs",
