@@ -155,6 +155,15 @@ records matched before and after views. Each `view(...)` line in
 - `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
 - A spec that needs another size or state adds a task for a new `view(...)` line.
 
+### Paseo plugin cards
+
+`node tools/capture-plugin-cards.mjs --capture <outdir>` renders the Factory screen's three cards (first login, stall, sign-in expired) from the real `paseo-plugin/client/dashboard-screen.tsx`. It writes `plugin-card-<card>-1280.png` (1280x800) and `plugin-card-<card>-390.png` (390x844, compact layout). It needs `pnpm --dir paseo-plugin install --frozen-lockfile` and the provisioned browser.
+
+- Settings are synthetic: dashboard `https://factory.example.test`, Paseo origin `https://app.example.test`.
+- Before images: `git archive <base> paseo-plugin | tar -x -C .context/base`, then add `--plugin .context/base/paseo-plugin`.
+- `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
+- Owned stubs in `tools/paseo-capture/` stand in for React Native, the Paseo plugin API and the frame. Layout is close to Paseo's, not identical. Icons are outlined squares, and the palette is a synthetic dark theme. Compare before and after from this tool only, never against app screenshots.
+
 ## Pre-commit checks
 
 Every `git commit` runs the `.husky/pre-commit` hook (installed by the
