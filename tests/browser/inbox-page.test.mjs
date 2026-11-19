@@ -229,14 +229,19 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       return { page, errors, state };
     };
     const heldRetry = async (page, state) => {
+      // The log starts at the Retry click, so a redraw that lands before it never counts.
       await page.evaluate(() => {
         const status = document.querySelector("#inbox-status");
         window.inboxStatusLog = [];
-        new MutationObserver(() => window.inboxStatusLog.push(status.textContent)).observe(status, {
-          childList: true,
-          characterData: true,
-          subtree: true,
-        });
+        document.addEventListener(
+          "click",
+          () =>
+            new MutationObserver(() => window.inboxStatusLog.push(status.textContent)).observe(
+              status,
+              { childList: true, characterData: true, subtree: true },
+            ),
+          { capture: true, once: true },
+        );
       });
       let release;
       state.hold = new Promise((resolve) => (release = resolve));
