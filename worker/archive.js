@@ -53,6 +53,25 @@ export function planArchive(jobs, setting, now, tracerOff = false) {
   );
 }
 
+export const SLIM_RECENT = 20;
+
+/** The board with every unfinished row, the newest finished rows by `updated`, and per-project finished counts. */
+export function slimBoard(data) {
+  const counts = {};
+  const finished = [];
+  for (const job of data.jobs) {
+    if (!terminal(job)) continue;
+    finished.push(job);
+    const project = typeof job.project === "string" ? job.project : "";
+    counts[project] ??= { merged: 0, closed: 0 };
+    counts[project][job.stage] += 1;
+  }
+  const at = (job) => Date.parse(job.updated) || 0;
+  const recent = new Set(finished.sort((a, b) => at(b) - at(a)).slice(0, SLIM_RECENT));
+  const jobs = data.jobs.filter((job) => !terminal(job) || recent.has(job));
+  return { ...data, jobs, slim: { recent: SLIM_RECENT, counts } };
+}
+
 /** Archive rows not back on the board plus the moved rows, newest finished first. */
 export function mergeArchive(archiveJobs, moved, boardIds) {
   return [...archiveJobs.filter((j) => !boardIds.has(j?.id)), ...moved].sort(newestFirst);
