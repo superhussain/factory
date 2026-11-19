@@ -41,8 +41,25 @@ test("runChild kills a timed-out child's own children too", async () => {
   const script =
     "const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });" +
     "console.log(c.pid); setInterval(() => {}, 1000)";
-  const { result } = await logged(() => runChild("node", ["-e", script], { timeoutMs: 500 }));
-  const pid = Number(result.output.trim());
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  // The timer starts at spawn, so leave a slow runner time to start both processes first.
+  const { result } = await logged(() => runChild("node", ["-e", script], { timeoutMs: 3000 }));
+  assert.match(
+    result.output,
+    /^\d+\n$/,
+    "the child printed its grandchild's pid before the timeout",
+  );
+  const pid = Number(result.output);
+  // SIGKILL lands asynchronously, so poll until the grandchild is gone.
+  const gone = () => {
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (error) {
+      return error.code === "ESRCH";
+    }
+  };
+  for (let tries = 0; !gone() && tries < 100; tries++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(gone(), `grandchild ${pid} still running`);
 });
