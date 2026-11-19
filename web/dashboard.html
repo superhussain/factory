@@ -6616,7 +6616,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && openId && !document.querySelector('dialog[open]')) closeDetail();
 });
 
-// Arrow navigation over cards and job pages, plus n, j or /, p, s, r, w and a single-key openers.
+// Arrow navigation over cards and job pages, plus a single-key opener. handleGlobalKeys holds the openers that work on every page.
 // A separate listener, so the Esc/Cmd+K handler above stays byte-identical.
 function handleBoardKeys(e) {
   if (settingsRoute() !== null || retrosRoute() !== null || inboxRoute() !== null || notificationsRoute() !== null) return;
@@ -6652,6 +6652,20 @@ function handleBoardKeys(e) {
     return;
   }
   if (e.repeat) return;
+  if (e.key === 'a' || e.key === '.') {
+    if (openBacklogRaw !== null) return;
+    const target = cardShortcutTarget(e);
+    if (!target) return;
+    e.preventDefault();
+    openJobActionsPicker(target);
+  }
+}
+document.addEventListener('keydown', handleBoardKeys);
+
+function handleGlobalKeys(e) {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
+  if (e.target.closest('textarea, [contenteditable], #d-resize, video, input:not([type=radio]):not([type=checkbox])')) return;
+  if (document.querySelector('dialog[open]')) return;
   if (e.key === 'n') {
     if ($('new-idea').hidden) return;
     e.preventDefault();
@@ -6663,12 +6677,15 @@ function handleBoardKeys(e) {
     e.preventDefault();
     openProjectPicker();
   } else if (e.key === 's') {
+    if (settingsRoute() !== null) return;
     e.preventDefault();
     location.hash = '#/settings/projects';
   } else if (e.key === 'r') {
+    if (retrosRoute() !== null) return;
     e.preventDefault();
     location.hash = '#/retros';
   } else if (e.key === 'i') {
+    if (inboxRoute() !== null) return;
     e.preventDefault();
     location.hash = '#/inbox';
   } else if (e.key === 'w') {
@@ -6676,15 +6693,9 @@ function handleBoardKeys(e) {
     if (!j) return;
     e.preventDefault();
     openCard(j.id);
-  } else if (e.key === 'a' || e.key === '.') {
-    if (openBacklogRaw !== null) return;
-    const target = cardShortcutTarget(e);
-    if (!target) return;
-    e.preventDefault();
-    openJobActionsPicker(target);
   }
 }
-document.addEventListener('keydown', handleBoardKeys);
+document.addEventListener('keydown', handleGlobalKeys);
 
 // b opens the first backlog item. a and d approve or deny the open one, which opens the next.
 function handleBacklogKeys(e) {
