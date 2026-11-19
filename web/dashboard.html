@@ -1558,6 +1558,7 @@ function drawUpdated() {
 
 function refreshBacklog() {
   backlogReadAt = Date.now();
+  if (Date.now() - retrosReadAt >= RETROS_POLL_MS) loadRetros();
   tracerSettingRead = loadTracerSetting();
   const version = boardReadVersion;
   // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
@@ -3175,6 +3176,7 @@ function renderRoute() {
   if (retrosOpen && !retrosWas) { retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
+  syncRetrosLink();
   if (section) $('settings-link').setAttribute('aria-current', 'page'); else $('settings-link').removeAttribute('aria-current');
   if (retrosOpen) $('retros-link').setAttribute('aria-current', 'page'); else $('retros-link').removeAttribute('aria-current');
   if (inboxOpen) $('inbox-link').setAttribute('aria-current', 'page'); else $('inbox-link').removeAttribute('aria-current');
@@ -3206,6 +3208,9 @@ let retros = null;
 let retrosFailed = false;
 let retrosScrolled = '';
 let retrosHtml = '';
+const RETROS_SEEN_KEY = 'factory-retros-seen';
+const RETROS_POLL_MS = 1800000;
+let retrosReadAt = 0;
 const RETRO_MARK = /^Retro: run [A-Za-z0-9_-]{1,64}, fingerprint ([0-9a-f]{16}), created \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
 
 function retrosRoute() {
@@ -3272,6 +3277,7 @@ function retroCardStatus(card, marks) {
 }
 
 async function loadRetros() {
+  retrosReadAt = Date.now();
   try {
     const r = await fetch('./api/retros', { cache: 'no-store' });
     if (r.status !== 200) throw new Error(String(r.status));
@@ -3280,6 +3286,17 @@ async function loadRetros() {
   } catch { retros = null; retrosFailed = true; }
   renderRetrosPage();
   if ($('job-picker').open && pickerMode === 'job') renderJobResults();
+  syncRetrosLink();
+}
+
+// Run ids start with a UTC timestamp, so string order is date order.
+function syncRetrosLink() {
+  const runs = Array.isArray(retros) ? retros : [];
+  if (retrosRoute() && runs.length && runs[0].run > (store.get(RETROS_SEEN_KEY) ?? '')) store.set(RETROS_SEEN_KEY, runs[0].run);
+  const seen = store.get(RETROS_SEEN_KEY) ?? '';
+  const n = runs.filter((r) => r.run > seen).length;
+  setIconCount('retros-count', n);
+  $('retros-link').setAttribute('aria-label', n ? 'Retros, ' + n + ' new' : 'Retros');
 }
 
 // Red flags: the flagged tool calls of every job, newest first, from the Worker's index.
