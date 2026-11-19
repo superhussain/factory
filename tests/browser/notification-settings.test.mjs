@@ -550,7 +550,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(await text('label[for="sound-on"]'), " Play a sound for board events");
       assert.equal(
         await text("#sound-help"),
-        "Pick which events play a sound under Events. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.",
+        "Pick which events play a sound in the Events list above. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.",
       );
       assert.equal(await page.$eval("#sound-on", (el) => el.checked), false);
       assert.equal(await storage("factory-sound"), null);
@@ -700,7 +700,7 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
       await page.click("#sound-pr");
       assert.equal(await storage("factory-sounds-off"), "pr");
-      assert.equal(await text("#sound-status"), "Sound settings saved for this browser.");
+      assert.equal(await text("#alert-status"), "Sound settings saved for this browser.");
       await seedBoard(origin, [
         ...board,
         extra("007-sample-merge", "build"),

@@ -9051,7 +9051,7 @@ const SOUND_KEY = 'factory-sound';
 const SOUNDS_OFF_KEY = 'factory-sounds-off';
 const SOUNDS = { backlog: [392, 494], needs: [880, 660, 880], spec: [659, 880], pr: [523, 659], merged: [523, 659, 784] };
 const SOUND_ORDER = ['needs', 'spec', 'pr', 'merged'];
-const SOUND_HELP = 'Pick which events play a sound under Events. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.';
+const SOUND_HELP = 'Pick which events play a sound in the Events list above. Sounds play in this tab, visible or not, after you click or type in it once since it loaded. This setting applies only to this browser.';
 let soundOn = store.get(SOUND_KEY) === 'on';
 const soundsOff = new Set((store.get(SOUNDS_OFF_KEY) || '').split(',').filter((k) => ALERT_KINDS.includes(k)));
 function soundKindOn(kind) { return !soundsOff.has(kind); }
@@ -9119,7 +9119,7 @@ $('settings-notifications').addEventListener('change', (e) => {
   if (!kind) return;
   if (e.target.checked) soundsOff.delete(kind); else soundsOff.add(kind);
   if (soundsOff.size) store.set(SOUNDS_OFF_KEY, [...soundsOff].join(',')); else store.remove(SOUNDS_OFF_KEY);
-  $('sound-status').textContent = 'Sound settings saved for this browser.';
+  $('alert-status').textContent = 'Sound settings saved for this browser.';
 });
 $('settings-notifications').addEventListener('click', (e) => {
   const b = e.target.closest('[data-sound]');
