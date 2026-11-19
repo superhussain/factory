@@ -438,6 +438,10 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
         await frame.evaluate(() => document.querySelector("#idea-text").value),
         DRAFT + " more",
       );
+      await warm.click("#side");
+      await frame.click("#idea-h");
+      await capture(warm, "empty-click.png");
+      assert.notEqual(await frame.evaluate(() => document.activeElement?.id), "idea-text");
 
       await frame.evaluate(() => document.querySelector("#idea-dlg").close());
       await warm.evaluate(
