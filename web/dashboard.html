@@ -179,6 +179,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .notifications-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; width: 360px; max-height: 70vh; overflow-y: auto; padding: 8px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .notifications-menu[hidden] { display: none; }
   .notifications-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 8px 8px; font-size: 13px; font-weight: 600; }
+  .notifications-menu-head .btn { font-weight: normal; }
   #notifications-menu-status { margin: 4px 8px 8px; }
   #notifications-menu-status:empty { display: none; }
   #notifications-menu-list, #notifications-list { list-style: none; margin: 0; padding: 0; }
@@ -186,7 +187,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .notification-link .inbox-title, .notification-link .inbox-meta { display: block; }
   .notification-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   @media (hover: hover) { .notification-link:hover { background: var(--line); } }
-  @media (pointer: coarse) { .notification-link { min-height: 44px; box-sizing: border-box; } }
+  @media (pointer: coarse) { .notification-link { min-height: 44px; box-sizing: border-box; } #notifications-see-all { display: inline-flex; align-items: center; } }
   #notifications-page { max-width: 1040px; }
   .notifications-filters, .notifications-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .notifications-filters { margin: 0 0 12px; }
@@ -3974,7 +3975,12 @@ $('notifications-wrap').addEventListener('keydown', (e) => {
 });
 document.addEventListener('pointerdown', (e) => { if (!$('notifications-wrap').contains(e.target)) closeNotificationsMenu(false); });
 $('notifications-wrap').addEventListener('focusout', (e) => { if (e.relatedTarget && !$('notifications-wrap').contains(e.relatedTarget)) closeNotificationsMenu(false); });
-$('notifications-menu').addEventListener('click', (e) => { if (e.target.closest('a')) closeNotificationsMenu(false); });
+$('notifications-menu').addEventListener('click', (e) => {
+  const a = e.target.closest('a');
+  if (!a) return;
+  closeNotificationsMenu(false);
+  if (a.id === 'notifications-see-all' && location.hash === '#/notifications') $('notifications-page-heading').focus();
+});
 $('notifications-back').addEventListener('click', (e) => { e.preventDefault(); leaveSettings(); });
 $('notifications-filters').addEventListener('click', (e) => {
   const b = e.target.closest('[data-notifications-filter]');

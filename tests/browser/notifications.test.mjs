@@ -328,6 +328,16 @@ test("notifications", { timeout: 180000 }, async (t) => {
         ),
         ["Open job", "Open PR #60", "Open in Session app", "Open in Session"],
       );
+      await page.click("#notifications-button");
+      await page.waitForSelector("#notifications-menu-list .notification-link", wait);
+      await page.click("#notifications-see-all");
+      assert.deepEqual(
+        await page.evaluate(() => [
+          document.getElementById("notifications-menu").hidden,
+          document.activeElement.id,
+        ]),
+        [true, "notifications-page-heading"],
+      );
       assert.deepEqual(errors, []);
     });
 
