@@ -1,6 +1,6 @@
 """Actual HTTP v1 drills through the installed CLI copy: concurrent claims, conditional
-registration, job write grammar, weak ETags, idea-image idempotence and two-device
-job/project exit-6 reconciliation. Installed into temporary HOME, checkout imports
+registration, job write grammar, weak ETags, idea-image idempotence, a cancelled slim
+read with a waiter and two-device job/project exit-6 reconciliation. Installed into temporary HOME, checkout imports
 unavailable, synthetic Git checkouts, owned loopback target only."""
 import concurrent.futures
 import hashlib
@@ -8,11 +8,15 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
+import struct
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from unittest.mock import patch
 
@@ -141,6 +145,43 @@ class HttpV1Test(unittest.TestCase):
             replies = list(pool.map(lambda _: self.request("/board.json?view=slim"), range(8)))
         self.assertEqual([r[0] for r in replies], [200] * 8)
         self.assertEqual(len({r[2] for r in replies}), 1)
+
+    def abort_slim(self, delay):
+        url = urllib.parse.urlsplit(self.url)
+        with socket.create_connection((url.hostname, url.port)) as sock:
+            sock.sendall(f"GET /board.json?view=slim HTTP/1.1\r\nHost: {url.netloc}\r\n\r\n".encode())
+            time.sleep(delay)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+
+    def test_cancelled_slim_read_still_answers_waiter(self):
+        status, headers, original = self.request("/api/board")
+        if status == 404:
+            original = b'{"jobs": []}'
+            status, headers, _ = self.request("/api/board", "PUT", original,
+                                              {"Content-Type": "application/json", "If-None-Match": "*"})
+        self.assertIn(status, (200, 201))
+        data = json.loads(original)
+        etag = [headers["ETag"]]
+        self.addCleanup(lambda: self.assertEqual(self.request(
+            "/api/board", "PUT", original,
+            {"Content-Type": "application/json", "If-Match": etag[0]})[0], 200))
+        for n in range(3):
+            padded = {**data, "drillPad": ["x" * 1024] * 8192, "drillRound": n}
+            status, headers, _ = self.request("/api/board", "PUT", json.dumps(padded).encode(),
+                                              {"Content-Type": "application/json", "If-Match": etag[0]})
+            self.assertEqual(status, 200)
+            etag[0] = headers["ETag"]
+            aborter = threading.Thread(target=self.abort_slim, args=(0.005,))
+            aborter.start()
+            time.sleep(0.002)
+            status, headers, body = self.request("/board.json?view=slim")
+            aborter.join()
+            self.assertEqual(status, 200, f"round {n}")
+            self.assertEqual(strong(headers["ETag"]), strong(etag[0]))
+            slim = json.loads(body)
+            self.assertEqual(len(slim["drillPad"]), 8192)
+            self.assertIn("slim", slim)
+            self.assertEqual(self.request("/board.json?view=slim")[2], body)
 
     def test_project_conditional_registration_race(self):
         path = "/api/projects/http-sample.md"
