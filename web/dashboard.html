@@ -1690,6 +1690,39 @@ async function paintCached() {
   } catch {}
 }
 
+// Cloudflare's edge may hand the page a weak W/"..." ETag; a rows frame names the bare one.
+function bareEtag(e) { return e.replace(/^W\//, ''); }
+
+// Redraws everything that shows the board after a read or a rows frame changes it.
+function boardTaken() {
+  drawUpdated();
+  renderBoard();
+  loadHoldConfigs();
+  notifyNeeds();
+  boardSound();
+  toastBoard();
+  if (settingsShown === 'projects') renderProjectList();
+  syncDetail();
+  syncBacklogRoute();
+  syncIdeaEditor();
+  if ($('job-picker').open) renderJobResults();
+}
+
+// A rows frame built on the board this tab holds applies in place, with no read. It
+// returns false when the tab holds another version or a saved copy, so the caller reads.
+function takeRows(frame) {
+  if (!loaded || boardFromCache || bareEtag(boardEtag) !== frame.prev) return false;
+  ++boardReadVersion;
+  const rows = new Map(frame.rows.map((j) => [j.id, j]));
+  const removed = new Set(frame.removed);
+  jobs = jobs.filter((j) => !removed.has(j.id)).map((j) => rows.get(j.id) || j)
+    .concat(frame.rows.filter((j) => !jobs.some((x) => x.id === j.id)));
+  boardUpdated = frame.updated || '';
+  boardEtag = frame.etag;
+  boardTaken();
+  return true;
+}
+
 async function poll({ ifChanged = false, withBacklog = true } = {}) {
   const version = ++boardReadVersion;
   try {
@@ -1709,7 +1742,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     noteDeployedVersion(r);
     // A socket open or a timer tick redraws only a changed board, so a focused card is not read again.
     // syncDetail() still reopens a deep-linked tab or archived job that has not loaded.
-    if (ifChanged && loaded && etag && etag === boardEtag) {
+    if (ifChanged && loaded && etag && bareEtag(etag) === boardEtag) {
       syncDetail();
       return true;
     }
@@ -1719,20 +1752,10 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     }
     takeBoard(data);
     boardFromCache = false;
-    boardEtag = etag;
+    boardEtag = bareEtag(etag);
     boardLoadError = '';
     loaded = true;
-    drawUpdated();
-    renderBoard();
-    loadHoldConfigs();
-    notifyNeeds();
-    boardSound();
-    toastBoard();
-    if (settingsShown === 'projects') renderProjectList();
-    syncDetail();
-    syncBacklogRoute();
-    syncIdeaEditor();
-    if ($('job-picker').open) renderJobResults();
+    boardTaken();
     if (!boardComplete && fullWanted && etag.replace(/^W\//, '') !== fullEtag) loadFullBoard();
     return true;
   } catch (e) {
@@ -9705,8 +9728,10 @@ function schedulePoll() {
   drawLiveDot();
 }
 document.addEventListener('visibilitychange', () => { syncLive(); if (pollStarted && !document.hidden) readBoard(); schedulePoll(); });
-// Live board events: the Worker sends {"type":"changed","key":...} after each board or
-// backlog write, and the matching key re-reads once, 2 s after the first frame; frames during a read add one more read. A dropped socket retries with backoff
+// Live board events: after a board PATCH or If-Match PUT the Worker sends {"type":"rows",...}
+// with the changed rows, which a tab at the frame's prev ETag applies with no read. Other
+// writes, and other tabs, get {"type":"changed","key":...} or a read: the matching key
+// re-reads once, 2 s after the first frame; frames during a read add one more read. A dropped socket retries with backoff
 // (1, 2, 4 ... 30 s), then every 30 s while a socket is wanted. An expired sign-in stops retries until a board read succeeds.
 const LIVE_PATH = '/events/board';
 const LIVE_FIRST_RETRY_MS = 1000, LIVE_MAX_RETRY_MS = 30000;
@@ -9733,8 +9758,10 @@ function openLive() {
   });
   ws.addEventListener('message', (e) => {
     if (ws !== liveSocket) return;
-    let key;
-    try { key = JSON.parse(e.data).key; } catch {}
+    let frame;
+    try { frame = JSON.parse(e.data); } catch {}
+    if (frame?.type === 'rows') { if (!takeRows(frame)) queueLiveRead('board.json'); return; }
+    const key = frame?.key;
     if (Object.hasOwn(liveReads, key)) queueLiveRead(key);
     else { queueLiveRead('board.json'); queueLiveRead('backlog.md'); }
   });

@@ -9,7 +9,14 @@ import {
   HOST_NAME,
   validatePipeline,
 } from "./admission.js";
-import { ARCHIVE_KEY, archiveGet, needsTriageKey, runArchive, slimBoard } from "./archive.js";
+import {
+  ARCHIVE_KEY,
+  archiveGet,
+  needsTriageKey,
+  runArchive,
+  slimBoard,
+  terminal,
+} from "./archive.js";
 import {
   DASHBOARD_VERSION,
   escapeHtml,
@@ -476,6 +483,57 @@ async function boardCommitted(env, storedJobs, jobs, ctx) {
   else await send;
 }
 
+const MAX_FRAME_ROWS = 100;
+const MAX_FRAME_BYTES = 262144;
+
+// The rows frame for a committed board write from stored to data at etag, or "" when
+// open tabs must read instead: no prior version, a top-level change other than jobs and
+// updated, ids that cannot be diffed, a finished row, or a frame too large.
+function rowsFrame(stored, data, etag) {
+  if (!stored.etag || !stored.doc) return "";
+  for (const k of new Set([...Object.keys(stored.doc), ...Object.keys(data)]))
+    if (
+      k !== "jobs" &&
+      k !== "updated" &&
+      JSON.stringify(stored.doc[k]) !== JSON.stringify(data[k])
+    )
+      return "";
+  const ids = (jobs) => {
+    const byId = new Map();
+    for (const j of jobs) {
+      if (typeof j?.id !== "string" || byId.has(j.id)) return null;
+      byId.set(j.id, j);
+    }
+    return byId;
+  };
+  const before = ids(stored.jobs),
+    after = ids(data.jobs);
+  if (!before || !after) return "";
+  const rows = [],
+    removed = [];
+  for (const [id, row] of after) {
+    const old = before.get(id);
+    if (old === row || (old && JSON.stringify(old) === JSON.stringify(row))) continue;
+    if (terminal(old) || terminal(row)) return "";
+    rows.push(row);
+  }
+  for (const [id, old] of before) {
+    if (after.has(id)) continue;
+    if (terminal(old)) return "";
+    removed.push(id);
+  }
+  if (rows.length + removed.length > MAX_FRAME_ROWS) return "";
+  const frame = JSON.stringify({
+    type: "rows",
+    etag,
+    prev: stored.etag,
+    updated: data.updated,
+    rows,
+    removed,
+  });
+  return new TextEncoder().encode(frame).length > MAX_FRAME_BYTES ? "" : frame;
+}
+
 const needsCondition = () => reply('PUT needs If-Match: "<etag>" or If-None-Match: *', 428);
 
 // Board and backlog writes must name the exact version they replace, or create the
@@ -501,10 +559,10 @@ async function casPut(request, env, key, type, ctx) {
     onlyIf: cond,
     httpMetadata: { contentType: type },
   });
-  if (obj) await announce(env, key);
   // The stored board is the true prior version only when the write named its ETag.
-  if (obj && stored && cond.has("If-Match") && stored.etag === cond.get("If-Match"))
-    await boardCommitted(env, stored.jobs, data.jobs, ctx);
+  const sameBase = obj && stored && cond.has("If-Match") && stored.etag === cond.get("If-Match");
+  if (obj) await announce(env, key, sameBase ? rowsFrame(stored, data, obj.httpEtag) : "");
+  if (sameBase) await boardCommitted(env, stored.jobs, data.jobs, ctx);
   return obj
     ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
     : reply("precondition failed", 412);
@@ -640,7 +698,7 @@ async function boardPatch(request, env, ctx) {
       httpMetadata: { contentType: "application/json" },
     });
     if (obj) {
-      await announce(env, "board.json");
+      await announce(env, "board.json", rowsFrame(stored, data, obj.httpEtag));
       await boardCommitted(env, stored.jobs, data.jobs, ctx);
       return reply("ok", 200, "text/plain", { ETag: obj.httpEtag });
     }
@@ -3034,7 +3092,7 @@ export async function serveFactory(request, env, principal, ctx) {
       return notFound();
     if (request.headers.get("Origin") !== new URL(request.url).origin)
       return reply("forbidden", 403);
-    return connectEvents(request, env);
+    return connectEvents(request, env, principal.exp);
   }
   if (path.startsWith("/api/")) return api(request, env, path, principal, ctx);
   if (request.method !== "GET") return notFound();

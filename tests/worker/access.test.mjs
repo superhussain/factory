@@ -32,9 +32,10 @@ test("person claims carry kind user and email; mixed or malformed claims stay se
       expected,
       JSON.stringify(claims),
     );
+  const exp = Math.floor(Date.now() / 1000) + 3600;
   await check(
-    { type: "app", email: "person@example.test" },
-    { verified: true, kind: "user", email: "person@example.test" },
+    { type: "app", email: "person@example.test", exp },
+    { verified: true, kind: "user", email: "person@example.test", exp },
   );
   await check(
     { email: "person@example.test", common_name: "device" },
