@@ -3160,13 +3160,14 @@ function renderRoute() {
   const inboxWas = $('inbox-page').hidden === false;
   const inboxOpen = !section && inboxShown();
   const notificationsWas = $('notifications-page').hidden === false;
-  const notificationsOpen = !section && !retrosOpen && !inboxOpen && notificationsRoute() !== null;
+  const notificationsOpen = !section && !retrosOpen && !inboxOpen && notificationsShown();
   document.body.dataset.view = section ? 'settings' : retrosOpen ? 'retros' : inboxOpen ? 'inbox' : notificationsOpen ? 'notifications' : 'board';
   $('settings-page').hidden = !section;
   $('retros-page').hidden = !retrosOpen;
   $('inbox-page').hidden = !inboxOpen;
   $('notifications-page').hidden = !notificationsOpen;
   document.body.toggleAttribute('data-inbox-split', inboxSplit());
+  document.body.toggleAttribute('data-notifications-split', notificationsSplit());
   document.title = section ? 'Settings · ' + baseTitle : retrosOpen ? 'Retros · ' + baseTitle : inboxOpen ? 'Inbox · ' + baseTitle : notificationsOpen ? 'Notifications · ' + baseTitle : baseTitle;
   if (inboxOpen && !inboxWas) { inboxHtml = ''; inboxError = ''; inboxFocusRow = -1; inboxAnswer = null; $('inbox-page-heading').focus(); }
   if (inboxOpen) renderInboxPage();
@@ -3854,6 +3855,8 @@ function logNotification(entry) {
 let notificationsHtml = '';
 let notificationsMenuHtml = '';
 function notificationsRoute() { return location.hash === '#/notifications' ? true : null; }
+function notificationsSplit() { return drawerReturn === '#/notifications' && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null; }
+function notificationsShown() { return notificationsRoute() !== null || notificationsSplit(); }
 function notificationItems() {
   const shown = jobs.filter((j) => isShown(j.project));
   const items = [];
@@ -3880,12 +3883,12 @@ function notificationsUnread(items) {
 function renderNotifications() {
   const items = loaded ? notificationItems() : [];
   const menuOpen = !$('notifications-menu').hidden;
-  if ((menuOpen || notificationsRoute() !== null) && notificationsUnread(items)) store.set(NOTIFICATIONS_SEEN_KEY, items[0].at);
+  if ((menuOpen || notificationsShown()) && notificationsUnread(items)) store.set(NOTIFICATIONS_SEEN_KEY, items[0].at);
   const unread = notificationsUnread(items);
   $('notifications-dot').hidden = !unread;
   $('notifications-button').setAttribute('aria-label', unread ? 'Notifications, new' : 'Notifications');
   if (menuOpen) renderNotificationsMenu(items);
-  if (notificationsRoute() !== null) renderNotificationsPage(items);
+  if (notificationsShown()) renderNotificationsPage(items);
 }
 function renderNotificationsMenu(items) {
   $('notifications-menu-status').textContent = boardLoadError ? "Couldn't load notifications. " + BOARD_LOAD_ERRORS[boardLoadError]
@@ -4796,7 +4799,7 @@ function renderBoard() {
       '<p>Jobs show up here as they move through the loop.</p>' +
       (boardArchived ? archiveSection('closed') : '') + '</div>';
     $('board').style.removeProperty('--cols');
-    if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsRoute()) document.title = BASE_TITLE;
+    if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsShown()) document.title = BASE_TITLE;
     syncAppBadge(0);
     if (focusClass === 'archive-more') $('board').querySelector('.archive-more')?.focus({ preventScroll: true });
     syncCardActions();
@@ -4817,7 +4820,7 @@ function renderBoard() {
   waiting.splice(0, waiting.length, ...waitingJobs());
   for (const s of ['idea', 'spec', 'build', 'review', 'approve']) prioritizedFirst(lists[COLUMNS.indexOf(s)]);
   for (const s of COLUMNS) if (s !== 'backlog' && !TERMINAL.includes(s)) starredFirst(lists[COLUMNS.indexOf(s)]);
-  if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsRoute()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
+  if (!settingsShown && !retrosRoute() && !inboxShown() && !notificationsShown()) document.title = waiting.length ? '(' + waiting.length + ') ' + BASE_TITLE : BASE_TITLE;
   syncAppBadge(waiting.length);
   const collapsed = COLUMNS.map((s, i) => columnCollapsed.get(s) ?? (lists[i].length === 0));
   const tracks = collapsed.flatMap((c, i) => hiddenColumns.has(COLUMNS[i]) ? [] : [c ? '36px' : 'minmax(160px, 1fr)']);
