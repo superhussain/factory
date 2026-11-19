@@ -245,6 +245,17 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
       await page.keyboard.press("Enter");
       await page.waitForFunction(() => !document.querySelector(".notify-toast"), wait);
       assert.equal(await focused(), "d-close");
+      // A drawer closed with its hash kept reopens before focus moves.
+      await page.evaluate(() => closeDetail(true));
+      assert.equal(await page.$eval("#detail", (el) => el.hidden), true);
+      await page.evaluate(() =>
+        showNotifyToast("needs", "#073-sample-retry", "Synthetic retry limit", "073-sample-retry"),
+      );
+      await page.focus("#notify-toasts a.notification-link");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(() => !document.querySelector(".notify-toast"), wait);
+      await page.waitForFunction(() => !document.getElementById("detail").hidden, wait);
+      assert.equal(await focused(), "d-close");
       await page.evaluate(() => {
         location.hash = "";
       });

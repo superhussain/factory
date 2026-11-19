@@ -9189,7 +9189,13 @@ $('notify-toasts').addEventListener('click', (e) => {
       window.addEventListener('hashchange', () => $('d-close').focus(), { once: true });
       setTimeout(() => li.remove());
     } else {
-      setTimeout(() => { li.remove(); $('d-close').focus(); });
+      // Like the job picker: a drawer closed with its hash kept reopens first.
+      setTimeout(() => {
+        li.remove();
+        const { id } = parseHash();
+        if (id && openId !== id) openJob(id);
+        if (!$('detail').hidden) $('d-close').focus();
+      });
     }
     return;
   }
