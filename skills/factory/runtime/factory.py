@@ -9641,6 +9641,7 @@ RETRO_CATEGORIES = ("navigation", "automated-checks", "reviewer-rules", "steerin
                     "information-access", "permissions")
 RETRO_SESSION_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[0-9a-f-]{8,36}", re.ASCII)
 RETRO_SESSION = re.compile(r"[0-9a-f-]{8,36}", re.ASCII)
+RETRO_FLAG_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,40}", re.ASCII)
 MAX_RETRO_BYTES = 131072
 RETRO_EDIT_SCHEMA = "factory.retro-edit/1"
 RETRO_RUN_SCHEMA = "factory.retro-run/1"
@@ -10314,12 +10315,18 @@ def retro_patterns(rows, pick):
 
 def retro_red_flags(index, board, projects, rows):
     """The red-flag index rows without an ack whose job is a board job of a registered project, in index
-    order, each with that project and up to 5 digest refs of the same job on the same host. paseo is dropped."""
+    order, each with that project and up to 5 digest refs of the same job on the same host. paseo is dropped.
+    A row whose tool or any flag name is not a plain RETRO_FLAG_NAME string is dropped too."""
     owner = {j.get("id"): j.get("project") for j in board["jobs"]}
     listed = retro_dict(index).get("rows")
     out = []
     for flag in listed if isinstance(listed, list) else []:
         if not isinstance(flag, dict) or "ack" in flag or owner.get(flag.get("job")) not in projects:
+            continue
+        names = flag.get("flags")
+        if not (isinstance(flag.get("tool"), str) and RETRO_FLAG_NAME.fullmatch(flag["tool"])
+                and isinstance(names, list)
+                and all(isinstance(n, str) and RETRO_FLAG_NAME.fullmatch(n) for n in names)):
             continue
         number = flag["job"].split("-", 1)[0]
         refs = dict.fromkeys(f"{r['host']}/{r['session']}" for r in rows
