@@ -243,6 +243,8 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       const backlog = page.waitForResponse(
         (response) => new URL(response.url()).pathname === "/api/backlog",
       );
+      // Stands in for the first load's backlog redraw landing just before the click (CI run 44478429364).
+      await page.evaluate(() => renderInboxPage());
       await page.click("#inbox-retry");
       await backlog;
       await new Promise((resolve) => setTimeout(resolve, 500));
