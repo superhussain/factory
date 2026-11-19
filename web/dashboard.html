@@ -1711,6 +1711,7 @@ window.addEventListener('message', (e) => {
 // In a Paseo frame, a warm return focuses the frame. Put focus back on the last focused element.
 // Chrome has already moved activeElement to body when window blur fires, so track focusin instead.
 // A press outside any focusable element forgets it. A scrollbar press keeps it, and a focused dialog holding it gives focus back.
+// The restored field then scrolls only as far as needed to be fully seen.
 let embedFocus = null;
 document.addEventListener('focusin', (e) => { if (e.target instanceof HTMLDialogElement && e.target.contains(embedFocus)) return; embedFocus = e.target; });
 const EMBED_FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, label, [tabindex], [contenteditable]:not([contenteditable="false"])';
@@ -1721,6 +1722,7 @@ window.addEventListener('focus', () => {
   if (!embedParent || !el || !el.isConnected || !el.checkVisibility()) return;
   const a = document.activeElement; if (a && a !== document.body && !(a instanceof HTMLDialogElement && a.contains(el))) return;
   el.focus({ preventScroll: true });
+  el.scrollIntoView({ block: 'nearest' });
 });
 document.addEventListener('click', (e) => {
   if (!embedParent) return;
