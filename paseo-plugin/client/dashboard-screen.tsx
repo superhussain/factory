@@ -29,7 +29,9 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
     const [stalled, setStalled] = useState(false);
     const origin =
       settings.status === "ready" ? parseDashboardOrigin(settings.values.origin) : null;
-    const [saved, setSaved] = useState<string | null>(null);
+    const [saved, setSaved] = useState<string | null>(() =>
+      origin ? startUrl(origin, params.job, savedLocation(origin)) : null,
+    );
     useEffect(() => {
       if (origin) setSaved(startUrl(origin, params.job, savedLocation(origin)));
     }, [origin, params.job]);
