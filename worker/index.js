@@ -1817,6 +1817,7 @@ async function auditFlagsUpdate(env, job, host, rows) {
     for (const row of fresh) {
       const ack = acks.get(auditFlagKey(row));
       if (ack) row.ack = ack;
+      else delete row.ack;
     }
     const next = auditFlagsKeep([...kept, ...fresh]);
     const saved = await env.BUCKET.put(

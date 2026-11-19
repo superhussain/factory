@@ -1673,6 +1673,10 @@ async function capture(outdir, referencePath) {
         await page.evaluate(() =>
           document.getElementById("audit-flags-pager").scrollIntoView({ block: "end" }),
         );
+        await page.evaluate(() => {
+          const wrap = document.getElementById("audit-flags-wrap");
+          wrap.scrollLeft = wrap.scrollWidth;
+        });
       }
     };
     flagsHosts = true;

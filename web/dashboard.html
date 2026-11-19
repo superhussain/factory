@@ -147,7 +147,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
   #settings-document { font-family: var(--font-mono); height: 50dvh; min-height: 240px; resize: vertical; }
   #settings-status, #pipeline-status, #project-pickup-status { overflow-wrap: anywhere; margin: 12px 0; }
-  #settings-status[role="alert"], #pipeline-status[role="alert"], #project-pickup-status[role="alert"] { color: var(--alert); }
+  #settings-status[role="alert"], #pipeline-status[role="alert"], #project-pickup-status[role="alert"], #audit-flags-err[role="alert"] { color: var(--alert); }
   #settings-hint { overflow-wrap: anywhere; margin: -4px 0 12px; }
   #settings-hint:empty { margin: 0; }
   @media (max-width: 760px) {
@@ -220,7 +220,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #audit-flags td a + a { margin-left: 8px; }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #audit-flags td:nth-child(8) { min-width: 14em; }
-  #audit-flags td:last-child .btn + .btn { margin-left: 8px; }
+  .audit-flag-actions { display: flex; flex-wrap: wrap; gap: 8px; }
   #audit-flags tr.acked { color: var(--muted); }
   .audit-flags-pager { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
   #audit-flags-pager[hidden] { display: none; }
@@ -3265,8 +3265,9 @@ async function loadAuditFlags() {
 }
 
 function renderAuditFlags() {
-  const all = auditFlags ?? [], showAcked = $('audit-flags-show-acked').checked;
-  const open = all.filter((row) => !row.ack), hidden = all.length - open.length;
+  const all = auditFlags ?? [], open = all.filter((row) => !row.ack), hidden = all.length - open.length;
+  if (!hidden) $('audit-flags-show-acked').checked = false;
+  const showAcked = $('audit-flags-show-acked').checked;
   const rows = showAcked ? all : open;
   const jobCount = new Set(open.map((row) => row.job)).size;
   const plural = (n, one, many) => n + (n === 1 ? one : many);
@@ -3318,13 +3319,15 @@ function renderAuditFlags() {
     code.textContent = row.target;
     cell('').append(code);
     if (row.ack) tr.className = 'acked';
-    const actions = cell(''), summary = row.flags.join(', ') + ' call in ' + row.job;
+    const actions = document.createElement('div'), summary = row.flags.join(', ') + ' call in ' + row.job;
     const ack = document.createElement('button');
     ack.type = 'button';
     ack.className = 'btn';
     ack.textContent = row.ack ? 'Unacknowledge' : 'Acknowledge';
     ack.setAttribute('aria-label', (row.ack ? 'Unacknowledge the ' : 'Acknowledge the ') + summary);
     ack.addEventListener('click', () => auditFlagsAck(row, !row.ack, ack));
+    actions.className = 'audit-flag-actions';
+    cell('').append(actions);
     actions.append(ack);
     if (!$('new-idea').hidden) {
       const idea = document.createElement('button');
@@ -3360,7 +3363,8 @@ async function auditFlagsAck(row, ack, button) {
     if (r.status !== 200) throw new Error(await r.text());
     auditFlags = (await r.json()).rows;
     renderAuditFlags();
-    $('audit-flags-show-acked').focus();
+    const box = $('audit-flags-show-acked');
+    (box.parentElement.parentElement.hidden ? $('audit-flags-wrap') : box).focus();
   } catch (x) {
     err.textContent = 'Could not save: ' + (x.message || x);
     err.hidden = false;

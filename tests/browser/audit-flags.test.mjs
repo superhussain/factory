@@ -378,7 +378,13 @@ test(
           "3 flagged calls across 1 job, newest first. Each host redacted its targets before upload.",
         );
 
-        await page.$eval("#audit-flags-show-acked", (c) => (c.checked = false));
+        assert.deepEqual(
+          await page.evaluate(() => [
+            document.getElementById("audit-flags-show-acked").checked,
+            document.activeElement.id,
+          ]),
+          [false, "audit-flags-wrap"],
+        );
         for (const left of [2, 1, 0]) {
           await page.click("#audit-flags-rows tr .btn");
           await page.waitForFunction(
