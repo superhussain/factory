@@ -44,17 +44,16 @@ function setup(board = { updated: UPDATED, jobs: [BUILD, SPEC] }) {
     }),
   };
   const env = { BUCKET: bucket, BoardEvents };
-  const send = (method, body, headers = {}) =>
-    serveFactory(
-      new Request(ORIGIN + "/api/board", {
-        method,
-        headers: { "Content-Type": "application/json", ...headers },
-        body: JSON.stringify(body),
-      }),
-      env,
-      person,
-      { waitUntil() {} },
-    );
+  const send = (method, body, headers = {}) => {
+    const init = {
+      method,
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    };
+    return serveFactory(new Request(ORIGIN + "/api/board", init), env, person, {
+      waitUntil() {},
+    });
+  };
   return {
     bodies,
     patch: (body) => send("PATCH", body),
