@@ -598,7 +598,7 @@
       },
       "expected": {
         "status": 413,
-        "body": "body over 4 MiB",
+        "body": "body over 16 MiB",
         "headers": {
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
@@ -752,7 +752,7 @@
       },
       "expected": {
         "status": 413,
-        "body": "body over 4 MiB",
+        "body": "body over 16 MiB",
         "headers": {
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
