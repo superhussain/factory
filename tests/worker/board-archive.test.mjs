@@ -111,6 +111,7 @@ test("an age pass moves 412, 413 and 416, archive first, and leaves a floor", as
   });
   assert.equal(board.updated, "2026-11-09T09:00:00Z");
   assert.ok(s.bucket.objects.get("board.json").bytes.toString().endsWith("}\n"));
+  assert.ok(!s.bucket.objects.get("board.json").bytes.toString().includes("\n  "));
   // A second pass has nothing to move and writes nothing.
   const before = s.bucket.calls.length;
   assert.deepEqual(await s.run(), { status: "none", moved: [] });

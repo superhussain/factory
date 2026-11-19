@@ -7252,7 +7252,7 @@ async function casBoard(change) {
       const cond = r.ok ? { 'If-Match': etag.replace(/^W\//, '') } : { 'If-None-Match': '*' };
       let put;
       try {
-        put = await fetch('./api/board', { method: 'PUT', headers: cond, body: JSON.stringify(board, null, 2) + '\n' });
+        put = await fetch('./api/board', { method: 'PUT', headers: cond, body: JSON.stringify(board) + '\n' });
       } catch (x) {
         x.uncertain = true; // the request may have landed before the connection dropped
         throw x;

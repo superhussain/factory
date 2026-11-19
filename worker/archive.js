@@ -128,7 +128,7 @@ export async function runArchive(env, now) {
     jobs: jobs.filter((j) => !ids.has(j.id)),
     archived: nextArchived(board.data.archived, moved),
   };
-  const written = await env.BUCKET.put("board.json", JSON.stringify(next, null, 2) + "\n", {
+  const written = await env.BUCKET.put("board.json", JSON.stringify(next) + "\n", {
     onlyIf: new Headers({ "If-Match": board.etag }),
     httpMetadata: { contentType: "application/json" },
   });
