@@ -446,10 +446,17 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .col { container: col / inline-size; }
   .count-wide { text-transform: none; }
   .count-wide, .count-narrow { white-space: nowrap; }
-  /* A header that no longer fits drops its show all button to the next line instead of overlapping it. */
-  .col:not(.collapsed-col) .column-toggle { min-width: min-content; }
+  /* A short finished column keeps its header on one line, so its cards line up with the next column's.
+     The stage name gives way first. */
+  .col.partial-col h2 { flex-wrap: nowrap; }
+  .col.partial-col .column-toggle { min-width: 0; }
+  .col.partial-col .column-toggle > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .count-narrow { display: none; }
-  @container col (max-width: 240px) { .count-wide { display: none; } .count-narrow { display: inline; } }
+  @container col (max-width: 280px) {
+    .count-wide { display: none; }
+    .count-narrow { display: inline; }
+    .col.partial-col .column-toggle { gap: 4px; }
+  }
   .column-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
   .collapsed-col h2 { margin-bottom: 0; }
   .collapsed-col .column-toggle { writing-mode: vertical-rl; align-items: flex-start; height: auto; flex: none; width: 36px; }
@@ -462,7 +469,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .archive-head { margin: 4px 0 0; }
   .archive-count { font-size: 12px; color: var(--muted); margin: 0; }
   .archive-error { font-size: 12px; color: var(--alert); margin: 0; }
-  .archive-more[aria-disabled="true"] { opacity: .6; cursor: default; }
+  .more[aria-disabled="true"], .archive-more[aria-disabled="true"] { opacity: .6; cursor: default; }
   .blank { grid-column: 1 / -1; text-align: center; padding: 64px 16px; color: var(--muted); }
   .blank h2 { margin: 0 0 8px; font-size: 16px; color: var(--fg); }
   .blank p { margin: 4px 0; font-size: 13px; }
@@ -1563,6 +1570,8 @@ function loadFullBoard() {
         fullFinished = (Array.isArray(data.jobs) ? data.jobs : []).filter((j) => TERMINAL.includes(j.stage));
         fullEtag = (r.headers.get('ETag') || '').replace(/^W\//, '');
       } catch {
+        fullRead = null;
+        if (loaded) renderBoard();
         showBoardStatus('Could not load merged and closed jobs. Try again.');
         return;
       } finally {
@@ -4914,23 +4923,26 @@ function renderBoard() {
     if (hiddenColumns.has(s)) return '';
     let list = lists[i];
     let more = '';
+    // A finished column the slim read cut short.
+    const partial = TERMINAL.includes(s) && !boardComplete && lists[i].length < totals[i];
     if (TERMINAL.includes(s)) {
       const t = (j) => Date.parse(j.done || j.updated) || 0;
       starredFirst(list.sort((a, b) => t(b) - t(a)));
       if (totals[i] > CAP) {
         const open = expanded.has(s) && boardComplete;
         const loading = !boardComplete && fullRead;
+        // A short column's header already names the total, so its button leaves the number out.
         more = '<button class="more" data-stage="' + s + '" aria-expanded="' + open + '"' + (loading ? ' aria-disabled="true"' : '') + '>' +
-          (open ? 'show ' + CAP : (loading ? 'loading all ' : 'show all ') + totals[i]) + '</button>';
+          (open ? 'show ' + CAP : (loading ? 'loading all' : 'show all') + (partial ? '' : ' ' + totals[i])) + '</button>';
         if (!open) list = list.slice(0, CAP);
       }
     }
     const label = s === 'needs-you' ? 'needs you' : s;
     // A finished column the slim read cut short says how much of it is loaded.
-    const count = TERMINAL.includes(s) && !boardComplete && lists[i].length < totals[i]
+    const count = partial
       ? '<span class="count-wide">showing ' + list.length + ' of ' + totals[i] + '</span><span class="count-narrow">' + list.length + ' / ' + totals[i] + '</span>'
       : totals[i];
-    return '<section class="col ' + s + (lists[i].length ? '' : ' empty-col') + (collapsed[i] ? ' collapsed-col' : '') + '"><h2>' +
+    return '<section class="col ' + s + (lists[i].length ? '' : ' empty-col') + (collapsed[i] ? ' collapsed-col' : partial ? ' partial-col' : '') + '"><h2>' +
       '<button type="button" class="column-toggle" data-stage="' + s + '" aria-label="' + (collapsed[i] ? 'Expand ' : 'Collapse ') + label +
       ' column" aria-expanded="' + !collapsed[i] + '" aria-controls="column-cards-' + s + '"><span>' + label + '</span><span>' + count +
       '</span><span aria-hidden="true">' + (collapsed[i] ? '+' : '−') + '</span></button>' + (collapsed[i] ? '' : more) +

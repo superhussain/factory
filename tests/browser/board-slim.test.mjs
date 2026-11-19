@@ -78,7 +78,7 @@ test("slim board read", { timeout: 240000 }, async (t) => {
       assert.equal(await text(page, ".col.merged .count-wide"), "showing 10 of 30");
       assert.equal(await text(page, ".col.merged .count-narrow"), "10 / 30");
       await clickNow(page, '.column-toggle[data-stage="merged"]');
-      assert.equal(await text(page, '.more[data-stage="merged"]'), "show all 30");
+      assert.equal(await text(page, '.more[data-stage="merged"]'), "show all");
       // A ref to a finished row outside the slim window stays a link.
       assert.ok(
         await page.$(
@@ -86,17 +86,46 @@ test("slim board read", { timeout: 240000 }, async (t) => {
         ),
       );
 
+      // A failed full read hands the button back and says so.
+      let failNext = true;
+      await page.setRequestInterception(true);
+      page.on("request", (request) => {
+        if (request.isInterceptResolutionHandled()) return;
+        const url = new URL(request.url());
+        if (failNext && request.method() === "GET" && url.pathname === "/api/board") {
+          failNext = false;
+          return request.respond({ status: 500, contentType: "text/plain", body: "boom" });
+        }
+        return request.continue();
+      });
+      await clickNow(page, '.more[data-stage="merged"]');
+      await page.waitForFunction(
+        () =>
+          document.getElementById("board-status").textContent ===
+          "Could not load merged and closed jobs. Try again.",
+        wait,
+      );
+      assert.deepEqual(
+        await page.$eval('.more[data-stage="merged"]', (el) => [
+          el.textContent,
+          el.getAttribute("aria-disabled"),
+        ]),
+        ["show all", null],
+      );
+      assert.equal(await mergedCards(page), 10);
+      assert.equal(fullReads(reads), 1);
+
       const loading = await page.evaluate(() => {
         document.querySelector('.more[data-stage="merged"]').click();
         const more = document.querySelector('.more[data-stage="merged"]');
         return [more.textContent, more.getAttribute("aria-disabled")];
       });
-      assert.deepEqual(loading, ["loading all 30", "true"]);
+      assert.deepEqual(loading, ["loading all", "true"]);
       await page.waitForFunction(
         () => document.querySelectorAll(".col.merged .card").length === 30,
         wait,
       );
-      assert.equal(fullReads(reads), 1);
+      assert.equal(fullReads(reads), 2);
       assert.equal(await page.$(".col.merged .count-wide"), null);
       assert.equal(
         await page.$eval(
