@@ -3805,6 +3805,21 @@ const NOTIFICATIONS_EMPTY = {
 let notificationsFilter = 'all';
 let notificationsPage = 0;
 const NOTIFICATIONS_SEEN_KEY = 'factory-notifications-seen';
+// Spec ready and backlog events leave no board trace, so this browser logs the ones its tabs saw.
+const NOTIFICATIONS_LOG_KEY = 'factory-notifications-log';
+const NOTIFICATIONS_LOG_MAX = 50;
+function notificationLog() {
+  let log;
+  try { log = JSON.parse(store.get(NOTIFICATIONS_LOG_KEY) || '[]'); } catch { return []; }
+  if (!Array.isArray(log)) return [];
+  return log.filter((e) => typeof e?.at === 'string' && (e.kind === 'spec' ? typeof e.id === 'string'
+    : e.kind === 'backlog' && typeof e.key === 'string' && /^[0-9a-f]{12}$/.test(e.key) && typeof e.title === 'string' && typeof e.project === 'string'));
+}
+function logNotification(entry) {
+  const same = (e) => e.kind === entry.kind && (e.kind === 'spec' ? e.id === entry.id : e.key === entry.key);
+  const log = [{ ...entry, at: new Date().toISOString() }, ...notificationLog().filter((e) => !same(e))];
+  store.set(NOTIFICATIONS_LOG_KEY, JSON.stringify(log.slice(0, NOTIFICATIONS_LOG_MAX)));
+}
 let notificationsHtml = '';
 let notificationsMenuHtml = '';
 function notificationsRoute() { return location.hash === '#/notifications' ? true : null; }
@@ -9157,17 +9172,28 @@ function toastBoard() {
   const prev = toastSeen;
   toastSeen = seen;
   if (!prev) return;
+  let logged = false;
   for (const [id, kinds] of jobEvents(prev, seen)) {
     const j = jobs.find((x) => x.id === id);
+    if (kinds.includes('spec')) {
+      logNotification({ kind: 'spec', id });
+      logged = true;
+    }
     const kind = kinds.find(alertOn);
     if (kind && isShown(j.project)) showNotifyToast(kind, '#' + encodeURIComponent(id), j.title || id, id);
   }
+  if (logged) renderNotifications();
 }
 function toastBacklog() {
   const prev = backlogSeen;
   backlogSeen = new Set(backlog.map((b) => b.raw));
-  if (!prev || !alertOn('backlog')) return;
-  for (const b of backlog) if (!prev.has(b.raw) && isShown(b.project)) showNotifyToast('backlog', '#/backlog/' + b.key, b.text, projectName(b));
+  if (!prev) return;
+  const fresh = backlog.filter((b) => !prev.has(b.raw));
+  for (const b of fresh) logNotification({ kind: 'backlog', key: b.key, title: b.text, project: b.project });
+  const shown = fresh.filter((b) => isShown(b.project));
+  if (alertOn('backlog')) for (const b of shown) showNotifyToast('backlog', '#/backlog/' + b.key, b.text, projectName(b));
+  if (shown.length && soundActive() && soundKindOn('backlog')) playSound('backlog');
+  if (fresh.length) renderNotifications();
 }
 
 // Web Push reaches this device while the dashboard is closed. The Worker serves its VAPID
