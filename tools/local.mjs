@@ -16,7 +16,7 @@ function runId(label) {
   return `${label}-${new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")}-${process.pid}`;
 }
 
-export async function startWorkerd({ port, persistDir, config }) {
+export async function startWorkerd({ port, persistDir, config, ip = "127.0.0.1" }) {
   if (!persistDir) throw new Error("startLocal requires an explicit fresh persistDir");
   const child = spawn(
     wrangler,
@@ -25,7 +25,7 @@ export async function startWorkerd({ port, persistDir, config }) {
       "--config",
       config,
       "--ip",
-      "127.0.0.1",
+      ip,
       "--port",
       String(port ?? 0),
       "--inspector-ip",
@@ -49,7 +49,7 @@ export async function startWorkerd({ port, persistDir, config }) {
     const message = JSON.parse(raw);
     if (message.event !== "DEV_SERVER_READY") return;
     if (
-      message.ip !== "127.0.0.1" ||
+      message.ip !== ip ||
       !Number.isInteger(message.port) ||
       message.port < 1 ||
       message.port > 65535 ||
@@ -58,7 +58,7 @@ export async function startWorkerd({ port, persistDir, config }) {
       readyError = new Error("local worker reported an unexpected listening address");
       return;
     }
-    origin = `http://127.0.0.1:${message.port}`;
+    origin = `http://${ip}:${message.port}`;
   });
   const exited = new Promise((resolve) => child.once("exit", resolve));
   const deadline = Date.now() + READY_TIMEOUT_MS;
@@ -136,12 +136,14 @@ function declaredPort() {
 
 // Owned fixed ports are 8220/8221; omitting port assigns a documented owned ephemeral
 // loopback port for parallel fixtures, or the caller's own held port declared in
-// FACTORY_OWNED_LOCAL_PORT.
-export async function startLocal({ port, persistDir } = {}) {
+// FACTORY_OWNED_LOCAL_PORT. ip serves the test entry, which skips auth, on one chosen
+// address instead of loopback, and never on every address.
+export async function startLocal({ port, persistDir, ip = "127.0.0.1" } = {}) {
   if (port !== undefined && !PORTS.includes(port) && port !== declaredPort()) {
     throw new Error(`owned loopback ports are ${PORTS.join(" and ")} only`);
   }
-  return startWorkerd({ port, persistDir, config: LOCAL_CONFIG });
+  if (ip === "0.0.0.0" || ip === "::") throw new Error("serve on one address, never all of them");
+  return startWorkerd({ port, persistDir, config: LOCAL_CONFIG, ip });
 }
 
 function python(args, env) {

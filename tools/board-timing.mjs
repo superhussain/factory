@@ -1,7 +1,10 @@
 // Times dashboard board writes against a local Worker on a synthetic board: the old GET plus
 // PUT round trip beside one PATCH /api/board, each with the backlog half of an accept, and the
 // live event and slim read a second tab waits on. Prints one markdown table.
-// Usage: node tools/board-timing.mjs [--rows N] [--runs N]
+// Usage: node tools/board-timing.mjs [--rows N] [--runs N] [--ip ADDRESS] [--origin URL]
+//        node tools/board-timing.mjs --serve --ip ADDRESS
+// --serve starts the Worker's test entry, which skips auth, on that one address and waits for
+// Ctrl-C. --origin times a fresh server started that way on another host.
 import { randomBytes } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { rm } from "node:fs/promises";
@@ -10,15 +13,32 @@ import { prepareAssets } from "./assets.mjs";
 import { startLocal } from "./local.mjs";
 
 const { values } = parseArgs({
-  options: { rows: { type: "string", default: "2000" }, runs: { type: "string", default: "10" } },
+  options: {
+    rows: { type: "string", default: "2000" },
+    runs: { type: "string", default: "10" },
+    ip: { type: "string", default: "127.0.0.1" },
+    serve: { type: "boolean", default: false },
+    origin: { type: "string" },
+  },
 });
 const ROWS = Number(values.rows);
 const RUNS = Number(values.runs);
 const dir = new URL(`../.context/board-timing-${process.pid}/`, import.meta.url).pathname;
 
-await prepareAssets();
-const service = await startLocal({ persistDir: dir + "r2" });
-const { origin } = service;
+let service, origin;
+if (values.origin) origin = new URL(values.origin).origin;
+else {
+  await prepareAssets();
+  service = await startLocal({ ip: values.ip, persistDir: dir + "r2" });
+  origin = service.origin;
+}
+if (values.serve) {
+  console.log(`serving ${origin}`);
+  await new Promise((resolve) => process.once("SIGINT", resolve));
+  await service.close();
+  await rm(dir, { recursive: true, force: true });
+  process.exit(0);
+}
 
 // One request: its status, body and the bytes each way.
 async function call(path, init = {}) {
@@ -166,7 +186,7 @@ for (let run = 0; run < RUNS; run++)
   }
 
 socket.destroy();
-await service.close();
+await service?.close();
 await rm(dir, { recursive: true, force: true });
 
 const pick = (list, q) => list.toSorted((a, b) => a - b)[Math.ceil(q * list.length) - 1];
