@@ -253,6 +253,8 @@ whether it was admitted or why it was skipped, even when nothing was admitted. I
 `retro upload failed: <status> <text>` to stderr and never changes the exit code. A Worker
 without the route answers 404. The `#/retros` dashboard page lists the runs.
 
+For each admitted red-flag card, `retro admit` sends its backlog line and grouped rows to `POST /api/audit-flags/backlog` and prints `linked <n> red-flag rows to <project>: <title>`. An error prints `red-flag link failed: <status> <text>` to stderr and never changes the exit code.
+
 ## Tool-call audit
 
 ```text
