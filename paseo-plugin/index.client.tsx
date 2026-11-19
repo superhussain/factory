@@ -5,7 +5,7 @@ import { InboxBadge } from "./client/inbox-badge";
 import { dashboardScreen } from "./client/dashboard-screen";
 import { startElection } from "./client/election";
 import { useFrameInboxCount } from "./client/frame-inbox";
-import { SettingsScreen } from "./client/settings-screen";
+import { settingsScreen } from "./client/settings-screen";
 import { dropWarmFrame, showNeedsNotification } from "./client/web";
 import { createInbox, type Inbox } from "./shared/arrivals";
 import { shownInboxCount } from "./shared/badge";
@@ -60,7 +60,7 @@ export default function contribute(client: PluginClientContext) {
     id: "dashboard",
     title: "Dashboard",
     icon: "Settings",
-    Component: SettingsScreen,
+    Component: settingsScreen(() => election.recheck()),
   });
   return () => {
     election.stop();

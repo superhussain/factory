@@ -47,6 +47,39 @@ test("back online takes it back", () => {
   assert.deepEqual(log.slice(-2).sort(), ["+mac", "-windows"]);
 });
 
+test("one miss keeps the seat", () => {
+  const { log, mac, windows } = three();
+  assert.equal(mac.miss(), true);
+  assert.equal(mac.elected(), true);
+  assert.equal(windows.elected(), false);
+  assert.deepEqual(log, ["+mac"]);
+});
+
+test("two misses hand over", () => {
+  const { log, mac, windows } = three();
+  mac.miss();
+  assert.equal(mac.miss(), false);
+  assert.equal(windows.elected(), true);
+  assert.deepEqual(log.slice(-2).sort(), ["+windows", "-mac"]);
+});
+
+test("online resets misses", () => {
+  const { log, mac } = three();
+  mac.miss();
+  mac.online(A);
+  assert.equal(mac.miss(), true);
+  assert.equal(mac.elected(), true);
+  assert.deepEqual(log, ["+mac"]);
+});
+
+test("unknown seat miss", () => {
+  const log = [];
+  const mac = member(sharedBallot({}), log, "mac");
+  assert.equal(mac.miss(), false);
+  assert.equal(mac.elected(), false);
+  assert.deepEqual(log, []);
+});
+
 test("origin change re-registers", () => {
   const log = [];
   const mac = member(sharedBallot({}), log, "mac");

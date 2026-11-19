@@ -25,67 +25,71 @@ const NOTIFICATION_HINTS: Record<Exclude<NotificationState, "unsupported">, stri
   denied: "Notifications are blocked for Paseo. Allow them in your browser's site settings.",
 };
 
-export function SettingsScreen({ theme }: PluginSurfaceProps) {
-  const settings = useSettings(factorySettings);
-  const toast = useToast();
-  const [value, setValue] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [permission, setPermission] = useState(notificationState);
-  useEffect(() => {
-    const refresh = () => setPermission(notificationState());
-    return onWindowFocus(refresh);
-  }, []);
-  if (settings.status === "loading") return <Loading />;
-  if (settings.status !== "ready")
-    return <Text style={{ color: theme.colors.foregroundMuted }}>{settings.error}</Text>;
-  const ready = settings;
-  const save = async () => {
-    const origin = parseDashboardOrigin(value ?? ready.values.origin);
-    if (!origin) {
-      setError("Enter an HTTPS origin with no path, like https://factory.example.com.");
-      return;
-    }
-    setError(null);
-    if (await ready.save({ origin }, ready.revision))
-      toast.show("Factory URL saved", { variant: "success" });
-  };
-  return (
-    <>
-      <SettingsSection title="Dashboard">
-        <SettingsCard>
-          <SettingsInput
-            label="Factory dashboard URL"
-            hint="The HTTPS origin of your factory, like https://factory.example.com."
-            placeholder="https://factory.example.com"
-            initialValue={ready.values.origin}
-            onChangeText={(text) => {
-              setValue(text);
-              setError(null);
-            }}
-            disabled={ready.saving}
-            error={error ?? ready.saveError}
-          />
-          <SettingsAction
-            label="Save changes"
-            actionLabel="Save"
-            disabled={ready.saving}
-            onPress={() => void save()}
-          />
-        </SettingsCard>
-      </SettingsSection>
-      {permission !== "unsupported" && (
-        <SettingsSection title="Notifications">
+export function settingsScreen(onSaved: () => void) {
+  return function SettingsScreen({ theme }: PluginSurfaceProps) {
+    const settings = useSettings(factorySettings);
+    const toast = useToast();
+    const [value, setValue] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [permission, setPermission] = useState(notificationState);
+    useEffect(() => {
+      const refresh = () => setPermission(notificationState());
+      return onWindowFocus(refresh);
+    }, []);
+    if (settings.status === "loading") return <Loading />;
+    if (settings.status !== "ready")
+      return <Text style={{ color: theme.colors.foregroundMuted }}>{settings.error}</Text>;
+    const ready = settings;
+    const save = async () => {
+      const origin = parseDashboardOrigin(value ?? ready.values.origin);
+      if (!origin) {
+        setError("Enter an HTTPS origin with no path, like https://factory.example.com.");
+        return;
+      }
+      setError(null);
+      if (await ready.save({ origin }, ready.revision)) {
+        toast.show("Factory URL saved", { variant: "success" });
+        onSaved();
+      }
+    };
+    return (
+      <>
+        <SettingsSection title="Dashboard">
           <SettingsCard>
+            <SettingsInput
+              label="Factory dashboard URL"
+              hint="The HTTPS origin of your factory, like https://factory.example.com."
+              placeholder="https://factory.example.com"
+              initialValue={ready.values.origin}
+              onChangeText={(text) => {
+                setValue(text);
+                setError(null);
+              }}
+              disabled={ready.saving}
+              error={error ?? ready.saveError}
+            />
             <SettingsAction
-              label="Desktop notifications"
-              hint={NOTIFICATION_HINTS[permission]}
-              actionLabel={permission === "granted" ? "On" : "Turn on"}
-              disabled={permission !== "default"}
-              onPress={() => void requestNotifications().then(setPermission)}
+              label="Save changes"
+              actionLabel="Save"
+              disabled={ready.saving}
+              onPress={() => void save()}
             />
           </SettingsCard>
         </SettingsSection>
-      )}
-    </>
-  );
+        {permission !== "unsupported" && (
+          <SettingsSection title="Notifications">
+            <SettingsCard>
+              <SettingsAction
+                label="Desktop notifications"
+                hint={NOTIFICATION_HINTS[permission]}
+                actionLabel={permission === "granted" ? "On" : "Turn on"}
+                disabled={permission !== "default"}
+                onPress={() => void requestNotifications().then(setPermission)}
+              />
+            </SettingsCard>
+          </SettingsSection>
+        )}
+      </>
+    );
+  };
 }
