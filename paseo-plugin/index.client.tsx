@@ -3,6 +3,7 @@ import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { useSyncExternalStore } from "react";
 import { InboxBadge } from "./client/inbox-badge";
 import { dashboardScreen } from "./client/dashboard-screen";
+import { startElection } from "./client/election";
 import { useFrameInboxCount } from "./client/frame-inbox";
 import { SettingsScreen } from "./client/settings-screen";
 import { showNeedsNotification } from "./client/web";
@@ -30,27 +31,37 @@ function factoryItem(inbox: Inbox, reload: Reload) {
 
 export default function contribute(client: PluginClientContext) {
   const reload = createReload();
-  const inbox = createInbox((job) =>
+  const inbox = createInbox((job) => {
+    if (!election.elected()) return;
     showNeedsNotification(job, () =>
       client.openScreen({ screenId: "dashboard", params: { job: job.id } }),
-    ),
-  );
+    );
+  });
+  const election = startElection(client, () => {
+    const removeScreen = client.addScreen({
+      id: "dashboard",
+      title: "Factory",
+      Component: dashboardScreen(client, reload),
+    });
+    const removeItem = client.addSidebarHeaderItem({
+      id: "factory",
+      title: "Factory",
+      Component: factoryItem(inbox, reload),
+    });
+    return () => {
+      void removeItem();
+      void removeScreen();
+    };
+  });
   const subscription = client.subscribe(factoryInbox, {}, inbox.apply);
-  client.addScreen({
-    id: "dashboard",
-    title: "Factory",
-    Component: dashboardScreen(client, reload),
-  });
-  client.addSidebarHeaderItem({
-    id: "factory",
-    title: "Factory",
-    Component: factoryItem(inbox, reload),
-  });
   client.addSettingsScreen({
     id: "dashboard",
     title: "Dashboard",
     icon: "Settings",
     Component: SettingsScreen,
   });
-  return () => subscription.release();
+  return () => {
+    election.stop();
+    subscription.release();
+  };
 }
