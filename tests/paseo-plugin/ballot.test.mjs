@@ -7,8 +7,8 @@ const A = "https://factory.example.test";
 const B = "https://other.example.test";
 
 function member(ballot, log, name) {
-  return joinBallot(ballot, () => {
-    log.push("+" + name);
+  return joinBallot(ballot, (origin) => {
+    log.push("+" + name + (origin === B ? " B" : ""));
     return () => log.push("-" + name);
   });
 }
@@ -45,6 +45,15 @@ test("back online takes it back", () => {
   assert.equal(mac.elected(), true);
   assert.equal(windows.elected(), false);
   assert.deepEqual(log.slice(-2).sort(), ["+mac", "-windows"]);
+});
+
+test("origin change re-registers", () => {
+  const log = [];
+  const mac = member(sharedBallot({}), log, "mac");
+  mac.online(A);
+  mac.online(A);
+  mac.online(B);
+  assert.deepEqual(log, ["+mac", "-mac", "+mac B"]);
 });
 
 test("all offline keeps the first", () => {

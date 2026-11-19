@@ -23,16 +23,23 @@ export function isElected(seats: readonly Seat[], seat: Seat): boolean {
   return (group.find((s) => s.online) ?? group[0]) === seat;
 }
 
-export function joinBallot(ballot: Ballot, register: () => () => void): Member {
+export function joinBallot(
+  ballot: Ballot,
+  register: (origin: string | null) => () => void,
+): Member {
   const seat: Seat = { origin: null, online: false, known: false };
   let unregister: (() => void) | null = null;
+  let registered: string | null = null;
   let left = false;
   const sync = () => {
     const win = isElected(ballot.seats, seat);
-    if (win && !unregister) unregister = register();
-    else if (!win && unregister) {
+    if (unregister && (!win || registered !== seat.origin)) {
       unregister();
       unregister = null;
+    }
+    if (win && !unregister) {
+      registered = seat.origin;
+      unregister = register(seat.origin);
     }
   };
   const notify = () => ballot.members.forEach((fn) => fn());

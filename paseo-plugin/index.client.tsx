@@ -9,6 +9,7 @@ import { SettingsScreen } from "./client/settings-screen";
 import { showNeedsNotification } from "./client/web";
 import { createInbox, type Inbox } from "./shared/arrivals";
 import { shownInboxCount } from "./shared/badge";
+import { dashboardHost } from "./shared/embed";
 import { factoryInbox } from "./shared/inbox";
 import { createReload, type Reload } from "./shared/reload";
 
@@ -37,10 +38,10 @@ export default function contribute(client: PluginClientContext) {
       client.openScreen({ screenId: "dashboard", params: { job: job.id } }),
     );
   });
-  const election = startElection(client, () => {
+  const election = startElection(client, (origin) => {
     const removeScreen = client.addScreen({
       id: "dashboard",
-      title: "Factory",
+      title: origin ? dashboardHost(origin) : "Factory",
       Component: dashboardScreen(client, reload),
     });
     const removeItem = client.addSidebarHeaderItem({

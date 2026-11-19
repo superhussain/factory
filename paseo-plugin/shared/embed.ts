@@ -17,6 +17,10 @@ export function parseDashboardOrigin(value: string): string | null {
   return match ? "https://" + match[1].toLowerCase() : null;
 }
 
+export function dashboardHost(origin: string): string {
+  return new URL(origin).host;
+}
+
 export function dashboardSrc(origin: string, job?: string): string {
   return origin + "/" + (job && JOB_ID.test(job) ? "#" + job : "");
 }

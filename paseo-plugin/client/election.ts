@@ -8,7 +8,10 @@ import { onWindowFocus } from "./web";
 export const ELECTION_POLL_MS = 30_000;
 export const ELECTION_TIMEOUT_MS = 5_000;
 
-export function startElection(client: PluginClientContext, register: () => () => void) {
+export function startElection(
+  client: PluginClientContext,
+  register: (origin: string | null) => () => void,
+) {
   const member = joinBallot(sharedBallot(globalThis), register);
   const read = settingsRpc(factorySettings.id).read;
   let started = 0;
