@@ -148,8 +148,8 @@ test("park clears onMessage and jumpTo moves only the kept frame", () => {
   assert.equal(frame.element.src, A + "/#043-sample-ask");
 });
 
-test("WARM_FRAME_MS is 30 minutes", () => {
-  assert.equal(WARM_FRAME_MS, 1_800_000);
+test("WARM_FRAME_MS is 4 hours", () => {
+  assert.equal(WARM_FRAME_MS, 14_400_000);
 });
 
 test("shouldFocusFrame focuses only a warm pointer return", () => {
