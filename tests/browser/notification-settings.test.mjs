@@ -571,6 +571,12 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(await page.$eval("#sound-on", (el) => el.checked), false);
       assert.deepEqual(await soundBoxes(), Array(5).fill([true, true]));
       assert.deepEqual(
+        await page.$$eval("[data-sound-kind]", (els) =>
+          els.map((el) => el.getAttribute("aria-describedby")),
+        ),
+        Array(5).fill("sound-help"),
+      );
+      assert.deepEqual(
         await page.$$eval("[data-sound]", (els) => els.map((el) => el.disabled)),
         Array(5).fill(false),
       );
@@ -630,6 +636,12 @@ test("notification settings", { timeout: 180000 }, async (t) => {
       assert.equal(await storage("factory-sound"), "on");
       assert.deepEqual(await soundBoxes(), Array(5).fill([true, false]));
       assert.equal(await text("#sound-help"), SOUND_HELP);
+      assert.deepEqual(
+        await page.$$eval("[data-sound-kind]", (els) =>
+          els.map((el) => el.getAttribute("aria-describedby")),
+        ),
+        Array(5).fill(null),
+      );
       await page.click("#sound-on");
       await page.waitForFunction(
         () => document.getElementById("sound-status").textContent === "Sounds are off.",
@@ -962,6 +974,12 @@ test("notification settings", { timeout: 180000 }, async (t) => {
         Array(10).fill(true),
       );
       assert.equal(await text("#sound-help"), "This browser cannot play sounds.");
+      assert.deepEqual(
+        await page.$$eval("[data-sound-kind]", (els) =>
+          els.map((el) => el.getAttribute("aria-describedby")),
+        ),
+        Array(5).fill("sound-help"),
+      );
     });
 
     assert.deepEqual(errors, []);

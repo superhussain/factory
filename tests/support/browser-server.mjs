@@ -136,7 +136,7 @@ export async function serveHostList(page, list) {
 // Starts a fresh local service on a documented owned ephemeral port (parallel-safe),
 // launches the pinned browser, runs callback({ browser, origin, runDir, env }), and always
 // closes both. Operator-facing fixed services use 8220/8221 via tools/local.mjs.
-export async function withBrowserFixture(callback) {
+export async function withBrowserFixture(callback, { scrollbars = false } = {}) {
   const executablePath = browserExecutable();
   const runDir = await mkdtemp(
     new URL(`../../.context/browser-${process.pid}-`, import.meta.url).pathname,
@@ -151,6 +151,8 @@ export async function withBrowserFixture(callback) {
       executablePath,
       headless: true,
       args: ["--blink-settings=primaryHoverType=2,availableHoverTypes=2"],
+      // scrollbars: true shows real scrollbars, which headless hides by default.
+      ignoreDefaultArgs: scrollbars ? ["--hide-scrollbars"] : [],
     });
     return await callback({ browser, origin: service.origin, runDir, env });
   } finally {
