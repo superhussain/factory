@@ -1759,6 +1759,11 @@ async function capture(outdir, referencePath) {
     try {
       await view("retros-flags-desktop", 1440, 900, "light", openRetrosFlags);
       await view("retros-flags-mobile", 390, 844, "dark", openRetrosFlags);
+      await view("retros-flags-web-hidden-desktop", 1440, 900, "light", async (page, side) => {
+        await page.evaluate(() => localStorage.setItem("factory-hidden-drawer-links", "web"));
+        await page.reload({ waitUntil: "networkidle0" });
+        await openRetrosFlags(page, side);
+      });
       await view("retros-flags-idea-desktop", 1440, 900, "light", async (page, side) => {
         await openRetrosFlags(page, side);
         if (side !== "after") return;
