@@ -217,6 +217,22 @@ test("after a failed shared read, the next request reads again and answers 200",
   assert.equal(counter.gets, 2);
 });
 
+test("a dropped starter hands its read to waitUntil and a second read still answers", async () => {
+  const s = setup(JSON.stringify(board(34)));
+  const counter = slowGets(s);
+  const kept = [];
+  const ctx = { waitUntil: (promise) => kept.push(promise) };
+  s.get = (path) =>
+    serveFactory(new Request("http://local" + path), { BUCKET: s.bucket }, person, ctx);
+  s.get("/board.json?view=slim");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(kept.length, 1);
+  const second = await s.get("/board.json?view=slim");
+  assert.equal(second.status, 200);
+  assert.equal(counter.gets, 1);
+  await Promise.all(kept);
+});
+
 test("a duplicate id counts once per stage", async () => {
   const row = (id, stage, n) => ({ id, project: "sample", stage, updated: at(n) });
   const stored = JSON.stringify({

@@ -306,7 +306,7 @@ async function readSlim(env) {
 }
 
 // The dashboard's first read. A board that is not JSON with a jobs array goes out as stored.
-async function slimBoardGet(env) {
+async function slimBoardGet(env, ctx) {
   const head = await env.BUCKET.head("board.json");
   if (!head) return notFound();
   const send = (body, etag) =>
@@ -317,7 +317,9 @@ async function slimBoardGet(env) {
     const clear = () => {
       if (slimPending.read === read) slimPending = { etag: "", read: null };
     };
-    read.then(clear, clear);
+    // Keeps the read alive for the waiters if the request that started it is cancelled.
+    const settled = read.then(clear, clear);
+    if (ctx) ctx.waitUntil(settled);
     slimPending = { etag: head.httpEtag, read };
   }
   const out = await slimPending.read;
@@ -3001,7 +3003,7 @@ export async function serveFactory(request, env, principal, ctx) {
   if (path.startsWith("/assets/") || path === "/sw.js") return serveAsset(request, env.config);
   if (path === "/board.json")
     return new URL(request.url).searchParams.get("view") === "slim"
-      ? slimBoardGet(env)
+      ? slimBoardGet(env, ctx)
       : getFile(env, "board.json", "application/json", {
           "X-Factory-Version": DASHBOARD_VERSION,
         });
