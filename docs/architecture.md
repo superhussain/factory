@@ -273,8 +273,9 @@ rather than loosens. The measured limit result is recorded in
 
 The `BoardEvents` Durable Object (`worker/events.js`, a plain Durable Object on the WebSocket
 Hibernation API) tells open dashboards when `board.json` or `backlog.md` changed. It
-stores nothing and never carries board content. The room holds at most 100 open sockets
-and answers a further upgrade with 503.
+stores nothing. After a board `PATCH` or `If-Match` `PUT` it carries the rows that write
+changed, only to sockets whose Access sign-in has not expired. The room holds at most 100
+open sockets and answers a further upgrade with 503.
 
 ```mermaid
 sequenceDiagram
@@ -289,6 +290,46 @@ sequenceDiagram
   W-->>D: 200 ETag (unchanged)
   B->>W: GET /board.json?view=slim
 ```
+
+After a board `PATCH`, or a `PUT` whose `If-Match` names the stored board, `rowsFrame` in
+`worker/index.js` sends the rows it committed instead:
+
+```mermaid
+sequenceDiagram
+  participant W as Worker
+  participant R as BoardEvents room
+  participant B as tab B at e1
+  W->>W: rowsFrame stored, data, e2
+  W->>R: POST notify body rows frame
+  R-->>B: type rows, etag e2, prev e1
+  B->>B: takeRows, renderBoard
+```
+
+- Frame: `{"type":"rows","etag":"\"e2\"","prev":"\"e1\"","updated":"...","rows":[...],"removed":[...]}`.
+  `rows` holds each new or changed row in full, `removed` the ids that left.
+
+| Tab state | Action |
+| --- | --- |
+| loaded, not from cache, `bareEtag(boardEtag) === prev` | `takeRows`: replace, drop, append, `boardEtag = etag`, redraw, no read |
+| any other `prev`, or a cached board | one slim board read after 2 s |
+| `changed` frame | re-reads its key |
+
+| Socket | Gets |
+| --- | --- |
+| upgrade `exp` in the future | the `rows` frame |
+| `exp` past, or no attachment (opened before the frame shipped) | `changed`, so its read hits Access |
+
+The Worker passes the verified user principal's `exp` to the room in an `X-Factory-Exp`
+header it sets itself, and the upgrade stores it with `serializeAttachment`. Browser
+headers other than the upgrade ones are still dropped.
+
+| Write that keeps the `changed` ping | Why |
+| --- | --- |
+| `PUT` with `If-None-Match: *`, or a first write | no `prev` |
+| a changed or removed row is `merged` or `closed` on either side | slim rows and `slim.counts` need the Worker |
+| top-level fields other than `jobs` and `updated` changed | `archived` and the like |
+| duplicate or non-string ids | no safe diff |
+| over 100 changed rows, or a frame over 262,144 bytes | frame size |
 
 - `casPut` announces only a committed write. A 412 announces nothing, and a
   failed announcement leaves the reply unchanged.
