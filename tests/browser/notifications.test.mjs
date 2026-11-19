@@ -442,7 +442,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
       await pageRows(page, 3);
       await page.keyboard.press("h");
       await page.waitForFunction(() => location.hash === "", wait);
-      assert.equal(await page.evaluate(() => document.body.dataset.view), "board");
+      await page.waitForFunction(() => document.body.dataset.view === "board", wait);
       assert.deepEqual(errors, []);
       await page.browserContext().close();
     });
