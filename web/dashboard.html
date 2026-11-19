@@ -1487,6 +1487,8 @@ window.addEventListener('online', async () => {
 let loaded = false;
 // Why the first board read failed while nothing has loaded: '', 'signin', 'offline' or 'unreachable'.
 let boardLoadError = '';
+// True while a Retry button's board read runs, so other redraws keep the Retrying… copy.
+let boardRetrying = false;
 const BOARD_LOAD_ERRORS = {
   signin: 'Your sign-in has expired. Sign in again, then retry.',
   offline: "You're offline and this device has no saved board. Reconnect, then retry.",
@@ -3453,7 +3455,7 @@ function renderInboxPage() {
   if (!inboxShown()) return;
   $('inbox-retry').hidden = !boardLoadError;
   if (!loaded || (!backlogLoaded && !backlogFailed)) {
-    $('inbox-status').textContent = inboxError || (boardLoadError ? "Couldn't load the inbox. " + BOARD_LOAD_ERRORS[boardLoadError] : 'Loading the inbox\u2026');
+    $('inbox-status').textContent = inboxError || (boardRetrying ? 'Retrying\u2026' : boardLoadError ? "Couldn't load the inbox. " + BOARD_LOAD_ERRORS[boardLoadError] : 'Loading the inbox\u2026');
     $('inbox-list').innerHTML = '';
     inboxHtml = '';
     return;
@@ -3806,9 +3808,12 @@ async function retryBoardLoad(e) {
   const button = e.currentTarget, id = button.id;
   // Disabled while the read runs, so repeated clicks cannot start parallel polls.
   button.disabled = true;
+  boardRetrying = true;
   $(RETRY_STATUS[id]).textContent = 'Retrying\u2026';
   const ok = await poll();
+  boardRetrying = false;
   button.disabled = false;
+  renderInboxPage();
   if (document.activeElement !== document.body) return;
   if (!ok) { button.focus(); return; }
   if (id === 'notifications-menu-retry') ($('notifications-menu-list').querySelector('a') || $('notifications-more')).focus();
