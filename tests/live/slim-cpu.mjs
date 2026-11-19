@@ -81,6 +81,10 @@ if (isMain) {
     cpuTime: e.cpuTime,
   }));
   text = "";
+  if (events.length === 0) {
+    console.error("tail returned no events; see wrangler output above");
+    process.exit(3);
+  }
   if (!events.some((e) => typeof e.cpuTime === "number")) {
     console.error("tail events carry no cpuTime");
     process.exit(3);
