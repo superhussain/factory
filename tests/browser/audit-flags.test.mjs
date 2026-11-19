@@ -525,3 +525,69 @@ test("a red flag row links its backlog decision", { timeout: 120000 }, async () 
     }
   });
 });
+
+test(
+  "the Red flags session cell leaves out link kinds hidden in Display settings",
+  { timeout: 120000 },
+  async () => {
+    await prepareAssets();
+    await withBrowserFixture(async ({ browser, origin }) => {
+      const app = [
+        "session://h/srv-a/agent/agent-build",
+        "Open the factory-builder session in Session app",
+        "",
+        "",
+      ];
+      const web = [
+        "https://sessions.example.test/srv-a/agent-build",
+        "Open the factory-builder session in Session",
+        "_blank",
+        "noopener noreferrer",
+      ];
+      for (const [hidden, expected] of [
+        ["web", [app]],
+        ["app,web", []],
+        [null, [app, web]],
+      ]) {
+        const context = await browser.createBrowserContext();
+        try {
+          const page = await context.newPage();
+          const errors = [];
+          page.on("pageerror", (error) => errors.push(String(error)));
+          await page.evaluateOnNewDocument((value) => {
+            if (value === null) localStorage.removeItem("factory-hidden-drawer-links");
+            else localStorage.setItem("factory-hidden-drawer-links", value);
+          }, hidden);
+          await page.setRequestInterception(true);
+          page.on("request", (request) => {
+            const path = new URL(request.url()).pathname;
+            if (path !== "/api/audit-flags") return request.continue();
+            return request.respond({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({ schema: "factory.audit-flags/1", rows: STEP_4 }),
+            });
+          });
+          await page.goto(origin + "/#/retros", { waitUntil: "domcontentloaded" });
+          await page.waitForFunction(() =>
+            document.getElementById("audit-flags-status").textContent.startsWith("5 flagged"),
+          );
+          const links = await page.$$eval(
+            "#audit-flags-rows tr:first-child td:nth-child(5) a",
+            (as) =>
+              as.map((a) => [
+                a.getAttribute("href"),
+                a.getAttribute("aria-label"),
+                a.target,
+                a.rel,
+              ]),
+          );
+          assert.deepEqual(links, expected, String(hidden));
+          assert.deepEqual(errors, [], "no page errors");
+        } finally {
+          await context.close();
+        }
+      }
+    });
+  },
+);
