@@ -636,21 +636,36 @@ test("notification settings", { timeout: 180000 }, async (t) => {
     });
 
     await t.test("sound S5 unticking a kind stops its tone", async () => {
-      await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
-      await page.click("#alert-merged");
-      assert.equal(await storage("factory-alerts-off"), "merged");
-      assert.equal(await text("#alert-status"), "Toast settings saved for this browser.");
-      // S4 left 001 and 004 merged. A new job merges, so the jobs C1 reads stay as they are.
+      // S4 left 001 and 004 merged. New jobs merge, so the jobs C1 reads stay as they are.
       const board = JOBS.map((j) => (j.id === "005-sample-needs" ? j : { ...j, stage: "merged" }));
-      const extra = { ...JOBS[0], id: "007-sample-merge", title: "Synthetic merge job" };
-      await seedBoard(origin, [...board, { ...extra, stage: "build" }]);
+      const extra = (id, stage) => ({ ...JOBS[0], id, title: "Synthetic merge job", stage });
+      await seedBoard(origin, [
+        ...board,
+        extra("007-sample-merge", "build"),
+        extra("008-sample-merge", "build"),
+      ]);
       await page.evaluate(() => poll());
       await page.evaluate(() => {
         window.tones = [];
       });
-      await seedBoard(origin, [...board, { ...extra, stage: "merged" }]);
+      await seedBoard(origin, [
+        ...board,
+        extra("007-sample-merge", "build"),
+        extra("008-sample-merge", "merged"),
+      ]);
       await page.evaluate(() => poll());
-      assert.deepEqual(await tones(), []);
+      assert.deepEqual(await tones(), [523, 659, 784]);
+      await toHash("#/settings/notifications", "#settings-notifications:not([hidden])");
+      await page.click("#alert-merged");
+      assert.equal(await storage("factory-alerts-off"), "merged");
+      assert.equal(await text("#alert-status"), "Toast settings saved for this browser.");
+      await seedBoard(origin, [
+        ...board,
+        extra("007-sample-merge", "merged"),
+        extra("008-sample-merge", "merged"),
+      ]);
+      await page.evaluate(() => poll());
+      assert.deepEqual(await tones(), [523, 659, 784]);
       await toHash("#/settings/display", "#settings-display:not([hidden])");
     });
 
