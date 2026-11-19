@@ -8822,8 +8822,23 @@ def stop(wt):
     sys.exit(1 if alive else 0)
 
 
+def pr_merged_head(home, pr):
+    """The head commit GitHub reports for a merged pull request URL, or None. A failed lookup warns and returns None."""
+    owner, name, number = GH_PR_PARTS.fullmatch(pr).groups()
+    states, why = pr_states(f"{owner}/{name}", [int(number)], holder(home)[0])
+    if states is None:
+        print(f"factory.py: cleanup could not read pull request {pr} ({why}), so it keeps a branch HEAD does not "
+              "contain", file=sys.stderr)
+        return None
+    state, head = states.get(int(number), (None, None))
+    if state == "MERGED" and isinstance(head, str) and COMMIT.fullmatch(head):
+        return head
+    return None
+
+
 def board_merged_head(home, slug, job_id):
-    """The board's github.head for a merged job, or None. An unreadable board warns and returns None."""
+    """The board's github.head for a merged job, else its merged pull request's head from GitHub, or None.
+    An unreadable board warns and returns None."""
     captured = io.StringIO()
     try:
         with contextlib.redirect_stderr(captured):
@@ -8838,6 +8853,8 @@ def board_merged_head(home, slug, job_id):
         if (job.get("stage") == "merged" and isinstance(github, dict) and isinstance(github.get("merged"), str)
                 and isinstance(github.get("head"), str) and COMMIT.fullmatch(github["head"])):
             return github["head"]
+        if job.get("stage") == "merged" and isinstance(job.get("pr"), str) and GH_PR_PARTS.fullmatch(job["pr"]):
+            return pr_merged_head(home, job["pr"])
         return None
     print(f"factory.py: cleanup could not read the board ({reason}), so it keeps a branch HEAD does not contain",
           file=sys.stderr)
