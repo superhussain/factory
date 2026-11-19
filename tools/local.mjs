@@ -3,6 +3,7 @@
 // `--check` runs the complete local integration and tears everything down.
 import { spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
+import { isIP } from "node:net";
 import { prepareAssets } from "./assets.mjs";
 
 const wrangler = new URL("../node_modules/.bin/wrangler", import.meta.url).pathname;
@@ -142,7 +143,11 @@ export async function startLocal({ port, persistDir, ip = "127.0.0.1" } = {}) {
   if (port !== undefined && !PORTS.includes(port) && port !== declaredPort()) {
     throw new Error(`owned loopback ports are ${PORTS.join(" and ")} only`);
   }
-  if (ip === "0.0.0.0" || ip === "::") throw new Error("serve on one address, never all of them");
+  // The URL parser normalizes every spelling of the unspecified address, such as "::0" or
+  // "::ffff:0.0.0.0", to one of these hostnames.
+  const host = isIP(ip) && new URL(`http://${isIP(ip) === 6 ? `[${ip}]` : ip}`).hostname;
+  if (!host || ["0.0.0.0", "[::]", "[::ffff:0:0]"].includes(host))
+    throw new Error("serve on one IP address, never all of them");
   return startWorkerd({ port, persistDir, config: LOCAL_CONFIG, ip });
 }
 
