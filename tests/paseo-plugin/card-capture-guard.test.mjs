@@ -2,16 +2,22 @@
 // provisioned browser and paseo-plugin dependencies, so it runs by hand, never in CI.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-test("a page request fails the capture and writes no PNG", () => {
+test("a page request fails the capture and writes no PNG", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "card-capture-guard-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const run = spawnSync(
     process.execPath,
-    [new URL("../../tools/capture-plugin-cards.mjs", import.meta.url).pathname, "--capture", dir],
+    [
+      fileURLToPath(new URL("../../tools/capture-plugin-cards.mjs", import.meta.url)),
+      "--capture",
+      dir,
+    ],
     {
       encoding: "utf8",
       env: {

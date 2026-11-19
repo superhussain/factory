@@ -1,7 +1,8 @@
 """Actual HTTP v1 drills through the installed CLI copy: concurrent claims, conditional
 registration, job write grammar, weak ETags, idea-image idempotence, a cancelled slim
-read with a waiter and two-device job/project exit-6 reconciliation. Installed into temporary HOME, checkout imports
-unavailable, synthetic Git checkouts, owned loopback target only."""
+read with a waiter and two-device job/project exit-6 reconciliation. Installed into
+temporary HOME, checkout imports unavailable, synthetic Git checkouts, owned loopback
+target only."""
 import concurrent.futures
 import hashlib
 import json
