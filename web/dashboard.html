@@ -1711,7 +1711,7 @@ window.addEventListener('message', (e) => {
 // A press outside any focusable element forgets it.
 let embedFocus = null;
 document.addEventListener('focusin', (e) => { embedFocus = e.target; });
-const EMBED_FOCUSABLE = 'a[href], button, input, select, textarea, summary, label, [tabindex], [contenteditable]';
+const EMBED_FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, label, [tabindex], [contenteditable]:not([contenteditable="false"])';
 document.addEventListener('pointerdown', (e) => { if (!(e.target instanceof Element && e.target.closest(EMBED_FOCUSABLE))) embedFocus = null; }, true);
 window.addEventListener('focus', () => {
   const el = embedFocus;
