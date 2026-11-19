@@ -263,6 +263,7 @@ test("slim board read", { timeout: 240000 }, async (t) => {
         await text(page, "#board-status"),
         "You're offline. Job 500-synthetic-merged opens when you reconnect.",
       );
+      assert.doesNotMatch(await text(page, "#board-status"), /opens when the board loads/);
       assert.equal(await page.evaluate(() => window.archiveReadCount), 0);
       await page.evaluate(() => window.releaseSlim());
       await page.waitForFunction(
@@ -272,6 +273,33 @@ test("slim board read", { timeout: 240000 }, async (t) => {
       assert.equal(await page.evaluate(() => window.archiveReadCount), 0);
       await page.close();
     });
+
+    await t.test(
+      "an online link to an older merged job says it opens when the board loads",
+      async () => {
+        const page = await openSaved(browser, origin);
+        await page.evaluate(() => {
+          location.hash = "#500-synthetic-merged";
+        });
+        await page.waitForFunction(
+          () => document.getElementById("board-status").textContent !== "",
+          wait,
+        );
+        assert.equal(
+          await text(page, "#board-status"),
+          "Job 500-synthetic-merged opens when the board loads.",
+        );
+        assert.equal(await page.evaluate(() => window.archiveReadCount), 0);
+        assert.equal(await page.evaluate(() => window.fullReadCount), 0);
+        await page.evaluate(() => window.releaseSlim());
+        await page.waitForFunction(
+          () => document.getElementById("d-title").textContent === "Synthetic merged 500",
+          wait,
+        );
+        assert.equal(await page.$eval("#board-status", (el) => el.hidden), true);
+        await page.close();
+      },
+    );
 
     await t.test("a 160px column with a 4-digit total keeps the stage name", async () => {
       const { page, errors } = await openPage(browser, origin);
