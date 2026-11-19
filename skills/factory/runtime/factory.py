@@ -898,8 +898,11 @@ def check_not_before(value):
 
 def board(factory, job_id):
     raw = "" if sys.stdin.isatty() else sys.stdin.read().strip()
+    if not raw:
+        fail("usage: board <factory-home> <job-id> with a JSON object on stdin. "
+             "stdin was empty, so nothing was written.", 2)
     try:
-        patch = json.loads(raw) if raw else {}
+        patch = json.loads(raw)
     except ValueError as e:
         fail(f"stdin is not JSON: {e}", 2)
     if not isinstance(patch, dict):

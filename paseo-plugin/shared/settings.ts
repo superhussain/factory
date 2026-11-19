@@ -5,5 +5,8 @@ export const factorySettings = defineSettings({
   id: "dashboard",
   scope: "host",
   version: 1,
-  schema: z.object({ origin: z.string().default("") }),
+  schema: z.object({
+    origin: z.string().default(""),
+    factoryLinkButtons: z.boolean().default(false),
+  }),
 });

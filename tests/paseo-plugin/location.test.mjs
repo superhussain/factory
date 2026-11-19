@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   frameUrl,
+  jumpUrl,
   readLocation,
   startUrl,
   writeLocation,
@@ -49,6 +50,21 @@ test("urls", () => {
   assert.equal(startUrl(A, "042-sample-links", "#/inbox"), A + "/#042-sample-links");
   assert.equal(startUrl(A, "042/../x", "#/inbox"), A + "/#/inbox");
   assert.equal(startUrl(A, undefined, ""), A + "/");
+});
+
+test("hash param", () => {
+  assert.equal(
+    startUrl(A, undefined, "#a", "#042-sample-links/build"),
+    A + "/#042-sample-links/build",
+  );
+  assert.equal(startUrl(A, "042-sample-links", "#a", "#x"), A + "/#042-sample-links");
+  assert.equal(startUrl(A, undefined, "#a", '#x"y'), A + "/#a");
+  assert.equal(startUrl(A, undefined, "#a", ""), A + "/");
+  assert.equal(jumpUrl(A, undefined, ""), A + "/");
+  assert.equal(jumpUrl(A, undefined, "#042-sample-links/build"), A + "/#042-sample-links/build");
+  assert.equal(jumpUrl(A, "042-sample-links", "#x"), A + "/#042-sample-links");
+  assert.equal(jumpUrl(A, undefined, undefined), null);
+  assert.equal(jumpUrl(A, "042/../x", '#x"y'), null);
 });
 
 test("reload", () => {

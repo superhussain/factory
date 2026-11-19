@@ -1,7 +1,11 @@
 // The warm frame keeper: park with moveBefore, return warm, drop on origin change, expiry or no moveBefore.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { WARM_FRAME_MS, createFrameKeeper } from "../../paseo-plugin/shared/warm-frame.ts";
+import {
+  WARM_FRAME_MS,
+  createFrameKeeper,
+  shouldFocusFrame,
+} from "../../paseo-plugin/shared/warm-frame.ts";
 
 const A = "https://factory.example.test";
 const B = "https://other.example.test";
@@ -144,4 +148,24 @@ test("park clears onMessage and jumpTo moves only the kept frame", () => {
 
 test("WARM_FRAME_MS is 30 minutes", () => {
   assert.equal(WARM_FRAME_MS, 1_800_000);
+});
+
+test("shouldFocusFrame focuses only a warm pointer return", () => {
+  const ROW = { tagName: "DIV", isContentEditable: false };
+  const cases = [
+    [true, "pointer", ROW, true],
+    [true, "pointer", null, true],
+    [false, "pointer", ROW, false],
+    [true, "keyboard", ROW, false],
+    [true, null, ROW, false],
+    [true, "pointer", { tagName: "TEXTAREA", isContentEditable: false }, false],
+    [true, "pointer", { tagName: "INPUT", isContentEditable: false }, false],
+    [true, "pointer", { tagName: "DIV", isContentEditable: true }, false],
+  ];
+  for (const [warm, press, active, expected] of cases)
+    assert.equal(
+      shouldFocusFrame(warm, press, active),
+      expected,
+      JSON.stringify([warm, press, active]),
+    );
 });

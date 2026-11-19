@@ -2,7 +2,6 @@ import { openExternalUrl } from "@getpaseo/plugin/client";
 import { createElement, useEffect, useLayoutEffect, useRef } from "react";
 import { Platform } from "react-native";
 import {
-  JOB_ID,
   dashboardSrc,
   frameLoaded,
   readEmbedMessage,
@@ -12,7 +11,12 @@ import {
 import { needsBody, needsTitle, type WaitingJob } from "../shared/arrivals";
 import * as firstLogin from "../shared/first-login";
 import { readLocation, writeLocation } from "../shared/location";
-import { createFrameKeeper, type KeptFrame } from "../shared/warm-frame";
+import {
+  createFrameKeeper,
+  shouldFocusFrame,
+  type InputKind,
+  type KeptFrame,
+} from "../shared/warm-frame";
 import { setFrameInboxCount } from "./frame-inbox";
 
 // This plugin typechecks without the DOM library. Declare only what this module uses.
@@ -29,6 +33,7 @@ type FrameElement = {
   contentWindow: MessageSource | null;
   clientWidth: number;
   clientHeight: number;
+  focus(): void;
 };
 type DivElement = {
   id: string;
@@ -42,14 +47,21 @@ declare const document: {
   createElement(tag: "div"): DivElement;
   getElementById(id: string): DivElement | null;
   body: { appendChild(node: DivElement): unknown };
+  activeElement: { tagName: string; isContentEditable: boolean } | null;
 };
 declare const window: {
   focus(): void;
   open(url: string, target: string, features: string): SignInWindow | null;
   addEventListener(type: "message", listener: (event: FrameMessage) => void): void;
   addEventListener(type: "focus", listener: () => void): void;
+  addEventListener(type: "pointerdown" | "keydown", listener: () => void, capture: boolean): void;
   removeEventListener(type: "message", listener: (event: FrameMessage) => void): void;
   removeEventListener(type: "focus", listener: () => void): void;
+  removeEventListener(
+    type: "pointerdown" | "keydown",
+    listener: () => void,
+    capture: boolean,
+  ): void;
 };
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -145,11 +157,26 @@ const keeper = createFrameKeeper<FrameElement, EmbedMessage>({
 });
 
 let listening = false;
+// The last input in Paseo's own document, so a warm return can tell a click on the Factory row from a key press.
+let lastInput: InputKind | null = null;
+let pressed: InputKind | null = null;
+const onPointer = () => {
+  lastInput = "pointer";
+};
+const onKey = () => {
+  lastInput = "keyboard";
+};
+
+export function noteSidebarOpen(): void {
+  pressed = lastInput;
+}
 
 function listen(): void {
   if (listening) return;
   listening = true;
   window.addEventListener("message", route);
+  window.addEventListener("pointerdown", onPointer, true);
+  window.addEventListener("keydown", onKey, true);
 }
 
 // One router for the kept frame, attached or parked, so a parked page keeps its saved page and count current.
@@ -171,7 +198,11 @@ function route(event: FrameMessage): void {
 export function dropWarmFrame(): void {
   keeper.drop();
   window.removeEventListener("message", route);
+  window.removeEventListener("pointerdown", onPointer, true);
+  window.removeEventListener("keydown", onKey, true);
   listening = false;
+  lastInput = null;
+  pressed = null;
 }
 
 export function frameReady(origin: string): boolean {
@@ -182,12 +213,14 @@ export function frameReady(origin: string): boolean {
 export function DashboardFrame({
   src,
   origin,
-  job,
+  jump,
+  jumpKey,
   onMessage,
 }: {
   src: string;
   origin: string;
-  job?: string;
+  jump: string | null;
+  jumpKey: string;
   onMessage(message: EmbedMessage): void;
 }) {
   const host = useRef<DivElement | null>(null);
@@ -200,9 +233,12 @@ export function DashboardFrame({
     if (Platform.OS !== "web" || !node) return;
     const { frame, warm } = keeper.attach(node, origin, src);
     frame.onMessage = (message) => handler.current(message);
-    if (warm && job && JOB_ID.test(job)) keeper.jumpTo(frame, dashboardSrc(origin, job));
-    jumped.current = job;
+    if (warm && jump) keeper.jumpTo(frame, jump);
+    jumped.current = jumpKey;
     attached.current = frame;
+    const press = pressed;
+    pressed = null;
+    if (shouldFocusFrame(warm, press, document.activeElement)) frame.element.focus();
     return () => {
       attached.current = null;
       keeper.park(frame);
@@ -210,10 +246,10 @@ export function DashboardFrame({
   }, [origin]);
   useEffect(() => {
     const frame = attached.current;
-    if (!frame || job === jumped.current) return;
-    jumped.current = job;
-    if (job && JOB_ID.test(job)) keeper.jumpTo(frame, dashboardSrc(origin, job));
-  }, [job]);
+    if (!frame || jumpKey === jumped.current) return;
+    jumped.current = jumpKey;
+    if (jump) keeper.jumpTo(frame, jump);
+  }, [jumpKey]);
   if (Platform.OS !== "web") return null;
   return createElement("div", { ref: host, style: { width: "100%", height: "100%" } });
 }
