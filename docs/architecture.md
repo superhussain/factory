@@ -184,7 +184,7 @@ acknowledge a row, which stores an optional `ack` UTC time (`YYYY-MM-DDTHH:MM:SS
 on it. A row is identified by its `time`, `job`, `host`, `agent`, `tool` and
 `target`, and a re-push keeps the `ack` of each row it sends again. The
 `#/retros` page shows the index as `Red flags`, hides acknowledged rows unless
-`Show acknowledged` is checked, and offers `Make an idea` on each row.
+`Show acknowledged` is checked, and offers `Make an idea` on each row. `retro aggregate` copies the rows without `ack` into `aggregate.json` as `red_flags`, so a retro can turn a recurring flag into a backlog card.
 
 | Route | Who | Effect |
 | --- | --- | --- |
