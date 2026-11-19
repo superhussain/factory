@@ -79,6 +79,8 @@ async function openSaved(browser, origin) {
   });
   await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => loaded === true && boardFromCache === true, wait);
+  // The boot reads projects before the slim fetch, so releaseSlim appears a moment later.
+  await page.waitForFunction(() => typeof window.releaseSlim === "function", wait);
   return page;
 }
 
