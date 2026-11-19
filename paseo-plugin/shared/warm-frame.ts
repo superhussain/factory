@@ -77,3 +77,18 @@ export function createFrameKeeper<E extends FrameNode, M>(
   }
   return { attach, park, drop, jumpTo, current: () => kept };
 }
+
+export type InputKind = "pointer" | "keyboard";
+export type ActiveElement = { tagName: string; isContentEditable: boolean } | null;
+
+const TYPING_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
+
+// A warm return focuses the frame only after a pointer press on the Factory row, and never takes focus from a field.
+export function shouldFocusFrame(
+  warm: boolean,
+  press: InputKind | null,
+  active: ActiveElement,
+): boolean {
+  if (!warm || press !== "pointer") return false;
+  return !(active && (TYPING_TAGS.has(active.tagName) || active.isContentEditable));
+}
