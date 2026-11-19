@@ -250,6 +250,19 @@ const CAPTURE_JOBS = [
     updated: "2026-01-01T12:00:00Z",
   },
 ];
+// More merged rows than the slim board read carries, so the merged column loads the rest on demand.
+const CAPTURE_MERGED = Array.from({ length: 30 }, (_, n) => {
+  const at = new Date(Date.UTC(2026, 0, 1) + n * 3600000).toISOString();
+  return {
+    id: `${500 + n}-synthetic-merged`,
+    project: "sample",
+    title: `Synthetic merged ${500 + n}`,
+    stage: "merged",
+    updated: at,
+    done: at,
+  };
+});
+const CAPTURE_BOARD = [...CAPTURE_JOBS, ...CAPTURE_MERGED];
 const CAPTURE_BACKLOG_CONTEXT = [
   "Recommend: approve",
   "",
@@ -421,7 +434,7 @@ async function capture(outdir, referencePath) {
     await put(
       origin,
       "/api/board",
-      JSON.stringify({ updated: "2026-01-01T12:00:00Z", jobs: CAPTURE_JOBS }),
+      JSON.stringify({ updated: "2026-01-01T12:00:00Z", jobs: CAPTURE_BOARD }),
       "application/json",
     );
     await put(origin, "/api/backlog", CAPTURE_BACKLOG, "text/markdown");
@@ -1059,6 +1072,69 @@ async function capture(outdir, referencePath) {
     await view("board-desktop", 1440, 900, "light", async () => {});
     await view("board-desktop-dark", 1440, 900, "dark", async () => {});
     await view("board-mobile", 390, 844, "dark", async () => {});
+    const expandMerged = (page) =>
+      page.evaluate(() => document.querySelector('.column-toggle[data-stage="merged"]').click());
+    const mergedHeader = async (page) => {
+      await expandMerged(page);
+      return clipOf(page, ".col.merged h2");
+    };
+    // At 1440 the clip takes in the pr-open column too, so card tops can be compared.
+    const mergedBeside = async (page) => {
+      await expandMerged(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    };
+    await view("board-merged-header-1440", 1440, 900, "light", mergedBeside);
+    await view("board-merged-header-390", 390, 844, "dark", mergedHeader);
+    // The full read never answers, so the button stays in its loading state.
+    const holdFullRead = (page) =>
+      page.evaluate(() => {
+        const fetchNow = window.fetch;
+        window.fetch = (url, options) =>
+          String(url).endsWith("api/board") && !options?.method
+            ? new Promise(() => {})
+            : fetchNow(url, options);
+      });
+    const clickMore = (page) =>
+      page.evaluate(() => document.querySelector('.more[data-stage="merged"]').click());
+    await view("board-merged-loading-1440", 1440, 900, "light", async (page) => {
+      await holdFullRead(page);
+      await expandMerged(page);
+      await clickMore(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    });
+    // The merged column at 160px with a production-sized total. The reference page has no
+    // slim counts, so its before shot keeps the fixture's own total.
+    const narrowThousands = async (page) => {
+      await holdFullRead(page);
+      await expandMerged(page);
+      await page.evaluate(() => {
+        const style = document.createElement("style");
+        style.textContent = ".col.merged { width: 160px; max-width: 160px; }";
+        document.head.append(style);
+        if (typeof slimCounts !== "undefined") {
+          slimCounts.sample.merged = 1763;
+          renderBoard();
+        }
+      });
+    };
+    await view("board-merged-160-1763", 1440, 900, "light", async (page) => {
+      await narrowThousands(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    });
+    await view("board-merged-160-1763-loading", 1440, 900, "light", async (page) => {
+      await narrowThousands(page);
+      await clickMore(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    });
+    await view("board-merged-all-1440", 1440, 900, "light", async (page) => {
+      await expandMerged(page);
+      await page.evaluate(() => document.querySelector('.more[data-stage="merged"]').click());
+      await page.waitForFunction(
+        (n) => document.querySelectorAll(".col.merged .card").length === n,
+        {},
+        CAPTURE_BOARD.filter((j) => j.stage === "merged").length,
+      );
+    });
     await view("header-inbox-dark-390", 390, 844, "dark", (page) => clipOf(page, "header"));
     await view("header-inbox-dark-1440", 1440, 900, "dark", (page) => clipOf(page, "header"));
     await view("drawer-desktop", 1440, 900, "light", openDrawer);
@@ -2122,7 +2198,7 @@ async function capture(outdir, referencePath) {
         provenance: {
           reference: { path: referencePath, sha256: sha(reference) },
           candidate: { path: "web/dashboard.html", sha256: sha(candidate) },
-          board: { jobs: CAPTURE_JOBS.length, sha256: sha(JSON.stringify(CAPTURE_JOBS)) },
+          board: { jobs: CAPTURE_BOARD.length, sha256: sha(JSON.stringify(CAPTURE_BOARD)) },
           origin,
           viewport: ["1440x900", "1280x900", "390x844", "375x667"],
           themes: ["light", "dark"],

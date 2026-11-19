@@ -285,7 +285,7 @@ sequenceDiagram
   W->>R: POST notify?key=board.json
   R-->>B: {"type":"changed","key":"board.json"}
   W-->>D: 200 ETag (unchanged)
-  B->>W: GET /board.json
+  B->>W: GET /board.json?view=slim
 ```
 
 - `casPut` announces only a committed write. A 412 announces nothing, and a
@@ -300,6 +300,12 @@ sequenceDiagram
   re-reads only its key, once within 2 seconds of the first frame however many frames arrive; a frame during that read adds one more read.
 - A socket open or a poll timer tick re-reads `board.json` but redraws only when its `ETag` changed, so a focused card is not read again. A tick still reopens the job when the link names a tab or archived job that has not loaded.
   The header dot is solid while live and a ring while polling.
+- The dashboard reads `GET /board.json?view=slim` (`slimBoard` in `worker/archive.js`): every
+  unfinished row, the 10 newest rows of each finished stage and `slim.counts`, the finished
+  rows per project and stage, under the stored `ETag`. Finished column headers then say
+  `showing 10 of N`. Once a view needs older rows (show all, the jumper, a link to an older
+  job, another route, the starred-only view) it reads `/api/board` once and keeps those rows.
+  `/board.json` without the query still returns the stored bytes.
 
 | Request to `/events/board` | Result |
 | --- | --- |
