@@ -911,8 +911,12 @@ test("notification settings", { timeout: 180000 }, async (t) => {
         await text("#sound-wait"),
         "Sounds start after your first click or key press in this tab.",
       );
+      const describedBy = () =>
+        page.$eval("#sound-on", (el) => el.getAttribute("aria-describedby"));
+      assert.equal(await describedBy(), "sound-help sound-wait");
       await page.click("#sound-heading");
       await page.waitForSelector("#sound-wait[hidden]", wait);
+      assert.equal(await describedBy(), "sound-help");
       await toHash("#/settings/display", "#settings-display:not([hidden])");
     });
 

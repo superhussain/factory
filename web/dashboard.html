@@ -9355,6 +9355,7 @@ function renderSoundSettings() {
 }
 function renderSoundWait() {
   $('sound-wait').hidden = !soundActive() || audio?.state === 'running';
+  $('sound-on').setAttribute('aria-describedby', $('sound-wait').hidden ? 'sound-help' : 'sound-help sound-wait');
 }
 $('sound-on').addEventListener('change', () => {
   soundOn = $('sound-on').checked;
