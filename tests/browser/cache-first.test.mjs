@@ -29,7 +29,7 @@ const JOBS = [job("001-alpha", "Synthetic alpha"), job("002-beta", "Synthetic be
 const HELD = new Set(["/board.json", "/projects.json", "/api/backlog"]);
 
 // up forwards to the local service; hold parks the board, projects and backlog reads
-// until proxy.release() forwards them.
+// until proxy.release() forwards them; fail answers /board.json with a 502.
 async function startProxy(target) {
   const proxy = { mode: "up", held: [] };
   const upstream = new URL(target);
@@ -51,8 +51,12 @@ async function startProxy(target) {
       upstreamRequest.on("error", () => req.socket.destroy());
       req.pipe(upstreamRequest);
     };
-    if (proxy.mode === "hold" && HELD.has(new URL(req.url, target).pathname))
-      return proxy.held.push(forward);
+    const path = new URL(req.url, target).pathname;
+    if (proxy.mode === "hold" && HELD.has(path)) return proxy.held.push(forward);
+    if (proxy.mode === "fail" && path === "/board.json") {
+      res.writeHead(502, { "Content-Type": "text/plain" });
+      return res.end("bad gateway");
+    }
     forward();
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -67,6 +71,47 @@ async function startProxy(target) {
   };
   return proxy;
 }
+
+// The first visit installs /sw.js. Once it controls the page, a reload saves the copies.
+async function saveCopies(page, origin) {
+  await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+  await waitForBoard(page);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => backlogLoaded && navigator.serviceWorker.controller);
+  await page.waitForFunction(async () => {
+    const cache = await caches.open("factory-v2");
+    const paths = (await cache.keys()).map((r) => new URL(r.url).pathname);
+    return ["/board.json", "/projects.json"].every((p) => paths.includes(p));
+  });
+}
+
+// Counts the page's own fetch calls by path in window.bootReads.
+const countReads = (page) =>
+  page.evaluateOnNewDocument(() => {
+    const real = window.fetch;
+    window.bootReads = {};
+    window.fetch = (input, init) => {
+      const path = new URL(String(input instanceof Request ? input.url : input), location.href)
+        .pathname;
+      window.bootReads[path] = (window.bootReads[path] || 0) + 1;
+      return real(input, init);
+    };
+  });
+
+// A live socket that stays connecting until the test closes it.
+const stubConnectingSocket = (page) =>
+  page.evaluateOnNewDocument(() => {
+    window.stubSockets = [];
+    window.WebSocket = class extends EventTarget {
+      readyState = 0;
+      constructor() {
+        super();
+        window.stubSockets.push(this);
+      }
+      close() {}
+    };
+  });
 
 const cardTitle = (page, id) =>
   page.evaluate(
@@ -102,17 +147,7 @@ test("cache-first board boot", async (t) => {
       await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
       await controlBoardPolling(page);
       try {
-        // The first visit installs /sw.js. Once it controls the page, a reload saves the copies.
-        await page.goto(proxy.origin + "/", { waitUntil: "domcontentloaded" });
-        await waitForBoard(page);
-        await page.evaluate(() => navigator.serviceWorker.ready);
-        await page.reload({ waitUntil: "domcontentloaded" });
-        await page.waitForFunction(() => backlogLoaded && navigator.serviceWorker.controller);
-        await page.waitForFunction(async () => {
-          const cache = await caches.open("factory-v2");
-          const paths = (await cache.keys()).map((r) => new URL(r.url).pathname);
-          return ["/board.json", "/projects.json"].every((p) => paths.includes(p));
-        });
+        await saveCopies(page, proxy.origin);
 
         await seedBoard(origin, [job("001-alpha", "Synthetic alpha renamed", "review"), JOBS[1]]);
         proxy.mode = "hold";
@@ -142,16 +177,7 @@ test("cache-first board boot", async (t) => {
       const page = await context.newPage();
       const errors = [];
       page.on("pageerror", (error) => errors.push(String(error)));
-      await page.evaluateOnNewDocument(() => {
-        const real = window.fetch;
-        window.bootReads = {};
-        window.fetch = (input, init) => {
-          const path = new URL(String(input instanceof Request ? input.url : input), location.href)
-            .pathname;
-          window.bootReads[path] = (window.bootReads[path] || 0) + 1;
-          return real(input, init);
-        };
-      });
+      await countReads(page);
       try {
         await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
         await page.waitForFunction(() => liveOpen && loaded && backlogLoaded);
@@ -169,5 +195,62 @@ test("cache-first board boot", async (t) => {
         await context.close();
       }
     });
+
+    await t.test("a server error after the cache paint shows the unreachable banner", async () => {
+      const proxy = await startProxy(origin);
+      assertBrowserTarget(proxy.origin, { [owned.OWNED_ORIGIN_ENV]: proxy.origin });
+      const context = await browser.createBrowserContext();
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await controlBoardPolling(page);
+      try {
+        await saveCopies(page, proxy.origin);
+        proxy.mode = "fail";
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForSelector("#conn-banner:not([hidden])");
+        assert.equal(await cardTitle(page, "001-alpha"), "Synthetic alpha");
+        assert.match(
+          await page.$eval("#conn-text", (el) => el.textContent),
+          /^Can't reach the factory/,
+        );
+        assert.deepEqual(errors, []);
+      } finally {
+        await context.close();
+        await proxy.close();
+      }
+    });
+
+    for (const [name, end] of [
+      ["an open slower than 2 s reads once from the timer", "wait"],
+      ["a close before open reads once at once", "close"],
+    ])
+      await t.test(name, async () => {
+        const context = await browser.createBrowserContext();
+        const page = await context.newPage();
+        const errors = [];
+        page.on("pageerror", (error) => errors.push(String(error)));
+        await countReads(page);
+        await stubConnectingSocket(page);
+        try {
+          await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+          await page.waitForFunction(() => pollStarted && window.stubSockets.length === 1);
+          assert.equal(await page.evaluate(() => window.bootReads["/board.json"]), undefined);
+          if (end === "close")
+            await page.evaluate(() => {
+              const ws = window.stubSockets[0];
+              ws.readyState = 3;
+              ws.dispatchEvent(new CloseEvent("close", { code: 1006 }));
+            });
+          await page.waitForFunction(() => loaded, {
+            timeout: end === "close" ? 1500 : 5000,
+          });
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          assert.equal(await page.evaluate(() => window.bootReads["/board.json"]), 1);
+          assert.deepEqual(errors, []);
+        } finally {
+          await context.close();
+        }
+      });
   });
 });

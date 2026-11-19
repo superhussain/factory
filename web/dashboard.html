@@ -1511,6 +1511,8 @@ window.addEventListener('online', async () => {
 });
 
 let loaded = false;
+// True while the board on screen is the saved copy, so a failed first network read still shows its banner.
+let boardFromCache = false;
 // Why the first board read failed while nothing has loaded: '', 'signin', 'offline' or 'unreachable'.
 let boardLoadError = '';
 // True while a Retry button's board read runs, so other redraws keep the Retrying… copy.
@@ -1521,7 +1523,7 @@ const BOARD_LOAD_ERRORS = {
   unreachable: "Can't reach the factory. Check your connection, then retry.",
 };
 function noteBoardLoadError(state) {
-  if (loaded) return;
+  if (loaded && !boardFromCache) return;
   boardLoadError = state;
   renderNotifications();
   renderInboxPage();
@@ -1583,7 +1585,7 @@ async function paintCached() {
     const hit = await caches.match('/board.json');
     if (!hit || loaded) return;
     takeBoard(await hit.json());
-    loaded = true;
+    loaded = boardFromCache = true;
     drawUpdated();
     renderBoard();
   } catch {}
@@ -1617,6 +1619,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
       if (version !== boardReadVersion) return false;
     }
     takeBoard(data);
+    boardFromCache = false;
     boardEtag = etag;
     boardLoadError = '';
     loaded = true;
@@ -1635,9 +1638,9 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
   } catch (e) {
     if (version !== boardReadVersion) return false;
     drawDot('dot err', 'board.json unreachable');
-    if (!loaded) $('updated').textContent = "can't reach the factory";
+    if (!loaded || boardFromCache) $('updated').textContent = "can't reach the factory";
     if (e instanceof TypeError) setConnection('offline');
-    else if (!loaded) setConnection('unreachable');
+    else if (!loaded || boardFromCache) setConnection('unreachable');
     noteBoardLoadError(e instanceof TypeError ? 'offline' : 'unreachable');
     return false;
   }
