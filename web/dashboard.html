@@ -3341,7 +3341,7 @@ function renderAuditFlags() {
     cell(row.agent);
     const session = document.createElement('td'), links = paseoLinksFor(row.paseo) || {};
     for (const kind of ['app', 'web']) {
-      if (!links[kind]) continue;
+      if (!links[kind] || hiddenDrawerLinks.has(kind)) continue;
       const a = document.createElement('a'), linkLabel = factoryConfig.agent_links[kind].label;
       a.href = links[kind];
       a.textContent = linkLabel;
@@ -9582,6 +9582,7 @@ $('display-drawer-links').addEventListener('change', e => {
   if (e.target.checked) hiddenDrawerLinks.delete(k); else hiddenDrawerLinks.add(k);
   if (hiddenDrawerLinks.size) store.set(DISPLAY_KEYS.drawerLinks, [...hiddenDrawerLinks].join(',')); else store.remove(DISPLAY_KEYS.drawerLinks);
   renderOpenDrawerLinks();
+  if (!$('retros-page').hidden) renderAuditFlags();
   displaySaved();
 });
 $('display-idea-project').addEventListener('change', () => {
