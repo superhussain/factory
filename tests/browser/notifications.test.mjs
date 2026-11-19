@@ -9,6 +9,7 @@ import {
   seedBoard,
   blockLiveEvents,
 } from "../support/browser-server.mjs";
+import { waitForBoard } from "../support/board-ready.cjs";
 
 const wait = { polling: 50 };
 const job = (id, stage, extra = {}) => ({
@@ -68,6 +69,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
       return { page, errors };
     };
     const openMenu = async (page) => {
+      await waitForBoard(page);
       await page.click("#notifications-button");
       await page.waitForSelector("#notifications-menu-list .notification-link", wait);
     };
@@ -423,6 +425,7 @@ test("notifications", { timeout: 180000 }, async (t) => {
 
     await t.test("open job returns to the page", async () => {
       const { page, errors } = list;
+      await pageRows(page, 3);
       await page.$$eval("#notifications-list .inbox-item", (items) =>
         items[1].querySelector('a[href="#051-sample-retry"]').click(),
       );
