@@ -84,6 +84,8 @@ conditional semantics. A board write that names the stored version also
 cannot change a row's id: one write may not drop a stored id and add a row.
 It also cannot add `move`, `priority`, `paused` or `close` to a row with a
 `batched-into` ref, since a rider follows its lead.
+It cannot add a new `idea` row with `priority.batch: true` (`checkNewStarters`): Run batch
+now marks only a held idea already on the board, so a read can cover every starter.
 Remove from batch may drop the ref from a rider that is not stacked, from
 `spec` to `idea`, while its lead is at `spec`.
 New device clients always send conditions; the blind
@@ -340,6 +342,10 @@ sequenceDiagram
 - The body is `{"updated", "rows": [{"id", "expect", "row"}]}`, 1 to 100 entries, one per id,
   at most 1 MiB. `expect` is the row the client saw, or null for a new row. `row` is the new
   row, or null to remove it. Rows match by JSON with sorted keys.
+- Optional `"reads": [{"id", "sha256"}]` names the rows the edit decided from but did not
+  change, such as the other held ideas Run batch now checks. `sha256` is the lowercase hex
+  SHA-256 of the row's JSON with sorted keys (`rowDigest` in the dashboard, `rowSha256` in
+  the Worker). One per id, none also in `rows`, and no count cap beyond the 1 MiB body.
 - The Worker builds the whole board from the stored rows, runs the same checks as `PUT`
   (`boardRefusal`, always against the stored base), writes with `onlyIf`, and retries its own
   R2 412 up to 10 times. A commit announces `board.json` and sends pushes as `PUT` does.
@@ -349,10 +355,11 @@ sequenceDiagram
 | Case | Worker reply | Client |
 | --- | --- | --- |
 | `expect` differs from the stored row | 409 `conflict`, current rows | replaces those rows, reruns `change` |
+| A `reads` digest differs, or its row is gone | 409 `conflict`, that row or null | replaces it, reruns `change` |
 | New id number at or below the stored max | 409 `conflict`, `max_id` | raises its max id and reruns, so the id becomes the next free number |
 | New row's `capture_id` is already stored | 409 `conflict`, that row | `addIdea` finds the prior id, sends nothing |
 | A `PUT` check refuses | 400, same text | same message as a `PUT` refusal |
-| Malformed body, or unreadable stored board | 400 | shows the text |
+| Malformed body or `reads`, or unreadable stored board | 400 | shows the text |
 | Merged board over 16 MiB | 413, nothing written | shows the text |
 | R2 412 ten times | 409 `busy` | "the board kept changing" |
 
