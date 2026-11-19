@@ -6769,9 +6769,9 @@ WATCH_USAGE = "usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--ti
 
 
 def watch_cmd(target, *args):
-    """Run hold once, then print one JSON line when every artifact has a valid first line, --pr's next
-    leaves wait, --timeout passes, or a file keeps an invalid non-empty first line for two reads,
-    reading files once a second and the PR every 30 seconds."""
+    """Run hold once when a session tag is set, then print one JSON line when every artifact has a
+    valid first line, --pr's next leaves wait, --timeout passes, or a file keeps an invalid non-empty
+    first line for two reads, reading files once a second and the PR every 30 seconds."""
     home, slug, job_id = r2_target(target, True)
     artifacts, timeout, watch_pr = [], None, False
     i = 0
