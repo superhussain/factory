@@ -280,10 +280,12 @@ Flags name risky calls. They are heuristics that inform a reader and block nothi
 | `sudo` | Bash | `sudo chown u x` |
 | `pipe-to-shell` | Bash | `curl ... \| sh` |
 | `deploy` | Bash | `wrangler deploy` |
-| `pr-merge` | Bash | `gh pr merge 7` |
+| `pr-merge` | subagent Bash | `gh pr merge 7` |
 | `sandbox-off` | Bash | input `dangerouslyDisableSandbox: true` |
 | `secret-file` | Bash, Read, Edit, Write, Grep `path` | `Read ~/app/.env` |
 | `denied` | any | the call's result is an error that holds a denial phrase |
+
+A `gh pr merge` in the main session carries no flag, since the orchestrator merges approved PRs there.
 
 Flags print in this order, joined by `,`; a call with none prints `-`. Flags
 match the raw target in memory. The printed target has the home path folded to

@@ -54,6 +54,14 @@ class AuditFlagsTest(IsolatedTestCase):
         self.assertEqual(self.flags("Agent", {}, True), ["denied"])
         self.assertEqual(self.flags("Bash", {"command": "rm -rf build"}, True), ["recursive-delete", "denied"])
 
+    def test_pr_merge_main_only(self):
+        merge = {"command": "gh pr merge 7"}
+        raw = factory.audit_target_raw("Bash", merge)
+        self.assertEqual(factory.audit_flags("Bash", merge, raw, False, main=True), [])
+        self.assertEqual(factory.audit_flags("Bash", merge, raw, False, main=False), ["pr-merge"])
+        push = {"command": "gh pr merge 7 && git push --force"}
+        self.assertEqual(factory.audit_flags("Bash", push, push["command"], False, main=True), ["force-push"])
+
     def test_near_misses(self):
         for command in ("git push origin main", "rm -f a", "cat .env.example", "git branch -d x", "curl x | jq ."):
             with self.subTest(command=command):
@@ -143,6 +151,12 @@ class AuditCommandTest(IsolatedTestCase):
     def test_one_call(self):
         out = self.session(("git status", False))
         self.assertTrue(out.startswith("job 1017-add-x on example-host: 1 call in 1 session, 0 flagged\n"))
+
+    def test_pr_merge_flag_by_agent(self):
+        out = self.session(("gh pr merge 7", False), ("gh pr merge 7", True), agent="factory-builder")
+        self.assertIn("2 calls in 1 session, 1 flagged", out)
+        self.assertRegex(out, r"main +Bash +- +gh pr merge 7")
+        self.assertRegex(out, r"factory-builder +Bash +pr-merge +gh pr merge 7")
 
     def test_control_characters_print_as_question_marks(self):
         out = self.session(("echo ok\x1b[1A\x1b[2K\rgit status", False), ("ls", True), agent="x\x1b[2Ky")
