@@ -11,6 +11,7 @@ import {
   seedProject,
   seedBoard,
   seedPipeline,
+  controlBoardPolling,
 } from "../support/browser-server.mjs";
 import { waitForBoard, clickNow, openJobActions } from "../support/board-ready.cjs";
 
@@ -463,6 +464,54 @@ test("Tracer controls wait for the setting and follow a change", { timeout: 1200
         const after = await page.$('.card[data-id="042-sample-export"]');
         await after.screenshot({ path: join(captureDir, "tracer-card-off-after-refresh.png") });
       }
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+test("Only the first board read waits for the Tracer setting", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seedProject(
+      origin,
+      "sample",
+      "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
+    );
+    await seedPipeline(origin, { schema: 1, tracer: { enabled: true } });
+    await seedBoard(origin, [JOB]);
+    const context = await browser.createBrowserContext();
+    try {
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await controlBoardPolling(page);
+      await page.setBypassServiceWorker(true);
+      await page.setRequestInterception(true);
+      let holding = true;
+      const held = [];
+      page.on("request", (request) => {
+        if (holding && new URL(request.url()).pathname === "/api/pipeline/global") {
+          held.push(request);
+          return;
+        }
+        request.continue();
+      });
+      await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      assert.equal(await page.evaluate(() => loaded), false);
+      holding = false;
+      await Promise.all(held.splice(0).map((request) => request.continue()));
+      await waitForBoard(page);
+      // Later pipeline reads never answer; the board read must not wait for them.
+      holding = true;
+      const ms = await page.evaluate(async () => {
+        const started = performance.now();
+        await poll();
+        return performance.now() - started;
+      });
+      assert.ok(ms < 2000, `poll took ${ms} ms`);
       assert.deepEqual(errors, []);
     } finally {
       await context.close();

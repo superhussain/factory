@@ -1489,13 +1489,14 @@ const CONNECTION = {
   signin: ['Your sign-in has expired.', 'dot err', 'sign-in expired'],
   unreachable: ["Can't reach the factory. The board loads when it answers.", 'dot err', 'board.json unreachable'],
 };
+const UNREACHABLE_SAVED = "Can't reach the factory. Showing the saved board until it answers.";
 function drawDot(className, label) { const dot = $('dot'); dot.className = className; dot.title = label; dot.setAttribute('aria-label', label); }
 let connState = '';
 function setConnection(state) {
   const was = connState; connState = state;
   const [text, dot, title] = CONNECTION[state];
   $('conn-banner').hidden = state === 'online';
-  $('conn-text').textContent = text;
+  $('conn-text').textContent = state === 'unreachable' && boardFromCache ? UNREACHABLE_SAVED : text;
   $('conn-signin').hidden = state !== 'signin';
   const polling = state === 'online' && !liveOpen;
   const every = pollEvery();
