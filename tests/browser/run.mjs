@@ -1086,16 +1086,44 @@ async function capture(outdir, referencePath) {
     await view("board-merged-header-1440", 1440, 900, "light", mergedBeside);
     await view("board-merged-header-390", 390, 844, "dark", mergedHeader);
     // The full read never answers, so the button stays in its loading state.
-    await view("board-merged-loading-1440", 1440, 900, "light", async (page) => {
-      await page.evaluate(() => {
+    const holdFullRead = (page) =>
+      page.evaluate(() => {
         const fetchNow = window.fetch;
         window.fetch = (url, options) =>
           String(url).endsWith("api/board") && !options?.method
             ? new Promise(() => {})
             : fetchNow(url, options);
       });
+    const clickMore = (page) =>
+      page.evaluate(() => document.querySelector('.more[data-stage="merged"]').click());
+    await view("board-merged-loading-1440", 1440, 900, "light", async (page) => {
+      await holdFullRead(page);
       await expandMerged(page);
-      await page.evaluate(() => document.querySelector('.more[data-stage="merged"]').click());
+      await clickMore(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    });
+    // The merged column at 160px with a production-sized total. The reference page has no
+    // slim counts, so its before shot keeps the fixture's own total.
+    const narrowThousands = async (page) => {
+      await holdFullRead(page);
+      await expandMerged(page);
+      await page.evaluate(() => {
+        const style = document.createElement("style");
+        style.textContent = ".col.merged { width: 160px; max-width: 160px; }";
+        document.head.append(style);
+        if (typeof slimCounts !== "undefined") {
+          slimCounts.sample.merged = 1763;
+          renderBoard();
+        }
+      });
+    };
+    await view("board-merged-160-1763", 1440, 900, "light", async (page) => {
+      await narrowThousands(page);
+      return clipOf(page, ".col.pr-open h2", ".col.merged .card");
+    });
+    await view("board-merged-160-1763-loading", 1440, 900, "light", async (page) => {
+      await narrowThousands(page);
+      await clickMore(page);
       return clipOf(page, ".col.pr-open h2", ".col.merged .card");
     });
     await view("board-merged-all-1440", 1440, 900, "light", async (page) => {
