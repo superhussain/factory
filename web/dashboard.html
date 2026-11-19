@@ -1252,7 +1252,10 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
   </div>
   <div class="notifications-filters" id="notifications-filters" role="group" aria-label="Filter notifications" hidden>
     <button type="button" class="btn" data-notifications-filter="all" aria-pressed="true">All</button>
+    <button type="button" class="btn" data-notifications-filter="backlog" aria-pressed="false">Backlog</button>
     <button type="button" class="btn" data-notifications-filter="needs" aria-pressed="false">Needs you</button>
+    <button type="button" class="btn" data-notifications-filter="spec" aria-pressed="false">Spec ready</button>
+    <button type="button" class="btn" data-notifications-filter="pr" aria-pressed="false">PR open</button>
     <button type="button" class="btn" data-notifications-filter="merged" aria-pressed="false">Merged</button>
   </div>
   <p class="muted" id="notifications-status" role="status"></p>
@@ -3791,14 +3794,17 @@ $('inbox-list').addEventListener('submit', (e) => {
   submitInboxAnswer();
 });
 $('inbox-back').addEventListener('click', e => { e.preventDefault(); leaveSettings(); });
-// Notifications: board jobs waiting on you and merged jobs, newest first.
-// The kinds match boardPushes in worker/push.js, without stuck.
-const NOTIFICATION_LABELS = { needs: 'Needs you', merged: 'Merged' };
+// Notifications, newest first: board jobs waiting on you, with an open PR or merged, plus the
+// spec ready and backlog events this browser logged. Toasts share these labels.
+const NOTIFICATION_LABELS = { backlog: 'Backlog', needs: 'Needs you', spec: 'Spec ready', pr: 'PR open', merged: 'Merged' };
 const NOTIFICATIONS_MENU_ROWS = 8;
 const NOTIFICATIONS_PAGE_ROWS = 20;
 const NOTIFICATIONS_EMPTY = {
-  all: 'No notifications yet. Merged jobs and jobs waiting on you show up here.',
+  all: 'No notifications yet. New backlog items, ready specs, open pull requests, merged jobs and jobs waiting on you show up here.',
+  backlog: 'No new backlog items yet. This list keeps the ones a tab in this browser saw.',
   needs: 'Nothing needs you right now.',
+  spec: 'No specs ready yet. This list keeps the ones a tab in this browser saw.',
+  pr: 'No open pull requests.',
   merged: 'No merged jobs yet.',
 };
 // The page's filter and zero-based page, kept for this tab only.
@@ -3824,9 +3830,24 @@ let notificationsHtml = '';
 let notificationsMenuHtml = '';
 function notificationsRoute() { return location.hash === '#/notifications' ? true : null; }
 function notificationItems() {
-  return jobs.filter((j) => isShown(j.project) && (waitsOnYou(j) || j.stage === 'merged'))
-    .map((job) => job.stage === 'merged' ? { kind: 'merged', job, at: job.done || job.updated } : { kind: 'needs', job, at: job.updated })
-    .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+  const shown = jobs.filter((j) => isShown(j.project));
+  const items = [];
+  for (const job of shown) {
+    if (job.stage === 'merged') items.push({ kind: 'merged', job, at: job.done || job.updated });
+    else if (waitsOnYou(job)) items.push({ kind: 'needs', job, at: job.updated });
+    else if (job.stage === 'pr-open') items.push({ kind: 'pr', job, at: job.updated });
+  }
+  for (const e of notificationLog()) {
+    const job = e.kind === 'spec' && shown.find((j) => j.id === e.id);
+    if (job) items.push({ kind: 'spec', job, at: e.at });
+    if (e.kind === 'backlog' && isShown(e.project)) items.push({ kind: 'backlog', item: e, at: e.at });
+  }
+  return items.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+}
+function notificationRow(it) {
+  if (it.kind === 'backlog') return { href: '#/backlog/' + it.item.key, title: it.item.title, id: '', project: projectName(it.item) };
+  const j = it.job;
+  return { href: '#' + encodeURIComponent(j.id), title: j.title || j.id, id: j.id, project: projectName(j) };
 }
 function notificationsUnread(items) {
   return (Date.parse(items[0]?.at) || 0) > (Date.parse(store.get(NOTIFICATIONS_SEEN_KEY)) || 0);
@@ -3845,9 +3866,11 @@ function renderNotificationsMenu(items) {
   $('notifications-menu-status').textContent = boardLoadError ? "Couldn't load notifications. " + BOARD_LOAD_ERRORS[boardLoadError]
     : !loaded ? 'Loading notifications…' : items.length ? '' : 'No notifications yet.';
   $('notifications-menu-retry').hidden = !boardLoadError;
-  const html = items.slice(0, NOTIFICATIONS_MENU_ROWS).map((it) =>
-    '<li><a class="notification-link" href="#' + esc(encodeURIComponent(it.job.id)) + '"><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span>' +
-    '<span class="inbox-title">' + esc(it.job.title || it.job.id) + '</span><span class="inbox-meta">' + esc(it.job.id) + ' · ' + esc(ago(it.at)) + '</span></a></li>').join('');
+  const html = items.slice(0, NOTIFICATIONS_MENU_ROWS).map((it) => {
+    const row = notificationRow(it);
+    return '<li><a class="notification-link" href="' + esc(row.href) + '"><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span>' +
+      '<span class="inbox-title">' + esc(row.title) + '</span><span class="inbox-meta">' + [row.id, ago(it.at)].filter(Boolean).map(esc).join(' · ') + '</span></a></li>';
+  }).join('');
   if (html === notificationsMenuHtml) return;
   notificationsMenuHtml = html;
   // Rewriting drops focus, so return it to the row with the same href.
@@ -3857,6 +3880,7 @@ function renderNotificationsMenu(items) {
   if (href !== null) [...list.querySelectorAll('a')].find((a) => a.getAttribute('href') === href)?.focus();
 }
 function notificationActions(it) {
+  if (it.kind === 'backlog') return '<a class="btn" href="#/backlog/' + esc(it.item.key) + '">Open item</a>';
   const j = it.job, pr = prLink(j), paseo = paseoLinks(j), owner = sessionJob(j);
   const whose = owner && owner !== j ? 'the session of ' + owner.id : "this job's session";
   let html = '<a class="btn" href="#' + esc(encodeURIComponent(j.id)) + '">Open job</a>';
@@ -3884,10 +3908,10 @@ function renderNotificationsPage(items) {
   $('notifications-prev').disabled = notificationsPage === 0;
   $('notifications-next').disabled = notificationsPage === pages - 1;
   const html = shown.slice(start, start + NOTIFICATIONS_PAGE_ROWS).map((it, i) => {
-    const j = it.job;
+    const row = notificationRow(it);
     return '<li class="inbox-item"><span class="inbox-rank">' + (start + i + 1) + '</span>' +
-      '<div><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span><p class="inbox-title">' + esc(j.title || j.id) + '</p>' +
-      '<p class="inbox-meta">' + [projectName(j), j.id, ago(it.at)].map(esc).join(' · ') + '</p></div>' +
+      '<div><span class="chip inbox-kind">' + NOTIFICATION_LABELS[it.kind] + '</span><p class="inbox-title">' + esc(row.title) + '</p>' +
+      '<p class="inbox-meta">' + [row.project, row.id, ago(it.at)].filter(Boolean).map(esc).join(' · ') + '</p></div>' +
       '<div class="inbox-actions">' + notificationActions(it) + '</div></li>';
   }).join('');
   if (html === notificationsHtml) return;
@@ -9110,7 +9134,6 @@ for (const type of ['pointerdown', 'keydown']) document.addEventListener(type, (
 
 // New board and backlog events show a toast in this tab. The first read only fills toastSeen
 // and backlogSeen. Board text is agent-written, so toasts set textContent only.
-const TOAST_LABELS = { backlog: 'Backlog', needs: 'Needs you', spec: 'Spec ready', pr: 'PR open', merged: 'Merged' };
 const TOAST_MAX = 3, TOAST_MS = 10000;
 let toastSeen = null;
 let backlogSeen = null;
@@ -9121,7 +9144,7 @@ function showNotifyToast(kind, href, title, meta) {
   const link = document.createElement('a');
   link.className = 'notification-link';
   link.href = href;
-  const parts = [['chip inbox-kind', TOAST_LABELS[kind]], ['inbox-title', title], ['inbox-meta', meta]].map(([cls, text]) => {
+  const parts = [['chip inbox-kind', NOTIFICATION_LABELS[kind]], ['inbox-title', title], ['inbox-meta', meta]].map(([cls, text]) => {
     const span = document.createElement('span');
     span.className = cls;
     span.textContent = text;
