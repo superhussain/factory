@@ -4,10 +4,13 @@ import type { Member } from "./ballot.ts";
 export const ELECTION_POLL_MS = 30_000;
 export const ELECTION_TIMEOUT_MS = 5_000;
 
+export type ElectionSettings = { origin: string | null; factoryLinkButtons: boolean };
+
 export function runElection(
   member: Member,
-  readOrigin: () => Promise<string | null>,
+  readOrigin: () => Promise<ElectionSettings | null>,
   watchFocus: (listener: () => void) => () => void,
+  onSettings: (origin: string | null, factoryLinkButtons: boolean) => void,
 ) {
   let started = 0;
   let settled = 0;
@@ -16,13 +19,17 @@ export function runElection(
     let timer: ReturnType<typeof setTimeout> | undefined;
     let report: () => void;
     try {
-      const origin = await Promise.race([
+      const settings = await Promise.race([
         readOrigin(),
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error("timeout")), ELECTION_TIMEOUT_MS);
         }),
       ]);
-      report = () => member.online(origin);
+      const origin = settings ? settings.origin : null;
+      report = () => {
+        member.online(origin);
+        onSettings(origin, settings ? settings.factoryLinkButtons : false);
+      };
     } catch {
       report = () => {
         if (member.miss()) void check();
