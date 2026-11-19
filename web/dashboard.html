@@ -220,7 +220,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #audit-flags td a + a { margin-left: 8px; }
   #audit-flags td code { white-space: pre-wrap; word-break: break-all; }
   #audit-flags td:nth-child(8) { min-width: 14em; }
-  .audit-flag-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .audit-flag-actions { display: flex; flex-wrap: nowrap; gap: 8px; }
+  #audit-flags td:last-child { white-space: nowrap; }
   #audit-flags tr.acked { color: var(--muted); }
   .audit-flags-pager { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
   #audit-flags-pager[hidden] { display: none; }
