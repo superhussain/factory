@@ -133,3 +133,40 @@ test("two reads of one board version slice it once, and a new version slices aga
   assert.equal(third.headers.get("ETag"), '"next"');
   assert.deepEqual((await third.json()).slim.counts.other, { merged: 6, closed: 5 });
 });
+
+test("a write between head and get answers with the get's ETag and counts, then hits the memo", async () => {
+  const s = setup(JSON.stringify(board(4)));
+  const head = s.bucket.head;
+  let stale = true;
+  s.bucket.head = async (key) => {
+    const found = await head(key);
+    if (!stale) return found;
+    stale = false;
+    return { ...found, httpEtag: '"stale"' };
+  };
+  const reads = () =>
+    s.bucket.calls.filter(([op, key]) => op === "get" && key === "board.json").length;
+  const first = await s.get("/board.json?view=slim");
+  assert.equal(first.headers.get("ETag"), s.etag);
+  assert.deepEqual((await first.json()).slim.counts, {
+    other: { merged: 1, closed: 1 },
+    sample: { merged: 1, closed: 1 },
+  });
+  const second = await s.get("/board.json?view=slim");
+  assert.equal(second.headers.get("ETag"), s.etag);
+  assert.equal(reads(), 1);
+});
+
+test("a duplicate id counts once per stage", async () => {
+  const row = (id, stage, n) => ({ id, project: "sample", stage, updated: at(n) });
+  const stored = JSON.stringify({
+    jobs: [
+      row("970-twice", "merged", 1),
+      row("970-twice", "merged", 2),
+      row("971-once", "merged", 3),
+      row("972-closed", "closed", 4),
+    ],
+  });
+  const body = await (await setup(stored).get("/board.json?view=slim")).json();
+  assert.deepEqual(body.slim.counts, { sample: { merged: 2, closed: 1 } });
+});

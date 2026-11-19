@@ -59,9 +59,13 @@ export const SLIM_RECENT = 10;
 export function slimBoard(data) {
   const counts = Object.create(null);
   const finished = { merged: [], closed: [] };
+  // The dashboard counts each id once per stage, so a duplicate row cannot leave it short forever.
+  const counted = { merged: new Set(), closed: new Set() };
   for (const job of data.jobs) {
     if (!terminal(job)) continue;
     finished[job.stage].push(job);
+    if (counted[job.stage].has(job.id)) continue;
+    counted[job.stage].add(job.id);
     const project = typeof job.project === "string" ? job.project : "";
     counts[project] ??= { merged: 0, closed: 0 };
     counts[project][job.stage] += 1;
