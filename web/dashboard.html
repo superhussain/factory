@@ -9085,6 +9085,9 @@ const soundsOff = new Set((store.get(SOUNDS_OFF_KEY) || '').split(',').filter((k
 function soundKindOn(kind) { return !soundsOff.has(kind); }
 let soundSeen = null;
 let audio = null;
+// A backlog tone and a board tone from one poll play one after the other, not on top of each other.
+const SOUND_GAP = 0.1;
+let soundEnd = -Infinity;
 function soundSupported() { return 'AudioContext' in window; }
 function soundActive() { return soundOn && soundSupported(); }
 function watchAway() { return notifyActive() || soundActive(); }
@@ -9098,8 +9101,9 @@ function wakeAudio() {
 function playSound(kind) {
   wakeAudio();
   try {
+    const start = Math.max(audio.currentTime + 0.02, soundEnd + SOUND_GAP);
     SOUNDS[kind].forEach((hz, i) => {
-      const at = audio.currentTime + 0.02 + i * 0.15;
+      const at = start + i * 0.15;
       const osc = audio.createOscillator();
       const gain = audio.createGain();
       osc.type = 'sine';
@@ -9111,6 +9115,7 @@ function playSound(kind) {
       osc.start(at);
       osc.stop(at + 0.15);
     });
+    soundEnd = start + SOUNDS[kind].length * 0.15;
   } catch {}
 }
 // The first read only fills soundSeen.
