@@ -244,10 +244,12 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
                     true,
                   )}
                 </View>
-                <Text style={styles.footnote}>
-                  {`Signed in and still blank? Ask your factory operator to add ${here ?? "this Paseo origin"} to embed_origins.`}
-                </Text>
-                {browser && returning ? (
+                {expired ? null : (
+                  <Text style={styles.footnote}>
+                    {`Signed in and still blank? Ask your factory operator to add ${here ?? "this Paseo origin"} to embed_origins.`}
+                  </Text>
+                )}
+                {browser && returning && !expired ? (
                   <Text style={styles.footnote}>
                     Using Safari, or another browser that blocks third-party cookies? The board
                     cannot load here. Select Open in a browser tab.
