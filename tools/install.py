@@ -179,7 +179,11 @@ def install(source: Path, destination: Path, replace: bool = False) -> Path:
             raise
         print(str(target))
         if backup is not None:
-            print(str(backup))
+            try:
+                shutil.rmtree(backup)
+                print("removed " + str(backup))
+            except OSError:
+                print("install.py: could not remove " + str(backup) + "; remove it by hand", file=sys.stderr)
         current = destination / LEGACY
         drop_legacy(destination)
         return target
