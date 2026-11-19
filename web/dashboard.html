@@ -9140,6 +9140,7 @@ function renderSoundSettings() {
   for (const box of document.querySelectorAll('[data-sound-kind]')) {
     box.checked = soundKindOn(box.dataset.soundKind);
     box.disabled = !soundActive();
+    if (box.disabled) box.setAttribute('aria-describedby', 'sound-help'); else box.removeAttribute('aria-describedby');
   }
   $('sound-help').textContent = supported ? (soundOn ? SOUND_HELP : SOUND_OFF_HELP) : 'This browser cannot play sounds.';
 }
