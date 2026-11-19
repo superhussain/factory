@@ -2019,9 +2019,8 @@ async function capture(outdir, referencePath) {
       });
       await page.waitForSelector("#settings-reference:not([hidden])");
       await page.evaluate(() =>
-        document.getElementById("reference-keys").scrollIntoView({ block: "center" }),
+        document.getElementById("reference-keys-heading").scrollIntoView({ block: "start" }),
       );
-      return clipOf(page, "#reference-keys");
     };
     await view("reference-keys-1280", 1280, 900, "light", openReferenceKeys);
     // The reference keeps 001-capture open behind the sign-in banner; the candidate closes it.
