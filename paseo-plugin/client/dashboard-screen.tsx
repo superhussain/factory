@@ -4,7 +4,7 @@ import { ExternalLink, Icon, Loading, ScrollView, useToast } from "@getpaseo/plu
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import { parseDashboardOrigin, type EmbedMessage } from "../shared/embed";
-import { frameUrl, startUrl } from "../shared/location";
+import { frameUrl, jumpUrl, startUrl } from "../shared/location";
 import type { Reload } from "../shared/reload";
 import { firstLoginSteps, isBrowserOrigin, openLabel } from "../shared/first-login";
 import { createOpenLimiter } from "../shared/open-limit";
@@ -31,11 +31,11 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
     const origin =
       settings.status === "ready" ? parseDashboardOrigin(settings.values.origin) : null;
     const [saved, setSaved] = useState<string | null>(() =>
-      origin ? startUrl(origin, params.job, savedLocation(origin)) : null,
+      origin ? startUrl(origin, params.job, savedLocation(origin), params.hash) : null,
     );
     useEffect(() => {
-      if (origin) setSaved(startUrl(origin, params.job, savedLocation(origin)));
-    }, [origin, params.job]);
+      if (origin) setSaved(startUrl(origin, params.job, savedLocation(origin), params.hash));
+    }, [origin, params.job, params.hash, params.at]);
     const src = origin && saved?.startsWith(origin + "/") ? saved : null;
     const reloadFrame = () => {
       dropWarmFrame();
@@ -190,7 +190,8 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
             key={load}
             src={src}
             origin={origin}
-            job={params.job}
+            jump={jumpUrl(origin, params.job, params.hash)}
+            jumpKey={`${params.job ?? ""}|${params.hash ?? ""}|${params.at ?? ""}`}
             onMessage={onMessage}
           />
         </View>

@@ -3,12 +3,14 @@ import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { useSyncExternalStore } from "react";
 import { InboxBadge } from "./client/inbox-badge";
 import { dashboardScreen } from "./client/dashboard-screen";
+import { createDashboardLinks } from "./client/deep-link";
 import { startElection } from "./client/election";
 import { useFrameInboxCount } from "./client/frame-inbox";
 import { settingsScreen } from "./client/settings-screen";
 import { dropWarmFrame, noteSidebarOpen, showNeedsNotification } from "./client/web";
 import { createInbox, type Inbox } from "./shared/arrivals";
 import { shownInboxCount } from "./shared/badge";
+import { setScreenOpener } from "./shared/deep-link";
 import { dashboardHost } from "./shared/embed";
 import { factoryInbox } from "./shared/inbox";
 import { createReload, type Reload } from "./shared/reload";
@@ -42,23 +44,34 @@ export default function contribute(client: PluginClientContext) {
       client.openScreen({ screenId: "dashboard", params: { job: job.id } }),
     );
   });
-  const election = startElection(client, (origin) => {
-    const removeScreen = client.addScreen({
-      id: "dashboard",
-      title: origin ? dashboardHost(origin) : "Factory",
-      Component: dashboardScreen(client, reload),
-    });
-    const removeItem = client.addSidebarHeaderItem({
-      id: "factory",
-      title: "Factory",
-      Component: factoryItem(inbox, reload),
-    });
-    return () => {
-      dropWarmFrame();
-      void removeItem();
-      void removeScreen();
-    };
-  });
+  const links = createDashboardLinks(client);
+  const election = startElection(
+    client,
+    (origin) => {
+      const removeScreen = client.addScreen({
+        id: "dashboard",
+        title: origin ? dashboardHost(origin) : "Factory",
+        Component: dashboardScreen(client, reload),
+      });
+      const removeItem = client.addSidebarHeaderItem({
+        id: "factory",
+        title: "Factory",
+        Component: factoryItem(inbox, reload),
+      });
+      const removeOpener = origin
+        ? setScreenOpener(globalThis, origin, (hash) =>
+            client.openScreen({ screenId: "dashboard", params: { hash, at: String(Date.now()) } }),
+          )
+        : () => {};
+      return () => {
+        removeOpener();
+        dropWarmFrame();
+        void removeItem();
+        void removeScreen();
+      };
+    },
+    links.update,
+  );
   const subscription = client.subscribe(factoryInbox, {}, inbox.apply);
   client.addSettingsScreen({
     id: "dashboard",
@@ -68,6 +81,7 @@ export default function contribute(client: PluginClientContext) {
   });
   return () => {
     election.stop();
+    links.stop();
     subscription.release();
     dropWarmFrame();
   };

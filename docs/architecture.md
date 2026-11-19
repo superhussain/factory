@@ -184,12 +184,13 @@ acknowledge a row, which stores an optional `ack` UTC time (`YYYY-MM-DDTHH:MM:SS
 on it. A row is identified by its `time`, `job`, `host`, `agent`, `tool` and
 `target`, and a re-push keeps the `ack` of each row it sends again. The
 `#/retros` page shows the index as `Red flags`, hides acknowledged rows unless
-`Show acknowledged` is checked, and offers `Make an idea` on each row. `retro aggregate` copies the rows without `ack` into `aggregate.json` as `red_flags`, so a retro can turn a recurring flag into a backlog card.
+`Show acknowledged` is checked, and offers `Make an idea` on each row. `retro aggregate` copies the rows without `ack` into `aggregate.json` as `red_flags`, so a retro can turn a recurring flag into a backlog card. `retro admit` stores the backlog line of each admitted `Red flag: <flag> via <tool>` card on the rows it grouped, as `backlog`; a re-push and an ack keep it, and the card links it to the Backlog decision page.
 
 | Route | Who | Effect |
 | --- | --- | --- |
 | `GET /api/audit-flags` | any verified principal | `{"schema":"factory.audit-flags/1","rows":[...]}`, `rows: []` when no index exists; other methods answer 404 |
 | `POST /api/audit-flags/ack` | a signed-in person | set or clear one row's `ack`; a re-push keeps it |
+| `POST /api/audit-flags/backlog` | a bound host's service token | set `backlog` on each listed row; answers `{"linked": n}` |
 
 Retro runs are stored one record per run at `retro-runs/<run>.json`. The hourly scheduled pass deletes a record uploaded more
 than 90 days before today's UTC date; a re-admit resets that clock. `retro admit` sends a `factory.retro-run/1` record with the checked findings, each

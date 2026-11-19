@@ -334,6 +334,9 @@ const CAPTURE_AUDIT_FLAGS = [
   target,
   paseo: { server: "srv-a", agent: "agent-build" },
   ...(flags[0] === "force-push" && { ack: "2026-11-11T09:00:00Z" }),
+  ...(flags[0] === "recursive-delete" && {
+    backlog: "- [ ] sample: Red flag: recursive-delete via Bash",
+  }),
 }));
 // Settings > Hosts for the retros-flags views: the fixture list plus the capture host.
 const CAPTURE_HOSTS = JSON.parse(

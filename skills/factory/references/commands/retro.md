@@ -38,6 +38,9 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    An `uploaded retro run <run>` line means the findings and the cards' outcomes are on the
    `#/retros` page. A `retro upload failed` or `retro upload skipped` line on stderr means
    they are not; it never changes the exit code.
+   A `linked <n> red-flag rows` line means `POST /api/audit-flags/backlog` saved the line, and
+   the Red flags card now links those rows to the Backlog decision page. A `red-flag link failed`
+   line never changes the exit code.
    An `edited <file> to version N: <summary>` line means a file edit is saved through
    `PUT /api/project-retro/<file>`; a person undoes it with Restore to draft in Settings, Projects.
    A person decides each line on the dashboard Backlog decision page.
