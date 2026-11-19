@@ -8876,6 +8876,28 @@ $('notify-remind').addEventListener('change', () => {
   $('notify-status').textContent = remindHours ? 'Reminders are on: after ' + REMIND_LABEL[remindHours] + '.' : 'Reminders are off.';
 });
 
+// Each event kind can be turned off per browser. Off kinds show no toast and play no sound.
+const ALERT_KINDS = ['backlog', 'needs', 'spec', 'pr', 'merged'];
+const ALERTS_OFF_KEY = 'factory-alerts-off';
+const alertsOff = new Set((store.get(ALERTS_OFF_KEY) || '').split(',').filter((k) => ALERT_KINDS.includes(k)));
+function alertOn(kind) { return !alertsOff.has(kind); }
+function boardSnapshot() { return new Map(jobs.map((j) => [j.id, { stage: j.stage, waits: waitsOnYou(j) }])); }
+// Each job's kinds fired since the previous read, in the order spec, needs, pr, merged.
+// spec, pr and merged need a previous entry for the job.
+function jobEvents(prev, seen) {
+  const events = new Map();
+  for (const [id, now] of seen) {
+    const was = prev.get(id);
+    const kinds = [];
+    if (was?.stage === 'spec' && now.stage !== 'spec' && !TERMINAL.includes(now.stage)) kinds.push('spec');
+    if (now.waits && !was?.waits) kinds.push('needs');
+    if (was && now.stage === 'pr-open' && was.stage !== 'pr-open' && !now.waits) kinds.push('pr');
+    if (was && now.stage === 'merged' && was.stage !== 'merged') kinds.push('merged');
+    if (kinds.length) events.set(id, kinds);
+  }
+  return events;
+}
+
 // Board sounds are opt-in per browser and play in a visible or hidden tab. One read plays
 // at most one tone, the first kind in SOUND_ORDER that fired.
 const SOUND_KEY = 'factory-sound';
@@ -8913,19 +8935,14 @@ function playSound(kind) {
     });
   } catch {}
 }
-// The first read only fills soundSeen. pr and merged need a previous entry for the job.
+// The first read only fills soundSeen.
 function boardSound() {
-  const seen = new Map(jobs.map((j) => [j.id, { stage: j.stage, waits: waitsOnYou(j) }]));
+  const seen = boardSnapshot();
   const prev = soundSeen;
   soundSeen = seen;
   if (!prev || !soundActive()) return;
   const fired = new Set();
-  for (const [id, now] of seen) {
-    const was = prev.get(id);
-    if (now.waits && !was?.waits) fired.add('needs');
-    if (was && now.stage === 'pr-open' && was.stage !== 'pr-open' && !now.waits) fired.add('pr');
-    if (was && now.stage === 'merged' && was.stage !== 'merged') fired.add('merged');
-  }
+  for (const kinds of jobEvents(prev, seen).values()) for (const k of kinds) if (SOUNDS[k] && alertOn(k)) fired.add(k);
   const kind = SOUND_ORDER.find((k) => fired.has(k));
   if (kind) playSound(kind);
 }
