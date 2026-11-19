@@ -191,6 +191,8 @@ frame; the screen then offers **Sign in**, **Reload** and a button that opens th
 
 Leave the Factory screen and come back within 30 minutes, and the board is as you left it, with the same page, scroll and unsent text. Until then the hidden board keeps running and uses memory. After 30 minutes away, or in an older browser that cannot move the hidden board back without reloading it (it needs `Element.moveBefore`), the screen loads the dashboard page you were on. A notification opens its job instead. Press the Factory row while the screen shows to reload it. With the plugin on several hosts, the Factory screen and row appear on one host per dashboard URL, so hosts that share a URL show one Factory entry. If that host goes offline, another host with the same URL takes over within 30 seconds. Hosts with different URLs each keep an entry in the screen header's host picker, and the Factory screen's title names its dashboard host, such as `factory.example.test`.
 
+Turn on Open in Factory buttons under Agent replies in these settings. When an agent's reply links to your dashboard URL, an Open in Factory button under the reply opens that page on the Factory screen.
+
 ### Inbox badge
 
 The Factory row shows the same number as the dashboard's Inbox badge: jobs waiting on you plus
