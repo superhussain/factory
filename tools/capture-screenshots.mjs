@@ -248,7 +248,9 @@ async function capture() {
         }
         return request.continue();
       });
-      await page.goto(origin + "/", { waitUntil: "networkidle0" });
+      // networkidle0 never settles: the dashboard leaves the bodies of 404 reads, such as the
+      // unsaved /api/pipeline/global, unread, so Chrome keeps those requests open.
+      await page.goto(origin + "/", { waitUntil: "networkidle2" });
       await page.waitForSelector(".card");
       await prepare(page);
       await page.evaluate(async () => {
