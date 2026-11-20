@@ -8860,8 +8860,12 @@ def board_merged_head(home, slug, job_id):
         if (job.get("stage") == "merged" and isinstance(github, dict) and isinstance(github.get("merged"), str)
                 and isinstance(github.get("head"), str) and COMMIT.fullmatch(github["head"])):
             return github["head"]
-        if job.get("stage") == "merged" and isinstance(job.get("pr"), str) and GH_PR_PARTS.fullmatch(job["pr"]):
-            return pr_merged_head(home, job["pr"])
+        m = job.get("stage") == "merged" and isinstance(job.get("pr"), str) and GH_PR_PARTS.fullmatch(job["pr"])
+        if m:
+            md = project_files(home, slug)[0]
+            repo = frontmatter(md)[0].get("repo", "") if md.exists() else ""
+            if f"{m[1]}/{m[2]}".lower() == repo.lower():
+                return pr_merged_head(home, job["pr"])
         return None
     print(f"factory.py: cleanup could not read the board ({reason}), so it keeps a branch HEAD does not contain",
           file=sys.stderr)

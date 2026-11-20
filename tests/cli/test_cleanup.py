@@ -24,6 +24,8 @@ class CleanupTest(IsolatedTestCase):
         self.repo = self.home / "checkout"
         self.repo.mkdir()
         (self.home / "paths.md").write_text(f"---\nsample: {self.repo}\n---\n")
+        (self.home / "projects").mkdir()
+        (self.home / "projects" / "sample.md").write_text("---\nrepo: sample/alpha\n---\n")
         self.git(self.repo, "init", "-q")
         self.git(self.repo, "symbolic-ref", "HEAD", "refs/heads/main")
         self.git(self.repo, "commit", "-q", "--allow-empty", "-m", "base")
@@ -257,6 +259,25 @@ class CleanupTest(IsolatedTestCase):
         self.assertEqual(code, 0)
         self.assertFalse(self.branch_exists())
         states.assert_called_once_with("sample/alpha", [7], "host-a")
+
+    def test_foreign_repo_pr_skips_the_lookup(self):
+        self.board("merged", None, pr="https://github.com/other/beta/pull/7")
+        with patch.object(factory, "pr_states") as states:
+            code, out, err = self.cleanup()
+        self.assertEqual(code, 1)
+        states.assert_not_called()
+        self.assertEqual(out["left"], ["branch factory/001-test: not merged into main"])
+        self.assertEqual(err, "")
+        self.assertTrue(self.branch_exists())
+
+    def test_repo_match_ignores_case(self):
+        (self.home / "projects" / "sample.md").write_text("---\nrepo: Sample/Alpha\n---\n")
+        self.board("merged", None, pr=self.PR)
+        head = self.git(self.wt, "rev-parse", "HEAD")
+        with patch.object(factory, "pr_states", return_value=({7: ("MERGED", head)}, None)):
+            code, _, _ = self.cleanup()
+        self.assertEqual(code, 0)
+        self.assertFalse(self.branch_exists())
 
     def test_board_head_skips_the_pr_lookup(self):
         self.board("merged", self.git(self.wt, "rev-parse", "HEAD"), pr=self.PR)
