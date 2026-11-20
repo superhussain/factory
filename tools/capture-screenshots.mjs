@@ -253,6 +253,10 @@ async function capture() {
       await page.goto(origin + "/", { waitUntil: "networkidle2" });
       await page.waitForSelector(".card");
       await prepare(page);
+      // Route changes focus the heading; drop that ring unless a dialog keeps the typed caret.
+      await page.evaluate(() => {
+        if (!document.querySelector("dialog[open]")) document.activeElement?.blur();
+      });
       await page.evaluate(async () => {
         await document.fonts.ready;
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
