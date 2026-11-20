@@ -267,6 +267,15 @@ const CAPTURE_JOBS = [
     pr: "https://github.com/example/sample/pull/112",
     needs: "review and merge PR #112: this project's pipeline holds every PR for a person",
   },
+  {
+    id: "113-round-cap",
+    project: "sample",
+    title: "Synthetic round cap",
+    stage: "needs-human",
+    updated: "2026-01-01T12:00:00Z",
+    note: "review panel: round 2 findings need a person",
+    needs: "decide on the round-2 findings",
+  },
 ];
 // More merged rows than the slim board read carries, so the merged column loads the rest on demand.
 const CAPTURE_MERGED = Array.from({ length: 30 }, (_, n) => {
@@ -2164,6 +2173,52 @@ async function capture(outdir, referencePath) {
           meta.some((el) => el.textContent.includes(id)),
         );
       });
+    });
+    const openRoundCap = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#113-round-cap";
+      });
+      await page.waitForFunction(
+        () =>
+          document.getElementById("d-meta").textContent.includes("113-round-cap") &&
+          document.querySelector("#d-doc").textContent !== "loading files",
+        { timeout: 30000 },
+      );
+    };
+    await view("resolve-drawer-1280", 1280, 900, "light", async (page) => {
+      await openRoundCap(page);
+      return clipOf(page, ".detail-head");
+    });
+    // The reference page has no Rework, so its side shows the drawer alone.
+    await view(
+      "rework-dialog-390",
+      390,
+      844,
+      "dark",
+      async (page) => {
+        await openRoundCap(page);
+        await page.evaluate(() => document.getElementById("d-rework-bar")?.click());
+        await page.waitForFunction(
+          () =>
+            !document.getElementById("d-rework-bar") || document.getElementById("rework-dlg").open,
+          { timeout: 30000 },
+        );
+        await page.evaluate(() => {
+          const note = document.getElementById("rework-note");
+          if (note) note.value = "Keep the CSV header order.";
+        });
+      },
+      true,
+    );
+    await view("inbox-resolve-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/inbox";
+      });
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll("#inbox-list .inbox-meta")].some((el) =>
+          el.textContent.includes("113-round-cap"),
+        ),
+      );
     });
     const openCardActions = (id) => async (page) => {
       const wrap = `.card-wrap:has(.card[data-id="${id}"])`;
