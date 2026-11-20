@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from support import IsolatedTestCase, invoke, load_runtime
 
@@ -62,9 +63,11 @@ class WithCloudflareTest(IsolatedTestCase):
     def test_usage(self):
         for args in (["with-cloudflare"], ["with-cloudflare", "--"],
                      ["with-cloudflare", sys.executable, "-c", "pass"]):
-            code, stdout, stderr = invoke(factory, args)
-            self.assertEqual((code, stdout), (2, ""))
-            self.assertIn(USAGE, stderr)
+            self.assertEqual(invoke(factory, args), (2, "", f"factory.py: usage: {USAGE}\n"))
+
+    def test_interrupt(self):
+        with patch.object(factory.subprocess, "run", side_effect=KeyboardInterrupt):
+            self.assertEqual(self.run_child("true"), (130, "", ""))
 
     def test_command_not_found(self):
         missing = str(self.home / "no-such-command")

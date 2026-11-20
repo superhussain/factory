@@ -10444,7 +10444,7 @@ def audit_cmd(*args):
 
 
 def with_cloudflare_cmd(*argv):
-    if argv[0] != "--" or len(argv) < 2:
+    if len(argv) < 2 or argv[0] != "--":
         fail("usage: factory.py with-cloudflare -- <command> [<arg>...]", 2)
     env_file = factory_home() / ".env"
     try:
@@ -10458,6 +10458,8 @@ def with_cloudflare_cmd(*argv):
         code = subprocess.run(list(argv[1:]), env={**os.environ, **loaded}).returncode
     except OSError:
         fail(f"cannot run {argv[1]}", 127)
+    except KeyboardInterrupt:
+        sys.exit(130)
     sys.exit(128 - code if code < 0 else code)
 
 
@@ -11288,7 +11290,7 @@ COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
 COMMANDS["audit"] = (audit_cmd, 1, 2)
-COMMANDS["with-cloudflare"] = (with_cloudflare_cmd, 2, sys.maxsize)
+COMMANDS["with-cloudflare"] = (with_cloudflare_cmd, 0, sys.maxsize)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
 COMMANDS["inbox"] = (inbox, 0, 0)
