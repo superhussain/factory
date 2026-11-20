@@ -214,10 +214,10 @@ async function capture() {
     await put(origin, "/api/backlog", BACKLOG, "text/markdown");
     await put(origin, "/api/jobs/sample/051-sample-retry/needs.md", NEEDS);
 
-    async function view(name, prepare) {
+    async function view(name, prepare, viewport = { width: 1280, height: 800 }) {
       const context = await browser.createBrowserContext();
       const page = await context.newPage();
-      await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
+      await page.setViewport({ ...viewport, deviceScaleFactor: 2 });
       await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
       await page.evaluateOnNewDocument((clock) => {
         const NativeDate = Date;
@@ -235,6 +235,13 @@ async function capture() {
       await page.setRequestInterception(true);
       page.on("request", (request) => {
         const target = new URL(request.url());
+        const stub = STUBS[target.pathname];
+        if (target.origin === origin && request.method() === "GET" && stub)
+          return request.respond({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify(stub),
+          });
         if (target.origin !== origin) {
           external.push(request.url());
           return request.abort();
