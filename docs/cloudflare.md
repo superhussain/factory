@@ -311,7 +311,8 @@ client-supplied headers.
   same origin across deploys preserves drafts. Legacy job-file writes without
   conditions remain possible for old clients and are unsafe under concurrent
   writers; new devices always send conditions.
-- Web Push and its `FACTORY_VAPID_KEY` secret, installing the dashboard as an app and the app icon badge are in [notifications.md](notifications.md).
+- Web Push and its `FACTORY_VAPID_KEY` secret, installing the dashboard as an
+  app and the app icon badge are in [notifications.md](notifications.md).
 - The service worker caches only the page, `/assets/*`, `/board.json`,
   `/projects.json`, `/jobs/*` and `GET /api/backlog`, and no other `/api/*` path.
   Board, backlog and job reads try the network first and fall back to this

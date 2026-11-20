@@ -32,6 +32,7 @@ node tools/vapid-key.mjs 2>/dev/null | pnpm exec wrangler secret put FACTORY_VAP
 
 Each person opts in once per browser. Open Settings, Notifications and check "Push to this device when the dashboard is closed". The browser asks for notification permission.
 
+- If you blocked notifications, allow them in the browser's site settings, then check the box again.
 - Each browser stores one subscription under `push/` in R2.
 - An instance holds at most 20 subscriptions. The 21st shows "This instance already has 20 push devices. Turn push off on one first."
 - Every subscribed browser gets every push, whoever subscribed it. Ada's teammates' browsers get her `051-sample-retry` push too.
@@ -58,7 +59,7 @@ Each person opts in once per browser. Open Settings, Notifications and check "Pu
 Installing is per browser. Nothing is set on the server.
 
 - iPhone or iPad: open the dashboard in Safari, tap Share, then Add to Home Screen. Safari never prompts.
-- Android Chrome: open the menu and tap Add to Home screen or Install app.
+- Android Chrome: open the menu and tap Add to Home screen or Install app. Chrome shows its own banner only after its engagement checks pass.
 - Desktop Chrome or Edge: use the install icon in the address bar.
 - Settings, Display, Install app shows Chrome's install prompt once the browser has offered one. Otherwise it shows a hint.
 - The manifest, icons and `/sw.js` sit behind the same Access check as every other route. Android Chrome may fetch the icons without the Access cookie and add a plain shortcut instead of an app icon.
