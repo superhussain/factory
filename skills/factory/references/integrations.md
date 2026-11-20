@@ -79,7 +79,7 @@ without asking. They remove only worktrees this pipeline created: a `factory-<id
 Paseo workspace, or the job's worktree under the factory home, and that job's private prompt folder under
 `prompts/<slug>/<id>`, refusing a link. `archive-workspace` archives
 a merged or closed job's own workspace whatever its git state and reports leftovers
-first. `cleanup` refuses a dirty worktree and keeps a branch that is not merged into HEAD or, for a `merged` job, the board's `github.head` or, when that is missing, its merged pull request's head on GitHub. Neither
+first. `cleanup` refuses a dirty worktree and keeps a branch that is not merged into HEAD or, for a `merged` job, the board's `github.head` or, when that is missing, its merged pull request's head on GitHub when the pull request's owner/name matches the project file's `repo:`. Neither
 forces. A host owner who runs Claude Code in auto mode can allow them with this sample
 entry under `autoMode.allow` in their settings:
 

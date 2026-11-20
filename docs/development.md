@@ -163,7 +163,7 @@ Set `FACTORY_CAPTURE_PROBE_URL` to make the page request that URL; the run must 
 - Settings are synthetic: dashboard `https://factory.example.test`, Paseo origin `https://app.example.test`.
 - Before images: `git archive <base> paseo-plugin | tar -x -C .context/base`, then add `--plugin .context/base/paseo-plugin`.
 - `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
-- Owned stubs in `tools/paseo-capture/` stand in for React Native, the Paseo plugin API and the frame. Layout is close to Paseo's, not identical. Icons are outlined squares, and the palette is a synthetic dark theme. Compare before and after from this tool only, never against app screenshots.
+- Owned stubs in `tools/paseo-capture/` stand in for React Native, the Paseo plugin API and the frame. Layout is close to Paseo's, not identical. Icons are inline Lucide paths for the four names the screen uses. The dark palette is synthetic. Compare before and after from this tool only, never against app screenshots.
 
 ## Pre-commit checks
 

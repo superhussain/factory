@@ -3,7 +3,7 @@
 import { createRoot } from "react-dom/client";
 import { dashboardScreen } from "factory-capture:screen";
 
-// Synthetic palettes, guesses and not Paseo's real theme.
+// Dark is a synthetic guess. Light copies Paseo 0.16.2's light theme tokens, which the plugin SDK does not expose.
 const THEMES = {
   dark: {
     colors: {
@@ -20,12 +20,12 @@ const THEMES = {
   light: {
     colors: {
       surface0: "#ffffff",
-      surface1: "#f6f6f7",
-      surface2: "#ececef",
-      foreground: "#18181b",
-      foregroundMuted: "#5f5f67",
-      border: "#dcdce0",
-      accent: "#2563eb",
+      surface1: "#fafafa",
+      surface2: "#f4f4f5",
+      foreground: "#1a1a1e",
+      foregroundMuted: "#71717a",
+      border: "#e4e4e7",
+      accent: "#20744A",
       accentForeground: "#ffffff",
     },
   },

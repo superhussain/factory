@@ -1,5 +1,5 @@
-// Paseo plugin screenshot capture: the dashboard board framed by a synthetic Paseo parent page,
-// and the plugin's first-login card in a light synthetic palette, at 1280x800 and 2x like
+// Paseo plugin screenshot capture: the dashboard board framed by a synthetic Paseo sidebar and header,
+// and the plugin's first-login card in Paseo's light palette, at 1280x800 and 2x like
 // tools/capture-screenshots.mjs. One owned local service on an ephemeral loopback port, a frozen
 // clock, and every off-origin request aborted and fatal. Needs `node tests/browser/provision.mjs`
 // and `pnpm --dir paseo-plugin install --frozen-lockfile` first. Never part of CI: run manually
@@ -42,7 +42,18 @@ const JOBS = [
   },
 ];
 const PARENT = `<!doctype html><title>Synthetic Paseo</title><link rel="icon" href="data:,">
-<iframe src="${DASHBOARD}/" style="border:0;width:100%;height:96vh"></iframe>
+<style>
+body{margin:0;display:flex;height:100vh;font:13px system-ui,-apple-system,"Segoe UI",sans-serif;color:#1a1a1e;background:#ffffff}
+nav{width:220px;flex-shrink:0;box-sizing:border-box;padding:12px;background:#f4f4f5;border-right:1px solid #e4e4e7}
+nav b{display:block;margin:4px 8px 16px;font-size:14px}
+nav p{margin:0 0 4px;padding:6px 8px;border-radius:6px;color:#71717a}
+nav p.on{background:#e4e4e7;color:#1a1a1e}
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+header{height:40px;flex-shrink:0;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid #e4e4e7;font-weight:600}
+iframe{flex:1;width:100%;border:0}
+</style>
+<nav aria-label="Synthetic Paseo sidebar"><b>Paseo</b><p>Synthetic workspace</p><p>Synthetic agent</p><p class="on">Factory</p></nav>
+<main><header>Factory</header><iframe src="${DASHBOARD}/"></iframe></main>
 <script>
 window.received = [];
 const frame = document.querySelector("iframe");
