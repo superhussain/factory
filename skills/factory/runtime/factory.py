@@ -9143,7 +9143,10 @@ def make_job_temp(slug, job_id):
     refused = f"{path} is a link or a file; remove it, then run prompt again"
     if is_link(path) or os.path.lexists(path) and not path.is_dir():
         fail(refused, 6)
-    path.mkdir(mode=0o700, exist_ok=True)
+    try:
+        path.mkdir(mode=0o700, exist_ok=True)
+    except FileExistsError:
+        fail(refused, 6)
     st = os.lstat(path)
     if (stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
             or not stat.S_ISDIR(st.st_mode)):

@@ -255,6 +255,30 @@ class PromptTest(IsolatedTestCase):
                 6, "", f"factory.py: {path} is a link or a file; remove it, then run prompt again\n"))
         self.assertEqual(stat.S_IMODE(real.stat().st_mode), 0o755)
 
+    def test_temp_folder_refuses_file_planted_after_check(self):
+        path = self.tmp / f"factory-sample-{JOB}"
+        expected = (6, "", f"factory.py: {path} is a link or a file; remove it, then run prompt again\n")
+        mkdir = Path.mkdir
+
+        def planting(action):
+            def plant(target, *args, **kwargs):
+                if target == path:
+                    action()
+                return mkdir(target, *args, **kwargs)
+            return plant
+
+        with mock.patch.object(Path, "mkdir", planting(lambda: path.write_text("x\n"))):
+            self.assertEqual(self.prompt("spec"), expected)
+        self.assertEqual(path.read_text(), "x\n")
+        path.unlink()
+        with mock.patch.object(Path, "mkdir", planting(lambda: path.symlink_to(self.home / "missing"))):
+            try:
+                result = self.prompt("spec")
+            except OSError:
+                self.skipTest("symlinks unavailable")
+            self.assertEqual(result, expected)
+        self.assertTrue(path.is_symlink())
+
     @unittest.skipIf(os.name == "nt", "POSIX owners")
     def test_temp_folder_refuses_other_owner(self):
         path = self.tmp / f"factory-sample-{JOB}"
