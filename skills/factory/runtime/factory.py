@@ -6632,6 +6632,7 @@ def prompt_cmd(target, role, *flags):
     stacked = next((r["id"] for r in riders if r.get("stacked") is True), None)
     tree_id = stacked if stacked and (review or role == "approve") else job_id
     skill = Path(HERE).parent
+    temp = make_job_temp(slug, job_id)
     lines = [f"Job id: {job_id}",
              f"Job folder: {folder}",
              f"Worktree: {worktrees / tree_id} (branch factory/{tree_id}, base branch {base})",
@@ -6640,7 +6641,7 @@ def prompt_cmd(target, role, *flags):
              f"Visuals reference: {skill / 'references' / 'visuals.md'}",
              f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}",
              f"Runtime: {skill / 'runtime' / 'factory.py'}",
-             f"Temp folder: {job_temp(job_id)}"]
+             f"Temp folder: {temp}"]
     round_folder = folder / f"round-{options['--round']}" if "--round" in options else None
     if role == "spec":
         feature = job.get("idea") or job.get("title")
@@ -9121,9 +9122,21 @@ def cleanup(target):
     sys.exit(1 if left else 0)
 
 
-def job_temp(job_id):
+def job_temp(slug, job_id):
     """The per-job folder outside the worktree that capture and probe tools on this host write to."""
-    return Path(tempfile.gettempdir()) / f"factory-{job_id}"
+    return Path(tempfile.gettempdir()) / f"factory-{slug}-{job_id}"
+
+
+def make_job_temp(slug, job_id):
+    """Create the job's temp folder private to this account, refusing a name someone else holds."""
+    path = job_temp(slug, job_id)
+    if is_link(path) or os.path.lexists(path) and not path.is_dir():
+        fail(f"{path} is a link or a file; remove it, then run prompt again", 6)
+    path.mkdir(mode=0o700, exist_ok=True)
+    if hasattr(os, "getuid") and path.stat().st_uid != os.getuid():
+        fail(f"{path} belongs to another account; remove it, then run prompt again", 6)
+    os.chmod(path, 0o700)
+    return path
 
 
 USAGE_CLEAN = "usage: clean <project-slug>/<job-id> node_modules | scratch <name> | temp"
@@ -9137,7 +9150,7 @@ def clean_cmd(target, what, *rest):
             or what == "temp" and not rest):
         fail(USAGE_CLEAN, 2)
     if what == "temp":
-        path = job_temp(job_id)
+        path = job_temp(slug, job_id)
         removed, left = [], []
         if is_link(path):
             left.append(f"{path}: a symlink or junction, left in place")
