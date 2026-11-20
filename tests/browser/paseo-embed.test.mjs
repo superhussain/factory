@@ -6,6 +6,7 @@
 // A listed parent gets the frame's hash on ready and on every change.
 // A listed parent also gets the Inbox count, which follows the frame's project filter.
 // The config also lists paseo://app, the desktop origin; Chrome here cannot load that scheme, so this proves the extra source leaves https framing intact.
+// A walkthrough renders under a listed parent, because its frame-ancestors lists the same embed origins.
 // The plugin's warm frame keeper parks a frame with moveBefore and brings it back with the same document.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -40,6 +41,13 @@ const ASK_OTHER = {
   stage: "needs-human",
   updated: "2026-01-01T00:00:00Z",
 };
+const WALK_JOB = {
+  id: "045-sample-walkthrough",
+  project: "sample",
+  title: "Synthetic walkthrough job",
+  stage: "build",
+  updated: "2026-01-01T00:00:00Z",
+};
 const PARENT = `<!doctype html><title>Synthetic Paseo</title>
 <iframe src="${DASHBOARD}/#042-sample-links" style="border:0;width:100%;height:96vh"></iframe>
 <script>
@@ -62,6 +70,9 @@ function proxy(origin, parent) {
     if (accessExpired && url.pathname === "/board.json")
       return request.respond({ status: 302, headers: { Location: ACCESS_LOGIN }, body: "" });
     const { host: _host, ...headers } = request.headers();
+    // Puppeteer's intercepted headers omit Sec-Fetch-Dest, and the Worker serves walkthroughs only to frame loads.
+    if (request.isNavigationRequest() && request.frame()?.parentFrame())
+      headers["sec-fetch-dest"] = "iframe";
     const response = await fetch(origin + url.pathname + url.search, {
       method: request.method(),
       headers,
@@ -207,7 +218,22 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       "other",
       "---\nrepo: example/other\nbase: main\ntitle: Synthetic other\n---\n",
     );
-    await seedBoard(origin, [JOB, ASK_SAMPLE, ASK_OTHER]);
+    await seedBoard(origin, [JOB, ASK_SAMPLE, ASK_OTHER, WALK_JOB]);
+    for (const [path, body, type] of [
+      ["045-sample-walkthrough/spec.md", "# Spec\n\nSynthetic spec.\n", "text/markdown"],
+      [
+        "045-sample-walkthrough/walkthrough.html",
+        '<!doctype html><title>Synthetic walkthrough</title><p id="synthetic-walk">Synthetic walkthrough renders</p>',
+        "text/html",
+      ],
+    ]) {
+      const put = await fetch(origin + "/api/jobs/sample/" + path, {
+        method: "PUT",
+        headers: { "Content-Type": type },
+        body,
+      });
+      assert.equal(put.status, 200, path);
+    }
 
     const page = await framedPage(browser, origin, LISTED);
     await t.test("listed origin ready", async () => {
@@ -373,6 +399,37 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
         await page.evaluate(() => window.received.some((m) => m?.type === "factory-open-url")),
         false,
       );
+    });
+
+    await t.test("walkthrough renders under a listed parent", async () => {
+      const walk = await framedPage(browser, origin, LISTED);
+      try {
+        await walk.waitForFunction(
+          () => window.received.some((m) => m?.type === "factory-embed-ready"),
+          { timeout: 5000, polling: 50 },
+        );
+        await childFrame(walk).evaluate(() => {
+          location.hash = "#045-sample-walkthrough/spec";
+        });
+        const show = await childFrame(walk).waitForSelector(
+          '#d-doc .html-stepper-bar button[aria-label="Show walkthrough"]',
+        );
+        await show.click();
+        let text = null;
+        const deadline = Date.now() + 10000;
+        while (text === null && Date.now() < deadline) {
+          for (const f of walk.frames()) {
+            if (f.detached || !f.url().split("#")[0].endsWith("/walkthrough.html")) continue;
+            text = await f.$eval("#synthetic-walk", (p) => p.textContent).catch(() => null);
+          }
+          if (text === null) await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        if (CAPTURE_DIR)
+          await walk.screenshot({ path: join(CAPTURE_DIR, "paseo-walkthrough-1280.png") });
+        assert.equal(text, "Synthetic walkthrough renders");
+      } finally {
+        await walk.browserContext().close();
+      }
     });
 
     await t.test("unlisted origin", async () => {
