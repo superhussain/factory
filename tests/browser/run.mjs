@@ -1181,6 +1181,20 @@ async function capture(outdir, referencePath) {
       });
       await new Promise((resolve) => setTimeout(resolve, 1500));
     });
+    await view("board-saved-deeplink-back-1440", 1440, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        const fetchNow = window.fetch;
+        window.fetch = (url, options) =>
+          /api\/board(\/archive|$)/.test(new URL(url, location.href).pathname)
+            ? new Promise(() => {})
+            : fetchNow(url, options);
+        boardFromCache = true;
+        location.hash = "#500-synthetic-merged";
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await page.evaluate(() => history.back());
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
     // The merged column at 160px with a production-sized total. The reference page has no
     // slim counts, so its before shot keeps the fixture's own total.
     const narrowThousands = async (page) => {
