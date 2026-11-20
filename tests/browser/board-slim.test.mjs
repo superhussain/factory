@@ -301,6 +301,46 @@ test("slim board read", { timeout: 240000 }, async (t) => {
       },
     );
 
+    await t.test("a network read inside the toast's 100 ms delay leaves it hidden", async () => {
+      const page = await openSaved(browser, origin);
+      await page.evaluate(() => {
+        // Stretch the toast's 100 ms text delay so the drawer surely opens inside it.
+        const setTimeoutNow = window.setTimeout;
+        window.setTimeout = (fn, ms, ...rest) => setTimeoutNow(fn, ms === 100 ? 1500 : ms, ...rest);
+        // Runs after the dashboard's listener, so the wait toast is pending when the read lands.
+        addEventListener("hashchange", () => window.releaseSlim(), { once: true });
+        location.hash = "#500-synthetic-merged";
+      });
+      await page.waitForFunction(
+        () => document.getElementById("d-title").textContent === "Synthetic merged 500",
+        wait,
+      );
+      assert.equal(await text(page, "#board-status"), "");
+      await new Promise((resolve) => setTimeout(resolve, 1800));
+      assert.equal(await page.$eval("#board-status", (el) => el.hidden), true);
+      await page.close();
+    });
+
+    await t.test("a link to a loaded job drops the earlier wait toast", async () => {
+      const page = await openSaved(browser, origin);
+      await page.evaluate(() => {
+        location.hash = "#500-synthetic-merged";
+      });
+      await page.waitForFunction(
+        () => document.getElementById("board-status").textContent !== "",
+        wait,
+      );
+      await page.evaluate(() => {
+        location.hash = "#600-synthetic-build";
+      });
+      await page.waitForFunction(
+        () => document.getElementById("d-title").textContent === "Synthetic build, renamed",
+        wait,
+      );
+      assert.equal(await page.$eval("#board-status", (el) => el.hidden), true);
+      await page.close();
+    });
+
     await t.test("a 160px column with a 4-digit total keeps the stage name", async () => {
       const { page, errors } = await openPage(browser, origin);
       await clickNow(page, '.column-toggle[data-stage="merged"]');
