@@ -131,12 +131,14 @@ const HTML_CSP =
   "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; " +
   "style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; " +
   "frame-ancestors 'self'";
+// A browser checks frame-ancestors against every ancestor, so a walkthrough inside a dashboard
+// that Paseo frames lists the same embed origins the dashboard does.
 // no-transform stops Cloudflare's edge rewriting the HTML, which would drop the ETag a device pull needs.
-const HTML_HEADERS = {
-  "Content-Security-Policy": HTML_CSP,
+const htmlHeaders = (embedOrigins) => ({
+  "Content-Security-Policy": HTML_CSP + embedOrigins.map((origin) => " " + origin).join(""),
   "Referrer-Policy": "no-referrer",
   "Cache-Control": "no-store, no-transform",
-};
+});
 // A browser gets walkthrough.html only as a frame load. Opened as its own tab, a sandboxed
 // page could still navigate itself off-site, and only the dashboard's frame-src stops that.
 // A device pull sends no Fetch Metadata and signs in as a service.
@@ -405,7 +407,7 @@ function frameOnly(key) {
 function getJobFile(request, env, principal, key) {
   if (key.endsWith("walkthrough.html"))
     return frameLoad(request, principal)
-      ? getFile(env, key, "text/html", HTML_HEADERS)
+      ? getFile(env, key, "text/html", htmlHeaders(env.config.embed_origins))
       : frameOnly(key);
   const type = imageType(key);
   return type ? getFile(env, key, type, IMAGE_HEADERS) : getFile(env, key, "text/markdown");
