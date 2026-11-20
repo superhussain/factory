@@ -993,14 +993,23 @@ async function capture(outdir, referencePath) {
         document.getElementById("d-doc").scrollTop = 300;
       });
     };
+    // A phone drawer on its build tab. It skips openDrawer's wait for the spec tab's diagram, which the build tab never shows and which a loaded host can take past 30 s to draw.
+    const openBuildTab = async (page) => {
+      await clickNow(page, '.card[data-id="001-capture"]');
+      await page.waitForSelector('#d-tabs .tab[data-name="build.md"]');
+      await page.click('.tab[data-name="build.md"]');
+      await named(
+        "build tab",
+        page.waitForFunction(
+          () => document.querySelector("#d-doc h1")?.textContent === "Synthetic build",
+          { polling: 50, timeout: 30000 },
+        ),
+      );
+    };
     // A phone drawer after a 150 px touch drag that starts on the job details.
     // The build tab is long enough for the page to scroll.
     const openMetaDragged = async (page, side) => {
-      await openDrawer(page, side);
-      await page.click('.tab[data-name="build.md"]');
-      await page.waitForFunction(
-        () => document.querySelector("#d-doc h1")?.textContent === "Synthetic build",
-      );
+      await openBuildTab(page);
       const m = await page.$eval("#d-meta", (el) => {
         const r = el.getBoundingClientRect();
         return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
@@ -1018,11 +1027,7 @@ async function capture(outdir, referencePath) {
     // A phone drawer after a flick on the job details: three 50 px moves 40 ms apart, then a lift.
     // Before, the page stops at 150. After, it glides on and settles further down.
     const openMetaFlicked = async (page, side) => {
-      await openDrawer(page, side);
-      await page.click('.tab[data-name="build.md"]');
-      await page.waitForFunction(
-        () => document.querySelector("#d-doc h1")?.textContent === "Synthetic build",
-      );
+      await openBuildTab(page);
       const m = await page.$eval("#d-meta", (el) => {
         const r = el.getBoundingClientRect();
         return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
@@ -1039,7 +1044,13 @@ async function capture(outdir, referencePath) {
       for (let k = 1; k <= 3; k++) await touch("touchMove", m.y - 50 * k, 40 * k);
       await touch("touchEnd", 0, 120);
       await cdp.detach();
-      await page.waitForFunction(() => typeof headGlide === "undefined" || headGlide === null);
+      await named(
+        "glide end",
+        page.waitForFunction(() => typeof headGlide === "undefined" || headGlide === null, {
+          polling: 50,
+          timeout: 30000,
+        }),
+      );
       await page.evaluate(
         () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
       );
