@@ -90,9 +90,10 @@
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
                                             branch without forcing, print what was left as JSON
-  factory.py clean <project-slug>/<job-id> node_modules | scratch <name>
+  factory.py clean <project-slug>/<job-id> node_modules | scratch <name> | temp
                                             remove the job worktree's git-ignored node_modules folders, or
-                                            its .context/<name> scratch folder, never through a link; print
+                                            its .context/<name> scratch folder, or the job's temp folder
+                                            under the system temp root, never through a link; print
                                             what was removed and left as JSON
   factory.py archive-workspace <project-slug>/<job-id> [--check]
                                             archive this session's Paseo worktree workspace and agent once
@@ -9119,16 +9120,37 @@ def cleanup(target):
     sys.exit(1 if left else 0)
 
 
-USAGE_CLEAN = "usage: clean <project-slug>/<job-id> node_modules | scratch <name>"
+def job_temp(job_id):
+    """The per-job folder outside the worktree that capture and probe tools on this host write to."""
+    return Path(tempfile.gettempdir()) / f"factory-{job_id}"
+
+
+USAGE_CLEAN = "usage: clean <project-slug>/<job-id> node_modules | scratch <name> | temp"
 SCRATCH_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 
 
 def clean_cmd(target, what, *rest):
     home, slug, job_id = r2_target(target, True)
     if not (what == "node_modules" and not rest
-            or what == "scratch" and len(rest) == 1 and SCRATCH_NAME.fullmatch(rest[0])):
+            or what == "scratch" and len(rest) == 1 and SCRATCH_NAME.fullmatch(rest[0])
+            or what == "temp" and not rest):
         fail(USAGE_CLEAN, 2)
-    wt = home / "worktrees" / slug / job_id
+    if what == "temp":
+        path = job_temp(job_id)
+        removed, left = [], []
+        if is_link(path):
+            left.append(f"{path}: a symlink or junction, left in place")
+        elif os.path.lexists(path) and not path.is_dir():
+            left.append(f"{path}: not a folder, left in place")
+        elif path.is_dir():
+            try:
+                shutil.rmtree(path)
+                removed.append(str(path))
+            except OSError as exc:
+                left.append(f"{path}: {exc.strerror}")
+        print(json.dumps({"removed": removed, "left": left}, indent=2))
+        sys.exit(1 if left else 0)
+    wt =home / "worktrees" / slug / job_id
     for path in (home / "worktrees", wt.parent, wt):
         if is_link(path):
             fail(f"{path} is a symlink or junction; nothing was removed", 6)
