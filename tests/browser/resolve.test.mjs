@@ -323,6 +323,10 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
           ...wait,
           timeout: 5000,
         });
+        await page.waitForFunction(() => document.activeElement.id === "d-actions", {
+          ...wait,
+          timeout: 5000,
+        });
         assert.equal((await boardJob(origin, "064-sample-human")).resolve.note, NOTE);
         assert.deepEqual(errors, []);
       });
