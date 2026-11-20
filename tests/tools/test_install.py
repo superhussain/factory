@@ -65,20 +65,45 @@ class InstallTest(IsolatedTestCase):
         spec.loader.exec_module(runtime)
         self.assertEqual(runtime.bundle_stamp(), json.loads(stamp))
 
-    def test_refusal_and_replacement_retain_unique_backups(self):
+    def test_refusal_keeps_install_and_replacement_removes_its_backup(self):
+        older = self.destination / "factory.backup-older"
+        older.mkdir(parents=True)
+        (older / "keep").write_text("keep")
         target, _ = self.install()
         (target / "SKILL.md").write_text("locally edited")
         old = snapshot(target)
         self.refused(self.install)
         self.assertEqual(snapshot(target), old)
         target, lines = self.install(replace=True)
-        self.assertEqual(len(lines), 2)
-        first = Path(lines[1])
-        self.assertEqual(snapshot(first), old)
+        backup = Path(lines[1][len("removed "):])
+        self.assertEqual(lines, [str(target), "removed " + str(backup)])
+        self.assertTrue(backup.name.startswith("factory.backup-"))
+        self.assertFalse(os.path.lexists(backup))
         (target / "SKILL.md").write_text("second edit")
-        _, next_lines = self.install(replace=True)
-        self.assertNotEqual(lines[1], next_lines[1])
-        self.assertEqual(snapshot(first), old)
+        self.install(replace=True)
+        self.assertEqual(list(self.destination.glob("factory.backup-*")), [older])
+        self.assertEqual((older / "keep").read_text(), "keep")
+
+    def test_backup_removal_failure_keeps_install_and_warns(self):
+        target, _ = self.install()
+        (target / "SKILL.md").write_text("old contents")
+        rmtree = shutil.rmtree
+        def fail_backup(path, *args, **kwargs):
+            if Path(path).name.startswith("factory.backup-"):
+                raise OSError("locked")
+            return rmtree(path, *args, **kwargs)
+        with patch.object(self.installer.shutil, "rmtree", side_effect=fail_backup), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            result, lines = self.install(replace=True)
+        self.assertEqual(result, target)
+        self.assertEqual(lines, [str(target)])
+        self.assertIn("could not remove", err.getvalue())
+        backups = list(self.destination.glob("factory.backup-*"))
+        self.assertEqual(len(backups), 1)
+        self.assertIn("install.py: could not remove " + str(backups[0]) + "; remove it by hand", err.getvalue())
+        self.assertEqual((backups[0] / "SKILL.md").read_text(), "old contents")
+        self.assertNotEqual((target / "SKILL.md").read_text(), "old contents")
+        self.assertFalse((self.destination / ".factory-install.lock").exists())
 
     def test_exclusive_lock_is_never_broken(self):
         self.destination.mkdir()
