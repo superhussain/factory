@@ -49,13 +49,17 @@ const withReceipt = (receipt) => ({
   tracer: { scope: "approved", ...(receipt && { receipt }) },
 });
 
-function setup(row = ROW, key = publicKey) {
+const keptRefusal = (note) =>
+  `a board write from a device cannot move "042-sample-export" into build while it keeps the note "${note}": only a person starts an approved spec again. Nothing was written.`;
+
+function setup(row = ROW, { seed = true, key = publicKey } = {}) {
   const bucket = memoryBucket();
-  bucket.objects.set("board.json", {
-    key: "board.json",
-    bytes: Buffer.from(JSON.stringify({ updated: "2026-11-20T08:00:00Z", jobs: [row] })),
-    httpEtag: '"board.json-seed"',
-  });
+  if (seed)
+    bucket.objects.set("board.json", {
+      key: "board.json",
+      bytes: Buffer.from(JSON.stringify({ updated: "2026-11-20T08:00:00Z", jobs: [row] })),
+      httpEtag: '"board.json-seed"',
+    });
   const BoardEvents = {
     idFromName: (name) => ({ name }),
     get: () => ({ fetch: async () => new Response(null, { status: 204 }) }),
@@ -75,6 +79,18 @@ function setup(row = ROW, key = publicKey) {
       device,
       ctx,
     );
+  const create = (next) =>
+    serveFactory(
+      new Request("http://local/api/board", {
+        method: "PUT",
+        body: JSON.stringify({ updated: "2026-11-20T09:00:00Z", jobs: [next] }),
+        headers: { "If-None-Match": "*" },
+        duplex: "half",
+      }),
+      env,
+      device,
+      ctx,
+    );
   const patch = (next, principal) =>
     serveFactory(
       new Request("http://local/api/board", {
@@ -86,7 +102,7 @@ function setup(row = ROW, key = publicKey) {
       principal,
       ctx,
     );
-  return { etag, put, patch };
+  return { bucket, etag, put, create, patch };
 }
 
 async function refused(s, write, copy) {
@@ -135,7 +151,7 @@ test("a device PUT cannot edit a receipt after signing", async () => {
 });
 
 test("a device PUT cannot set the Tracer note when no receipt key is configured", async () => {
-  const s = setup(ROW, null);
+  const s = setup(ROW, { key: null });
   await refused(s, async () => s.put(withReceipt(await signed())), receiptRefusal);
 });
 
@@ -153,5 +169,112 @@ test("a device PUT keeps a stored dashboard note", async () => {
   const s = setup(approved(DASHBOARD));
   const claim = { device: "host-a" };
   const response = await s.put({ ...approved(DASHBOARD), claim });
+  assert.equal(response.status, 200);
+});
+
+// Only a signed-in person sets resolve, the dashboard's Rework or Approve as is on a held job.
+// A device may delete it, which only cancels the request.
+const HELD = {
+  id: "064-sample-human",
+  project: "sample",
+  stage: "needs-human",
+  note: "review panel: round 2 findings need a person",
+  needs: "decide on the round-2 findings",
+};
+const REWORK = { action: "rework", note: "Keep the CSV header order.", at: "2026-11-20T09:00:00Z" };
+const resolved = (resolve) => {
+  const { needs: _needs, ...row } = HELD;
+  return { ...row, note: "rework requested on the dashboard", resolve };
+};
+const deviceResolveRefusal =
+  'a board write from a device cannot set resolve on "064-sample-human": only a signed-in person asks for rework or approval on the dashboard. Nothing was written.';
+const shapeRefusal =
+  'resolve on "064-sample-human" must be {action: "rework", note, at} or {action: "approve", at}. Nothing was written.';
+
+test("a device PUT cannot set resolve", async () => {
+  const s = setup(HELD);
+  await refused(s, () => s.put(resolved(REWORK)), deviceResolveRefusal);
+});
+
+test("a device PATCH cannot set resolve", async () => {
+  const s = setup(HELD);
+  await refused(s, () => s.patch(resolved(REWORK), device), deviceResolveRefusal);
+});
+
+test("a person's PATCH sets rework and approve", async () => {
+  assert.equal((await setup(HELD).patch(resolved(REWORK), person)).status, 200);
+  const approve = { action: "approve", at: "2026-11-20T09:00:00Z" };
+  assert.equal((await setup(HELD).patch(resolved(approve), person)).status, 200);
+});
+
+test("a person's PATCH cannot set a malformed resolve", async () => {
+  for (const bad of [
+    { action: "rework", note: "   ", at: "2026-11-20T09:00:00Z" },
+    { action: "rework", note: "x".repeat(2001), at: "2026-11-20T09:00:00Z" },
+    { action: "rework", at: "2026-11-20T09:00:00Z" },
+    { action: "approve", note: "extra", at: "2026-11-20T09:00:00Z" },
+    { action: "approve" },
+    { action: "ship", at: "2026-11-20T09:00:00Z" },
+    "rework",
+    null,
+  ]) {
+    const s = setup(HELD);
+    await refused(s, () => s.patch(resolved(bad), person), shapeRefusal);
+  }
+});
+
+test("a person and a device delete resolve", async () => {
+  const stored = resolved(REWORK);
+  const { resolve: _resolve, ...cleared } = stored;
+  assert.equal((await setup(stored).patch(cleared, person)).status, 200);
+  assert.equal((await setup(stored).patch(cleared, device)).status, 200);
+  assert.equal((await setup(stored).put(cleared)).status, 200);
+});
+
+test("a device PUT keeps a stored resolve", async () => {
+  const stored = resolved(REWORK);
+  const response = await setup(stored).put({ ...stored, claim: { device: "host-a" } });
+  assert.equal(response.status, 200);
+});
+
+test("a device create on an absent board runs the approval check", async () => {
+  const s = setup(ROW, { seed: false });
+  const response = await s.create(approved(DASHBOARD));
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), dashboardRefusal);
+  assert.equal(s.bucket.objects.has("board.json"), false);
+});
+
+test("a device create on an existing board gets 412", async () => {
+  const s = setup();
+  const before = s.etag();
+  const response = await s.create(approved(DASHBOARD));
+  assert.equal(response.status, 412);
+  assert.equal(s.etag(), before);
+});
+
+test("a device PUT cannot move a kept dashboard note into build", async () => {
+  const s = setup({ ...ROW, note: DASHBOARD });
+  await refused(s, () => s.put(approved(DASHBOARD)), keptRefusal(DASHBOARD));
+});
+
+test("a device PATCH cannot move a kept dashboard note into build", async () => {
+  const s = setup({ ...ROW, note: DASHBOARD });
+  await refused(s, () => s.patch(approved(DASHBOARD), device), keptRefusal(DASHBOARD));
+});
+
+test("a device PUT cannot move a kept Tracer note into build", async () => {
+  const s = setup({ ...ROW, note: TRACER });
+  await refused(s, () => s.put(approved(TRACER)), keptRefusal(TRACER));
+});
+
+test("a person's PATCH moves a kept dashboard note into build", async () => {
+  const response = await setup({ ...ROW, note: DASHBOARD }).patch(approved(DASHBOARD), person);
+  assert.equal(response.status, 200);
+});
+
+test("a device PUT moves a kept dashboard note out of build", async () => {
+  const s = setup(approved(DASHBOARD));
+  const response = await s.put({ ...ROW, note: DASHBOARD });
   assert.equal(response.status, 200);
 });

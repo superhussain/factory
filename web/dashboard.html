@@ -603,7 +603,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   body.compact .card-wrap > .card.archived ~ .pr-link { right: 8px; }
   .detail-head .links { flex: none; display: flex; gap: 16px; align-items: center; height: var(--icon-size); }
   .detail-head .btn { flex: none; }
-  .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar { height: var(--icon-size); }
+  .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar { height: var(--icon-size); }
   .job-actions { position: relative; flex: none; }
   .job-actions-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; min-width: 200px; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .job-actions-menu[hidden] { display: none; }
@@ -748,7 +748,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head > #d-agents .table-wrap { max-height: none; }
     .detail-head .pr-link { margin-top: 8px; }
     /* The bar buttons get their own row under the links, so the title keeps the width beside the icons. */
-    .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar { order: 3; margin-top: 8px; }
+    .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar { order: 3; margin-top: 8px; }
     .detail-head .job-actions { position: static; }
     .detail-head .job-actions-menu { top: calc(100% + 4px); right: 16px; }
     .doc { padding: 16px 16px 40px; }
@@ -757,7 +757,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
     #d-title, #d-star, #d-actions, .detail-head .close { position: relative; z-index: 3; }
     .detail-head .close { background: var(--panel); }
-    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
+    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
@@ -836,11 +836,15 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     </div>
     <button class="btn primary" id="d-approve-spec-bar" title="Start the build on this spec" hidden>Approve spec</button>
     <button class="btn" id="d-babysit-bar" title="Work this PR as the Babysit note asks, or hand it back" hidden>Babysit PR</button>
+    <button class="btn" id="d-rework-bar" title="Send this job back to the builder with a note" hidden>Rework…</button>
+    <button class="btn" id="d-approve-as-is-bar" title="Ship and merge this PR without another review round" hidden>Approve as is</button>
     <button class="btn icon" id="d-star" aria-label="Star job" title="Star job" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg></button>
     <div class="job-actions" id="d-actions-wrap">
       <button class="btn icon" id="d-actions" aria-label="Job actions" title="Job actions (A or .)" aria-keyshortcuts="a ." aria-haspopup="menu" aria-expanded="false" aria-controls="d-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>
       <div class="job-actions-menu" id="d-actions-menu" role="menu" aria-label="Job actions" hidden>
         <button class="btn" id="d-approve-spec" role="menuitem" tabindex="-1" hidden>Approve spec</button>
+        <button class="btn" id="d-rework" role="menuitem" tabindex="-1" hidden>Rework…</button>
+        <button class="btn" id="d-approve-as-is" role="menuitem" tabindex="-1" hidden>Approve as is</button>
         <button class="btn" id="d-edit-idea" role="menuitem" tabindex="-1" hidden>Edit idea</button>
         <button class="btn" id="d-discard" role="menuitem" tabindex="-1" hidden>Discard idea</button>
         <button class="btn" id="d-follow-tracer" role="menuitem" tabindex="-1" hidden>Follow in Tracer</button>
@@ -866,6 +870,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <p class="err" id="d-prioritize-err" role="alert" hidden></p>
   <p class="err" id="d-approve-spec-err" role="alert" hidden></p>
   <p class="err" id="d-babysit-err" role="alert" hidden></p>
+  <p class="err" id="d-resolve-err" role="alert" hidden></p>
   <p class="copy-status" id="d-copy-status" role="status"></p>
   <p class="err" id="d-pause-err" role="alert" hidden></p>
   <p class="err" id="d-rerun-err" role="alert" hidden></p>
@@ -1360,6 +1365,15 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <label>Reason<input type="text" id="close-job-reason" maxlength="200" autocomplete="off" aria-describedby="close-job-help"></label>
     <p class="err" id="close-job-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="close-job-cancel">Cancel</button><button class="btn primary" type="submit" id="close-job-save">Close job</button></div>
+  </form>
+</dialog>
+<dialog id="rework-dlg" aria-labelledby="rework-h">
+  <form id="rework-form">
+    <h2 id="rework-h">Rework job</h2>
+    <p class="muted" id="rework-help"></p>
+    <label>Note<textarea id="rework-note" maxlength="2000" placeholder="What the builder should change." aria-describedby="rework-help"></textarea></label>
+    <p class="err" id="rework-err" role="alert" hidden></p>
+    <div class="actions"><button class="btn" type="button" id="rework-cancel">Cancel</button><button class="btn primary" type="submit" id="rework-save">Start rework</button></div>
   </form>
 </dialog>
 <dialog id="job-picker" aria-labelledby="job-picker-heading">
@@ -3865,7 +3879,7 @@ function renderInboxPage() {
     } else {
       const pr = prLink(j);
       title = j.title || j.id;
-      meta = [projectName(j), j.id].concat(asks(j.needs) ? j.needs : []);
+      meta = [projectName(j), j.id].concat(canApproveSpec(j) ? 'Read the spec, then press Approve spec to start the build.' : asks(j.needs) ? j.needs : []);
       const open = inboxAnswer?.id === j.id;
       actions = kind === 'ask' && j.needs.includes('#' + j.id + '/needs')
         ? '<button type="button" class="btn primary" data-inbox-answer="' + esc(j.id) + '" aria-expanded="' + open + '"' +
@@ -3874,6 +3888,8 @@ function renderInboxPage() {
           (canBabysit(j) ? '<button type="button" class="btn primary" data-inbox-babysit="' + esc(j.id) + '">Babysit PR #' + esc(pr.n) + '</button>' : '') +
           (pr ? '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>' : '') +
           (kind === 'spec' && tracerLink(j) ? '<a class="btn" href="' + esc(tracerLink(j)) + '" target="_blank" rel="noopener noreferrer">Open in Tracer</a>' : '') +
+          (canResolve(j) ? '<button type="button" class="btn" data-inbox-rework="' + esc(j.id) + '">Rework…</button>' +
+            '<button type="button" class="btn" data-inbox-approve-as-is="' + esc(j.id) + '">Approve as is</button>' : '') +
           link(href, kind === 'spec' ? 'Open spec' : 'Open job');
     }
     return '<li class="inbox-item"' + (i === current ? ' aria-current="true"' : '') + '><span class="inbox-rank">' + (i + 1) + '</span>' +
@@ -4041,11 +4057,18 @@ $('inbox-list').addEventListener('click', (e) => {
       openInboxAnswer(jobs.find((x) => x.id === id));
     }
   }
-  if (e.target.closest('[data-inbox-approve-spec], [data-inbox-babysit], [data-inbox-decide]')) inboxFocusRow = [...$('inbox-list').children].indexOf(e.target.closest('li'));
+  if (e.target.closest('[data-inbox-approve-spec], [data-inbox-babysit], [data-inbox-rework], [data-inbox-approve-as-is], [data-inbox-decide]')) inboxFocusRow = [...$('inbox-list').children].indexOf(e.target.closest('li'));
   const approve = e.target.closest('[data-inbox-approve-spec]');
   if (approve) {
     approveSpecAction({ id: approve.dataset.inboxApproveSpec, button: approve, report: inboxReport, live: () => inboxShown() });
     if (!approve.disabled) inboxFocusRow = -1;
+  }
+  const rework = e.target.closest('[data-inbox-rework]');
+  if (rework) openReworkDialog({ id: rework.dataset.inboxRework, opener: () => rework });
+  const approveAsIs = e.target.closest('[data-inbox-approve-as-is]');
+  if (approveAsIs) {
+    approveAsIsAction({ id: approveAsIs.dataset.inboxApproveAsIs, button: approveAsIs, report: inboxReport, live: () => inboxShown() });
+    if (!approveAsIs.disabled) inboxFocusRow = -1;
   }
   const babysit = e.target.closest('[data-inbox-babysit]');
   if (babysit) {
@@ -5670,6 +5693,8 @@ async function openJob(id) {
   syncStarButton(id);
   $('d-approve-spec-bar').hidden = archived || !shown.includes('d-approve-spec');
   $('d-babysit-bar').hidden = archived || !shown.includes('d-babysit');
+  $('d-rework-bar').hidden = archived || !shown.includes('d-rework');
+  $('d-approve-as-is-bar').hidden = archived || !shown.includes('d-approve-as-is');
   if (archived) for (const b of $('d-actions-menu').querySelectorAll('button')) b.hidden = b.id !== 'd-copy-link';
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
   if (first) {
@@ -5680,6 +5705,7 @@ async function openJob(id) {
     $('d-prioritize-err').hidden = true;
     $('d-approve-spec-err').hidden = true;
     $('d-babysit-err').hidden = true;
+    $('d-resolve-err').hidden = true;
     $('d-pause-err').hidden = true;
     $('d-rerun-err').hidden = true;
     $('d-rerun-status').textContent = '';
@@ -6288,7 +6314,7 @@ let swipeSettling = false;
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
 // so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
 // On an idea tab the gallery and file list move into the top of the page, so they scroll with it.
-const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
+const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
 let headCollapse = 0;
 let headShift = 0;
 let headStop = null;
@@ -7679,13 +7705,15 @@ async function openIdeaEditor(ctx) {
   }
 }
 
-const JOB_ACTIONS = ['d-approve-spec', 'd-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-unbatch', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
+const JOB_ACTIONS = ['d-approve-spec', 'd-rework', 'd-approve-as-is', 'd-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-unbatch', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
 
 // The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
 function jobActionsFor(j) {
   const rider = !!leadOf(j);
   const shown = {
     'd-approve-spec': canApproveSpec(j),
+    'd-rework': canResolve(j),
+    'd-approve-as-is': canResolve(j),
     'd-edit-idea': canEditIdea(j),
     'd-discard': j.stage === 'idea',
     'd-follow-tracer': !tracerOff && !!j.project && (TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) && j.tracer?.follow !== true && !tracerLink(j),
@@ -7709,7 +7737,7 @@ function jobActionsFor(j) {
 // A runner's context. The drawer writes into its own lines and drops results once another job opens.
 function drawerAction(id) {
   const version = drawerVersion;
-  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-run-batch': 'd-prioritize-err', 'd-start-alone': 'd-prioritize-err', 'd-unbatch': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-approve-spec': 'd-approve-spec-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
+  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-run-batch': 'd-prioritize-err', 'd-start-alone': 'd-prioritize-err', 'd-unbatch': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-approve-spec': 'd-approve-spec-err', 'd-rework': 'd-resolve-err', 'd-approve-as-is': 'd-resolve-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
   return {
     id: openId,
     card: false,
@@ -7966,6 +7994,25 @@ function approveSpecJob(board, id, now) {
   return '';
 }
 
+// A job held for a person after a round cap or agent failure. Rework or Approve as is sets resolve,
+// and factory.py pickup launches /factory rework or /factory approve with it.
+function canResolve(j) {
+  return !!j.project && j.stage === 'needs-human' && inboxKind(j) === 'human' && !j.resolve && !leadOf(j) && !j.paused && !j.close;
+}
+
+// Returns an error message, or '' once the board is changed.
+function resolveJob(board, id, resolve, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (!canResolve(j)) return 'This job can no longer be reworked or approved here.';
+  j.resolve = { ...resolve, at: now };
+  j.note = resolve.action === 'rework' ? 'rework requested on the dashboard' : 'approval requested on the dashboard';
+  delete j.needs;
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
 // A pr-open job with a PR a person can hand to a /factory babysit session, which factory.py pickup launches.
 function canBabysit(j) {
   return !!j.project && j.stage === 'pr-open' && !!prLink(j) && !leadOf(j) && !j.babysit && !j.paused && !j.close;
@@ -8173,6 +8220,59 @@ $('move-host-form').addEventListener('submit', async (e) => {
   }
   closeMoveHost();
   await poll();
+});
+
+let reworkDialog = null;
+
+function openReworkDialog(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
+  if (reworkDialog || !j || !canResolve(j)) return;
+  reworkDialog = { id: j.id, opener: ctx.opener };
+  $('rework-help').textContent = j.id + ' is waiting on you. Pickup starts /factory rework with your note, and the builder runs a new round on it.';
+  $('rework-note').value = '';
+  $('rework-err').textContent = '';
+  $('rework-err').hidden = true;
+  $('rework-save').disabled = false;
+  $('rework-dlg').showModal();
+  $('rework-note').focus();
+}
+
+function dismissReworkDialog() {
+  if (!reworkDialog) return;
+  const opener = reworkDialog.opener;
+  reworkDialog = null;
+  $('rework-dlg').close();
+  focusOpener(opener);
+}
+
+$('rework-cancel').addEventListener('click', dismissReworkDialog);
+$('rework-dlg').addEventListener('cancel', (e) => { e.preventDefault(); dismissReworkDialog(); });
+$('rework-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!reworkDialog || $('rework-save').disabled) return;
+  const { id, opener } = reworkDialog;
+  const note = $('rework-note').value.trim();
+  if (!note) {
+    $('rework-err').textContent = 'Write what the builder should change.';
+    $('rework-err').hidden = false;
+    return;
+  }
+  $('rework-save').disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = resolveJob(board, id, { action: 'rework', note }, isoNow());
+      if (message) throw new Error(message);
+    });
+  } catch (x) {
+    $('rework-err').textContent = failText(x);
+    $('rework-err').hidden = false;
+    $('rework-save').disabled = false;
+    return;
+  }
+  dismissReworkDialog();
+  await poll();
+  // The poll hides the bar button that had focus; its opener then names the actions menu button.
+  if (document.activeElement === document.body) focusOpener(opener);
 });
 
 let closeDialog = null;
@@ -8397,6 +8497,24 @@ async function approveSpecAction(ctx) {
   try {
     await casBoard((board) => {
       const message = approveSpecJob(board, ctx.id, isoNow());
+      if (message) throw new Error(message);
+    });
+    await poll();
+  } catch (x) {
+    if (ctx.live()) ctx.report(failText(x));
+  } finally {
+    if (ctx.button) ctx.button.disabled = false;
+  }
+}
+async function approveAsIsAction(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
+  if (!j || !canResolve(j)) return;
+  if (!confirm('Approve ' + j.id + ' as is? Pickup ships and merges its PR without another review round.')) return;
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = resolveJob(board, ctx.id, { action: 'approve' }, isoNow());
       if (message) throw new Error(message);
     });
     await poll();
@@ -8896,6 +9014,8 @@ async function followTracerAction(ctx) {
 
 const JOB_ACTION_RUN = {
   'd-approve-spec': approveSpecAction,
+  'd-rework': openReworkDialog,
+  'd-approve-as-is': approveAsIsAction,
   'd-edit-idea': openIdeaEditor,
   'd-discard': discardAction,
   'd-follow-tracer': followTracerAction,
@@ -8925,6 +9045,8 @@ const focusAfterBar = (button) => () => {
 };
 $('d-approve-spec-bar').addEventListener('click', () => approveSpecAction({ ...drawerAction('d-approve-spec'), button: $('d-approve-spec-bar') }).then(focusAfterBar($('d-approve-spec-bar'))));
 $('d-babysit-bar').addEventListener('click', () => babysitAction({ ...drawerAction('d-babysit'), button: $('d-babysit-bar') }).then(focusAfterBar($('d-babysit-bar'))));
+$('d-rework-bar').addEventListener('click', () => openReworkDialog({ ...drawerAction('d-rework'), opener: () => $('d-rework-bar').hidden ? $('d-actions') : $('d-rework-bar') }));
+$('d-approve-as-is-bar').addEventListener('click', () => approveAsIsAction({ ...drawerAction('d-approve-as-is'), button: $('d-approve-as-is-bar') }).then(focusAfterBar($('d-approve-as-is-bar'))));
 
 // One run per job and action at a time; a second click while the first is in flight does nothing.
 const cardRuns = new Set();
@@ -9138,7 +9260,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-star', 'd-pipeline', 'd-chat', 'd-held', 'd-not-before', 'd-auto-babysit', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-approve-spec', 'd-approve-spec-bar', 'd-approve-spec-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-star', 'd-pipeline', 'd-chat', 'd-held', 'd-not-before', 'd-auto-babysit', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-approve-spec', 'd-approve-spec-bar', 'd-approve-spec-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-rework', 'd-rework-bar', 'd-approve-as-is', 'd-approve-as-is-bar', 'd-resolve-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;

@@ -45,6 +45,20 @@ launches `/factory recover <id>`, which starts the builder, as [pickup](pickup.m
 describes. The Worker refuses that note from a device token, and `factory.py board`
 refuses both approval notes, so only a signed-in person sets it.
 
+## Rework and Approve as is
+
+The drawer's top bar, the job actions menu, the card menu and the inbox show Rework and
+Approve as is on a `needs-human` job held for a person, such as a review round cap or an
+agent failure, that has no `resolve` and is not a batch rider, paused or closing. Rework
+asks for a note of 1 to 2000 characters; Approve as is asks for a confirm. Either press
+deletes `needs`, sets `resolve` to `{action: "rework", note, at}` or `{action: "approve",
+at}`, and sets the note `rework requested on the dashboard` or `approval requested on the
+dashboard`, in one board write. A row that changed meanwhile is never forced. The card
+stays in needs you until pickup launches `/factory rework <id> --session <tag>` or
+`/factory approve <id> --session <tag>`, as [pickup](pickup.md) describes. The Worker
+refuses `resolve` from a device token, and `factory.py board` refuses any `resolve` but
+null, so only a signed-in person sets it.
+
 ## Stage-change deep links
 
 | Event | Link to |

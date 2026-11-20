@@ -25,6 +25,7 @@ const CONTROLS = {
   paused: { at: "2026-11-10T09:00:00Z" },
   close: { reason: "not needed", at: "2026-11-10T09:00:00Z" },
   babysit: { at: "2026-11-10T09:00:00Z" },
+  resolve: { action: "approve", at: "2026-11-10T09:00:00Z" },
 };
 const RIDER_CONTROLS = JSON.parse(
   /const RIDER_CONTROLS = (\[[^\]]*\]);/.exec(

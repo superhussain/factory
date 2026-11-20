@@ -575,9 +575,9 @@ Read a command's file before you run it.
 | `/factory next` | [next](references/commands/next.md) | You take the next backlog line or queue work. |
 | `/factory deny-notes <id>` | [deny-notes](references/commands/deny-notes.md) | Pickup hands you a denied job's notes. |
 | `/factory babysit <id>` | [babysit](references/commands/babysit.md) | Pickup hands you a PR a person asked to babysit; work it as the Babysit note asks. |
-| `/factory approve <id>` | [approve](references/commands/approve.md) | A person approves a `needs-human` job. |
+| `/factory approve <id>`, `/factory approve <id> --session <tag>` | [approve](references/commands/approve.md) | A person approves a `needs-human` job, or pickup hands you a dashboard Approve as is press (`resolve`). |
 | `/factory approve-spec <id>` | [approve-spec](references/commands/approve-spec.md) | A person passes the spec-approval gate. |
-| `/factory rework <id> <note>` | [rework](references/commands/rework.md) | A person asks for rework, or a job is stuck after a dead session. |
+| `/factory rework <id> <note>`, `/factory rework <id> --session <tag>` | [rework](references/commands/rework.md) | A person asks for rework, or pickup hands you a dashboard Rework press (`resolve`), or a job is stuck after a dead session. |
 | `/factory recover <id>` | [recover](references/commands/recover.md) | The resume schedule or pickup recovers a job. |
 | `/factory build` | [build](references/commands/build.md) | You check or trigger the device build queue. |
 | `/factory init` | [init](references/commands/init.md) | You set up a device or register a project. |

@@ -457,7 +457,8 @@ function condition(request) {
 }
 
 // The first reason a board write of data over stored is refused, or null. The row checks
-// compare against the stored rows, so they run only when data was built on that version.
+// compare against the stored rows, so they run only when data was built on that version,
+// or creates the board when none is stored.
 async function boardRefusal(env, stored, data, sameBase, principal) {
   return (
     checkGoals(data.jobs) ??
@@ -470,7 +471,8 @@ async function boardRefusal(env, stored, data, sameBase, principal) {
         checkRiderControls(stored.jobs, data.jobs) ??
         checkBatchRefs(stored.jobs, data.jobs) ??
         checkNewStarters(stored.jobs, data.jobs) ??
-        (await checkApprovalNotes(env, stored.jobs, data.jobs, principal)))
+        (await checkApprovalNotes(env, stored.jobs, data.jobs, principal)) ??
+        checkResolve(stored.jobs, data.jobs, principal))
       : null)
   );
 }
@@ -553,13 +555,11 @@ async function casPut(request, env, key, type, principal, ctx) {
     }
     if (!Array.isArray(data?.jobs)) return reply("body needs a jobs array", 400);
     stored = await storedBoard(env);
-    const bad = await boardRefusal(
-      env,
-      stored,
-      data,
-      stored.etag === cond.get("If-Match"),
-      principal,
-    );
+    // A create on an absent board is built on the empty board, so the row checks run.
+    const builtOn = cond.has("If-Match")
+      ? stored.etag === cond.get("If-Match")
+      : stored.etag === null;
+    const bad = await boardRefusal(env, stored, data, builtOn, principal);
     if (bad) return reply(bad, 400);
   }
   const obj = await env.BUCKET.put(key, body, {
@@ -2594,7 +2594,7 @@ function checkArchived(stored, data) {
   return null;
 }
 
-const RIDER_CONTROLS = ["move", "priority", "paused", "close", "babysit"];
+const RIDER_CONTROLS = ["move", "priority", "paused", "close", "babysit", "resolve"];
 const DASHBOARD_APPROVED_NOTE = "spec approved on the dashboard";
 const TRACER_APPROVED_NOTE = "spec approved in Tracer";
 const RECEIPT_PREFIX = "tracer-scope-approval/v1";
@@ -2676,14 +2676,25 @@ async function validReceipt(env, row) {
 
 // Only a signed-in person passes the spec-approval gate on the dashboard, and the Tracer
 // note needs the row's Tracer scope approved, plus a Tracer-signed receipt from a device.
-// A row whose note is unchanged passes. An error message, or null.
+// A row whose note is unchanged passes. A device cannot move a row into build while it
+// keeps an approval note. An error message, or null.
 async function checkApprovalNotes(env, storedJobs, jobs, principal) {
   const stored = new Map();
   for (const j of storedJobs)
     if (typeof j?.id === "string" && !stored.has(j.id)) stored.set(j.id, j);
   for (const row of jobs) {
     if (typeof row !== "object" || row === null || typeof row.id !== "string") continue;
-    if (row.note === stored.get(row.id)?.note) continue;
+    const storedRow = stored.get(row.id);
+    if (row.note === storedRow?.note) {
+      if (
+        (row.note === DASHBOARD_APPROVED_NOTE || row.note === TRACER_APPROVED_NOTE) &&
+        principal?.kind !== "user" &&
+        row.stage === "build" &&
+        storedRow.stage !== "build"
+      )
+        return `a board write from a device cannot move ${quoteIdCut(row.id, QUOTED_ID_MAX)} into build while it keeps the note "${row.note}": only a person starts an approved spec again. Nothing was written.`;
+      continue;
+    }
     if (row.note === DASHBOARD_APPROVED_NOTE && principal?.kind !== "user")
       return `a board write from a device cannot set the note "${DASHBOARD_APPROVED_NOTE}" on ${quoteIdCut(row.id, QUOTED_ID_MAX)}: only a signed-in person approves a spec on the dashboard. Nothing was written.`;
     if (row.note === TRACER_APPROVED_NOTE && row.tracer?.scope !== "approved")
@@ -2694,6 +2705,33 @@ async function checkApprovalNotes(env, storedJobs, jobs, principal) {
       !(await validReceipt(env, row))
     )
       return `a board write from a device cannot set the note "${TRACER_APPROVED_NOTE}" on ${quoteIdCut(row.id, QUOTED_ID_MAX)} without a Tracer-signed scope receipt for ${tracerIds(row)[0]}. Nothing was written.`;
+  }
+  return null;
+}
+
+// Only a signed-in person sets resolve, the dashboard's Rework or Approve as is. Any writer
+// may delete it. A row whose resolve is unchanged passes. An error message, or null.
+function checkResolve(storedJobs, jobs, principal) {
+  const stored = new Map();
+  for (const j of storedJobs)
+    if (typeof j?.id === "string" && !stored.has(j.id)) stored.set(j.id, j);
+  for (const row of jobs) {
+    if (typeof row !== "object" || row === null || typeof row.id !== "string") continue;
+    const r = row.resolve;
+    if (r === undefined || JSON.stringify(r) === JSON.stringify(stored.get(row.id)?.resolve))
+      continue;
+    const id = quoteIdCut(row.id, QUOTED_ID_MAX);
+    if (principal?.kind !== "user")
+      return `a board write from a device cannot set resolve on ${id}: only a signed-in person asks for rework or approval on the dashboard. Nothing was written.`;
+    const keys =
+      r && typeof r === "object" && !Array.isArray(r) ? Object.keys(r).sort().join() : "";
+    const note = typeof r?.note === "string" ? r.note.trim().length : 0;
+    const wellFormed =
+      typeof r?.at === "string" &&
+      ((r.action === "rework" && keys === "action,at,note" && note >= 1 && note <= 2000) ||
+        (r.action === "approve" && keys === "action,at"));
+    if (!wellFormed)
+      return `resolve on ${id} must be {action: "rework", note, at} or {action: "approve", at}. Nothing was written.`;
   }
   return null;
 }

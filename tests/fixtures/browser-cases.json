@@ -141,6 +141,7 @@
   "tests/browser/prioritize.test.mjs",
   "tests/browser/babysit.test.mjs",
   "tests/browser/approve-spec.test.mjs",
+  "tests/browser/resolve.test.mjs",
   "tests/browser/run-child.test.mjs",
   "tests/browser/card-chips.test.mjs",
   "tests/browser/batch-hold-card.test.mjs",
