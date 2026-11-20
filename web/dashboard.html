@@ -8269,8 +8269,11 @@ $('rework-form').addEventListener('submit', async (e) => {
     $('rework-save').disabled = false;
     return;
   }
+  const { opener } = reworkDialog;
   dismissReworkDialog();
   await poll();
+  // The poll hides the bar button that had focus; its opener then names the actions menu button.
+  if (document.activeElement === document.body) focusOpener(opener);
 });
 
 let closeDialog = null;
@@ -9043,7 +9046,7 @@ const focusAfterBar = (button) => () => {
 };
 $('d-approve-spec-bar').addEventListener('click', () => approveSpecAction({ ...drawerAction('d-approve-spec'), button: $('d-approve-spec-bar') }).then(focusAfterBar($('d-approve-spec-bar'))));
 $('d-babysit-bar').addEventListener('click', () => babysitAction({ ...drawerAction('d-babysit'), button: $('d-babysit-bar') }).then(focusAfterBar($('d-babysit-bar'))));
-$('d-rework-bar').addEventListener('click', () => openReworkDialog({ ...drawerAction('d-rework'), opener: () => $('d-rework-bar') }));
+$('d-rework-bar').addEventListener('click', () => openReworkDialog({ ...drawerAction('d-rework'), opener: () => $('d-rework-bar').hidden ? $('d-actions') : $('d-rework-bar') }));
 $('d-approve-as-is-bar').addEventListener('click', () => approveAsIsAction({ ...drawerAction('d-approve-as-is'), button: $('d-approve-as-is-bar') }).then(focusAfterBar($('d-approve-as-is-bar'))));
 
 // One run per job and action at a time; a second click while the first is in flight does nothing.

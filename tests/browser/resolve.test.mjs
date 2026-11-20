@@ -202,6 +202,10 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
         await activate("#rework-save");
         await page.waitForSelector("#rework-dlg:not([open])", wait);
         await page.waitForFunction(() => document.getElementById("d-rework-bar").hidden, wait);
+        await page.waitForFunction(() => document.activeElement.id === "d-actions", {
+          ...wait,
+          timeout: 5000,
+        });
         const j = await boardJob(origin, "064-sample-human");
         assert.deepEqual(
           [j.stage, j.note, "needs" in j, j.resolve, j.updated],
