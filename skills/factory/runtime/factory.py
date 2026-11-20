@@ -148,6 +148,9 @@
   factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, add its cards to the backlog
   factory.py audit <job-id>                 list this host's tool calls in the job's worktree, risky ones flagged
   factory.py audit push <job-id>            upload this host's audit rows to audit/<job-id>/<device>.jsonl
+  factory.py with-cloudflare -- <command> [<arg>...]
+                                            run one command with the CLOUDFLARE_* keys of this home's .env
+                                            in its environment; prints no value
   factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]
                                             append one row to the job's agents, after checking this
                                             session holds the claim, and print it as JSON
@@ -10440,6 +10443,24 @@ def audit_cmd(*args):
         print("  ".join(cell.ljust(w) for cell, w in zip(line, widths)).rstrip())
 
 
+def with_cloudflare_cmd(*argv):
+    if argv[0] != "--" or len(argv) < 2:
+        fail("usage: factory.py with-cloudflare -- <command> [<arg>...]", 2)
+    env_file = factory_home() / ".env"
+    try:
+        regular_metadata(env_file)
+        loaded = {k: v for k, v in read_conf(env_file).items() if k.startswith("CLOUDFLARE_") and v}
+    except (OSError, ValueError):
+        loaded = {}
+    if "CLOUDFLARE_API_TOKEN" not in loaded:
+        fail(f"CLOUDFLARE_API_TOKEN missing from {env_file}. docs/cloudflare.md, Device token, shows how to store it.", 5)
+    try:
+        code = subprocess.run(list(argv[1:]), env={**os.environ, **loaded}).returncode
+    except OSError:
+        fail(f"cannot run {argv[1]}", 127)
+    sys.exit(128 - code if code < 0 else code)
+
+
 def retro_int(value):
     return value if type(value) is int else 0
 
@@ -11267,6 +11288,7 @@ COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
 COMMANDS["audit"] = (audit_cmd, 1, 2)
+COMMANDS["with-cloudflare"] = (with_cloudflare_cmd, 2, sys.maxsize)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
 COMMANDS["inbox"] = (inbox, 0, 0)
@@ -11278,6 +11300,9 @@ def main(argv=None):
     i = 0
     while i < len(args):
         arg = args[i]
+        if arg == "--" and positional == ["with-cloudflare"]:
+            positional += args[i:]
+            break
         if arg in ("--home", "--session"):
             if arg in options or i + 1 == len(args) or not args[i + 1]:
                 fail(f"{arg} requires one nonempty value and may occur only once", 2)
