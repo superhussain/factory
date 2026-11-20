@@ -40,9 +40,12 @@ test("runChild returns a finished child's exit code and output", async () => {
 test("runChild kills a timed-out child's own children too", async () => {
   const script =
     "const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });" +
-    "console.log(c.pid); setInterval(() => {}, 1000)";
-  // The timer starts at spawn, so leave a slow runner time to start both processes first.
-  const { result } = await logged(() => runChild("node", ["-e", script], { timeoutMs: 3000 }));
+    "process.stdout.write(c.pid + '\\n'); setInterval(() => {}, 1000)";
+  // console.log colors a number under FORCE_COLOR, which Nx sets, so the script writes a plain line.
+  // ready holds the timer until that line, so a slow runner cannot kill the child before it spawns.
+  const { result } = await logged(() =>
+    runChild("node", ["-e", script], { timeoutMs: 300, ready: /\n/ }),
+  );
   assert.match(
     result.output,
     /^\d+\n$/,
