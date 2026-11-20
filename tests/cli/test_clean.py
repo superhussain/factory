@@ -97,7 +97,7 @@ class CleanTest(IsolatedTestCase):
             code, out, _ = self.clean("scratch", "capture-1")
         self.assertEqual((code, out), (1, {"removed": [], "left": [
             f"{path}: Cannot call rmtree on a symbolic link"]}))
-        job = self.tmp / "factory-001-test"
+        job = self.tmp / "factory-sample-001-test"
         job.mkdir(parents=True)
         with mock.patch.object(factory.shutil, "rmtree",
                                side_effect=OSError("Cannot call rmtree on a symbolic link")):
@@ -121,7 +121,7 @@ class CleanTest(IsolatedTestCase):
         self.assertTrue(modules.is_dir())
 
     def test_temp_removes_job_folder(self):
-        job, other = self.tmp / "factory-001-test", self.tmp / "factory-002-other"
+        job, other = self.tmp / "factory-sample-001-test", self.tmp / "factory-other-001-test"
         for path in (job / "shots", other):
             path.mkdir(parents=True)
             (path / "file.png").write_text("x\n")
@@ -134,7 +134,7 @@ class CleanTest(IsolatedTestCase):
 
     def test_temp_left_and_absent(self):
         target = "sample/009-no-worktree"
-        path = self.tmp / "factory-009-no-worktree"
+        path = self.tmp / "factory-sample-009-no-worktree"
         self.assertEqual(self.clean("temp", target=target), (0, {"removed": [], "left": []}, ""))
         self.tmp.mkdir()
         path.write_text("x\n")
