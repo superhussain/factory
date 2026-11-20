@@ -8889,7 +8889,7 @@ def worktree(target):
 PREBUILD_DIR = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*")
 # Checked at the worktree root, every folder between it and a listed folder, and the listed folder itself. The
 # *mise* globs cover every mise config, rc, lock and conf.d name, such as .miserc.toml and .config/miserc.toml.
-PREBUILD_CONFIG_FILES = [".miserc.toml", ".config/miserc.toml", ":(glob)*mise*", ":(glob)*mise*/**",
+PREBUILD_CONFIG_FILES = [":(glob)*mise*", ":(glob)*mise*/**",
                          ":(glob).config/*mise*", ":(glob).config/*mise*/**", ".tool-versions", ".npmrc",
                          "pnpm-workspace.yaml"]
 PREBUILD_DIR_FILES = ["pnpm-lock.yaml", "package.json", ".pnpmfile.cjs", ".pnpmfile.mjs"]
