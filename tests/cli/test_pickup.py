@@ -3140,6 +3140,98 @@ class DenyNotesTest(PickupFixture):
         self.assertEqual(self.calls, [])
 
 
+def resolving(job_id, project, resolve, **extra):
+    """A needs-human job after a dashboard Rework or Approve as is press."""
+    return dict({"id": job_id, "project": project, "title": "Export the sample report", "stage": "needs-human",
+                 "updated": "2026-01-01T00:00:00Z", "note": "rework requested on the dashboard",
+                 "resolve": dict(resolve, at="2026-01-02T12:00:00Z")}, **extra)
+
+
+REWORK_NOTE = "Keep the CSV header order."
+
+
+class ResolveTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        self.views["alpha"] = (200, effective("alpha", {"pickup": ON}))
+
+    def test_rework_and_approve_launch_their_commands(self):
+        for action, extra in (("rework", {"note": REWORK_NOTE}), ("approve", {})):
+            with self.subTest(action=action):
+                self.board["jobs"] = [resolving("064-sample-human", "alpha", dict(extra, action=action))]
+                self.records.unlink(missing_ok=True)
+                code, out, err = self.pickup()
+                job = self.job("064-sample-human")
+                tag = job["claim"]["session"]
+                self.assertEqual((code, err), (0, ""))
+                self.assertEqual(out, f"launched resolve 064-sample-human alpha on primary session {tag}\n")
+                self.assertEqual(job["stage"], "needs-human")
+                self.assertNotIn("started", job)
+                self.assertEqual(job["resolve"]["action"], action)
+                [record] = self.launched()
+                self.assertEqual(record["argv"][7], f"/factory {action} 064-sample-human --session {tag}\n\n"
+                                 + factory.UNATTENDED)
+                self.assertNotIn(REWORK_NOTE, json.dumps(record["argv"]))
+
+    def test_paused_closing_claimed_and_malformed_skip(self):
+        factory.save_triage_sweep(self.home, factory.now())
+        rework = {"action": "rework", "note": REWORK_NOTE}
+        for job, reason in (
+                (resolving("064-sample-human", "alpha", rework, paused={"at": "2026-01-02T12:00:00Z"}), "paused"),
+                (resolving("064-sample-human", "alpha", rework, claim=held("other-host")),
+                 "claimed by other-host session s1"),
+                (resolving("064-sample-human", "alpha", {"action": "ship"}), "action must be rework or approve"),
+                (resolving("064-sample-human", "alpha", {"action": "rework", "note": " "}),
+                 "rework note must be 1 to 2000 characters"),
+                (resolving("064-sample-human", "alpha", {"action": "rework", "note": "x" * 2001}),
+                 "rework note must be 1 to 2000 characters")):
+            with self.subTest(reason=reason):
+                self.board["jobs"] = [job]
+                self.assertEqual(self.pickup("--dry-run"), (
+                    0, f"skip resolve 064-sample-human alpha: {reason}\nhost {DEVICE}: would launch 0\n", ""))
+                self.calls.clear()
+                self.assert_silent(self.pickup())
+                self.assertEqual(self.calls, [("GET", "/api/board")])
+
+    def test_closing_skips_in_dry_run(self):
+        factory.save_triage_sweep(self.home, factory.now())
+        self.board["jobs"] = [resolving("064-sample-human", "alpha", {"action": "approve"},
+                                        close={"reason": "x", "at": "2026-01-02T12:00:00Z"})]
+        self.assertEqual(self.pickup("--dry-run"), (
+            0, f"would close 064-sample-human alpha\nskip resolve 064-sample-human alpha: closing\n"
+               f"host {DEVICE}: would launch 0\n", ""))
+
+    def test_not_due_is_silent(self):
+        factory.save_triage_sweep(self.home, factory.now())
+        del self.views["alpha"]
+        built = resolving("065-sample-built", "alpha", {"action": "approve"}, stage="build")
+        no_at = resolving("066-sample-no-at", "alpha", {"action": "approve"})
+        del no_at["resolve"]["at"]
+        plain = resolving("067-sample-plain", "alpha", {"action": "approve"})
+        del plain["resolve"]
+        for job in (built, no_at, plain):
+            with self.subTest(job=job["id"]):
+                self.assertFalse(factory.resolve_due(job))
+                self.calls.clear()
+                self.board["jobs"] = [job]
+                self.assert_silent(self.pickup())
+                self.assertEqual(self.calls, [("GET", "/api/board")])
+
+    def test_launch_failure_releases_the_claim(self):
+        self.board["jobs"] = [resolving("064-sample-human", "alpha", {"action": "approve"})]
+        real = factory.launch_idea
+
+        def launch(home, entry, route, argv, env):
+            return real(home, entry, route, [sys.executable, "-c", "print('boom'); raise SystemExit(1)"], env)
+        with patch.object(factory, "launch_idea", launch):
+            code, out, err = self.pickup()
+        [log] = (self.home / "logs" / "pickup").glob("064-sample-human-*.log")
+        self.assertEqual((code, out), (0, "released 064-sample-human\n"))
+        self.assertEqual(err, f"factory.py: launch of 064-sample-human on primary failed: exit 1; see {log}\n")
+        self.assertNotIn("claim", self.job("064-sample-human"))
+        self.assertEqual(self.job("064-sample-human")["resolve"]["action"], "approve")
+
+
 def babysat(job_id, project, **extra):
     """A pr-open job after a dashboard Babysit PR click."""
     return dict({"id": job_id, "project": project, "title": "Export the sample report", "stage": "pr-open",

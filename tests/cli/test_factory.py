@@ -1777,6 +1777,21 @@ class MoveFenceTest(IsolatedTestCase):
                       err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
+    def test_board_refuses_a_resolve_patch(self):
+        before = self.store["/api/board"]
+        err = io.StringIO()
+        with patch.object(factory.sys, "stdin", io.StringIO('{"resolve": {"action": "approve", "at": "x"}}')), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            factory.board(self.home, "001-test")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("only the dashboard sets resolve; a session clears it with null. Nothing was written.",
+                      err.getvalue())
+        self.assertEqual(self.store["/api/board"], before)
+        self.save(dict(self.job, resolve={"action": "approve", "at": "2026-01-02T12:00:00Z"}))
+        with patch.object(factory.sys, "stdin", io.StringIO('{"resolve": null}')):
+            factory.board(self.home, "001-test")
+        self.assertNotIn("resolve", self.saved())
+
     def test_board_clears_babysit_with_null(self):
         self.save(dict(self.job, babysit={"at": "2026-01-02T12:00:00Z"}))
         self.assertTrue(factory.babysitting(self.saved()))

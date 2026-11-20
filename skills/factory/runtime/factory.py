@@ -952,6 +952,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
     if patch.get("babysit") is not None:
         fail("only the dashboard and factory.py control set babysit; a session clears it with null. To relay a "
              "person's chat, run factory.py control <job-id> babysit --chat-file <file>", 2)
+    if patch.get("resolve") is not None:
+        fail("only the dashboard sets resolve; a session clears it with null. Nothing was written.", 2)
     if "close" in patch:
         fail("only the dashboard, factory.py pickup and factory.py control set close. To relay a person's chat, "
              "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
@@ -5129,6 +5131,122 @@ def deny_notes_pass(home, data, device, minutes, paths, settings, dry):
             print(line)
 
 
+def resolve_due(j):
+    """True when a needs-human job carries a dashboard Rework or Approve as is press."""
+    r = j.get("resolve")
+    return j.get("stage") == "needs-human" and isinstance(r, dict) and isinstance(r.get("at"), str) \
+        and isinstance(j.get("id"), str) and bool(JOB_ID.fullmatch(j["id"])) and ".." not in j["id"]
+
+
+def resolve_problem(j):
+    """Why a due job's resolve may not reach a session, or None."""
+    r = j["resolve"]
+    if r.get("action") not in ("rework", "approve"):
+        return "action must be rework or approve"
+    note = r.get("note")
+    if r["action"] == "rework" and not (isinstance(note, str) and 1 <= len(note.strip()) <= 2000):
+        return "rework note must be 1 to 2000 characters"
+    return None
+
+
+def claim_resolve(home, job_id, device, minutes, paths):
+    """Claim a resolve job in one board write, and return the new session tag, else None. Only the claim changes."""
+    tag = secrets.token_hex(3)
+
+    def change(text):
+        data = load_board(text)
+        j = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        project = (j or {}).get("project")
+        if (j is None or not resolve_due(j) or resolve_problem(j) is not None or gated(j)
+                or project not in paths or not os.path.isdir(paths[project])
+                or blocking(j, device, "", minutes)):
+            return None, None
+        j["claim"] = new_claim(device, tag)
+        j["updated"] = data["updated"] = now()
+        return dump_board(data), tag
+    return cas(home, "/api/board", change)
+
+
+def resolve_pass(home, data, device, minutes, paths, settings, dry):
+    """Launch at most one /factory rework or approve session for a dashboard Rework or Approve as is press."""
+    jobs = [j for j in data["jobs"] if resolve_due(j)]
+
+    def skip(j):
+        """Why this job is not ready, or None."""
+        project = j.get("project")
+        if not project:
+            return f"skip resolve {j['id']}: no project"
+        head = f"skip resolve {j['id']} {project}"
+        if project not in paths or not os.path.isdir(paths[project]):
+            return f"{head}: no checkout on this host"
+        if gated(j):
+            return f"{head}: waiting on a human"
+        if paused(j):
+            return f"{head}: paused"
+        if closing(j):
+            return f"{head}: closing"
+        c = blocking(j, device, "", minutes)
+        if c:
+            return f"{head}: claimed by {c['device']} session {c.get('session')}"
+        problem = resolve_problem(j)
+        if problem:
+            return f"{head}: {problem}"
+        if project not in settings:
+            settings[project] = pickup_settings(home, project, paths[project], device)
+            if settings[project][2] and not dry:
+                print(f"factory.py: pickup skips {project}: {settings[project][2]}", file=sys.stderr)
+        enabled, hosts, reason = settings[project]
+        if reason:
+            return f"{head}: {reason}"
+        if not enabled:
+            return f"{head}: pickup off"
+        if device not in hosts:
+            return f"{head}: pickup does not list host {device}"
+        return None
+
+    def values(j, session, route):
+        _, provider, model, effort = route
+        return {"id": j["id"], "project": j["project"], "repo_path": paths[j["project"]], "session": session,
+                "provider": provider, "model": model, "effort": effort or "",
+                "prompt": launch_prompt(f"/factory {j['resolve']['action']} {j['id']} --session {session}")}
+
+    ready = False
+    for j in jobs:
+        line = skip(j)
+        if line is None and ready:
+            line = f"wait resolve {j['id']} {j['project']}: one resolve launch per run"
+        elif line is None:
+            ready = True
+            route = pick_route(home)
+            if route is None and not dry:
+                return
+            if route is None:
+                stamp = now()
+                active = {n: until for n, until in read_limits(home).items() if until > stamp}
+                line = "no route: no available route: " + ", ".join(
+                    f"{r[0]} until {active[r[0]]}" for r in read_routes(home))
+            else:
+                template = route_launcher(home, route)
+                if dry:
+                    line = f"would launch resolve {j['id']} {j['project']} on {route[0]}: " \
+                        + shlex.join(launcher_argv(template, values(j, "<session>", route)))
+                else:
+                    tag = claim_resolve(home, j["id"], device, minutes, paths)
+                    if tag is None:
+                        return
+                    given = values(j, tag, route)
+                    ok, detail, log_path = launch_idea(home, given, route[0], launcher_argv(template, given),
+                                                       launch_env(given, route[1], route[2]))
+                    if ok:
+                        print(f"launched resolve {j['id']} {j['project']} on {route[0]} session {tag}")
+                    else:
+                        launch_failed(home, route[0], j["id"], detail, log_path,
+                                      lambda: release_pickup_claim(home, j["id"], device, tag), fatal=False)
+                    return
+        if dry:
+            print(line)
+
+
 def babysit_due(j):
     """True when a pr-open job carries a dashboard Babysit PR click."""
     return j.get("stage") == "pr-open" and babysitting(j) and isinstance(j.get("id"), str) \
@@ -6141,6 +6259,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     babysit_pass(home, data, device, minutes, paths, settings, dry)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
+    resolve_pass(home, data, device, minutes, paths, settings, dry)
     if not dry and taken >= limit:
         return
     jobs = [j for j in data["jobs"] if (j.get("stage") == IDEA or approved_start(j) or moved_here(j, device))
