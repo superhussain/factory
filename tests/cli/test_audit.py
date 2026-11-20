@@ -70,6 +70,22 @@ class AuditFlagsTest(IsolatedTestCase):
         self.assertEqual(self.flags("Glob", {"pattern": "**/.env"}), [])
         self.assertEqual(self.flags("Bash", {"command": "ls", "dangerouslyDisableSandbox": False}), [])
 
+    def test_secret_file_skips_data_heredoc_bodies(self):
+        for command in (
+                "cat > walkthrough.html <<'EOF'\n<p>The token lives in the factory .env file.</p>\nEOF",
+                "git commit -m \"$(cat <<'EOF'\nKeep .env out of the repo\nEOF\n)\""):
+            with self.subTest(command=command):
+                self.assertEqual(self.flags("Bash", {"command": command}), [])
+
+    def test_secret_file_still_flags_reads(self):
+        for command in (
+                "cat > notes.md <<'EOF'\nprose\nEOF\ncat ~/app/.env",
+                "cat <<'EOF' | sh\ncat ~/app/.env\nEOF",
+                "bash <<'EOF'\ncat ~/app/.env\nEOF",
+                "cat ~/app/.env <<'EOF'\nprose\nEOF"):
+            with self.subTest(command=command):
+                self.assertEqual(self.flags("Bash", {"command": command}), ["secret-file"])
+
     def test_raw_targets(self):
         for name, inp, raw in (("Bash", {"command": "git status"}, "git status"),
                                ("Read", {"file_path": "/a"}, "/a"),
