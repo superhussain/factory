@@ -949,6 +949,11 @@ async function capture(outdir, referencePath) {
       }
     }
 
+    // Prefixes a wait's error with the step it guarded, so a capture retry names the step.
+    const named = (step, wait) =>
+      wait.catch((error) => {
+        throw new Error(`${step}: ${error?.message ?? error}`);
+      });
     const openDrawer = async (page, side) => {
       await clickNow(page, '.card[data-id="001-capture"]');
       await page.waitForSelector('#d-tabs .tab[data-name="spec.md"]');
