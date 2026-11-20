@@ -6,7 +6,6 @@ import io
 import json
 import os
 from pathlib import Path
-import shutil
 import socket
 import subprocess
 import tempfile
@@ -829,21 +828,15 @@ class DownTest(Instance):
 
 
 class DeviceTokenDocTest(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("pwsh") or os.environ.get("CI"), "pwsh not installed")
-    def test_powershell_loader(self):
+    def test_with_cloudflare_loader(self):
         doc = (ROOT / "docs" / "cloudflare.md").read_text(encoding="utf-8")
-        block = doc.split("3. Use it.", 1)[1].split("```powershell\n", 1)[1].split("```", 1)[0].strip()
-        up = "mise exec -- py -3 tools/bootstrap.py up"
-        self.assertEqual(block.count(up), 1)
-        with tempfile.TemporaryDirectory() as home:
-            Path(home, ".env").write_bytes(b"OTHER=1\r\nCLOUDFLARE_API_TOKEN=synthetic-token-123\r\n")
-            script = (block.replace(up, "[Console]::Out.Write('token=' + $env:CLOUDFLARE_API_TOKEN)")
-                      .replace("<factory-home>", home)
-                      + "; [Console]::Out.Write(';after=' + [string]$env:CLOUDFLARE_API_TOKEN)")
-            env = {k: v for k, v in os.environ.items() if k != "CLOUDFLARE_API_TOKEN"}
-            out = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", script], env=env,
-                                 capture_output=True, text=True, check=True).stdout
-        self.assertEqual(out, "token=synthetic-token-123;after=")
+        step = doc.split("3. Use it.", 1)[1].split("\n4. ", 1)[0]
+        block = step.split("```sh\n", 1)[1].split("```", 1)[0].strip()
+        self.assertEqual(block, "python3 <installed-skill>/runtime/factory.py with-cloudflare -- "
+                                "mise exec -- python3 tools/bootstrap.py up")
+        self.assertIn("On Windows use `py -3` for both.", step)
+        self.assertNotIn("```powershell", step)
+        self.assertNotIn("sed -n", step)
 
 
 if __name__ == "__main__":

@@ -93,14 +93,10 @@ Keep the same token on each device that manages the instance. Agents there can t
 3. Use it. `up` reads `CLOUDFLARE_API_TOKEN` from the environment, not from `.env`, so load it for one command:
 
    ```sh
-   CLOUDFLARE_API_TOKEN="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "<factory-home>/.env")" mise exec -- python3 tools/bootstrap.py up
+   python3 <installed-skill>/runtime/factory.py with-cloudflare -- mise exec -- python3 tools/bootstrap.py up
    ```
 
-   In PowerShell:
-
-   ```powershell
-   $env:CLOUDFLARE_API_TOKEN = (Get-Content -LiteralPath "<factory-home>/.env" | Where-Object { $_ -like 'CLOUDFLARE_API_TOKEN=*' } | Select-Object -First 1) -replace '^CLOUDFLARE_API_TOKEN=', ''; try { mise exec -- py -3 tools/bootstrap.py up } finally { Remove-Item Env:CLOUDFLARE_API_TOKEN -ErrorAction SilentlyContinue }
-   ```
+   On Windows use `py -3` for both.
 
    `pr_screenshots.py` reads the key from `.env` itself. The Workers R2 Storage Edit permission covers its uploads.
 4. Revoke the old token. If `.env` held a narrower token before, delete it under My Profile, API Tokens after one screenshot upload and one `up` rerun pass with the new token.
