@@ -165,6 +165,25 @@ the installed [execution guide](../skills/factory/references/execution.md), neve
 an automatic takeover or reset of review/approval counters.
 Within one command, the runtime reuses a 200 answer from /projects.json, /api/pipeline/global or /api/pipeline/effective/<slug> for up to 60 seconds. A pipeline or project write clears it.
 
+## Cloudflare credentials for one command
+
+`with-cloudflare` runs one command with the `CLOUDFLARE_*` keys of the factory
+home `.env` added to its environment. It passes no other `.env` key, prints no
+value and runs the command without a shell. Wrap a command in `sh -c` when it
+needs the token by name:
+
+```text
+python3 <installed-skill>/runtime/factory.py with-cloudflare -- sh -c 'curl -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/user/tokens/verify'
+```
+
+| Case | Exit | stderr |
+| --- | --- | --- |
+| no `--` or no command | 2 | `factory.py: usage: factory.py with-cloudflare -- <command> [<arg>...]` |
+| `.env` missing, a link, unreadable, or no token | 5 | `factory.py: CLOUDFLARE_API_TOKEN missing from <env path>. docs/cloudflare.md, Device token, shows how to store it.` |
+| command not found | 127 | `factory.py: cannot run <command>` |
+
+Otherwise it exits with the command's code, or `128 + N` when signal `N` ends it.
+
 ## Session retro digest
 
 ```text

@@ -129,6 +129,8 @@ A job's worktree is `WT="$WORKTREES/<id>"`, on branch `factory/<id>` cut from `$
 | `$WT` | the builder's worktree |
 | `$FACTORY/config.md`, `$FACTORY/.env` | device settings and the private Access service token |
 
+A command that needs Cloudflare credentials runs as `python3 <skill>/runtime/factory.py with-cloudflare -- <command>`. Never read `$FACTORY/.env` in a command or print its values.
+
 R2 holds the board (one for every project, each job carrying `project`), the
 backlog, the project files, and a copy of every job folder's markdown and images. `factory.py`
 reads and writes them, and job folders go up by hand:
