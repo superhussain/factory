@@ -327,11 +327,23 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
             save: document.getElementById("rework-save").textContent,
             cancel: document.getElementById("rework-cancel").disabled,
             note: document.getElementById("rework-note").disabled,
+            focus: document.activeElement.id,
+            status: document.getElementById("rework-status").textContent,
+            cancelBorder: getComputedStyle(document.getElementById("rework-cancel")).borderTopStyle,
           })),
-          { open: true, save: "Saving…", cancel: true, note: true },
+          {
+            open: true,
+            save: "Saving…",
+            cancel: true,
+            note: true,
+            focus: "rework-h",
+            status: "Saving…",
+            cancelBorder: "dashed",
+          },
         );
         await page.evaluate(() => window.fixtureReleaseSave());
         await page.waitForSelector("#rework-dlg:not([open])", wait);
+        assert.equal(await page.$eval("#rework-status", (e) => e.textContent), "");
         await page.waitForFunction(() => document.getElementById("d-rework-bar").hidden, {
           ...wait,
           timeout: 5000,

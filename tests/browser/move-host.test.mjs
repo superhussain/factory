@@ -446,11 +446,24 @@ test("move host", { timeout: 240000 }, async (t) => {
             save: document.getElementById("move-host-save").textContent,
             cancel: document.getElementById("move-host-cancel").disabled,
             select: document.getElementById("move-host-select").disabled,
+            focus: document.activeElement.id,
+            status: document.getElementById("move-host-status").textContent,
+            cancelBorder: getComputedStyle(document.getElementById("move-host-cancel"))
+              .borderTopStyle,
           })),
-          { open: true, save: "Saving…", cancel: true, select: true },
+          {
+            open: true,
+            save: "Saving…",
+            cancel: true,
+            select: true,
+            focus: "move-host-h",
+            status: "Saving…",
+            cancelBorder: "dashed",
+          },
         );
         await page.evaluate(() => window.fixtureReleaseSave());
         await page.waitForFunction(() => !document.getElementById("move-host-dlg").open, wait);
+        assert.equal(await page.$eval("#move-host-status", (e) => e.textContent), "");
         const job = (await (await fetch(origin + "/api/board")).json()).jobs.find(
           (j) => j.id === "042-sample-export",
         );
