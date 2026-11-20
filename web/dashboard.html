@@ -6910,8 +6910,8 @@ window.addEventListener('hashchange', (e) => {
   const { id } = parseHash();
   if (id !== archiveFailNoted) archiveFailNoted = '';
   if (id !== boardWaitNoted) {
-    // A link to another job drops the old wait toast.
-    if (id && boardWaitShowing(boardWaitNoted)) showBoardStatus('');
+    // A link to another job, or Back to the board, drops the old wait toast.
+    if (boardWaitShowing(boardWaitNoted)) showBoardStatus('');
     boardWaitNoted = '';
   }
   const key = backlogRoute();
