@@ -421,6 +421,7 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
           for (const f of walk.frames()) {
             if (f.detached || !f.url().split("#")[0].endsWith("/walkthrough.html")) continue;
             text = await f.$eval("#synthetic-walk", (p) => p.textContent).catch(() => null);
+            if (text !== null) break;
           }
           if (text === null) await new Promise((resolve) => setTimeout(resolve, 100));
         }

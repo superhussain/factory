@@ -119,7 +119,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog select, dialog textarea, dialog input[type=text] { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   dialog label[hidden], dialog select[hidden], dialog textarea[hidden], dialog input[hidden] { display: none; }
   dialog textarea { resize: vertical; min-height: 140px; }
-  dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
+  dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
   dialog .err.saved { color: inherit; }
   dialog h2[tabindex="-1"]:focus { outline: none; }
   dialog .actions .btn:not(.primary):disabled { border-style: dashed; color: var(--muted); }
@@ -7683,7 +7683,8 @@ function firstPressText(message, uncertain) {
 // A refusal after an uncertain press whose note the row still holds: quote that note, on one line and cut short.
 function reworkNoteKept(held) {
   const flat = held.replace(/\s+/g, ' ').trim();
-  const quote = flat.length > 120 ? flat.slice(0, 119).trimEnd() + '…' : flat;
+  const chars = Array.from(flat);
+  const quote = chars.length > 120 ? chars.slice(0, 119).join('').trimEnd() + '…' : flat;
   return 'Your first press saved the rework with this note:\n"' + quote + '"\nThe job still holds that note, so your edit was not saved. Cancel closes this dialog and keeps the first note.';
 }
 
