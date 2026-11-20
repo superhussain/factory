@@ -8184,7 +8184,7 @@ async function openMoveHost(ctx) {
 }
 
 function closeMoveHost() {
-  if (!moveHost) return;
+  if (!moveHost || moveHost.saving) return;
   const opener = moveHost.opener;
   moveHost = null;
   $('move-host-dlg').close();
@@ -8200,7 +8200,8 @@ $('move-host-form').addEventListener('submit', async (e) => {
   const dlg = moveHost;
   let refused = false;
   const to = $('move-host-select').value;
-  $('move-host-save').disabled = true;
+  dlg.saving = true;
+  setDialogSaving('move-host', 'move-host-select', 'Move job', true);
   try {
     await casBoard((board) => {
       const message = moveJob(board, id, to, isoNow());
@@ -8215,12 +8216,19 @@ $('move-host-form').addEventListener('submit', async (e) => {
     dlg.uncertain = !!x.uncertain;
     $('move-host-err').textContent = boardSaveError(x, 'The move may have saved. Press Move job again with the same host to check. It will not queue a duplicate move.');
     $('move-host-err').hidden = false;
-    $('move-host-save').disabled = false;
+    dlg.saving = false;
+    setDialogSaving('move-host', 'move-host-select', 'Move job', false);
+    $('move-host-select').focus();
     return;
   }
+  dlg.saving = false;
+  setDialogSaving('move-host', 'move-host-select', 'Move job', false);
   closeMoveHost();
   await poll();
 });
+
+// While a dialog save runs, Escape and Cancel wait for it, as in the idea dialogs. A sent save cannot be recalled.
+function setDialogSaving(name, field, label, saving) { $(name + '-save').disabled = saving; $(name + '-save').textContent = saving ? 'Saving…' : label; $(name + '-cancel').disabled = saving; $(field).disabled = saving; }
 
 let reworkDialog = null;
 
@@ -8238,7 +8246,7 @@ function openReworkDialog(ctx) {
 }
 
 function dismissReworkDialog() {
-  if (!reworkDialog) return;
+  if (!reworkDialog || reworkDialog.saving) return;
   const opener = reworkDialog.opener;
   reworkDialog = null;
   $('rework-dlg').close();
@@ -8257,7 +8265,8 @@ $('rework-form').addEventListener('submit', async (e) => {
     $('rework-err').hidden = false;
     return;
   }
-  $('rework-save').disabled = true;
+  reworkDialog.saving = true;
+  setDialogSaving('rework', 'rework-note', 'Start rework', true);
   try {
     await casBoard((board) => {
       const message = resolveJob(board, id, { action: 'rework', note }, isoNow());
@@ -8266,9 +8275,13 @@ $('rework-form').addEventListener('submit', async (e) => {
   } catch (x) {
     $('rework-err').textContent = failText(x);
     $('rework-err').hidden = false;
-    $('rework-save').disabled = false;
+    reworkDialog.saving = false;
+    setDialogSaving('rework', 'rework-note', 'Start rework', false);
+    $('rework-note').focus();
     return;
   }
+  reworkDialog.saving = false;
+  setDialogSaving('rework', 'rework-note', 'Start rework', false);
   dismissReworkDialog();
   await poll();
   // The poll hides the bar button that had focus; its opener then names the actions menu button.
@@ -8292,7 +8305,7 @@ function openCloseDialog(ctx) {
 }
 
 function dismissCloseDialog() {
-  if (!closeDialog) return;
+  if (!closeDialog || closeDialog.saving) return;
   const opener = closeDialog.opener;
   closeDialog = null;
   $('close-job-dlg').close();
@@ -8308,7 +8321,8 @@ $('close-job-form').addEventListener('submit', async (e) => {
   const dlg = closeDialog;
   let refused = false;
   let savedReason = null;
-  $('close-job-save').disabled = true;
+  dlg.saving = true;
+  setDialogSaving('close-job', 'close-job-reason', 'Close job', true);
   try {
     await casBoard((board) => {
       savedReason = null;
@@ -8329,16 +8343,20 @@ $('close-job-form').addEventListener('submit', async (e) => {
     $('close-job-err').classList.remove('saved');
     $('close-job-err').textContent = boardSaveError(x, 'The close may have saved. Press Close job again to check. It will not queue a second close or change a saved reason.');
     $('close-job-err').hidden = false;
-    $('close-job-save').disabled = false;
+    dlg.saving = false;
+    setDialogSaving('close-job', 'close-job-reason', 'Close job', false);
+    $('close-job-reason').focus();
     return;
   }
+  dlg.saving = false;
+  setDialogSaving('close-job', 'close-job-reason', 'Close job', false);
   if (savedReason !== null) {
     dlg.uncertain = false;
     $('close-job-reason').value = savedReason;
     $('close-job-err').classList.add('saved');
     $('close-job-err').textContent = 'The close is already saved, with the reason "' + savedReason + '". A saved reason cannot be changed. Cancel closes this dialog and keeps the close.';
     $('close-job-err').hidden = false;
-    $('close-job-save').disabled = false;
+    $('close-job-reason').focus();
     return;
   }
   dismissCloseDialog();
