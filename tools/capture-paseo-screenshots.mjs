@@ -1,5 +1,5 @@
 // Paseo plugin screenshot capture: the dashboard board framed by a synthetic Paseo sidebar and header,
-// and the plugin's first-login card in a light synthetic palette, at 1280x800 and 2x like
+// and the plugin's first-login card in Paseo's light palette, at 1280x800 and 2x like
 // tools/capture-screenshots.mjs. One owned local service on an ephemeral loopback port, a frozen
 // clock, and every off-origin request aborted and fatal. Needs `node tests/browser/provision.mjs`
 // and `pnpm --dir paseo-plugin install --frozen-lockfile` first. Never part of CI: run manually
