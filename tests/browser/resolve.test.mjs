@@ -71,10 +71,11 @@ const LONG_KEPT = KEPT.replace(
   '"Keep the CSV header order."',
   '"Keep the CSV header order. Also keep the footer row, the totals column and the sample dates. Also keep the footer row,…"',
 );
-const EMOJI = "Keep the CSV header order. " + "x".repeat(91) + "\u{1F642} and the footer row.";
+const EMOJI =
+  "Keep the CSV header order. " + "xxxxxxxxx ".repeat(9) + "x" + "\u{1F642} and the footer row.";
 const EMOJI_KEPT = KEPT.replace(
   '"Keep the CSV header order."',
-  '"Keep the CSV header order. ' + "x".repeat(91) + '\u{1F642}…"',
+  '"Keep the CSV header order. ' + "xxxxxxxxx ".repeat(9) + "x" + '\u{1F642}…"',
 );
 // The next board PATCH lands, then the page sees a 503 as if the answer was lost.
 const landThen503 = (page) =>
