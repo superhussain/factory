@@ -1,4 +1,4 @@
-# `/factory rework <job-id> <note>`
+# `/factory rework <job-id> <note>`, `/factory rework <job-id> --session <tag>`
 
 A merged or closed job never reopens. Rework on one runs as a new job: claim an id,
 patch `refs` to `[{"id": "<job-id>", "kind": "rework-of"}]`, and run the loop with

@@ -1,4 +1,4 @@
-# `/factory approve <job-id>`
+# `/factory approve <job-id>`, `/factory approve <job-id> --session <tag>`
 
 For jobs stuck at `needs-human` for reasons other than ESCALATE, such as the review
 round cap or a failed agent. The job must be at `needs-human`. Otherwise report its
