@@ -130,7 +130,6 @@ function installKeeper(withMove) {
       element.style.cssText = "border:0;width:100%;height:100%;display:block";
       element.src = src;
       element.addEventListener("load", () => {
-        window.loads++;
         element.contentWindow.postMessage({ type: "factory-embed-hello", v: 1 }, origin);
       });
       return element;
@@ -188,7 +187,6 @@ const attach = (page) =>
     return window.attached.warm;
   }, DASHBOARD + "/#042-sample-links");
 const park = (page) => page.evaluate(() => window.keeper.park(window.attached.frame));
-const loads = (page) => page.evaluate(() => window.loads);
 const draftState = (frame) =>
   frame.evaluate(() => ({
     marker: window.warmMarker ?? null,
@@ -505,8 +503,14 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
         host.id = "warm-host";
         host.style.cssText = "width:1280px;height:720px";
         document.body.prepend(host);
-        window.loads = 0;
         window.fakeNow = 0;
+      });
+      // Each new dashboard document in the warm host is one navigation request. A fragment
+      // jump makes none, though Chrome still fires a late load event on the iframe for it.
+      const documents = [];
+      warm.on("request", (request) => {
+        if (request.isNavigationRequest() && request.url().startsWith(DASHBOARD + "/"))
+          documents.push(request.url());
       });
       await warm.addScriptTag({ type: "module", content });
       await warm.waitForFunction(() => typeof window.createFrameKeeper === "function");
@@ -522,7 +526,7 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       });
       assert.equal(await attach(warm), true);
       let frame = await warmFrame(warm);
-      assert.equal(await loads(warm), 1);
+      assert.equal(documents.length, 1);
       assert.deepEqual(await draftState(frame), { marker: 1, text: DRAFT, open: true });
       await capture(warm, "after-return.png");
 
@@ -559,7 +563,7 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
         DASHBOARD + "/#043-sample-ask",
       );
       await frame.waitForFunction(() => location.hash === "#043-sample-ask", { timeout: 5000 });
-      assert.equal(await loads(warm), 1);
+      assert.equal(documents.length, 1);
       assert.equal(await frame.evaluate(() => window.warmMarker), 1);
 
       await park(warm);
@@ -567,8 +571,8 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
         window.fakeNow += window.WARM_FRAME_MS;
       });
       assert.equal(await attach(warm), false);
-      await warm.waitForFunction(() => window.loads === 2, { timeout: 8000 });
       frame = await warmFrame(warm);
+      assert.equal(documents.length, 2);
       assert.equal(await frame.evaluate(() => window.warmMarker), undefined);
 
       await warm.evaluate(() => window.keeper.drop());
@@ -577,8 +581,8 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
       await typeDraft(await warmFrame(warm));
       await park(warm);
       assert.equal(await attach(warm), false);
-      await warm.waitForFunction(() => window.loads === 4, { timeout: 8000 });
       frame = await warmFrame(warm);
+      assert.equal(documents.length, 4);
       assert.deepEqual(await draftState(frame), { marker: null, text: "", open: false });
       await capture(warm, "before-return.png");
     });
