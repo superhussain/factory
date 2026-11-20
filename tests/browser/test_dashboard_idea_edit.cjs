@@ -1259,6 +1259,7 @@ async function browserTest(url) {
     await page.evaluate(() => closeDetail());
     await page.click("#new-idea");
     await page.waitForFunction(() => document.getElementById("idea-dlg").open, { polling: 50 });
+    assert.equal(await page.evaluate(() => document.activeElement.id), "idea-project");
     await page.type("#idea-text", "\nCreated idea 😀\nBody");
     held = hold("GET", "/board.json");
     await page.click("#idea-add");

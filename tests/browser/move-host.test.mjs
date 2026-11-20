@@ -223,6 +223,7 @@ test("move host", { timeout: 240000 }, async (t) => {
           "move-host-help",
         );
         assert.deepEqual(await options(page), ["Studio Mac (studio-mac)"]);
+        assert.equal(await page.evaluate(() => document.activeElement.id), "move-host-select");
         await page.click("#move-host-cancel");
         assert.equal(
           await page.evaluate(() => document.getElementById("move-host-dlg").open),
@@ -277,6 +278,7 @@ test("move host", { timeout: 240000 }, async (t) => {
             "No other active host runs pickup for sample. Add one in Settings, Hosts.",
           );
           assert.equal(await page.$eval("#move-host-save", (el) => el.disabled), true);
+          assert.equal(await page.evaluate(() => document.activeElement.id), "move-host-cancel");
           await page.click("#move-host-cancel");
 
           effectiveFails = true;

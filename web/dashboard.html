@@ -8182,6 +8182,7 @@ async function openMoveHost(ctx) {
   empty.hidden = !emptyText;
   $('move-host-save').disabled = !hosts.length;
   $('move-host-dlg').showModal();
+  $(hosts.length ? 'move-host-select' : 'move-host-cancel').focus();
   if (emptyText) {
     const opened = moveHost;
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -8459,7 +8460,7 @@ function openIdeaDialog(followUp = null, prefill = null) {
   $('idea-h').textContent = followUp ? 'New follow-up idea' : 'New idea';
   $('idea-err').hidden = true;
   $('idea-dlg').showModal();
-  if (followUp || prefill) $('idea-text').focus();
+  $(followUp || prefill ? 'idea-text' : 'idea-project').focus();
 }
 $('new-idea').addEventListener('click', () => openIdeaDialog());
 function followUpAction(ctx) {
