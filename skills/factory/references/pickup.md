@@ -463,7 +463,8 @@ the file, and nothing syncs it:
 ```
 
 The file names folders only. The command is fixed: `mise exec -- pnpm install
---frozen-lockfile`, or `pnpm install --frozen-lockfile` when `mise` is not on `PATH`.
+--frozen-lockfile --ignore-pnpmfile`, or `pnpm install --frozen-lockfile
+--ignore-pnpmfile` when `mise` is not on `PATH`.
 Each install appends to `<home>/logs/prebuild-<job-id>.log`, and stdout still prints
 only the worktree path. Every outcome keeps exit 0, and each folder reports on stderr:
 
@@ -471,9 +472,9 @@ only the worktree path. Every outcome keeps exit 0, and each folder reports on s
 | --- | --- |
 | `node_modules/.modules.yaml` exists | none, skipped |
 | no `pnpm-lock.yaml`, or the path leaves the worktree | `prebuild skips <dir>: no pnpm-lock.yaml` / `prebuild skips <dir>: not inside the worktree` |
-| lockfile, `package.json` or `pnpm-workspace.yaml` differs from `origin/<base>` | `prebuild skips <dir>: its dependency files differ from origin/<base>` |
+| the working tree, untracked files included, differs from `origin/<base>` in the folder's `pnpm-lock.yaml`, `package.json`, `pnpm-workspace.yaml`, `.npmrc`, `.pnpmfile.cjs`, `.pnpmfile.mjs`, `mise.toml` or `.mise.toml`, or the root `mise.toml`, `.mise.toml`, `.tool-versions` or `.npmrc` | `prebuild skips <dir>: its dependency files differ from origin/<base>` |
 | neither `mise` nor `pnpm` on `PATH` | `prebuild skips <dir>: pnpm is not on PATH` |
-| install exits non-zero or runs past 600 s | `factory.py: prebuild of <dir> failed (<why>); log: <log>` |
+| install exits non-zero, cannot start, or runs past 600 s | `factory.py: prebuild of <dir> failed (<why>); log: <log>` |
 | success | `prebuilt <dir> with pnpm install --frozen-lockfile` |
 
 A bad file prints `factory.py: cannot read <path>: use {"version": 1, "prebuild":

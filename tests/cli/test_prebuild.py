@@ -34,16 +34,17 @@ class PrebuildTest(IsolatedTestCase):
         (seed / "sample").mkdir()
         (seed / "sample" / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
         (seed / "sample" / "package.json").write_text("{}\n", encoding="utf-8")
+        (seed / "mise.toml").write_text("[tools]\nnode = '24'\n", encoding="utf-8")
         self.git(seed, "add", ".")
         self.git(seed, "commit", "-q", "-m", "sample")
         self.git(seed, "remote", "add", "origin", str(origin))
         self.git(seed, "push", "-q", "origin", "main")
         self.git(self.root, "clone", "-q", str(origin), str(self.wt))
         self.record = self.root / "calls.txt"
-        pnpm = self.root / "pnpm"
-        pnpm.write_text(FAKE_PNPM.format(record=self.record), encoding="utf-8")
-        pnpm.chmod(0o755)
-        tools = {"mise": None, "pnpm": str(pnpm)}
+        self.pnpm = self.root / "pnpm"
+        self.pnpm.write_text(FAKE_PNPM.format(record=self.record), encoding="utf-8")
+        self.pnpm.chmod(0o755)
+        tools = {"mise": None, "pnpm": str(self.pnpm)}
         self.addCleanup(patch.stopall)
         patch.object(factory.shutil, "which", side_effect=lambda name: tools[name]).start()
         self.log = self.home / "logs" / f"prebuild-{JOB}.log"
@@ -78,7 +79,7 @@ class PrebuildTest(IsolatedTestCase):
     def test_installs_once(self):
         self.config(["sample"])
         self.assertEqual(self.prebuild(), "prebuilt sample with pnpm install --frozen-lockfile\n")
-        self.assertEqual(self.calls(), [f"install --frozen-lockfile {self.wt / 'sample'}"])
+        self.assertEqual(self.calls(), [f"install --frozen-lockfile --ignore-pnpmfile {self.wt / 'sample'}"])
         self.assertTrue(self.log.exists())
         self.assertEqual(self.prebuild(), "")
         self.assertEqual(len(self.calls()), 1)
@@ -97,6 +98,56 @@ class PrebuildTest(IsolatedTestCase):
         self.assertEqual(self.prebuild(),
                          "prebuild skips sample: its dependency files differ from origin/main\n")
         self.assertEqual(self.calls(), [])
+
+    def test_uncommitted_lockfile_skips(self):
+        self.config(["sample"])
+        (self.wt / "sample" / "pnpm-lock.yaml").write_text("lockfileVersion: '9.1'\n", encoding="utf-8")
+        self.assertEqual(self.prebuild(),
+                         "prebuild skips sample: its dependency files differ from origin/main\n")
+        self.assertEqual(self.calls(), [])
+
+    def test_root_mise_toml_edit_skips(self):
+        self.config(["sample"])
+        (self.wt / "mise.toml").write_text("[env]\n_.source = 'x.sh'\n", encoding="utf-8")
+        self.git(self.wt, "commit", "-q", "-am", "builder mise.toml")
+        self.assertEqual(self.prebuild(),
+                         "prebuild skips sample: its dependency files differ from origin/main\n")
+        self.assertEqual(self.calls(), [])
+
+    def test_untracked_pnpmfile_skips(self):
+        self.config(["sample"])
+        (self.wt / "sample" / ".pnpmfile.cjs").write_text("module.exports = {}\n", encoding="utf-8")
+        self.assertEqual(self.prebuild(),
+                         "prebuild skips sample: its dependency files differ from origin/main\n")
+        self.assertEqual(self.calls(), [])
+
+    def test_mise_runs_pnpm_through_exec(self):
+        self.config(["sample"])
+        with patch.object(factory.shutil, "which", return_value=str(self.pnpm)):
+            self.assertEqual(self.prebuild(), "prebuilt sample with pnpm install --frozen-lockfile\n")
+        self.assertEqual(self.calls(),
+                         [f"exec -- pnpm install --frozen-lockfile --ignore-pnpmfile {self.wt / 'sample'}"])
+
+    def test_timeout_reports_the_log(self):
+        self.config(["sample"])
+        real = subprocess.run
+
+        def hang(argv, **kwargs):
+            if argv[0] == "git":
+                return real(argv, **kwargs)
+            self.assertEqual(kwargs["timeout"], 600)
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+        with patch.object(factory.subprocess, "run", side_effect=hang):
+            self.assertEqual(self.prebuild(),
+                             f"factory.py: prebuild of sample failed (timed out after 600 s); log: {self.log}\n")
+
+    def test_unrunnable_pnpm_still_returns(self):
+        self.config(["sample"])
+        self.pnpm.chmod(0o644)
+        out = self.prebuild()
+        self.assertTrue(out.startswith("factory.py: prebuild of sample failed ([Errno 13] Permission denied"), out)
+        self.assertTrue(out.endswith(f"; log: {self.log}\n"), out)
 
     def test_no_lockfile_skips(self):
         self.config(["missing"])
