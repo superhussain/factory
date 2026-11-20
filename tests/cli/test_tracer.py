@@ -21,9 +21,10 @@ UNSIGNED_NEEDS = ("Tracer approved scope for factory-1 without a signed receipt:
                   "001-sample or press Approve spec to build")
 
 
-def RECEIPT(feature="factory-1", ticket="FACTORY-1"):
+def RECEIPT(feature="factory-1", ticket="FACTORY-1", job="001-sample"):
     """Tracer's scope_receipt for an approval at APPROVED_AT, with a fake signature only the Worker would refuse."""
-    return {"feature": feature, "ticket": ticket, "approved_at": APPROVED_AT, "signature": "A" * 86 + "=="}
+    return {"job": job, "feature": feature, "ticket": ticket, "approved_at": APPROVED_AT,
+            "signature": "A" * 86 + "=="}
 
 SPEC = """# Spec: Sample feature
 
@@ -433,6 +434,7 @@ class GatherTest(TracerCase):
             self.gather(fake)
             posted = next(r[3] for r in fake.requests if r[0] == "POST" and r[1] == "/api/features")
             self.assertIs(posted["start_gather"], True)
+            self.assertEqual(posted["job"], "001-sample")
             self.assertEqual(posted["ticket"], "FACTORY-1")
             self.assertEqual(posted["title"], "Export samples as CSV")
             self.assertEqual(posted["ticket_text"], "Export samples as CSV\nWith a header row.")
@@ -504,6 +506,18 @@ class GatherTest(TracerCase):
             self.hold_at_gate()
             fake.features["factory-1"].update(scope_approved_at=APPROVED_AT,
                                               scope_receipt=RECEIPT("factory-7", "FACTORY-7"))
+            factory.tracer_follow_pass(self.home)
+            job = self.board["jobs"][0]
+            self.assertEqual((job["stage"], job["note"], job["needs"]),
+                             ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS))
+            self.assertNotIn("receipt", job["tracer"])
+
+    def test_receipt_for_another_job_is_dropped(self):
+        with FakeTracer() as fake:
+            self.gather(fake)
+            self.hold_at_gate()
+            fake.features["factory-1"].update(scope_approved_at=APPROVED_AT,
+                                              scope_receipt=RECEIPT(job="007-sample-other"))
             factory.tracer_follow_pass(self.home)
             job = self.board["jobs"][0]
             self.assertEqual((job["stage"], job["note"], job["needs"]),

@@ -9533,14 +9533,14 @@ def tracer_scope(feature):
     return "approved" if feature.get("scope_approved_at") else "gathering"
 
 
-def tracer_receipt(feature, feature_id, ticket):
-    """Tracer's signed scope receipt for this feature and ticket, or None. The Worker checks
+def tracer_receipt(feature, feature_id, ticket, job_id):
+    """Tracer's signed scope receipt for this job, feature and ticket, or None. The Worker checks
     the signature; this keeps only a well-formed receipt bound to the job's own ids."""
     receipt = feature.get("scope_receipt")
     if not isinstance(receipt, dict):
         return None
-    kept = {k: receipt.get(k) for k in ("feature", "ticket", "approved_at", "signature")}
-    if kept["feature"] != feature_id or kept["ticket"] != ticket \
+    kept = {k: receipt.get(k) for k in ("job", "feature", "ticket", "approved_at", "signature")}
+    if kept["job"] != job_id or kept["feature"] != feature_id or kept["ticket"] != ticket \
             or kept["approved_at"] != feature.get("scope_approved_at") \
             or not isinstance(kept["signature"], str) or not TRACER_SIGNATURE.fullmatch(kept["signature"]):
         return None
@@ -9555,14 +9555,14 @@ def tracer_gather(home, slug, job, cfg):
     link = api_url(home) + "/#" + job_id
     idea = str(job.get("idea") or "").strip()
     title = (str(job.get("title") or "").strip() or idea.split("\n")[0].strip() or job_id)[:200]
-    body = {"id": feature_id, "ticket": ticket, "title": title, "ticket_text": (idea or title)[:20000],
+    body = {"id": feature_id, "job": job_id, "ticket": ticket, "title": title, "ticket_text": (idea or title)[:20000],
             "services": [{"name": cfg["service"], "language": cfg["language"]}], "start_gather": True,
             "reading": f"Gathered for factory job {job_id}: {link}. Approve or decline scope here. "
                        "The factory builds this feature from its own spec and stops any Tracer build "
                        "that approval starts."}
     feature = tracer_create(base, token, body, ticket)
     tracer_record(home, job, base, feature["id"], scope=tracer_scope(feature),
-                  receipt=tracer_receipt(feature, feature_id, ticket))
+                  receipt=tracer_receipt(feature, feature_id, ticket, job_id))
 
 
 def tracer_poll_scope(home, slug, job, cfg):
@@ -9581,7 +9581,7 @@ def tracer_poll_scope(home, slug, job, cfg):
     scope = tracer_scope(feature)
     if scope != "gathering":
         tracer_record(home, job, base, feature_id, scope=scope,
-                      receipt=tracer_receipt(feature, feature_id, ticket))
+                      receipt=tracer_receipt(feature, feature_id, ticket, job["id"]))
     return scope
 
 
