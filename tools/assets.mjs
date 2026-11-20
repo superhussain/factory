@@ -65,6 +65,8 @@ export async function prepareAssets() {
     ["third-party-notices.txt", notices],
   ]) {
     const target = new URL(`.build/${name}`, root);
+    // A rewrite makes a running wrangler dev reload the worker and drop its live sockets.
+    if (existsSync(target) && (await readFile(target)).equals(body)) continue;
     const temporary = new URL(`.build/${name}.${process.pid}.tmp`, root);
     await writeFile(temporary, body);
     await rename(temporary, target);
