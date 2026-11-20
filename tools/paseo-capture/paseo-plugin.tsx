@@ -11,7 +11,7 @@ export const openExternalUrl = async () => {};
 
 export const useToast = () => ({ error() {} });
 
-// Lucide icon paths (ISC license) for the names the Factory screen uses, copied from the Paseo 0.16.2 app.
+// Lucide icon paths for the names the Factory screen uses, copied from the Paseo 0.16.2 app. License: THIRD_PARTY_NOTICES.md, "Lucide icon paths".
 const LUCIDE = {
   Factory: [
     "M12 16h.01",
