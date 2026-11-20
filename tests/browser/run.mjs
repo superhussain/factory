@@ -4,8 +4,7 @@
 // a mandatory case marker is missing. Capture mode is private builder evidence only:
 // `--capture <outdir> --reference-html <absolute path>` records matched before/after
 // views against the read-only reference page and is never part of CI or assertions.
-// Each capture side gets up to three attempts in a fresh browser context, so one hung page
-// under host load does not end the run.
+// Each capture side gets up to three attempts. Each retry starts a fresh browser process, so one hung page under host load does not end the run.
 // A side that fails all attempts is logged and the run continues; it ends with a FAIL summary and a non-zero exit.
 // Compare two captures of one side with `node tests/browser/capture-compare.mjs`; it passes when no channel differs by more than 16.
 // Capture pages bypass the dashboard service worker so request interception answers /board.json.
@@ -456,11 +455,13 @@ async function capture(outdir, referencePath) {
   await mkdir(dir, { recursive: true });
   const service = await startLocal({ persistDir: dir + "r2" });
   const puppeteer = (await import("puppeteer-core")).default;
-  const browser = await puppeteer.launch({
-    executablePath: browserExecutable(),
-    headless: true,
-    protocolTimeout: 60_000,
-  });
+  const launchBrowser = () =>
+    puppeteer.launch({
+      executablePath: browserExecutable(),
+      headless: true,
+      protocolTimeout: 60_000,
+    });
+  let browser = await launchBrowser();
   const origin = service.origin;
   const external = [];
   try {
@@ -547,7 +548,13 @@ async function capture(outdir, referencePath) {
       for (const side of ["before", "after"]) {
         const started = Date.now();
         try {
-          await retryCapture(`${side}-${name}`, async () => {
+          await retryCapture(`${side}-${name}`, async (attempt) => {
+            // A timed-out page can wedge the shared browser, so each retry starts a fresh one.
+            if (attempt > 1) {
+              console.error(`capture relaunch ${side}-${name}: attempt ${attempt}`);
+              await browser.close().catch(() => {});
+              browser = await launchBrowser();
+            }
             const context = await browser.createBrowserContext();
             try {
               await context.setPermission(origin, {
@@ -1118,12 +1125,16 @@ async function capture(outdir, referencePath) {
           "settings projects",
           page.waitForSelector("#settings-projects:not([hidden])", { timeout: 30000 }),
         );
-        // The pickup status above the tabs can grow a line late, so settle it and click without coordinates.
+        // The pickup status above the tabs can grow a line late, so wait for settled text. Pages without the project pickup pass at once.
         await named(
           "settings pickup",
           page.waitForFunction(
-            () =>
-              !document.getElementById("project-pickup-status")?.textContent.startsWith("Loading"),
+            () => {
+              const status = document.getElementById("project-pickup-status");
+              if (!status || typeof renderProjectPickup !== "function") return true;
+              const text = status.textContent;
+              return text !== "" && !text.startsWith("Loading");
+            },
             { polling: 50, timeout: 30000 },
           ),
         );
