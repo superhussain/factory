@@ -10483,17 +10483,21 @@ def audit_strip_data_heredocs(command):
     out, pending = [], []
     for line in command.split("\n"):
         if pending:
-            delimiter, data = pending[0]
+            delimiter, data, quoted = pending[0]
             if line.strip() == delimiter:
                 pending.pop(0)
                 out.append(line)
             else:
-                out.append("" if data else line)
+                out.append("" if data and (quoted or not re.search(r"\$\(|`", line)) else line)
             continue
         out.append(line)
         for m in AUDIT_HEREDOC_OPEN.finditer(line):
-            words = re.split(r"[;&|(]|\$\(", line[:m.start()])[-1].split()
-            pending.append((m.group(3), bool(words) and words[0] in ("cat", "tee") and "|" not in line[m.end():]))
+            before, after = line[:m.start()], line[m.end():]
+            words = re.split(r"[;&|(]|\$\(", before)[-1].split()
+            data = (bool(words) and words[0] in ("cat", "tee") and re.match(r"\s|$", after) is not None
+                    and not re.search(r"<\(|\beval\b|(?:^|\s)-c(?:\s|$)", before)
+                    and not re.search(r"\||>\(", after))
+            pending.append((m.group(3), data, bool(m.group(2))))
     return "\n".join(out)
 
 
