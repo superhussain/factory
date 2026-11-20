@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from support import IsolatedTestCase, invoke, load_runtime
 
@@ -16,6 +17,10 @@ class CleanTest(IsolatedTestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.home = Path(temp.name).resolve()
+        self.tmp = self.home / "tmp"
+        tempdir = patch.object(tempfile, "tempdir", str(self.tmp))
+        tempdir.start()
+        self.addCleanup(tempdir.stop)
         self.wt = self.home / "worktrees" / "sample" / "001-test"
         self.wt.mkdir(parents=True)
         self.git("init", "-q")
@@ -100,10 +105,43 @@ class CleanTest(IsolatedTestCase):
         self.assertIn(f"{link} is a symlink or junction; nothing was removed", err)
         self.assertTrue(modules.is_dir())
 
+    def test_temp_removes_job_folder(self):
+        job, other = self.tmp / "factory-001-test", self.tmp / "factory-002-other"
+        for path in (job / "shots", other):
+            path.mkdir(parents=True)
+            (path / "file.png").write_text("x\n")
+        modules = self.folder("node_modules")
+        code, out, err = self.clean("temp")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, {"removed": [str(job)], "left": []})
+        self.assertFalse(job.exists())
+        self.assertTrue((other / "file.png").is_file() and modules.is_dir())
+
+    def test_temp_left_and_absent(self):
+        target = "sample/009-no-worktree"
+        path = self.tmp / "factory-009-no-worktree"
+        self.assertEqual(self.clean("temp", target=target), (0, {"removed": [], "left": []}, ""))
+        self.tmp.mkdir()
+        path.write_text("x\n")
+        code, out, _ = self.clean("temp", target=target)
+        self.assertEqual((code, out), (1, {"removed": [], "left": [f"{path}: not a folder, left in place"]}))
+        self.assertTrue(path.is_file())
+        path.unlink()
+        outside = self.home / "outside"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("keep\n")
+        try:
+            os.symlink(outside, path, target_is_directory=True)
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        code, out, _ = self.clean("temp", target=target)
+        self.assertEqual((code, out), (1, {"removed": [], "left": [f"{path}: a symlink or junction, left in place"]}))
+        self.assertTrue((outside / "keep.txt").is_file())
+
     def test_bad_usage_exits_2(self):
         modules, scratch = self.folder("node_modules"), self.folder(".context/capture-1")
         for args in (("scratch", "../x"), ("scratch",), ("node_modules", "extra"), ("dist",),
-                     ("scratch", ".hidden")):
+                     ("scratch", ".hidden"), ("temp", "extra")):
             code, out, err = self.clean(*args)
             self.assertEqual((code, out), (2, None), args)
             self.assertIn(factory.USAGE_CLEAN, err)
