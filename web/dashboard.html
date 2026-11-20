@@ -7674,8 +7674,12 @@ const FIRST_PRESS_SAVED = 'Your first press most likely saved, and the job has m
 function firstPressText(message, uncertain) {
   return uncertain ? message + ' ' + FIRST_PRESS_SAVED : message;
 }
-// A refusal after an uncertain press whose note the row still holds: the edit did not save.
-const REWORK_NOTE_KEPT = 'Your first press saved the rework with the note as it was then. The job still holds that note, so your edit was not saved. Cancel closes this dialog and keeps the first note.';
+// A refusal after an uncertain press whose note the row still holds: quote that note, on one line and cut short.
+function reworkNoteKept(held) {
+  const flat = held.replace(/\s+/g, ' ').trim();
+  const quote = flat.length > 120 ? flat.slice(0, 119).trimEnd() + '…' : flat;
+  return 'Your first press saved the rework with this note:\n"' + quote + '"\nThe job still holds that note, so your edit was not saved. Cancel closes this dialog and keeps the first note.';
+}
 
 let ideaEditor = null;
 let ideaEditorLoad = null;
@@ -8298,7 +8302,7 @@ $('rework-form').addEventListener('submit', async (e) => {
       reworkDialog.uncertain = true;
       reworkDialog.uncertainNotes.add(note);
     }
-    $('rework-err').textContent = refused && reworkDialog.uncertainNotes.has(heldNote) ? REWORK_NOTE_KEPT : refused ? firstPressText(x.message, reworkDialog.uncertain) : boardSaveError(x, 'The rework may have saved. Press Start rework again to check. It will not queue a second rework.');
+    $('rework-err').textContent = refused && reworkDialog.uncertainNotes.has(heldNote) ? reworkNoteKept(heldNote) : refused ? firstPressText(x.message, reworkDialog.uncertain) : boardSaveError(x, 'The rework may have saved. Press Start rework again to check. It will not queue a second rework.');
     $('rework-err').hidden = false;
     reworkDialog.saving = false;
     setDialogSaving('rework', 'rework-note', 'Start rework', false);
