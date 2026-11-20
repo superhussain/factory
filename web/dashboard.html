@@ -1598,11 +1598,8 @@ let archiveFailNoted = '';
 const savedBoardWaitText = (id) => `Job ${id} opens when the board loads.`;
 // The id whose wait-for-the-board toast already showed, so a repeat call stays quiet.
 let boardWaitNoted = '';
-// The toast writes its text after 100 ms, so a visible empty toast is still the pending wait copy.
-const boardWaitShowing = (id) => {
-  const s = $('board-status');
-  return !!id && boardWaitNoted === id && (s.textContent === savedBoardWaitText(id) || (!s.hidden && !s.textContent));
-};
+// The toast writes its text after 100 ms, so an empty toast is the wait copy only while that text is pending.
+const boardWaitShowing = (id) => !!id && boardWaitNoted === id && ($('board-status').textContent || boardStatusPending) === savedBoardWaitText(id);
 // The board carries archived.max_id once the Worker has archived a job, so only then is there an archive to search.
 let boardArchived = false;
 // The jumper's one archive lookup: { query, status: 'loading' | 'done' | 'error', jobs, total }.
@@ -6956,8 +6953,8 @@ window.addEventListener('hashchange', (e) => {
   const { id } = parseHash();
   if (id !== archiveFailNoted) archiveFailNoted = '';
   if (id !== boardWaitNoted) {
-    // A link to another job drops the old wait toast.
-    if (id && boardWaitShowing(boardWaitNoted)) showBoardStatus('');
+    // A link to another job, or Back to the board, drops the old wait toast.
+    if (boardWaitShowing(boardWaitNoted)) showBoardStatus('');
     boardWaitNoted = '';
   }
   const key = backlogRoute();
@@ -7740,16 +7737,20 @@ function focusOpener(opener) {
 
 const BOARD_STATUS_MS = 12000, COPIED_STATUS_MS = 2000;
 let boardStatusTimer = 0;
+// The text waiting out the toast's 100 ms delay, or '' when none is pending.
+let boardStatusPending = '';
 let boardStatusHeld = false;
 
 // A separate task sets the text after the toast empties, so a repeat is announced again.
 function showBoardStatus(text) {
   clearTimeout(boardStatusTimer);
   if (!text) boardStatusHeld = false;
+  boardStatusPending = text;
   $('board-status').textContent = '';
   $('board-status').hidden = !text;
   if (!text) return;
   boardStatusTimer = setTimeout(() => {
+    boardStatusPending = '';
     $('board-status').textContent = text;
     if (!boardStatusHeld) boardStatusTimer = setTimeout(() => showBoardStatus(''), text === 'Copied' ? COPIED_STATUS_MS : BOARD_STATUS_MS);
   }, 100);
