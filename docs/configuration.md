@@ -58,9 +58,16 @@ Keep each key once. Runtime reads take the last duplicate (`frontmatter`), while
 - Never put a credential in `config.md`, `deploy/profile.json`, the CI variable, `projects/<slug>.md` or project documents. The dashboard renders project files and documents as markdown to every Access-authenticated viewer, and the profile and connection descriptor are nonsecret by design.
 - `deploy/profile.json` is listed in `.gitignore` but is not a secret; it holds instance values that never belong in committed source.
 
+## Notifications and Display
+
+- Display and Notifications settings apply only to the browser you set them in. Display values are never sent to the server.
+- Push when the dashboard is closed needs the optional `FACTORY_VAPID_KEY` Worker secret ([cloudflare.md §7](cloudflare.md#7-behavior-notes-and-release-boundary)).
+- See [the dashboard tour](dashboard-tour.md#settings) for every option.
+
 ## Related
 
 - [device.md](device.md) — device setup, credentials and home selection
 - [cloudflare.md](cloudflare.md) — instance setup, profile and continuous deployment
 - [architecture.md](architecture.md) — ownership and request boundary
 - [integrations.md](integrations.md) — optional native roles and schedules
+- [dashboard-tour.md](dashboard-tour.md) — every dashboard view, route and shortcut
