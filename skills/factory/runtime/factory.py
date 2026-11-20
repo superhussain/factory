@@ -90,6 +90,10 @@
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
                                             branch without forcing, print what was left as JSON
+  factory.py clean <project-slug>/<job-id> node_modules | scratch <name>
+                                            remove the job worktree's git-ignored node_modules folders, or
+                                            its .context/<name> scratch folder, never through a link; print
+                                            what was removed and left as JSON
   factory.py archive-workspace <project-slug>/<job-id> [--check]
                                             archive this session's Paseo worktree workspace and agent once
                                             the job is merged or closed, whatever its git state; print
@@ -6622,7 +6626,8 @@ def prompt_cmd(target, role, *flags):
              f"Project file: {project_file}",
              f"Project documents: {documents}",
              f"Visuals reference: {skill / 'references' / 'visuals.md'}",
-             f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}"]
+             f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}",
+             f"Runtime: {skill / 'runtime' / 'factory.py'}"]
     round_folder = folder / f"round-{options['--round']}" if "--round" in options else None
     if role == "spec":
         feature = job.get("idea") or job.get("title")
@@ -9018,6 +9023,63 @@ def cleanup(target):
     sys.exit(1 if left else 0)
 
 
+USAGE_CLEAN = "usage: clean <project-slug>/<job-id> node_modules | scratch <name>"
+SCRATCH_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+
+
+def clean_cmd(target, what, *rest):
+    home, slug, job_id = r2_target(target, True)
+    if not (what == "node_modules" and not rest
+            or what == "scratch" and len(rest) == 1 and SCRATCH_NAME.fullmatch(rest[0])):
+        fail(USAGE_CLEAN, 2)
+    wt = home / "worktrees" / slug / job_id
+    for path in (home / "worktrees", wt.parent, wt):
+        if is_link(path):
+            fail(f"{path} is a symlink or junction; nothing was removed", 6)
+    if not wt.is_dir():
+        fail(f"no worktree {wt}; nothing was removed", 4)
+    removed, left = [], []
+    if what == "node_modules":
+        try:
+            listed = subprocess.run(["git", "-C", str(wt), "ls-files", "-z", "--others", "--ignored",
+                                     "--exclude-standard", "--directory"],
+                                    capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.TimeoutExpired):
+            listed = None
+        if listed is None or listed.returncode != 0:
+            fail(f"git could not list ignored folders in {wt}; nothing was removed", 1)
+        targets = sorted(entry.rstrip("/") for entry in listed.stdout.split("\0")
+                         if entry and Path(entry.rstrip("/")).name == "node_modules")
+    else:
+        rel = f".context/{rest[0]}"
+        targets = []
+        if os.path.lexists(wt / rel):
+            try:
+                ignored = subprocess.run(["git", "-C", str(wt), "check-ignore", "-q", rel],
+                                         capture_output=True, timeout=20).returncode == 0
+            except (OSError, subprocess.TimeoutExpired):
+                ignored = False
+            if ignored:
+                targets = [rel]
+            else:
+                left.append(f"{wt / rel}: not ignored by git, left in place")
+    for rel in targets:
+        path = wt / rel
+        parts = Path(rel).parts
+        if any(is_link(wt.joinpath(*parts[:i])) for i in range(1, len(parts) + 1)):
+            left.append(f"{path}: a symlink or junction, left in place")
+        elif not path.is_dir():
+            left.append(f"{path}: not a folder, left in place")
+        else:
+            try:
+                shutil.rmtree(path)
+                removed.append(str(path))
+            except OSError as exc:
+                left.append(f"{path}: {exc.strerror}")
+    print(json.dumps({"removed": removed, "left": left}, indent=2))
+    sys.exit(1 if left else 0)
+
+
 def cleanup_job(repo, wt, branch, drop_pushed=False, merged_head=None):
     """Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged branch that origin holds at the same commit and no worktree has checked out. With merged_head, also delete a branch whose tip that commit contains and no worktree has checked out. (removed, left)."""
     def run_git(*args, timeout=20):
@@ -11258,6 +11320,7 @@ COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
 COMMANDS["host"] = (host_cmd, 3, 3)
 COMMANDS["cleanup"] = (cleanup, 1, 1)
+COMMANDS["clean"] = (clean_cmd, 2, 3)
 COMMANDS["deny-notes"] = (deny_notes_cmd, 1, 2)
 COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
