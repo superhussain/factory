@@ -2625,6 +2625,7 @@ function checkRiderControls(storedJobs, jobs) {
 
 // Only a signed-in person passes the spec-approval gate on the dashboard, and the Tracer
 // note needs the row's Tracer scope approved. A row whose note is unchanged passes.
+// A device cannot move a row into build while it keeps an approval note.
 // An error message, or null.
 function checkApprovalNotes(storedJobs, jobs, principal) {
   const stored = new Map();
@@ -2632,7 +2633,17 @@ function checkApprovalNotes(storedJobs, jobs, principal) {
     if (typeof j?.id === "string" && !stored.has(j.id)) stored.set(j.id, j);
   for (const row of jobs) {
     if (typeof row !== "object" || row === null || typeof row.id !== "string") continue;
-    if (row.note === stored.get(row.id)?.note) continue;
+    const storedRow = stored.get(row.id);
+    if (row.note === storedRow?.note) {
+      if (
+        (row.note === DASHBOARD_APPROVED_NOTE || row.note === TRACER_APPROVED_NOTE) &&
+        principal?.kind !== "user" &&
+        row.stage === "build" &&
+        storedRow.stage !== "build"
+      )
+        return `a board write from a device cannot move ${quoteIdCut(row.id, QUOTED_ID_MAX)} into build while it keeps the note "${row.note}": only a person starts an approved spec again. Nothing was written.`;
+      continue;
+    }
     if (row.note === DASHBOARD_APPROVED_NOTE && principal?.kind !== "user")
       return `a board write from a device cannot set the note "${DASHBOARD_APPROVED_NOTE}" on ${quoteIdCut(row.id, QUOTED_ID_MAX)}: only a signed-in person approves a spec on the dashboard. Nothing was written.`;
     if (row.note === TRACER_APPROVED_NOTE && row.tracer?.scope !== "approved")
