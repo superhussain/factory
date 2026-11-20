@@ -164,7 +164,7 @@ test("refuses a receipt replayed from another job", async () => {
 
 test("refuses a v1 receipt", async () => {
   const s = setup();
-  const { job: _job, ...receipt } = await signed({}, "tracer-scope-approval/v1");
+  const receipt = await signed({}, "tracer-scope-approval/v1");
   await refused(s, () => s.put(withReceipt(receipt)), receiptRefusal);
 });
 
