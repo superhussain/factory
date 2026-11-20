@@ -78,6 +78,12 @@ class WithCloudflareTest(IsolatedTestCase):
         self.addCleanup(self.env_file.chmod, 0o600)
         self.assert_exit_5(f"cannot read {self.env_file}: check its permissions and that it is UTF-8 text.")
 
+    @unittest.skipIf(os.name == "nt" or os.geteuid() == 0, "chmod 0 does not block lookups here")
+    def test_unsearchable_home(self):
+        self.home.chmod(0)
+        self.addCleanup(self.home.chmod, 0o700)
+        self.assert_exit_5(f"cannot read {self.env_file}: check its permissions and that it is UTF-8 text.")
+
     def test_usage(self):
         for args in (["with-cloudflare"], ["with-cloudflare", "--"],
                      ["with-cloudflare", sys.executable, "-c", "pass"]):

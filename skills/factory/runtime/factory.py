@@ -9151,7 +9151,7 @@ def clean_cmd(target, what, *rest):
                 left.append(f"{path}: {exc.strerror}")
         print(json.dumps({"removed": removed, "left": left}, indent=2))
         sys.exit(1 if left else 0)
-    wt =home / "worktrees" / slug / job_id
+    wt = home / "worktrees" / slug / job_id
     for path in (home / "worktrees", wt.parent, wt):
         if is_link(path):
             fail(f"{path} is a symlink or junction; nothing was removed", 6)
@@ -10669,15 +10669,15 @@ def with_cloudflare_cmd(*argv):
     env_file = factory_home() / ".env"
     not_regular = f"{env_file} is a link or not a regular file, so it was not read. Replace it with a regular file."
     unreadable = f"cannot read {env_file}: check its permissions and that it is UTF-8 text."
-    if is_link(env_file):
-        fail(not_regular, 5)
-    if not os.path.lexists(env_file):
-        fail(f"no {env_file}. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there.", 5)
-    if not stat.S_ISREG(env_file.stat().st_mode):
-        fail(not_regular, 5)
-    if not os.access(env_file, os.R_OK):
-        fail(unreadable, 5)
     try:
+        if is_link(env_file):
+            fail(not_regular, 5)
+        if not os.path.lexists(env_file):
+            fail(f"no {env_file}. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there.", 5)
+        if not stat.S_ISREG(env_file.stat().st_mode):
+            fail(not_regular, 5)
+        if not os.access(env_file, os.R_OK):
+            fail(unreadable, 5)
         loaded = {k: v for k, v in read_conf(env_file).items() if k.startswith("CLOUDFLARE_") and v}
     except (OSError, ValueError):
         fail(unreadable, 5)
