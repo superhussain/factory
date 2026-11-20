@@ -1,0 +1,68 @@
+// runChild logs start and done lines, and kills a child that outlives its timeout.
+import assert from "node:assert/strict";
+import test from "node:test";
+import { runChild } from "./run-child.mjs";
+
+const logged = async (run) => {
+  const lines = [];
+  const log = console.log;
+  console.log = (line) => lines.push(line);
+  try {
+    return { result: await run(), lines };
+  } finally {
+    console.log = log;
+  }
+};
+
+test("runChild kills a stalled child at the timeout", async () => {
+  const { result, lines } = await logged(() =>
+    runChild("node", ["-e", "setInterval(() => {}, 1000)"], { timeoutMs: 300, label: "stall" }),
+  );
+  assert.equal(result.timedOut, true);
+  assert.equal(result.code, null);
+  assert.ok(result.ms < 5000, `took ${result.ms}ms`);
+  assert.deepEqual(lines.slice(0, 2), ["start stall", "timeout stall after 0.3s"]);
+  assert.match(lines[2], /^done stall: exit null \(\d+\.\ds\)$/);
+});
+
+test("runChild returns a finished child's exit code and output", async () => {
+  const { result, lines } = await logged(() =>
+    runChild("node", ["-e", "console.log('hi'); process.exit(3)"], {
+      timeoutMs: 60000,
+      label: "quick",
+    }),
+  );
+  assert.deepEqual([result.code, result.output, result.timedOut], [3, "hi\n", false]);
+  assert.equal(lines[0], "start quick");
+  assert.match(lines[1], /^done quick: exit 3 \(\d+\.\ds\)$/);
+});
+
+test("runChild kills a timed-out child's own children too", async () => {
+  const script =
+    "const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });" +
+    "process.stdout.write(c.pid + '\\n'); setInterval(() => {}, 1000)";
+  // console.log colors a number under FORCE_COLOR, which Nx sets, so the script writes a plain line.
+  // ready holds the timer until that line, so a slow runner cannot kill the child before it spawns.
+  const { result } = await logged(() =>
+    runChild("node", ["-e", script], { timeoutMs: 300, ready: /\n/ }),
+  );
+  assert.match(
+    result.output,
+    /^\d+\n$/,
+    "the child printed its grandchild's pid before the timeout",
+  );
+  const pid = Number(result.output);
+  // SIGKILL lands asynchronously, so poll until the grandchild is gone.
+  const gone = () => {
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (error) {
+      return error.code === "ESRCH";
+    }
+  };
+  for (let tries = 0; !gone() && tries < 100; tries++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(gone(), `grandchild ${pid} still running`);
+});

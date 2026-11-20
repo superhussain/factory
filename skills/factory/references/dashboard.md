@@ -34,6 +34,16 @@ deletes `needs` and `escalated`, and sets the note `babysitting PR #<n>`. The ca
 leaves needs you for pr-open with a Babysitting chip, and pickup launches
 `/factory babysit <id>`, as [pickup](pickup.md) describes. Clearing babysit drops that priority again unless it was earlier.
 
+## Approve spec
+
+The drawer's top bar, the job actions menu, the card menu and the inbox show Approve
+spec on a `needs-human` job with the note `gate: spec-approval` that is not a batch
+rider, paused or closing. After a confirm it moves the job to `build`, sets the note
+`spec approved on the dashboard`, deletes `needs` and stamps `updated`, in one board
+write. A row that changed meanwhile is checked again and never forced. Pickup then
+launches `/factory recover <id>`, which starts the builder, as [pickup](pickup.md)
+describes. `factory.py board` refuses that note, so only the dashboard sets it.
+
 ## Stage-change deep links
 
 | Event | Link to |

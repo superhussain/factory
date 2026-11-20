@@ -100,7 +100,7 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | Browser toasts, sounds, notifications, reminders and display | Settings, Notifications and Display | [notifications.md](notifications.md), [dashboard-tour.md](dashboard-tour.md#display) |
 | Answer every job waiting on you in one list | Inbox (`I`), or `W` for the next job | [dashboard-tour.md](dashboard-tour.md#inbox-and-the-w-key) |
 | Review flagged tool calls and retro runs | Retros (`R`), Red flags | [dashboard-tour.md](dashboard-tour.md#retros-and-red-flags) |
-| Open the board inside Paseo | `paseo plugin install <checkout>/paseo-plugin`, then Paseo Settings, Plugins, Factory | [integrations.md](integrations.md#paseo-plugin) |
+| Open the board inside Paseo | `paseo plugin install <checkout>/paseo-plugin`, then Paseo Settings, Plugins, Factory, then `embed_origins` and an `up` rerun | [integrations.md](integrations.md#paseo-plugin) |
 | Make a job wait for another job or a time | `Depends on:` backlog lines, `depends-on` refs, `not_before` | [autonomy.md](autonomy.md#waiting-on-other-jobs) |
 | Let agents manage the instance, such as Access settings or an `up` rerun | `CLOUDFLARE_API_TOKEN` in the factory home `.env` | [cloudflare.md](cloudflare.md#device-token) |
 | Upgrade later | `git pull` here, then `install.py --replace` on each host | [upgrade.md](upgrade.md) |

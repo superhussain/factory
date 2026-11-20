@@ -1,5 +1,6 @@
 // Full hosted browser behavior run: the CJS suites in a bounded pool, each against its own
-// fresh owned ephemeral local service, beside the node --test files, failing if
+// fresh owned ephemeral local service, beside the node --test files, one process each in a second
+// pool. Each suite and file logs start and done lines and is killed after 10 minutes, failing if
 // a mandatory case marker is missing. Capture mode is private builder evidence only:
 // `--capture <outdir> --reference-html <absolute path>` records matched before/after
 // views against the read-only reference page and is never part of CI or assertions.
@@ -9,7 +10,6 @@
 // Compare two captures of one side with `node tests/browser/capture-compare.mjs`; it passes when no channel differs by more than 16.
 // Capture pages bypass the dashboard service worker so request interception answers /board.json.
 // Viewports and views: docs/development.md, Visual captures.
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { prepareAssets } from "../../tools/assets.mjs";
@@ -20,6 +20,7 @@ import { png } from "../support/png.mjs";
 import owned from "../support/owned-origin.cjs";
 import { clickNow } from "../support/board-ready.cjs";
 import { retryCapture } from "./capture-retry.mjs";
+import { pool, runChild } from "./run-child.mjs";
 import { selectShard } from "./shard.mjs";
 
 const CASES = selectShard(
@@ -27,42 +28,23 @@ const CASES = selectShard(
   process.env.FACTORY_BROWSER_SHARD,
 );
 
-function run(command, args, env = {}) {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { env: { ...process.env, ...env } });
-    let output = "";
-    child.stdout.on("data", (chunk) => {
-      output += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      output += chunk;
-    });
-    child.once("exit", (code) => resolve({ code, output }));
-  });
-}
-
 const BROWSER_CONCURRENCY = 2;
-
-async function pool(items, limit, worker) {
-  const results = [];
-  let next = 0;
-  async function lane() {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await worker(items[index]);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
-  return results;
-}
+// A suite or node file still running after this is killed and recorded as a failure.
+const SUITE_TIMEOUT_MS = 600000;
 
 async function runSuite(suite, dir) {
   const started = Date.now();
   const service = await startLocal({ persistDir: `${dir}${suite.file}-r2` });
   try {
-    const result = await run("node", [`tests/browser/${suite.file}`, "--browser", service.origin], {
-      [owned.OWNED_ORIGIN_ENV]: service.origin,
-    });
+    const result = await runChild(
+      "node",
+      [`tests/browser/${suite.file}`, "--browser", service.origin],
+      {
+        env: { [owned.OWNED_ORIGIN_ENV]: service.origin },
+        timeoutMs: SUITE_TIMEOUT_MS,
+        label: suite.file,
+      },
+    );
     return { ...result, ms: Date.now() - started };
   } finally {
     await service.close();
@@ -80,18 +62,21 @@ async function behavior() {
   const failures = [];
   const [results, tests] = await Promise.all([
     pool(CASES.suites, BROWSER_CONCURRENCY, (suite) => runSuite(suite, dir)),
-    run("node", [
-      "--test",
-      "--test-reporter=tap",
-      `--test-concurrency=${BROWSER_CONCURRENCY}`,
-      ...CASES.nodeTests,
-    ]),
+    pool(CASES.nodeTests, BROWSER_CONCURRENCY, (file) =>
+      runChild("node", ["--test", "--test-reporter=tap", file], {
+        timeoutMs: SUITE_TIMEOUT_MS,
+        label: file,
+      }),
+    ),
   ]);
   CASES.suites.forEach((suite, index) => {
     const result = results[index];
     console.log(result.output.trim());
     let suiteFailed = false;
-    if (result.code !== 0) {
+    if (result.timedOut) {
+      suiteFailed = true;
+      failures.push(`${suite.file}: timed out after ${SUITE_TIMEOUT_MS / 1000}s`);
+    } else if (result.code !== 0) {
       suiteFailed = true;
       failures.push(`${suite.file}: exit ${result.code}`);
     }
@@ -105,12 +90,16 @@ async function behavior() {
       `${suite.file}: ${suiteFailed ? "see failures" : "all cases present"} (${(result.ms / 1000).toFixed(1)}s)`,
     );
   });
-  console.log(tests.output.trim());
-  if (tests.code !== 0) failures.push(`node --test browser files: exit ${tests.code}`);
-  for (const marker of ["# fail 0", "# skipped 0"]) {
-    if (!tests.output.includes(marker))
-      failures.push(`node --test browser files: missing ${JSON.stringify(marker)}`);
-  }
+  CASES.nodeTests.forEach((file, index) => {
+    const result = tests[index];
+    console.log(result.output.trim());
+    if (result.timedOut) failures.push(`${file}: timed out after ${SUITE_TIMEOUT_MS / 1000}s`);
+    else if (result.code !== 0) failures.push(`${file}: exit ${result.code}`);
+    for (const marker of ["# fail 0", "# skipped 0"]) {
+      if (!result.output.includes(marker))
+        failures.push(`${file}: missing ${JSON.stringify(marker)}`);
+    }
+  });
   if (failures.length) {
     console.error("mandatory browser cases failed:\n" + failures.join("\n"));
     process.exit(1);
@@ -248,6 +237,35 @@ const CAPTURE_JOBS = [
     refs: [{ id: "108-batch-lead", kind: "batched-into" }],
     note: "batched into 108-batch-lead",
     updated: "2026-01-01T12:00:00Z",
+  },
+  {
+    id: "110-spec-gate",
+    project: "sample",
+    title: "Synthetic spec gate",
+    stage: "needs-human",
+    updated: "2026-01-01T12:00:00Z",
+    note: "gate: spec-approval",
+    needs: "approve spec.md, then run /factory approve-spec 110-spec-gate to start the build",
+  },
+  {
+    id: "111-tracer-gate",
+    project: "sample",
+    title: "Synthetic Tracer scope hold",
+    stage: "needs-human",
+    updated: "2026-01-01T12:00:00Z",
+    note: "gate: tracer-scope",
+    tracer: { url: "https://tracer.example.test/scope/111" },
+  },
+  {
+    id: "112-held-pr",
+    project: "sample",
+    title: "Synthetic held PR",
+    stage: "pr-open",
+    updated: "2026-01-01T12:00:00Z",
+    branch: "factory/112-held-pr",
+    round: 1,
+    pr: "https://github.com/example/sample/pull/112",
+    needs: "review and merge PR #112: this project's pipeline holds every PR for a person",
   },
 ];
 // More merged rows than the slim board read carries, so the merged column loads the rest on demand.
@@ -2045,6 +2063,43 @@ async function capture(outdir, referencePath) {
       return clipOf(page, ".detail-head");
     };
     await view("held-drawer-390", 390, 844, "dark", openHeldDrawer, true);
+    const openSpecGate = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#110-spec-gate";
+      });
+      await page.waitForFunction(
+        () =>
+          document.getElementById("d-meta").textContent.includes("110-spec-gate") &&
+          document.querySelector("#d-doc").textContent !== "loading files",
+        { timeout: 30000 },
+      );
+    };
+    await view("approve-spec-drawer-1280", 1280, 900, "light", async (page) => {
+      await openSpecGate(page);
+      return clipOf(page, ".detail-head");
+    });
+    await view("approve-spec-drawer-390", 390, 844, "dark", openSpecGate);
+    await view("inbox-spec-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/inbox";
+      });
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll("#inbox-list .inbox-meta")].some((el) =>
+          el.textContent.includes("110-spec-gate"),
+        ),
+      );
+    });
+    await view("inbox-unblock-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/inbox";
+      });
+      await page.waitForFunction(() => {
+        const meta = [...document.querySelectorAll("#inbox-list .inbox-meta")];
+        return ["111-tracer-gate", "112-held-pr"].every((id) =>
+          meta.some((el) => el.textContent.includes(id)),
+        );
+      });
+    });
     const openCardActions = (id) => async (page) => {
       const wrap = `.card-wrap:has(.card[data-id="${id}"])`;
       await page.evaluate(

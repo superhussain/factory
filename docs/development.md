@@ -144,8 +144,8 @@ records matched before and after views. Each `view(...)` line in
 | Viewport | Used by |
 | --- | --- |
 | 1440x900 | desktop views, `retros-flags-offline-desktop`, `board-merged-all-1440`, `board-merged-header-1440`, `board-merged-loading-1440`, `board-merged-saved-click-1440`, `board-banner-saved-1440`, `board-offline-deeplink-1440`, `board-saved-deeplink-1440`, `board-saved-deeplink-back-1440`, `board-merged-160-1763`, `board-merged-160-1763-loading`, `header-badges-1440` |
-| 1280x900 | settings, archive and agent-run views, `notify-toast-1280`, `notifications-menu-kinds-1280`, `notifications-split-1280`, `notifications-page-hidden-links-1280`, `notify-sound-wait-1280`, `retros-split-1280`, `settings-split-1280` |
-| 390x844 | mobile views, `notify-toast-390`, `notify-alerts-390` and `board-merged-header-390` |
+| 1280x900 | settings, archive and agent-run views, `notify-toast-1280`, `notifications-menu-kinds-1280`, `notifications-split-1280`, `notifications-page-hidden-links-1280`, `notify-sound-wait-1280`, `retros-split-1280`, `settings-split-1280`, `approve-spec-drawer-1280`, `inbox-spec-1280`, `inbox-unblock-1280` |
+| 390x844 | mobile views, `notify-toast-390`, `notify-alerts-390`, `board-merged-header-390` and `approve-spec-drawer-390` |
 | 375x667 | `drawer-mobile-scrolled` |
 | 320x844 | `header-notifications-320` |
 | 900x900 | `inbox-split-900` |
@@ -163,7 +163,7 @@ Set `FACTORY_CAPTURE_PROBE_URL` to make the page request that URL; the run must 
 - Settings are synthetic: dashboard `https://factory.example.test`, Paseo origin `https://app.example.test`.
 - Before images: `git archive <base> paseo-plugin | tar -x -C .context/base`, then add `--plugin .context/base/paseo-plugin`.
 - `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
-- Owned stubs in `tools/paseo-capture/` stand in for React Native, the Paseo plugin API and the frame. Layout is close to Paseo's, not identical. Icons are outlined squares, and the palette is a synthetic dark theme. Compare before and after from this tool only, never against app screenshots.
+- Owned stubs in `tools/paseo-capture/` stand in for React Native, the Paseo plugin API and the frame. Layout is close to Paseo's, not identical. Icons are inline Lucide paths for the four names the screen uses. The dark palette is synthetic. Compare before and after from this tool only, never against app screenshots.
 
 ## Pre-commit checks
 

@@ -652,6 +652,30 @@ test("retros page", { timeout: 180000 }, async (t) => {
       await page.browserContext().close();
     });
 
+    await t.test("closing a drawer keeps the page scroll", async () => {
+      const { page, errors } = await openPage(RUN_HASH, { width: 1280, height: 480 });
+      await page.waitForSelector(CHIP, wait);
+      const top = await page.$eval(CHIP, (el) => el.getBoundingClientRect().top + scrollY);
+      assert.ok(top > (await page.evaluate(() => innerHeight)), `chip top ${top} is on screen`);
+      await page.$eval(CHIP, (el) => el.scrollIntoView({ block: "center" }));
+      await page.focus(CHIP);
+      await page.keyboard.press("Enter");
+      await page.waitForSelector("#detail:not([hidden])", wait);
+      await page.click("#d-close");
+      await page.waitForSelector("#detail[hidden]", wait);
+      const after = await page.$eval(CHIP, (el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          focused: document.activeElement === el,
+          inside: r.top >= 0 && r.bottom <= innerHeight,
+          scrolled: scrollY > 0,
+        };
+      });
+      assert.deepEqual(after, { focused: true, inside: true, scrolled: true });
+      assert.deepEqual(errors, []);
+      await page.browserContext().close();
+    });
+
     await t.test("the bell menu keeps the page beside its drawer", async () => {
       const { page, errors } = await openPage(RUN_HASH);
       const row = '#notifications-menu-list a[href="#1490-guard-the-ls-alias"]';

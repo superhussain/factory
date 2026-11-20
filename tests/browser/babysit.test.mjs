@@ -167,6 +167,7 @@ test("babysit", { timeout: 240000 }, async (t) => {
         assert.deepEqual(await columnOf(page, "042-sample-export"), ["needs-you"]);
         await activate("#d-babysit-bar");
         await page.waitForFunction(() => document.getElementById("d-babysit-bar").hidden, wait);
+        assert.equal(await page.evaluate(() => document.activeElement.id), "d-actions");
         const j = await boardJob(origin, "042-sample-export");
         assert.deepEqual(
           [j.babysit, j.priority, j.note, "needs" in j, "escalated" in j],

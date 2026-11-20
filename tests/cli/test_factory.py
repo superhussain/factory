@@ -1688,6 +1688,17 @@ class MoveFenceTest(IsolatedTestCase):
             factory.board(self.home, "001-test")
         self.assertNotIn("not_before", self.saved())
 
+    def test_board_refuses_the_dashboard_approval_note(self):
+        before = self.store["/api/board"]
+        err = io.StringIO()
+        with patch.object(factory.sys, "stdin", io.StringIO('{"note": "spec approved on the dashboard"}')), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            factory.board(self.home, "001-test")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("only the dashboard sets the note 'spec approved on the dashboard'. Nothing was written.",
+                      err.getvalue())
+        self.assertEqual(self.store["/api/board"], before)
+
     def test_board_refuses_a_bad_not_before(self):
         before = self.store["/api/board"]
         for value in ("tomorrow", "2026-11-17 09:00", 5):
