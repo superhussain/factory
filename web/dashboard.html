@@ -7674,6 +7674,8 @@ const FIRST_PRESS_SAVED = 'Your first press most likely saved, and the job has m
 function firstPressText(message, uncertain) {
   return uncertain ? message + ' ' + FIRST_PRESS_SAVED : message;
 }
+// A refusal after an uncertain press whose note the row still holds: the edit did not save.
+const REWORK_NOTE_KEPT = 'Your first press saved the rework with the note as it was then. The job still holds that note, so your edit was not saved. Cancel closes this dialog and keeps the first note.';
 
 let ideaEditor = null;
 let ideaEditorLoad = null;
@@ -8245,7 +8247,7 @@ let reworkDialog = null;
 function openReworkDialog(ctx) {
   const j = jobs.find((x) => x.id === ctx.id);
   if (reworkDialog || !j || !canResolve(j)) return;
-  reworkDialog = { id: j.id, opener: ctx.opener };
+  reworkDialog = { id: j.id, opener: ctx.opener, uncertainNotes: new Set() };
   $('rework-help').textContent = j.id + ' is waiting on you. Pickup starts /factory rework with your note, and the builder runs a new round on it.';
   $('rework-note').value = '';
   $('rework-err').textContent = '';
@@ -8276,20 +8278,27 @@ $('rework-form').addEventListener('submit', async (e) => {
     return;
   }
   let refused = false;
+  let heldNote = null;
   reworkDialog.saving = true;
   setDialogSaving('rework', 'rework-note', 'Start rework', true);
   try {
     await casBoard((board) => {
+      heldNote = null;
       const message = resolveJob(board, id, { action: 'rework', note }, isoNow());
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) {
+        const row = board.jobs.find((x) => x.id === id);
+        if (row?.stage === 'needs-human' && row.resolve?.action === 'rework') heldNote = row.resolve.note;
         refused = true;
         throw new Error(message);
       }
     });
   } catch (x) {
-    if (x.uncertain) reworkDialog.uncertain = true;
-    $('rework-err').textContent = refused ? firstPressText(x.message, reworkDialog.uncertain) : boardSaveError(x, 'The rework may have saved. Press Start rework again to check. It will not queue a second rework.');
+    if (x.uncertain) {
+      reworkDialog.uncertain = true;
+      reworkDialog.uncertainNotes.add(note);
+    }
+    $('rework-err').textContent = refused && reworkDialog.uncertainNotes.has(heldNote) ? REWORK_NOTE_KEPT : refused ? firstPressText(x.message, reworkDialog.uncertain) : boardSaveError(x, 'The rework may have saved. Press Start rework again to check. It will not queue a second rework.');
     $('rework-err').hidden = false;
     reworkDialog.saving = false;
     setDialogSaving('rework', 'rework-note', 'Start rework', false);
