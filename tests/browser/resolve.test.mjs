@@ -71,6 +71,11 @@ const LONG_KEPT = KEPT.replace(
   '"Keep the CSV header order."',
   '"Keep the CSV header order. Also keep the footer row, the totals column and the sample dates. Also keep the footer row,…"',
 );
+const EMOJI = "Keep the CSV header order. " + "x".repeat(91) + "\u{1F642} and the footer row.";
+const EMOJI_KEPT = KEPT.replace(
+  '"Keep the CSV header order."',
+  '"Keep the CSV header order. ' + "x".repeat(91) + '\u{1F642}…"',
+);
 // The next board PATCH lands, then the page sees a 503 as if the answer was lost.
 const landThen503 = (page) =>
   page.evaluate(() => {
@@ -505,6 +510,28 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
         await page.keyboard.press("Escape");
         await page.waitForSelector("#rework-dlg:not([open])", wait);
       });
+      await t.test(
+        `an edited second press cuts the quote on whole characters ${width}`,
+        async () => {
+          await landedRework(EMOJI);
+          await page.$eval("#rework-note", (el) => (el.value = ""));
+          await page.type("#rework-note", EDITED);
+          const before = await boardText(origin);
+          await secondPress();
+          if (width === 390) {
+            await mkdir(SHOTS, { recursive: true });
+            await (
+              await page.$("#rework-dlg")
+            ).screenshot({ path: `${SHOTS}edited-second-press-emoji-rework-390.png` });
+          }
+          assert.equal(await page.$eval("#rework-err", (el) => el.textContent), EMOJI_KEPT);
+          assert.equal(await boardText(origin), before);
+          assert.equal((await boardJob(origin, "064-sample-human")).resolve.note, EMOJI);
+          assert.equal(await page.$eval("#rework-note", (el) => el.value), EDITED);
+          await page.keyboard.press("Escape");
+          await page.waitForSelector("#rework-dlg:not([open])", wait);
+        },
+      );
       await context.close();
     }
     assert.deepEqual(errors, []);
