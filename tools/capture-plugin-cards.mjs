@@ -53,6 +53,16 @@ export async function bundleCards(pluginDir = DEFAULT_PLUGIN) {
   return { code: outputFiles[0].text, inputs: Object.keys(metafile.inputs) };
 }
 
+export function cardHtml(code, card, { probe, scheme = "dark" } = {}) {
+  return (
+    '<!doctype html><meta charset="utf-8"><style>html,body,#root{margin:0;height:100%}#root{display:flex;flex-direction:column}</style><div id="root"></div>' +
+    (probe ? `<img alt="" src="${encodeURI(probe)}">` : "") +
+    `<script>globalThis.FACTORY_CAPTURE_CARD=${JSON.stringify(card)}</script>` +
+    `<script>globalThis.FACTORY_CAPTURE_SCHEME=${JSON.stringify(scheme)}</script>` +
+    `<script>${code.replaceAll("</script", "<\\/script")}</script>`
+  );
+}
+
 async function capture(outdir, pluginDir) {
   const { code } = await bundleCards(pluginDir);
   const puppeteer = (await import("puppeteer-core")).default;
@@ -76,12 +86,7 @@ async function capture(outdir, pluginDir) {
           requests.push(request.url());
           request.abort();
         });
-        await page.setContent(
-          '<!doctype html><meta charset="utf-8"><style>html,body,#root{margin:0;height:100%}#root{display:flex;flex-direction:column}</style><div id="root"></div>' +
-            (probe ? `<img alt="" src="${encodeURI(probe)}">` : "") +
-            `<script>globalThis.FACTORY_CAPTURE_CARD=${JSON.stringify(card)}</script>` +
-            `<script>${code.replaceAll("</script", "<\\/script")}</script>`,
-        );
+        await page.setContent(cardHtml(code, card, { probe }));
         await page.waitForSelector('[role="button"]', { timeout: 15000 });
         await page.evaluate(async () => {
           await document.fonts.ready;

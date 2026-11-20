@@ -3,19 +3,34 @@
 import { createRoot } from "react-dom/client";
 import { dashboardScreen } from "factory-capture:screen";
 
-// Synthetic dark palette, a guess and not Paseo's real theme.
-const THEME = {
-  colors: {
-    surface0: "#111113",
-    surface1: "#1a1a1d",
-    surface2: "#26262a",
-    foreground: "#ededef",
-    foregroundMuted: "#a0a0a8",
-    border: "#2e2e33",
-    accent: "#3b82f6",
-    accentForeground: "#ffffff",
+// Synthetic palettes, guesses and not Paseo's real theme.
+const THEMES = {
+  dark: {
+    colors: {
+      surface0: "#111113",
+      surface1: "#1a1a1d",
+      surface2: "#26262a",
+      foreground: "#ededef",
+      foregroundMuted: "#a0a0a8",
+      border: "#2e2e33",
+      accent: "#3b82f6",
+      accentForeground: "#ffffff",
+    },
+  },
+  light: {
+    colors: {
+      surface0: "#ffffff",
+      surface1: "#f6f6f7",
+      surface2: "#ececef",
+      foreground: "#18181b",
+      foregroundMuted: "#5f5f67",
+      border: "#dcdce0",
+      accent: "#2563eb",
+      accentForeground: "#ffffff",
+    },
   },
 };
+const THEME = THEMES[globalThis.FACTORY_CAPTURE_SCHEME] ?? THEMES.dark;
 
 const Screen = dashboardScreen({ openSettings() {} }, { fire() {}, listen: () => () => {} });
 
