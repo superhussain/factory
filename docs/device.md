@@ -324,7 +324,7 @@ Flags name risky calls. They are heuristics that inform a reader and block nothi
 | `denied` | any | the call's result is an error that holds a denial phrase |
 
 A `gh pr merge` in the main session carries no flag, since the orchestrator merges approved PRs there.
-`secret-file` skips the body of a `cat` or `tee` heredoc with no pipe after it, so writing about `.env` does not flag. A heredoc fed to a shell or interpreter, and every other line, still flags. That includes output run through `eval`, `-c`, `<(` or `>(`, a delimiter with quotes inside it such as `E"OF"`, and lines an unquoted heredoc expands with `$(` or a backtick.
+`secret-file` skips the body of a `cat` or `tee` heredoc with no pipe after it, so writing about `.env` does not flag. A heredoc fed to a shell or interpreter, and every other line, still flags. That includes output run through `eval`, `-c` or a combined flag such as `-lc`, `<(` or `>(`, a `$(cat <<EOF` used as the command itself, and every body line inside a `$(` that spans lines, a delimiter with quotes inside it such as `E"OF"`, and lines an unquoted heredoc expands with `$(` or a backtick. A body written to a file and run later, such as `cat > s.sh <<EOF` then `bash s.sh`, is beyond a per-call heuristic.
 
 Flags print in this order, joined by `,`; a call with none prints `-`. Flags
 match the raw target in memory. The printed target has the home path folded to
