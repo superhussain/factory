@@ -10444,6 +10444,7 @@ AUDIT_FLAGS = (
     ("pr-merge", re.compile(r"\bgh\s+pr\s+merge\b")),
 )
 AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
+AUDIT_HEREDOC_OPEN = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)([A-Za-z_][\w.-]*)\2")
 AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
 AUDIT_MAX_BYTES = 1 << 20
 AUDIT_PUSH_FILE = "audit-push.json"
@@ -10477,6 +10478,25 @@ def audit_target(raw):
     return AUDIT_CONTROL.sub("?", " ".join(retro_redact(folded).split()))[:120]
 
 
+def audit_strip_data_heredocs(command):
+    """command with the body lines of cat and tee heredocs blanked, so prose about a file is not read as a use of it."""
+    out, pending = [], []
+    for line in command.split("\n"):
+        if pending:
+            delimiter, data = pending[0]
+            if line.strip() == delimiter:
+                pending.pop(0)
+                out.append(line)
+            else:
+                out.append("" if data else line)
+            continue
+        out.append(line)
+        for m in AUDIT_HEREDOC_OPEN.finditer(line):
+            words = re.split(r"[;&|(]|\$\(", line[:m.start()])[-1].split()
+            pending.append((m.group(3), bool(words) and words[0] in ("cat", "tee") and "|" not in line[m.end():]))
+    return "\n".join(out)
+
+
 def audit_flags(name, inp, raw, denied, main=False):
     """The names of the risky shapes one call matches, in AUDIT_FLAGS order, then sandbox-off,
     secret-file and denied. They match the raw target, never the redacted one.
@@ -10485,7 +10505,8 @@ def audit_flags(name, inp, raw, denied, main=False):
              if name == "Bash" and not (main and flag == "pr-merge") and pattern.search(raw)]
     if name == "Bash" and inp.get("dangerouslyDisableSandbox") is True:
         flags.append("sandbox-off")
-    path = inp.get("path") if name == "Grep" else raw if name == "Bash" or name in AUDIT_FILE_TOOLS else None
+    path = (audit_strip_data_heredocs(raw) if name == "Bash" else inp.get("path") if name == "Grep"
+            else raw if name in AUDIT_FILE_TOOLS else None)
     if isinstance(path, str) and AUDIT_SECRET_FILE.search(path):
         flags.append("secret-file")
     if denied:
