@@ -7683,7 +7683,8 @@ function firstPressText(message, uncertain) {
 // A refusal after an uncertain press whose note the row still holds: quote that note, on one line and cut short.
 function reworkNoteKept(held) {
   const flat = held.replace(/\s+/g, ' ').trim();
-  const quote = flat.length > 120 ? flat.slice(0, 119).trimEnd() + '…' : flat;
+  const chars = Array.from(flat);
+  const quote = chars.length > 120 ? chars.slice(0, 119).join('').trimEnd() + '…' : flat;
   return 'Your first press saved the rework with this note:\n"' + quote + '"\nThe job still holds that note, so your edit was not saved. Cancel closes this dialog and keeps the first note.';
 }
 
