@@ -590,3 +590,51 @@ test(
     });
   },
 );
+
+test("the red flags table stacks at narrow widths", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    const context = await browser.createBrowserContext();
+    try {
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await page.setRequestInterception(true);
+      page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (path !== "/api/audit-flags") return request.continue();
+        return request.respond({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ schema: "factory.audit-flags/1", rows: STEP_4 }),
+        });
+      });
+      const layout = async (width) => {
+        await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
+        await page.goto(origin + "/#/retros", { waitUntil: "domcontentloaded" });
+        await page.waitForFunction(() =>
+          document.getElementById("audit-flags-status").textContent.startsWith("5 flagged"),
+        );
+        return page.evaluate(() => {
+          const wrap = document.getElementById("audit-flags-wrap");
+          const cell = document.querySelector("#audit-flags-rows td");
+          const head = document.querySelector("#audit-flags thead tr").getBoundingClientRect();
+          return {
+            fits: wrap.scrollWidth <= wrap.clientWidth,
+            label: getComputedStyle(cell, "::before").content,
+            headVisible: head.width > 1 && head.height > 1,
+          };
+        });
+      };
+      assert.deepEqual(await layout(480), {
+        fits: true,
+        label: '"Time (UTC)"',
+        headVisible: false,
+      });
+      assert.equal((await layout(1440)).headVisible, true);
+      assert.deepEqual(errors, [], "no page errors");
+    } finally {
+      await context.close();
+    }
+  });
+});

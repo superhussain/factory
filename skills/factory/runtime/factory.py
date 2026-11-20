@@ -959,6 +959,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
         fail("only factory.py pickup sets github. Nothing was written.", 2)
     if "auto_babysit" in patch:
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
+    if patch.get("note") == DASHBOARD_APPROVED_NOTE:
+        fail("only the dashboard sets the note 'spec approved on the dashboard'. Nothing was written.", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
@@ -2313,7 +2315,7 @@ def inflight_count(data, project, minutes, device=None):
         if gated(j) or lead_of(j) or babysitting(j) or waiting_until(j):
             continue
         stage = j.get("stage")
-        if stage == IDEA or tracer_start(j):
+        if stage == IDEA or approved_start(j):
             stamp = (j.get("claim") or {}).get("seen", "")
         elif stage in IN_FLIGHT or stage == "pr-open" and not escalated(j):
             stamp = j.get("updated", "")
@@ -2332,7 +2334,7 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
                 builds=False, experiment=None, route=None, skip_ids=frozenset()):
     """Claim up to limit of the oldest runnable ideas in one board write, and return their
     [{"id", "project", "repo_path", "session"}]. An empty session mints a tag per idea.
-    builds also accepts jobs that Tracer scope approval moved to build.
+    builds also accepts jobs that Tracer scope approval or the dashboard's Approve spec moved to build.
     experiment is read_experiment's dict and route the picked route tuple: each picked job
     without a record gets an experiment stamp naming its arm and launch values, written once,
     and an arm b job is never picked while the experiment is limited.
@@ -2360,7 +2362,7 @@ def claim_ideas(home, device, session, minutes, paths, limit, max_inflight=None,
                 continue
             repo = paths.get(j["project"])
             # The scheduler pastes the id into a shell command, so only well-formed ids pass.
-            if not (j.get("stage") == "idea" or builds and (tracer_start(j) or moved_here(j, device))) \
+            if not (j.get("stage") == "idea" or builds and (approved_start(j) or moved_here(j, device))) \
                     or not repo or not os.path.isdir(repo) \
                     or (project and j["project"] != project) \
                     or not JOB_ID.fullmatch(j["id"]) or ".." in j["id"] or j["id"] in skip_ids \
@@ -6140,10 +6142,10 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     deny_notes_pass(home, data, device, minutes, paths, settings, dry)
     if not dry and taken >= limit:
         return
-    jobs = [j for j in data["jobs"] if (j.get("stage") == IDEA or tracer_start(j) or moved_here(j, device))
+    jobs = [j for j in data["jobs"] if (j.get("stage") == IDEA or approved_start(j) or moved_here(j, device))
             and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"]) and ".." not in j["id"]]
     jobs.sort(key=lambda j: not prioritized(j))
-    starts = {j["id"] for j in jobs if tracer_start(j) or moved_here(j, device)}
+    starts = {j["id"] for j in jobs if approved_start(j) or moved_here(j, device)}
     experiment, exp_limited = None, None
     # Only an experiment line needs routes.md this early; without one, a host with no routes stays silent.
     routes_md = Path(home, "routes.md")
@@ -7309,9 +7311,10 @@ def pr_queue_cmd(target):
         time.sleep(PR_QUEUE_INTERVAL)
 
 
-def tracer_start(j):
-    """True when Tracer scope approval moved this job to build and no session has started it."""
-    return j.get("stage") == "build" and j.get("note") == TRACER_APPROVED_NOTE
+def approved_start(j):
+    """True when Tracer scope approval or the dashboard's Approve spec moved this job to build and no session has
+    started it."""
+    return j.get("stage") == "build" and j.get("note") in SPEC_APPROVED_NOTES
 
 
 def tracer_gate_passed(job, patch):
@@ -8989,6 +8992,8 @@ TRACER_STAGES = ("spec", "build", "review", "approve", "needs-human", "pr-open",
 TRACER_GATHER_STAGES = ("idea", "spec")
 TRACER_GATE_NOTE = "gate: tracer-scope"
 TRACER_APPROVED_NOTE = "spec approved in Tracer"
+DASHBOARD_APPROVED_NOTE = "spec approved on the dashboard"
+SPEC_APPROVED_NOTES = (TRACER_APPROVED_NOTE, DASHBOARD_APPROVED_NOTE)
 TRACER_STARTING = "The companion is starting this build"
 TRACER_DECLINED_NEEDS = ("Tracer scope for {feature} was declined: run /factory approve-spec {id} to build anyway, "
                          "or close the job")

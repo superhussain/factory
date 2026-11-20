@@ -242,6 +242,7 @@ test("slim board read", { timeout: 240000 }, async (t) => {
         ["true", "true"],
       );
       assert.equal(await page.evaluate(() => window.fullReadCount), 0);
+      await page.waitForFunction(() => typeof window.releaseSlim === "function", wait);
       await page.evaluate(() => window.releaseSlim());
       await waitForBoard(page);
       await page.waitForFunction(() => boardComplete === true, wait);

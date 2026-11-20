@@ -110,6 +110,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .ask-other { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .ask-bar { position: sticky; bottom: -48px; display: flex; gap: 12px; align-items: center; padding: 10px 0 48px; margin-bottom: -48px; background: var(--panel); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  .btn.primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   dialog { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 14px; padding: 24px; width: min(520px, calc(100vw - 32px)); }
   dialog::backdrop { background: rgba(17,24,39,.45); }
   dialog h2 { font-size: 15px; margin: 0 0 12px; }
@@ -224,6 +225,24 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #audit-flags tr.acked { color: var(--muted); }
   .audit-flags-pager { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
   #audit-flags-pager[hidden] { display: none; }
+  #audit-flags { container: audit-flags / inline-size; }
+  /* A narrow section stacks each flag into labeled rows instead of scrolling sideways. */
+  @container audit-flags (max-width: 640px) {
+    #audit-flags thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    #audit-flags .reference-table, #audit-flags tbody, #audit-flags tr, #audit-flags .reference-table td { display: block; }
+    #audit-flags tr { border-bottom: 1px solid var(--line); padding: 8px 0; }
+    #audit-flags .reference-table td { position: relative; padding-left: 8em; min-width: 0; white-space: normal; border-bottom: 0; }
+    #audit-flags td::before { position: absolute; left: 0; width: 7.5em; color: var(--muted); font-size: 12px; }
+    #audit-flags td:nth-child(1)::before { content: 'Time (UTC)'; }
+    #audit-flags td:nth-child(2)::before { content: 'Job'; }
+    #audit-flags td:nth-child(3)::before { content: 'Host'; }
+    #audit-flags td:nth-child(4)::before { content: 'Agent'; }
+    #audit-flags td:nth-child(5)::before { content: 'Session'; }
+    #audit-flags td:nth-child(6)::before { content: 'Tool'; }
+    #audit-flags td:nth-child(7)::before { content: 'Flags'; }
+    #audit-flags td:nth-child(8)::before { content: 'Target'; }
+    #audit-flags td:nth-child(9)::before { content: 'Actions'; }
+  }
   #inbox-page { max-width: 1040px; }
   #inbox-list { list-style: none; margin: 0; padding: 0; }
   .inbox-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 16px; padding: 12px 10px; border-bottom: 1px solid var(--line); }
@@ -584,7 +603,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   body.compact .card-wrap > .card.archived ~ .pr-link { right: 8px; }
   .detail-head .links { flex: none; display: flex; gap: 16px; align-items: center; height: var(--icon-size); }
   .detail-head .btn { flex: none; }
-  .detail-head #d-babysit-bar { height: var(--icon-size); }
+  .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar { height: var(--icon-size); }
   .job-actions { position: relative; flex: none; }
   .job-actions-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; min-width: 200px; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   .job-actions-menu[hidden] { display: none; }
@@ -734,7 +753,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     /* On a phone the details under the title slide up with the page; syncHeadShift sets the shift. */
     .detail-head { border-bottom: 0; }
     .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
-    #d-title, .detail-head #d-babysit-bar, #d-star, #d-actions, .detail-head .close { position: relative; z-index: 3; }
+    #d-title, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, #d-star, #d-actions, .detail-head .close { position: relative; z-index: 3; }
     .detail-head .close { background: var(--panel); }
     #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
@@ -813,11 +832,13 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <a class="pr-link" id="d-paseo-web" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-tracer" target="_blank" rel="noopener noreferrer" hidden>Tracer</a>
     </div>
+    <button class="btn primary" id="d-approve-spec-bar" title="Start the build on this spec" hidden>Approve spec</button>
     <button class="btn" id="d-babysit-bar" title="Work this PR as the Babysit note asks, or hand it back" hidden>Babysit PR</button>
     <button class="btn icon" id="d-star" aria-label="Star job" title="Star job" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg></button>
     <div class="job-actions" id="d-actions-wrap">
       <button class="btn icon" id="d-actions" aria-label="Job actions" title="Job actions (A or .)" aria-keyshortcuts="a ." aria-haspopup="menu" aria-expanded="false" aria-controls="d-actions-menu"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none"/></svg></button>
       <div class="job-actions-menu" id="d-actions-menu" role="menu" aria-label="Job actions" hidden>
+        <button class="btn" id="d-approve-spec" role="menuitem" tabindex="-1" hidden>Approve spec</button>
         <button class="btn" id="d-edit-idea" role="menuitem" tabindex="-1" hidden>Edit idea</button>
         <button class="btn" id="d-discard" role="menuitem" tabindex="-1" hidden>Discard idea</button>
         <button class="btn" id="d-follow-tracer" role="menuitem" tabindex="-1" hidden>Follow in Tracer</button>
@@ -841,6 +862,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   </div>
   <p class="err" id="d-edit-idea-err" role="alert" hidden></p>
   <p class="err" id="d-prioritize-err" role="alert" hidden></p>
+  <p class="err" id="d-approve-spec-err" role="alert" hidden></p>
   <p class="err" id="d-babysit-err" role="alert" hidden></p>
   <p class="copy-status" id="d-copy-status" role="status"></p>
   <p class="err" id="d-pause-err" role="alert" hidden></p>
@@ -1385,6 +1407,9 @@ const BUILD_STATES = ['queued', 'running', 'done', 'failed'];
 const TRACER_STAGES = ['spec', 'build', 'review', 'approve', 'needs-human', 'pr-open', 'merged'];
 // The stages where following asks Tracer to gather scope first.
 const TRACER_GATHER_STAGES = ['idea', 'spec'];
+// The spec gate's hold note, and the note Approve spec sets, which factory.py pickup starts the build on.
+const SPEC_GATE_NOTE = 'gate: spec-approval';
+const DASHBOARD_APPROVED_NOTE = 'spec approved on the dashboard';
 // The Worker serves projects.json, and each job links PRs only for its own project's repo.
 let projects = null;
 const UNASSIGNED = ':unassigned';
@@ -3764,10 +3789,10 @@ function inboxRoute() {
 function inboxSplit() { return drawerReturn === '#/inbox' && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null; }
 function inboxShown() { return inboxRoute() !== null || inboxSplit(); }
 
-const INBOX_LABELS = { ask: 'Question', pr: 'Escalated PR', human: 'Needs recovery', backlog: 'Backlog decision' };
+const INBOX_LABELS = { ask: 'Question', pr: 'Escalated PR', spec: 'Spec approval', human: 'Needs recovery', backlog: 'Backlog decision' };
 
 function inboxKind(j) {
-  if (j.stage === 'needs-human') return 'human';
+  if (j.stage === 'needs-human') return [SPEC_GATE_NOTE, 'gate: tracer-scope'].includes(j.note) ? 'spec' : 'human';
   if (j.stage === 'pr-open' && (j.escalated === true || /^escalated:/i.test(String(j.note ?? '')))) return 'pr';
   if (asks(j.needs)) return 'ask';
   return null;
@@ -3777,7 +3802,7 @@ function inboxKind(j) {
 function inboxItems() {
   const waiting = jobs.filter((j) => waitsOnYou(j) && isShown(j.project))
     .sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at) || (Date.parse(a.updated) || 0) - (Date.parse(b.updated) || 0));
-  return ['ask', 'pr', 'human'].flatMap((kind) => waiting.filter((j) => inboxKind(j) === kind).map((job) => ({ kind, job })))
+  return ['ask', 'pr', 'spec', 'human'].flatMap((kind) => waiting.filter((j) => inboxKind(j) === kind).map((job) => ({ kind, job })))
     .concat(backlogLoaded ? visibleBacklog().map((item) => ({ kind: 'backlog', item })) : []);
 }
 
@@ -3785,6 +3810,7 @@ function inboxItems() {
 function inboxHref(it) {
   if (it.item) return '#/backlog/' + it.item.key;
   const id = it.job.id;
+  if (it.kind === 'spec') return '#' + encodeURIComponent(id) + '/spec';
   return '#' + encodeURIComponent(id) + (it.kind === 'ask' && it.job.needs.includes('#' + id + '/needs') ? '/needs' : '');
 }
 
@@ -3845,9 +3871,11 @@ function renderInboxPage() {
       actions = kind === 'ask' && j.needs.includes('#' + j.id + '/needs')
         ? '<button type="button" class="btn primary" data-inbox-answer="' + esc(j.id) + '" aria-expanded="' + open + '"' +
           (open ? ' aria-controls="inbox-answer"' : '') + '>Answer</button>' + link(href, 'Open job')
-        : (kind === 'pr' && canBabysit(j) ? '<button type="button" class="btn primary" data-inbox-babysit="' + esc(j.id) + '">Babysit PR #' + esc(pr.n) + '</button>' : '') +
-          (kind === 'pr' && pr ? '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>' : '') +
-          link(href, 'Open job');
+        : (canApproveSpec(j) ? '<button type="button" class="btn primary" data-inbox-approve-spec="' + esc(j.id) + '">Approve spec</button>' : '') +
+          (canBabysit(j) ? '<button type="button" class="btn primary" data-inbox-babysit="' + esc(j.id) + '">Babysit PR #' + esc(pr.n) + '</button>' : '') +
+          (pr ? '<a class="btn" href="' + esc(pr.url) + '" target="_blank" rel="noopener">Open PR #' + esc(pr.n) + '</a>' : '') +
+          (kind === 'spec' && tracerLink(j) ? '<a class="btn" href="' + esc(tracerLink(j)) + '" target="_blank" rel="noopener noreferrer">Open in Tracer</a>' : '') +
+          link(href, kind === 'spec' ? 'Open spec' : 'Open job');
     }
     return '<li class="inbox-item"' + (i === current ? ' aria-current="true"' : '') + '><span class="inbox-rank">' + (i + 1) + '</span>' +
       '<div><span class="chip inbox-kind">' + INBOX_LABELS[kind] + '</span><p class="inbox-title">' + esc(title) + '</p>' +
@@ -4014,7 +4042,12 @@ $('inbox-list').addEventListener('click', (e) => {
       openInboxAnswer(jobs.find((x) => x.id === id));
     }
   }
-  if (e.target.closest('[data-inbox-babysit], [data-inbox-decide]')) inboxFocusRow = [...$('inbox-list').children].indexOf(e.target.closest('li'));
+  if (e.target.closest('[data-inbox-approve-spec], [data-inbox-babysit], [data-inbox-decide]')) inboxFocusRow = [...$('inbox-list').children].indexOf(e.target.closest('li'));
+  const approve = e.target.closest('[data-inbox-approve-spec]');
+  if (approve) {
+    approveSpecAction({ id: approve.dataset.inboxApproveSpec, button: approve, report: inboxReport, live: () => inboxShown() });
+    if (!approve.disabled) inboxFocusRow = -1;
+  }
   const babysit = e.target.closest('[data-inbox-babysit]');
   if (babysit) {
     babysitAction({ id: babysit.dataset.inboxBabysit, button: babysit, report: inboxReport, live: () => inboxShown() });
@@ -5636,6 +5669,7 @@ async function openJob(id) {
   for (const id of JOB_ACTIONS) $(id).hidden = !shown.includes(id);
   $('d-star').hidden = archived;
   syncStarButton(id);
+  $('d-approve-spec-bar').hidden = archived || !shown.includes('d-approve-spec');
   $('d-babysit-bar').hidden = archived || !shown.includes('d-babysit');
   if (archived) for (const b of $('d-actions-menu').querySelectorAll('button')) b.hidden = b.id !== 'd-copy-link';
   $('d-assignment').hidden = j.stage !== 'idea' || !!j.project;
@@ -5645,6 +5679,7 @@ async function openJob(id) {
     clearCopyStatus();
     $('d-edit-idea-err').hidden = true;
     $('d-prioritize-err').hidden = true;
+    $('d-approve-spec-err').hidden = true;
     $('d-babysit-err').hidden = true;
     $('d-pause-err').hidden = true;
     $('d-rerun-err').hidden = true;
@@ -6668,6 +6703,9 @@ function closeDetail(keepHash = false) {
   const raw = openBacklogRaw;
   const id = openId;
   const refocus = $('detail').contains(document.activeElement) || document.activeElement === document.body;
+  const back = drawerReturn;
+  // Returning to a page keeps its scroll, so the board refocus is skipped.
+  const pageY = back && !keepHash ? window.scrollY : null;
   drawerVersion++;
   openId = null;
   openBacklogRaw = null;
@@ -6676,17 +6714,20 @@ function closeDetail(keepHash = false) {
   closeJobActions(false);
   syncIdeaEditor();
   renderBoard();
-  const target = raw !== null ? focusBacklogControl(raw) : id && refocus ? focusJobCard(id) : null;
+  const target = pageY !== null ? null : raw !== null ? focusBacklogControl(raw) : id && refocus ? focusJobCard(id) : null;
   target?.scrollIntoView({ block: 'nearest' });
   refreshPicker();
   if (!keepHash && settingsRoute() === null && retrosRoute() === null && inboxRoute() === null && notificationsRoute() === null) replaceUrl(location.pathname + location.search + (drawerReturn ?? ''));
-  const back = drawerReturn;
   drawerReturn = null;
   if (back && !keepHash) renderRoute();
   if (back === '#/inbox' && !keepHash) focusInboxRow(id, raw);
   if (back === '#/notifications' && !keepHash) focusNotificationRow(id, raw);
   if (back && !keepHash && retrosRoute(back)) focusRetrosOpener();
   if (back && !keepHash && settingsRoute(back)) $('settings-nav-' + settingsRoute()).focus();
+  if (pageY === null) return;
+  window.scrollTo(0, pageY);
+  const r = document.activeElement.getBoundingClientRect();
+  if (r.bottom < 0 || r.top > innerHeight) document.activeElement.scrollIntoView({ block: 'nearest' });
 }
 $('d-close').addEventListener('click', () => closeDetail());
 document.addEventListener('keydown', (e) => {
@@ -7639,12 +7680,13 @@ async function openIdeaEditor(ctx) {
   }
 }
 
-const JOB_ACTIONS = ['d-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-unbatch', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
+const JOB_ACTIONS = ['d-approve-spec', 'd-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-unbatch', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
 
 // The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
 function jobActionsFor(j) {
   const rider = !!leadOf(j);
   const shown = {
+    'd-approve-spec': canApproveSpec(j),
     'd-edit-idea': canEditIdea(j),
     'd-discard': j.stage === 'idea',
     'd-follow-tracer': !tracerOff && !!j.project && (TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) && j.tracer?.follow !== true && !tracerLink(j),
@@ -7668,7 +7710,7 @@ function jobActionsFor(j) {
 // A runner's context. The drawer writes into its own lines and drops results once another job opens.
 function drawerAction(id) {
   const version = drawerVersion;
-  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-run-batch': 'd-prioritize-err', 'd-start-alone': 'd-prioritize-err', 'd-unbatch': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
+  const err = $({ 'd-edit-idea': 'd-edit-idea-err', 'd-prioritize': 'd-prioritize-err', 'd-run-batch': 'd-prioritize-err', 'd-start-alone': 'd-prioritize-err', 'd-unbatch': 'd-prioritize-err', 'd-remove-priority': 'd-prioritize-err', 'd-approve-spec': 'd-approve-spec-err', 'd-babysit': 'd-babysit-err', 'd-pause': 'd-pause-err', 'd-resume': 'd-pause-err', 'd-rerun': 'd-rerun-err' }[id]);
   return {
     id: openId,
     card: false,
@@ -7898,6 +7940,24 @@ function prioritizeJob(board, id, now, mode = '') {
   if (mode && !batchHeld(j)) return 'This idea is no longer held for a batch.';
   if (mode === 'batch' && board.jobs.some((x) => batchStarter(x, j.project))) return 'unchanged';
   j.priority = mode ? { at: now, [mode]: true } : { at: now };
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
+// A job held at the spec gate. Approving it moves it to build, and factory.py pickup launches /factory recover.
+function canApproveSpec(j) {
+  return !!j.project && j.stage === 'needs-human' && j.note === SPEC_GATE_NOTE && !leadOf(j) && !j.paused && !j.close;
+}
+
+// Returns an error message, or '' once the board is changed.
+function approveSpecJob(board, id, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (!canApproveSpec(j)) return 'This spec can no longer be approved.';
+  j.stage = 'build';
+  j.note = DASHBOARD_APPROVED_NOTE;
+  delete j.needs;
   j.updated = now;
   board.updated = now;
   return '';
@@ -8318,6 +8378,24 @@ async function prioritizeAction(ctx, mode = '') {
       if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     }, { reads: (board) => prioritizeReads(board, ctx.id, mode) });
+    await poll();
+  } catch (x) {
+    if (ctx.live()) ctx.report(failText(x));
+  } finally {
+    if (ctx.button) ctx.button.disabled = false;
+  }
+}
+async function approveSpecAction(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
+  if (!j || !canApproveSpec(j)) return;
+  if (!confirm('Approve the spec of ' + j.id + '? Pickup starts the build on its next run.')) return;
+  ctx.report('');
+  if (ctx.button) ctx.button.disabled = true;
+  try {
+    await casBoard((board) => {
+      const message = approveSpecJob(board, ctx.id, isoNow());
+      if (message) throw new Error(message);
+    });
     await poll();
   } catch (x) {
     if (ctx.live()) ctx.report(failText(x));
@@ -8814,6 +8892,7 @@ async function followTracerAction(ctx) {
 }
 
 const JOB_ACTION_RUN = {
+  'd-approve-spec': approveSpecAction,
   'd-edit-idea': openIdeaEditor,
   'd-discard': discardAction,
   'd-follow-tracer': followTracerAction,
@@ -8836,7 +8915,12 @@ $('d-star').addEventListener('click', () => {
   toggleStar(openId);
   syncStarButton(openId);
 });
-$('d-babysit-bar').addEventListener('click', () => babysitAction({ ...drawerAction('d-babysit'), button: $('d-babysit-bar') }));
+// A bar button hides itself once its action lands, so focus would fall to body.
+const focusActionsIfDropped = () => {
+  if (document.activeElement === document.body) $('d-actions').focus();
+};
+$('d-approve-spec-bar').addEventListener('click', () => approveSpecAction({ ...drawerAction('d-approve-spec'), button: $('d-approve-spec-bar') }).then(focusActionsIfDropped));
+$('d-babysit-bar').addEventListener('click', () => babysitAction({ ...drawerAction('d-babysit'), button: $('d-babysit-bar') }).then(focusActionsIfDropped));
 
 // One run per job and action at a time; a second click while the first is in flight does nothing.
 const cardRuns = new Set();
@@ -9050,7 +9134,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-star', 'd-pipeline', 'd-chat', 'd-held', 'd-not-before', 'd-auto-babysit', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-star', 'd-pipeline', 'd-chat', 'd-held', 'd-not-before', 'd-auto-babysit', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-approve-spec', 'd-approve-spec-bar', 'd-approve-spec-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
