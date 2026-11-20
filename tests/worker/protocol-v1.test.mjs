@@ -171,10 +171,12 @@ test("job optional writes, strong/weak CAS, independent listings and sandbox ima
 
 test("walkthrough html: page names only, 1 MiB cap, frame loads only, sandbox CSP on both read paths", async () => {
   const s = await setup();
-  const csp =
+  s.env.config = { embed_origins: ["https://paseo.example.test", "paseo://app"] };
+  const base =
     "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; " +
     "style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; " +
     "frame-ancestors 'self'";
+  const csp = base + " https://paseo.example.test paseo://app";
   const body = "<!doctype html><p>hi</p><script>1</script>";
   const pages = {
     "walkthrough.html": "spec",
@@ -262,6 +264,11 @@ test("walkthrough html: page names only, 1 MiB cap, frame loads only, sandbox CS
     assert.equal(big.status, 413, name);
     assert.equal(await big.text(), "body over 1 MiB");
   }
+  s.env.config = { embed_origins: [] };
+  const bare = await s.request("/api/jobs/sample/001/walkthrough.html", "GET", undefined, {
+    "Sec-Fetch-Dest": "iframe",
+  });
+  assert.equal(bare.headers.get("Content-Security-Policy"), base);
 });
 
 test("idea image exact digest, envelope metadata and create-only upload a repeat rewrites", async () => {

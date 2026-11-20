@@ -73,7 +73,7 @@ const MAP_HTML = await readFile(
 const CSP =
   "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; " +
   "style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; " +
-  "frame-ancestors 'self'";
+  "frame-ancestors 'self' https://paseo.example.test paseo://app";
 
 const PROBE = "origin:null cookie:blocked parent:blocked storage:blocked fetch:blocked";
 
