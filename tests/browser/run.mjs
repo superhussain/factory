@@ -527,6 +527,11 @@ async function capture(outdir, referencePath) {
       page.waitForFunction(() => document.getElementById("dot").className === "dot ok", {
         timeout: 30000,
       });
+    // A hash route reads the full board and redraws once it lands.
+    const waitFullBoard = (page) =>
+      page.waitForFunction(() => typeof boardComplete === "undefined" || boardComplete === true, {
+        timeout: 30000,
+      });
     // keepViewport captures without resizing the viewport, which would close an open card menu.
     async function view(name, width, height, theme, prepare, touch = false, keepViewport = false) {
       if (onlyViews && !onlyViews.includes(name)) return;
@@ -691,6 +696,18 @@ async function capture(outdir, referencePath) {
                     headers: { ETag: board.headers.get("ETag") ?? "" },
                     body: JSON.stringify({
                       ...body,
+                      ...(body.slim && {
+                        slim: {
+                          ...body.slim,
+                          counts: {
+                            ...body.slim.counts,
+                            sample: {
+                              ...body.slim.counts.sample,
+                              merged: (body.slim.counts.sample?.merged ?? 0) + 1,
+                            },
+                          },
+                        },
+                      }),
                       jobs: [
                         ...body.jobs,
                         {
@@ -1312,6 +1329,7 @@ async function capture(outdir, referencePath) {
       await page.evaluate(() => {
         location.hash = "#/notifications";
       });
+      await waitFullBoard(page);
       await page.waitForSelector("#notifications-list .inbox-item");
     };
     const openInboxSplit = async (page) => {
@@ -1331,6 +1349,7 @@ async function capture(outdir, referencePath) {
       await page.evaluate(() => {
         location.hash = "#/notifications";
       });
+      await waitFullBoard(page);
       await page.waitForSelector('#notifications-list a[href="#001-capture"]');
       await page.click('#notifications-list a[href="#001-capture"]');
       await page.waitForFunction(
