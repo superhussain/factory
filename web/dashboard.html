@@ -7898,6 +7898,7 @@ function closeIdeaEditor() {
   const { opener } = ideaEditor.ctx;
   ideaEditor = null;
   $('edit-idea-dlg').close();
+  $('edit-idea-status').textContent = '';
   $('edit-idea-text').value = '';
   $('edit-idea-err').textContent = '';
   $('edit-idea-err').hidden = true;
@@ -8413,11 +8414,14 @@ $('edit-idea-form').addEventListener('submit', async (e) => {
   session.saving = true;
   session.error = '';
   syncIdeaEditor();
+  $('edit-idea-status').textContent = 'Saving…';
+  keepDialogFocus('edit-idea-dlg');
   try {
     await casBoard((board) => editIdea(board, edit.id, edit.originalText, edit.text, isoNow()) === 'unchanged' ? BOARD_UNCHANGED : undefined);
   } catch (x) {
     session.error = String(x.message || x);
     session.saving = false;
+    $('edit-idea-status').textContent = '';
     syncIdeaEditor();
     $('edit-idea-text').focus();
     return;
@@ -8991,6 +8995,7 @@ $('idea-form').addEventListener('submit', async (e) => {
   if (inflight) return;
   inflight = true;
   renderDraft();
+  keepDialogFocus('idea-dlg');
   let id = null;
   try {
     id = await saveIdea();
