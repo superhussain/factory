@@ -479,7 +479,9 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   an unmerged branch, or a git call that failed or ran past 20 s. That is not a stop.
   Put `cleanup left: <first left item>` in the job's `note` and continue. Never run
   `git branch -D`, `git worktree remove --force` or `rm -rf` on a job's worktree,
-  branch or folder, and never retry cleanup with force.
+  branch or folder, and never retry cleanup with force. To reset a job's
+  `node_modules` or `.context/<name>` folder, run
+  `python3 "$RUNTIME" clean "$SLUG/<id>" node_modules` or `... scratch <name>`.
 - Never put real secrets, tokens, or user data in screenshots, logs, or job files,
   since the Worker serves job markdown and images to anyone past the Access policy.
 - If an agent fails or writes a malformed file, re-run it once, then move the job
