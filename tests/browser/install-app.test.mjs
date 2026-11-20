@@ -47,8 +47,7 @@ test("install app", { timeout: 180000 }, async (t) => {
       if (setup) await setup(page);
       await page.goto(origin + "/#/settings/display", { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#settings-display:not([hidden])", wait);
-      // The projects load re-enters the section and focuses the theme select, so wait it out
-      // before a case checks focus.
+      // Each case starts after the projects load has filled the section.
       await page.waitForSelector('#display-idea-project option[value="sample"]', wait);
       return page;
     };
@@ -141,6 +140,31 @@ test("install app", { timeout: 180000 }, async (t) => {
       await page.evaluate(() => dispatchEvent(new Event("appinstalled")));
       assert.equal(await text(page, "#display-install-hint"), HINT.installed);
       assert.equal(await hidden(page), true);
+    });
+
+    await t.test("install I8 a late projects load keeps focus on the Display page", async () => {
+      const context = await browser.createBrowserContext();
+      const page = await context.newPage();
+      await page.setViewport({ width: 1280, height: 900 });
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await blockLiveEvents(page);
+      // Holds the first projects.json read until the case releases it.
+      await page.evaluateOnNewDocument(() => {
+        const real = window.fetch;
+        window.fetch = (url, options) =>
+          String(url).endsWith("projects.json") && !window.releaseProjects
+            ? new Promise((resolve) => {
+                window.releaseProjects = () => resolve(real(url, options));
+              })
+            : real(url, options);
+      });
+      await page.goto(origin + "/#/settings/display", { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#settings-display:not([hidden])", wait);
+      await page.waitForFunction(() => typeof window.releaseProjects === "function", wait);
+      await page.focus("#display-install-heading");
+      await page.evaluate(() => window.releaseProjects());
+      await page.waitForSelector('#display-idea-project option[value="sample"]', wait);
+      assert.equal(await page.evaluate(() => document.activeElement.id), "display-install-heading");
     });
 
     assert.deepEqual(errors, []);

@@ -9786,7 +9786,7 @@ paintCached().then(() => loadProjects()).then(() => {
   if (settingsShown === 'projects') enterProjectsSection(!$('settings-page').contains(document.activeElement) || document.activeElement === $('settings-nav-projects'));
   if (settingsShown === 'pipeline') enterPipelineSection();
   if (settingsShown === 'hosts') enterHostsSection();
-  if (settingsShown === 'display') enterDisplaySection();
+  if (settingsShown === 'display') enterDisplaySection(!$('settings-page').contains(document.activeElement) || document.activeElement === $('settings-nav-display'));
   if (settingsShown === 'notifications') enterNotificationsSection();
   referenceReady = true; if (settingsShown === 'reference') loadReferenceEffective();
   pollStarted = true; loadHosts(); syncLive(); readBoard(); schedulePoll();
@@ -9969,10 +9969,10 @@ $('display-drawer-links').append(...DRAWER_LINKS.map(([k, text]) => {
   label.append(box, ' ' + text);
   return label;
 }));
-function enterDisplaySection() {
+function enterDisplaySection(focus = true) {
   $('display-idea-project').replaceChildren(new Option('No default', ''), ...[...(projects || [])].map(([slug, p]) => new Option(p.title || slug, slug)));
   renderDisplaySettings();
-  $('display-theme').focus();
+  if (focus) $('display-theme').focus();
 }
 function renderDisplaySettings() {
   $('display-theme').value = theme;
