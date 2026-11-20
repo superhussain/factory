@@ -87,7 +87,7 @@
   {
    "file": "test_dashboard_mobile_header.cjs",
    "cases": [
-    "\"result\":\"PASS\",\"comparisons\":80"
+    "\"result\":\"PASS\",\"comparisons\":90"
    ]
   },
   {
