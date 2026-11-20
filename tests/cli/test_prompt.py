@@ -236,6 +236,25 @@ class PromptTest(IsolatedTestCase):
         self.assertEqual(self.prompt("spec"), expected)
         self.assertTrue(path.is_symlink())
 
+    @unittest.skipIf(os.name == "nt", "POSIX links and modes")
+    def test_temp_folder_refuses_link_planted_after_check(self):
+        path = self.tmp / f"factory-sample-{JOB}"
+        real = self.home / "elsewhere"
+        real.mkdir()
+        real.chmod(0o755)
+        is_link = factory.is_link
+
+        def plant(candidate):
+            if Path(candidate) == path:
+                path.symlink_to(real, target_is_directory=True)
+                return False
+            return is_link(candidate)
+
+        with mock.patch.object(factory, "is_link", plant):
+            self.assertEqual(self.prompt("spec"), (
+                6, "", f"factory.py: {path} is a link or a file; remove it, then run prompt again\n"))
+        self.assertEqual(stat.S_IMODE(real.stat().st_mode), 0o755)
+
     @unittest.skipIf(os.name == "nt", "POSIX owners")
     def test_temp_folder_refuses_other_owner(self):
         path = self.tmp / f"factory-sample-{JOB}"

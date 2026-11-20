@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -75,9 +76,16 @@ class AuditFlagsTest(IsolatedTestCase):
                 "cat > walkthrough.html <<'EOF'\n<p>The token lives in the factory .env file.</p>\nEOF",
                 "git commit -m \"$(cat <<'EOF'\nKeep .env out of the repo\nEOF\n)\"",
                 "tee notes.md <<EOF\nThe token lives in the factory .env file.\nEOF",
-                "cat <<'EOF'\n$(cat ~/app/.env)\nEOF"):
+                "cat <<'EOF'\n$(cat ~/app/.env)\nEOF",
+                "cat <<EOF\n(see the .env notes)\nEOF",
+                "cat <<'EOF'\n$(\ncat ~/app/.env\n)\nEOF"):
             with self.subTest(command=command):
                 self.assertEqual(self.flags("Bash", {"command": command}), [])
+
+    def test_runs_output_pattern_is_linear(self):
+        started = time.monotonic()
+        self.assertIsNone(factory.AUDIT_RUNS_OUTPUT.search(" -" + "c" * 100_000 + "!"))
+        self.assertLess(time.monotonic() - started, 1)
 
     def test_secret_file_still_flags_reads(self):
         for command in (
@@ -91,7 +99,12 @@ class AuditFlagsTest(IsolatedTestCase):
                 "bash <(cat <<EOF\ncat ~/app/.env\nEOF\n)",
                 "sh -c \"$(cat <<EOF\ncat ~/app/.env\nEOF\n)\"",
                 "cat <<EOF > >(sh)\ncat ~/app/.env\nEOF",
-                "cat <<E\"OF\"\nx\nEOF\ncat ~/app/.env"):
+                "cat <<E\"OF\"\nx\nEOF\ncat ~/app/.env",
+                "bash -lc \"$(cat <<EOF\ncat ~/app/.env\nEOF\n)\"",
+                "sh -ec \"$(cat <<EOF\ncat ~/app/.env\nEOF\n)\"",
+                "$(cat <<EOF\ncat ~/app/.env\nEOF\n)",
+                "echo hi; \"$(cat <<EOF\ncat ~/app/.env\nEOF\n)\"",
+                "cat <<EOF\n$(\ncat ~/app/.env\n)\nEOF"):
             with self.subTest(command=command):
                 self.assertEqual(self.flags("Bash", {"command": command}), ["secret-file"])
 
