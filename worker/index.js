@@ -470,7 +470,8 @@ async function boardRefusal(env, stored, data, sameBase, principal) {
         checkRiderControls(stored.jobs, data.jobs) ??
         checkBatchRefs(stored.jobs, data.jobs) ??
         checkNewStarters(stored.jobs, data.jobs) ??
-        checkApprovalNotes(stored.jobs, data.jobs, principal))
+        checkApprovalNotes(stored.jobs, data.jobs, principal) ??
+        checkResolve(stored.jobs, data.jobs, principal))
       : null)
   );
 }
@@ -2594,7 +2595,7 @@ function checkArchived(stored, data) {
   return null;
 }
 
-const RIDER_CONTROLS = ["move", "priority", "paused", "close", "babysit"];
+const RIDER_CONTROLS = ["move", "priority", "paused", "close", "babysit", "resolve"];
 const DASHBOARD_APPROVED_NOTE = "spec approved on the dashboard";
 const TRACER_APPROVED_NOTE = "spec approved in Tracer";
 const leadOfRow = (j) =>
@@ -2638,6 +2639,33 @@ function checkApprovalNotes(storedJobs, jobs, principal) {
       return `a board write from a device cannot set the note "${DASHBOARD_APPROVED_NOTE}" on ${quoteIdCut(row.id, QUOTED_ID_MAX)}: only a signed-in person approves a spec on the dashboard. Nothing was written.`;
     if (row.note === TRACER_APPROVED_NOTE && row.tracer?.scope !== "approved")
       return `a board write cannot set the note "${TRACER_APPROVED_NOTE}" on ${quoteIdCut(row.id, QUOTED_ID_MAX)} unless its tracer.scope is "approved". Nothing was written.`;
+  }
+  return null;
+}
+
+// Only a signed-in person sets resolve, the dashboard's Rework or Approve as is. Any writer
+// may delete it. A row whose resolve is unchanged passes. An error message, or null.
+function checkResolve(storedJobs, jobs, principal) {
+  const stored = new Map();
+  for (const j of storedJobs)
+    if (typeof j?.id === "string" && !stored.has(j.id)) stored.set(j.id, j);
+  for (const row of jobs) {
+    if (typeof row !== "object" || row === null || typeof row.id !== "string") continue;
+    const r = row.resolve;
+    if (r === undefined || JSON.stringify(r) === JSON.stringify(stored.get(row.id)?.resolve))
+      continue;
+    const id = quoteIdCut(row.id, QUOTED_ID_MAX);
+    if (principal?.kind !== "user")
+      return `a board write from a device cannot set resolve on ${id}: only a signed-in person asks for rework or approval on the dashboard. Nothing was written.`;
+    const keys =
+      r && typeof r === "object" && !Array.isArray(r) ? Object.keys(r).sort().join() : "";
+    const note = typeof r?.note === "string" ? r.note.trim().length : 0;
+    const wellFormed =
+      typeof r?.at === "string" &&
+      ((r.action === "rework" && keys === "action,at,note" && note >= 1 && note <= 2000) ||
+        (r.action === "approve" && keys === "action,at"));
+    if (!wellFormed)
+      return `resolve on ${id} must be {action: "rework", note, at} or {action: "approve", at}. Nothing was written.`;
   }
   return null;
 }

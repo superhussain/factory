@@ -103,3 +103,68 @@ test("a device PUT keeps a stored dashboard note", async () => {
   const response = await s.put({ ...approved(DASHBOARD), claim });
   assert.equal(response.status, 200);
 });
+
+// Only a signed-in person sets resolve, the dashboard's Rework or Approve as is on a held job.
+// A device may delete it, which only cancels the request.
+const HELD = {
+  id: "064-sample-human",
+  project: "sample",
+  stage: "needs-human",
+  note: "review panel: round 2 findings need a person",
+  needs: "decide on the round-2 findings",
+};
+const REWORK = { action: "rework", note: "Keep the CSV header order.", at: "2026-11-20T09:00:00Z" };
+const resolved = (resolve) => {
+  const { needs: _needs, ...row } = HELD;
+  return { ...row, note: "rework requested on the dashboard", resolve };
+};
+const deviceResolveRefusal =
+  'a board write from a device cannot set resolve on "064-sample-human": only a signed-in person asks for rework or approval on the dashboard. Nothing was written.';
+const shapeRefusal =
+  'resolve on "064-sample-human" must be {action: "rework", note, at} or {action: "approve", at}. Nothing was written.';
+
+test("a device PUT cannot set resolve", async () => {
+  const s = setup(HELD);
+  await refused(s, () => s.put(resolved(REWORK)), deviceResolveRefusal);
+});
+
+test("a device PATCH cannot set resolve", async () => {
+  const s = setup(HELD);
+  await refused(s, () => s.patch(resolved(REWORK), device), deviceResolveRefusal);
+});
+
+test("a person's PATCH sets rework and approve", async () => {
+  assert.equal((await setup(HELD).patch(resolved(REWORK), person)).status, 200);
+  const approve = { action: "approve", at: "2026-11-20T09:00:00Z" };
+  assert.equal((await setup(HELD).patch(resolved(approve), person)).status, 200);
+});
+
+test("a person's PATCH cannot set a malformed resolve", async () => {
+  for (const bad of [
+    { action: "rework", note: "   ", at: "2026-11-20T09:00:00Z" },
+    { action: "rework", note: "x".repeat(2001), at: "2026-11-20T09:00:00Z" },
+    { action: "rework", at: "2026-11-20T09:00:00Z" },
+    { action: "approve", note: "extra", at: "2026-11-20T09:00:00Z" },
+    { action: "approve" },
+    { action: "ship", at: "2026-11-20T09:00:00Z" },
+    "rework",
+    null,
+  ]) {
+    const s = setup(HELD);
+    await refused(s, () => s.patch(resolved(bad), person), shapeRefusal);
+  }
+});
+
+test("a person and a device delete resolve", async () => {
+  const stored = resolved(REWORK);
+  const { resolve: _resolve, ...cleared } = stored;
+  assert.equal((await setup(stored).patch(cleared, person)).status, 200);
+  assert.equal((await setup(stored).patch(cleared, device)).status, 200);
+  assert.equal((await setup(stored).put(cleared)).status, 200);
+});
+
+test("a device PUT keeps a stored resolve", async () => {
+  const stored = resolved(REWORK);
+  const response = await setup(stored).put({ ...stored, claim: { device: "host-a" } });
+  assert.equal(response.status, 200);
+});
