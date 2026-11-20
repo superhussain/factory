@@ -8866,6 +8866,9 @@ def board_merged_head(home, slug, job_id):
             repo = frontmatter(md)[0].get("repo", "") if md.exists() else ""
             if f"{m[1]}/{m[2]}".lower() == repo.lower():
                 return pr_merged_head(home, job["pr"])
+            why = (f"{md} is missing" if not md.exists() else f"{md} has no repo:" if not repo
+                   else f"it is in {m[1]}/{m[2]}, not the project file's repo: {repo}")
+            print(f"factory.py: cleanup skipped the GitHub lookup for {job['pr']}: {why}", file=sys.stderr)
         return None
     print(f"factory.py: cleanup could not read the board ({reason}), so it keeps a branch HEAD does not contain",
           file=sys.stderr)

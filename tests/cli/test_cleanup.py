@@ -267,8 +267,29 @@ class CleanupTest(IsolatedTestCase):
         self.assertEqual(code, 1)
         states.assert_not_called()
         self.assertEqual(out["left"], ["branch factory/001-test: not merged into main"])
-        self.assertEqual(err, "")
+        self.assertEqual(err, "factory.py: cleanup skipped the GitHub lookup for https://github.com/other/beta/pull/7: "
+                              "it is in other/beta, not the project file's repo: sample/alpha\n")
         self.assertTrue(self.branch_exists())
+
+    def test_missing_project_file_skips_the_lookup(self):
+        md = self.home / "projects" / "sample.md"
+        md.unlink()
+        self.board("merged", None, pr=self.PR)
+        with patch.object(factory, "pr_states") as states:
+            code, _, err = self.cleanup()
+        self.assertEqual(code, 1)
+        states.assert_not_called()
+        self.assertEqual(err, f"factory.py: cleanup skipped the GitHub lookup for {self.PR}: {md} is missing\n")
+
+    def test_project_file_without_repo_skips_the_lookup(self):
+        md = self.home / "projects" / "sample.md"
+        md.write_text("---\ntitle: x\n---\n")
+        self.board("merged", None, pr=self.PR)
+        with patch.object(factory, "pr_states") as states:
+            code, _, err = self.cleanup()
+        self.assertEqual(code, 1)
+        states.assert_not_called()
+        self.assertEqual(err, f"factory.py: cleanup skipped the GitHub lookup for {self.PR}: {md} has no repo:\n")
 
     def test_repo_match_ignores_case(self):
         (self.home / "projects" / "sample.md").write_text("---\nrepo: Sample/Alpha\n---\n")
