@@ -589,6 +589,8 @@ class GatherTest(TracerCase):
             self.assertEqual(code, 0, err)
             self.assertIn("Tracer-signed scope receipt", err)
             job = self.board["jobs"][0]
+            self.assertIn("the Worker refused Tracer's receipt (check tracer_receipt_key); "
+                          f"{job['id']} waits at gate: spec-approval instead", err)
             self.assertEqual((job["stage"], job["note"], job["needs"]),
                              ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS))
             self.assertNotIn("receipt", job["tracer"])

@@ -1056,7 +1056,7 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
             if job["tracer"].get("receipt"):
                 job.update(stage="build", note=TRACER_APPROVED_NOTE)
                 job.pop("needs", None)
-                sent.append(True)
+                sent.append(job_id)
             else:
                 feature = job["tracer"].get("feature") or tracer_ids(job)[1]
                 job.update(note="gate: spec-approval",
@@ -9432,7 +9432,7 @@ def tracer_record(home, job, base, feature_id, scope=None, receipt=None):
                 found["stage"] = "build"
                 found["note"] = TRACER_APPROVED_NOTE
                 found.pop("needs", None)
-                sent.append(True)
+                sent.append(job["id"])
             else:
                 found["note"] = "gate: spec-approval"
                 needs = TRACER_UNSIGNED_NEEDS if scope == "approved" else TRACER_DECLINED_NEEDS
@@ -9444,16 +9444,19 @@ def tracer_record(home, job, base, feature_id, scope=None, receipt=None):
 
 
 def receipt_cas(factory, change):
-    """cas on the board with change(text, signed, sent), where change appends to sent when it
-    moves a job to build on Tracer's receipt. When the Worker refuses that write, because it
-    has no receipt key or another one, retry once unsigned so the job waits for a person."""
+    """cas on the board with change(text, signed, sent), where change appends the job id to sent
+    when it moves a job to build on Tracer's receipt. When the Worker refuses that write, because
+    it has no receipt key or another one, retry once unsigned so the job waits for a person."""
     sent = []
     try:
         return cas(factory, "/api/board", lambda text: change(text, True, sent))
     except SystemExit as e:
         if e.code != 5 or not sent:
             raise
-    return cas(factory, "/api/board", lambda text: change(text, False, []))
+    result = cas(factory, "/api/board", lambda text: change(text, False, []))
+    print(f"factory.py: the Worker refused Tracer's receipt (check tracer_receipt_key); "
+          f"{sent[-1]} waits at gate: spec-approval instead", file=sys.stderr)
+    return result
 
 
 def tracer_follow_pass(home):
