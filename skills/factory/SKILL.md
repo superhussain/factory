@@ -485,7 +485,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   `git branch -D`, `git worktree remove --force` or `rm -rf` on a job's worktree,
   branch or folder, and never retry cleanup with force. To reset a job's
   `node_modules` or `.context/<name>` folder, run
-  `python3 "$RUNTIME" clean "$SLUG/<id>" node_modules` or `... scratch <name>`.
+  `python3 "$RUNTIME" clean "$SLUG/<id>" node_modules` or `... scratch <name>`, and its temp folder with `... temp`.
 - Never put real secrets, tokens, or user data in screenshots, logs, or job files,
   since the Worker serves job markdown and images to anyone past the Access policy.
 - If an agent fails or writes a malformed file, re-run it once, then move the job

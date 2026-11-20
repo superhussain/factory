@@ -154,6 +154,7 @@ python3 <installed-skill>/runtime/factory.py claim <factory-home> small-feature 
 python3 <installed-skill>/runtime/factory.py sync sample
 python3 <installed-skill>/runtime/factory.py handoff sample/001-small-feature --session <printed-tag>
 python3 <installed-skill>/runtime/factory.py clean sample/001-small-feature node_modules
+python3 <installed-skill>/runtime/factory.py clean sample/001-small-feature temp
 ```
 
 Use the allocated ID, not the illustrative ID above. Claims without a supplied
@@ -167,6 +168,8 @@ an automatic takeover or reset of review/approval counters.
 `clean` removes only git-ignored `node_modules` folders, or one `.context/<name>`
 scratch folder, inside the job's own worktree, never through a link, and prints
 `{"removed": [...], "left": [...]}` as JSON.
+`temp` removes the job's `factory-<job-id>` folder under the system temp root, the
+`Temp folder:` that every role prompt names.
 Within one command, the runtime reuses a 200 answer from /projects.json, /api/pipeline/global or /api/pipeline/effective/<slug> for up to 60 seconds. A pipeline or project write clears it.
 
 ## Cloudflare credentials for one command
