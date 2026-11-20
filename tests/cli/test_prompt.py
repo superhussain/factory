@@ -61,7 +61,8 @@ class PromptTest(IsolatedTestCase):
                 f"Project file: {self.project}\n"
                 f"Project documents: {self.documents}\n"
                 f"Visuals reference: {skill / 'references' / 'visuals.md'}\n"
-                f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}\n")
+                f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}\n"
+                f"Runtime: {skill / 'runtime' / 'factory.py'}\n")
 
     def assertPrompt(self, args, expected, **kw):
         code, out, err = self.prompt(*args, **kw)
