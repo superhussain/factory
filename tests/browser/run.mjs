@@ -2065,6 +2065,24 @@ async function capture(outdir, referencePath) {
       return clipOf(page, ".detail-head");
     });
     await view("approve-spec-drawer-390", 390, 844, "dark", openSpecGate);
+    await view("approve-spec-failed-1280", 1280, 900, "light", async (page) => {
+      await openSpecGate(page);
+      page.once("dialog", (dialog) => dialog.accept());
+      // The board write fails as a dropped connection would.
+      await page.evaluate(() => {
+        const fetchNow = window.fetch;
+        window.fetch = (url, options) =>
+          String(url).endsWith("api/board") && options?.method === "PATCH"
+            ? Promise.reject(new TypeError("Failed to fetch"))
+            : fetchNow(url, options);
+      });
+      await page.focus("#d-approve-spec-bar");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(() => !document.getElementById("d-approve-spec-err").hidden, {
+        timeout: 30000,
+      });
+      return clipOf(page, ".detail-head", "#d-approve-spec-err");
+    });
     await view("inbox-spec-1280", 1280, 900, "light", async (page) => {
       await page.evaluate(() => {
         location.hash = "#/inbox";
