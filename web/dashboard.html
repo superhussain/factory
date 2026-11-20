@@ -8273,7 +8273,7 @@ $('rework-form').addEventListener('submit', async (e) => {
       if (message) throw new Error(message);
     });
   } catch (x) {
-    $('rework-err').textContent = failText(x);
+    $('rework-err').textContent = boardSaveError(x, 'The rework may have saved. Press Start rework again to check. It will not queue a second rework.');
     $('rework-err').hidden = false;
     reworkDialog.saving = false;
     setDialogSaving('rework', 'rework-note', 'Start rework', false);
@@ -8519,7 +8519,7 @@ async function approveSpecAction(ctx) {
     });
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(failText(x));
+    if (ctx.live()) ctx.report(boardSaveError(x, 'The approval may have saved. Press Approve spec again to check. It will not start a second build.'));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }

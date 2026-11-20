@@ -452,6 +452,36 @@ changes nothing. Then install one timer per host.
 - Only pickup writes `github` and `close.via = "github"`. `board` refuses a `github` patch with exit 2.
 - A synced move does not mirror Tracer, archive a Paseo workspace or post a stage-change chat line. Agents still own those.
 
+## Prebuilt dependencies
+
+`factory.py worktree` installs the folders a device-local `<home>/prebuild.json`
+lists for the project, so agents never run `pnpm install` themselves. The host owns
+the file, and nothing syncs it:
+
+```json
+{"version": 1, "prebuild": {"factory": ["paseo-plugin"]}}
+```
+
+The file names folders only. The command is fixed: `mise exec -- pnpm install
+--frozen-lockfile --ignore-pnpmfile`, or `pnpm install --frozen-lockfile
+--ignore-pnpmfile` when `mise` is not on `PATH`.
+Each install appends to `<home>/logs/prebuild-<job-id>.log`, and stdout still prints
+only the worktree path. Every outcome keeps exit 0, and each folder reports on stderr:
+
+| Condition | stderr line |
+| --- | --- |
+| `node_modules/.modules.yaml` exists | none, skipped |
+| no `pnpm-lock.yaml`, or the path leaves the worktree | `prebuild skips <dir>: no pnpm-lock.yaml` / `prebuild skips <dir>: not inside the worktree` |
+| the working tree, untracked and gitignored files included, differs from `origin/<base>` in the folder's `pnpm-lock.yaml`, `package.json`, `.pnpmfile.cjs` or `.pnpmfile.mjs`, or, at the worktree root, in every folder between it and the folder, or in the folder itself, any name with `mise` in it or under such a folder, at that level or in `.config/` (so `mise.toml`, `mise.local.toml`, `.miserc.toml`, `.config/miserc.toml`, `mise.lock`, `.mise/` and `.config/mise/conf.d/` all count), `.tool-versions`, `.npmrc` or `pnpm-workspace.yaml` | `prebuild skips <dir>: its dependency files differ from origin/<base>` |
+| neither `mise` nor `pnpm` on `PATH` | `prebuild skips <dir>: pnpm is not on PATH` |
+| install exits non-zero, cannot start, or runs past 600 s | `factory.py: prebuild of <dir> failed (<why>); log: <log>` |
+| success | `prebuilt <dir> with pnpm install --frozen-lockfile` |
+
+A bad file prints `factory.py: cannot read <path>: use {"version": 1, "prebuild":
+{"<project>": ["<dir>", ...]}}`. pnpm writes `.modules.yaml` last, so a killed
+install retries on the next `worktree` call. A cold install can take minutes, so give
+the `worktree` call a 600000 ms timeout.
+
 ## Logs and limits
 
 Each launch writes `<home>/logs/pickup/<id>-<tag>.log` (mode 0600, one file per

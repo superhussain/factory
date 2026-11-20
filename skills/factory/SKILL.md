@@ -192,7 +192,9 @@ shipping), steps 1 and 2 are: `python3 <this skill's dir>/runtime/factory.py job
 for its `project`, then `where <project>`, `hold <project>/<id>`, and
 `worktree <project>/<id>`. `hold` claims the job for this session and pulls its
 files. `worktree` creates `$WT` from `origin/factory/<id>`, or fast-forwards it, and
-prints the path.
+prints the path. When `<home>/prebuild.json` lists the project, `worktree` also
+installs each listed folder from its frozen lockfile, so give that call a 600000 ms
+timeout. See [pickup](references/pickup.md#prebuilt-dependencies).
 
 ## Claims
 

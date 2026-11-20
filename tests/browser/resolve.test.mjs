@@ -3,6 +3,7 @@
 // dismissed confirm and a row that changed meanwhile, against one owned local Worker at mobile and
 // desktop width. Rows are made up: 064-sample-human waits at needs-human after a review round cap.
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { openJobActions } from "../support/board-ready.cjs";
@@ -56,6 +57,9 @@ const CONFIRM =
   "Approve 066-sample-failed as is? Pickup ships and merges its PR without another review round.";
 const HELP =
   "064-sample-human is waiting on you. Pickup starts /factory rework with your note, and the builder runs a new round on it.";
+const UNCERTAIN =
+  "Not confirmed: saving the board failed: 503 Storage is busy. The rework may have saved. Press Start rework again to check. It will not queue a second rework.";
+const SHOTS = new URL("../../.context/shots/", import.meta.url).pathname;
 
 const freezeClock = (page) =>
   page.evaluateOnNewDocument((now) => {
@@ -332,8 +336,42 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
           ...wait,
           timeout: 5000,
         });
+        await page.waitForFunction(() => document.activeElement.id === "d-actions", {
+          ...wait,
+          timeout: 5000,
+        });
         assert.equal((await boardJob(origin, "064-sample-human")).resolve.note, NOTE);
         assert.deepEqual(errors, []);
+      });
+
+      await t.test(`a 503 rework save says not confirmed ${width}`, async () => {
+        await reseed();
+        await openDrawer(page, "064-sample-human");
+        await activate("#d-rework-bar");
+        await page.waitForSelector("#rework-dlg[open]", wait);
+        await page.type("#rework-note", NOTE);
+        const before = await boardText(origin);
+        await page.evaluate(() => {
+          const real = window.fetch;
+          window.fetch = (url, init) => {
+            if (!String(url).endsWith("api/board") || init?.method !== "PATCH")
+              return real(url, init);
+            window.fetch = real;
+            return Promise.resolve(new Response("Storage is busy.", { status: 503 }));
+          };
+        });
+        await activate("#rework-save");
+        await page.waitForFunction(() => !document.getElementById("rework-err").hidden, wait);
+        if (width === 390) {
+          await mkdir(SHOTS, { recursive: true });
+          await (
+            await page.$("#rework-dlg")
+          ).screenshot({ path: `${SHOTS}rework-uncertain-390.png` });
+        }
+        assert.equal(await page.$eval("#rework-err", (el) => el.textContent), UNCERTAIN);
+        assert.equal(await boardText(origin), before);
+        await page.keyboard.press("Escape");
+        await page.waitForSelector("#rework-dlg:not([open])", wait);
       });
       await context.close();
     }

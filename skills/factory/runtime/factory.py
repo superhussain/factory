@@ -8880,7 +8880,92 @@ def worktree(target):
                 fail(f"{wt} is {ahead} ahead and {behind} behind origin/{branch}"
                      + ("" if ahead != "0" else " with uncommitted changes") + ". Nothing was changed", 6)
             git_ok(wt, "merge", "--ff-only", f"origin/{branch}")
+    prebuild(home, slug, job_id, wt)
     print(wt)
+
+
+PREBUILD_DIR = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*")
+# Checked at the worktree root, every folder between it and a listed folder, and the listed folder itself. The
+# *mise* globs cover every mise config, rc, lock and conf.d name, such as .miserc.toml and .config/miserc.toml.
+PREBUILD_CONFIG_FILES = [".miserc.toml", ".config/miserc.toml", ":(glob)*mise*", ":(glob)*mise*/**",
+                         ":(glob).config/*mise*", ":(glob).config/*mise*/**", ".tool-versions", ".npmrc",
+                         "pnpm-workspace.yaml"]
+PREBUILD_DIR_FILES = ["pnpm-lock.yaml", "package.json", ".pnpmfile.cjs", ".pnpmfile.mjs"]
+
+
+def prebuild_dirs(home, slug):
+    """The folders <home>/prebuild.json lists for slug. A dir that could leave the worktree is skipped."""
+    path = home / "prebuild.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        dirs = data["prebuild"].get(slug, []) if data["version"] == 1 else None
+        if not isinstance(dirs, list) or not all(isinstance(d, str) for d in dirs):
+            raise ValueError
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        print(f'factory.py: cannot read {path}: use {{"version": 1, "prebuild": {{"<project>": ["<dir>", ...]}}}}',
+              file=sys.stderr)
+        return []
+    ok = [d for d in dirs if PREBUILD_DIR.fullmatch(d) and ".." not in d.split("/")]
+    for d in dirs:
+        if d not in ok:
+            print(f"prebuild skips {d}: not inside the worktree", file=sys.stderr)
+    return ok
+
+
+def prebuild(home, slug, job_id, wt):
+    """Install each listed folder from its frozen lockfile, only when its dependency files match origin/<base>."""
+    dirs = prebuild_dirs(home, slug)
+    if not dirs:
+        return
+    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
+    log = home / "logs" / f"prebuild-{job_id}.log"
+    for d in dirs:
+        folder = Path(wt) / d
+        if (folder / "node_modules" / ".modules.yaml").exists():
+            continue
+        if Path(wt).resolve() not in folder.resolve().parents:
+            print(f"prebuild skips {d}: not inside the worktree", file=sys.stderr)
+            continue
+        if not (folder / "pnpm-lock.yaml").is_file():
+            print(f"prebuild skips {d}: no pnpm-lock.yaml", file=sys.stderr)
+            continue
+        # The mise, npmrc and pnpm files a builder could change, checked in the working tree, untracked and
+        # gitignored ones too.
+        files = [name.replace(":(glob)", ":(glob)" + prefix) if name.startswith(":(glob)") else prefix + name
+                 for prefix in ["/".join(d.split("/")[:i]) + "/" if i else "" for i in range(len(d.split("/")) + 1)]
+                 for name in PREBUILD_CONFIG_FILES]
+        files += [f"{d}/{name}" for name in PREBUILD_DIR_FILES]
+        diff = subprocess.run(["git", "-C", str(wt), "diff", "--quiet", f"refs/remotes/origin/{base}", "--", *files],
+                              capture_output=True)
+        status = subprocess.run(["git", "-C", str(wt), "status", "--porcelain", "--untracked-files=all", "--ignored",
+                                 "--", *files], capture_output=True, text=True)
+        if diff.returncode or status.returncode or status.stdout.strip():
+            print(f"prebuild skips {d}: its dependency files differ from origin/{base}", file=sys.stderr)
+            continue
+        mise, pnpm = shutil.which("mise"), shutil.which("pnpm")
+        if mise:
+            argv = [mise, "exec", "--", "pnpm", "install", "--frozen-lockfile", "--ignore-pnpmfile"]
+        elif pnpm:
+            argv = [pnpm, "install", "--frozen-lockfile", "--ignore-pnpmfile"]
+        else:
+            print(f"prebuild skips {d}: pnpm is not on PATH", file=sys.stderr)
+            continue
+        try:
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with open(log, "a", encoding="utf-8") as out:
+                code = subprocess.run(argv, cwd=folder, stdin=subprocess.DEVNULL, stdout=out,
+                                      stderr=subprocess.STDOUT, timeout=600).returncode
+            why = f"exit {code}" if code else ""
+        except subprocess.TimeoutExpired:
+            why = "timed out after 600 s"
+        except OSError as e:
+            why = str(e)
+        if why:
+            print(f"factory.py: prebuild of {d} failed ({why}); log: {log}", file=sys.stderr)
+        else:
+            print(f"prebuilt {d} with pnpm install --frozen-lockfile", file=sys.stderr)
 
 
 LSOF_FALLBACKS = ("/usr/sbin/lsof", "/usr/bin/lsof")

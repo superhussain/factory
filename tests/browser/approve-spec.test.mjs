@@ -3,6 +3,7 @@
 // local Worker at mobile and desktop width. The inbox also offers Open in Tracer for a Tracer hold
 // and Babysit PR and Open PR for a PR held for a person.
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { openJobActions } from "../support/board-ready.cjs";
@@ -57,7 +58,9 @@ const VIEWPORTS = [
   { width: 1280, height: 900, theme: "light" },
 ];
 const CONFIRM = "Approve the spec of 042-sample-export? Pickup starts the build on its next run.";
-const OFFLINE = "Could not reach the factory. Check your connection, then try again.";
+const APPROVE_HINT =
+  "The approval may have saved. Press Approve spec again to check. It will not start a second build.";
+const SHOTS = new URL("../../.context/shots/", import.meta.url).pathname;
 
 const freezeClock = (page) =>
   page.evaluateOnNewDocument((now) => {
@@ -279,6 +282,44 @@ test("approve spec", { timeout: 240000 }, async (t) => {
         assert.equal(await (await fetch(origin + "/api/board")).text(), before);
       });
 
+      await t.test(`a 503 Approve spec says not confirmed ${width}`, async () => {
+        await seedBoard(origin, JOBS);
+        await page.evaluate(() => window.fixtureBoardPoll());
+        await openDrawer(page, "042-sample-export");
+        await page.waitForFunction(
+          () => !document.getElementById("d-approve-spec-bar").hidden,
+          wait,
+        );
+        const before = await (await fetch(origin + "/api/board")).text();
+        await page.evaluate(() => {
+          const real = window.fetch;
+          window.fetch = (url, init) => {
+            if (!String(url).endsWith("api/board") || init?.method !== "PATCH")
+              return real(url, init);
+            window.fetch = real;
+            return Promise.resolve(new Response("Storage is busy.", { status: 503 }));
+          };
+        });
+        await activate("#d-approve-spec-bar");
+        await page.waitForFunction(
+          () => !document.getElementById("d-approve-spec-err").hidden,
+          wait,
+        );
+        if (width === 1280) {
+          await mkdir(SHOTS, { recursive: true });
+          await (
+            await page.$("#detail")
+          ).screenshot({
+            path: `${SHOTS}approve-spec-uncertain-1280.png`,
+          });
+        }
+        assert.equal(
+          await page.$eval("#d-approve-spec-err", (el) => el.textContent),
+          "Not confirmed: saving the board failed: 503 Storage is busy. " + APPROVE_HINT,
+        );
+        assert.equal(await (await fetch(origin + "/api/board")).text(), before);
+      });
+
       await t.test(`a failed bar Approve spec keeps focus on the button ${width}`, async () => {
         await seedBoard(origin, JOBS);
         await page.evaluate(() => window.fixtureBoardPoll());
@@ -300,7 +341,7 @@ test("approve spec", { timeout: 240000 }, async (t) => {
         await page.waitForFunction(
           (line) => document.getElementById("d-approve-spec-err").textContent === line,
           wait,
-          OFFLINE,
+          "Not confirmed: Failed to fetch. " + APPROVE_HINT,
         );
         assert.equal(await page.evaluate(() => document.activeElement.id), "d-approve-spec-bar");
         assert.equal(await (await fetch(origin + "/api/board")).text(), before);
