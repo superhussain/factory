@@ -82,7 +82,7 @@ class WithCloudflareTest(IsolatedTestCase):
 
     def test_documented_command_not_flagged(self):
         command = ("python3 ~/.claude/skills/factory/runtime/factory.py with-cloudflare -- sh -c "
-                   "'curl -H \"Authorization: Bearer $CLOUDFLARE_API_TOKEN\" "
+                   "'printf \"Authorization: Bearer %s\\n\" \"$CLOUDFLARE_API_TOKEN\" | curl -H @- "
                    "https://api.cloudflare.com/client/v4/user/tokens/verify'")
         inp = {"command": command}
         self.assertEqual(factory.audit_flags("Bash", inp, factory.audit_target_raw("Bash", inp), False), [])

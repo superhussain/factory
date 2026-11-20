@@ -180,8 +180,10 @@ value and runs the command without a shell. Wrap a command in `sh -c` when it
 needs the token by name:
 
 ```text
-python3 <installed-skill>/runtime/factory.py with-cloudflare -- sh -c 'curl -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/user/tokens/verify'
+python3 <installed-skill>/runtime/factory.py with-cloudflare -- sh -c 'printf "Authorization: Bearer %s\n" "$CLOUDFLARE_API_TOKEN" | curl -H @- https://api.cloudflare.com/client/v4/user/tokens/verify'
 ```
+
+`printf` is a shell builtin, so the token reaches curl on stdin and never shows in a process list.
 
 | Case | Exit | stderr |
 | --- | --- | --- |
