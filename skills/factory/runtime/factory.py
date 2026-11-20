@@ -6639,7 +6639,8 @@ def prompt_cmd(target, role, *flags):
              f"Project documents: {documents}",
              f"Visuals reference: {skill / 'references' / 'visuals.md'}",
              f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}",
-             f"Runtime: {skill / 'runtime' / 'factory.py'}"]
+             f"Runtime: {skill / 'runtime' / 'factory.py'}",
+             f"Temp folder: {job_temp(job_id)}"]
     round_folder = folder / f"round-{options['--round']}" if "--round" in options else None
     if role == "spec":
         feature = job.get("idea") or job.get("title")

@@ -62,7 +62,8 @@ class PromptTest(IsolatedTestCase):
                 f"Project documents: {self.documents}\n"
                 f"Visuals reference: {skill / 'references' / 'visuals.md'}\n"
                 f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}\n"
-                f"Runtime: {skill / 'runtime' / 'factory.py'}\n")
+                f"Runtime: {skill / 'runtime' / 'factory.py'}\n"
+                f"Temp folder: {Path(tempfile.gettempdir()) / ('factory-' + JOB)}\n")
 
     def assertPrompt(self, args, expected, **kw):
         code, out, err = self.prompt(*args, **kw)
