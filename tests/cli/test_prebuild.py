@@ -34,6 +34,8 @@ class PrebuildTest(IsolatedTestCase):
         (seed / "sample").mkdir()
         (seed / "sample" / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
         (seed / "sample" / "package.json").write_text("{}\n", encoding="utf-8")
+        (seed / "sample" / "inner").mkdir()
+        (seed / "sample" / "inner" / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
         (seed / "mise.toml").write_text("[tools]\nnode = '24'\n", encoding="utf-8")
         self.git(seed, "add", ".")
         self.git(seed, "commit", "-q", "-m", "sample")
@@ -143,6 +145,29 @@ class PrebuildTest(IsolatedTestCase):
         (self.wt / "sample" / ".config" / "mise" / "config.toml").write_text("[env]\n", encoding="utf-8")
         self.assertEqual(self.prebuild(),
                          "prebuild skips sample: its dependency files differ from origin/main\n")
+        self.assertEqual(self.calls(), [])
+
+    def test_untracked_root_miserc_skips(self):
+        self.config(["sample"])
+        (self.wt / ".miserc.toml").write_text("override_config_filenames = ['x.toml']\n", encoding="utf-8")
+        self.assertEqual(self.prebuild(),
+                         "prebuild skips sample: its dependency files differ from origin/main\n")
+        self.assertEqual(self.calls(), [])
+
+    def test_untracked_folder_config_miserc_skips(self):
+        self.config(["sample"])
+        (self.wt / "sample" / ".config").mkdir()
+        (self.wt / "sample" / ".config" / "miserc.toml").write_text("override_config_filenames = ['x.toml']\n",
+                                                                     encoding="utf-8")
+        self.assertEqual(self.prebuild(),
+                         "prebuild skips sample: its dependency files differ from origin/main\n")
+        self.assertEqual(self.calls(), [])
+
+    def test_untracked_parent_folder_mise_toml_skips(self):
+        self.config(["sample/inner"])
+        (self.wt / "sample" / "mise.toml").write_text("[env]\n_.source = 'x.sh'\n", encoding="utf-8")
+        self.assertEqual(self.prebuild(),
+                         "prebuild skips sample/inner: its dependency files differ from origin/main\n")
         self.assertEqual(self.calls(), [])
 
     def test_mise_runs_pnpm_through_exec(self):

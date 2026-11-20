@@ -8869,11 +8869,12 @@ def worktree(target):
 
 
 PREBUILD_DIR = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*")
-# Checked at the worktree root and in each listed folder.
-PREBUILD_CONFIG_FILES = ["mise.toml", ".mise.toml", "mise.local.toml", ".mise.local.toml", ".config/mise.toml",
-                         ".tool-versions", ".npmrc", ":(glob)mise.*.toml", ":(glob).mise.*.toml",
-                         ":(glob).config/mise/**", ":(glob).mise/**", ":(glob)mise/**"]
-PREBUILD_DIR_FILES = ["pnpm-lock.yaml", "package.json", "pnpm-workspace.yaml", ".pnpmfile.cjs", ".pnpmfile.mjs"]
+# Checked at the worktree root, every folder between it and a listed folder, and the listed folder itself. The
+# *mise* globs cover every mise config, rc, lock and conf.d name, such as .miserc.toml and .config/miserc.toml.
+PREBUILD_CONFIG_FILES = [".miserc.toml", ".config/miserc.toml", ":(glob)*mise*", ":(glob)*mise*/**",
+                         ":(glob).config/*mise*", ":(glob).config/*mise*/**", ".tool-versions", ".npmrc",
+                         "pnpm-workspace.yaml"]
+PREBUILD_DIR_FILES = ["pnpm-lock.yaml", "package.json", ".pnpmfile.cjs", ".pnpmfile.mjs"]
 
 
 def prebuild_dirs(home, slug):
@@ -8917,7 +8918,8 @@ def prebuild(home, slug, job_id, wt):
         # The mise, npmrc and pnpm files a builder could change, checked in the working tree, untracked and
         # gitignored ones too.
         files = [name.replace(":(glob)", ":(glob)" + prefix) if name.startswith(":(glob)") else prefix + name
-                 for prefix in ("", d + "/") for name in PREBUILD_CONFIG_FILES]
+                 for prefix in ["/".join(d.split("/")[:i]) + "/" if i else "" for i in range(len(d.split("/")) + 1)]
+                 for name in PREBUILD_CONFIG_FILES]
         files += [f"{d}/{name}" for name in PREBUILD_DIR_FILES]
         diff = subprocess.run(["git", "-C", str(wt), "diff", "--quiet", f"refs/remotes/origin/{base}", "--", *files],
                               capture_output=True)
