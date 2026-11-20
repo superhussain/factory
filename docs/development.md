@@ -154,6 +154,7 @@ records matched before and after views. Each `view(...)` line in
 - `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
 - Views on a hash route that reads the full board call `waitFullBoard(page)` before they click or shoot, so the second draw cannot detach a node.
 - A spec that needs another size or state adds a task for a new `view(...)` line.
+- Capture mode starts a fresh browser every 50 sides and on each retry. A failed attempt logs a `capture fault` line with its stage, browser age, open contexts and load.
 
 ### Paseo plugin cards
 
