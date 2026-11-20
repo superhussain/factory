@@ -7669,6 +7669,12 @@ function boardSaveError(x, hint) {
   return x.uncertain ? 'Not confirmed: ' + text.replace(/[\s.]+$/, '') + '. ' + hint : text;
 }
 
+// A refusal after an uncertain press: that press most likely saved, and the row moved on since.
+const FIRST_PRESS_SAVED = 'Your first press most likely saved, and the job has moved on since. Check its note on the board.';
+function firstPressText(message, uncertain) {
+  return uncertain ? message + ' ' + FIRST_PRESS_SAVED : message;
+}
+
 let ideaEditor = null;
 let ideaEditorLoad = null;
 
@@ -7981,10 +7987,12 @@ function canApproveSpec(j) {
   return !!j.project && j.stage === 'needs-human' && j.note === SPEC_GATE_NOTE && !leadOf(j) && !j.paused && !j.close;
 }
 
-// Returns an error message, or '' once the board is changed.
+// Returns an error message, '' once the board is changed, or 'unchanged' when it already holds
+// this approval.
 function approveSpecJob(board, id, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
+  if (j.stage === 'build' && j.note === DASHBOARD_APPROVED_NOTE) return 'unchanged';
   if (!canApproveSpec(j)) return 'This spec can no longer be approved.';
   j.stage = 'build';
   j.note = DASHBOARD_APPROVED_NOTE;
@@ -8000,10 +8008,12 @@ function canResolve(j) {
   return !!j.project && j.stage === 'needs-human' && inboxKind(j) === 'human' && !j.resolve && !leadOf(j) && !j.paused && !j.close;
 }
 
-// Returns an error message, or '' once the board is changed.
+// Returns an error message, '' once the board is changed, or 'unchanged' when it already holds
+// this request.
 function resolveJob(board, id, resolve, now) {
   const j = board.jobs.find((x) => x.id === id);
   if (!j) return 'This job is no longer on the board.';
+  if (j.resolve?.action === resolve.action && (resolve.action !== 'rework' || j.resolve.note === resolve.note)) return 'unchanged';
   if (!canResolve(j)) return 'This job can no longer be reworked or approved here.';
   j.resolve = { ...resolve, at: now };
   j.note = resolve.action === 'rework' ? 'rework requested on the dashboard' : 'approval requested on the dashboard';
@@ -8265,15 +8275,21 @@ $('rework-form').addEventListener('submit', async (e) => {
     $('rework-err').hidden = false;
     return;
   }
+  let refused = false;
   reworkDialog.saving = true;
   setDialogSaving('rework', 'rework-note', 'Start rework', true);
   try {
     await casBoard((board) => {
       const message = resolveJob(board, id, { action: 'rework', note }, isoNow());
-      if (message) throw new Error(message);
+      if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message) {
+        refused = true;
+        throw new Error(message);
+      }
     });
   } catch (x) {
-    $('rework-err').textContent = boardSaveError(x, 'The rework may have saved. Press Start rework again to check. It will not queue a second rework.');
+    if (x.uncertain) reworkDialog.uncertain = true;
+    $('rework-err').textContent = refused ? firstPressText(x.message, reworkDialog.uncertain) : boardSaveError(x, 'The rework may have saved. Press Start rework again to check. It will not queue a second rework.');
     $('rework-err').hidden = false;
     reworkDialog.saving = false;
     setDialogSaving('rework', 'rework-note', 'Start rework', false);
@@ -8339,9 +8355,10 @@ $('close-job-form').addEventListener('submit', async (e) => {
     });
   } catch (x) {
     if (!refused && dlg.uncertain) x.uncertain = true;
+    const text = refused ? firstPressText(x.message, dlg.uncertain) : boardSaveError(x, 'The close may have saved. Press Close job again to check. It will not queue a second close or change a saved reason.');
     dlg.uncertain = !!x.uncertain;
     $('close-job-err').classList.remove('saved');
-    $('close-job-err').textContent = boardSaveError(x, 'The close may have saved. Press Close job again to check. It will not queue a second close or change a saved reason.');
+    $('close-job-err').textContent = text;
     $('close-job-err').hidden = false;
     dlg.saving = false;
     setDialogSaving('close-job', 'close-job-reason', 'Close job', false);
@@ -8506,20 +8523,29 @@ async function prioritizeAction(ctx, mode = '') {
     if (ctx.button) ctx.button.disabled = false;
   }
 }
+// Job ids whose last Approve spec press may have saved.
+const uncertainApprovals = new Set();
 async function approveSpecAction(ctx) {
   const j = jobs.find((x) => x.id === ctx.id);
   if (!j || !canApproveSpec(j)) return;
   if (!confirm('Approve the spec of ' + j.id + '? Pickup starts the build on its next run.')) return;
   ctx.report('');
   if (ctx.button) ctx.button.disabled = true;
+  let refused = false;
   try {
     await casBoard((board) => {
       const message = approveSpecJob(board, ctx.id, isoNow());
-      if (message) throw new Error(message);
+      if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message) {
+        refused = true;
+        throw new Error(message);
+      }
     });
+    uncertainApprovals.delete(ctx.id);
     await poll();
   } catch (x) {
-    if (ctx.live()) ctx.report(boardSaveError(x, 'The approval may have saved. Press Approve spec again to check. It will not start a second build.'));
+    if (x.uncertain) uncertainApprovals.add(ctx.id);
+    if (ctx.live()) ctx.report(refused ? firstPressText(x.message, uncertainApprovals.has(ctx.id)) : boardSaveError(x, 'The approval may have saved. Press Approve spec again to check. It will not start a second build.'));
   } finally {
     if (ctx.button) ctx.button.disabled = false;
   }
@@ -8533,6 +8559,7 @@ async function approveAsIsAction(ctx) {
   try {
     await casBoard((board) => {
       const message = resolveJob(board, ctx.id, { action: 'approve' }, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
       if (message) throw new Error(message);
     });
     await poll();
