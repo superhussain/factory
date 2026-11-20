@@ -59,6 +59,8 @@ const SAVED_CLOSE =
   'The close is already saved, with the reason "' +
   REASON +
   '". A saved reason cannot be changed. Cancel closes this dialog and keeps the close.';
+const FIRST_PRESS =
+  " Your first press most likely saved, and the job has moved on since. Check its note on the board.";
 // null sends board writes through, 'drop' aborts them unsent, 'land' sends then aborts the page's copy,
 // '5xx' answers 503 with a body ending in a period.
 let putMode = null;
@@ -460,6 +462,43 @@ test("close job", { timeout: 240000 }, async (t) => {
           })),
           { open: true, save: "Close job", cancel: false, focus: "close-job-reason" },
         );
+        assert.equal(await boardText(origin), before);
+        await activate("#close-job-cancel");
+        await page.waitForSelector("#close-job-dlg:not([open])", wait);
+      });
+
+      await t.test(`a second press after a landed save says it saved ${width}`, async () => {
+        await reseed();
+        await openDialog("042-sample-export");
+        await page.type("#close-job-reason", REASON);
+        await page.evaluate(() => {
+          const real = window.fetch;
+          window.fetch = async (url, init) => {
+            if (!String(url).endsWith("api/board") || init?.method !== "PATCH")
+              return real(url, init);
+            window.fetch = real;
+            await real(url, init);
+            return new Response("Storage is busy.", { status: 503 });
+          };
+        });
+        const first = await failedSave();
+        assert.match(first, /^Not confirmed: /);
+        await seedBoard(
+          origin,
+          JOBS.map((j) => (j.id === "042-sample-export" ? { ...j, stage: "closed" } : j)),
+        );
+        const before = await boardText(origin);
+        await activate("#close-job-save");
+        await page.waitForFunction(
+          (text) => document.getElementById("close-job-err").textContent !== text,
+          { ...wait, timeout: 5000 },
+          first,
+        );
+        if (width === 390)
+          await (
+            await page.$("#close-job-dlg")
+          ).screenshot({ path: `${SHOTS}second-press-close-390.png` });
+        assert.equal(await errText(page), "This job can no longer be closed." + FIRST_PRESS);
         assert.equal(await boardText(origin), before);
         await activate("#close-job-cancel");
         await page.waitForSelector("#close-job-dlg:not([open])", wait);
