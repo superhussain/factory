@@ -29,7 +29,7 @@ This page walks through every dashboard view with a made-up job, `051-sample-ret
 ![The New idea dialog](screenshots/idea-entry.png)
 
 - The first line becomes the title. An idea holds 4000 characters at most.
-- Cmd+Enter adds the idea.
+- On a Mac, Cmd+Enter adds the idea. Other systems use the Add button.
 - Attach up to 4 images by paste or Add files. Images can be PNG, JPEG or WebP, 5 MiB each.
 - Attach up to 4 files: PDF up to 10 MiB, CSV or text up to 1 MiB, MP4 or WebM up to 25 MiB.
 
