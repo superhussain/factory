@@ -59,6 +59,19 @@ const HELP =
   "064-sample-human is waiting on you. Pickup starts /factory rework with your note, and the builder runs a new round on it.";
 const UNCERTAIN =
   "Not confirmed: saving the board failed: 503 Storage is busy. The rework may have saved. Press Start rework again to check. It will not queue a second rework.";
+const FIRST_PRESS =
+  " Your first press most likely saved, and the job has moved on since. Check its note on the board.";
+// The next board PATCH lands, then the page sees a 503 as if the answer was lost.
+const landThen503 = (page) =>
+  page.evaluate(() => {
+    const real = window.fetch;
+    window.fetch = async (url, init) => {
+      if (!String(url).endsWith("api/board") || init?.method !== "PATCH") return real(url, init);
+      window.fetch = real;
+      await real(url, init);
+      return new Response("Storage is busy.", { status: 503 });
+    };
+  });
 const SHOTS = new URL("../../.context/shots/", import.meta.url).pathname;
 
 const freezeClock = (page) =>
@@ -372,6 +385,64 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
         assert.equal(await boardText(origin), before);
         await page.keyboard.press("Escape");
         await page.waitForSelector("#rework-dlg:not([open])", wait);
+      });
+
+      const landedRework = async () => {
+        await reseed();
+        await openDrawer(page, "064-sample-human");
+        await activate("#d-rework-bar");
+        await page.waitForSelector("#rework-dlg[open]", wait);
+        await page.type("#rework-note", NOTE);
+        await landThen503(page);
+        await activate("#rework-save");
+        await page.waitForFunction(
+          (text) => document.getElementById("rework-err").textContent === text,
+          wait,
+          UNCERTAIN,
+        );
+      };
+      const secondPress = async () => {
+        await activate("#rework-save");
+        await page.waitForFunction(
+          (text) =>
+            !document.getElementById("rework-dlg").open ||
+            document.getElementById("rework-err").textContent !== text,
+          { ...wait, timeout: 5000 },
+          UNCERTAIN,
+        );
+      };
+
+      await t.test(`a second press after a landed save says it saved ${width}`, async () => {
+        await landedRework();
+        await seedBoard(
+          origin,
+          JOBS.map((j) =>
+            j.id === "064-sample-human" ? { ...j, stage: "build", note: "building" } : j,
+          ),
+        );
+        const before = await boardText(origin);
+        await secondPress();
+        if (width === 390) {
+          await mkdir(SHOTS, { recursive: true });
+          await (
+            await page.$("#rework-dlg")
+          ).screenshot({ path: `${SHOTS}second-press-rework-390.png` });
+        }
+        assert.equal(
+          await page.$eval("#rework-err", (el) => el.textContent),
+          "This job can no longer be reworked or approved here." + FIRST_PRESS,
+        );
+        assert.equal(await boardText(origin), before);
+        await page.keyboard.press("Escape");
+        await page.waitForSelector("#rework-dlg:not([open])", wait);
+      });
+
+      await t.test(`a second press on a held request saves quietly ${width}`, async () => {
+        await landedRework();
+        const before = await boardText(origin);
+        await secondPress();
+        assert.equal(await page.$eval("#rework-dlg", (el) => el.open), false);
+        assert.equal(await boardText(origin), before);
       });
       await context.close();
     }

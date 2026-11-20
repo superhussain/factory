@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -21,9 +22,14 @@ UNSIGNED_NEEDS = ("Tracer approved scope for factory-1 without a signed receipt:
                   "001-sample or press Approve spec to build")
 
 
-def RECEIPT(feature="factory-1", ticket="FACTORY-1"):
+RECEIPT_REFUSAL = ('a board write from a device cannot set the note "spec approved in Tracer" on "001-sample" '
+                   "without a Tracer-signed scope receipt for FACTORY-1. Nothing was written.")
+
+
+def RECEIPT(feature="factory-1", ticket="FACTORY-1", job="001-sample"):
     """Tracer's scope_receipt for an approval at APPROVED_AT, with a fake signature only the Worker would refuse."""
-    return {"feature": feature, "ticket": ticket, "approved_at": APPROVED_AT, "signature": "A" * 86 + "=="}
+    return {"job": job, "feature": feature, "ticket": ticket, "approved_at": APPROVED_AT,
+            "signature": "A" * 86 + "=="}
 
 SPEC = """# Spec: Sample feature
 
@@ -433,6 +439,7 @@ class GatherTest(TracerCase):
             self.gather(fake)
             posted = next(r[3] for r in fake.requests if r[0] == "POST" and r[1] == "/api/features")
             self.assertIs(posted["start_gather"], True)
+            self.assertEqual(posted["job"], "001-sample")
             self.assertEqual(posted["ticket"], "FACTORY-1")
             self.assertEqual(posted["title"], "Export samples as CSV")
             self.assertEqual(posted["ticket_text"], "Export samples as CSV\nWith a header row.")
@@ -510,6 +517,18 @@ class GatherTest(TracerCase):
                              ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS))
             self.assertNotIn("receipt", job["tracer"])
 
+    def test_receipt_for_another_job_is_dropped(self):
+        with FakeTracer() as fake:
+            self.gather(fake)
+            self.hold_at_gate()
+            fake.features["factory-1"].update(scope_approved_at=APPROVED_AT,
+                                              scope_receipt=RECEIPT(job="007-sample-other"))
+            factory.tracer_follow_pass(self.home)
+            job = self.board["jobs"][0]
+            self.assertEqual((job["stage"], job["note"], job["needs"]),
+                             ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS))
+            self.assertNotIn("receipt", job["tracer"])
+
     def test_scope_approval_before_gate_keeps_stage(self):
         with FakeTracer() as fake:
             self.gather(fake)
@@ -559,14 +578,19 @@ class GatherTest(TracerCase):
             self.assertEqual((job["stage"], job["note"], job["needs"]),
                              ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS))
 
-    def refuse_tracer_note(self):
+    def block_tracer_note(self, refuse):
+        """Make refuse() answer every board PUT that sets the Tracer note."""
         def api(home, method, path, body=None, ok=(200,), headers=None, raw=False):
             if method == "PUT" and any(j.get("note") == "spec approved in Tracer" for j in json.loads(body)["jobs"]):
-                factory.fail("PUT /api/board returned 400: a board write from a device cannot set the note "
-                             '"spec approved in Tracer" on "001-sample" without a Tracer-signed scope receipt '
-                             "for FACTORY-1. Nothing was written.", 5)
+                refuse()
             return self.api(home, method, path, body, ok, headers, raw)
         patch.object(factory, "api", side_effect=api).start()
+
+    def refuse_tracer_note(self, status=400, detail=RECEIPT_REFUSAL):
+        def refuse():
+            print(f"factory.py: PUT {API_URL}/api/board returned {status}: {detail[:200]}", file=sys.stderr)
+            raise factory.ApiStatusExit(status, detail)
+        self.block_tracer_note(refuse)
 
     def test_refused_receipt_holds_for_a_person(self):
         with FakeTracer() as fake:
@@ -594,6 +618,28 @@ class GatherTest(TracerCase):
             self.assertEqual((job["stage"], job["note"], job["needs"]),
                              ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS))
             self.assertNotIn("receipt", job["tracer"])
+
+    def test_transient_failure_keeps_the_receipt_write(self):
+        refusals = {
+            "503": lambda: self.refuse_tracer_note(503, "Storage is busy."),
+            "network": lambda: self.block_tracer_note(
+                lambda: factory.fail(f"can't reach {API_URL}/api/board: connection refused", 5)),
+        }
+        for name, block in refusals.items():
+            with self.subTest(name), FakeTracer() as fake:
+                self.board["jobs"][0] = dict(self.job)
+                self.gather(fake)
+                fake.features["factory-1"].update(scope_approved_at=APPROVED_AT, scope_receipt=RECEIPT())
+                factory.tracer_follow_pass(self.home)
+                self.board["jobs"][0]["stage"] = "spec"
+                block()
+                code, _, err = self.board_patch(
+                    {"stage": "needs-human", "note": "gate: tracer-scope", "needs": "approve"})
+                patch.stopall()
+                patch.object(factory, "api", side_effect=self.api).start()
+                self.assertEqual(code, 5, err)
+                self.assertNotIn("the Worker refused Tracer's receipt", err)
+                self.assertEqual(self.board["jobs"][0]["stage"], "spec")
 
     def test_gate_patch_without_approval_holds(self):
         for scope, feature in (("gathering", {}), ("declined", {"closed": True})):

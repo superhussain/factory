@@ -60,6 +60,20 @@ const VIEWPORTS = [
 const CONFIRM = "Approve the spec of 042-sample-export? Pickup starts the build on its next run.";
 const APPROVE_HINT =
   "The approval may have saved. Press Approve spec again to check. It will not start a second build.";
+const UNCERTAIN = "Not confirmed: saving the board failed: 503 Storage is busy. " + APPROVE_HINT;
+const FIRST_PRESS =
+  " Your first press most likely saved, and the job has moved on since. Check its note on the board.";
+// The next board PATCH lands, then the page sees a 503 as if the answer was lost.
+const landThen503 = (page) =>
+  page.evaluate(() => {
+    const real = window.fetch;
+    window.fetch = async (url, init) => {
+      if (!String(url).endsWith("api/board") || init?.method !== "PATCH") return real(url, init);
+      window.fetch = real;
+      await real(url, init);
+      return new Response("Storage is busy.", { status: 503 });
+    };
+  });
 const SHOTS = new URL("../../.context/shots/", import.meta.url).pathname;
 
 const freezeClock = (page) =>
@@ -317,6 +331,72 @@ test("approve spec", { timeout: 240000 }, async (t) => {
           await page.$eval("#d-approve-spec-err", (el) => el.textContent),
           "Not confirmed: saving the board failed: 503 Storage is busy. " + APPROVE_HINT,
         );
+        assert.equal(await (await fetch(origin + "/api/board")).text(), before);
+      });
+
+      const landedApproval = async () => {
+        await seedBoard(origin, JOBS);
+        await page.evaluate(() => window.fixtureBoardPoll());
+        await openDrawer(page, "042-sample-export");
+        await page.waitForFunction(
+          () => !document.getElementById("d-approve-spec-bar").hidden,
+          wait,
+        );
+        // A native confirm hands focus back, and the focus read would show the landed save
+        // before the second press, as no lost answer does on a slow network.
+        await page.evaluate(() => {
+          window.fixtureConfirm = window.confirm;
+          window.confirm = () => true;
+        });
+        await landThen503(page);
+        await activate("#d-approve-spec-bar");
+        await page.waitForFunction(
+          (text) => document.getElementById("d-approve-spec-err").textContent === text,
+          wait,
+          UNCERTAIN,
+        );
+      };
+      const secondPress = async () => {
+        await activate("#d-approve-spec-bar");
+        await page.waitForFunction(
+          (text) =>
+            document.getElementById("d-approve-spec-bar").hidden ||
+            (!document.getElementById("d-approve-spec-err").hidden &&
+              document.getElementById("d-approve-spec-err").textContent !== text),
+          { ...wait, timeout: 5000 },
+          UNCERTAIN,
+        );
+        await page.evaluate(() => (window.confirm = window.fixtureConfirm));
+      };
+
+      await t.test(`a second press after a landed save says it saved ${width}`, async () => {
+        await landedApproval();
+        await seedBoard(
+          origin,
+          JOBS.map((j) =>
+            j.id === "042-sample-export" ? { ...j, stage: "build", note: "building" } : j,
+          ),
+        );
+        const before = await (await fetch(origin + "/api/board")).text();
+        await secondPress();
+        if (width === 1280) {
+          await mkdir(SHOTS, { recursive: true });
+          await (
+            await page.$("#detail")
+          ).screenshot({ path: `${SHOTS}second-press-approve-spec-1280.png` });
+        }
+        assert.equal(
+          await page.$eval("#d-approve-spec-err", (el) => el.textContent),
+          "This spec can no longer be approved." + FIRST_PRESS,
+        );
+        assert.equal(await (await fetch(origin + "/api/board")).text(), before);
+      });
+
+      await t.test(`a second press on a held request saves quietly ${width}`, async () => {
+        await landedApproval();
+        const before = await (await fetch(origin + "/api/board")).text();
+        await secondPress();
+        assert.equal(await page.$eval("#d-approve-spec-err", (el) => el.hidden), true);
         assert.equal(await (await fetch(origin + "/api/board")).text(), before);
       });
 

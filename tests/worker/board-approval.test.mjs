@@ -1,6 +1,6 @@
 // Only a signed-in person sets the spec-approval note "spec approved on the dashboard", and
 // no write sets "spec approved in Tracer" unless the row's tracer.scope is approved. A device
-// also needs a Tracer-signed scope receipt for the row's ticket. Rows are
+// also needs a Tracer-signed scope receipt for the row's job id and ticket. Rows are
 // the made-up running example: 042-sample-export waits at needs-human on the spec-approval gate.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -15,11 +15,18 @@ const publicKey = Buffer.from(await crypto.subtle.exportKey("raw", keys.publicKe
   "base64",
 );
 
-// A receipt as Tracer signs it, for factory-42 approved at 09:30 unless fields say otherwise.
-async function signed(fields = {}) {
-  const r = { feature: "factory-42", ticket: "FACTORY-42", approved_at: "2026-11-20T09:30:00Z" };
+// A receipt as Tracer signs it, for 042-sample-export's factory-42 approved at 09:30 unless
+// fields say otherwise.
+async function signed(fields = {}, prefix = "tracer-scope-approval/v2") {
+  const r = {
+    job: "042-sample-export",
+    feature: "factory-42",
+    ticket: "FACTORY-42",
+    approved_at: "2026-11-20T09:30:00Z",
+  };
   Object.assign(r, fields);
-  const message = ["tracer-scope-approval/v1", r.feature, r.ticket, r.approved_at].join("\n");
+  const head = prefix.endsWith("/v1") ? [prefix] : [prefix, r.job];
+  const message = [...head, r.feature, r.ticket, r.approved_at].join("\n");
   const signature = await crypto.subtle.sign(
     { name: "Ed25519" },
     keys.privateKey,
@@ -141,6 +148,29 @@ test("a device PUT sets the Tracer note with a signed receipt", async () => {
 test("a device PUT cannot reuse another job's receipt", async () => {
   const s = setup();
   const receipt = await signed({ feature: "factory-7", ticket: "FACTORY-7" });
+  await refused(s, () => s.put(withReceipt(receipt)), receiptRefusal);
+});
+
+test("refuses a receipt replayed from another job", async () => {
+  const row = { ...ROW, jira: "PLAN-7" };
+  const s = setup(row);
+  const receipt = await signed({ job: "007-sample-other", feature: "plan-7", ticket: "PLAN-7" });
+  await refused(
+    s,
+    () => s.put({ ...withReceipt(receipt), jira: "PLAN-7" }),
+    receiptRefusal.replace("FACTORY-42", "PLAN-7"),
+  );
+});
+
+test("refuses a v1 receipt", async () => {
+  const s = setup();
+  const receipt = await signed({}, "tracer-scope-approval/v1");
+  await refused(s, () => s.put(withReceipt(receipt)), receiptRefusal);
+});
+
+test("refuses a receipt without a job", async () => {
+  const s = setup();
+  const { job: _job, ...receipt } = await signed();
   await refused(s, () => s.put(withReceipt(receipt)), receiptRefusal);
 });
 

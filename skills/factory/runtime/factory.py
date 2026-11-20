@@ -341,6 +341,15 @@ def fail(msg, code=1):
     sys.exit(code)
 
 
+class ApiStatusExit(SystemExit):
+    """Exit 5 for a Worker status outside ok, keeping the status and the response text."""
+
+    def __init__(self, status, detail):
+        super().__init__(5)
+        self.status = status
+        self.detail = detail
+
+
 def printable_line(text, limit):
     """text on one line: non-printable characters become spaces, whitespace collapses, cut to limit."""
     return " ".join("".join(c if c.isprintable() else " " for c in text).split())[:limit]
@@ -523,8 +532,9 @@ def api(factory, method, path, body=None, ok=(200,), headers=None, raw=False):
     if status not in ok and status in (301, 302, 303, 307, 308, 401, 403):
         fail(access_message(env_file), 5)
     if status not in ok:
-        detail = text if isinstance(text, str) else text.decode("utf-8", "replace")
-        fail(f"{method} {url} returned {status}: {printable_line(detail, 200)}", 5)
+        detail = printable_line(text if isinstance(text, str) else text.decode("utf-8", "replace"), 2000)
+        print(f"factory.py: {method} {url} returned {status}: {detail[:200]}", file=sys.stderr)
+        raise ApiStatusExit(status, detail)
     if cached and status == 200:
         _READS[key] = (time.monotonic(), status, got, text)
     return status, got, text
@@ -9546,14 +9556,14 @@ def tracer_scope(feature):
     return "approved" if feature.get("scope_approved_at") else "gathering"
 
 
-def tracer_receipt(feature, feature_id, ticket):
-    """Tracer's signed scope receipt for this feature and ticket, or None. The Worker checks
+def tracer_receipt(feature, feature_id, ticket, job_id):
+    """Tracer's signed scope receipt for this job, feature and ticket, or None. The Worker checks
     the signature; this keeps only a well-formed receipt bound to the job's own ids."""
     receipt = feature.get("scope_receipt")
     if not isinstance(receipt, dict):
         return None
-    kept = {k: receipt.get(k) for k in ("feature", "ticket", "approved_at", "signature")}
-    if kept["feature"] != feature_id or kept["ticket"] != ticket \
+    kept = {k: receipt.get(k) for k in ("job", "feature", "ticket", "approved_at", "signature")}
+    if kept["job"] != job_id or kept["feature"] != feature_id or kept["ticket"] != ticket \
             or kept["approved_at"] != feature.get("scope_approved_at") \
             or not isinstance(kept["signature"], str) or not TRACER_SIGNATURE.fullmatch(kept["signature"]):
         return None
@@ -9568,14 +9578,14 @@ def tracer_gather(home, slug, job, cfg):
     link = api_url(home) + "/#" + job_id
     idea = str(job.get("idea") or "").strip()
     title = (str(job.get("title") or "").strip() or idea.split("\n")[0].strip() or job_id)[:200]
-    body = {"id": feature_id, "ticket": ticket, "title": title, "ticket_text": (idea or title)[:20000],
+    body = {"id": feature_id, "job": job_id, "ticket": ticket, "title": title, "ticket_text": (idea or title)[:20000],
             "services": [{"name": cfg["service"], "language": cfg["language"]}], "start_gather": True,
             "reading": f"Gathered for factory job {job_id}: {link}. Approve or decline scope here. "
                        "The factory builds this feature from its own spec and stops any Tracer build "
                        "that approval starts."}
     feature = tracer_create(base, token, body, ticket)
     tracer_record(home, job, base, feature["id"], scope=tracer_scope(feature),
-                  receipt=tracer_receipt(feature, feature_id, ticket))
+                  receipt=tracer_receipt(feature, feature_id, ticket, job_id))
 
 
 def tracer_poll_scope(home, slug, job, cfg):
@@ -9594,7 +9604,7 @@ def tracer_poll_scope(home, slug, job, cfg):
     scope = tracer_scope(feature)
     if scope != "gathering":
         tracer_record(home, job, base, feature_id, scope=scope,
-                      receipt=tracer_receipt(feature, feature_id, ticket))
+                      receipt=tracer_receipt(feature, feature_id, ticket, job["id"]))
     return scope
 
 
@@ -9748,15 +9758,19 @@ def tracer_record(home, job, base, feature_id, scope=None, receipt=None):
     receipt_cas(home, change)
 
 
+RECEIPT_REFUSAL = "without a Tracer-signed scope receipt"
+
+
 def receipt_cas(factory, change):
     """cas on the board with change(text, signed, sent), where change appends the job id to sent
-    when it moves a job to build on Tracer's receipt. When the Worker refuses that write, because
-    it has no receipt key or another one, retry once unsigned so the job waits for a person."""
+    when it moves a job to build on Tracer's receipt. When the Worker refuses that write for its
+    receipt, because it has no receipt key or another one, retry once unsigned so the job waits
+    for a person. Any other failure exits 5 with nothing written."""
     sent = []
     try:
         return cas(factory, "/api/board", lambda text: change(text, True, sent))
     except SystemExit as e:
-        if e.code != 5 or not sent:
+        if not (sent and isinstance(e, ApiStatusExit) and e.status == 400 and RECEIPT_REFUSAL in e.detail):
             raise
     result = cas(factory, "/api/board", lambda text: change(text, False, []))
     print(f"factory.py: the Worker refused Tracer's receipt (check tracer_receipt_key); "
