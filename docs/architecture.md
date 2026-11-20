@@ -87,8 +87,8 @@ It also cannot add `move`, `priority`, `paused` or `close` to a row with a
 It cannot add a new `idea` row with `priority.batch: true` (`checkNewStarters`): Run batch
 now marks only a held idea already on the board, so a read can cover every starter.
 A device token cannot set a row's note to `spec approved on the dashboard`, and no write
-sets `spec approved in Tracer` unless the row's `tracer.scope` is `approved`
-(`checkApprovalNotes`).
+sets `spec approved in Tracer` unless the row's `tracer.scope` is `approved`, and a device
+needs a valid Ed25519 `tracer.receipt` for the job's ticket (`checkApprovalNotes`).
 Remove from batch may drop the ref from a rider that is not stacked, from
 `spec` to `idea`, while its lead is at `spec`.
 New device clients always send conditions; the blind

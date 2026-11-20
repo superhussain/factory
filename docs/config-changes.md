@@ -15,6 +15,7 @@ Access. The apply step hands off to the operator gates in
 | `agent_links` (agent app and web links) | `deploy/profile.json` | Server operator |
 | `jira_origin` (Jira key links) | `deploy/profile.json` | Server operator |
 | `embed_origins` (sites that may frame the dashboard) | `deploy/profile.json` | Server operator |
+| `tracer_receipt_key` (Tracer scope receipts) | `deploy/profile.json` | Server operator |
 | `title` | `deploy/profile.json` | Server operator |
 | `origin` (instance URL) | `deploy/profile.json`, then each device's `config.md` `api_url` | Server operator, then each device host |
 
