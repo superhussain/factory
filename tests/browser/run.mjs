@@ -673,6 +673,18 @@ async function capture(outdir, referencePath) {
                     headers: { ETag: board.headers.get("ETag") ?? "" },
                     body: JSON.stringify({
                       ...body,
+                      ...(body.slim && {
+                        slim: {
+                          ...body.slim,
+                          counts: {
+                            ...body.slim.counts,
+                            sample: {
+                              ...body.slim.counts.sample,
+                              merged: (body.slim.counts.sample?.merged ?? 0) + 1,
+                            },
+                          },
+                        },
+                      }),
                       jobs: [
                         ...body.jobs,
                         {
