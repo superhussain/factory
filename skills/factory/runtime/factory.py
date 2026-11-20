@@ -867,13 +867,13 @@ def check_build(build):
 
 def check_tracer(value):
     """tracer is null or {"follow", "gather"}, each true or null. factory.py alone records
-    feature, url, scope, building, stopped and tasks."""
+    feature, url, scope, receipt, building, stopped and tasks."""
     if value is None:
         return
     if not (isinstance(value, dict) and set(value) <= {"follow", "gather"}
             and all(v in (True, None) for v in value.values())):
         fail('tracer must be {"follow": true} or null, optionally with "gather": true; '
-             'only factory.py sets tracer.feature, tracer.url, tracer.scope, tracer.building, tracer.stopped '
+             'only factory.py sets tracer.feature, tracer.url, tracer.scope, tracer.receipt, tracer.building, tracer.stopped '
              'and tracer.tasks', 2)
 
 
@@ -1051,8 +1051,13 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
         if paseo and not isinstance(job.get("paseo"), dict) and job.get("paseo_writer") != paseo:
             job["paseo_writer"] = paseo
         if tracer_gate_passed(job, patch):
-            job.update(stage="build", note=TRACER_APPROVED_NOTE)
-            job.pop("needs", None)
+            if job["tracer"].get("receipt"):
+                job.update(stage="build", note=TRACER_APPROVED_NOTE)
+                job.pop("needs", None)
+            else:
+                feature = job["tracer"].get("feature") or tracer_ids(job)[1]
+                job.update(note="gate: spec-approval",
+                           needs=TRACER_UNSIGNED_NEEDS.format(feature=feature, id=job_id))
         if same_board(before, data, device, session):
             return None, (next(j for j in before["jobs"] if j.get("id") == job_id), None, [])
         return dump_board(data), (job, None, stacked)
@@ -9001,6 +9006,9 @@ SPEC_APPROVED_NOTES = (TRACER_APPROVED_NOTE, DASHBOARD_APPROVED_NOTE)
 TRACER_STARTING = "The companion is starting this build"
 TRACER_DECLINED_NEEDS = ("Tracer scope for {feature} was declined: run /factory approve-spec {id} to build anyway, "
                          "or close the job")
+TRACER_UNSIGNED_NEEDS = ("Tracer approved scope for {feature} without a signed receipt: run /factory approve-spec {id} "
+                         "or press Approve spec to build")
+TRACER_SIGNATURE = re.compile(r"[A-Za-z0-9+/]{86}==")
 TRACER_BUILDER = "factory-builder"
 TRACER_REVIEWERS = ("security", "ux", "ui", "code")
 TRACER_SERVICE = re.compile(r"[a-z0-9][a-z0-9._-]{0,39}")
@@ -9230,6 +9238,20 @@ def tracer_scope(feature):
     return "approved" if feature.get("scope_approved_at") else "gathering"
 
 
+def tracer_receipt(feature, feature_id, ticket):
+    """Tracer's signed scope receipt for this feature and ticket, or None. The Worker checks
+    the signature; this keeps only a well-formed receipt bound to the job's own ids."""
+    receipt = feature.get("scope_receipt")
+    if not isinstance(receipt, dict):
+        return None
+    kept = {k: receipt.get(k) for k in ("feature", "ticket", "approved_at", "signature")}
+    if kept["feature"] != feature_id or kept["ticket"] != ticket \
+            or kept["approved_at"] != feature.get("scope_approved_at") \
+            or not isinstance(kept["signature"], str) or not TRACER_SIGNATURE.fullmatch(kept["signature"]):
+        return None
+    return kept
+
+
 def tracer_gather(home, slug, job, cfg):
     """Create the job's Tracer feature with a gather run and record its scope."""
     job_id = job["id"]
@@ -9244,7 +9266,8 @@ def tracer_gather(home, slug, job, cfg):
                        "The factory builds this feature from its own spec and stops any Tracer build "
                        "that approval starts."}
     feature = tracer_create(base, token, body, ticket)
-    tracer_record(home, job, base, feature["id"], scope=tracer_scope(feature))
+    tracer_record(home, job, base, feature["id"], scope=tracer_scope(feature),
+                  receipt=tracer_receipt(feature, feature_id, ticket))
 
 
 def tracer_poll_scope(home, slug, job, cfg):
@@ -9262,7 +9285,8 @@ def tracer_poll_scope(home, slug, job, cfg):
         fail(f"Tracer feature {feature_id} for job {job['id']} belongs to {tracer_ticket_label(feature.get('ticket'))}", 5)
     scope = tracer_scope(feature)
     if scope != "gathering":
-        tracer_record(home, job, base, feature_id, scope=scope)
+        tracer_record(home, job, base, feature_id, scope=scope,
+                      receipt=tracer_receipt(feature, feature_id, ticket))
     return scope
 
 
@@ -9374,11 +9398,12 @@ def tracer_mirror(home, slug, job, cfg):
                       else "; tasks unassigned until scope is approved in Tracer" if locked else "")
 
 
-def tracer_record(home, job, base, feature_id, scope=None):
-    """Save the Tracer feature, its page link and the scope when given on the job's board entry,
-    keeping follow. Only board.updated changes, so the job's own timers stay put, except when a
-    scope decision releases a job held at the tracer-scope gate: approval moves it to build for
-    pickup to start, and a decline moves it to the spec-approval gate."""
+def tracer_record(home, job, base, feature_id, scope=None, receipt=None):
+    """Save the Tracer feature, its page link, the scope and Tracer's signed receipt when given
+    on the job's board entry, keeping follow. Only board.updated changes, so the job's own timers
+    stay put, except when a scope decision releases a job held at the tracer-scope gate: a signed
+    approval moves it to build for pickup to start, and an unsigned one or a decline moves it to
+    the spec-approval gate."""
     url = f"{base}/#/f/{urllib.parse.quote(feature_id, safe='')}"
     held = job.get("tracer") if isinstance(job.get("tracer"), dict) else {}
     if held.get("feature") == feature_id and held.get("url") == url and (scope is None or held.get("scope") == scope):
@@ -9393,16 +9418,19 @@ def tracer_record(home, job, base, feature_id, scope=None):
         found["tracer"] = dict(tracer, feature=feature_id, url=url)
         if scope is not None:
             found["tracer"]["scope"] = scope
+        if scope == "approved" and receipt:
+            found["tracer"]["receipt"] = receipt
         stamp = now()
         if scope in ("approved", "declined") and found.get("stage") == "needs-human" \
                 and found.get("note") == TRACER_GATE_NOTE:
-            if scope == "approved":
+            if scope == "approved" and found["tracer"].get("receipt"):
                 found["stage"] = "build"
                 found["note"] = TRACER_APPROVED_NOTE
                 found.pop("needs", None)
             else:
                 found["note"] = "gate: spec-approval"
-                found["needs"] = TRACER_DECLINED_NEEDS.format(feature=feature_id, id=job["id"])
+                needs = TRACER_UNSIGNED_NEEDS if scope == "approved" else TRACER_DECLINED_NEEDS
+                found["needs"] = needs.format(feature=feature_id, id=job["id"])
             found["updated"] = stamp
         data["updated"] = stamp
         return dump_board(data), None

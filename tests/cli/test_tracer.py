@@ -16,6 +16,14 @@ factory = load_runtime()
 TOKEN = "synthetic-token-0123456789"
 API_URL = "https://factory.example.invalid"
 PICKUP_TAIL = "the next pickup retries (or run factory.py pickup)."
+APPROVED_AT = "2026-01-02T00:00:00Z"
+UNSIGNED_NEEDS = ("Tracer approved scope for factory-1 without a signed receipt: run /factory approve-spec "
+                  "001-sample or press Approve spec to build")
+
+
+def RECEIPT(feature="factory-1", ticket="FACTORY-1"):
+    """Tracer's scope_receipt for an approval at APPROVED_AT, with a fake signature only the Worker would refuse."""
+    return {"feature": feature, "ticket": ticket, "approved_at": APPROVED_AT, "signature": "A" * 86 + "=="}
 
 SPEC = """# Spec: Sample feature
 
@@ -416,7 +424,8 @@ class GatherTest(TracerCase):
             code, _, err = self.board_patch({"tracer": bad})
             self.assertEqual(code, 2, bad)
             self.assertIn('optionally with "gather": true; only factory.py sets tracer.feature, '
-                          'tracer.url, tracer.scope, tracer.building, tracer.stopped and tracer.tasks', err)
+                          'tracer.url, tracer.scope, tracer.receipt, tracer.building, tracer.stopped and '
+                          'tracer.tasks', err)
             self.assertEqual(self.board_writes, writes)
 
     def test_gather_patch_starts_gather(self):
@@ -466,17 +475,40 @@ class GatherTest(TracerCase):
             self.hold_at_gate()
             factory.tracer_follow_pass(self.home)
             self.assertEqual(self.board["jobs"][0]["note"], "gate: tracer-scope")
-            fake.features["factory-1"]["scope_approved_at"] = "2026-01-02T00:00:00Z"
+            fake.features["factory-1"].update(scope_approved_at=APPROVED_AT, scope_receipt=RECEIPT())
             with patch.object(factory, "now", return_value="2026-01-02T00:00:01Z"):
                 factory.tracer_follow_pass(self.home)
             job = self.board["jobs"][0]
-            self.assertEqual((job["stage"], job["note"], job["tracer"]["scope"]),
-                             ("build", "spec approved in Tracer", "approved"))
+            self.assertEqual((job["stage"], job["note"], job["tracer"]["scope"], job["tracer"]["receipt"]),
+                             ("build", "spec approved in Tracer", "approved", RECEIPT()))
             self.assertNotIn("needs", job)
             self.assertEqual((job["updated"], self.board["updated"]), ("2026-01-02T00:00:01Z",) * 2)
             calls = len(fake.requests)
             factory.tracer_follow_pass(self.home)
             self.assertEqual(len(fake.requests), calls)
+
+    def test_unsigned_scope_approval_holds_for_a_person(self):
+        with FakeTracer() as fake:
+            self.gather(fake)
+            self.hold_at_gate()
+            fake.features["factory-1"]["scope_approved_at"] = APPROVED_AT
+            factory.tracer_follow_pass(self.home)
+            job = self.board["jobs"][0]
+            self.assertEqual((job["stage"], job["note"], job["needs"], job["tracer"]["scope"]),
+                             ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS, "approved"))
+            self.assertNotIn("receipt", job["tracer"])
+
+    def test_receipt_for_another_feature_is_dropped(self):
+        with FakeTracer() as fake:
+            self.gather(fake)
+            self.hold_at_gate()
+            fake.features["factory-1"].update(scope_approved_at=APPROVED_AT,
+                                              scope_receipt=RECEIPT("factory-7", "FACTORY-7"))
+            factory.tracer_follow_pass(self.home)
+            job = self.board["jobs"][0]
+            self.assertEqual((job["stage"], job["note"], job["needs"]),
+                             ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS))
+            self.assertNotIn("receipt", job["tracer"])
 
     def test_scope_approval_before_gate_keeps_stage(self):
         with FakeTracer() as fake:
@@ -502,7 +534,7 @@ class GatherTest(TracerCase):
     def test_gate_patch_after_approval_starts_build(self):
         with FakeTracer() as fake:
             self.gather(fake)
-            fake.features["factory-1"]["scope_approved_at"] = "2026-01-02T00:00:00Z"
+            fake.features["factory-1"].update(scope_approved_at=APPROVED_AT, scope_receipt=RECEIPT())
             factory.tracer_follow_pass(self.home)
             for note in ("gate: spec-approval", "gate: tracer-scope"):
                 with self.subTest(note=note):
@@ -514,6 +546,18 @@ class GatherTest(TracerCase):
                     self.assertEqual((job["stage"], job["note"]), ("build", "spec approved in Tracer"))
                     self.assertNotIn("needs", job)
                     self.assertNotIn("claim", job)
+
+    def test_gate_patch_after_unsigned_approval_holds(self):
+        with FakeTracer() as fake:
+            self.gather(fake)
+            fake.features["factory-1"]["scope_approved_at"] = APPROVED_AT
+            factory.tracer_follow_pass(self.home)
+            self.board["jobs"][0]["stage"] = "spec"
+            code, _, err = self.board_patch({"stage": "needs-human", "note": "gate: tracer-scope", "needs": "approve"})
+            self.assertEqual((code, err), (0, ""), err)
+            job = self.board["jobs"][0]
+            self.assertEqual((job["stage"], job["note"], job["needs"]),
+                             ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS))
 
     def test_gate_patch_without_approval_holds(self):
         for scope, feature in (("gathering", {}), ("declined", {"closed": True})):
@@ -564,7 +608,7 @@ class GatherTest(TracerCase):
     def approve(self, fake):
         self.gather(fake)
         self.hold_at_gate()
-        fake.features["factory-1"]["scope_approved_at"] = "2026-01-02T00:00:00Z"
+        fake.features["factory-1"].update(scope_approved_at=APPROVED_AT, scope_receipt=RECEIPT())
 
     def test_scope_approval_stops_tracer_build(self):
         with FakeTracer() as fake:
