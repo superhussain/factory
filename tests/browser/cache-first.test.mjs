@@ -99,6 +99,20 @@ const countReads = (page) =>
     };
   });
 
+// The boot board read waits for the live socket's open, or for LIVE_OPEN_WAIT_MS (2 s) at
+// most. A loaded host can open the socket later than that, and then the timer and the open
+// both read. This stretches only that fallback timer, so the open always does the one read.
+const holdOpenFallback = (page) =>
+  page.evaluateOnNewDocument(() => {
+    const realTimeout = window.setTimeout;
+    window.heldOpenFallback = false;
+    window.setTimeout = (callback, ms, ...args) => {
+      if (callback?.name !== "flushLiveRead") return realTimeout(callback, ms, ...args);
+      window.heldOpenFallback = true;
+      return realTimeout(callback, 60000, ...args);
+    };
+  });
+
 // A live socket that stays connecting until the test closes it.
 const stubConnectingSocket = (page) =>
   page.evaluateOnNewDocument(() => {
@@ -178,6 +192,7 @@ test("cache-first board boot", async (t) => {
       const errors = [];
       page.on("pageerror", (error) => errors.push(String(error)));
       await countReads(page);
+      await holdOpenFallback(page);
       try {
         await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
         await page.waitForFunction(() => liveOpen && loaded && backlogLoaded);
@@ -190,6 +205,7 @@ test("cache-first board boot", async (t) => {
           "/projects.json",
         ])
           assert.equal(reads[path], 1, `${path} read once, got ${JSON.stringify(reads)}`);
+        assert.equal(await page.evaluate(() => window.heldOpenFallback), true);
         assert.deepEqual(errors, []);
       } finally {
         await context.close();
