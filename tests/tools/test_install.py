@@ -97,7 +97,6 @@ class InstallTest(IsolatedTestCase):
             result, lines = self.install(replace=True)
         self.assertEqual(result, target)
         self.assertEqual(lines, [str(target)])
-        self.assertIn("could not remove", err.getvalue())
         backups = list(self.destination.glob("factory.backup-*"))
         self.assertEqual(len(backups), 1)
         self.assertIn("install.py: could not remove " + str(backups[0]) + "; remove it by hand", err.getvalue())

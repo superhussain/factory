@@ -74,11 +74,11 @@ Deployment is an operator-only gate: read the complete recipe — bucket creatio
 
 ![The board with synthetic jobs across several stages](docs/screenshots/board.png)
 
-![The New idea dialog over the board](docs/screenshots/idea-entry.png)
+![The Inbox ranking synthetic waiting items](docs/screenshots/inbox.png)
 
-![The Settings page Projects section](docs/screenshots/project-settings.png)
+![The Retros page with the Red flags card](docs/screenshots/retros-red-flags.png)
 
-Captured by `tools/capture-screenshots.mjs` with synthetic fixture data (frozen clock, placeholder URLs only).
+The full set, including Notifications, the Settings sections, a phone-width board and the New idea dialog, lives in [docs/screenshots](docs/screenshots). Captured by `tools/capture-screenshots.mjs` with synthetic fixture data (frozen clock, placeholder URLs only).
 
 ## More
 
