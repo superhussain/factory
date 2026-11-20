@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest import mock
 
 from support import IsolatedTestCase, invoke, load_runtime
 
@@ -18,7 +18,7 @@ class CleanTest(IsolatedTestCase):
         self.addCleanup(temp.cleanup)
         self.home = Path(temp.name).resolve()
         self.tmp = self.home / "tmp"
-        tempdir = patch.object(tempfile, "tempdir", str(self.tmp))
+        tempdir = mock.patch.object(tempfile, "tempdir", str(self.tmp))
         tempdir.start()
         self.addCleanup(tempdir.stop)
         self.wt = self.home / "worktrees" / "sample" / "001-test"
@@ -89,6 +89,21 @@ class CleanTest(IsolatedTestCase):
         self.assertEqual((code, out), (1, {"removed": [], "left": [
             f"{self.wt / '.context' / 'capture-1'}: a symlink or junction, left in place"]}))
         self.assertTrue((outside / "keep.txt").is_file())
+
+    def test_rmtree_refusal_names_the_error(self):
+        path = self.folder(".context/capture-1")
+        with mock.patch.object(factory.shutil, "rmtree",
+                               side_effect=OSError("Cannot call rmtree on a symbolic link")):
+            code, out, _ = self.clean("scratch", "capture-1")
+        self.assertEqual((code, out), (1, {"removed": [], "left": [
+            f"{path}: Cannot call rmtree on a symbolic link"]}))
+        job = self.tmp / "factory-001-test"
+        job.mkdir(parents=True)
+        with mock.patch.object(factory.shutil, "rmtree",
+                               side_effect=OSError("Cannot call rmtree on a symbolic link")):
+            code, out, _ = self.clean("temp")
+        self.assertEqual((code, out), (1, {"removed": [], "left": [
+            f"{job}: Cannot call rmtree on a symbolic link"]}))
 
     def test_worktree_link_and_missing(self):
         code, out, err = self.clean("node_modules", target="sample/002-absent")

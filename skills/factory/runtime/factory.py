@@ -9148,7 +9148,7 @@ def clean_cmd(target, what, *rest):
                 shutil.rmtree(path)
                 removed.append(str(path))
             except OSError as exc:
-                left.append(f"{path}: {exc.strerror}")
+                left.append(f"{path}: {exc.strerror or str(exc)}")
         print(json.dumps({"removed": removed, "left": left}, indent=2))
         sys.exit(1 if left else 0)
     wt = home / "worktrees" / slug / job_id
@@ -9194,7 +9194,7 @@ def clean_cmd(target, what, *rest):
                 shutil.rmtree(path)
                 removed.append(str(path))
             except OSError as exc:
-                left.append(f"{path}: {exc.strerror}")
+                left.append(f"{path}: {exc.strerror or str(exc)}")
     print(json.dumps({"removed": removed, "left": left}, indent=2))
     sys.exit(1 if left else 0)
 
