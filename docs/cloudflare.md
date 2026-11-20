@@ -165,6 +165,7 @@ key is required; set `image_origins` to `[]` and `agent_links` to `{}` to run
 with those integrations disabled.
 Optional `jira_origin`, such as `https://your-site.atlassian.net`, turns Jira keys in job files into links to `<jira_origin>/browse/<KEY>`; leave it out to keep keys as text.
 Optional `embed_origins`, a list of HTTPS origins, plus the Paseo desktop origin `paseo://app`, such as `["https://app.paseo.sh", "paseo://app"]`, lets those sites frame the dashboard for the Paseo plugin ([integrations.md](integrations.md#paseo-plugin)). It becomes the dashboard's `frame-ancestors`; without it only the dashboard itself may frame the board.
+Optional `tracer_receipt_key`, the base64 Ed25519 public key Tracer signs scope approvals with, lets a device move a Tracer-approved job to `build`; without it a person approves each spec.
 `python3 tools/deploy.py check --profile deploy/profile.json` validates the file
 without writes; `tests/fixtures/deployment-valid.json` shows the shape with
 synthetic values.
