@@ -42,7 +42,8 @@ rider, paused or closing. After a confirm it moves the job to `build`, sets the 
 `spec approved on the dashboard`, deletes `needs` and stamps `updated`, in one board
 write. A row that changed meanwhile is checked again and never forced. Pickup then
 launches `/factory recover <id>`, which starts the builder, as [pickup](pickup.md)
-describes. `factory.py board` refuses that note, so only the dashboard sets it.
+describes. The Worker refuses that note from a device token, and `factory.py board`
+refuses both approval notes, so only a signed-in person sets it.
 
 ## Stage-change deep links
 

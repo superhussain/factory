@@ -959,8 +959,9 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
         fail("only factory.py pickup sets github. Nothing was written.", 2)
     if "auto_babysit" in patch:
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
-    if patch.get("note") == DASHBOARD_APPROVED_NOTE:
-        fail("only the dashboard sets the note 'spec approved on the dashboard'. Nothing was written.", 2)
+    if patch.get("note") in SPEC_APPROVED_NOTES:
+        fail(f"only a person approves a spec, on the dashboard or in Tracer, so factory.py board cannot set the "
+             f"note '{patch['note']}'. Nothing was written.", 2)
     if "id" in patch:
         fail("the job id comes from the <job-id> argument, so the patch cannot set id. "
              "Nothing was written.", 2)
