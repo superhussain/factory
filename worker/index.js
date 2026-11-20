@@ -458,7 +458,7 @@ function condition(request) {
 
 // The first reason a board write of data over stored is refused, or null. The row checks
 // compare against the stored rows, so they run only when data was built on that version.
-async function boardRefusal(env, stored, data, sameBase) {
+async function boardRefusal(env, stored, data, sameBase, principal) {
   return (
     checkGoals(data.jobs) ??
     (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
@@ -469,7 +469,8 @@ async function boardRefusal(env, stored, data, sameBase) {
         checkNewIds(stored.jobs, data.jobs) ??
         checkRiderControls(stored.jobs, data.jobs) ??
         checkBatchRefs(stored.jobs, data.jobs) ??
-        checkNewStarters(stored.jobs, data.jobs))
+        checkNewStarters(stored.jobs, data.jobs) ??
+        checkApprovalNotes(stored.jobs, data.jobs, principal))
       : null)
   );
 }
@@ -538,7 +539,7 @@ const needsCondition = () => reply('PUT needs If-Match: "<etag>" or If-None-Matc
 
 // Board and backlog writes must name the exact version they replace, or create the
 // file only if it's absent, so no device clobbers another.
-async function casPut(request, env, key, type, ctx) {
+async function casPut(request, env, key, type, principal, ctx) {
   const cond = condition(request);
   if (!cond) return needsCondition();
   const body = await readBody(request, MAX_BOARD);
@@ -552,7 +553,13 @@ async function casPut(request, env, key, type, ctx) {
     }
     if (!Array.isArray(data?.jobs)) return reply("body needs a jobs array", 400);
     stored = await storedBoard(env);
-    const bad = await boardRefusal(env, stored, data, stored.etag === cond.get("If-Match"));
+    const bad = await boardRefusal(
+      env,
+      stored,
+      data,
+      stored.etag === cond.get("If-Match"),
+      principal,
+    );
     if (bad) return reply(bad, 400);
   }
   const obj = await env.BUCKET.put(key, body, {
@@ -598,7 +605,7 @@ const READS_SHAPE =
 // Applies the dashboard's changed rows, each with the row it expects to replace, to the
 // stored board. A row that changed since the client read it comes back as a 409 conflict;
 // an R2 race with another writer is retried here.
-async function boardPatch(request, env, ctx) {
+async function boardPatch(request, env, principal, ctx) {
   const body = await readBody(request);
   if (body === null) return reply("body over 1 MiB", 413);
   let patch;
@@ -688,7 +695,7 @@ async function boardPatch(request, env, ctx) {
         ? patch.updated
         : doc.updated;
     const data = { ...doc, jobs, updated };
-    const bad = await boardRefusal(env, stored, data, true);
+    const bad = await boardRefusal(env, stored, data, true, principal);
     if (bad) return reply(bad, 400);
     const text = JSON.stringify(data);
     if (new TextEncoder().encode(text).length > MAX_BOARD)
@@ -2588,6 +2595,8 @@ function checkArchived(stored, data) {
 }
 
 const RIDER_CONTROLS = ["move", "priority", "paused", "close", "babysit"];
+const DASHBOARD_APPROVED_NOTE = "spec approved on the dashboard";
+const TRACER_APPROVED_NOTE = "spec approved in Tracer";
 const leadOfRow = (j) =>
   Array.isArray(j?.refs)
     ? (j.refs.find((r) => r?.kind === "batched-into" && typeof r.id === "string")?.id ?? null)
@@ -2611,6 +2620,24 @@ function checkRiderControls(storedJobs, jobs) {
     const added = RIDER_CONTROLS.find((f) => f in row && !(storedRow && f in storedRow));
     if (added)
       return `a board write cannot add ${added} to ${quoteIdCut(row.id, QUOTED_ID_MAX)}: it is batched into ${quoteIdCut(lead, QUOTED_ID_MAX)} and follows its lead. Act on the lead instead. Nothing was written.`;
+  }
+  return null;
+}
+
+// Only a signed-in person passes the spec-approval gate on the dashboard, and the Tracer
+// note needs the row's Tracer scope approved. A row whose note is unchanged passes.
+// An error message, or null.
+function checkApprovalNotes(storedJobs, jobs, principal) {
+  const stored = new Map();
+  for (const j of storedJobs)
+    if (typeof j?.id === "string" && !stored.has(j.id)) stored.set(j.id, j);
+  for (const row of jobs) {
+    if (typeof row !== "object" || row === null || typeof row.id !== "string") continue;
+    if (row.note === stored.get(row.id)?.note) continue;
+    if (row.note === DASHBOARD_APPROVED_NOTE && principal?.kind !== "user")
+      return `a board write from a device cannot set the note "${DASHBOARD_APPROVED_NOTE}" on ${quoteIdCut(row.id, QUOTED_ID_MAX)}: only a signed-in person approves a spec on the dashboard. Nothing was written.`;
+    if (row.note === TRACER_APPROVED_NOTE && row.tracer?.scope !== "approved")
+      return `a board write cannot set the note "${TRACER_APPROVED_NOTE}" on ${quoteIdCut(row.id, QUOTED_ID_MAX)} unless its tracer.scope is "approved". Nothing was written.`;
   }
   return null;
 }
@@ -2983,8 +3010,8 @@ async function api(request, env, path, principal, ctx) {
     const [key, type] =
       path === "/api/board" ? ["board.json", "application/json"] : ["backlog.md", "text/markdown"];
     if (method === "GET") return getFile(env, key, type);
-    if (method === "PUT") return casPut(request, env, key, type, ctx);
-    if (method === "PATCH" && key === "board.json") return boardPatch(request, env, ctx);
+    if (method === "PUT") return casPut(request, env, key, type, principal, ctx);
+    if (method === "PATCH" && key === "board.json") return boardPatch(request, env, principal, ctx);
     return notFound();
   }
   m = path.match(PROJECT_RETRO);

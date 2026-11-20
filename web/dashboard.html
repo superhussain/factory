@@ -747,15 +747,17 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head > #d-agents { order: 4; }
     .detail-head > #d-agents .table-wrap { max-height: none; }
     .detail-head .pr-link { margin-top: 8px; }
+    /* The bar buttons get their own row under the links, so the title keeps the width beside the icons. */
+    .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar { order: 3; margin-top: 8px; }
     .detail-head .job-actions { position: static; }
     .detail-head .job-actions-menu { top: calc(100% + 4px); right: 16px; }
     .doc { padding: 16px 16px 40px; }
     /* On a phone the details under the title slide up with the page; syncHeadShift sets the shift. */
     .detail-head { border-bottom: 0; }
     .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
-    #d-title, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, #d-star, #d-actions, .detail-head .close { position: relative; z-index: 3; }
+    #d-title, #d-star, #d-actions, .detail-head .close { position: relative; z-index: 3; }
     .detail-head .close { background: var(--panel); }
-    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
+    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
@@ -6286,7 +6288,7 @@ let swipeSettling = false;
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
 // so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
 // On an idea tab the gallery and file list move into the top of the page, so they scroll with it.
-const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
+const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
 let headCollapse = 0;
 let headShift = 0;
 let headStop = null;

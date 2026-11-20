@@ -1,4 +1,4 @@
-// Mobile drawer header: all eight fixture variants, long title/metadata/ref wrapping,
+// Mobile drawer header: all nine fixture variants, long title/metadata/ref wrapping,
 // visible actions toggle/links/close hit area, menu items, Tab/menu keys/Escape/discard
 // cancel, across light/dark and 320/360/390/430/1280 widths.
 // Requires --browser <owned-loopback-origin>.
@@ -29,6 +29,13 @@ const fixtures = [
     pr: "https://github.com/example/layout/pull/42",
     paseo: { server: "synthetic-server", agent: "synthetic-agent" },
     tracer: { follow: true },
+  },
+  {
+    name: "spec-gate",
+    stage: "needs-human",
+    project: "layout",
+    idea: title,
+    note: "gate: spec-approval",
   },
   { name: "closed-job", stage: "closed", project: "layout", idea: title },
 ].map((j) => ({
@@ -78,6 +85,14 @@ const expectedItems = {
     "d-close-job",
   ],
   "linked-job": ["d-babysit", "d-pause", "d-copy-link", "d-follow-up", "d-close-job"],
+  "spec-gate": [
+    "d-approve-spec",
+    "d-follow-tracer",
+    "d-pause",
+    "d-copy-link",
+    "d-follow-up",
+    "d-close-job",
+  ],
   "closed-job": ["d-copy-link", "d-follow-up"],
 };
 const PROJECT_DOC = "---\nrepo: example/layout\nbase: main\ntitle: Synthetic layout project\n---\n";
@@ -95,6 +110,7 @@ const selectors = [
   "#d-pr",
   "#d-paseo",
   "#d-paseo-web",
+  "#d-approve-spec-bar",
   "#d-babysit-bar",
   "#d-star",
   "#d-actions",
@@ -151,6 +167,7 @@ async function geometry(page) {
     const rect = (el) => el.getBoundingClientRect().toJSON();
     const bounds = Object.fromEntries(selectors.map((s) => [s, rect(document.querySelector(s))]));
     const items = [
+      "d-approve-spec",
       "d-edit-idea",
       "d-discard",
       "d-follow-tracer",
@@ -184,6 +201,7 @@ async function geometry(page) {
       bounds,
       items,
       actions: document.getElementById("d-actions").getClientRects().length > 0,
+      approveSpec: !document.getElementById("d-approve-spec-bar").hidden,
       babysit: !document.getElementById("d-babysit-bar").hidden,
       text,
       closeHit: close === hit || close.contains(hit),
@@ -212,6 +230,7 @@ function checkGeometry(g, fixture, width, label) {
   assert.ok(g.headWidth <= g.headClientWidth, label + " header horizontal overflow");
   const boxes = [
     ".detail-head .titles",
+    ...(g.approveSpec ? ["#d-approve-spec-bar"] : []),
     ...(g.babysit ? ["#d-babysit-bar"] : []),
     "#d-star",
     ...(g.actions ? ["#d-actions"] : []),
@@ -252,12 +271,12 @@ function checkGeometry(g, fixture, width, label) {
     if (width < 760) assert.ok(t.lines.length > 1, label + " " + t.id + " long text wraps");
   }
   // The title takes the full remaining header width. On mobile the wrapped title row is
-  // titles, Babysit PR (when shown), the star, the actions toggle (when any item exists), then close, with 12px gaps.
+  // titles, the star, the actions toggle (when any item exists), then close, with 12px gaps.
   // On desktop the empty links box also occupies a gap slot, so assert the flex contract
   // instead of gap arithmetic: titles grows and can shrink for wrapping.
   const titles = g.bounds[".detail-head .titles"];
   if (width < 760) {
-    const neighbour = g.bounds[boxes[1]];
+    const neighbour = g.bounds["#d-star"];
     assert.ok(
       Math.abs(titles.right + 12 - neighbour.left) <= 1,
       label + " title takes the full remaining header width",
@@ -272,6 +291,22 @@ function checkGeometry(g, fixture, width, label) {
         Math.max(g.bounds[".detail-head .titles"].bottom, g.bounds["#d-close"].bottom),
       label + " links below title",
     );
+  if (width < 760)
+    for (const key of [
+      ...(g.approveSpec ? ["#d-approve-spec-bar"] : []),
+      ...(g.babysit ? ["#d-babysit-bar"] : []),
+    ]) {
+      const r = g.bounds[key];
+      const above = Math.max(
+        titles.bottom,
+        g.bounds["#d-close"].bottom,
+        ...(g.links.length ? [g.bounds[".detail-head .links"].bottom] : []),
+      );
+      assert.ok(
+        r.top >= above - 1 && Math.abs(r.left - titles.left) <= 1,
+        label + " " + key + " below title",
+      );
+    }
   assert.deepEqual(
     g.links,
     fixture.name === "linked-job"
@@ -294,6 +329,7 @@ async function keyboard(page, fixture, label, support) {
   await support.focusVisible(page, "#d-refs a");
   const sequence = [
     ...(fixture.name === "linked-job" ? ["d-pr", "d-paseo", "d-paseo-web", "d-babysit-bar"] : []),
+    ...(fixture.name === "spec-gate" ? ["d-approve-spec-bar"] : []),
     "d-star",
     ...(items.length ? ["d-actions"] : []),
     "d-close",

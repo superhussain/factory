@@ -2114,6 +2114,18 @@ async function capture(outdir, referencePath) {
       return clipOf(page, ".detail-head");
     });
     await view("approve-spec-drawer-390", 390, 844, "dark", openSpecGate);
+    await view("babysit-drawer-390", 390, 844, "dark", async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#112-held-pr";
+      });
+      await page.waitForFunction(
+        () =>
+          document.getElementById("d-meta").textContent.includes("112-held-pr") &&
+          document.getElementById("d-babysit-bar").checkVisibility(),
+        { timeout: 30000 },
+      );
+      return clipOf(page, ".detail-head");
+    });
     await view("approve-spec-failed-1280", 1280, 900, "light", async (page) => {
       await openSpecGate(page);
       page.once("dialog", (dialog) => dialog.accept());
