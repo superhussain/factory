@@ -12,10 +12,13 @@ import {
 
 const html = await readFile(new URL("../../web/dashboard.html", import.meta.url), "utf8");
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-const settings = script.slice(
-  script.indexOf("const projectDocuments = new Map();"),
-  script.indexOf("function renderBoard()"),
-);
+const settings =
+  script.match(/^function discardBody\(.*$/m)[0] +
+  "\n" +
+  script.slice(
+    script.indexOf("const projectDocuments = new Map();"),
+    script.indexOf("function renderBoard()"),
+  );
 const slug = "documents-sample",
   name = "notes.md";
 const storageKey = "factory-project-document-draft:" + slug + ":" + name;
