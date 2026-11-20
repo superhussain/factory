@@ -152,6 +152,7 @@ records matched before and after views. Each `view(...)` line in
 
 - Board data is the fixed `CAPTURE_JOBS`, `CAPTURE_MERGED` and `CAPTURE_BACKLOG` fixtures.
 - `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
+- Views on a hash route that reads the full board call `waitFullBoard(page)` before they click or shoot, so the second draw cannot detach a node.
 - A spec that needs another size or state adds a task for a new `view(...)` line.
 
 ### Paseo plugin cards
