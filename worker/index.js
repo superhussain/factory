@@ -2597,7 +2597,7 @@ function checkArchived(stored, data) {
 const RIDER_CONTROLS = ["move", "priority", "paused", "close", "babysit", "resolve"];
 const DASHBOARD_APPROVED_NOTE = "spec approved on the dashboard";
 const TRACER_APPROVED_NOTE = "spec approved in Tracer";
-const RECEIPT_PREFIX = "tracer-scope-approval/v1";
+const RECEIPT_PREFIX = "tracer-scope-approval/v2";
 let receiptKeyMemo = { text: "", key: null };
 const leadOfRow = (j) =>
   Array.isArray(j?.refs)
@@ -2653,19 +2653,20 @@ async function receiptKey(env) {
   return key;
 }
 
-// Whether the row carries a Tracer-signed scope receipt for its own ticket.
+// Whether the row carries a Tracer-signed scope receipt for its own job and ticket.
 async function validReceipt(env, row) {
   const r = row.tracer?.receipt;
   if (typeof r !== "object" || r === null) return false;
   const line = (v) => typeof v === "string" && v.length >= 1 && v.length <= 64 && !v.includes("\n");
-  if (![r.feature, r.ticket, r.approved_at].every(line)) return false;
+  if (![r.job, r.feature, r.ticket, r.approved_at].every(line)) return false;
+  if (r.job !== row.id) return false;
   if (typeof r.signature !== "string" || !/^[A-Za-z0-9+/]{86}==$/.test(r.signature)) return false;
   const [ticket, feature] = tracerIds(row);
   if (r.feature !== feature || r.ticket !== ticket) return false;
   const key = await receiptKey(env);
   if (key === null) return false;
   const signature = Uint8Array.from(atob(r.signature), (c) => c.charCodeAt(0));
-  const message = [RECEIPT_PREFIX, r.feature, r.ticket, r.approved_at].join("\n");
+  const message = [RECEIPT_PREFIX, r.job, r.feature, r.ticket, r.approved_at].join("\n");
   return crypto.subtle.verify(
     { name: "Ed25519" },
     key,
