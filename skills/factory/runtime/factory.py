@@ -8869,9 +8869,11 @@ def worktree(target):
 
 
 PREBUILD_DIR = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*")
-PREBUILD_ROOT_FILES = ["mise.toml", ".mise.toml", ".tool-versions", ".npmrc"]
-PREBUILD_DIR_FILES = ["pnpm-lock.yaml", "package.json", "pnpm-workspace.yaml", ".npmrc", ".pnpmfile.cjs",
-                      ".pnpmfile.mjs", "mise.toml", ".mise.toml"]
+# Checked at the worktree root and in each listed folder.
+PREBUILD_CONFIG_FILES = ["mise.toml", ".mise.toml", "mise.local.toml", ".mise.local.toml", ".config/mise.toml",
+                         ".tool-versions", ".npmrc", ":(glob)mise.*.toml", ":(glob).mise.*.toml",
+                         ":(glob).config/mise/**", ":(glob).mise/**", ":(glob)mise/**"]
+PREBUILD_DIR_FILES = ["pnpm-lock.yaml", "package.json", "pnpm-workspace.yaml", ".pnpmfile.cjs", ".pnpmfile.mjs"]
 
 
 def prebuild_dirs(home, slug):
@@ -8912,12 +8914,15 @@ def prebuild(home, slug, job_id, wt):
         if not (folder / "pnpm-lock.yaml").is_file():
             print(f"prebuild skips {d}: no pnpm-lock.yaml", file=sys.stderr)
             continue
-        # Every file mise or pnpm reads before or during the install, in the working tree, untracked ones too.
-        files = PREBUILD_ROOT_FILES + [f"{d}/{name}" for name in PREBUILD_DIR_FILES]
+        # The mise, npmrc and pnpm files a builder could change, checked in the working tree, untracked and
+        # gitignored ones too.
+        files = [name.replace(":(glob)", ":(glob)" + prefix) if name.startswith(":(glob)") else prefix + name
+                 for prefix in ("", d + "/") for name in PREBUILD_CONFIG_FILES]
+        files += [f"{d}/{name}" for name in PREBUILD_DIR_FILES]
         diff = subprocess.run(["git", "-C", str(wt), "diff", "--quiet", f"refs/remotes/origin/{base}", "--", *files],
                               capture_output=True)
-        status = subprocess.run(["git", "-C", str(wt), "status", "--porcelain", "--untracked-files=all", "--", *files],
-                                capture_output=True, text=True)
+        status = subprocess.run(["git", "-C", str(wt), "status", "--porcelain", "--untracked-files=all", "--ignored",
+                                 "--", *files], capture_output=True, text=True)
         if diff.returncode or status.returncode or status.stdout.strip():
             print(f"prebuild skips {d}: its dependency files differ from origin/{base}", file=sys.stderr)
             continue

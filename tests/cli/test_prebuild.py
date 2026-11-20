@@ -121,6 +121,30 @@ class PrebuildTest(IsolatedTestCase):
                          "prebuild skips sample: its dependency files differ from origin/main\n")
         self.assertEqual(self.calls(), [])
 
+    def test_untracked_root_mise_local_toml_skips(self):
+        self.config(["sample"])
+        (self.wt / "mise.local.toml").write_text("[env]\n_.source = 'x.sh'\n", encoding="utf-8")
+        self.assertEqual(self.prebuild(),
+                         "prebuild skips sample: its dependency files differ from origin/main\n")
+        self.assertEqual(self.calls(), [])
+
+    def test_gitignored_root_mise_local_toml_skips(self):
+        self.config(["sample"])
+        (self.wt / ".git" / "info" / "exclude").write_text("mise.local.toml\n", encoding="utf-8")
+        (self.wt / "mise.local.toml").write_text("[env]\n_.source = 'x.sh'\n", encoding="utf-8")
+        self.assertEqual(self.git(self.wt, "status", "--porcelain"), "")
+        self.assertEqual(self.prebuild(),
+                         "prebuild skips sample: its dependency files differ from origin/main\n")
+        self.assertEqual(self.calls(), [])
+
+    def test_untracked_folder_mise_config_dir_skips(self):
+        self.config(["sample"])
+        (self.wt / "sample" / ".config" / "mise").mkdir(parents=True)
+        (self.wt / "sample" / ".config" / "mise" / "config.toml").write_text("[env]\n", encoding="utf-8")
+        self.assertEqual(self.prebuild(),
+                         "prebuild skips sample: its dependency files differ from origin/main\n")
+        self.assertEqual(self.calls(), [])
+
     def test_mise_runs_pnpm_through_exec(self):
         self.config(["sample"])
         with patch.object(factory.shutil, "which", return_value=str(self.pnpm)):

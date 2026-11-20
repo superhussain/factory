@@ -472,7 +472,7 @@ only the worktree path. Every outcome keeps exit 0, and each folder reports on s
 | --- | --- |
 | `node_modules/.modules.yaml` exists | none, skipped |
 | no `pnpm-lock.yaml`, or the path leaves the worktree | `prebuild skips <dir>: no pnpm-lock.yaml` / `prebuild skips <dir>: not inside the worktree` |
-| the working tree, untracked files included, differs from `origin/<base>` in the folder's `pnpm-lock.yaml`, `package.json`, `pnpm-workspace.yaml`, `.npmrc`, `.pnpmfile.cjs`, `.pnpmfile.mjs`, `mise.toml` or `.mise.toml`, or the root `mise.toml`, `.mise.toml`, `.tool-versions` or `.npmrc` | `prebuild skips <dir>: its dependency files differ from origin/<base>` |
+| the working tree, untracked and gitignored files included, differs from `origin/<base>` in the folder's `pnpm-lock.yaml`, `package.json`, `pnpm-workspace.yaml`, `.pnpmfile.cjs` or `.pnpmfile.mjs`, or, at the worktree root or in the folder, `mise.toml`, `.mise.toml`, `mise.local.toml`, `.mise.local.toml`, `mise.*.toml`, `.mise.*.toml`, `.config/mise.toml`, anything under `.config/mise/`, `.mise/` or `mise/`, `.tool-versions` or `.npmrc` | `prebuild skips <dir>: its dependency files differ from origin/<base>` |
 | neither `mise` nor `pnpm` on `PATH` | `prebuild skips <dir>: pnpm is not on PATH` |
 | install exits non-zero, cannot start, or runs past 600 s | `factory.py: prebuild of <dir> failed (<why>); log: <log>` |
 | success | `prebuilt <dir> with pnpm install --frozen-lockfile` |
