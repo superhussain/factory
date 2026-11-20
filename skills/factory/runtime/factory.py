@@ -9140,12 +9140,30 @@ def job_temp(slug, job_id):
 def make_job_temp(slug, job_id):
     """Create the job's temp folder private to this account, refusing a name someone else holds."""
     path = job_temp(slug, job_id)
+    refused = f"{path} is a link or a file; remove it, then run prompt again"
     if is_link(path) or os.path.lexists(path) and not path.is_dir():
-        fail(f"{path} is a link or a file; remove it, then run prompt again", 6)
+        fail(refused, 6)
     path.mkdir(mode=0o700, exist_ok=True)
-    if hasattr(os, "getuid") and path.stat().st_uid != os.getuid():
+    st = os.lstat(path)
+    if (stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            or not stat.S_ISDIR(st.st_mode)):
+        fail(refused, 6)
+    if hasattr(os, "getuid") and st.st_uid != os.getuid():
         fail(f"{path} belongs to another account; remove it, then run prompt again", 6)
-    os.chmod(path, 0o700)
+    if not hasattr(os, "O_NOFOLLOW"):
+        os.chmod(path, 0o700)
+        return path
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        fail(refused, 6)
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino) != (st.st_dev, st.st_ino):
+            fail(refused, 6)
+        os.fchmod(fd, 0o700)
+    finally:
+        os.close(fd)
     return path
 
 
