@@ -1,5 +1,10 @@
 // runChild logs start and done lines, and kills a child that outlives its timeout.
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { runChild } from "./run-child.mjs";
 
@@ -65,4 +70,49 @@ test("runChild kills a timed-out child's own children too", async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.ok(gone(), `grandchild ${pid} still running`);
+});
+
+test("SIGINT on the parent ends a detached child's process group", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "run-child-"));
+  const pidFile = join(dir, "pid");
+  const runChildUrl = new URL("./run-child.mjs", import.meta.url).href;
+  const script =
+    `import { runChild } from ${JSON.stringify(runChildUrl)};` +
+    `runChild(process.execPath, ["-e", "require('fs').writeFileSync(process.env.PID_FILE, String(process.pid)); setInterval(() => {}, 1000)"]);`;
+  const parent = spawn(process.execPath, ["--input-type=module", "-e", script], {
+    env: { ...process.env, PID_FILE: pidFile },
+    stdio: "ignore",
+  });
+  let pid = 0;
+  try {
+    for (let tries = 0; !pid && tries < 100; tries++) {
+      pid = Number(await readFile(pidFile, "utf8").catch(() => "0"));
+      if (!pid) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(pid, "the child wrote its pid");
+    const exited = once(parent, "exit");
+    parent.kill("SIGINT");
+    const [code] = await exited;
+    assert.equal(code, 130);
+    const gone = () => {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch (error) {
+        return error.code === "ESRCH";
+      }
+    };
+    for (let tries = 0; !gone() && tries < 100; tries++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(gone(), `child ${pid} still running`);
+  } finally {
+    if (pid) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    }
+    parent.kill("SIGKILL");
+    await rm(dir, { recursive: true, force: true });
+  }
 });
