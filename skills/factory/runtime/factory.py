@@ -651,6 +651,13 @@ def proc_name(pid):
     return run(["ps", "-p", str(pid), "-o", "comm="]).strip()
 
 
+def device_name(factory):
+    """config.md's device:, else the hostname. Checks no session or claim settings, so it never exits."""
+    config = Path(factory, "config.md")
+    meta = frontmatter(config)[0] if config.exists() else {}
+    return meta.get("device") or socket.gethostname()
+
+
 def holder(factory):
     """(device, session, claim_stale_minutes) this process claims jobs as. The device is
     config.md's device:, else the hostname. The session is FACTORY_SESSION or --session."""
@@ -663,7 +670,7 @@ def holder(factory):
     minutes = meta.get("claim_stale_minutes") or "120"
     if not minutes.isdigit():
         fail(f"claim_stale_minutes in {config} must be a whole number of minutes, not {minutes!r}", 2)
-    return meta.get("device") or socket.gethostname(), session, int(minutes)
+    return device_name(factory), session, int(minutes)
 
 
 def new_session():
@@ -8825,7 +8832,7 @@ def stop(wt):
 def pr_merged_head(home, pr):
     """The head commit GitHub reports for a merged pull request URL, or None. A failed lookup warns and returns None."""
     owner, name, number = GH_PR_PARTS.fullmatch(pr).groups()
-    states, why = pr_states(f"{owner}/{name}", [int(number)], holder(home)[0])
+    states, why = pr_states(f"{owner}/{name}", [int(number)], device_name(home))
     if states is None:
         print(f"factory.py: cleanup could not read pull request {pr} ({why}), so it keeps a branch HEAD does not "
               "contain", file=sys.stderr)
