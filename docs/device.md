@@ -154,6 +154,7 @@ python3 <installed-skill>/runtime/factory.py claim <factory-home> small-feature 
 python3 <installed-skill>/runtime/factory.py sync sample
 python3 <installed-skill>/runtime/factory.py handoff sample/001-small-feature --session <printed-tag>
 python3 <installed-skill>/runtime/factory.py clean sample/001-small-feature node_modules
+python3 <installed-skill>/runtime/factory.py clean sample/001-small-feature temp
 ```
 
 Use the allocated ID, not the illustrative ID above. Claims without a supplied
@@ -167,6 +168,8 @@ an automatic takeover or reset of review/approval counters.
 `clean` removes only git-ignored `node_modules` folders, or one `.context/<name>`
 scratch folder, inside the job's own worktree, never through a link, and prints
 `{"removed": [...], "left": [...]}` as JSON.
+`temp` removes the job's `factory-<job-id>` folder under the system temp root, the
+`Temp folder:` that every role prompt names.
 Within one command, the runtime reuses a 200 answer from /projects.json, /api/pipeline/global or /api/pipeline/effective/<slug> for up to 60 seconds. A pipeline or project write clears it.
 
 ## Cloudflare credentials for one command
@@ -177,13 +180,18 @@ value and runs the command without a shell. Wrap a command in `sh -c` when it
 needs the token by name:
 
 ```text
-python3 <installed-skill>/runtime/factory.py with-cloudflare -- sh -c 'curl -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/user/tokens/verify'
+python3 <installed-skill>/runtime/factory.py with-cloudflare -- sh -c 'printf "Authorization: Bearer %s\n" "$CLOUDFLARE_API_TOKEN" | curl -H @- https://api.cloudflare.com/client/v4/user/tokens/verify'
 ```
+
+`printf` is a shell builtin, so the token reaches curl on stdin and never shows in a process list.
 
 | Case | Exit | stderr |
 | --- | --- | --- |
 | no `--` or no command | 2 | `factory.py: usage: factory.py with-cloudflare -- <command> [<arg>...]` |
-| `.env` missing, a link, unreadable, or no token | 5 | `factory.py: CLOUDFLARE_API_TOKEN missing from <env path>. docs/cloudflare.md, Device token, shows how to store it.` |
+| no `.env` | 5 | `factory.py: no <env path>. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there.` |
+| `.env` is a link or not a regular file | 5 | `factory.py: <env path> is a link or not a regular file, so it was not read. Replace it with a regular file.` |
+| `.env` unreadable | 5 | `factory.py: cannot read <env path>: check its permissions and that it is UTF-8 text.` |
+| no token | 5 | `factory.py: CLOUDFLARE_API_TOKEN missing from <env path>. docs/cloudflare.md, Device token, shows how to store it.` |
 | command not found | 127 | `factory.py: cannot run <command>` |
 
 Otherwise it exits with the command's code, or `128 + N` when signal `N` ends it.

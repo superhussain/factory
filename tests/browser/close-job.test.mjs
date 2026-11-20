@@ -462,7 +462,7 @@ test("close job", { timeout: 240000 }, async (t) => {
         );
         assert.equal(await boardText(origin), before);
         await activate("#close-job-cancel");
-        await page.waitForSelector("#close-job-dlg:not([open])");
+        await page.waitForSelector("#close-job-dlg:not([open])", wait);
       });
 
       await reseed();

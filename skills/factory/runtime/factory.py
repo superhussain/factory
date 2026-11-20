@@ -90,9 +90,10 @@
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
                                             branch without forcing, print what was left as JSON
-  factory.py clean <project-slug>/<job-id> node_modules | scratch <name>
+  factory.py clean <project-slug>/<job-id> node_modules | scratch <name> | temp
                                             remove the job worktree's git-ignored node_modules folders, or
-                                            its .context/<name> scratch folder, never through a link; print
+                                            its .context/<name> scratch folder, or the job's temp folder
+                                            under the system temp root, never through a link; print
                                             what was removed and left as JSON
   factory.py archive-workspace <project-slug>/<job-id> [--check]
                                             archive this session's Paseo worktree workspace and agent once
@@ -6638,7 +6639,8 @@ def prompt_cmd(target, role, *flags):
              f"Project documents: {documents}",
              f"Visuals reference: {skill / 'references' / 'visuals.md'}",
              f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}",
-             f"Runtime: {skill / 'runtime' / 'factory.py'}"]
+             f"Runtime: {skill / 'runtime' / 'factory.py'}",
+             f"Temp folder: {job_temp(job_id)}"]
     round_folder = folder / f"round-{options['--round']}" if "--round" in options else None
     if role == "spec":
         feature = job.get("idea") or job.get("title")
@@ -8887,7 +8889,7 @@ def worktree(target):
 PREBUILD_DIR = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*")
 # Checked at the worktree root, every folder between it and a listed folder, and the listed folder itself. The
 # *mise* globs cover every mise config, rc, lock and conf.d name, such as .miserc.toml and .config/miserc.toml.
-PREBUILD_CONFIG_FILES = [".miserc.toml", ".config/miserc.toml", ":(glob)*mise*", ":(glob)*mise*/**",
+PREBUILD_CONFIG_FILES = [":(glob)*mise*", ":(glob)*mise*/**",
                          ":(glob).config/*mise*", ":(glob).config/*mise*/**", ".tool-versions", ".npmrc",
                          "pnpm-workspace.yaml"]
 PREBUILD_DIR_FILES = ["pnpm-lock.yaml", "package.json", ".pnpmfile.cjs", ".pnpmfile.mjs"]
@@ -9119,15 +9121,36 @@ def cleanup(target):
     sys.exit(1 if left else 0)
 
 
-USAGE_CLEAN = "usage: clean <project-slug>/<job-id> node_modules | scratch <name>"
+def job_temp(job_id):
+    """The per-job folder outside the worktree that capture and probe tools on this host write to."""
+    return Path(tempfile.gettempdir()) / f"factory-{job_id}"
+
+
+USAGE_CLEAN = "usage: clean <project-slug>/<job-id> node_modules | scratch <name> | temp"
 SCRATCH_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 
 
 def clean_cmd(target, what, *rest):
     home, slug, job_id = r2_target(target, True)
     if not (what == "node_modules" and not rest
-            or what == "scratch" and len(rest) == 1 and SCRATCH_NAME.fullmatch(rest[0])):
+            or what == "scratch" and len(rest) == 1 and SCRATCH_NAME.fullmatch(rest[0])
+            or what == "temp" and not rest):
         fail(USAGE_CLEAN, 2)
+    if what == "temp":
+        path = job_temp(job_id)
+        removed, left = [], []
+        if is_link(path):
+            left.append(f"{path}: a symlink or junction, left in place")
+        elif os.path.lexists(path) and not path.is_dir():
+            left.append(f"{path}: not a folder, left in place")
+        elif path.is_dir():
+            try:
+                shutil.rmtree(path)
+                removed.append(str(path))
+            except OSError as exc:
+                left.append(f"{path}: {exc.strerror or str(exc)}")
+        print(json.dumps({"removed": removed, "left": left}, indent=2))
+        sys.exit(1 if left else 0)
     wt = home / "worktrees" / slug / job_id
     for path in (home / "worktrees", wt.parent, wt):
         if is_link(path):
@@ -10644,11 +10667,20 @@ def with_cloudflare_cmd(*argv):
     if len(argv) < 2 or argv[0] != "--":
         fail("usage: factory.py with-cloudflare -- <command> [<arg>...]", 2)
     env_file = factory_home() / ".env"
+    not_regular = f"{env_file} is a link or not a regular file, so it was not read. Replace it with a regular file."
+    unreadable = f"cannot read {env_file}: check its permissions and that it is UTF-8 text."
     try:
-        regular_metadata(env_file)
+        if is_link(env_file):
+            fail(not_regular, 5)
+        if not os.path.lexists(env_file):
+            fail(f"no {env_file}. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there.", 5)
+        if not stat.S_ISREG(env_file.stat().st_mode):
+            fail(not_regular, 5)
+        if not os.access(env_file, os.R_OK):
+            fail(unreadable, 5)
         loaded = {k: v for k, v in read_conf(env_file).items() if k.startswith("CLOUDFLARE_") and v}
     except (OSError, ValueError):
-        loaded = {}
+        fail(unreadable, 5)
     if "CLOUDFLARE_API_TOKEN" not in loaded:
         fail(f"CLOUDFLARE_API_TOKEN missing from {env_file}. docs/cloudflare.md, Device token, shows how to store it.", 5)
     try:

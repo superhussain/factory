@@ -90,7 +90,7 @@ no findings to fix. Check `git status` and `git log main..HEAD` in the worktree,
 judge any uncommitted edits against the spec (keep and commit what's right, revert
 what isn't), finish the spec, and note in build.md what you inherited.
 
-**Reset folders.** Never delete a folder with `rm -r`, `rm -rf`, `Remove-Item -Recurse` or `rmdir /s`. To reset dependencies run `python3 <Runtime> clean <slug>/<id> node_modules`, then the project's install command. To drop a scratch folder you made under `.context/`, run `python3 <Runtime> clean <slug>/<id> scratch <name>`. A path the command leaves is not yours to remove: write a fresh folder instead.
+**Reset folders.** Never delete a folder with `rm -r`, `rm -rf`, `Remove-Item -Recurse` or `rmdir /s`. To reset dependencies run `python3 <Runtime> clean <slug>/<id> node_modules`, then the project's install command. To drop a scratch folder you made under `.context/`, run `python3 <Runtime> clean <slug>/<id> scratch <name>`. A tool that writes outside the worktree, such as a Windows capture or probe, writes under the prompt's `Temp folder:`. Create it with `mkdir -p` and reset it with `python3 <Runtime> clean <slug>/<id> temp`. On WSL, give a Windows tool `$(wslpath -w <Temp folder>)`. A path the command leaves is not yours to remove: write a fresh folder instead.
 
 **Wait on long commands.** Run a command that takes minutes, such as a full test suite, with the Bash tool's `run_in_background`, then wait for its completion notification before you read its output. Never `sleep` then `tail` its log, and never poll in an `until` or `while` loop. The harness denies a foreground `sleep`, and `factory.py audit` flags each denied call.
 
