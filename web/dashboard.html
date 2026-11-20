@@ -8233,8 +8233,11 @@ $('move-host-form').addEventListener('submit', async (e) => {
   await poll();
 });
 
+// Disabling the focused control drops focus to the page body. Keep it in the dialog, on its heading.
+function keepDialogFocus(id) { const a = document.activeElement; if (!$(id).contains(a) || a.disabled) $(id).querySelector('h2').focus(); }
+
 // While a dialog save runs, Escape and Cancel wait for it, as in the idea dialogs. A sent save cannot be recalled.
-function setDialogSaving(name, field, label, saving) { $(name + '-save').disabled = saving; $(name + '-save').textContent = saving ? 'Saving…' : label; $(name + '-cancel').disabled = saving; $(field).disabled = saving; }
+function setDialogSaving(name, field, label, saving) { $(name + '-save').disabled = saving; $(name + '-save').textContent = saving ? 'Saving…' : label; $(name + '-cancel').disabled = saving; $(field).disabled = saving; $(name + '-status').textContent = saving ? 'Saving…' : ''; if (saving) keepDialogFocus(name + '-dlg'); }
 
 let reworkDialog = null;
 
