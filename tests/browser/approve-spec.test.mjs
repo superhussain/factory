@@ -57,6 +57,7 @@ const VIEWPORTS = [
   { width: 1280, height: 900, theme: "light" },
 ];
 const CONFIRM = "Approve the spec of 042-sample-export? Pickup starts the build on its next run.";
+const OFFLINE = "Could not reach the factory. Check your connection, then try again.";
 
 const freezeClock = (page) =>
   page.evaluateOnNewDocument((now) => {
@@ -259,6 +260,33 @@ test("approve spec", { timeout: 240000 }, async (t) => {
           await page.$eval("#d-approve-spec-err", (el) => el.textContent),
           "This spec can no longer be approved.",
         );
+        assert.equal(await (await fetch(origin + "/api/board")).text(), before);
+      });
+
+      await t.test(`a failed bar Approve spec keeps focus on the button ${width}`, async () => {
+        await seedBoard(origin, JOBS);
+        await page.evaluate(() => window.fixtureBoardPoll());
+        await openDrawer(page, "042-sample-export");
+        await page.waitForFunction(
+          () => !document.getElementById("d-approve-spec-bar").hidden,
+          wait,
+        );
+        const before = await (await fetch(origin + "/api/board")).text();
+        // The board write fails as a dropped connection would.
+        await page.evaluate(() => {
+          const fetchNow = window.fetch;
+          window.fetch = (url, options) =>
+            String(url).endsWith("api/board") && options?.method === "PATCH"
+              ? Promise.reject(new TypeError("Failed to fetch"))
+              : fetchNow(url, options);
+        });
+        await activate("#d-approve-spec-bar");
+        await page.waitForFunction(
+          (line) => document.getElementById("d-approve-spec-err").textContent === line,
+          wait,
+          OFFLINE,
+        );
+        assert.equal(await page.evaluate(() => document.activeElement.id), "d-approve-spec-bar");
         assert.equal(await (await fetch(origin + "/api/board")).text(), before);
       });
       await context.close();

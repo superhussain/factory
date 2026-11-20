@@ -8915,12 +8915,13 @@ $('d-star').addEventListener('click', () => {
   toggleStar(openId);
   syncStarButton(openId);
 });
-// A bar button hides itself once its action lands, so focus would fall to body.
-const focusActionsIfDropped = () => {
-  if (document.activeElement === document.body) $('d-actions').focus();
+// A bar button hides itself once its action lands, so focus would fall to body and goes to the
+// actions menu button. A failed action leaves the bar button shown, so focus goes back to it.
+const focusAfterBar = (button) => () => {
+  if (document.activeElement === document.body) (button.hidden ? $('d-actions') : button).focus();
 };
-$('d-approve-spec-bar').addEventListener('click', () => approveSpecAction({ ...drawerAction('d-approve-spec'), button: $('d-approve-spec-bar') }).then(focusActionsIfDropped));
-$('d-babysit-bar').addEventListener('click', () => babysitAction({ ...drawerAction('d-babysit'), button: $('d-babysit-bar') }).then(focusActionsIfDropped));
+$('d-approve-spec-bar').addEventListener('click', () => approveSpecAction({ ...drawerAction('d-approve-spec'), button: $('d-approve-spec-bar') }).then(focusAfterBar($('d-approve-spec-bar'))));
+$('d-babysit-bar').addEventListener('click', () => babysitAction({ ...drawerAction('d-babysit'), button: $('d-babysit-bar') }).then(focusAfterBar($('d-babysit-bar'))));
 
 // One run per job and action at a time; a second click while the first is in flight does nothing.
 const cardRuns = new Set();
