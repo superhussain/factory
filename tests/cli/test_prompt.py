@@ -1,7 +1,9 @@
 import os
 import stat
 import tempfile
+import unittest
 from pathlib import Path
+from unittest import mock
 
 from support import SKILL, IsolatedTestCase, http_fixture, invoke, load_runtime, snapshot
 
@@ -39,6 +41,11 @@ class PromptTest(IsolatedTestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.home = Path(temp.name).resolve()
+        self.tmp = self.home / "tmp"
+        self.tmp.mkdir()
+        tempdir = mock.patch.object(tempfile, "tempdir", str(self.tmp))
+        tempdir.start()
+        self.addCleanup(tempdir.stop)
         (self.home / "projects").mkdir()
         self.project = self.home / "projects" / "sample.md"
         self.project.write_text("---\nrepo: example/sample\nbase: main\n---\n# Sample\n")
@@ -63,7 +70,7 @@ class PromptTest(IsolatedTestCase):
                 f"Visuals reference: {skill / 'references' / 'visuals.md'}\n"
                 f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}\n"
                 f"Runtime: {skill / 'runtime' / 'factory.py'}\n"
-                f"Temp folder: {Path(tempfile.gettempdir()) / ('factory-' + JOB)}\n")
+                f"Temp folder: {self.tmp / f'factory-sample-{JOB}'}\n")
 
     def assertPrompt(self, args, expected, **kw):
         code, out, err = self.prompt(*args, **kw)
@@ -204,6 +211,37 @@ class PromptTest(IsolatedTestCase):
         self.assertEqual((code, out), (6, ""))
         self.assertIn("symlink or junction", err)
         self.assertEqual(list(real.iterdir()), [])
+
+    @unittest.skipIf(os.name == "nt", "POSIX modes")
+    def test_temp_folder_is_private(self):
+        path = self.tmp / f"factory-sample-{JOB}"
+        self.assertEqual(self.prompt("spec")[0], 0)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+        path.chmod(0o755)
+        self.assertEqual(self.prompt("spec")[0], 0)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+
+    def test_temp_folder_refuses_file_and_link(self):
+        path = self.tmp / f"factory-sample-{JOB}"
+        expected = (6, "", f"factory.py: {path} is a link or a file; remove it, then run prompt again\n")
+        path.write_text("x\n")
+        self.assertEqual(self.prompt("spec"), expected)
+        path.unlink()
+        real = self.home / "elsewhere"
+        real.mkdir()
+        try:
+            path.symlink_to(real, target_is_directory=True)
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        self.assertEqual(self.prompt("spec"), expected)
+        self.assertTrue(path.is_symlink())
+
+    @unittest.skipIf(os.name == "nt", "POSIX owners")
+    def test_temp_folder_refuses_other_owner(self):
+        path = self.tmp / f"factory-sample-{JOB}"
+        with mock.patch.object(factory.os, "getuid", return_value=os.getuid() + 1):
+            self.assertEqual(self.prompt("spec"), (
+                6, "", f"factory.py: {path} belongs to another account; remove it, then run prompt again\n"))
 
     def test_skill_uses_prompt(self):
         skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
