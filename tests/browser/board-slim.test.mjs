@@ -120,6 +120,10 @@ test("slim board read", { timeout: 240000 }, async (t) => {
 
       // A failed full read hands the button back and says so.
       let failNext = true;
+      // The service worker answers /board.json once it controls the page, and request
+      // interception never sees those reads. Wait for it, then bypass it, so every run counts the same reads.
+      await page.waitForFunction(() => navigator.serviceWorker.controller !== null, wait);
+      await page.setBypassServiceWorker(true);
       await page.setRequestInterception(true);
       page.on("request", (request) => {
         if (request.isInterceptResolutionHandled()) return;
