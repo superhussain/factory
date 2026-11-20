@@ -97,8 +97,10 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory.py` onc
 ## 10. Extras
 
 - Check: none.
-- Ask, Extras (multi-select): "Set up any of these now?" Options: Deploy on merge to main, PR screenshots, Tracer mirror, Notifications.
-- Then do each chosen one from its doc section, in that order: [cloudflare.md](../../../docs/cloudflare.md#8-continuous-deployment-from-main), [integrations.md](../../../docs/integrations.md).
+- Ask, Extras (multi-select): "Set up any of these now?" Options: Deploy on merge to main, PR screenshots, Tracer mirror.
+- Ask, Reach (multi-select): "Where else should the board reach you?" Options: Notifications and the installed app, Paseo plugin.
+- Then do each chosen one in that order: [cloudflare.md](../../../docs/cloudflare.md#8-continuous-deployment-from-main), [integrations.md](../../../docs/integrations.md#private-evidence-and-images), [integrations.md](../../../docs/integrations.md#tracer-mirror), [notifications.md](../../../docs/notifications.md), [integrations.md](../../../docs/integrations.md#paseo-plugin).
+- Paseo plugin step 4 reruns `up`. Hand it over for their own terminal, as in phase 3.
 
 ## 11. First job and summary
 
@@ -106,3 +108,4 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory.py` onc
 - Ask, First job: "Start a small first job now?" Options: Yes (Recommended), Later.
 - Then suggest `/factory <one small feature>` in the checkout.
 - Print a table with columns Step, Status (done, skipped, waiting on you) and Next.
+- Then point to [dashboard-tour.md](../../../docs/dashboard-tour.md) for the board, Inbox, Retros and Settings.

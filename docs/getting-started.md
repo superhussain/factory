@@ -12,7 +12,7 @@ mise exec -- pnpm install --frozen-lockfile
 mise exec -- python3 tools/bootstrap.py up
 ```
 
-`up` asks for your account ID, zone, hostname and allowed emails. See [cloudflare.md](cloudflare.md#guided-setup) for the token permissions. It ends with `Factory is live at https://factory.example.test`.
+`up` asks for your account ID, zone, hostname and allowed emails. See [cloudflare.md](cloudflare.md#guided-setup) for the token permissions. It prints `Factory is live at https://factory.example.test`, then the next steps.
 
 Keep that token. Store it as `CLOUDFLARE_API_TOKEN` in the factory home `.env` on this computer, as [cloudflare.md](cloudflare.md#device-token) shows, so agents here can rerun `up`, change Access settings and upload PR screenshots. `up` itself never saves it, and its last line prints the `.env` path.
 
@@ -79,6 +79,10 @@ flowchart LR
   spec --> build --> review --> approve --> pr-open --> merged
 ```
 
+![The board with jobs across the stages](screenshots/board.png)
+
+A job moves across these columns. [dashboard-tour.md](dashboard-tour.md) walks through every view.
+
 The second route is New idea on the board, then `/factory idea <id>` or automatic pickup (see the next section).
 
 ## What you can do next
@@ -93,9 +97,15 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | Keep project notes, decisions and a runbook | Settings, Projects, document tabs | [configuration.md](configuration.md) |
 | Deploy every merge to main | `deploy-main` workflow | [cloudflare.md](cloudflare.md#8-continuous-deployment-from-main) |
 | PR screenshots, Paseo, Tracer | device config | [integrations.md](integrations.md) |
-| Browser toasts, sounds, notifications, reminders and display | Settings, Notifications and Display | none |
+| Browser toasts, sounds, notifications, reminders and display | Settings, Notifications and Display | [notifications.md](notifications.md), [dashboard-tour.md](dashboard-tour.md#display) |
+| Answer every job waiting on you in one list | Inbox (`I`), or `W` for the next job | [dashboard-tour.md](dashboard-tour.md#inbox-and-the-w-key) |
+| Review flagged tool calls and retro runs | Retros (`R`), Red flags | [dashboard-tour.md](dashboard-tour.md#retros-and-red-flags) |
+| Open the board inside Paseo | `paseo plugin install <checkout>/paseo-plugin`, then Paseo Settings, Plugins, Factory | [integrations.md](integrations.md#paseo-plugin) |
+| Make a job wait for another job or a time | `Depends on:` backlog lines, `depends-on` refs, `not_before` | [autonomy.md](autonomy.md#waiting-on-other-jobs) |
 | Let agents manage the instance, such as Access settings or an `up` rerun | `CLOUDFLARE_API_TOKEN` in the factory home `.env` | [cloudflare.md](cloudflare.md#device-token) |
 | Upgrade later | `git pull` here, then `install.py --replace` on each host | [upgrade.md](upgrade.md) |
+
+![The Inbox with a question row](screenshots/inbox.png)
 
 Automatic pickup: run `python3 <installed-skill>/runtime/factory.py pickup setup` on each host and fix each missing line until it prints 7 of 7 ok. A stored Paseo or Claude schedule prompt does not pick up ideas.
 

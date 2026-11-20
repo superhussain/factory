@@ -133,8 +133,7 @@ ports, so the two never contend for a port. Their inputs cover
 lists the four projects. The `device-bundle` Python suites run as the cached
 `cli`/`install` targets (and `tooling:verify`) through `nx run-many` — they are
 not part of the `affected` selection; `tools/verify.py` still
-runs them directly with no Node. Job 108 adds
-the lint and format targets later; `nx.json` deliberately declares none.
+runs them directly with no Node. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
 
 ## Visual captures
 
