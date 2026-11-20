@@ -24,13 +24,17 @@ const dashboardRefusal =
 const tracerRefusal =
   'a board write cannot set the note "spec approved in Tracer" on "042-sample-export" unless its tracer.scope is "approved". Nothing was written.';
 
-function setup(row = ROW) {
+const keptRefusal = (note) =>
+  `a board write from a device cannot move "042-sample-export" into build while it keeps the note "${note}": only a person starts an approved spec again. Nothing was written.`;
+
+function setup(row = ROW, { seed = true } = {}) {
   const bucket = memoryBucket();
-  bucket.objects.set("board.json", {
-    key: "board.json",
-    bytes: Buffer.from(JSON.stringify({ updated: "2026-11-20T08:00:00Z", jobs: [row] })),
-    httpEtag: '"board.json-seed"',
-  });
+  if (seed)
+    bucket.objects.set("board.json", {
+      key: "board.json",
+      bytes: Buffer.from(JSON.stringify({ updated: "2026-11-20T08:00:00Z", jobs: [row] })),
+      httpEtag: '"board.json-seed"',
+    });
   const BoardEvents = {
     idFromName: (name) => ({ name }),
     get: () => ({ fetch: async () => new Response(null, { status: 204 }) }),
@@ -50,6 +54,18 @@ function setup(row = ROW) {
       device,
       ctx,
     );
+  const create = (next) =>
+    serveFactory(
+      new Request("http://local/api/board", {
+        method: "PUT",
+        body: JSON.stringify({ updated: "2026-11-20T09:00:00Z", jobs: [next] }),
+        headers: { "If-None-Match": "*" },
+        duplex: "half",
+      }),
+      env,
+      device,
+      ctx,
+    );
   const patch = (next, principal) =>
     serveFactory(
       new Request("http://local/api/board", {
@@ -61,7 +77,7 @@ function setup(row = ROW) {
       principal,
       ctx,
     );
-  return { etag, put, patch };
+  return { bucket, etag, put, create, patch };
 }
 
 async function refused(s, write, copy) {
@@ -101,5 +117,47 @@ test("a device PUT keeps a stored dashboard note", async () => {
   const s = setup(approved(DASHBOARD));
   const claim = { device: "host-a" };
   const response = await s.put({ ...approved(DASHBOARD), claim });
+  assert.equal(response.status, 200);
+});
+
+test("a device create on an absent board runs the approval check", async () => {
+  const s = setup(ROW, { seed: false });
+  const response = await s.create(approved(DASHBOARD));
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), dashboardRefusal);
+  assert.equal(s.bucket.objects.has("board.json"), false);
+});
+
+test("a device create on an existing board gets 412", async () => {
+  const s = setup();
+  const before = s.etag();
+  const response = await s.create(approved(DASHBOARD));
+  assert.equal(response.status, 412);
+  assert.equal(s.etag(), before);
+});
+
+test("a device PUT cannot move a kept dashboard note into build", async () => {
+  const s = setup({ ...ROW, note: DASHBOARD });
+  await refused(s, () => s.put(approved(DASHBOARD)), keptRefusal(DASHBOARD));
+});
+
+test("a device PATCH cannot move a kept dashboard note into build", async () => {
+  const s = setup({ ...ROW, note: DASHBOARD });
+  await refused(s, () => s.patch(approved(DASHBOARD), device), keptRefusal(DASHBOARD));
+});
+
+test("a device PUT cannot move a kept Tracer note into build", async () => {
+  const s = setup({ ...ROW, note: TRACER });
+  await refused(s, () => s.put(approved(TRACER)), keptRefusal(TRACER));
+});
+
+test("a person's PATCH moves a kept dashboard note into build", async () => {
+  const response = await setup({ ...ROW, note: DASHBOARD }).patch(approved(DASHBOARD), person);
+  assert.equal(response.status, 200);
+});
+
+test("a device PUT moves a kept dashboard note out of build", async () => {
+  const s = setup(approved(DASHBOARD));
+  const response = await s.put({ ...ROW, note: DASHBOARD });
   assert.equal(response.status, 200);
 });
