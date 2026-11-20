@@ -395,6 +395,76 @@ test("close job", { timeout: 240000 }, async (t) => {
         });
       });
 
+      await t.test(`Escape waits for the save ${width}`, async () => {
+        await reseed();
+        await openDialog("042-sample-export");
+        await page.type("#close-job-reason", REASON);
+        // Hold the board PATCH so Escape lands while the save is in flight.
+        await page.evaluate(() => {
+          const real = window.fetch;
+          window.fetch = (url, init) => {
+            if (init?.method !== "PATCH") return real(url, init);
+            window.fetch = real;
+            return new Promise((resolve) => {
+              window.fixtureReleaseSave = () => resolve(real(url, init));
+            });
+          };
+        });
+        await activate("#close-job-save");
+        await page.waitForFunction(() => window.fixtureReleaseSave, wait);
+        await page.keyboard.press("Escape");
+        assert.deepEqual(
+          await page.evaluate(() => ({
+            open: document.getElementById("close-job-dlg").open,
+            save: document.getElementById("close-job-save").textContent,
+            cancel: document.getElementById("close-job-cancel").disabled,
+            reason: document.getElementById("close-job-reason").disabled,
+          })),
+          { open: true, save: "Saving…", cancel: true, reason: true },
+        );
+        await page.evaluate(() => window.fixtureReleaseSave());
+        await page.waitForSelector("#close-job-dlg:not([open])", wait);
+        assert.deepEqual((await boardJob(origin, "042-sample-export")).close, {
+          reason: REASON,
+          at: NOW,
+        });
+      });
+
+      await t.test(`Escape during a failed save keeps the error ${width}`, async () => {
+        await reseed();
+        await openDialog("042-sample-export");
+        const before = await boardText(origin);
+        await page.type("#close-job-reason", REASON);
+        await page.evaluate(() => {
+          const real = window.fetch;
+          window.fetch = (url, init) => {
+            if (init?.method !== "PATCH") return real(url, init);
+            window.fetch = real;
+            return new Promise((resolve, reject) => {
+              window.fixtureReleaseSave = () => reject(new TypeError("Failed to fetch"));
+            });
+          };
+        });
+        await activate("#close-job-save");
+        await page.waitForFunction(() => window.fixtureReleaseSave, wait);
+        await page.keyboard.press("Escape");
+        assert.equal(await page.$eval("#close-job-dlg", (el) => el.open), true);
+        await page.evaluate(() => window.fixtureReleaseSave());
+        await page.waitForFunction(() => !document.getElementById("close-job-err").hidden, wait);
+        assert.deepEqual(
+          await page.evaluate(() => ({
+            open: document.getElementById("close-job-dlg").open,
+            save: document.getElementById("close-job-save").textContent,
+            cancel: document.getElementById("close-job-cancel").disabled,
+            focus: document.activeElement.id,
+          })),
+          { open: true, save: "Close job", cancel: false, focus: "close-job-reason" },
+        );
+        assert.equal(await boardText(origin), before);
+        await activate("#close-job-cancel");
+        await page.waitForSelector("#close-job-dlg:not([open])");
+      });
+
       await reseed();
       await t.test(`a valid reason writes close ${width}`, async () => {
         await openDialog("042-sample-export");
