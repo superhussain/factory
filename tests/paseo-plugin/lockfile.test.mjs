@@ -12,6 +12,10 @@ test("the plugin workspace keeps tarball URLs in its lockfile", () => {
   assert.deepEqual(parse(read("pnpm-workspace.yaml")), { lockfileIncludeTarballUrl: true });
 });
 
+test("the plugin workspace pins the public registry", () => {
+  assert.equal(read(".npmrc"), `registry=${REGISTRY}\n`);
+});
+
 test("every plugin tarball resolves through the public registry", () => {
   const entries = Object.entries(parse(read("pnpm-lock.yaml")).packages ?? {});
   assert.ok(entries.length > 100, "lockfile inventories the plugin dependency graph");
