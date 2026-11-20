@@ -4,7 +4,7 @@
 // a mandatory case marker is missing. Capture mode is private builder evidence only:
 // `--capture <outdir> --reference-html <absolute path>` records matched before/after
 // views against the read-only reference page and is never part of CI or assertions.
-// Each capture side gets up to three attempts. Each retry starts a fresh browser process, so one hung page under host load does not end the run.
+// Each capture side gets up to three attempts. Each retry, and every 50th side, starts a fresh browser process.
 // A side that fails all attempts is logged and the run continues; it ends with a FAIL summary and a non-zero exit.
 // Compare two captures of one side with `node tests/browser/capture-compare.mjs`; it passes when no channel differs by more than 16.
 // Capture pages bypass the dashboard service worker so request interception answers /board.json.
@@ -437,6 +437,9 @@ async function put(origin, route, body, type) {
   if (response.status !== 200) throw new Error(`capture seed ${route}: ${response.status}`);
 }
 
+// A browser that served many sides can stop answering, so capture mode starts a fresh one this often.
+const CAPTURE_SIDES_PER_BROWSER = 50;
+
 async function capture(outdir, referencePath) {
   if (
     !outdir ||
@@ -552,8 +555,13 @@ async function capture(outdir, referencePath) {
         try {
           await retryCapture(`${side}-${name}`, async (attempt) => {
             // A timed-out page can wedge the shared browser, so each retry starts a fresh one.
-            if (attempt > 1) {
-              console.error(`capture relaunch ${side}-${name}: attempt ${attempt}`);
+            if (attempt > 1 || sidesOnBrowser >= CAPTURE_SIDES_PER_BROWSER) {
+              if (attempt > 1)
+                console.error(`capture relaunch ${side}-${name}: attempt ${attempt}`);
+              else
+                console.error(
+                  `capture recycle ${side}-${name}: ${sidesOnBrowser} sides on this browser`,
+                );
               await browser.close().catch(() => {});
               browser = await launchBrowser();
               sidesOnBrowser = 0;
