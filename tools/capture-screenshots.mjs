@@ -6,7 +6,7 @@
 // project-settings,inbox,notifications,retros-red-flags,settings-notifications,
 // settings-display,settings-hosts,settings-pipeline,board-phone,idea-attachment}.png.
 import { readFileSync } from "node:fs";
-import { mkdir, rm, stat } from "node:fs/promises";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { prepareAssets } from "./assets.mjs";
 import { startLocal } from "./local.mjs";
 import { browserExecutable } from "../tests/support/browser-server.mjs";
@@ -283,6 +283,63 @@ async function capture() {
             "(not created)",
           ),
         { timeout: 15000 },
+      );
+    });
+    const go = (page, hash) =>
+      page.evaluate((h) => {
+        location.hash = h;
+      }, hash);
+    await view("inbox", async (page) => {
+      await go(page, "#/inbox");
+      await page.waitForFunction(() =>
+        document.getElementById("inbox-list").textContent.includes("Trim the export columns"),
+      );
+    });
+    await view("notifications", async (page) => {
+      await go(page, "#/notifications");
+      await page.waitForFunction(() =>
+        document.getElementById("notifications-list").textContent.includes("Synthetic merged job"),
+      );
+    });
+    await view("retros-red-flags", async (page) => {
+      await go(page, "#/retros");
+      await page.waitForSelector("#audit-flags-wrap:not([hidden])");
+      await page.waitForFunction(
+        () =>
+          ![...document.querySelectorAll("#audit-flags-rows td:nth-child(3)")].some(
+            (cell) => cell.textContent === "example-host",
+          ),
+      );
+    });
+    for (const section of ["notifications", "display"])
+      await view(`settings-${section}`, async (page) => {
+        await go(page, `#/settings/${section}`);
+        await page.waitForSelector(`#settings-${section}:not([hidden])`);
+      });
+    await view("settings-hosts", async (page) => {
+      await go(page, "#/settings/hosts");
+      await page.waitForSelector('.host-card[data-id="lab-linux"]');
+    });
+    await view("settings-pipeline", async (page) => {
+      await go(page, "#/settings/pipeline");
+      await page.waitForFunction(
+        () =>
+          document.getElementById("pipeline-status").textContent ===
+          "Not saved yet. Choose values, then Save to create version 1.",
+      );
+      await page.waitForSelector('#pipeline-pickup-hosts input[value="lab-linux"]');
+    });
+    await view("board-phone", async () => {}, { width: 390, height: 844 });
+    const brief = persistDir + "brief.pdf";
+    await writeFile(brief, "%PDF-1.4\n%%EOF\n");
+    await view("idea-attachment", async (page) => {
+      await page.waitForSelector("#new-idea:not([hidden])");
+      await page.click("#new-idea");
+      await page.waitForSelector("#idea-dlg[open]");
+      await page.type("#idea-text", "Import the attached sales sheet.");
+      await (await page.$("#idea-file")).uploadFile(brief);
+      await page.waitForFunction(
+        () => !draft.filePending && document.querySelectorAll("#idea-image-list li").length === 1,
       );
     });
     if (external.length)
