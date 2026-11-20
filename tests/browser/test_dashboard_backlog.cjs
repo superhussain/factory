@@ -57,10 +57,12 @@ function helpers(fetch, extra = {}) {
     ...extra,
   });
   vm.runInContext(
-    script.slice(
-      script.indexOf("function parseNeeds("),
-      script.indexOf("function answersMarkdown("),
-    ) +
+    script.match(/^function discardBody\(.*$/m)[0] +
+      "\n" +
+      script.slice(
+        script.indexOf("function parseNeeds("),
+        script.indexOf("function answersMarkdown("),
+      ) +
       script.slice(script.indexOf("function ideaSlug("), script.indexOf("let ideaEditor =")) +
       "\nthis.api = { backlogItems, parseBacklogContext, backlogAnswersText, loadBacklog, ideaWithContext, addBacklogJob, backlogReworkHistory, markBacklogLine, removeBacklogJob," +
       " casBacklog, decideBacklog, backlogDepends, boardSaveError, backlogBusy, backlogPending, BOARD_UNCHANGED, get backlog() { return backlog; } };",
