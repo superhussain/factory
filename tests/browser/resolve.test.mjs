@@ -296,6 +296,36 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
         );
         assert.equal(await boardText(origin), before);
       });
+
+      await t.test(`Escape during the save still refreshes the board ${width}`, async () => {
+        await reseed();
+        await openDrawer(page, "064-sample-human");
+        await activate("#d-rework-bar");
+        await page.waitForSelector("#rework-dlg[open]", wait);
+        await page.type("#rework-note", NOTE);
+        // Hold the board PATCH so Escape lands while the save is in flight.
+        await page.evaluate(() => {
+          const real = window.fetch;
+          window.fetch = (url, init) => {
+            if (init?.method !== "PATCH") return real(url, init);
+            window.fetch = real;
+            return new Promise((resolve) => {
+              window.fixtureReleaseSave = () => resolve(real(url, init));
+            });
+          };
+        });
+        await activate("#rework-save");
+        await page.waitForFunction(() => window.fixtureReleaseSave, wait);
+        await page.keyboard.press("Escape");
+        await page.waitForSelector("#rework-dlg:not([open])", wait);
+        await page.evaluate(() => window.fixtureReleaseSave());
+        await page.waitForFunction(() => document.getElementById("d-rework-bar").hidden, {
+          ...wait,
+          timeout: 5000,
+        });
+        assert.equal((await boardJob(origin, "064-sample-human")).resolve.note, NOTE);
+        assert.deepEqual(errors, []);
+      });
       await context.close();
     }
     assert.deepEqual(errors, []);

@@ -8250,7 +8250,7 @@ $('rework-dlg').addEventListener('cancel', (e) => { e.preventDefault(); dismissR
 $('rework-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!reworkDialog || $('rework-save').disabled) return;
-  const { id } = reworkDialog;
+  const { id, opener } = reworkDialog;
   const note = $('rework-note').value.trim();
   if (!note) {
     $('rework-err').textContent = 'Write what the builder should change.';
@@ -8269,7 +8269,6 @@ $('rework-form').addEventListener('submit', async (e) => {
     $('rework-save').disabled = false;
     return;
   }
-  const { opener } = reworkDialog;
   dismissReworkDialog();
   await poll();
   // The poll hides the bar button that had focus; its opener then names the actions menu button.
