@@ -297,7 +297,7 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
         assert.equal(await boardText(origin), before);
       });
 
-      await t.test(`Escape during the save still refreshes the board ${width}`, async () => {
+      await t.test(`Escape waits for the save ${width}`, async () => {
         await reseed();
         await openDrawer(page, "064-sample-human");
         await activate("#d-rework-bar");
@@ -317,8 +317,17 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
         await activate("#rework-save");
         await page.waitForFunction(() => window.fixtureReleaseSave, wait);
         await page.keyboard.press("Escape");
-        await page.waitForSelector("#rework-dlg:not([open])", wait);
+        assert.deepEqual(
+          await page.evaluate(() => ({
+            open: document.getElementById("rework-dlg").open,
+            save: document.getElementById("rework-save").textContent,
+            cancel: document.getElementById("rework-cancel").disabled,
+            note: document.getElementById("rework-note").disabled,
+          })),
+          { open: true, save: "Saving…", cancel: true, note: true },
+        );
         await page.evaluate(() => window.fixtureReleaseSave());
+        await page.waitForSelector("#rework-dlg:not([open])", wait);
         await page.waitForFunction(() => document.getElementById("d-rework-bar").hidden, {
           ...wait,
           timeout: 5000,

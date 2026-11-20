@@ -2221,6 +2221,28 @@ async function capture(outdir, referencePath) {
       },
       true,
     );
+    await view(
+      "rework-dialog-saving-390",
+      390,
+      844,
+      "dark",
+      async (page) => {
+        await openRoundCap(page);
+        await page.evaluate(() => document.getElementById("d-rework-bar")?.click());
+        await page.waitForFunction(() => document.getElementById("rework-dlg").open, {
+          timeout: 30000,
+        });
+        await page.evaluate(() => {
+          document.getElementById("rework-note").value = "Keep the CSV header order.";
+          const real = window.fetch;
+          window.fetch = (url, init) =>
+            init?.method === "PATCH" ? new Promise(() => {}) : real(url, init);
+          document.getElementById("rework-save").click();
+        });
+        await page.waitForFunction(() => document.getElementById("rework-save").disabled);
+      },
+      true,
+    );
     await view("inbox-resolve-1280", 1280, 900, "light", async (page) => {
       await page.evaluate(() => {
         location.hash = "#/inbox";

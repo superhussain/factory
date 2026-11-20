@@ -422,6 +422,44 @@ test("move host", { timeout: 240000 }, async (t) => {
         await page.waitForSelector("#d-move-host:not([hidden])", wait);
       });
 
+      await t.test(`Escape waits for the save ${width}`, async () => {
+        await openJobActions(page);
+        await page.click("#d-move-host");
+        await page.waitForFunction(() => document.getElementById("move-host-dlg").open, wait);
+        // Hold the board PATCH so Escape lands while the save is in flight.
+        await page.evaluate(() => {
+          const real = window.fetch;
+          window.fetch = (url, init) => {
+            if (init?.method !== "PATCH") return real(url, init);
+            window.fetch = real;
+            return new Promise((resolve) => {
+              window.fixtureReleaseSave = () => resolve(real(url, init));
+            });
+          };
+        });
+        await page.click("#move-host-save");
+        await page.waitForFunction(() => window.fixtureReleaseSave, wait);
+        await page.keyboard.press("Escape");
+        assert.deepEqual(
+          await page.evaluate(() => ({
+            open: document.getElementById("move-host-dlg").open,
+            save: document.getElementById("move-host-save").textContent,
+            cancel: document.getElementById("move-host-cancel").disabled,
+            select: document.getElementById("move-host-select").disabled,
+          })),
+          { open: true, save: "Saving…", cancel: true, select: true },
+        );
+        await page.evaluate(() => window.fixtureReleaseSave());
+        await page.waitForFunction(() => !document.getElementById("move-host-dlg").open, wait);
+        const job = (await (await fetch(origin + "/api/board")).json()).jobs.find(
+          (j) => j.id === "042-sample-export",
+        );
+        assert.equal(job.move.to, "studio-mac");
+        await seedBoard(origin, JOBS);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForSelector("#d-move-host:not([hidden])", wait);
+      });
+
       await t.test(`Move job writes move and drops the claim ${width}`, async () => {
         await openJobActions(page);
         await page.click("#d-move-host");
