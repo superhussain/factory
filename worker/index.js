@@ -470,7 +470,7 @@ async function boardRefusal(env, stored, data, sameBase, principal) {
         checkRiderControls(stored.jobs, data.jobs) ??
         checkBatchRefs(stored.jobs, data.jobs) ??
         checkNewStarters(stored.jobs, data.jobs) ??
-        checkApprovalNotes(stored.jobs, data.jobs, principal))
+        (await checkApprovalNotes(env, stored.jobs, data.jobs, principal)))
       : null)
   );
 }
@@ -2597,6 +2597,8 @@ function checkArchived(stored, data) {
 const RIDER_CONTROLS = ["move", "priority", "paused", "close", "babysit"];
 const DASHBOARD_APPROVED_NOTE = "spec approved on the dashboard";
 const TRACER_APPROVED_NOTE = "spec approved in Tracer";
+const RECEIPT_PREFIX = "tracer-scope-approval/v1";
+let receiptKeyMemo = { text: "", key: null };
 const leadOfRow = (j) =>
   Array.isArray(j?.refs)
     ? (j.refs.find((r) => r?.kind === "batched-into" && typeof r.id === "string")?.id ?? null)
@@ -2624,10 +2626,58 @@ function checkRiderControls(storedJobs, jobs) {
   return null;
 }
 
+// [ticket, feature] Tracer knows a row by, as factory.py tracer_ids: the Jira key, else
+// FACTORY-<n> from the id's leading digits, else the id.
+function tracerIds(row) {
+  if (typeof row.jira === "string" && /^[A-Za-z][A-Za-z0-9]*-[1-9][0-9]*$/.test(row.jira))
+    return [row.jira.toUpperCase(), row.jira.toLowerCase()];
+  const m = /^(\d{1,7})-/.exec(row.id);
+  if (m) return [`FACTORY-${Number(m[1])}`, `factory-${Number(m[1])}`];
+  return [row.id.toUpperCase(), row.id];
+}
+
+// The Ed25519 public key Tracer signs scope approvals with, or null when none is configured.
+async function receiptKey(env) {
+  const text = env.FACTORY_TRACER_RECEIPT_KEY;
+  if (typeof text !== "string") return null;
+  if (receiptKeyMemo.text === text) return receiptKeyMemo.key;
+  let key = null;
+  try {
+    const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+    if (bytes.length === 32)
+      key = await crypto.subtle.importKey("raw", bytes, { name: "Ed25519" }, false, ["verify"]);
+  } catch {
+    key = null;
+  }
+  receiptKeyMemo = { text, key };
+  return key;
+}
+
+// Whether the row carries a Tracer-signed scope receipt for its own ticket.
+async function validReceipt(env, row) {
+  const r = row.tracer?.receipt;
+  if (typeof r !== "object" || r === null) return false;
+  const line = (v) => typeof v === "string" && v.length >= 1 && v.length <= 64 && !v.includes("\n");
+  if (![r.feature, r.ticket, r.approved_at].every(line)) return false;
+  if (typeof r.signature !== "string" || !/^[A-Za-z0-9+/]{86}==$/.test(r.signature)) return false;
+  const [ticket, feature] = tracerIds(row);
+  if (r.feature !== feature || r.ticket !== ticket) return false;
+  const key = await receiptKey(env);
+  if (key === null) return false;
+  const signature = Uint8Array.from(atob(r.signature), (c) => c.charCodeAt(0));
+  const message = [RECEIPT_PREFIX, r.feature, r.ticket, r.approved_at].join("\n");
+  return crypto.subtle.verify(
+    { name: "Ed25519" },
+    key,
+    signature,
+    new TextEncoder().encode(message),
+  );
+}
+
 // Only a signed-in person passes the spec-approval gate on the dashboard, and the Tracer
-// note needs the row's Tracer scope approved. A row whose note is unchanged passes.
-// An error message, or null.
-function checkApprovalNotes(storedJobs, jobs, principal) {
+// note needs the row's Tracer scope approved, plus a Tracer-signed receipt from a device.
+// A row whose note is unchanged passes. An error message, or null.
+async function checkApprovalNotes(env, storedJobs, jobs, principal) {
   const stored = new Map();
   for (const j of storedJobs)
     if (typeof j?.id === "string" && !stored.has(j.id)) stored.set(j.id, j);
@@ -2638,6 +2688,12 @@ function checkApprovalNotes(storedJobs, jobs, principal) {
       return `a board write from a device cannot set the note "${DASHBOARD_APPROVED_NOTE}" on ${quoteIdCut(row.id, QUOTED_ID_MAX)}: only a signed-in person approves a spec on the dashboard. Nothing was written.`;
     if (row.note === TRACER_APPROVED_NOTE && row.tracer?.scope !== "approved")
       return `a board write cannot set the note "${TRACER_APPROVED_NOTE}" on ${quoteIdCut(row.id, QUOTED_ID_MAX)} unless its tracer.scope is "approved". Nothing was written.`;
+    if (
+      row.note === TRACER_APPROVED_NOTE &&
+      principal?.kind !== "user" &&
+      !(await validReceipt(env, row))
+    )
+      return `a board write from a device cannot set the note "${TRACER_APPROVED_NOTE}" on ${quoteIdCut(row.id, QUOTED_ID_MAX)} without a Tracer-signed scope receipt for ${tracerIds(row)[0]}. Nothing was written.`;
   }
   return null;
 }
