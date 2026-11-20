@@ -457,7 +457,8 @@ function condition(request) {
 }
 
 // The first reason a board write of data over stored is refused, or null. The row checks
-// compare against the stored rows, so they run only when data was built on that version.
+// compare against the stored rows, so they run only when data was built on that version,
+// or creates the board when none is stored.
 async function boardRefusal(env, stored, data, sameBase, principal) {
   return (
     checkGoals(data.jobs) ??
@@ -553,13 +554,11 @@ async function casPut(request, env, key, type, principal, ctx) {
     }
     if (!Array.isArray(data?.jobs)) return reply("body needs a jobs array", 400);
     stored = await storedBoard(env);
-    const bad = await boardRefusal(
-      env,
-      stored,
-      data,
-      stored.etag === cond.get("If-Match"),
-      principal,
-    );
+    // A create on an absent board is built on the empty board, so the row checks run.
+    const builtOn = cond.has("If-Match")
+      ? stored.etag === cond.get("If-Match")
+      : stored.etag === null;
+    const bad = await boardRefusal(env, stored, data, builtOn, principal);
     if (bad) return reply(bad, 400);
   }
   const obj = await env.BUCKET.put(key, body, {
