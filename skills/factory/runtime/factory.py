@@ -984,7 +984,7 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
     paseo = paseo_session()
     home = factory_home() if paseo else None
 
-    def change(text):
+    def change(text, signed, sent):
         data = load_board(text)
         before = load_board(text)
         found = next((j for j in data["jobs"] if j.get("id") == job_id), None)
@@ -1051,9 +1051,12 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
         if paseo and not isinstance(job.get("paseo"), dict) and job.get("paseo_writer") != paseo:
             job["paseo_writer"] = paseo
         if tracer_gate_passed(job, patch):
+            if not signed:
+                job["tracer"].pop("receipt", None)
             if job["tracer"].get("receipt"):
                 job.update(stage="build", note=TRACER_APPROVED_NOTE)
                 job.pop("needs", None)
+                sent.append(True)
             else:
                 feature = job["tracer"].get("feature") or tracer_ids(job)[1]
                 job.update(note="gate: spec-approval",
@@ -1061,7 +1064,7 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
         if same_board(before, data, device, session):
             return None, (next(j for j in before["jobs"] if j.get("id") == job_id), None, [])
         return dump_board(data), (job, None, stacked)
-    job, held, stacked = cas(factory, "/api/board", change)
+    job, held, stacked = receipt_cas(factory, change)
     if held == "closing":
         fail(closing_message(job_id), 6)
     if held:
@@ -9409,7 +9412,7 @@ def tracer_record(home, job, base, feature_id, scope=None, receipt=None):
     if held.get("feature") == feature_id and held.get("url") == url and (scope is None or held.get("scope") == scope):
         return
 
-    def change(text):
+    def change(text, signed, sent):
         data = load_board(text)
         found = next((j for j in data["jobs"] if j.get("id") == job["id"]), None)
         if found is None:
@@ -9420,6 +9423,8 @@ def tracer_record(home, job, base, feature_id, scope=None, receipt=None):
             found["tracer"]["scope"] = scope
         if scope == "approved" and receipt:
             found["tracer"]["receipt"] = receipt
+        if not signed:
+            found["tracer"].pop("receipt", None)
         stamp = now()
         if scope in ("approved", "declined") and found.get("stage") == "needs-human" \
                 and found.get("note") == TRACER_GATE_NOTE:
@@ -9427,6 +9432,7 @@ def tracer_record(home, job, base, feature_id, scope=None, receipt=None):
                 found["stage"] = "build"
                 found["note"] = TRACER_APPROVED_NOTE
                 found.pop("needs", None)
+                sent.append(True)
             else:
                 found["note"] = "gate: spec-approval"
                 needs = TRACER_UNSIGNED_NEEDS if scope == "approved" else TRACER_DECLINED_NEEDS
@@ -9434,7 +9440,20 @@ def tracer_record(home, job, base, feature_id, scope=None, receipt=None):
             found["updated"] = stamp
         data["updated"] = stamp
         return dump_board(data), None
-    cas(home, "/api/board", change)
+    receipt_cas(home, change)
+
+
+def receipt_cas(factory, change):
+    """cas on the board with change(text, signed, sent), where change appends to sent when it
+    moves a job to build on Tracer's receipt. When the Worker refuses that write, because it
+    has no receipt key or another one, retry once unsigned so the job waits for a person."""
+    sent = []
+    try:
+        return cas(factory, "/api/board", lambda text: change(text, True, sent))
+    except SystemExit as e:
+        if e.code != 5 or not sent:
+            raise
+    return cas(factory, "/api/board", lambda text: change(text, False, []))
 
 
 def tracer_follow_pass(home):

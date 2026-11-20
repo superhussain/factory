@@ -559,6 +559,40 @@ class GatherTest(TracerCase):
             self.assertEqual((job["stage"], job["note"], job["needs"]),
                              ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS))
 
+    def refuse_tracer_note(self):
+        def api(home, method, path, body=None, ok=(200,), headers=None, raw=False):
+            if method == "PUT" and any(j.get("note") == "spec approved in Tracer" for j in json.loads(body)["jobs"]):
+                factory.fail("PUT /api/board returned 400: a board write from a device cannot set the note "
+                             '"spec approved in Tracer" on "001-sample" without a Tracer-signed scope receipt '
+                             "for FACTORY-1. Nothing was written.", 5)
+            return self.api(home, method, path, body, ok, headers, raw)
+        patch.object(factory, "api", side_effect=api).start()
+
+    def test_refused_receipt_holds_for_a_person(self):
+        with FakeTracer() as fake:
+            self.approve(fake)
+            self.refuse_tracer_note()
+            factory.tracer_follow_pass(self.home)
+            job = self.board["jobs"][0]
+            self.assertEqual((job["stage"], job["note"], job["needs"], job["tracer"]["scope"]),
+                             ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS, "approved"))
+            self.assertNotIn("receipt", job["tracer"])
+
+    def test_gate_patch_with_refused_receipt_holds(self):
+        with FakeTracer() as fake:
+            self.gather(fake)
+            fake.features["factory-1"].update(scope_approved_at=APPROVED_AT, scope_receipt=RECEIPT())
+            factory.tracer_follow_pass(self.home)
+            self.board["jobs"][0]["stage"] = "spec"
+            self.refuse_tracer_note()
+            code, _, err = self.board_patch({"stage": "needs-human", "note": "gate: tracer-scope", "needs": "approve"})
+            self.assertEqual(code, 0, err)
+            self.assertIn("Tracer-signed scope receipt", err)
+            job = self.board["jobs"][0]
+            self.assertEqual((job["stage"], job["note"], job["needs"]),
+                             ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS))
+            self.assertNotIn("receipt", job["tracer"])
+
     def test_gate_patch_without_approval_holds(self):
         for scope, feature in (("gathering", {}), ("declined", {"closed": True})):
             with self.subTest(scope=scope), FakeTracer() as fake:
