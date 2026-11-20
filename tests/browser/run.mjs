@@ -267,6 +267,15 @@ const CAPTURE_JOBS = [
     pr: "https://github.com/example/sample/pull/112",
     needs: "review and merge PR #112: this project's pipeline holds every PR for a person",
   },
+  {
+    id: "113-round-cap",
+    project: "sample",
+    title: "Synthetic round cap",
+    stage: "needs-human",
+    updated: "2026-01-01T12:00:00Z",
+    note: "review panel: round 2 findings need a person",
+    needs: "decide on the round-2 findings",
+  },
 ];
 // More merged rows than the slim board read carries, so the merged column loads the rest on demand.
 const CAPTURE_MERGED = Array.from({ length: 30 }, (_, n) => {
@@ -1105,15 +1114,23 @@ async function capture(outdir, referencePath) {
         await page.evaluate(() => {
           location.hash = "#/settings/projects";
         });
-        await page.waitForSelector("#settings-projects:not([hidden])");
-        await page.click("#settings-tab-notes");
+        await named(
+          "settings projects",
+          page.waitForSelector("#settings-projects:not([hidden])", { timeout: 30000 }),
+        );
+        await named("settings notes tab", page.click("#settings-tab-notes"));
       } else {
         await page.click("#project-settings");
         await page.select("#settings-resource", "notes.md");
       }
       // The recovered draft's conflict message, not the project tab's status, marks the view ready.
-      await page.waitForFunction(() =>
-        document.getElementById("settings-status").textContent.includes("Your draft is kept"),
+      await named(
+        "settings draft",
+        page.waitForFunction(
+          () =>
+            document.getElementById("settings-status").textContent.includes("Your draft is kept"),
+          { polling: 50, timeout: 30000 },
+        ),
       );
     };
     // History and Change summary push the field past one 390x844 screen, so the view clips from the document tabs to Save.
@@ -1338,8 +1355,11 @@ async function capture(outdir, referencePath) {
       refBoard = false;
     }
     const openNotificationsMenu = (press) => async (page) => {
-      await page[press]("#notifications-button");
-      await page.waitForSelector("#notifications-menu-list .notification-link");
+      await named("notifications button", page[press]("#notifications-button"));
+      await named(
+        "notifications list",
+        page.waitForSelector("#notifications-menu-list .notification-link", { timeout: 30000 }),
+      );
     };
     const openNotificationsPage = async (page) => {
       await page.evaluate(() => {
@@ -2164,6 +2184,52 @@ async function capture(outdir, referencePath) {
           meta.some((el) => el.textContent.includes(id)),
         );
       });
+    });
+    const openRoundCap = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#113-round-cap";
+      });
+      await page.waitForFunction(
+        () =>
+          document.getElementById("d-meta").textContent.includes("113-round-cap") &&
+          document.querySelector("#d-doc").textContent !== "loading files",
+        { timeout: 30000 },
+      );
+    };
+    await view("resolve-drawer-1280", 1280, 900, "light", async (page) => {
+      await openRoundCap(page);
+      return clipOf(page, ".detail-head");
+    });
+    // The reference page has no Rework, so its side shows the drawer alone.
+    await view(
+      "rework-dialog-390",
+      390,
+      844,
+      "dark",
+      async (page) => {
+        await openRoundCap(page);
+        await page.evaluate(() => document.getElementById("d-rework-bar")?.click());
+        await page.waitForFunction(
+          () =>
+            !document.getElementById("d-rework-bar") || document.getElementById("rework-dlg").open,
+          { timeout: 30000 },
+        );
+        await page.evaluate(() => {
+          const note = document.getElementById("rework-note");
+          if (note) note.value = "Keep the CSV header order.";
+        });
+      },
+      true,
+    );
+    await view("inbox-resolve-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/inbox";
+      });
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll("#inbox-list .inbox-meta")].some((el) =>
+          el.textContent.includes("113-round-cap"),
+        ),
+      );
     });
     const openCardActions = (id) => async (page) => {
       const wrap = `.card-wrap:has(.card[data-id="${id}"])`;

@@ -338,6 +338,8 @@ test("inbox page", { timeout: 180000 }, async (t) => {
         ["A", "Open job", "#051-sample-retry/needs"],
       ]);
       assert.deepEqual(await controls(await rowOf(page, "Recover the sample host")), [
+        ["BUTTON", "Rework…", null],
+        ["BUTTON", "Approve as is", null],
         ["A", "Open job", "#046-sample-human"],
       ]);
       assert.deepEqual(await controls(await rowOf(page, "Export the sample report")), [
@@ -847,7 +849,7 @@ test("inbox page", { timeout: 180000 }, async (t) => {
       await page.keyboard.press("Enter");
       await gone(page, "Export the sample report");
       await page.waitForFunction(() => document.activeElement !== document.body, wait);
-      assert.equal(await focused(), "Open job");
+      assert.equal(await focused(), "Rework…");
       await page.browserContext().close();
       await seedBoard(origin, [JOBS[1]]);
       await seedBacklog(origin, BACKLOG.split("- [ ] sample: Trim")[0]);

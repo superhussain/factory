@@ -1,7 +1,7 @@
 // startLocal serves the test entry, which skips auth, on one IP address and never on all of
 // them, whatever the spelling. Checked before any Wrangler process starts.
 import assert from "node:assert/strict";
-import { mkdtemp, rm, utimes } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes } from "node:fs/promises";
 import test from "node:test";
 import { prepareAssets } from "../../tools/assets.mjs";
 import { startLocal } from "../../tools/local.mjs";
@@ -43,6 +43,7 @@ test("prepareAssets with unchanged assets keeps a running service's live socket 
   const past = new Date(Date.now() - 60000);
   for (const name of ["mermaid.min.txt", "third-party-notices.txt"])
     await utimes(new URL(`../../.build/${name}`, import.meta.url), past, past);
+  await mkdir(new URL("../../.context/", import.meta.url), { recursive: true });
   const dir = await mkdtemp(
     new URL(`../../.context/local-test-${process.pid}-`, import.meta.url).pathname,
   );

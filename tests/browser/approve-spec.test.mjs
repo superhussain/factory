@@ -179,8 +179,24 @@ test("approve spec", { timeout: 240000 }, async (t) => {
           ],
           ["Spec approval", "062-sample-rider", [["A", "Open spec", "#062-sample-rider/spec"]]],
           ["Spec approval", "063-sample-paused", [["A", "Open spec", "#063-sample-paused/spec"]]],
-          ["Needs recovery", "064-sample-human", [["A", "Open job", "#064-sample-human"]]],
+          [
+            "Needs recovery",
+            "064-sample-human",
+            [
+              ["BUTTON", "Rework…"],
+              ["BUTTON", "Approve as is"],
+              ["A", "Open job", "#064-sample-human"],
+            ],
+          ],
         ]);
+        assert.ok(
+          (
+            await page.$eval(
+              '[data-inbox-approve-spec="042-sample-export"]',
+              (b) => b.closest(".inbox-item").querySelector(".inbox-meta").textContent,
+            )
+          ).endsWith(" · Read the spec, then press Approve spec to start the build."),
+        );
       });
 
       await t.test(`the focused bar button shows a ring ${width}`, async () => {

@@ -111,6 +111,15 @@ Each run, in order:
   inside a `backlog-notes` envelope, queues the follow-ups they ask for with
   `backlog add`, then runs `deny-notes <id> done`. Notes that fail admission are
   skipped. This launch does not count against `--limit` or the in-flight cap.
+- Resolve: right after deny notes, launches at most one `/factory rework <id> --session <tag>`
+  or `/factory approve <id> --session <tag>` session for a `needs-human` job whose
+  `resolve` the dashboard's Rework or Approve as is set. It claims the job and changes
+  nothing else. The note never enters argv; the session reads it with `factory.py job`
+  and clears `resolve` with null. It skips a job that waits on a human, is paused,
+  closing or held by a live claim, or whose `resolve` is malformed. A dry run prints
+  `would launch resolve ...` and `skip resolve <id> <project>: <reason>`. A failed
+  launch releases the claim. This launch does not count against `--limit` or the
+  in-flight cap.
 - Babysit: right after the priority nudges, launches at most one `/factory babysit <id>`
   session for a `pr-open` job with `babysit` set. It claims the job, records an agents
   row with role babysit when it launches a new session or sends to the job's agent, and
