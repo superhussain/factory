@@ -50,3 +50,37 @@ test("the View stub renders nativeID as the element id", async () => {
   assert.equal(withoutId.type, "div");
   assert.equal(withoutId.props.id, undefined);
 });
+
+test("the Icon stub draws the Lucide glyph for each name", async () => {
+  const repo = fileURLToPath(new URL("../..", import.meta.url));
+  const { outputFiles } = await esbuild.build({
+    entryPoints: [repo + "tools/paseo-capture/paseo-plugin.tsx"],
+    bundle: true,
+    write: false,
+    format: "iife",
+    globalName: "out",
+    platform: "browser",
+    jsx: "automatic",
+    nodePaths: [repo + "paseo-plugin/node_modules"],
+  });
+  const { Icon } = new Function(outputFiles[0].text + "\nreturn out;")();
+  const logIn = Icon({ name: "LogIn", size: 16, color: "#ffffff" });
+  assert.equal(logIn.type, "svg");
+  assert.equal(logIn.props.width, 16);
+  assert.equal(logIn.props.stroke, "#ffffff");
+  assert.equal(logIn.props["data-icon"], "LogIn");
+  assert.deepEqual(
+    logIn.props.children.map((path) => path.props.d),
+    ["m10 17 5-5-5-5", "M15 12H3", "M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"],
+  );
+  for (const [name, count] of [
+    ["Factory", 4],
+    ["RotateCw", 2],
+    ["ExternalLink", 3],
+  ]) {
+    const icon = Icon({ name, size: 16, color: "#000" });
+    assert.equal(icon.type, "svg");
+    assert.equal(icon.props.children.length, count);
+  }
+  assert.equal(Icon({ name: "Nope", size: 16, color: "#000" }), null);
+});
