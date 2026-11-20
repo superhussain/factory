@@ -61,6 +61,9 @@ const UNCERTAIN =
   "Not confirmed: saving the board failed: 503 Storage is busy. The rework may have saved. Press Start rework again to check. It will not queue a second rework.";
 const FIRST_PRESS =
   " Your first press most likely saved, and the job has moved on since. Check its note on the board.";
+const EDITED = "Keep the CSV header order and the footer.";
+const KEPT =
+  "Your first press saved the rework with the note as it was then. The job still holds that note, so your edit was not saved. Cancel closes this dialog and keeps the first note.";
 // The next board PATCH lands, then the page sees a 503 as if the answer was lost.
 const landThen503 = (page) =>
   page.evaluate(() => {
@@ -443,6 +446,26 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
         await secondPress();
         assert.equal(await page.$eval("#rework-dlg", (el) => el.open), false);
         assert.equal(await boardText(origin), before);
+      });
+
+      await t.test(`an edited second press keeps the first note ${width}`, async () => {
+        await landedRework();
+        await page.$eval("#rework-note", (el) => (el.value = ""));
+        await page.type("#rework-note", EDITED);
+        const before = await boardText(origin);
+        await secondPress();
+        if (width === 390) {
+          await mkdir(SHOTS, { recursive: true });
+          await (
+            await page.$("#rework-dlg")
+          ).screenshot({ path: `${SHOTS}edited-second-press-rework-390.png` });
+        }
+        assert.equal(await page.$eval("#rework-err", (el) => el.textContent), KEPT);
+        assert.equal(await boardText(origin), before);
+        assert.equal((await boardJob(origin, "064-sample-human")).resolve.note, NOTE);
+        assert.equal(await page.$eval("#rework-note", (el) => el.value), EDITED);
+        await page.keyboard.press("Escape");
+        await page.waitForSelector("#rework-dlg:not([open])", wait);
       });
       await context.close();
     }
