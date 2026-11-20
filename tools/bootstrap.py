@@ -396,6 +396,7 @@ def up(answers, api, run, root):
     print("Next: open it in a browser and sign in as one of " + ", ".join(answers["emails"]) + ".")
     print("Then follow docs/getting-started.md to install the skill, add a project and start a first job.")
     print("To add another device, run python3 tools/bootstrap.py up on that host.")
+    print("For push notifications and the installable app, see docs/notifications.md.")
     print("Store this API token as CLOUDFLARE_API_TOKEN in " + str(home / ".env") + " so agents here can manage the instance; see Device token in docs/cloudflare.md.")
 
 

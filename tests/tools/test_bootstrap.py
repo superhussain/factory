@@ -315,6 +315,9 @@ class FreshUpTest(Instance):
         self.assertIn("Factory is live at https://factory.example.test", out)
         self.assertIn("Then follow docs/getting-started.md", out)
         self.assertIn("so agents here can manage the instance", out)
+        self.assertIn("see docs/notifications.md", out)
+        self.assertLess(out.index("docs/notifications.md"), out.index("so agents here can manage the instance"))
+        self.assertTrue(out.rstrip().splitlines()[-1].startswith("Store this API token"))
         self.assertNotIn(API_TOKEN, out)
         self.assertIn(str(self.home / ".env"), out)
 
