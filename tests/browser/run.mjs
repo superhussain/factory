@@ -1118,7 +1118,16 @@ async function capture(outdir, referencePath) {
           "settings projects",
           page.waitForSelector("#settings-projects:not([hidden])", { timeout: 30000 }),
         );
-        await named("settings notes tab", page.click("#settings-tab-notes"));
+        // The pickup status above the tabs can grow a line late, so settle it and click without coordinates.
+        await named(
+          "settings pickup",
+          page.waitForFunction(
+            () =>
+              !document.getElementById("project-pickup-status")?.textContent.startsWith("Loading"),
+            { polling: 50, timeout: 30000 },
+          ),
+        );
+        await named("settings notes tab", clickNow(page, "#settings-tab-notes"));
       } else {
         await page.click("#project-settings");
         await page.select("#settings-resource", "notes.md");
