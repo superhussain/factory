@@ -548,9 +548,9 @@ test("paseo embed", { timeout: 180000 }, async (t) => {
         DRAFT + " more",
       );
       await warm.click("#side");
-      // A real click on #idea-h focuses the modal dialog, so model a press that leaves focus on body.
+      // A real click on plain dialog text focuses the modal dialog, so model a press that leaves focus on body.
       await frame.evaluate(() => {
-        document.querySelector("#idea-h").dispatchEvent(new PointerEvent("pointerdown"));
+        document.querySelector("#idea-key-help").dispatchEvent(new PointerEvent("pointerdown"));
         document.activeElement.blur();
       });
       await warm.evaluate(() => window.attached.frame.element.focus());

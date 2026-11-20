@@ -121,6 +121,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   dialog textarea { resize: vertical; min-height: 140px; }
   dialog .err, .detail > .err { color: var(--alert); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
   dialog .err.saved { color: inherit; }
+  dialog h2[tabindex="-1"]:focus { outline: none; }
+  dialog .actions .btn:not(.primary):disabled { border-style: dashed; color: var(--muted); }
   .detail > .err, .detail > .copy-status { margin: 12px 20px; flex: none; }
   .detail > .copy-status { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
   .detail > .copy-status:empty { display: none; }
@@ -1326,7 +1328,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
 </div>
 <dialog id="idea-dlg" aria-labelledby="idea-h">
   <form id="idea-form">
-    <h2 id="idea-h">New idea</h2>
+    <h2 id="idea-h" tabindex="-1">New idea</h2>
     <p class="muted" id="idea-ref" hidden></p>
     <label>Project<select id="idea-project" aria-describedby="idea-project-help"></select></label>
     <p class="muted" id="idea-project-help"></p>
@@ -1341,37 +1343,41 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
 </dialog>
 <dialog id="edit-idea-dlg" aria-labelledby="edit-idea-h">
   <form id="edit-idea-form">
-    <h2 id="edit-idea-h">Edit idea</h2>
+    <h2 id="edit-idea-h" tabindex="-1">Edit idea</h2>
     <label>Idea<textarea id="edit-idea-text" required maxlength="4000" aria-describedby="edit-idea-help" placeholder="The feature, as you'd tell the spec writer. The first line becomes the title."></textarea></label>
     <p class="muted" id="edit-idea-help">The first nonblank line becomes the title. The job ID stays the same.</p>
+    <p class="sr-only" id="edit-idea-status" role="status"></p>
     <p class="err" id="edit-idea-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="edit-idea-cancel">Cancel</button><button class="btn primary" type="submit" id="edit-idea-save">Save changes</button></div>
   </form>
 </dialog>
 <dialog id="move-host-dlg" aria-labelledby="move-host-h">
   <form id="move-host-form">
-    <h2 id="move-host-h">Move to another host</h2>
+    <h2 id="move-host-h" tabindex="-1">Move to another host</h2>
     <p class="muted" id="move-host-help"></p>
     <label id="move-host-label">Host<select id="move-host-select" aria-describedby="move-host-help"></select></label>
     <p class="muted" id="move-host-empty" role="status" aria-live="polite" hidden></p>
+    <p class="sr-only" id="move-host-status" role="status"></p>
     <p class="err" id="move-host-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="move-host-cancel">Cancel</button><button class="btn primary" type="submit" id="move-host-save">Move job</button></div>
   </form>
 </dialog>
 <dialog id="close-job-dlg" aria-labelledby="close-job-h">
   <form id="close-job-form">
-    <h2 id="close-job-h">Close job</h2>
+    <h2 id="close-job-h" tabindex="-1">Close job</h2>
     <p class="muted" id="close-job-help"></p>
     <label>Reason<input type="text" id="close-job-reason" maxlength="200" autocomplete="off" aria-describedby="close-job-help"></label>
+    <p class="sr-only" id="close-job-status" role="status"></p>
     <p class="err" id="close-job-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="close-job-cancel">Cancel</button><button class="btn primary" type="submit" id="close-job-save">Close job</button></div>
   </form>
 </dialog>
 <dialog id="rework-dlg" aria-labelledby="rework-h">
   <form id="rework-form">
-    <h2 id="rework-h">Rework job</h2>
+    <h2 id="rework-h" tabindex="-1">Rework job</h2>
     <p class="muted" id="rework-help"></p>
     <label>Note<textarea id="rework-note" maxlength="2000" placeholder="What the builder should change." aria-describedby="rework-help"></textarea></label>
+    <p class="sr-only" id="rework-status" role="status"></p>
     <p class="err" id="rework-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="rework-cancel">Cancel</button><button class="btn primary" type="submit" id="rework-save">Start rework</button></div>
   </form>
@@ -7900,6 +7906,7 @@ function closeIdeaEditor() {
   const { opener } = ideaEditor.ctx;
   ideaEditor = null;
   $('edit-idea-dlg').close();
+  $('edit-idea-status').textContent = '';
   $('edit-idea-text').value = '';
   $('edit-idea-err').textContent = '';
   $('edit-idea-err').hidden = true;
@@ -8187,6 +8194,7 @@ async function openMoveHost(ctx) {
   empty.hidden = !emptyText;
   $('move-host-save').disabled = !hosts.length;
   $('move-host-dlg').showModal();
+  $(hosts.length ? 'move-host-select' : 'move-host-cancel').focus();
   if (emptyText) {
     const opened = moveHost;
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -8239,8 +8247,11 @@ $('move-host-form').addEventListener('submit', async (e) => {
   await poll();
 });
 
+// Disabling the focused control drops focus to the page body. Keep it in the dialog, on its heading.
+function keepDialogFocus(id) { const a = document.activeElement; if (!$(id).contains(a) || a.disabled) $(id).querySelector('h2').focus(); }
+
 // While a dialog save runs, Escape and Cancel wait for it, as in the idea dialogs. A sent save cannot be recalled.
-function setDialogSaving(name, field, label, saving) { $(name + '-save').disabled = saving; $(name + '-save').textContent = saving ? 'Saving…' : label; $(name + '-cancel').disabled = saving; $(field).disabled = saving; }
+function setDialogSaving(name, field, label, saving) { $(name + '-save').disabled = saving; $(name + '-save').textContent = saving ? 'Saving…' : label; $(name + '-cancel').disabled = saving; $(field).disabled = saving; $(name + '-status').textContent = saving ? 'Saving…' : ''; if (saving) keepDialogFocus(name + '-dlg'); }
 
 let reworkDialog = null;
 
@@ -8430,11 +8441,14 @@ $('edit-idea-form').addEventListener('submit', async (e) => {
   session.saving = true;
   session.error = '';
   syncIdeaEditor();
+  $('edit-idea-status').textContent = 'Saving…';
+  keepDialogFocus('edit-idea-dlg');
   try {
     await casBoard((board) => editIdea(board, edit.id, edit.originalText, edit.text, isoNow()) === 'unchanged' ? BOARD_UNCHANGED : undefined);
   } catch (x) {
     session.error = String(x.message || x);
     session.saving = false;
+    $('edit-idea-status').textContent = '';
     syncIdeaEditor();
     $('edit-idea-text').focus();
     return;
@@ -8472,7 +8486,7 @@ function openIdeaDialog(followUp = null, prefill = null) {
   $('idea-h').textContent = followUp ? 'New follow-up idea' : 'New idea';
   $('idea-err').hidden = true;
   $('idea-dlg').showModal();
-  if (followUp || prefill) $('idea-text').focus();
+  $(followUp || prefill ? 'idea-text' : 'idea-project').focus();
 }
 $('new-idea').addEventListener('click', () => openIdeaDialog());
 function followUpAction(ctx) {
@@ -9018,6 +9032,7 @@ $('idea-form').addEventListener('submit', async (e) => {
   if (inflight) return;
   inflight = true;
   renderDraft();
+  keepDialogFocus('idea-dlg');
   let id = null;
   try {
     id = await saveIdea();

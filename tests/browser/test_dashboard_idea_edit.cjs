@@ -512,6 +512,10 @@ function fakeUI(fetch) {
           contains() {
             return false;
           },
+          // keepDialogFocus looks up the dialog heading: edit-idea-dlg has edit-idea-h.
+          querySelector() {
+            return document.getElementById(id.replace(/-dlg$/, "-h"));
+          },
           getClientRects() {
             return this.hidden ? [] : [{}];
           },
@@ -1067,6 +1071,8 @@ async function browserTest(url) {
     assert.equal(await disabled("#edit-idea-text"), true);
     assert.equal(await disabled("#edit-idea-cancel"), true);
     assert.equal(await page.$eval("#edit-idea-save", (e) => e.textContent), "Saving…");
+    assert.equal(await page.evaluate(() => document.activeElement.id), "edit-idea-h");
+    assert.equal(await page.$eval("#edit-idea-status", (e) => e.textContent), "Saving…");
     await page.keyboard.press("Escape");
     assert.equal(await editorOpen(), true);
     await page.click("#edit-idea-cancel");
@@ -1253,6 +1259,7 @@ async function browserTest(url) {
     await page.evaluate(() => closeDetail());
     await page.click("#new-idea");
     await page.waitForFunction(() => document.getElementById("idea-dlg").open, { polling: 50 });
+    assert.equal(await page.evaluate(() => document.activeElement.id), "idea-project");
     await page.type("#idea-text", "\nCreated idea 😀\nBody");
     held = hold("GET", "/board.json");
     await page.click("#idea-add");
@@ -1369,6 +1376,7 @@ async function browserTest(url) {
     request = await held;
     const frozen = JSON.parse(request.postData()).rows.at(-1).row;
     assert.equal(await page.$eval("#idea-add", (e) => e.textContent), "Saving…");
+    assert.equal(await page.evaluate(() => document.activeElement.id), "idea-h");
     assert.equal(await disabled("#idea-add"), true);
     // Cancel and Escape do nothing while the save runs: closing would drop the snapshot.
     assert.equal(await disabled("#idea-cancel"), true);

@@ -421,11 +421,24 @@ test("close job", { timeout: 240000 }, async (t) => {
             save: document.getElementById("close-job-save").textContent,
             cancel: document.getElementById("close-job-cancel").disabled,
             reason: document.getElementById("close-job-reason").disabled,
+            focus: document.activeElement.id,
+            status: document.getElementById("close-job-status").textContent,
+            cancelBorder: getComputedStyle(document.getElementById("close-job-cancel"))
+              .borderTopStyle,
           })),
-          { open: true, save: "Saving…", cancel: true, reason: true },
+          {
+            open: true,
+            save: "Saving…",
+            cancel: true,
+            reason: true,
+            focus: "close-job-h",
+            status: "Saving…",
+            cancelBorder: "dashed",
+          },
         );
         await page.evaluate(() => window.fixtureReleaseSave());
         await page.waitForSelector("#close-job-dlg:not([open])", wait);
+        assert.equal(await page.$eval("#close-job-status", (e) => e.textContent), "");
         assert.deepEqual((await boardJob(origin, "042-sample-export")).close, {
           reason: REASON,
           at: NOW,
