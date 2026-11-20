@@ -47,6 +47,9 @@ test("install app", { timeout: 180000 }, async (t) => {
       if (setup) await setup(page);
       await page.goto(origin + "/#/settings/display", { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#settings-display:not([hidden])", wait);
+      // The projects load re-enters the section and focuses the theme select, so wait it out
+      // before a case checks focus.
+      await page.waitForSelector('#display-idea-project option[value="sample"]', wait);
       return page;
     };
     const dispatch = (page, outcome) =>
