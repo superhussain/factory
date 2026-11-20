@@ -188,7 +188,10 @@ python3 <installed-skill>/runtime/factory.py with-cloudflare -- sh -c 'printf "A
 | Case | Exit | stderr |
 | --- | --- | --- |
 | no `--` or no command | 2 | `factory.py: usage: factory.py with-cloudflare -- <command> [<arg>...]` |
-| `.env` missing, a link, unreadable, or no token | 5 | `factory.py: CLOUDFLARE_API_TOKEN missing from <env path>. docs/cloudflare.md, Device token, shows how to store it.` |
+| no `.env` | 5 | `factory.py: no <env path>. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there.` |
+| `.env` is a link or not a regular file | 5 | `factory.py: <env path> is a link or not a regular file, so it was not read. Replace it with a regular file.` |
+| `.env` unreadable | 5 | `factory.py: cannot read <env path>: check its permissions and that it is UTF-8 text.` |
+| no token | 5 | `factory.py: CLOUDFLARE_API_TOKEN missing from <env path>. docs/cloudflare.md, Device token, shows how to store it.` |
 | command not found | 127 | `factory.py: cannot run <command>` |
 
 Otherwise it exits with the command's code, or `128 + N` when signal `N` ends it.

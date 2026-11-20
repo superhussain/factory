@@ -30,12 +30,15 @@ class WithCloudflareTest(IsolatedTestCase):
         self.assertNotIn("cf-test-token", stdout + stderr)
         return code, stdout, stderr
 
-    def assert_missing_token(self):
+    def assert_exit_5(self, message):
         code, stdout, stderr = self.run_child(sys.executable, "-c", DUMP_ENV, str(self.out))
         self.assertEqual((code, stdout), (5, ""))
-        self.assertEqual(stderr, f"factory.py: CLOUDFLARE_API_TOKEN missing from {self.env_file}. "
-                                 "docs/cloudflare.md, Device token, shows how to store it.\n")
+        self.assertEqual(stderr, f"factory.py: {message}\n")
         self.assertFalse(self.out.exists())
+
+    def assert_not_regular(self):
+        self.assert_exit_5(f"{self.env_file} is a link or not a regular file, so it was not read. "
+                           "Replace it with a regular file.")
 
     def test_loads_only_cloudflare_keys(self):
         self.assertEqual(self.run_child(sys.executable, "-c", DUMP_ENV, str(self.out)), (0, "", ""))
@@ -47,18 +50,33 @@ class WithCloudflareTest(IsolatedTestCase):
     def test_child_exit_code(self):
         self.assertEqual(self.run_child(sys.executable, "-c", "raise SystemExit(7)"), (7, "", ""))
 
-    def test_missing_token(self):
+    def test_no_token(self):
         self.env_file.write_text("CLOUDFLARE_ACCOUNT_ID=acct-test\n", encoding="utf-8")
-        self.assert_missing_token()
+        self.assert_exit_5(f"CLOUDFLARE_API_TOKEN missing from {self.env_file}. "
+                           "docs/cloudflare.md, Device token, shows how to store it.")
+
+    def test_no_env_file(self):
         self.env_file.unlink()
-        self.assert_missing_token()
+        self.assert_exit_5(f"no {self.env_file}. docs/cloudflare.md, Device token, "
+                           "shows how to store CLOUDFLARE_API_TOKEN there.")
 
     @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
     def test_linked_env(self):
         target = self.home / "real.env"
         self.env_file.rename(target)
         self.env_file.symlink_to(target)
-        self.assert_missing_token()
+        self.assert_not_regular()
+
+    def test_env_is_folder(self):
+        self.env_file.unlink()
+        self.env_file.mkdir()
+        self.assert_not_regular()
+
+    @unittest.skipIf(os.name == "nt" or os.geteuid() == 0, "chmod 0 does not block reads here")
+    def test_unreadable_env(self):
+        self.env_file.chmod(0)
+        self.addCleanup(self.env_file.chmod, 0o600)
+        self.assert_exit_5(f"cannot read {self.env_file}: check its permissions and that it is UTF-8 text.")
 
     def test_usage(self):
         for args in (["with-cloudflare"], ["with-cloudflare", "--"],

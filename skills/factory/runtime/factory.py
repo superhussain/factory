@@ -10667,11 +10667,20 @@ def with_cloudflare_cmd(*argv):
     if len(argv) < 2 or argv[0] != "--":
         fail("usage: factory.py with-cloudflare -- <command> [<arg>...]", 2)
     env_file = factory_home() / ".env"
+    not_regular = f"{env_file} is a link or not a regular file, so it was not read. Replace it with a regular file."
+    unreadable = f"cannot read {env_file}: check its permissions and that it is UTF-8 text."
+    if is_link(env_file):
+        fail(not_regular, 5)
+    if not os.path.lexists(env_file):
+        fail(f"no {env_file}. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there.", 5)
+    if not stat.S_ISREG(env_file.stat().st_mode):
+        fail(not_regular, 5)
+    if not os.access(env_file, os.R_OK):
+        fail(unreadable, 5)
     try:
-        regular_metadata(env_file)
         loaded = {k: v for k, v in read_conf(env_file).items() if k.startswith("CLOUDFLARE_") and v}
     except (OSError, ValueError):
-        loaded = {}
+        fail(unreadable, 5)
     if "CLOUDFLARE_API_TOKEN" not in loaded:
         fail(f"CLOUDFLARE_API_TOKEN missing from {env_file}. docs/cloudflare.md, Device token, shows how to store it.", 5)
     try:
