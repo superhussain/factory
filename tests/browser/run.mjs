@@ -1114,15 +1114,23 @@ async function capture(outdir, referencePath) {
         await page.evaluate(() => {
           location.hash = "#/settings/projects";
         });
-        await page.waitForSelector("#settings-projects:not([hidden])");
-        await page.click("#settings-tab-notes");
+        await named(
+          "settings projects",
+          page.waitForSelector("#settings-projects:not([hidden])", { timeout: 30000 }),
+        );
+        await named("settings notes tab", page.click("#settings-tab-notes"));
       } else {
         await page.click("#project-settings");
         await page.select("#settings-resource", "notes.md");
       }
       // The recovered draft's conflict message, not the project tab's status, marks the view ready.
-      await page.waitForFunction(() =>
-        document.getElementById("settings-status").textContent.includes("Your draft is kept"),
+      await named(
+        "settings draft",
+        page.waitForFunction(
+          () =>
+            document.getElementById("settings-status").textContent.includes("Your draft is kept"),
+          { polling: 50, timeout: 30000 },
+        ),
       );
     };
     // History and Change summary push the field past one 390x844 screen, so the view clips from the document tabs to Save.
@@ -1347,8 +1355,11 @@ async function capture(outdir, referencePath) {
       refBoard = false;
     }
     const openNotificationsMenu = (press) => async (page) => {
-      await page[press]("#notifications-button");
-      await page.waitForSelector("#notifications-menu-list .notification-link");
+      await named("notifications button", page[press]("#notifications-button"));
+      await named(
+        "notifications list",
+        page.waitForSelector("#notifications-menu-list .notification-link", { timeout: 30000 }),
+      );
     };
     const openNotificationsPage = async (page) => {
       await page.evaluate(() => {
