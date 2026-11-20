@@ -9,9 +9,12 @@ import type { Reload } from "../shared/reload";
 import { firstLoginSteps, isBrowserOrigin, openLabel } from "../shared/first-login";
 import { createOpenLimiter } from "../shared/open-limit";
 import { factorySettings } from "../shared/settings";
+import { CARD_ID } from "../shared/warm-frame";
 import {
+  cardHeldFocus,
   DashboardFrame,
   dropWarmFrame,
+  focusFrame,
   frameReady,
   frameSignedOut,
   hasLoadedBefore,
@@ -70,6 +73,12 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
       const timer = setTimeout(() => setStalled(true), READY_TIMEOUT_MS);
       return () => clearTimeout(timer);
     }, [origin, load, showing]);
+    const refocus = useRef(false);
+    useEffect(() => {
+      if (!refocus.current) return;
+      refocus.current = false;
+      if (origin) focusFrame(origin);
+    }, [ready]);
 
     const styles = {
       screen: { flex: 1, backgroundColor: theme.colors.surface0 },
@@ -180,6 +189,7 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
 
     const onMessage = (message: EmbedMessage) => {
       if (message.type === "factory-embed-ready") {
+        refocus.current = cardHeldFocus();
         setReady(true);
         setStalled(false);
         setExpired(false);
@@ -213,7 +223,7 @@ export function dashboardScreen(client: PluginClientContext, reload: Reload) {
         {ready ? null : (
           <ScrollView style={styles.overlay} contentContainerStyle={styles.overlayContent}>
             {stalled ? (
-              <View style={styles.card}>
+              <View nativeID={CARD_ID} style={styles.card}>
                 <Icon name="Factory" size={28} color={theme.colors.accent} />
                 <Text style={styles.title}>
                   {expired

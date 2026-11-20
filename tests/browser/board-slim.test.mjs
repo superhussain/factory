@@ -264,6 +264,7 @@ test("slim board read", { timeout: 240000 }, async (t) => {
         await text(page, "#board-status"),
         "You're offline. Job 500-synthetic-merged opens when you reconnect.",
       );
+      assert.doesNotMatch(await text(page, "#board-status"), /opens when the board loads/);
       assert.equal(await page.evaluate(() => window.archiveReadCount), 0);
       await page.evaluate(() => window.releaseSlim());
       await page.waitForFunction(
@@ -271,6 +272,73 @@ test("slim board read", { timeout: 240000 }, async (t) => {
         wait,
       );
       assert.equal(await page.evaluate(() => window.archiveReadCount), 0);
+      await page.close();
+    });
+
+    await t.test(
+      "an online link to an older merged job says it opens when the board loads",
+      async () => {
+        const page = await openSaved(browser, origin);
+        await page.evaluate(() => {
+          location.hash = "#500-synthetic-merged";
+        });
+        await page.waitForFunction(
+          () => document.getElementById("board-status").textContent !== "",
+          wait,
+        );
+        assert.equal(
+          await text(page, "#board-status"),
+          "Job 500-synthetic-merged opens when the board loads.",
+        );
+        assert.equal(await page.evaluate(() => window.archiveReadCount), 0);
+        assert.equal(await page.evaluate(() => window.fullReadCount), 0);
+        await page.evaluate(() => window.releaseSlim());
+        await page.waitForFunction(
+          () => document.getElementById("d-title").textContent === "Synthetic merged 500",
+          wait,
+        );
+        assert.equal(await page.$eval("#board-status", (el) => el.hidden), true);
+        await page.close();
+      },
+    );
+
+    await t.test("a network read inside the toast's 100 ms delay leaves it hidden", async () => {
+      const page = await openSaved(browser, origin);
+      await page.evaluate(() => {
+        // Stretch the toast's 100 ms text delay so the drawer surely opens inside it.
+        const setTimeoutNow = window.setTimeout;
+        window.setTimeout = (fn, ms, ...rest) => setTimeoutNow(fn, ms === 100 ? 1500 : ms, ...rest);
+        // Runs after the dashboard's listener, so the wait toast is pending when the read lands.
+        addEventListener("hashchange", () => window.releaseSlim(), { once: true });
+        location.hash = "#500-synthetic-merged";
+      });
+      await page.waitForFunction(
+        () => document.getElementById("d-title").textContent === "Synthetic merged 500",
+        wait,
+      );
+      assert.equal(await text(page, "#board-status"), "");
+      await new Promise((resolve) => setTimeout(resolve, 1800));
+      assert.equal(await page.$eval("#board-status", (el) => el.hidden), true);
+      await page.close();
+    });
+
+    await t.test("a link to a loaded job drops the earlier wait toast", async () => {
+      const page = await openSaved(browser, origin);
+      await page.evaluate(() => {
+        location.hash = "#500-synthetic-merged";
+      });
+      await page.waitForFunction(
+        () => document.getElementById("board-status").textContent !== "",
+        wait,
+      );
+      await page.evaluate(() => {
+        location.hash = "#600-synthetic-build";
+      });
+      await page.waitForFunction(
+        () => document.getElementById("d-title").textContent === "Synthetic build, renamed",
+        wait,
+      );
+      assert.equal(await page.$eval("#board-status", (el) => el.hidden), true);
       await page.close();
     });
 

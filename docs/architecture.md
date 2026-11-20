@@ -16,8 +16,8 @@ Node `>=22.18.0`, pinned development Node `24.14.0`, pnpm `11.9.0`.
 `mise install` provisions the pins from `mise.toml`;
 `mise exec -- pnpm install --frozen-lockfile` installs dependencies.
 Direct pins are jose `6.2.13`, Wrangler `4.154.0`, Mermaid `12.2.0`, esbuild
-`0.28.2`, puppeteer-core `25.16.0`, @puppeteer/browsers `3.2.6` and test-only
-YAML parser `2.9.1`.
+`0.28.2`, puppeteer-core `25.16.0`, @puppeteer/browsers `3.2.6`, test-only
+Miniflare `5.20261023.1-beta` and test-only YAML parser `2.9.1`.
 Only jose is a production dependency. The lock records exact registry integrity
 for every dependency; browser installation is a separate explicit operation.
 

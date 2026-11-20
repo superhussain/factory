@@ -7,6 +7,7 @@ import {
   createFrameKeeper,
   freshPress,
   shouldFocusFrame,
+  shouldRefocusFrame,
 } from "../../paseo-plugin/shared/warm-frame.ts";
 
 const A = "https://factory.example.test";
@@ -181,4 +182,14 @@ test("freshPress forgets a press after PRESS_MS", () => {
   assert.equal(freshPress({ kind: "pointer", at }, at + 2_000), null);
   assert.equal(freshPress({ kind: "keyboard", at }, at + 1_999), "keyboard");
   assert.equal(freshPress(null, at), null);
+});
+
+test("shouldRefocusFrame refocuses only when the card held focus", () => {
+  const inside = { id: "sign-in" };
+  const outside = { id: "sidebar" };
+  const card = { contains: (node) => node === inside };
+  assert.equal(shouldRefocusFrame(card, inside), true);
+  assert.equal(shouldRefocusFrame(null, inside), false);
+  assert.equal(shouldRefocusFrame(card, null), false);
+  assert.equal(shouldRefocusFrame(card, outside), false);
 });

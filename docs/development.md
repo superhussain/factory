@@ -87,7 +87,7 @@ runs `format:check`, the workflow contracts and the affected `auth`, `protocol`,
 suites, picked by `FACTORY_BROWSER_SHARD=<n>/4`; unset runs them all. The `paseo-plugin` job installs `paseo-plugin/` from its own lockfile, then runs its `typecheck` and `pnpm run test:paseo-plugin`, which also checks that every plugin lockfile entry has a public registry tarball URL. Its packages are not in the cached store, so that install downloads them each run. The `ci`
 job runs unless the run was cancelled, prints each job's name with its result,
 and passes only when every other job succeeds. `local` binds
-`127.0.0.1:8220`/`8221` and `browser` binds owned ephemeral ports,
+`127.0.0.1:8220`/`8221`/`8222` and `browser` binds owned ephemeral ports,
 so the two run side by side with no Nx dependency between them. A pull request that
 changes only docs selects nothing in the `browser` shards, which skip their
 gated provision. `targets` always provisions the browser because `assets` runs a
@@ -124,7 +124,7 @@ both Worker suites. `worker-hosted`'s suites depend on `web-dashboard:assets`
 because they import the `.build` artifacts it writes, so a clean checkout builds
 assets first. The `local` and `browser` suites are cached like the rest: a
 cache hit replays the stored output without executing. Only `local` binds
-`127.0.0.1:8220`/`8221`; `browser` starts its local services on owned ephemeral
+`127.0.0.1:8220`/`8221`/`8222`; `browser` starts its local services on owned ephemeral
 ports, so the two never contend for a port. Their inputs cover
 `tests/`, `worker/` and `web/` sources only — `skills/` stays outside.
 
@@ -133,8 +133,7 @@ ports, so the two never contend for a port. Their inputs cover
 lists the four projects. The `device-bundle` Python suites run as the cached
 `cli`/`install` targets (and `tooling:verify`) through `nx run-many` — they are
 not part of the `affected` selection; `tools/verify.py` still
-runs them directly with no Node. Job 108 adds
-the lint and format targets later; `nx.json` deliberately declares none.
+runs them directly with no Node. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
 
 ## Visual captures
 
@@ -144,7 +143,7 @@ records matched before and after views. Each `view(...)` line in
 
 | Viewport | Used by |
 | --- | --- |
-| 1440x900 | desktop views, `retros-flags-offline-desktop`, `board-merged-all-1440`, `board-merged-header-1440`, `board-merged-loading-1440`, `board-merged-saved-click-1440`, `board-banner-saved-1440`, `board-offline-deeplink-1440`, `board-merged-160-1763`, `board-merged-160-1763-loading`, `header-badges-1440` |
+| 1440x900 | desktop views, `retros-flags-offline-desktop`, `board-merged-all-1440`, `board-merged-header-1440`, `board-merged-loading-1440`, `board-merged-saved-click-1440`, `board-banner-saved-1440`, `board-offline-deeplink-1440`, `board-saved-deeplink-1440`, `board-merged-160-1763`, `board-merged-160-1763-loading`, `header-badges-1440` |
 | 1280x900 | settings, archive and agent-run views, `notify-toast-1280`, `notifications-menu-kinds-1280`, `notifications-split-1280`, `notifications-page-hidden-links-1280`, `notify-sound-wait-1280`, `retros-split-1280`, `settings-split-1280`, `approve-spec-drawer-1280`, `inbox-spec-1280`, `inbox-unblock-1280` |
 | 390x844 | mobile views, `notify-toast-390`, `notify-alerts-390`, `board-merged-header-390` and `approve-spec-drawer-390` |
 | 375x667 | `drawer-mobile-scrolled` |

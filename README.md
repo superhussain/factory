@@ -52,7 +52,7 @@ mise exec -- pnpm exec nx run-many -t cli install verify
 
 `worker-hosted` owns `auth` and `protocol`, `web-dashboard` owns `assets`, `tooling` owns `deploy`, `local`, `browser` and `verify`, and `skills/factory` is declared as `device-bundle`, whose Python suites run as the cached `cli`/`install` targets (and `tooling:verify`) through `nx run-many`; `tools/verify.py` still runs them directly with no Node. `worker-hosted`'s suites depend on `web-dashboard:assets` because they import the `.build` artifacts it writes, so a clean checkout builds assets first. Only `local` binds the fixed ports 8220/8221; `browser` uses owned ephemeral ports, so the two run side by side.
 
-`nx` is a pinned devDependency; task results cache locally under the ignored `.nx/cache` (`pnpm exec nx reset` clears them), and `pnpm exec nx show projects` lists the four projects. Job 108 adds the lint and format targets later; `nx.json` deliberately declares none.
+`nx` is a pinned devDependency; task results cache locally under the ignored `.nx/cache` (`pnpm exec nx reset` clears them), and `pnpm exec nx show projects` lists the four projects. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
 
 ## Private deployment profile
 
@@ -72,17 +72,21 @@ Deployment is an operator-only gate: read the complete recipe — bucket creatio
 
 ## Screenshots
 
+The dashboard is one board for every project and host. Jobs move from idea to merged PR, the Inbox lists every job waiting on you, Retros lists red-flagged tool calls, and Settings holds the pipeline, hosts and notifications. [docs/dashboard-tour.md](docs/dashboard-tour.md) walks through each view.
+
 ![The board with synthetic jobs across several stages](docs/screenshots/board.png)
 
-![The New idea dialog over the board](docs/screenshots/idea-entry.png)
+![The Inbox ranking synthetic waiting items](docs/screenshots/inbox.png)
 
-![The Settings page Projects section](docs/screenshots/project-settings.png)
+![The Retros page with the Red flags card](docs/screenshots/retros-red-flags.png)
 
-Captured by `tools/capture-screenshots.mjs` with synthetic fixture data (frozen clock, placeholder URLs only).
+The full set, including Notifications, the Settings sections, a phone-width board and the New idea dialog, lives in [docs/screenshots](docs/screenshots). Captured by `tools/capture-screenshots.mjs` with synthetic fixture data (frozen clock, placeholder URLs only).
 
 ## More
 
 - [docs/getting-started.md](docs/getting-started.md) — first job after deploy, then what to set up next
+- [docs/dashboard-tour.md](docs/dashboard-tour.md) — every dashboard view, route and shortcut
+- [docs/notifications.md](docs/notifications.md) — Web Push, the installed app and every alert channel
 - [docs/architecture.md](docs/architecture.md) — ownership, request boundary, protocol, toolchain and bundle proofs
 - [docs/configuration.md](docs/configuration.md) — configuration layers, precedence and the secrets boundary
 - [docs/trust.md](docs/trust.md) — trust model for configurable text

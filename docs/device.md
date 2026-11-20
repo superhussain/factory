@@ -32,8 +32,12 @@ requires explicit replacement:
 python3 tools/install.py --destination <absolute-directory> --replace
 ```
 
-Replacement retains `factory.backup-<uuid>` beside the installed directory and
-prints both paths. It never merges trees or deletes older backups. A completed
+Replacement moves the old bundle to `factory.backup-<uuid>` beside the installed
+directory, switches in the new one, then deletes that backup and prints
+`removed <path>`. A failed switch restores the old bundle. If the delete fails,
+the install still succeeds and warns
+`install.py: could not remove <path>; remove it by hand`. It never merges trees
+or deletes older backups. Copy out any local edits before `--replace`. A completed
 sibling stage is switched only after validation. Pause other installers and
 editors during replacement. `.factory-install.lock` serializes cooperating
 installers, not arbitrary external filesystem writers. An existing lock fails

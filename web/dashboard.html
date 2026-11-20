@@ -1595,6 +1595,14 @@ const archivedJobs = new Map();
 const archiveMisses = new Set();
 // The id whose failed archive load was already reported. It resets when the hash names another id, so retries and tab changes stay quiet.
 let archiveFailNoted = '';
+const savedBoardWaitText = (id) => `Job ${id} opens when the board loads.`;
+// The id whose wait-for-the-board toast already showed, so a repeat call stays quiet.
+let boardWaitNoted = '';
+// The toast writes its text after 100 ms, so a visible empty toast is still the pending wait copy.
+const boardWaitShowing = (id) => {
+  const s = $('board-status');
+  return !!id && boardWaitNoted === id && (s.textContent === savedBoardWaitText(id) || (!s.hidden && !s.textContent));
+};
 // The board carries archived.max_id once the Worker has archived a job, so only then is there an archive to search.
 let boardArchived = false;
 // The jumper's one archive lookup: { query, status: 'loading' | 'done' | 'error', jobs, total }.
@@ -1717,6 +1725,7 @@ async function paintCached() {
 
 // Cloudflare's edge may hand the page a weak W/"..." ETag; a rows frame names the bare one.
 function bareEtag(e) { return e.replace(/^W\//, ''); }
+function discardBody(r) { r.body?.cancel().catch(() => {}); }
 
 // Redraws everything that shows the board after a read or a rows frame changes it.
 function boardTaken() {
@@ -1760,6 +1769,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
     }
     // The orchestrator creates board.json with its first job, so a 404 is an empty factory, not an outage.
     if (!r.ok && r.status !== 404) throw new Error(r.status);
+    if (r.status === 404) discardBody(r);
     const data = r.ok ? await r.json() : { jobs: [] };
     if (version !== boardReadVersion) return false;
     const etag = r.ok ? r.headers.get('ETag') || '' : '';
@@ -2999,6 +3009,7 @@ async function loadProjectDocument(resource, replacement = false) {
     if (r.redirected || [401,403].includes(r.status)) throw new Error(settingsAccess);
     if (generation !== settingsLoads.get(resource.id) || projectDocuments.get(resource.id) !== state) return;
     if (r.status === 404) {
+      discardBody(r);
       if (extra && !malformedDrafts.has(resource.id) && !previous?.blocked && previous?.mode !== 'edit' && (!previous || !settingsDirty(previous))) {
         Object.assign(state, {mode:'create', blocked:null, phase:'ready', message:'Not created. Enter Markdown, then choose Create document.'});
         renderProjectSettings();
@@ -3511,7 +3522,7 @@ async function loadAuditFlags() {
   renderAuditFlags();
   try {
     const r = await fetch('./api/audit-flags', { cache: 'no-store' });
-    if (r.status === 404) auditFlags = [];
+    if (r.status === 404) { discardBody(r); auditFlags = []; }
     else if (r.status !== 200) throw new Error(String(r.status));
     else auditFlags = await auditFlagsKeyed((await r.json()).rows);
     auditFlagsFailed = false;
@@ -4505,6 +4516,7 @@ async function loadPipelineScope(scope, replacement = false) {
     if (generation !== pipelineLoads.get(scope)) return;
     if (r.redirected || [401,403].includes(r.status)) throw new Error(settingsAccess);
     if (r.status === 404) {
+      discardBody(r);
       Object.assign(s, {base:null, baseEtag:null, version:0, draft:{schema:1}, loaded:true, phase:'ready', message:'Not saved yet. Choose values, then Save to create version 1.'});
       if (replacement) persistPipelineDraft(scope, true);
     } else {
@@ -4772,7 +4784,7 @@ async function loadTracerSetting() {
   let off = tracerOff;
   try {
     const r = await fetch('./api/pipeline/global', {cache:'no-store'});
-    if (r.status === 404) off = true;
+    if (r.status === 404) { discardBody(r); off = true; }
     else if (r.status === 200 && !r.redirected) off = (await r.json())?.tracer?.enabled !== true;
   } catch {}
   tracerSettingKnown = true;
@@ -5570,6 +5582,7 @@ async function loadArchivedJob(id) {
     // An expired Access session answers 401 or 403. The banner offers sign-in, and the id is not cached as a miss.
     if (r.status === 401 || r.status === 403) { setConnection('signin'); return { job: null, signin: true }; }
     if (r.status === 404) {
+      discardBody(r);
       archiveMisses.add(id);
       return { job: null };
     }
@@ -5615,6 +5628,10 @@ async function openJob(id) {
       archiveFailNoted = id;
       showBoardStatus(`You're offline. Job ${id} opens when you reconnect.`);
     }
+    if (connState !== 'offline' && boardWaitNoted !== id) {
+      boardWaitNoted = id;
+      showBoardStatus(savedBoardWaitText(id));
+    }
     return;
   }
   if (!j && loaded) {
@@ -5632,6 +5649,10 @@ async function openJob(id) {
     }
   }
   if (!j) return;
+  if (boardWaitShowing(id)) {
+    boardWaitNoted = '';
+    showBoardStatus('');
+  }
   const archived = !jobs.some((x) => x.id === id);
   const first = openId !== id;
   openId = id;
@@ -6934,6 +6955,11 @@ function syncDetail() {
 window.addEventListener('hashchange', (e) => {
   const { id } = parseHash();
   if (id !== archiveFailNoted) archiveFailNoted = '';
+  if (id !== boardWaitNoted) {
+    // A link to another job drops the old wait toast.
+    if (id && boardWaitShowing(boardWaitNoted)) showBoardStatus('');
+    boardWaitNoted = '';
+  }
   const key = backlogRoute();
   const from = new URL(e.oldURL).hash;
   if (key || id) drawerReturn = splitPage(from) ? from : openId || openBacklogRaw !== null ? drawerReturn : null;
@@ -7408,6 +7434,7 @@ async function casBacklog(change) {
     const r = await fetch('./api/backlog', { cache: 'no-store' });
     if (r.headers.get('X-Factory-Offline')) throw new Error("reading the backlog failed: you're offline, so nothing was saved");
     if (!r.ok && r.status !== 404) throw new Error('reading the backlog failed: ' + r.status);
+    if (!r.ok) discardBody(r);
     const { text, state } = change(r.ok ? await r.text() : null);
     if (state !== 'marked') return state;
     const etag = r.headers.get('ETag');
@@ -9199,7 +9226,10 @@ async function fetchBacklogTriage(items) {
         method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: chunk.map((b) => b.project + ': ' + b.feature) }),
       });
-      if (r.status === 404) for (const b of chunk) backlogTriageSeen.set(b.raw, null);
+      if (r.status === 404) {
+        discardBody(r);
+        for (const b of chunk) backlogTriageSeen.set(b.raw, null);
+      }
       else if (r.ok) {
         const verdicts = (await r.json())?.verdicts;
         if (Array.isArray(verdicts) && verdicts.length === chunk.length) chunk.forEach((b, k) => backlogTriageSeen.set(b.raw, verdicts[k] ?? null));
@@ -9706,7 +9736,7 @@ async function loadPushState() {
   if (!pushSupported()) { $('push-help').textContent = PUSH_HELP.unsupported; return; }
   try {
     const r = await fetch('./api/push/key', {cache:'no-store'});
-    if (r.status === 404) { $('push-help').textContent = PUSH_HELP.missing; return; }
+    if (r.status === 404) { discardBody(r); $('push-help').textContent = PUSH_HELP.missing; return; }
     if (!r.ok || r.redirected) throw new Error('push key ' + r.status);
     pushKey = (await r.json()).key;
     const subscription = await (await navigator.serviceWorker.ready).pushManager.getSubscription();

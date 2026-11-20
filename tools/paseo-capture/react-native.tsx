@@ -38,8 +38,12 @@ const BASE = {
   borderStyle: "solid",
 };
 
-export function View({ style, children }) {
-  return <div style={{ ...BASE, ...flatten(style) }}>{children}</div>;
+export function View({ nativeID, style, children }) {
+  return (
+    <div id={nativeID} style={{ ...BASE, ...flatten(style) }}>
+      {children}
+    </div>
+  );
 }
 
 export function Text({ style, children }) {

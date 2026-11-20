@@ -22,6 +22,7 @@ const DIRECT_PINS = {
   oxfmt: "0.75.0",
   typescript: "5.9.3",
   husky: "9.1.7",
+  miniflare: "5.20261023.1-beta",
 };
 
 const read = (name) => readFile(new URL(`../../${name}`, import.meta.url), "utf8");
