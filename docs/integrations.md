@@ -172,6 +172,7 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
    `deploy/profile.json`, for example `"embed_origins": ["https://app.paseo.sh", "paseo://app"]`, then render
    and deploy as [config-changes.md](config-changes.md) describes. The dashboard sends
    `frame-ancestors 'self'` plus these origins, so no other site can frame it.
+   Job walkthroughs send the same list, because a browser checks every frame above a walkthrough, Paseo included.
    The Paseo desktop app frames from `paseo://app`; list it to show the board there. It is the
    only non-https entry accepted.
 
