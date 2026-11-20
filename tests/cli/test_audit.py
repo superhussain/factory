@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -80,6 +81,11 @@ class AuditFlagsTest(IsolatedTestCase):
                 "cat <<'EOF'\n$(\ncat ~/app/.env\n)\nEOF"):
             with self.subTest(command=command):
                 self.assertEqual(self.flags("Bash", {"command": command}), [])
+
+    def test_runs_output_pattern_is_linear(self):
+        started = time.monotonic()
+        self.assertIsNone(factory.AUDIT_RUNS_OUTPUT.search(" -" + "c" * 100_000 + "!"))
+        self.assertLess(time.monotonic() - started, 1)
 
     def test_secret_file_still_flags_reads(self):
         for command in (

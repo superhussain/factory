@@ -10490,7 +10490,7 @@ AUDIT_FLAGS = (
 )
 AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
 AUDIT_HEREDOC_OPEN = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)([A-Za-z_][\w.-]*)\2")
-AUDIT_RUNS_OUTPUT = re.compile(r"<\(|\beval\b|(?:^|\s)-[A-Za-z]*c[A-Za-z]*(?:\s|$)|(?:^|[;&|(])\s*\"?\$\([^()]*$")
+AUDIT_RUNS_OUTPUT = re.compile(r"<\(|\beval\b|(?:^|\s)-(?=[A-Za-z]*c)[A-Za-z]+(?:\s|$)|(?:^|[;&|(])\s*\"?\$\([^()]*$")
 AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
 AUDIT_MAX_BYTES = 1 << 20
 AUDIT_PUSH_FILE = "audit-push.json"
