@@ -248,6 +248,16 @@ class CleanupTest(IsolatedTestCase):
         states.assert_called_once_with("sample/alpha", [7], ANY)
         self.assertFalse(self.branch_exists())
 
+    def test_bad_claim_minutes_still_reads_the_pr(self):
+        (self.home / "config.md").write_text("---\ndevice: host-a\nclaim_stale_minutes: soon\n---\n")
+        self.board("merged", None, pr=self.PR)
+        head = self.git(self.wt, "rev-parse", "HEAD")
+        with patch.object(factory, "pr_states", return_value=({7: ("MERGED", head)}, None)) as states:
+            code, _, _ = self.cleanup()
+        self.assertEqual(code, 0)
+        self.assertFalse(self.branch_exists())
+        states.assert_called_once_with("sample/alpha", [7], "host-a")
+
     def test_board_head_skips_the_pr_lookup(self):
         self.board("merged", self.git(self.wt, "rev-parse", "HEAD"), pr=self.PR)
         with patch.object(factory, "pr_states") as states:
