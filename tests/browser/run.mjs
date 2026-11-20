@@ -1118,12 +1118,16 @@ async function capture(outdir, referencePath) {
           "settings projects",
           page.waitForSelector("#settings-projects:not([hidden])", { timeout: 30000 }),
         );
-        // The pickup status above the tabs can grow a line late, so settle it and click without coordinates.
+        // The pickup status above the tabs can grow a line late, so wait for settled text. Pages without the project pickup pass at once.
         await named(
           "settings pickup",
           page.waitForFunction(
-            () =>
-              !document.getElementById("project-pickup-status")?.textContent.startsWith("Loading"),
+            () => {
+              const status = document.getElementById("project-pickup-status");
+              if (!status || typeof renderProjectPickup !== "function") return true;
+              const text = status.textContent;
+              return text !== "" && !text.startsWith("Loading");
+            },
             { polling: 50, timeout: 30000 },
           ),
         );
