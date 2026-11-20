@@ -170,7 +170,8 @@ scratch folder, inside the job's own worktree, never through a link, and prints
 `{"removed": [...], "left": [...]}` as JSON.
 `temp` removes the job's `factory-<slug>-<job-id>` folder under the system temp root, the
 `Temp folder:` that every role prompt names. `prompt` creates it with mode 0700 and
-stops when a link, a file or another account holds the name.
+stops when a link, a file or another account holds the name. It checks the name again with
+`lstat` after creating it and changes the mode through a handle that does not follow links.
 Within one command, the runtime reuses a 200 answer from /projects.json, /api/pipeline/global or /api/pipeline/effective/<slug> for up to 60 seconds. A pipeline or project write clears it.
 
 ## Cloudflare credentials for one command
