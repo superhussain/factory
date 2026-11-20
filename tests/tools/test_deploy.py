@@ -198,6 +198,26 @@ class RenderTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("embed_origins entry must be a canonical https origin", result.stderr)
 
+    def test_render_with_tracer_receipt_key(self):
+        key = "A" * 43 + "="
+        profile = {**json.loads(VALID.read_text()), "tracer_receipt_key": key}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.json"
+            path.write_text(json.dumps(profile))
+            config = deploy.project_wrangler(deploy.load_profile(path), ROOT, Path(directory) / "out")
+            variables = json.loads(Path(config).read_text())["vars"]
+        self.assertEqual(variables["FACTORY_TRACER_RECEIPT_KEY"], key)
+
+    def test_tracer_receipt_key_rejects_bad_keys(self):
+        for key in ("A" * 42 + "==", "A" * 43 + "!", "", 32):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as directory:
+                profile = {**json.loads(VALID.read_text()), "tracer_receipt_key": key}
+                path = Path(directory) / "profile.json"
+                path.write_text(json.dumps(profile))
+                result = run_cli("check", "--profile", str(path))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("tracer_receipt_key must be the base64 of a 32-byte Ed25519 public key", result.stderr)
+
 class PreflightTest(unittest.TestCase):
     def fake_run(self, calls, wrangler_dry_run=0, wrangler_deploy=0, inspect=0):
         def fake(argv, **kwargs):

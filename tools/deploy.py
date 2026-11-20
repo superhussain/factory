@@ -5,6 +5,8 @@ Commands: check | render | dry-run | deploy, each with --profile <file>.
 Only ignored deploy/profile.json is deployment input. Exit 2 for invalid
 profile/options, 1 for failed build/Wrangler checks, 0 on success.
 """
+import base64
+import binascii
 import json
 import os
 from pathlib import Path
@@ -17,7 +19,7 @@ COMPATIBILITY_DATE = "2026-06-01"
 OBSERVABILITY = {"enabled": True, "head_sampling_rate": 1, "redact_query_string": True}
 PROFILE_KEYS = ["version", "account_id", "worker_name", "bucket_name", "origin", "title",
                 "issuer", "audience", "image_origins", "agent_links"]
-OPTIONAL_PROFILE_KEYS = ["jira_origin", "embed_origins"]
+OPTIONAL_PROFILE_KEYS = ["jira_origin", "embed_origins", "tracer_receipt_key"]
 DESKTOP_EMBED_ORIGINS = ("paseo://app",)
 
 DNS = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]*$")
@@ -94,6 +96,15 @@ def embed_origins(value):
             fail("embed_origins entry must be a canonical https origin or paseo://app")
         https_origin(origin, "embed_origins entry")
     return list(value)
+
+
+def receipt_key(value):
+    try:
+        if isinstance(value, str) and len(base64.b64decode(value, validate=True)) == 32:
+            return value
+    except binascii.Error:
+        pass
+    fail("tracer_receipt_key must be the base64 of a 32-byte Ed25519 public key")
 
 
 def link_url(template, kind):
@@ -203,6 +214,8 @@ def load_profile(path):
         profile["jira_origin"] = data["jira_origin"]
     if "embed_origins" in data:
         profile["embed_origins"] = embed_origins(data["embed_origins"])
+    if "tracer_receipt_key" in data:
+        profile["tracer_receipt_key"] = receipt_key(data["tracer_receipt_key"])
     return profile
 
 
@@ -246,6 +259,8 @@ def project_wrangler(profile, source_root, output):
         config["vars"]["FACTORY_JIRA_ORIGIN"] = profile["jira_origin"]
     if "embed_origins" in profile:
         config["vars"]["FACTORY_EMBED_ORIGINS"] = json.dumps(profile["embed_origins"])
+    if "tracer_receipt_key" in profile:
+        config["vars"]["FACTORY_TRACER_RECEIPT_KEY"] = profile["tracer_receipt_key"]
     connection = {"version": 1, "api_url": profile["origin"]}
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
