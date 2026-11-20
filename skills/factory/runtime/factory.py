@@ -10472,6 +10472,7 @@ AUDIT_FLAGS = (
 )
 AUDIT_SECRET_FILE = re.compile(r"(?:^|[\s/'\"=])\.env(?![\w.-])")
 AUDIT_HEREDOC_OPEN = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)([A-Za-z_][\w.-]*)\2")
+AUDIT_RUNS_OUTPUT = re.compile(r"<\(|\beval\b|(?:^|\s)-[A-Za-z]*c[A-Za-z]*(?:\s|$)|(?:^|[;&|(])\s*\"?\$\([^()]*$")
 AUDIT_FILE_TOOLS = ("Read", "Edit", "Write")
 AUDIT_MAX_BYTES = 1 << 20
 AUDIT_PUSH_FILE = "audit-push.json"
@@ -10506,23 +10507,28 @@ def audit_target(raw):
 
 
 def audit_strip_data_heredocs(command):
-    """command with the body lines of cat and tee heredocs blanked, so prose about a file is not read as a use of it."""
-    out, pending = [], []
+    """command with the body lines of cat and tee heredocs blanked, unless Bash runs or expands them,
+    so prose about a file is not read as a use of it."""
+    out, pending, depth = [], [], 0
     for line in command.split("\n"):
         if pending:
             delimiter, data, quoted = pending[0]
             if line.strip() == delimiter:
                 pending.pop(0)
+                depth = 0
+                out.append(line)
+            elif not quoted and (depth or "$(" in line):
+                depth = max(0, depth + line.count("(") - line.count(")"))
                 out.append(line)
             else:
-                out.append("" if data and (quoted or not re.search(r"\$\(|`", line)) else line)
+                out.append("" if data and (quoted or "`" not in line) else line)
             continue
         out.append(line)
         for m in AUDIT_HEREDOC_OPEN.finditer(line):
             before, after = line[:m.start()], line[m.end():]
             words = re.split(r"[;&|(]|\$\(", before)[-1].split()
             data = (bool(words) and words[0] in ("cat", "tee") and re.match(r"\s|$", after) is not None
-                    and not re.search(r"<\(|\beval\b|(?:^|\s)-c(?:\s|$)", before)
+                    and not AUDIT_RUNS_OUTPUT.search(before)
                     and not re.search(r"\||>\(", after))
             pending.append((m.group(3), data, bool(m.group(2))))
     return "\n".join(out)
