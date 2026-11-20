@@ -63,7 +63,14 @@ const FIRST_PRESS =
   " Your first press most likely saved, and the job has moved on since. Check its note on the board.";
 const EDITED = "Keep the CSV header order and the footer.";
 const KEPT =
-  "Your first press saved the rework with the note as it was then. The job still holds that note, so your edit was not saved. Cancel closes this dialog and keeps the first note.";
+  'Your first press saved the rework with this note:\n"Keep the CSV header order."\nThe job still holds that note, so your edit was not saved. Cancel closes this dialog and keeps the first note.';
+const LONG =
+  "Keep the CSV header order.  " +
+  "Also keep the footer row, the totals column and the sample dates. ".repeat(2).trim();
+const LONG_KEPT = KEPT.replace(
+  '"Keep the CSV header order."',
+  '"Keep the CSV header order. Also keep the footer row, the totals column and the sample dates. Also keep the footer row,…"',
+);
 // The next board PATCH lands, then the page sees a 503 as if the answer was lost.
 const landThen503 = (page) =>
   page.evaluate(() => {
@@ -402,12 +409,12 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
         await page.waitForSelector("#rework-dlg:not([open])", wait);
       });
 
-      const landedRework = async () => {
+      const landedRework = async (first = NOTE) => {
         await reseed();
         await openDrawer(page, "064-sample-human");
         await activate("#d-rework-bar");
         await page.waitForSelector("#rework-dlg[open]", wait);
-        await page.type("#rework-note", NOTE);
+        await page.type("#rework-note", first);
         await landThen503(page);
         await activate("#rework-save");
         await page.waitForFunction(
@@ -475,6 +482,25 @@ test("rework and approve as is", { timeout: 240000 }, async (t) => {
         assert.equal(await page.$eval("#rework-err", (el) => el.textContent), KEPT);
         assert.equal(await boardText(origin), before);
         assert.equal((await boardJob(origin, "064-sample-human")).resolve.note, NOTE);
+        assert.equal(await page.$eval("#rework-note", (el) => el.value), EDITED);
+        await page.keyboard.press("Escape");
+        await page.waitForSelector("#rework-dlg:not([open])", wait);
+      });
+      await t.test(`an edited second press quotes a long note cut short ${width}`, async () => {
+        await landedRework(LONG);
+        await page.$eval("#rework-note", (el) => (el.value = ""));
+        await page.type("#rework-note", EDITED);
+        const before = await boardText(origin);
+        await secondPress();
+        if (width === 390) {
+          await mkdir(SHOTS, { recursive: true });
+          await (
+            await page.$("#rework-dlg")
+          ).screenshot({ path: `${SHOTS}edited-second-press-long-rework-390.png` });
+        }
+        assert.equal(await page.$eval("#rework-err", (el) => el.textContent), LONG_KEPT);
+        assert.equal(await boardText(origin), before);
+        assert.equal((await boardJob(origin, "064-sample-human")).resolve.note, LONG);
         assert.equal(await page.$eval("#rework-note", (el) => el.value), EDITED);
         await page.keyboard.press("Escape");
         await page.waitForSelector("#rework-dlg:not([open])", wait);
