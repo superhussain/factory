@@ -974,7 +974,7 @@ async function capture(outdir, referencePath) {
               );
             } catch (error) {
               console.error(
-                `capture fault ${side}-${name}: attempt ${attempt}, side ${sidesOnBrowser} on this browser, ${browser.browserContexts().length} contexts open, load ${loadavg()[0].toFixed(2)}`,
+                `capture fault ${side}-${name}: attempt ${attempt}, side ${sidesOnBrowser} on this browser, ${browser.browserContexts().length} contexts open, load ${loadavg()[0].toFixed(2)}: ${error?.message ?? error}`,
               );
               throw error;
             } finally {
