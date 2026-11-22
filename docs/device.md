@@ -359,6 +359,59 @@ exits 5. A bad job id, or a second argument without `push`, exits 2 with
 approve or pr-open whose transcripts here changed since `<home>/audit-push.json`
 records; a failed push prints one warning and the run goes on.
 
+## Token usage
+
+```text
+python3 <installed-skill>/runtime/factory.py usage [record] <project-slug>/<job-id>
+```
+
+`usage` sums the tokens this host's Claude Code transcripts spent on a job, by
+model. It reads the same `~/.claude/projects` or `$CLAUDE_CONFIG_DIR/projects`
+folders as `audit`. A transcript belongs to the job when:
+
+- its main session ran in a `factory-<job-id>` worktree, which also counts every
+  subagent of that session, or
+- the first user prompt of a main session or subagent names the job folder
+  `<home>/jobs/<slug>/<id>` or the prompt folder `<home>/prompts/<slug>/<id>`.
+  `1017-add-x` never matches `1017-add-xy`.
+
+Each `message.id` counts once, with the largest value seen for each kind. Models
+whose counts are all 0 are dropped, and a model name that is not a plain model
+id, such as `<synthetic>`, counts as `other`. It counts tokens, never prices.
+
+```text
+job 1017-add-x on host-a: 3 transcripts
+model            input  output  cache_write  cache_read
+claude-opus-5-5  1,200  48,000      210,000   3,400,000
+```
+
+`usage record` prints the same table, then writes it to the board job and prints
+`recorded host-a tokens on 1017-add-x`. Each host keeps its own entry under
+`tokens`, keyed by its `device:`, and a rerun replaces only that entry:
+
+```json
+"tokens": {"host-a": {"at": "2026-01-02T12:00:00Z", "transcripts": 3,
+  "models": {"claude-opus-5-5": {"input": 1200, "output": 48000,
+  "cache_write": 210000, "cache_read": 3400000}}}}
+```
+
+Only model names, counts and the host name reach the board. The job drawer shows
+every host's entry as a Tokens table. Close-out runs `usage record` before
+`audit push`.
+
+A parse failure warns and never blocks close-out:
+
+| Failure | Result, exit 0 |
+| --- | --- |
+| bad JSON lines | `factory.py: usage: 2 unreadable lines in agent-b1.jsonl` on stderr, the rest counted |
+| unreadable file | `factory.py: usage: cannot read <name>`, file skipped |
+| any other scan error | `factory.py: usage: scan failed (<Type>: <msg>); nothing recorded` |
+| no matching transcript | `no Claude Code transcripts on host-a name 1017-add-x; nothing recorded` |
+
+A bad target, a second argument other than `record`, or `record` without a valid
+`device:` exits 2. `record` exits 4 when the board has no such job and 2 when the
+job belongs to another project; board errors keep their usual exits.
+
 ## Exit recovery
 
 | Exit | Action |

@@ -44,7 +44,8 @@ feature.
    all-`pending` entry to `rounds`. Before spawning anyone, run
    `python3 "$RUNTIME" review-plan "$SLUG/<id>" <N>` and run
    `python3 "$RUNTIME" verdict "$SLUG/<id>" <N> <r> SKIPPED` for each reviewer `<r>` in its
-   `skipped` list. Spawn only the reviewers in its
+   `skipped` list. Its `protected` list stays in `round-N/review-plan.json` for the
+   approver. Spawn only the reviewers in its
    `run` list, from `factory-review-security`, `factory-review-ux`,
    `factory-review-ui`, and `factory-review-code`, each with the pointer to its own
    `prompt "$SLUG/<id>" review-<r> --round <N> --out` file. A non-zero exit
@@ -110,7 +111,8 @@ feature.
    `decision.md` as a table with Item, Source and Outcome (`queued`,
    `already queued` or `for a person`) columns, or `None.` when there are none, and run
    `push "$SLUG/<id>"`.
-10. Run `python3 "$RUNTIME" audit push <id>`. A non-zero exit never stops close-out.
+10. Run `python3 "$RUNTIME" usage record "$SLUG/<id>"`, then `python3 "$RUNTIME" audit push <id>`.
+    A non-zero exit from either never stops close-out.
     After the `merged:` line and the final summary are sent, run
     `python3 "$RUNTIME" archive-workspace "$SLUG/<id>" --check`. If the output has a
     `reason`, stop. If `leftovers` is not empty, write a file that starts with

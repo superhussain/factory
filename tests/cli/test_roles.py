@@ -354,6 +354,19 @@ class RolesTest(IsolatedTestCase):
                       "you Write it, or the Write fails with `File has not been read yet`.",
                       flat("agents/factory-approver.md"))
 
+    def test_approver_protected_paths(self):
+        def flat(name):
+            return " ".join((SKILL / name).read_text(encoding="utf-8").split())
+        self.assertIn("**Protected paths.** Read the newest `round-N/review-plan.json` the listing shows. Its "
+                      "`protected` list names the branch's CI, check, hook and test-config files. For each path, "
+                      "ESCALATE with a sign-off bullet that names it, or APPROVE only after you justify it under a "
+                      "`## Protected paths` heading in decision.md, one bullet per path: the path, the spec task "
+                      "that names it, and why every check stays at least as strict. A path no spec task names is "
+                      "ESCALATE. When `protected` is null or no plan file exists, apply this rule to every such file "
+                      "in the diff.", flat("agents/factory-approver.md"))
+        self.assertIn("Its `protected` list stays in `round-N/review-plan.json` for the approver.",
+                      flat("references/commands/feature.md"))
+
     def test_role_openers_name_files_not_globs(self):
         def flat(name):
             return " ".join((SKILL / name).read_text(encoding="utf-8").split())

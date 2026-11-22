@@ -103,7 +103,15 @@ class ReviewPlanTest(IsolatedTestCase):
         self.assertEqual(self.assertRunsAll()["reason"], "decision.md names a visible change")
 
     def test_missing_worktree_runs_all(self):
-        self.assertIn("could not be read", self.assertRunsAll()["reason"])
+        plan = self.assertRunsAll()
+        self.assertIn("could not be read", plan["reason"])
+        self.assertIsNone(plan["protected"])
+
+    def test_protected_paths_reported(self):
+        self.worktree("skills/factory/runtime/factory.py", ".github/workflows/ci.yml", "docs/trust.md")
+        self.assertEqual(self.assertSkipped()["protected"], [".github/workflows/ci.yml"])
+        self.assertEqual(json.loads((self.folder / "round-1" / "review-plan.json").read_text()),
+                         {"round": 1, "head": self.head(), "protected": [".github/workflows/ci.yml"]})
 
     def test_later_round_adds_visible_file(self):
         self.worktree("docs/trust.md")
@@ -158,7 +166,7 @@ class ReviewPlanTest(IsolatedTestCase):
         self.worktree("web/dashboard.html")
         self.assertRunsAll("1")
         recorded = json.loads((self.folder / "round-1" / "review-plan.json").read_text())
-        self.assertEqual(recorded, {"round": 1, "head": self.head()})
+        self.assertEqual(recorded, {"round": 1, "head": self.head(), "protected": []})
         (self.folder / "round-1" / "review-ux.md").write_text(ux)
         (self.folder / "round-1" / "review-ui.md").write_text("VERDICT: PASS\n")
 
@@ -169,7 +177,7 @@ class ReviewPlanTest(IsolatedTestCase):
                          "none of the 1 files changed since round 1 matches a visible-file glob, "
                          "and round 1 ux and ui did not ask for changes")
         self.assertEqual(json.loads((self.folder / "round-2" / "review-plan.json").read_text()),
-                         {"round": 2, "head": self.head()})
+                         {"round": 2, "head": self.head(), "protected": []})
 
     def test_fix_round_after_ux_changes_runs_all(self):
         self.fix_round(ux="VERDICT: CHANGES\n")
