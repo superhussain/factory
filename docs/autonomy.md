@@ -146,6 +146,8 @@ flowchart LR
 - Guards: `ideas` skips any job with a `needs` ask or an unapproved explorer card.
   `board` refuses a patch that sets `origin`, and refuses moving an unapproved
   explorer card to any stage but `idea` or `closed`.
+- `origin.approved` carries `decider: "person"`. An older approval without it was made
+  by a person, since `suggest approve` is its only writer.
 - Honest limit: the Worker cannot yet tell a human from a service token, so a token
   holder could forge an approval with a raw PUT. The runtime guards stop automation,
   except an agent that runs `--chat-file`, which only the chat-decisions
@@ -561,14 +563,14 @@ token such as `ｇｈｐ＿…` or `gһp_…` is removed too. A review that quot
 tag, or writes an emoji such as ⚠️ or 👩‍💻, is still rated.
 
 Reply 200: `{"decision": "escalate"|"continue", "confidence": int, "threshold": 80,
-"reason": text, "model": "@cf/cloudflare/clef-flash"}`. The reason is
+"reason": text, "model": "@cf/cloudflare/clef-flash", "decider": "model"}`. The reason is
 `clef-flash rated the findings as needing a person.` or
 `clef-flash rated the findings as fixable by the builder.`
 
 | Case | Output | Loop |
 | --- | --- | --- |
-| no CHANGES review | `continue`, no call | unchanged |
-| 400, 404, 502, 503, network, bad reply | warning, `continue` | unchanged |
+| no CHANGES review | `continue`, `decider` `"rule"`, no call | unchanged |
+| 400, 404, 502, 503, network, bad reply | warning, `continue`, `decider` `"rule"` | unchanged |
 
 A failed check never blocks a job. It only skips the extra stop. The round cap, the
 approver and the merge rules still apply. The Worker must deploy before hosts upgrade, or
