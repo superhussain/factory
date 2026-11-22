@@ -73,7 +73,8 @@ class LegacyCommandContractTest(IsolatedTestCase):
                               "updated": "2000-01-01T00:00:00Z", "idea": "not printed"}]}
             def cas(home, path, change):
                 return change(json.dumps(data))[1]
-            with patch.object(r, "cas", side_effect=cas), patch.object(r, "read_paths", return_value={"sample": str(root)}), patch.object(r, "holder", return_value=("device", "tag", 120)):
+            with patch.object(r, "cas", side_effect=cas), patch.object(r, "read_paths", return_value={"sample": str(root)}), patch.object(r, "holder", return_value=("device", "tag", 120)), \
+                    patch.object(r, "read_halt", return_value=None):
                 code, out, err = invoke(r, [name])
             self.assertEqual((code, err), (0, ""))
             self.assertEqual(set(json.loads(out)[0]), expected)

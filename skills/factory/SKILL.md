@@ -125,7 +125,7 @@ A job's worktree is `WT="$WORKTREES/<id>"`, on branch `factory/<id>` cut from `$
 | Path | What |
 | --- | --- |
 | `$PROJECT` | project context for every agent |
-| `$JOBS/<id>/` | `spec.md`, `build.md`, `pre-review.md` (written by `factory.py pre-review`), `round-N/review-{security,ux,ui,code}.md`, `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, `<file>-evidence.md`, `scratchpad.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
+| `$JOBS/<id>/` | `spec.md`, `build.md`, `pre-review.md` (written by `factory.py pre-review`), `round-N/review-{security,ux,ui,code}.md`, `round-N/grounding.md` (written by `factory.py grounding`), `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, `<file>-evidence.md`, `scratchpad.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
 | `$WT` | the builder's worktree |
 | `$FACTORY/config.md`, `$FACTORY/.env` | device settings and the private Access service token |
 
@@ -514,6 +514,9 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   person text in files, per [chat decisions](references/chat-decisions.md). They never run `autonomy
   resume`, `autonomy allow` or `/factory approve-spec`, or approve scope in Tracer; a human does, there or by pressing Approve spec on the
   dashboard.
+- An agent that sees an incident needing every host stopped, such as runaway launches or a leaked
+  secret, runs `factory.py halt set --reason <text>` and tells the person. It never clears the
+  flag. A person resumes from the dashboard.
 
 ## Security floors
 

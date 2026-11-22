@@ -174,6 +174,8 @@ class PickupFixture(IsolatedTestCase):
                                                   encoding="utf-8")
 
     def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if path == "/api/halt":
+            return 404, {}, ""
         self.calls.append((method, path))
         if path == "/api/board":
             if method == "GET":

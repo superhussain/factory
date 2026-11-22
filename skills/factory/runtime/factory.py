@@ -97,6 +97,9 @@
   factory.py pre-review <project-slug>/<job-id>
                                             run the base branch's .factory/checks.json in the job
                                             worktree, write pre-review.md, print one JSON line; FAIL exits 1
+  factory.py grounding <project-slug>/<job-id> <round>
+                                            check each path:line a round's reviews cite, write
+                                            round-N/grounding.md and the round's unverified list; flags only
   factory.py stop <worktree>                stop processes running out of a worktree
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
@@ -144,6 +147,9 @@
   factory.py autonomy status|pause|resume|allow <slug>|deny <slug>|self <slug>
                                             show or change the explorer kill switch and allowlist;
                                             resume and allow need a human typing at a terminal
+  factory.py halt status | halt set --reason <text>
+                                            show or set the global stop flag that pickup, its takeover
+                                            and stuck honor; only a signed-in person clears it
   factory.py suggest admit <file>           turn an explorer's suggestions file into idea cards that
                                             wait on a human (exit 3 when paused or none admitted)
   factory.py suggest approve <job-id> <A|B|C> [--chat-file <file>]
@@ -998,6 +1004,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
              "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
     if "github" in patch:
         fail("only factory.py pickup sets github. Nothing was written.", 2)
+    if "token_cap" in patch:
+        fail("only factory.py pickup sets token_cap. Nothing was written.", 2)
     if "auto_babysit" in patch:
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
     if "handled" in patch:
@@ -3969,7 +3977,7 @@ def arm_metrics(arm_jobs, follow_ups, jobs_root):
     for job_id, j in sorted(arm_jobs.items()):
         if not (isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"])
                 and JOB_ID.fullmatch(job_id) and ".." not in job_id
-                and all(k in TRACER_REVIEWERS for entry in j.get("rounds") or [] if isinstance(entry, dict)
+                and all(k in TRACER_REVIEWERS or k == "unverified" for entry in j.get("rounds") or [] if isinstance(entry, dict)
                         for k in entry)):
             coverage_unknown += 1
             continue
@@ -4230,6 +4238,51 @@ def host_max_inflight(home, device):
     record = next((h for h in hosts if isinstance(h, dict) and h.get("id") == device), None)
     cap = record.get("max_inflight") if record else None
     return cap if type(cap) is int and 0 <= cap <= 5 else None
+
+
+def read_halt(home):
+    """The Worker's halt record when the factory is stopped, else None. A Worker without the
+    route (404) is not stopped. An unreadable reply counts as stopped."""
+    status, _, text = api(home, "GET", "/api/halt", ok=(200, 404))
+    if status == 404:
+        return None
+    try:
+        record = json.loads(text)
+    except ValueError:
+        record = None
+    if not isinstance(record, dict) or type(record.get("halted")) is not bool:
+        return {"halted": True, "reason": "the Worker's halt reply is unreadable"}
+    return record if record["halted"] else None
+
+
+def halt_line(record):
+    fallback = {"person": "a person", "host": "a host"}.get(str(record.get("by_kind")), "an unknown source")
+    by = record.get("by") if isinstance(record.get("by"), str) else fallback
+    at = record.get("at") if isinstance(record.get("at"), str) else "an unknown time"
+    reason = record.get("reason") if isinstance(record.get("reason"), str) else "no reason given"
+    return (f"factory stopped by {printable_line(by, 80)} at {printable_line(at, 40)}: "
+            f"{printable_line(reason, 200)}")
+
+
+def halt_cmd(*args):
+    """Show or set the global stop flag. Only a signed-in person clears it, from the dashboard."""
+    home = factory_home()
+    if args == ("status",):
+        status, _, text = api(home, "GET", "/api/halt", ok=(200, 404))
+        if status == 404:
+            fail("this Worker has no /api/halt route; deploy the Worker first", 4)
+        print(json.dumps(json.loads(text), indent=2))
+        return
+    if len(args) == 3 and args[:2] == ("set", "--reason"):
+        error = check_text(args[2], 1, 200)
+        if error:
+            fail(f"--reason {error}", 2)
+        _, _, text = api(home, "PUT", "/api/halt", json.dumps({"halted": True, "reason": args[2]}),
+                         ok=(200,), headers={"Content-Type": "application/json"})
+        print(json.dumps(json.loads(text), indent=2))
+        return
+    fail("usage: halt status | halt set --reason <text>; only a signed-in person resumes the factory, "
+         "from the dashboard", 2)
 
 
 def read_launchers(home):
@@ -4783,6 +4836,13 @@ def pickup(*args):
             data = None
 
     try:
+        halt = read_halt(home)
+        if halt:
+            if dry:
+                print(f"skip all: {halt_line(halt)}")
+            else:
+                print(f"factory.py: pickup launches nothing; {halt_line(halt)}", file=sys.stderr)
+            return
         data = None if os.path.lexists(home / "tracer.json") else read_board(home)
         if not dry:
             for tracer_pass, stopped in (
@@ -6405,6 +6465,21 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
 
 PRIORITY_NUDGE = ("The owner prioritized factory job {id}. If your turn ended while work "
                   "on it is still owed, continue with the next step now.")
+IDLE_NUDGE_MINUTES = 20
+IDLE_NUDGE = ("Factory job {id} shows no commit, file or board change for 20 minutes while this session sits "
+              "idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent "
+              "or command that is still running, run factory.py hold for the job with your --session tag, then "
+              "keep waiting.")
+
+
+def read_idle_watch(home):
+    """The jobs dict of <home>/idle-watch.json, {} when the file is missing or malformed."""
+    try:
+        doc = json.loads(Path(home, "idle-watch.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    jobs = doc.get("jobs") if isinstance(doc, dict) and doc.get("version") == 1 else None
+    return jobs if isinstance(jobs, dict) else {}
 
 
 def paseo_send(agent, message):
@@ -6468,6 +6543,145 @@ def priority_nudge_pass(home, data, device, dry):
             print(f"nudged {line}")
 
 
+def idle_watch_pass(home, data, device, dry):
+    """Nudge the idle Paseo agent of an in-flight job claimed on this host once its worktree and
+    board job sit unchanged for IDLE_NUDGE_MINUTES, and move the job to needs-human when they
+    stay unchanged that long again. The quiet signatures live in <home>/idle-watch.json."""
+    server = paseo_server()
+
+    def due(j):
+        c, link, job_id = j.get("claim"), j.get("paseo"), j.get("id")
+        return (j.get("stage") in IN_FLIGHT and isinstance(c, dict) and c.get("device") == device
+                and server and isinstance(link, dict) and link.get("server") == server
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"])
+                and not gated(j) and not paused(j) and not closing(j) and not lead_of(j))
+
+    old = read_idle_watch(home)
+    watch = {}
+    jobs = [j for j in data["jobs"] if due(j)]
+    statuses = paseo_statuses() if jobs else {}
+    if statuses is None:
+        print("factory.py: pickup skips idle checks: paseo did not answer", file=sys.stderr)
+        return
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=IDLE_NUDGE_MINUTES)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for j in jobs:
+        job_id, project, agent = j["id"], j.get("project"), j["paseo"].get("agent")
+        prev = old.get(job_id) if isinstance(old.get(job_id), dict) else {}
+        if statuses.get(agent) != "idle":
+            if prev:
+                watch[job_id] = prev
+            continue
+        wt = Path(home, "worktrees", project, job_id)
+        there = wt.exists()
+        sig = {"agent": agent, "head": git(wt, "rev-parse", "HEAD") if there else "",
+               "tree": hashlib.sha256(git(wt, "status", "--porcelain").encode()).hexdigest()[:12] if there else "",
+               "updated": j.get("updated")}
+        if any(prev.get(k) != v for k, v in sig.items()) or not isinstance(prev.get("since"), str):
+            watch[job_id] = dict(sig, since=now())
+            continue
+        entry = watch[job_id] = dict(prev)
+        line = f"{job_id} {project}: agent {agent}"
+        if "nudged" not in entry:
+            if entry["since"] >= cutoff:
+                continue
+            if dry:
+                print(f"would nudge idle {line}")
+            elif not paseo_send(agent, IDLE_NUDGE.format(id=job_id)):
+                print(f"factory.py: pickup could not nudge idle {job_id}: paseo send failed", file=sys.stderr)
+            else:
+                entry["nudged"] = now()
+                print(f"nudged idle {line}")
+            continue
+        if not isinstance(entry["nudged"], str) or entry["nudged"] >= cutoff:
+            continue
+        note = f"idle: no progress {IDLE_NUDGE_MINUTES} minutes after a nudge to agent {agent}"
+        if dry:
+            print(f"would move needs-human {job_id} {project}: {note}")
+            continue
+
+        def change(text, job_id=job_id, stage=j["stage"], updated=j.get("updated"), note=note):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            if (found is None or found.get("stage") != stage or found.get("updated") != updated
+                    or not isinstance(found.get("claim"), dict) or found["claim"].get("device") != device):
+                return None, False
+            patch_job(board, job_id, {"stage": "needs-human", "note": note, "claim": None})
+            return dump_board(board), True
+        if cas(home, "/api/board", change):
+            print(f"needs-human {job_id} {project}: {note}")
+        del watch[job_id]
+    if not dry and watch != old:
+        write_atomic(Path(home, "idle-watch.json"), json.dumps({"version": 1, "jobs": watch}, indent=2) + "\n")
+
+
+def token_cap_pass(home, data, device, dry):
+    """Warn once when an in-flight job claimed on this host passes TOKEN_WARN_PERCENT of config.md's
+    job_token_cap, and move it to needs-human and stop its Paseo agent when it reaches the cap.
+    This host scans its own transcripts; other hosts count through their recorded tokens entry."""
+    cap = job_token_cap(home)
+    if cap is None:
+        return
+
+    def due(j):
+        c, job_id = j.get("claim"), j.get("id")
+        return (j.get("stage") in IN_FLIGHT and isinstance(c, dict) and c.get("device") == device
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"]) and not closing(j))
+
+    for j in [j for j in data["jobs"] if due(j)]:
+        job_id, project = j["id"], j["project"]
+        try:
+            fresh = usage_totals(home, project, job_id)
+        except Exception as e:
+            print(f"factory.py: pickup skips the token cap of {job_id}: scan failed ({type(e).__name__})",
+                  file=sys.stderr)
+            continue
+        tokens = j.get("tokens") if isinstance(j.get("tokens"), dict) else {}
+        total = token_count(fresh["models"]) + sum(
+            token_count(e["models"]) for host, e in tokens.items()
+            if host != device and isinstance(e, dict) and isinstance(e.get("models"), dict))
+        state = j.get("token_cap") if isinstance(j.get("token_cap"), dict) else {}
+        base = state["base"] if type(state.get("base")) is int else 0
+        used = total - base
+        park = used >= cap
+        if park:
+            note = f"tokens: {used:,} reached the {cap:,} job cap on {device}; a resumed session gets another {cap:,}"
+            patch = {"stage": "needs-human", "note": note, "claim": None, "token_cap": {"base": total, "warned": None}}
+            line = f"needs-human {job_id} {project}: {note}"
+            dry_line = f"would move {line}"
+        elif used * 100 >= cap * TOKEN_WARN_PERCENT and "warned" not in state:
+            note = f"tokens: {used:,} of the {cap:,} job cap ({used * 100 // cap}%) on {device}"
+            patch = {"note": note, "token_cap": {"base": base, "warned": now()}}
+            line = f"token warning {job_id} {project}: {note}"
+            dry_line = f"would warn tokens {job_id} {project}: {note}"
+        else:
+            continue
+        if dry:
+            print(dry_line)
+            continue
+
+        def change(text, job_id=job_id, stage=j["stage"], patch=patch, fresh=fresh):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            if (found is None or found.get("stage") != stage
+                    or not isinstance(found.get("claim"), dict) or found["claim"].get("device") != device):
+                return None, False
+            patch_job(board, job_id, patch)
+            old = found.get("tokens") if isinstance(found.get("tokens"), dict) else {}
+            found["tokens"] = {**old, device: {"at": found["updated"], **fresh}}
+            return dump_board(board), True
+        if not cas(home, "/api/board", change):
+            continue
+        print(line)
+        link = j.get("paseo") if isinstance(j.get("paseo"), dict) else {}
+        agent, server = link.get("agent"), paseo_server()
+        if (park and server and link.get("server") == server
+                and isinstance(agent, str) and PASEO_ID.fullmatch(agent) and not agent.startswith("-")
+                and paseo_run(["stop", agent])[0]):
+            print(f"factory.py: pickup could not stop agent {agent} of {job_id}: paseo stop failed", file=sys.stderr)
+
+
 def moved_here(j, device):
     """True when the dashboard moved this in-flight job to this host, no pickup has claimed it yet,
     and no stop of it is still queued on this host, as for a rerun."""
@@ -6488,6 +6702,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     close_pass(home, data, device, minutes, dry)
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
+    idle_watch_pass(home, data, device, dry)
+    token_cap_pass(home, data, device, dry)
     auto_babysit_pass(home, data, device, minutes, paths, settings, dry)
     babysit_pass(home, data, device, minutes, paths, settings, dry)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
@@ -6915,7 +7131,8 @@ PROTECTED_PATHS = (".github/*", "*/.github/*", "*.gitlab-ci*", "*.circleci/*", "
                    ".factory/*", ".husky/*", "*.pre-commit-config.yaml", "*lefthook*", "*conftest.py",
                    "*pytest.ini", "*tox.ini", "*jest.config*", "*vitest.config*", "*playwright.config*",
                    "package.json", "*/package.json", "*.gitleaks.toml", "mise.toml", "*/mise.toml", "*.mise.toml",
-                   "*.oxfmtrc*", "nx.json", "tools/verify.py", "tests/cli/support.py", "tests/support/*")
+                   "*.oxfmtrc*", "nx.json", "tools/verify.py", "tests/cli/support.py", "tests/support/*",
+                   "tools/secret-scan.py", "pnpm-workspace.yaml", "*/pnpm-workspace.yaml", "*.npmrc")
 VISUAL_CRITERION = re.compile(r"screenshot|captur|before and after|before/after|visual evidence", re.I)
 SKIPPABLE_REVIEWERS = ("ux", "ui")
 REVIEW_PLAN_USAGE = "usage: review-plan <project-slug>/<job-id> <round>"
@@ -7255,6 +7472,168 @@ def pre_review_cmd(target):
         sys.exit(1)
 
 
+GROUNDING_USAGE = "usage: grounding <project-slug>/<job-id> <round>"
+GROUNDING_NEAR = 10
+GROUNDING_BOARD_MAX = 20
+GROUNDING_ROWS_MAX = 100
+CITATION = re.compile(r"(?<![\w./:-])((?:[\w.-]+/)*[\w-][\w.-]*\.[A-Za-z][A-Za-z0-9]{0,9}):([0-9]+)(?:-([0-9]+))?"
+                      r"((?:,[0-9]+)*)(?![\w])")
+
+
+def find_citations(text):
+    """[(citation, path, lines, span)] for each distinct path:line a review cites, in order of first appearance.
+    span is (start, end) for a path:a-b range, else None."""
+    found, seen = [], set()
+    for m in CITATION.finditer(text):
+        path = m[1]
+        while path.startswith("./"):
+            path = path[2:]
+        if m[0] in seen or ".." in path.split("/"):
+            continue
+        seen.add(m[0])
+        lines = [int(m[2])] + ([int(m[3])] if m[3] else []) + [int(x) for x in m[4].split(",") if x]
+        found.append((m[0], path, lines, (lines[0], lines[1]) if m[3] else None))
+    return found
+
+
+def diff_ranges(wt, base):
+    """({path: [(start, end)]}, None) for the lines the branch changes since origin/<base>, or (None, reason)."""
+    reason = fetch_base(wt, base)
+    if reason:
+        return None, reason
+    unreadable = f"the diff against origin/{base} could not be read"
+    mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
+                        capture_output=True, text=True)
+    if mb.returncode:
+        return None, unreadable
+    diff = subprocess.run(["git", "-C", str(wt), "diff", "-U0", "--no-renames", mb.stdout.strip(), "HEAD"],
+                          capture_output=True, encoding="utf-8", errors="replace")
+    if diff.returncode:
+        return None, unreadable
+    ranges, path, header = {}, None, False
+    for line in diff.stdout.splitlines():
+        if line.startswith("diff --git "):
+            path, header = None, True
+        elif header and line.startswith("+++ "):
+            path = line[len("+++ b/"):] if line.startswith("+++ b/") else None
+        elif line.startswith("@@ "):
+            header = False
+            m = re.match(r"@@ -\S+ \+([0-9]+)(?:,([0-9]+))? @@", line)
+            if path and m:
+                start, count = int(m[1]), int(m[2] or 1)
+                ranges.setdefault(path, []).append((start, start + max(count, 1) - 1))
+    return ranges, None
+
+
+def ground_citation(path, lines, wt, folder, tracked, ranges, near, span=None):
+    """(status, resolved, reason) for one cited path and its lines: ok, no-file, bad-line or off-diff."""
+    def regular(root, rel):
+        file = root / rel
+        return file.is_file() and not is_link(file) and root.resolve() in file.resolve().parents
+
+    if regular(wt, path):
+        files = [path]
+    elif "/" not in path and (named := [t for t in tracked if t.rsplit("/", 1)[-1] == path and regular(wt, t)]):
+        files = named
+    elif JOB_REL.fullmatch(path) and regular(folder, path):
+        files = None
+    else:
+        return "no-file", "no-file", f"no file at {path} in the worktree or job folder"
+    resolved = f"job:{path}" if files is None else ", ".join(files)
+    counts = [len((folder / path).read_bytes().splitlines())] if files is None else \
+        [len((wt / f).read_bytes().splitlines()) for f in files]
+    missing = next((line for line in lines if not any(1 <= line <= n for n in counts)), None)
+    if missing is not None:
+        reason = f"{resolved} has {counts[0]} lines" if len(counts) == 1 else \
+            f"{len(counts)} files named {path}, none has line {missing}"
+        return "bad-line", resolved, reason
+    if near and ranges is not None and files is not None:
+        changed = [r for f in files for r in ranges.get(f, [])]
+        if not changed:
+            return "off-diff", resolved, f"{resolved} is not changed on this branch"
+        spans = [(line, line) for line in lines] + ([span] if span else [])
+        if not any(start - GROUNDING_NEAR <= hi and lo <= end + GROUNDING_NEAR
+                   for lo, hi in spans for start, end in changed):
+            return "off-diff", resolved, f"more than {GROUNDING_NEAR} lines from every change to {resolved}"
+    return "ok", resolved, ""
+
+
+def grounding_cmd(target, round_text):
+    """Check each path:line a round's reviews cite against the job worktree, write round-N/grounding.md and
+    the round's unverified board list, and print one JSON line. It flags only and never changes a verdict."""
+    home, slug, job_id = r2_target(target, True)
+    if not re.fullmatch(r"[1-9][0-9]*", round_text):
+        fail(f"bad round {round_text!r}. " + GROUNDING_USAGE, 2)
+    n = int(round_text)
+    hold(target)
+    data = read_board(home)
+    job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+    rounds = (job or {}).get("rounds")
+    if not isinstance(rounds, list) or len(rounds) < n or not isinstance(rounds[n - 1], dict):
+        fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
+    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
+    stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
+    wt = home / "worktrees" / slug / (stacked or job_id)
+    folder = home / "jobs" / slug / job_id
+    round_folder = folder / f"round-{n}"
+    out_file = round_folder / "grounding.md"
+    for node in (folder, round_folder, out_file):
+        if is_link(node):
+            fail(f"{node} is a symlink or junction; nothing was written", 6)
+    if not wt.is_dir():
+        fail(f"no worktree at {wt}; nothing was written", 4)
+    if not round_folder.is_dir():
+        fail(f"no round folder at {round_folder}; nothing was written", 4)
+
+    def git(*args):
+        proc = subprocess.run(["git", "-C", str(wt), *args], capture_output=True, text=True)
+        return None if proc.returncode else proc.stdout
+
+    head = (git("rev-parse", "HEAD") or "").strip() or None
+    tracked = [p for p in (git("ls-files", "-z") or "").split("\0") if p]
+    ranges, diff_reason = diff_ranges(wt, base)
+    rows, checked, files = [], 0, 0
+    for name in REVIEWERS:
+        review = f"review-{name}.md"
+        path = round_folder / review
+        if not path.is_file() or is_link(path):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if (text.splitlines() or [""])[0] == "VERDICT: SKIPPED":
+            continue
+        files += 1
+        for citation, cited, lines, span in find_citations(text):
+            checked += 1
+            status, _, reason = ground_citation(cited, lines, wt, folder, tracked, ranges, name == "code", span)
+            if status != "ok":
+                rows.append({"review": review, "citation": citation, "status": status, "reason": reason})
+
+    def cell(text):
+        return printable_line(text, 200).replace("|", "/")
+
+    out = [f"GROUNDING: UNVERIFIED {len(rows)}" if rows else "GROUNDING: CLEAN", "", f"Head: {head}",
+           f"Diff: origin/{base}" if ranges is not None else f"Diff: unreadable: {cell(diff_reason)}",
+           f"Checked: {checked} citations in {files} review files"]
+    if rows:
+        out += ["", "| Review | Citation | Status | Reason |", "| --- | --- | --- | --- |"]
+        out += [f"| {cell(r['review'])} | `{cell(r['citation'])}` | {r['status']} | {cell(r['reason'])} |"
+                for r in rows[:GROUNDING_ROWS_MAX]]
+        if len(rows) > GROUNDING_ROWS_MAX:
+            out += ["", f"And {len(rows) - GROUNDING_ROWS_MAX} more."]
+    out += ["", "Unverified means the cited path or line did not check out. The finding may still be right. "
+                "No verdict changed."]
+    write_atomic(str(out_file), "\n".join(out) + "\n")
+    entry = {k: v for k, v in rounds[n - 1].items() if k != "unverified"}
+    if rows:
+        entry["unverified"] = [f"{r['review']} {r['citation']} {r['status']}" for r in rows][:GROUNDING_BOARD_MAX]
+    if entry != rounds[n - 1]:
+        rounds = list(rounds)
+        rounds[n - 1] = entry
+        board_write(home, job_id, {"rounds": rounds}, show=False, rewrite_round=n)
+    print(json.dumps({"round": n, "result": "unverified" if rows else "clean", "checked": checked,
+                      "unverified": rows, "diff": diff_reason}))
+
+
 WAIT_ARTIFACT = re.compile(r"spec\.md|spec-evidence\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
 WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]"
 
@@ -7444,7 +7823,7 @@ def round_wait_cmd(target, *args):
             fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
         return list(rounds)
 
-    written = board_rounds()[n - 1]
+    written = {k: v for k, v in board_rounds()[n - 1].items() if k in REVIEWERS}
     folder = home / "jobs" / slug / job_id
     artifacts = {r: f"round-{n}/review-{r}.md" for r in REVIEWERS}
     start = time.monotonic()
@@ -7456,7 +7835,7 @@ def round_wait_cmd(target, *args):
         verdicts = {r: valid[a][len("VERDICT: "):] if a in valid else "pending" for r, a in artifacts.items()}
         if verdicts != written:
             rounds = board_rounds()
-            rounds[n - 1] = verdicts
+            rounds[n - 1] = {**{k: v for k, v in rounds[n - 1].items() if k not in REVIEWERS}, **verdicts}
             board_write(home, job_id, {"rounds": rounds}, show=False, rewrite_round=n)
             written = verdicts
         bad = {a: line for a, line in lines.items() if line.strip() and a not in valid}
@@ -9391,11 +9770,25 @@ def orphan_reason(jobs, job_id):
     return "job merged" if job["stage"] == "merged" else "job closed"
 
 
+def workspace_project(cwd, paths):
+    """The paths.md slug whose checkout shares cwd's git common dir, first by slug, else None.
+    git before 2.31 lacks --path-format, so a relative answer resolves against the folder asked."""
+    def common(path):
+        out = git(path, "rev-parse", "--git-common-dir")
+        return os.path.normcase(str(Path(path, out).resolve())) if out else None
+
+    target = common(cwd)
+    if target is None:
+        return None
+    return next((slug for slug, path in sorted(paths.items()) if common(path) == target), None)
+
+
 def orphan_scan(home):
     """(orphans, skipped): factory branches on origin, open factory PRs, job worktrees and factory-<id>
     Paseo workspaces that no open board job owns. Only reads; a source that fails is one skipped line,
     which never carries a tool's stderr."""
     jobs = read_board(home)["jobs"]
+    paths = read_paths(home)
     ids = {j.get("id") for j in jobs}
     orphans, skipped = [], []
 
@@ -9405,7 +9798,7 @@ def orphan_scan(home):
             orphans.append({"kind": kind, "project": project, "job": job_id, "name": name, "reason": reason})
 
     gh_missing = False
-    for slug, path in read_paths(home).items():
+    for slug, path in paths.items():
         if not os.path.isdir(path):
             continue
         try:
@@ -9485,7 +9878,7 @@ def orphan_scan(home):
                 rest = base[len("factory-"):]
                 job_id = rest if rest in ids else re.sub(r"-\d+$", "", rest)
                 job = next((j for j in jobs if j.get("id") == job_id), {})
-                add("workspace", job.get("project"), job_id, cwd)
+                add("workspace", job.get("project") or workspace_project(cwd, paths), job_id, cwd)
 
     orphans.sort(key=lambda o: (ORPHAN_KINDS.index(o["kind"]), o["name"]))
     return orphans, skipped
@@ -9533,6 +9926,10 @@ def stuck(*args):
     limit = int(args[1]) if args else 1
     home = factory_home()
     device, session, minutes = holder(home)
+    halt = read_halt(home)
+    if halt:
+        print(f"factory.py: stuck resumes nothing; {halt_line(halt)}", file=sys.stderr)
+        sys.exit(3)
     paths, server = read_paths(home), paseo_server()
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
     statuses = []  # [result] once paseo has been asked, so cas retries reuse it.
@@ -11616,7 +12013,8 @@ def usage_pickup_record(home, job):
     try:
         totals = usage_totals(home, slug, job_id)
     except Exception as e:
-        print(f"factory.py: usage: scan failed ({type(e).__name__}: {e}); nothing recorded", file=sys.stderr)
+        print(f"factory.py: usage: scan failed on {job_id} ({type(e).__name__}: {e}); nothing recorded",
+              file=sys.stderr)
         return
     tokens = job.get("tokens") if isinstance(job.get("tokens"), dict) else {}
     old = tokens.get(device) if isinstance(tokens.get(device), dict) else {}
@@ -11624,6 +12022,29 @@ def usage_pickup_record(home, job):
         return
     usage_record(home, slug, job_id, device, totals)
     print(f"recorded {device} tokens on {job_id}")
+
+
+TOKEN_WARN_PERCENT = 80
+
+
+def token_count(models):
+    """Input, output and cache_write tokens summed over a {model: {kind: tokens}} map. cache_read and
+    negative counts are left out."""
+    return sum(v for counts in models.values() if isinstance(counts, dict)
+               for k, v in counts.items() if k in ("input", "output", "cache_write") and type(v) is int and v >= 0)
+
+
+def job_token_cap(home):
+    """config.md's job_token_cap as an int, else None. A bad value prints one stderr line and is off."""
+    config = Path(home, "config.md")
+    value = (frontmatter(config)[0] if config.is_file() else {}).get("job_token_cap")
+    if value is None:
+        return None
+    if not (value.isdecimal() and int(value) >= 1):
+        print(f"factory.py: pickup ignores job_token_cap in {config}: must be a whole number of at least 1",
+              file=sys.stderr)
+        return None
+    return int(value)
 
 
 def usage_cmd(*args):
@@ -12585,6 +13006,7 @@ COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3)
 COMMANDS["adopt-home"] = (adopt_home_cmd, 1, 1)
 COMMANDS["doctor"] = (doctor_cmd, 0, 0)
 COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
+COMMANDS["halt"] = (halt_cmd, 1, 3)
 COMMANDS["suggest"] = (suggest_cmd, 2, 5)
 COMMANDS["control"] = (control_cmd, 4, 6)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
@@ -12614,6 +13036,7 @@ COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["repeats"] = (repeats_cmd, 2, 2)
 COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["pre-review"] = (pre_review_cmd, 1, 1)
+COMMANDS["grounding"] = (grounding_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)

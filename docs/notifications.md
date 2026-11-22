@@ -46,6 +46,7 @@ Each person opts in once per browser. Open Settings, Notifications and check "Pu
 | A board write makes a job wait on you: stage `needs-human`, a `needs` value, or an escalated `pr-open` | Web Push | `Needs you: 051-sample-retry` |
 | A job reaches `merged` | Web Push | `Merged: <id>` |
 | The hourly cron (`17 * * * *`) finds an in-flight job whose claim went stale 240 minutes earlier | Web Push, once per stale claim | `Stuck: <id>` |
+| The hourly cron finds a job that has waited on you 24 hours since its last board update | Web Push, once per wait | `Still needs you: 051-sample-retry` |
 | A job starts waiting on you while the tab is in the background | Browser notification, with "Notify me when a job needs me" on | the job id and title |
 | A job still waits after 1 hour, 4 hours or 1 day | Browser notification, with a reminder picked | one more notification |
 | A new backlog item, a job needs you, a spec is ready, a pull request opens, a job merges | Toasts and sounds, set per event in Events | a toast in the tab, a sound or both |

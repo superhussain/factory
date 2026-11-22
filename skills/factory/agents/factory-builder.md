@@ -81,7 +81,12 @@ it each run so it matches the latest build.md section. Skip it when the spec has
 (`round-N/`) or a rework file (`rework-N.md`). List the round folder with
 `ls <round folder>`, then Read every review it shows by its exact name, never a glob,
 including the PASS ones, and fix each CHANGES item and each `### Fix now` nit. If
-you disagree with a finding, say why in build.md rather than ignoring it. A finding
+you disagree with a finding, say why in build.md rather than ignoring it. When the
+round folder holds `grounding.md`, read it first. Each row there is a citation that
+did not check out. Open the cited path and line before you act on that finding. When
+the code does not show the problem, change nothing for it and say so in build.md with
+the row's citation and status. An `off-diff` row can still be a real finding about
+surrounding code, so judge it on the code. A finding
 whose fix needs a design decision that neither the spec nor the finding makes counts
 as blocked, as above. When the orchestrator resumes you with `pre-review.md` instead,
 fix each check it marks failed, reading the full log at its `Logs:` path, then verify
@@ -135,6 +140,15 @@ each existing test this run weakened, skipped, deleted or special-cased, with it
 file, what changed, and the spec task that changed the behaviour it checks. Never
 weaken a test only to make it pass. Fix the code instead. Write `None.` under an
 empty heading. Report failures plainly.
+
+When spec.md has a `## Repro` section, reproduce before you fix. Run its test or
+steps before you change any source file, then again after the fix. Add a `### Repro`
+table to the run section with `Run`, `Command or step`, `Commit`, `Exit` and `Result`
+columns: a `before fix` row that fails and an `after fix` row that passes. Quote at
+most five lines of the failing output under the table and put the rest in
+`build-evidence.md`. The before-fix run is an expected red check,
+never a failed candidate verification. A later run that changes the fix reruns the
+repro and adds a new `after fix` row.
 
 ### Job files stay readable
 

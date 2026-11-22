@@ -64,7 +64,11 @@ feature.
    at 600000 ms. It records each verdict on the board. On `timeout`, run it again. On
    `malformed`, read the review file whose `files` entry is not a valid `VERDICT:`
    line, resume its agent, then run `round-wait` again.
-5. Once `round-wait` prints `round`, any CHANGES first checks the round cap. At the cap, the job
+5. Once `round-wait` prints `round`, run `python3 "$RUNTIME" grounding "$SLUG/<id>" <N>`.
+   It flags citations and never changes a verdict. A non-zero exit puts its stderr line in
+   the board `note`, and the loop goes on. When it prints `"result": "unverified"`, the
+   builder dispatch below and the approver in step 6 get `round-<N>/grounding.md` on a
+   short line. Then any CHANGES first checks the round cap. At the cap, the job
    goes to `needs-human`. Below the cap, first run
    `python3 "$RUNTIME" repeats "$SLUG/<id>" <N>`. When its decision is `repeat`, run
    `push "$SLUG/<id>"`, patch

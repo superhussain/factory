@@ -31,6 +31,7 @@
   "agents": [{ "at": "...", "stage": "spec", "role": "spec", "harness": "claude", "via": "native", "model": "...", "effort": "medium", "session": "a1b2c3", "paseo": {"server": "...", "agent": "..."} }],
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
   "paseo_writer": {"server": "...", "agent": "..."},
+  "token_cap": { "base": 0, "warned": "..." },
   "started": "2026-10-15T11:40:00Z",
   "updated": "2026-10-15T12:00:00Z",
   "done": "2026-10-15T12:30:00Z"
@@ -44,6 +45,7 @@ job's own `$REPO`.
 `pending`, `PASS`, `CHANGES`, or `SKIPPED` (ux and ui only, written by `review-plan`). Reviewer keys are fixed: security, ux, ui, code.
 `factory.py verdict` sets one reviewer's verdict in one write and keeps the rest of `rounds`.
 A `board` patch cannot rewrite a recorded round: it may only keep the stored rounds and append all-pending ones.
+`factory.py grounding` may add `"unverified": ["review-code.md export.py:412 bad-line"]` to a round entry: the review citations whose path or line did not check out. It never changes a verdict.
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
 which ports live jobs hold. Only `factory.py` writes `claim`.
 A `board` patch that would change only `updated` stamps, or only this session's `claim.seen` while the stored one is under 10 minutes old, sends no PUT and prints the stored row.
@@ -51,6 +53,7 @@ A `board` patch that would change only `updated` stamps, or only this session's 
 Approving a backlog line turns each `Depends on: <slug>: <feature>` context line into this ref, and is refused while that line is unchecked. The dashboard's refusal links to that prerequisite's backlog item. `next` and `batch` skip such a line while its prerequisite is unchecked or still open, and add this ref to the job they make. `batch` allows a prerequisite that is the lead or one of its riders.
 `done` is when the job entered `merged` or `closed`, and only `factory.py` writes it.
 `started` is when the job first got a claim, and only `factory.py` writes it.
+`token_cap` holds the job token cap state, and only `factory.py pickup` writes it. `base` is the token total at the last park, so a resumed session gets a full cap again, and `warned` is when pickup last warned at 80%. `board` refuses a `token_cap` patch with exit 2.
 `escalated` is set when an ESCALATE PR ships, and marks a PR that waits on a human.
 `automerge` marks an APPROVE PR waiting to merge. `board` refuses `automerge` true
 unless the local decision.md opens with APPROVE, and refuses stage `approve` unless

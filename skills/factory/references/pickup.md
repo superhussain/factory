@@ -433,6 +433,49 @@ changes nothing. Then install one timer per host.
 - When the job's session on this host was claimed before `priority.at` and its Paseo agent is not closed, `pickup` sends the agent one fixed nudge with `paseo send --no-wait`, then sets `priority.nudged`. A failed send is printed on stderr and retried next run.
 - Only the dashboard, `pickup` and `factory.py control` write `priority`. `board` refuses a `priority` patch with exit 2.
 
+## Stopping the whole factory
+
+- The dashboard's Stop factory form in Settings > Hosts sets the global stop flag, and the banner's Resume factory clears it. Only a signed-in person can clear it.
+- An agent that sees an incident needing every host stopped runs `factory.py halt set --reason <text>`. `factory.py halt status` prints the record.
+- While the flag is set, `pickup` prints `factory.py: pickup launches nothing; factory stopped by ...` on stderr and runs no pass: no launch, takeover, triage or Tracer pass. Its dry run prints `skip all: ...`.
+- `stuck` exits 3, so the resume schedule resumes nothing.
+- Sessions already running keep running. A stop blocks new starts only.
+- A Worker without the `/api/halt` route answers 404, which means not stopped.
+
+## Nudging an idle job
+
+- `pickup` watches each job at `spec`, `build`, `review` or `approve` that this device claimed and whose Paseo agent runs on this host's server. It skips jobs with an ask, a pause, a queued close or a batch lead.
+- The quiet signature is the agent, the worktree's `HEAD`, a hash of `git status --porcelain` and the job's `updated`. It lives in `<home>/idle-watch.json`, never on the board. Any commit, file edit or board write starts the window again.
+- Only an `idle` agent counts. A `running` agent keeps its entry and is skipped that run.
+- After 20 quiet minutes, `pickup` sends the agent one fixed nudge with `paseo send --no-wait` and prints `nudged idle <id> <project>: agent <agent>`. `--dry-run` prints `would nudge idle ...` and writes nothing. A failed send prints `factory.py: pickup could not nudge idle <id>: paseo send failed` on stderr and retries next run.
+- The nudge reads: "Factory job <id> shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory.py hold for the job with your --session tag, then keep waiting."
+- After 20 more quiet minutes, `pickup` moves the job to `needs-human`, releases the claim and prints `needs-human <id> <project>: idle: no progress 20 minutes after a nudge to agent <agent>`. A board change since the read wins, so a fresh `hold` keeps the job.
+- `--dry-run` prints `would move needs-human <id> <project>: <note>` for that move and writes neither the board nor `idle-watch.json`.
+- When paseo does not answer, `pickup` prints `factory.py: pickup skips idle checks: paseo did not answer` on stderr.
+
+## Token cap
+
+- Set `job_token_cap: <n>` in `config.md` to cap the tokens each job may spend on this host. Without it the pass is off and `pickup` never scans transcripts for it.
+- Right after the idle watch, `pickup` checks each job at `spec`, `build`, `review` or `approve` that this device claimed. It skips jobs with a queued close.
+- A job's count is input, output and cache_write tokens, without cache_read. This host scans its own transcripts. Each other host counts through its `tokens.<host>` entry on the board. `used` is that total minus `token_cap.base`.
+- When `used` reaches 80% of the cap and the job has no `token_cap.warned`, one write sets the warn note, `token_cap.warned` and this host's `tokens` entry.
+- When `used` reaches the cap, one write moves the job to `needs-human`, releases the claim, sets `token_cap.base` to the total and this host's `tokens` entry, then `paseo stop` stops the agent when it runs on this host's server. A resumed session gets a full cap again.
+- A board change to the stage or claim device since the read wins, and nothing is written. Each note replaces the job's `note`.
+
+| Case | Line |
+| --- | --- |
+| warn note | `tokens: {used} of the {cap} job cap ({pct}%) on {device}` |
+| park note | `tokens: {used} reached the {cap} job cap on {device}; a resumed session gets another {cap}` |
+| warn print | `token warning {id} {project}: {note}` |
+| park print | `needs-human {id} {project}: {note}` |
+| dry warn | `would warn tokens {id} {project}: {note}` |
+| dry park | `would move needs-human {id} {project}: {note}` |
+| bad config | `factory.py: pickup ignores job_token_cap in {config}: must be a whole number of at least 1` |
+| scan error | `factory.py: pickup skips the token cap of {id}: scan failed ({Type})` |
+| stop failed | `factory.py: pickup could not stop agent {agent} of {id}: paseo stop failed` |
+
+Numbers use `,` thousands separators, and `pct` is `used * 100 // cap`. The last three lines go to stderr. `--dry-run` writes nothing and never stops an agent.
+
 ## Pausing a job
 
 - The dashboard's Pause pickup item sets `paused = {at}` on a job with a project that is not merged or closed. Resume pickup deletes it.

@@ -22,7 +22,7 @@ Credentials are covered under [Secrets stay out of configuration](#secrets-stay-
 | Project documents | R2 `project-documents/<slug>/{notes,decisions,runbook}.md` | One project | Dashboard document selector | `worker/index.js` `PROJECT_DOCUMENT_NAMES`, `projectDocumentPut` |
 | Credentials | `<home>/.env` (POSIX mode 0600 when seeded) | One device | Device owner, by hand | runtime `api`, `read_conf`, `init` seed |
 
-`board.json` and `jobs/...` in R2 are state, not configuration. `<home>/route-limits.json` is device state that `routes limit` and `routes clear` write. `<home>/logs/pickup/` is device state that `pickup` writes, one launch log per idea. `<home>/paseo-claims/<job-id>/<agent>` is device state: `claim`, `board` and `hold` write one empty file when a Paseo session claims a job, and `pickup` removes it after archiving that session. The file sits under `<home>`, the resolved factory home (`--home`, `FACTORY_HOME` or the location pointer).
+`board.json` and `jobs/...` in R2 are state, not configuration. `<home>/route-limits.json` is device state that `routes limit` and `routes clear` write. `<home>/logs/pickup/` is device state that `pickup` writes, one launch log per idea. `<home>/paseo-claims/<job-id>/<agent>` is device state: `claim`, `board` and `hold` write one empty file when a Paseo session claims a job, and `pickup` removes it after archiving that session. `<home>/idle-watch.json` is device state that `pickup` writes: each idle Paseo job's quiet signature, when it started and when it was nudged. Deleting it restarts every idle window. The file sits under `<home>`, the resolved factory home (`--home`, `FACTORY_HOME` or the location pointer).
 
 ## Device config keys
 
@@ -31,6 +31,7 @@ Credentials are covered under [Secrets stay out of configuration](#secrets-stay-
 | `api_url` | none; commands that call the Worker exit 2 | `api_url()` | HTTPS origin; HTTP only for localhost/127.0.0.1 tests (`normalized_origin`) |
 | `device` | `socket.gethostname()` | `holder()` | Claim owner name on the shared board |
 | `claim_stale_minutes` | `120` | `holder()` | Whole number, 0 allowed |
+| `job_token_cap` | off | `job_token_cap()`, `pickup` | Whole number of at least 1. Pickup warns at 80% and moves the job to `needs-human` at the cap; an invalid value prints one stderr line and stays off ([pickup.md](../skills/factory/references/pickup.md#token-cap)) |
 | `claude_agents_dir` | `~/.claude/agents` | agents install | Absolute path |
 | `opencode_agents_dir` | `<config_root>/opencode/agents` | agents install | Absolute path |
 

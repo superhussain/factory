@@ -36,7 +36,14 @@ import {
   REVIEWERS,
 } from "./escalation.js";
 import { announce, connectEvents, EVENTS_PATH } from "./events.js";
-import { boardPushes, pushKey, sendPushes, stuckPushes, validSubscription } from "./push.js";
+import {
+  boardPushes,
+  pushKey,
+  sendPushes,
+  stalePushes,
+  stuckPushes,
+  validSubscription,
+} from "./push.js";
 import {
   newPairingCode,
   OFFLINE_MINUTES,
@@ -1906,6 +1913,81 @@ async function boundHost(env, principal) {
   );
 }
 
+const HALT_KEY = "halt.json";
+const HALT_SHAPE = "a halt needs {halted: true, reason: 1-200 characters} or {halted: false}";
+const HALT_PERSON_ONLY = "only a signed-in person can resume the factory";
+const HALT_UNREADABLE =
+  "the stored halt record is unreadable; resume from the dashboard to rewrite it";
+const UNREADABLE_HALT = Object.freeze({ halted: true, reason: HALT_UNREADABLE });
+
+// The stored global stop record. No key is not halted; a record that does not parse is halted.
+async function readHalt(env) {
+  const obj = await env.BUCKET.get(HALT_KEY);
+  if (!obj) return { halted: false };
+  let record = null;
+  try {
+    record = JSON.parse(await obj.text());
+  } catch {}
+  if (
+    typeof record !== "object" ||
+    record === null ||
+    Array.isArray(record) ||
+    typeof record.halted !== "boolean"
+  )
+    return UNREADABLE_HALT;
+  return record;
+}
+
+// A service never sees the email of the person who set the halt.
+function haltView(record, principal) {
+  const view = { ...record };
+  if (principal.kind !== "user" && view.by_kind === "person") delete view.by;
+  return view;
+}
+
+async function haltGet(env, principal) {
+  return reply(JSON.stringify(haltView(await readHalt(env), principal)), 200, "application/json");
+}
+
+async function haltPut(request, env, principal) {
+  const text = await readBody(request, 16384);
+  if (text === null) return reply("body over 16 KiB", 413);
+  let body = null;
+  try {
+    body = JSON.parse(text);
+  } catch {}
+  const keys =
+    typeof body === "object" && body !== null && !Array.isArray(body)
+      ? Object.keys(body).sort().join(",")
+      : "";
+  const reason = typeof body?.reason === "string" ? body.reason.trim() : "";
+  const valid =
+    (keys === "halted,reason" &&
+      body.halted === true &&
+      reason.length >= 1 &&
+      [...reason].length <= 200 &&
+      // oxlint-disable-next-line no-control-regex -- this pattern exists to reject control characters.
+      !/[\x00-\x1f\x7f-\x9f]/u.test(body.reason)) ||
+    (keys === "halted" && body.halted === false);
+  if (!valid) return reply(HALT_SHAPE, 400);
+  if (!body.halted && principal.kind !== "user") return reply(HALT_PERSON_ONLY, 403);
+  const current = await readHalt(env);
+  if (current.halted === body.halted && current !== UNREADABLE_HALT)
+    return reply(JSON.stringify(haltView(current, principal)), 200, "application/json");
+  const record =
+    principal.kind === "user"
+      ? { halted: body.halted, by_kind: "person", by: principal.email }
+      : {
+          halted: body.halted,
+          by_kind: "host",
+          by: (await boundHost(env, principal))?.id ?? "device",
+        };
+  record.at = new Date().toISOString().slice(0, 19) + "Z";
+  if (body.halted) record.reason = reason;
+  await env.BUCKET.put(HALT_KEY, JSON.stringify(record), JSON_TYPE);
+  return reply(JSON.stringify(haltView(record, principal)), 200, "application/json");
+}
+
 // A re-push replaces the host's file for that day. Every line is a JSON object naming the host.
 async function retroPut(request, env, principal, id, date) {
   if ((await boundHost(env, principal))?.id !== id) return reply(RETRO_WRITE_ONLY, 403);
@@ -2497,10 +2579,13 @@ async function storedBoard(env) {
   }
 }
 
-// The hourly stuck-job push. A scheduled env has no config, so it is read here for VAPID.
-async function pushStuck(env, at) {
+// The hourly stuck and stale push. A scheduled env has no config, so it is read here for VAPID.
+async function pushHourly(env, at) {
   const { jobs } = await storedBoard(env);
-  return sendPushes({ ...env, config: readServerConfig(env) }, stuckPushes(jobs, at));
+  return sendPushes({ ...env, config: readServerConfig(env) }, [
+    ...stuckPushes(jobs, at),
+    ...stalePushes(jobs, at),
+  ]);
 }
 
 // JSON-quoted id with every char outside printable ASCII as \uXXXX, safe to echo to a terminal.
@@ -3103,6 +3188,11 @@ async function api(request, env, path, principal, ctx) {
     if (method === "DELETE") return pushUnsubscribe(request, env);
     return notFound();
   }
+  if (path === "/api/halt") {
+    if (method === "GET") return haltGet(env, principal);
+    if (method === "PUT") return haltPut(request, env, principal);
+    return notFound();
+  }
   if (path === "/api/board" || path === "/api/backlog") {
     const [key, type] =
       path === "/api/board" ? ["board.json", "application/json"] : ["backlog.md", "text/markdown"];
@@ -3192,7 +3282,7 @@ export default {
     ctx.waitUntil(pruneRetro(env, new Date(controller.scheduledTime)));
     ctx.waitUntil(pruneRetroRuns(env, new Date(controller.scheduledTime)));
     ctx.waitUntil(pruneIdeaUploads(env, new Date(controller.scheduledTime)));
-    ctx.waitUntil(pushStuck(env, new Date(controller.scheduledTime)).catch(() => {}));
+    ctx.waitUntil(pushHourly(env, new Date(controller.scheduledTime)).catch(() => {}));
   },
 };
 

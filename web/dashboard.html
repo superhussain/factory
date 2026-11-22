@@ -388,7 +388,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .host-routes td:first-child { font-weight: 600; }
     .host-routes td:not(:first-child)::before { content: attr(data-label) ": "; color: var(--muted); }
   }
-  .host-card input, #host-add input { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .host-card input, #host-add input, #halt-form input { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .host-code { border: 1px solid var(--accent); border-radius: 8px; padding: 12px; margin: 0 0 12px; }
   .host-code pre { overflow-x: auto; }
   .host-checks label { display: flex; align-items: center; gap: 6px; color: var(--fg); margin: 4px 0; }
@@ -459,6 +459,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .dot.ok.polling { background: transparent; box-shadow: inset 0 0 0 2px var(--ok); }
   .dot.err { background: var(--alert); }
   .conn-banner { position: sticky; top: 0; z-index: 20; width: 100%; padding: 8px 14px; background: var(--alert-bg); color: var(--fg); border-bottom: 1px solid var(--line); }
+  .halt-banner { width: 100%; padding: 8px 14px; background: var(--alert-bg); color: var(--fg); border-bottom: 1px solid var(--line); }
   .board {
     display: grid; grid-template-columns: var(--cols, 1fr);
     gap: 20px; padding: 24px 28px; overflow-x: auto;
@@ -805,6 +806,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
 </head>
 <body>
 <div class="conn-banner" id="conn-banner" role="status" hidden><span id="conn-text"></span> <button class="btn" id="conn-signin" hidden>Sign in again</button></div>
+<div class="halt-banner" id="halt-banner" role="status" hidden><span id="halt-text"></span> <button class="btn" id="halt-resume" type="button">Resume factory</button></div>
 <header>
   <h1><a id="board-link" href="#">__FACTORY_TITLE__</a></h1>
   <div class="filter-wrap" id="filter-wrap">
@@ -1065,6 +1067,13 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <h3 id="hosts-settings-heading" tabindex="-1">Hosts</h3>
       <p id="hosts-help" class="muted">Devices that run factory work. A person adds a host, the device pairs with a one-time code, and a person confirms it. Once any host exists, only active hosts pick up work, so add and confirm every host in one sitting. Routes are set on each device and show here read-only. Only a signed-in person can change hosts.</p>
       <p id="hosts-status" role="status"></p>
+      <form id="halt-form">
+        <h4>Stop all hosts</h4>
+        <p id="halt-help" class="muted">Stops pickup, stalled-session takeover and stuck resumes on every host. Sessions already running keep running. Agents may also stop the factory. Only a signed-in person can resume it.</p>
+        <label for="halt-reason">Reason<input type="text" id="halt-reason" maxlength="200" autocomplete="off" aria-describedby="halt-help" required></label>
+        <p id="halt-status" role="status"></p>
+        <div class="actions"><button class="btn primary" id="halt-stop" type="submit">Stop factory</button></div>
+      </form>
       <div id="host-code" class="host-code" role="status" hidden>
         <p id="host-code-text"></p>
         <pre><code id="host-code-command"></code></pre>
@@ -1496,6 +1505,8 @@ function syncAppBadge(count) {
 
 let jobs = [];
 let openId = null;
+// The Worker's global stop record, or null before the first read.
+let haltRecord = null;
 // Hidden until the first read of the all-projects pipeline says Tracer is on.
 let tracerOff = true;
 const TRACER_WAIT_MS = 3000;
@@ -1725,6 +1736,7 @@ function refreshBacklog() {
   backlogReadAt = Date.now();
   if (Date.now() - retrosReadAt >= RETROS_POLL_MS) loadRetros();
   tracerSettingRead = loadTracerSetting();
+  loadHalt();
   const version = boardReadVersion;
   // The backlog read never holds the board. It re-renders only when the list changed, so a poll still draws once.
   const seen = backlog.map((b) => b.raw).join('\n');
@@ -3375,7 +3387,7 @@ function unsavedWork() {
   return !!document.querySelector('dialog[open]')
     || settingsUnsaved()
     || [...document.querySelectorAll(typing)].some(el => !blank(el))
-    || [...document.querySelectorAll('#host-add input[type=text], #host-add input:not([type])')].some(el => !blank(el))
+    || [...document.querySelectorAll('#host-add input[type=text], #host-add input:not([type]), #halt-reason')].some(el => !blank(el))
     || hostDrafts.size > 0
     || backlogSaving || needsSaving || inboxAnswer?.saving || boardWrites > 0
     || needsStorageFailed && [...needsMemory.values()].some(a => a.some(x => x.picked.length || x.other.trim()))
@@ -4867,6 +4879,41 @@ async function loadTracerSetting() {
   if (openId) openJob(openId);
 }
 
+async function loadHalt() {
+  try {
+    const r = await fetch('./api/halt', {cache:'no-store'});
+    if (r.ok && !r.redirected) haltRecord = await r.json();
+  } catch {}
+  renderHalt();
+}
+
+function renderHalt() {
+  const halted = haltRecord?.halted === true;
+  $('halt-banner').hidden = !halted;
+  $('halt-form').hidden = halted;
+  if (!halted) return;
+  const {by, at, reason} = haltRecord;
+  $('halt-text').textContent = 'Factory stopped by ' + (by || 'an unknown source') + (at ? ' at ' + hostUtc(at) : '') + '. ' + (reason || '');
+}
+
+async function saveHalt(body) {
+  let r = null;
+  try {
+    r = await fetch('./api/halt', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  } catch {}
+  if (r?.status === 200 && !r.redirected) {
+    haltRecord = await r.json();
+    renderHalt();
+    if (body.halted) $('halt-resume').focus();
+    else if ($('halt-reason').checkVisibility()) $('halt-reason').focus();
+    else { showBoardStatus('Factory resumed.'); $('board-status').focus(); }
+    return true;
+  }
+  if (body.halted) $('halt-status').textContent = 'Could not stop the factory. Try again.';
+  else showBoardStatus('Could not resume the factory. Try again.');
+  return false;
+}
+
 async function loadHosts() {
   const generation = ++hostsGeneration;
   let list = null;
@@ -5049,6 +5096,15 @@ $('host-add').addEventListener('submit', async e => {
   $('host-add').reset();
 });
 $('hosts-load').addEventListener('click', () => { loadHosts(); loadHostProjects(); });
+$('halt-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const reason = $('halt-reason').value.trim();
+  if (!reason) { $('halt-status').textContent = 'Enter a reason.'; return; }
+  if (!await saveHalt({halted:true, reason})) return;
+  $('halt-reason').value = '';
+  $('halt-status').textContent = '';
+});
+$('halt-resume').addEventListener('click', () => saveHalt({halted:false}));
 $('host-code-done').addEventListener('click', clearHostCode);
 $('host-code-copy').addEventListener('click', async () => {
   try {

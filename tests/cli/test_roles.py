@@ -512,3 +512,15 @@ class RolesTest(IsolatedTestCase):
         for phrase in ("push once, reply in every thread, resolve each thread when the notes ask, then run",
                        "and reply in the review threads, and resolve each thread when the notes ask, as the notes"):
             self.assertIn(phrase, babysit)
+
+    def test_reproduce_first_and_visual_gate(self):
+        def flat(name):
+            return " ".join((SKILL / "agents" / name).read_text(encoding="utf-8").split())
+        self.assertIn("adds a `## Repro` section right before Tasks", flat("factory-spec-writer.md"))
+        builder = flat("factory-builder.md")
+        self.assertIn("reproduce before you fix", builder)
+        self.assertIn("never a failed candidate verification", builder)
+        self.assertIn("return CHANGES unless build.md has a `### Repro` table", flat("factory-review-code.md"))
+        ui = flat("factory-review-ui.md")
+        self.assertIn("It is never a nit and never goes under `### Fix now`", ui)
+        self.assertIn("mark the pair `invalid comparison`", ui)

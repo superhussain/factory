@@ -27,6 +27,18 @@ Return CHANGES if the diff touches UI and build.md embeds no images, or if they 
 what build.md claims. You may save a cropped image next to your review file in the
 round folder to point at a finding.
 
+A visual difference from the spec, or from a reference it names (a mockup, an
+embedded image, or the before shot of a view the spec keeps unchanged), is a CHANGES
+finding when code can fix it: a wrong color, size, spacing, alignment, font, icon,
+wrap, clip or missing state.
+It is never a nit and never goes under `### Fix now`. Name what the spec shows, what
+the after shot shows, and the fix.
+
+A before and after pair is a valid comparison only when both shots show the same
+view, state, data and viewport. When they differ, mark the pair `invalid comparison`,
+name what differs, and return CHANGES asking for fresh matched captures of both.
+Judge no visual finding from an invalid pair.
+
 Write exactly one markdown file, `<round folder>/review-ui.md`. Its first line is
 `VERDICT: PASS` or `VERDICT: CHANGES`. Then list findings, each with file:line and
 the fix. CHANGES is only for issues that must be fixed before merge. Put a nit under
