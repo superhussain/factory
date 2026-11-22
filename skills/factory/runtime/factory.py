@@ -996,6 +996,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
              "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
     if "github" in patch:
         fail("only factory.py pickup sets github. Nothing was written.", 2)
+    if "token_cap" in patch:
+        fail("only factory.py pickup sets token_cap. Nothing was written.", 2)
     if "auto_babysit" in patch:
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
     if "handled" in patch:
@@ -11653,6 +11655,28 @@ def usage_pickup_record(home, job):
         return
     usage_record(home, slug, job_id, device, totals)
     print(f"recorded {device} tokens on {job_id}")
+
+
+TOKEN_WARN_PERCENT = 80
+
+
+def token_count(models):
+    """Input, output and cache_write tokens summed over a {model: {kind: tokens}} map. cache_read is left out."""
+    return sum(v for counts in models.values() if isinstance(counts, dict)
+               for k, v in counts.items() if k in ("input", "output", "cache_write") and type(v) is int)
+
+
+def job_token_cap(home):
+    """config.md's job_token_cap as an int, else None. A bad value prints one stderr line and is off."""
+    config = Path(home, "config.md")
+    value = (frontmatter(config)[0] if config.is_file() else {}).get("job_token_cap")
+    if value is None:
+        return None
+    if not (value.isdecimal() and int(value) >= 1):
+        print(f"factory.py: pickup ignores job_token_cap in {config}: must be a whole number of at least 1",
+              file=sys.stderr)
+        return None
+    return int(value)
 
 
 def usage_cmd(*args):
