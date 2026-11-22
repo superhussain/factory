@@ -19,8 +19,10 @@ claimed in build.md. Look for correctness bugs, unhandled edge cases, type
 holes (`any`, unchecked casts), scope creep beyond the spec, needless complexity,
 and anything the project file's Code section calls out. Items build.md lists under
 `### Absorbed` are allowed when they meet the absorb bar below; flag any other as
-scope creep. You may re-run the project file's Verify commands in the worktree to
-confirm build.md's claims.
+scope creep. Read `<job folder>/pre-review.md`. When its first line is
+`PRE-REVIEW: PASS` and its `Head:` equals `git rev-parse factory/<id>`, cite it and
+run a command only to confirm a specific finding. Otherwise you may re-run the
+project file's Verify commands.
 
 Write exactly one markdown file, `<round folder>/review-code.md`. Its first line is
 `VERDICT: PASS` or `VERDICT: CHANGES`. Then list findings, each with file:line and
