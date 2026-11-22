@@ -279,6 +279,64 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
       });
     });
 
+    const STATUS = "Could not resume the factory. Try again.";
+    const showWithStatus = async (position) => {
+      await page.evaluate((pos) => {
+        toastPosition = pos;
+        applyDisplay();
+        showNotifyToast("spec", "#073-sample-retry", "Synthetic retry limit", "073-sample-retry");
+      }, position);
+      await page.evaluate((text) => showBoardStatus(text), STATUS);
+      await page.waitForFunction(
+        (text) => document.getElementById("board-status").textContent === text,
+        wait,
+        STATUS,
+      );
+    };
+    const stackAboveStatus = () =>
+      page.waitForFunction(
+        () =>
+          document.getElementById("notify-toasts").getBoundingClientRect().bottom <=
+          document.getElementById("board-status").getBoundingClientRect().top - 8 + 1,
+        { ...wait, timeout: 5000 },
+      );
+    const stackAtBottom = () =>
+      page.waitForFunction(
+        () =>
+          Math.abs(
+            document.getElementById("notify-toasts").getBoundingClientRect().bottom -
+              (innerHeight - 16),
+          ) <= 1,
+        { ...wait, timeout: 5000 },
+      );
+    const resetStack = async () => {
+      await page.evaluate(() => {
+        showBoardStatus("");
+        toastPosition = "bottom-right";
+        applyDisplay();
+      });
+      await clear();
+    };
+
+    await t.test("bottom center toast T2 sits above the board status", async () => {
+      await showWithStatus("bottom-center");
+      await stackAboveStatus();
+      await page.evaluate(() => showBoardStatus(""));
+      await stackAtBottom();
+      await resetStack();
+    });
+
+    await t.test("narrow bottom right toast T3 yields, desktop corner stays", async () => {
+      await page.setViewport({ width: 390, height: 844 });
+      await showWithStatus("bottom-right");
+      await stackAboveStatus();
+      await resetStack();
+      await page.setViewport({ width: 1280, height: 900 });
+      await showWithStatus("bottom-right");
+      await stackAtBottom();
+      await resetStack();
+    });
+
     assert.deepEqual(errors, []);
   });
 });
