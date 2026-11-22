@@ -6115,7 +6115,7 @@ def outcome_of(checkout, base, oid, rework_ids):
     return ("reworked", sorted(evidence)) if evidence else ("held", [])
 
 
-def outcome_checkout_problem(checkout, base, device):
+def outcome_checkout_problem(checkout, base, repo, device):
     """Why outcomes cannot read origin/<base> in checkout on device, or None once the fetch worked."""
     path = Path(checkout)
     if not path.is_dir():
@@ -6123,7 +6123,7 @@ def outcome_checkout_problem(checkout, base, device):
     top = git(path, "rev-parse", "--show-toplevel")
     if not top or Path(top).resolve() != path.resolve():
         return f"{checkout} is not a git checkout on {device}"
-    why = fetch_base(path, base)
+    why = fetch_base(path, base, repo)
     return f"{why} in {checkout} on {device}" if why else None
 
 
@@ -7495,7 +7495,8 @@ def review_plan_cmd(target, round_text):
     if not any(j.get("id") == job_id for j in data["jobs"]):
         fail(f"no job {job_id} on the board. Nothing was written.", 4)
     project_file = project_files(home, slug)[0]
-    base = frontmatter(project_file)[0].get("base") or "main"
+    meta = frontmatter(project_file)[0]
+    base, repo = meta.get("base") or "main", meta.get("repo", "")
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
     folder = home / "jobs" / slug / job_id
@@ -7524,7 +7525,7 @@ def review_plan_cmd(target, round_text):
         for name in SKIPPABLE_REVIEWERS)
     fixed = round_changed_files(wt, prev[1]) if passed else None
     globs = visible_globs(project_file)
-    branch = changed_files(wt, base) if wt.is_dir() and not fetch_base(wt, base) else None
+    branch = changed_files(wt, base) if wt.is_dir() and not fetch_base(wt, base, repo) else None
     protected = touched_protected(branch) if branch is not None else None
     if fixed is not None:
         hit = next(((path, g) for path in fixed for g in globs if fnmatch.fnmatchcase(path, g)), None)
@@ -7631,7 +7632,8 @@ def pre_review_cmd(target):
         fail(f"no job {job_id} on the board. Nothing was written. " + PRE_REVIEW_USAGE, 4)
     board_round = job.get("round")
     round_n = (board_round if type(board_round) is int and board_round >= 0 else 0) + 1
-    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
+    meta = frontmatter(project_files(home, slug)[0])[0]
+    base, repo = meta.get("base") or "main", meta.get("repo", "")
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
     folder = home / "jobs" / slug / job_id
@@ -7647,7 +7649,7 @@ def pre_review_cmd(target):
         return None if proc.returncode else proc.stdout
 
     head = (git("rev-parse", "HEAD") or "").strip() or None
-    checks, reason = [], fetch_base(wt, base)
+    checks, reason = [], fetch_base(wt, base, repo)
     if not reason:
         text = git("show", f"origin/{base}:{CHECKS_FILE}")
         checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
@@ -7721,9 +7723,9 @@ def find_citations(text):
     return found
 
 
-def diff_ranges(wt, base):
+def diff_ranges(wt, base, repo):
     """({path: [(start, end)]}, None) for the lines the branch changes since origin/<base>, or (None, reason)."""
-    reason = fetch_base(wt, base)
+    reason = fetch_base(wt, base, repo)
     if reason:
         return None, reason
     unreadable = f"the diff against origin/{base} could not be read"
@@ -7796,7 +7798,8 @@ def grounding_cmd(target, round_text):
     rounds = (job or {}).get("rounds")
     if not isinstance(rounds, list) or len(rounds) < n or not isinstance(rounds[n - 1], dict):
         fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
-    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
+    meta = frontmatter(project_files(home, slug)[0])[0]
+    base, repo = meta.get("base") or "main", meta.get("repo", "")
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
     folder = home / "jobs" / slug / job_id
@@ -7816,7 +7819,7 @@ def grounding_cmd(target, round_text):
 
     head = (git("rev-parse", "HEAD") or "").strip() or None
     tracked = [p for p in (git("ls-files", "-z") or "").split("\0") if p]
-    ranges, diff_reason = diff_ranges(wt, base)
+    ranges, diff_reason = diff_ranges(wt, base, repo)
     rows, checked, files = [], 0, 0
     for name in REVIEWERS:
         review = f"review-{name}.md"
@@ -12476,7 +12479,7 @@ def outcomes_cmd(*args):
                 prs.setdefault(int(m[3]), []).append(j["id"])
         if not prs:
             continue
-        problem = outcome_checkout_problem(checkout, base, device)
+        problem = outcome_checkout_problem(checkout, base, repo, device)
         if problem:
             for ids in prs.values():
                 results.update(dict.fromkeys(ids, ("unknown", [problem])))
