@@ -1771,7 +1771,7 @@ RULE_HOLD_REASONS = ("its author recommends deny", "it asks questions a person m
 
 
 def record_decider(record):
-    """Who made a board backlog decision. Records from before decider existed infer it."""
+    """Who made a board backlog decision or an origin.approved approval. Records from before decider existed infer it."""
     return record.get("decider") or ("model" if record.get("by") == "triage" else "person")
 
 
@@ -1966,8 +1966,9 @@ def escalation_verdict(text):
         return None
     ok = (isinstance(reply, dict) and reply.get("decision") in ("escalate", "continue")
           and type(reply.get("confidence")) is int and type(reply.get("threshold")) is int
-          and isinstance(reply.get("reason"), str) and isinstance(reply.get("model"), str))
-    return reply if ok else None
+          and isinstance(reply.get("reason"), str) and isinstance(reply.get("model"), str)
+          and reply.get("decider", "model") == "model")
+    return {**reply, "decider": "model"} if ok else None
 
 
 def escalation_cmd(target, round_text):
@@ -1986,7 +1987,7 @@ def escalation_cmd(target, round_text):
         if text.splitlines()[:1] == ["VERDICT: CHANGES"]:
             reviews[name] = text[:ESCALATION_TEXT_LIMIT]
     unchanged = {"decision": "continue", "confidence": None, "threshold": None,
-                 "reason": "no reviewer asked for changes", "model": None}
+                 "reason": "no reviewer asked for changes", "model": None, "decider": "rule"}
     if not reviews:
         print(json.dumps(unchanged))
         return
@@ -3584,10 +3585,11 @@ def suggest_approve(job_id, option, chat_file=None):
             fail(f"{slug} is not a registered project on the autonomy allowlist; nothing was changed", 2)
         stamp = now()
         if quote is None:
-            origin["approved"] = {"option": option, "device": device, "at": stamp}
+            origin["approved"] = {"option": option, "device": device, "at": stamp, "decider": "person"}
             footer = f"Approved option {option} by {device} at {stamp}."
         else:
-            origin["approved"] = {"option": option, "via": "chat", "quote": quote, "device": device, "at": stamp}
+            origin["approved"] = {"option": option, "via": "chat", "quote": quote, "device": device, "at": stamp,
+                                  "decider": "person"}
             footer = f'Approved option {option} in chat by {device} at {stamp}: "{" ".join(quote.split())}"'
         job["project"] = slug
         job.pop("needs", None)
