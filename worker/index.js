@@ -2721,13 +2721,24 @@ async function storedBoard(env) {
   }
 }
 
+// Spend nudges for the hour; a failure is logged so the stuck and stale pushes still go out.
+async function spendEvents(env, at) {
+  if (!pushKey(env)) return [];
+  try {
+    return await spendNudgePass(env, await weeklyBudgets(env), at);
+  } catch (error) {
+    console.warn(`spend nudge pass failed: ${error.message}`);
+    return [];
+  }
+}
+
 // The hourly stuck, stale and spend push. A scheduled env has no config, so it is read here for VAPID.
 async function pushHourly(env, at) {
   const { jobs } = await storedBoard(env);
   return sendPushes({ ...env, config: readServerConfig(env) }, [
     ...stuckPushes(jobs, at),
     ...stalePushes(jobs, at),
-    ...(pushKey(env) ? await spendNudgePass(env, await weeklyBudgets(env), at) : []),
+    ...(await spendEvents(env, at)),
   ]);
 }
 
