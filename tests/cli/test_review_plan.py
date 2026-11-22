@@ -12,6 +12,8 @@ JOB = "001-sample-job"
 ALL = ["security", "ux", "ui", "code"]
 SPEC = "# Spec: sample\n\n## Acceptance criteria\n\n| # | Criterion |\n| 1 | The docs read well |\n"
 LOW = SPEC + "\n## Review tier\n\nTier: low\n\n- Docs only.\n"
+MEDIUM = LOW.replace("Tier: low", "Tier: medium")
+FULL = "CHANGES\n\n## Full review\n\nAuth changed.\n"
 ROUTES = ("---\nprimary: provider-a model-big medium\nreview-low: provider-a model-small low\n"
           "review-medium: provider-a model-mid medium\n---\n")
 SMALL = {"name": "review-low", "provider": "provider-a", "model": "model-small", "effort": "low"}
@@ -255,6 +257,7 @@ class ReviewPlanTest(IsolatedTestCase):
                 shutil.rmtree(self.wt, ignore_errors=True)
                 shutil.rmtree(self.home / "origin.git", ignore_errors=True)
                 shutil.rmtree(self.folder / "round-1", ignore_errors=True)
+                (self.folder / "review-floor.json").unlink(missing_ok=True)
                 (self.folder / "spec.md").write_text(spec)
                 if decision:
                     (self.folder / "decision.md").write_text(decision)
@@ -270,6 +273,73 @@ class ReviewPlanTest(IsolatedTestCase):
                 self.assertEqual(plan["routes"], dict.fromkeys(plan["run"]))
                 recorded = json.loads((self.folder / "round-1" / "review-plan.json").read_text())
                 self.assertEqual((recorded["tier"], recorded["routes"]), ("high", dict.fromkeys(plan["run"])))
+
+    def floor_cmd(self):
+        routes = {"/api/board": (200, board())}
+        with http_fixture(routes) as server:
+            (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
+            return invoke(factory, ["--home", str(self.home), "review-floor", f"sample/{JOB}"])
+
+    def test_review_floor_never_lowers(self):
+        (self.folder / "decision.md").write_text(FULL)
+        recorded = {"tier": "medium", "full_review": True}
+        for spec in (MEDIUM, LOW):
+            (self.folder / "spec.md").write_text(spec)
+            if spec == LOW:
+                (self.folder / "decision.md").unlink()
+            code, out, err = self.floor_cmd()
+            self.assertEqual((code, err), (0, ""))
+            self.assertEqual(json.loads(out), recorded)
+            self.assertEqual(json.loads((self.folder / "review-floor.json").read_text()), recorded)
+        (self.folder / "spec.md").write_text(LOW.replace("Tier: low", "Tier: high"))
+        code, out, _ = self.floor_cmd()
+        self.assertEqual((code, json.loads(out)), (0, {"tier": "high", "full_review": True}))
+
+    def test_floor_keeps_recorded_tier(self):
+        (self.folder / "spec.md").write_text(MEDIUM)
+        self.assertEqual(self.floor_cmd()[:2], (0, '{"tier": "medium", "full_review": false}\n'))
+        self.worktree("docs/trust.md")
+        self.assertEqual(self.assertSkipped()["tier"], "medium")
+        (self.folder / "spec.md").write_text(LOW)
+        self.commit("docs/a.md")
+        plan = self.assertSkipped("2")
+        self.assertEqual((plan["tier"], plan["tier_reason"]),
+                         ("medium", "review-floor.json records medium, above spec.md's low"))
+
+    def test_floor_keeps_full_review(self):
+        (self.folder / "spec.md").write_text(MEDIUM)
+        (self.folder / "decision.md").write_text(FULL)
+        self.worktree("docs/trust.md")
+        self.assertEqual(self.assertSkipped()["tier_reason"], "decision.md asks for a full review")
+        self.assertEqual(json.loads((self.folder / "review-floor.json").read_text()),
+                         {"tier": "medium", "full_review": True})
+        (self.folder / "decision.md").unlink()
+        self.commit("docs/a.md")
+        plan = self.assertSkipped("2")
+        self.assertEqual((plan["tier"], plan["tier_reason"]), ("high", "review-floor.json records a full review"))
+
+    def test_floor_bad_or_linked(self):
+        (self.folder / "spec.md").write_text(LOW)
+        self.worktree("docs/trust.md")
+        floor = self.folder / "review-floor.json"
+        bads = ("not json", '{"tier": "huge", "full_review": false}', '{"tier": "low"}', "[]")
+        for n, bad in enumerate(bads, 1):
+            with self.subTest(bad):
+                floor.write_text(bad)
+                code, out, _ = self.floor_cmd()
+                self.assertEqual((code, json.loads(out)), (0, {"tier": "high", "full_review": False}))
+                floor.write_text(bad)
+                plan = json.loads(self.plan(str(n))[1])
+                self.assertEqual((plan["tier"], plan["tier_reason"]),
+                                 ("high", "review-floor.json records high, above spec.md's low"))
+        floor.unlink()
+        real = self.home / "elsewhere.json"
+        real.write_text('{"tier": "low", "full_review": false}\n')
+        floor.symlink_to(real)
+        for code, out, err in (self.floor_cmd(), self.plan("5")):
+            self.assertEqual((code, out), (6, ""))
+            self.assertIn("symlink or junction; nothing was written", err)
+        self.assertEqual(real.read_text(), '{"tier": "low", "full_review": false}\n')
 
     def test_no_routes_file_gives_null_routes(self):
         (self.folder / "spec.md").write_text(LOW)
