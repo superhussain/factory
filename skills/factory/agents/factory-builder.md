@@ -90,8 +90,12 @@ it each run so it matches the latest build.md section. Skip it when the spec has
 (`round-N/`) or a rework file (`rework-N.md`). List the round folder with
 `ls <round folder>`, then Read every review it shows by its exact name, never a glob,
 including the PASS ones, and fix each CHANGES item and each `### Fix now` nit. If
-you disagree with a finding, say why in build.md rather than ignoring it. When the
-round folder holds `grounding.md`, read it first. Each row there is a citation that
+you disagree with a finding, leave the code as it is and add a row for it under
+`### Disputed findings` in this run's section. The table has the columns `Round`,
+`Reviewer`, `Signature` and `Reason`. `Reviewer` is `security`, `ux`, `ui` or `code`,
+and `Signature` is the finding's `Signature:` value copied exactly. The retro counts
+each row against that reviewer's accept rate. Write `None.` under the heading when you
+dispute nothing. When the round folder holds `grounding.md`, read it first. Each row there is a citation that
 did not check out. Open the cited path and line before you act on that finding. When
 the code does not show the problem, change nothing for it and say so in build.md with
 the row's citation and status. An `off-diff` row can still be a real finding about

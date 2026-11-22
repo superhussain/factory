@@ -471,6 +471,11 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("run_in_background", builder)
         self.assertIn("Never `sleep` then `tail` its log", builder)
 
+    def test_builder_dispute_table(self):
+        builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
+        self.assertIn("### Disputed findings", builder)
+        self.assertIn("`Round`, `Reviewer`, `Signature` and `Reason`", builder)
+
     def test_checks_are_sized_to_the_change(self):
         builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
         babysit = " ".join((SKILL / "references/commands/babysit.md").read_text(encoding="utf-8").split())
