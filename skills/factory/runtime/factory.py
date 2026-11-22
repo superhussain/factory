@@ -1048,6 +1048,9 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
         if "stage" in patch and not patch["stage"]:
             fail(f"a board write cannot clear {job_id}'s stage. "
                  'Close the job with {"stage": "closed"} instead. Nothing was written.', 2)
+        refusal = move_refusal(Path(factory), job_id, found, patch)
+        if refusal:
+            fail(refusal, 2)
         if "refs" in patch and batch_refs(patch["refs"]) != batch_refs((found or {}).get("refs")):
             fail(f"only factory.py batch and the lead's mirror add or remove a batched-into ref. "
                  f"A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.", 2)
@@ -7121,6 +7124,40 @@ def escalation_hold(home, slug, job_id):
         return "has a decision.md that cannot be read"
     first = next((line.strip() for line in text.splitlines() if line.strip()), "")
     return "has a decision.md that says ESCALATE" if first.startswith("ESCALATE") else None
+
+
+def move_refusal(home, job_id, found, patch):
+    """Why a board write cannot move the job to approve or set automerge true, or None."""
+    if patch.get("stage") == "approve":
+        rounds = patch["rounds"] if "rounds" in patch else (found or {}).get("rounds")
+        if not isinstance(rounds, list) or not rounds or not isinstance(rounds[-1], dict):
+            return f"{job_id} cannot move to approve: it has no review round on the board. Nothing was written."
+        failing = [f"{r} {rounds[-1].get(r, 'missing')}" for r in REVIEWERS
+                   if rounds[-1].get(r) not in ("PASS", "SKIPPED")]
+        if failing:
+            return (f"{job_id} cannot move to approve: round {len(rounds)} has {', '.join(failing)}. "
+                    "Every verdict in the latest round must be PASS or SKIPPED. Nothing was written.")
+    if patch.get("automerge") is True:
+        slug = patch.get("project", (found or {}).get("project"))
+        if not isinstance(slug, str) or not SLUG.fullmatch(slug):
+            return (f"{job_id} cannot set automerge true: it has no project, so there is no decision.md "
+                    "to check. Nothing was written.")
+        decision = home / "jobs" / slug / job_id / "decision.md"
+        unreadable = f"{job_id} cannot set automerge true: its decision.md cannot be read. Nothing was written."
+        try:
+            if is_link(decision):
+                return unreadable
+            text = decision.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return (f"{job_id} cannot set automerge true: decision.md is not on this host. "
+                    f"Run factory.py pull {slug}/{job_id}, then retry. Nothing was written.")
+        except (OSError, UnicodeError):
+            return unreadable
+        first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+        if not re.match(r"APPROVE\b", first):
+            return (f"{job_id} cannot set automerge true: decision.md starts with {first[:40]!r}, not APPROVE. "
+                    "Nothing was written.")
+    return None
 
 
 def gh_answer(result, what):

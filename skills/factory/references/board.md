@@ -51,7 +51,10 @@ Approving a backlog line turns each `Depends on: <slug>: <feature>` context line
 `done` is when the job entered `merged` or `closed`, and only `factory.py` writes it.
 `started` is when the job first got a claim, and only `factory.py` writes it.
 `escalated` is set when an ESCALATE PR ships, and marks a PR that waits on a human.
-`automerge` marks an APPROVE PR waiting to merge. `resumes` counts consecutive
+`automerge` marks an APPROVE PR waiting to merge. `board` refuses `automerge` true
+unless the local decision.md opens with APPROVE, and refuses stage `approve` unless
+the last `rounds` entry is all PASS or SKIPPED; factory.py says it cannot move to
+approve. `resumes` counts consecutive
 scheduled resumes without progress, and only `factory.py stuck` writes it.
 `refs` links a job to the jobs it came from, and the dashboard shows them on the
 card and as links in the job panel. The drawer's Add follow-up idea item saves a
