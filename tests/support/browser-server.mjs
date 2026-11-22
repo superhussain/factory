@@ -104,6 +104,12 @@ export async function seedBoard(origin, jobs, updated = "2026-01-01T00:00:00Z") 
   return write(jobs);
 }
 
+// Adds a trials list to the stored board, as retro admit and trial settle do.
+export async function seedTrials(origin, trials) {
+  const board = await (await fetch(origin + "/api/board")).json();
+  return put(origin, "/api/board", JSON.stringify({ ...board, trials }));
+}
+
 export async function seedPipeline(origin, doc) {
   return put(origin, "/api/pipeline/global", JSON.stringify(doc), {
     "Content-Type": "application/json",

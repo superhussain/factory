@@ -157,6 +157,10 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     #settings-document { min-height: 45dvh; }
   }
   #pipeline-effective { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--code-bg); padding: 10px 12px; border-radius: 6px; }
+  #pipeline-trials-paused { background: var(--alert-bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 0 0 10px; overflow-wrap: anywhere; }
+  #pipeline-trials-paused p { margin: 0; }
+  #pipeline-trials-table { table-layout: auto; min-width: 560px; }
+  #pipeline-trials-table th, #pipeline-trials-table td { overflow-wrap: normal; }
   #pipeline-history, #settings-history { height: 160px; overflow-y: auto; padding-right: 4px; padding-bottom: 4px; scroll-padding-block: 4px; }
   #pipeline-gates, #pipeline-pickup, #pipeline-triage, #pipeline-hold, #pipeline-backpressure, #pipeline-archive, #pipeline-tracer, #project-pickup { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; padding: 8px 12px; }
   #pipeline-gates legend, #pipeline-pickup legend, #pipeline-triage legend, #pipeline-hold legend, #pipeline-backpressure legend, #pipeline-archive legend, #pipeline-tracer legend, #project-pickup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
@@ -1062,6 +1066,18 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <label for="pipeline-note-review" id="pipeline-note-panel-review" role="tabpanel" aria-labelledby="pipeline-note-tab-review" hidden>Review stage note<textarea id="pipeline-note-review" spellcheck="false"></textarea></label>
         <label for="pipeline-note-approve" id="pipeline-note-panel-approve" role="tabpanel" aria-labelledby="pipeline-note-tab-approve" hidden>Approve stage note<textarea id="pipeline-note-approve" spellcheck="false"></textarea></label>
         <label for="pipeline-note-babysit" id="pipeline-note-panel-babysit" role="tabpanel" aria-labelledby="pipeline-note-tab-babysit" hidden>Babysit stage note<textarea id="pipeline-note-babysit" spellcheck="false" placeholder="Name the readings to act on (fix-ci, fix-reviews, rebase, merge), how to reply in review threads, and the skills to load. With no note, Babysit PR waits and hands the PR back."></textarea></label>
+        <section id="pipeline-trials" aria-labelledby="pipeline-trials-heading">
+          <h4 id="pipeline-trials-heading">Stage-note trials</h4>
+          <p id="pipeline-trials-help" class="muted">Retro admit opens a trial for each stage-note edit it saves. Arm a jobs keep the old note and arm b jobs read the edit. <code>factory.py trial settle</code> compares the arms and reverts an edit when b reads higher on rounds or tokens.</p>
+          <div id="pipeline-trials-paused" role="status" hidden></div>
+          <div class="reference-scroll" id="pipeline-trials-wrap" tabindex="0" role="region" aria-labelledby="pipeline-trials-heading" hidden>
+            <table id="pipeline-trials-table" class="project-list">
+              <thead><tr><th scope="col">Trial</th><th scope="col">Stage</th><th scope="col">Status</th><th scope="col">Jobs a / b</th><th scope="col">Rounds</th><th scope="col">Tokens</th></tr></thead>
+              <tbody id="pipeline-trials-body"></tbody>
+            </table>
+          </div>
+          <p id="pipeline-trials-empty" class="muted">No stage-note trials yet.</p>
+        </section>
         <h4 id="pipeline-history-heading">History</h4>
         <ol id="pipeline-history"></ol>
         <p id="pipeline-status" role="status"></p>
@@ -1529,6 +1545,7 @@ function syncAppBadge(count) {
 }
 
 let jobs = [];
+let boardTrials = [];
 let openId = null;
 // The Worker's global stop record, or null before the first read.
 let haltRecord = null;
@@ -1773,6 +1790,7 @@ function takeBoard(data) {
   boardArchived = Number.isInteger(data.archived?.max_id);
   boardUpdated = data.updated || '';
   boardMaxId = Number.isInteger(data.archived?.max_id) ? data.archived.max_id : 0;
+  boardTrials = Array.isArray(data.trials) ? data.trials : [];
 }
 
 // Saved copies paint the board at once. The network read that follows replaces them.
@@ -1803,6 +1821,7 @@ function boardTaken() {
   boardSound();
   toastBoard();
   if (settingsShown === 'projects') renderProjectList();
+  if (settingsShown === 'pipeline') renderPipelineTrials();
   syncDetail();
   syncBacklogRoute();
   syncIdeaEditor();
@@ -4522,6 +4541,8 @@ const pipelineLoads = new Map();
 let pipelineGeneration = 0;
 const PIPELINE_STAGES = ['spec', 'build', 'review', 'approve', 'babysit'];
 const PIPELINE_GATES = ['spec-approval'];
+// Same as factory.py TRIAL_PAUSE_REVERTS.
+const TRIAL_PAUSE_REVERTS = 2;
 const pipelineObject = doc => !!doc && typeof doc === 'object' && !Array.isArray(doc);
 // Same pattern and messages as the pickup block of validatePipeline in worker/admission.js.
 const PIPELINE_HOST = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -4924,6 +4945,57 @@ function selectPipelineScope() {
   loadPipelineHistory(scope);
   loadPipelineEffective(scope);
   renderPipelineSettings();
+  renderPipelineTrials();
+}
+
+// Board trials are agent-written records, so every cell is textContent.
+const trialRow = (t) => !!t && typeof t === 'object' && ['id', 'project', 'stage', 'status'].every((k) => typeof t[k] === 'string');
+
+// Same count as factory.py trials_paused: any record object, not only the ones that render as rows.
+const trialRecord = (t) => !!t && typeof t === 'object' && !Array.isArray(t);
+function trialsPaused(slug) {
+  return boardTrials.filter((t) => trialRecord(t) && t.project === slug && t.status === 'reverted' && !t.resumed).length >= TRIAL_PAUSE_REVERTS;
+}
+// The banner is rebuilt only when its projects change, so a status region does not re-announce on every board update.
+let trialsPausedShown = '';
+
+function renderPipelineTrials() {
+  const scope = $('pipeline-scope').value;
+  const slug = scope.startsWith('projects/') ? scope.slice(9) : '';
+  const rows = boardTrials
+    .filter((t) => trialRow(t) && (!slug || t.project === slug))
+    .sort((a, b) => String(b.opened ?? '').localeCompare(String(a.opened ?? '')));
+  const unsettled = 'not settled yet';
+  $('pipeline-trials-body').replaceChildren(...rows.map((t) => {
+    const tr = document.createElement('tr');
+    const head = document.createElement('th');
+    head.scope = 'row';
+    head.textContent = t.id;
+    tr.append(head);
+    for (const text of [
+      t.stage,
+      t.status + (t.status === 'reverted' && t.resumed ? ', resumed' : ''),
+      Array.isArray(t.arms?.a) && Array.isArray(t.arms?.b) ? t.arms.a.length + ' / ' + t.arms.b.length : unsettled,
+      typeof t.reads?.rounds === 'string' ? t.reads.rounds : unsettled,
+      typeof t.reads?.tokens === 'string' ? t.reads.tokens : unsettled,
+    ]) tr.insertCell().textContent = text;
+    return tr;
+  }));
+  const projectsWithTrials = boardTrials.filter((t) => trialRecord(t) && typeof t.project === 'string').map((t) => t.project);
+  const paused = (slug ? [slug] : [...new Set(projectsWithTrials)].sort()).filter(trialsPaused);
+  if (paused.join('\n') !== trialsPausedShown) {
+    trialsPausedShown = paused.join('\n');
+    $('pipeline-trials-paused').replaceChildren(...paused.map((p) => {
+      const line = document.createElement('p');
+      const code = document.createElement('code');
+      code.textContent = 'factory.py trial resume ' + p;
+      line.append('Stage-note trials for ' + p + ' are paused after ' + TRIAL_PAUSE_REVERTS + ' reverts. Retro edits no ' + p + ' stage note until a person runs ', code, ' at a terminal.');
+      return line;
+    }));
+  }
+  $('pipeline-trials-paused').hidden = !paused.length;
+  $('pipeline-trials-wrap').hidden = !rows.length;
+  $('pipeline-trials-empty').hidden = !!rows.length;
 }
 
 function enterPipelineSection() {

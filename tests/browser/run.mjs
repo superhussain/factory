@@ -504,6 +504,59 @@ const CAPTURE_RETROS = ["20261020T090000Z-a1b2c3", "20261013T090000Z-d4e5f6"].ma
   findings: [],
   cards: [],
 }));
+// Stage-note trials for the Settings, Pipeline views: one open, two reverted, so sample is paused.
+const CAPTURE_TRIALS = [
+  {
+    id: "sample-spec-v8",
+    project: "sample",
+    stage: "spec",
+    status: "open",
+    opened: "2026-11-12T09:00:00Z",
+    arms: {
+      a: ["101-sample-a", "102-sample-a", "103-sample-a"],
+      b: ["104-sample-b", "105-sample-b"],
+    },
+    reads: { rounds: "inconclusive", tokens: "inconclusive" },
+  },
+  {
+    id: "sample-build-v5",
+    project: "sample",
+    stage: "build",
+    status: "reverted",
+    opened: "2026-11-05T09:00:00Z",
+    arms: {
+      a: [
+        "111-sample-a",
+        "112-sample-a",
+        "113-sample-a",
+        "114-sample-a",
+        "115-sample-a",
+        "116-sample-a",
+      ],
+      b: ["117-sample-b", "118-sample-b", "119-sample-b", "120-sample-b", "121-sample-b"],
+    },
+    reads: { rounds: "b higher", tokens: "no difference" },
+  },
+  {
+    id: "sample-review-v3",
+    project: "sample",
+    stage: "review",
+    status: "reverted",
+    opened: "2026-11-01T09:00:00Z",
+    arms: {
+      a: ["131-sample-a", "132-sample-a", "133-sample-a", "134-sample-a", "135-sample-a"],
+      b: [
+        "136-sample-b",
+        "137-sample-b",
+        "138-sample-b",
+        "139-sample-b",
+        "140-sample-b",
+        "141-sample-b",
+      ],
+    },
+    reads: { rounds: "no difference", tokens: "b higher" },
+  },
+];
 // The archived running example: answered by interception, never on the board.
 const CAPTURE_ARCHIVED = {
   id: "412-fix-login",
@@ -649,6 +702,7 @@ async function capture(outdir, referencePath) {
     const servedMetaCsp = inner(/http-equiv="Content-Security-Policy" content="([^"]*)"/);
 
     let archivedBoard = false;
+    let trialsBoard = false;
     let archivePageFails = false;
     let archiveSearchFails = false;
     let longProject = false;
@@ -989,6 +1043,15 @@ async function capture(outdir, referencePath) {
                         j.id === "003-idea" ? { ...j, idea_files: [clipName] } : j,
                       ),
                     }),
+                  });
+                }
+                if (trialsBoard && target.pathname === "/board.json") {
+                  const board = await fetch(target.href);
+                  return request.respond({
+                    status: board.status,
+                    contentType: "application/json",
+                    headers: { ETag: board.headers.get("ETag") ?? "" },
+                    body: JSON.stringify({ ...(await board.json()), trials: CAPTURE_TRIALS }),
                   });
                 }
                 if (archivedBoard && target.pathname === "/board.json") {
@@ -2149,6 +2212,27 @@ async function capture(outdir, referencePath) {
       return clipOf(page, "#pipeline-triage", "#pipeline-archive");
     };
     await view("pipeline-hold-1280", 1280, 900, "light", openPipelineHold);
+    // The reference has no trials section, so its side shows the stage notes straight above History.
+    const openPipelineTrials = async (page) => {
+      trialsBoard = true;
+      try {
+        await page.evaluate(() => poll());
+        await page.evaluate(() => {
+          location.hash = "#/settings/pipeline";
+        });
+        await page.waitForSelector("#settings-pipeline:not([hidden])");
+        await page.select("#pipeline-scope", "global");
+        await page.waitForFunction(() => !document.getElementById("pipeline-triage-mode").disabled);
+        await page.evaluate(() =>
+          document.getElementById("pipeline-note-tabs").scrollIntoView({ block: "start" }),
+        );
+        return clipOf(page, "#pipeline-note-tabs", "#pipeline-history-heading");
+      } finally {
+        trialsBoard = false;
+      }
+    };
+    await view("pipeline-trials-1280", 1280, 900, "light", openPipelineTrials);
+    await view("pipeline-trials-390", 390, 844, "dark", openPipelineTrials);
     // The reference has no backpressure fieldset, so its side shows hold straight above archive.
     const openPipelineBackpressure = async (page, side) => {
       await page.evaluate(() => {
