@@ -951,7 +951,7 @@ def board(factory, job_id):
     board_write(factory, job_id, patch)
 
 
-def board_write(factory, job_id, patch, show=True, verdict=None):
+def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=None):
     if patch.get("claim") is not None:
         fail('only hold sets a claim. {"claim": null} releases it', 2)
     if "paseo" in patch:
@@ -1066,7 +1066,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
         if "stage" in patch and not patch["stage"]:
             fail(f"a board write cannot clear {job_id}'s stage. "
                  'Close the job with {"stage": "closed"} instead. Nothing was written.', 2)
-        refusal = move_refusal(Path(factory), job_id, found, patch)
+        refusal = "rounds" in patch and not verdict and rounds_refusal(job_id, found, patch["rounds"], rewrite_round)
+        refusal = refusal or move_refusal(Path(factory), job_id, found, patch)
         if refusal:
             fail(refusal, 2)
         if "refs" in patch and batch_refs(patch["refs"]) != batch_refs((found or {}).get("refs")):
@@ -7306,6 +7307,27 @@ def watch_cmd(target, *args):
 
 ROUND_WAIT_USAGE = "usage: round-wait <project-slug>/<job-id> <round> [--timeout S]"
 REVIEWERS = ("security", "ux", "ui", "code")
+PENDING_ROUND = {r: "pending" for r in REVIEWERS}
+
+
+def rounds_refusal(job_id, found, rounds, rewrite_round=None):
+    """Why a rounds patch cannot be written, or None. It may keep the stored rounds and append pending
+    ones; only round rewrite_round may differ from the stored entry."""
+    if not isinstance(rounds, list):
+        return f"{job_id} rounds must be a list of review rounds. Nothing was written."
+    stored = (found or {}).get("rounds")
+    stored = stored if isinstance(stored, list) else []
+    if len(rounds) < len(stored):
+        return (f"{job_id} cannot drop review rounds: the board has {len(stored)} and the patch sends "
+                f"{len(rounds)}. Nothing was written.")
+    for i, entry in enumerate(rounds):
+        if i < len(stored) and entry != stored[i] and i + 1 != rewrite_round:
+            return (f"{job_id} cannot rewrite round {i + 1} in a board patch. Only factory.py verdict and "
+                    "round-wait change a recorded round. Nothing was written.")
+        if i >= len(stored) and entry != PENDING_ROUND:
+            return (f"{job_id} cannot add round {i + 1} with verdicts. A new round starts as "
+                    f"{json.dumps(PENDING_ROUND)}. Record verdicts with factory.py verdict. Nothing was written.")
+    return None
 
 
 def round_wait_cmd(target, *args):
@@ -7343,7 +7365,7 @@ def round_wait_cmd(target, *args):
         if verdicts != written:
             rounds = board_rounds()
             rounds[n - 1] = verdicts
-            board_write(home, job_id, {"rounds": rounds}, show=False)
+            board_write(home, job_id, {"rounds": rounds}, show=False, rewrite_round=n)
             written = verdicts
         bad = {a: line for a, line in lines.items() if line.strip() and a not in valid}
         if len(valid) == len(artifacts):

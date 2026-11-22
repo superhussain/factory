@@ -252,7 +252,8 @@ echo '{"stage":"review","round":1,"rounds":[{"security":"pending","ux":"pending"
 
 `null` clears a key (`{"port": null}`), and `rounds` is always sent whole. To record one
 reviewer's verdict, run `python3 "$RUNTIME" verdict "$SLUG/<id>" <N> <reviewer> <verdict>`
-instead of resending `rounds`. The job's first patch also sets `"project": "<slug>"`.
+instead of resending `rounds`. A `board` patch cannot rewrite a recorded round: it may only keep the
+stored rounds and append all-pending ones. The job's first patch also sets `"project": "<slug>"`.
 
 When `<home>/tracer.json` lists the project, a patch that sets `stage` or `rounds` also mirrors the job into Tracer, and a Tracer failure only prints one warning line. While Tracer builds a job, pickup saves its task statuses as `tracer.tasks`. All of this runs only while Settings, Pipeline, Tracer integration is On. See [integrations](references/integrations.md#tracer-mirror).
 
