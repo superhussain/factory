@@ -320,6 +320,47 @@ const CAPTURE_JOBS = [
       },
     ],
   },
+  {
+    id: "130-ground-export",
+    project: "sample",
+    title: "Synthetic grounded export",
+    stage: "review",
+    updated: "2026-01-02T15:00:00Z",
+    round: 1,
+    rounds: [
+      {
+        security: "PASS",
+        ux: "PASS",
+        ui: "PASS",
+        code: "CHANGES",
+        unverified: [
+          "review-code.md worker/push.js:412 bad-line",
+          "review-code.md web/dashboard.html:9 off-diff",
+        ],
+      },
+    ],
+  },
+  {
+    id: "131-launch-retry",
+    project: "sample",
+    title: "Synthetic launch retry",
+    stage: "idea",
+    idea: "Synthetic launch retry",
+    updated: "2026-01-02T15:00:00Z",
+    not_before: "2026-10-27T15:00:00Z",
+    launch_failure: { count: 2, reason: "launcher exited 1: no free agent slot" },
+  },
+  {
+    id: "132-steer-human",
+    project: "sample",
+    title: "Synthetic steered needs-human",
+    stage: "needs-human",
+    updated: "2026-01-02T14:00:00Z",
+    note: "builder failed twice",
+    steer: [
+      { note: "Keep the CSV header order the same as the old report.", at: "2026-01-02T14:00:00Z" },
+    ],
+  },
 ];
 // More merged rows than the slim board read carries, so the merged column loads the rest on demand.
 const CAPTURE_MERGED = Array.from({ length: 30 }, (_, n) => {
@@ -334,6 +375,25 @@ const CAPTURE_MERGED = Array.from({ length: 30 }, (_, n) => {
   };
 });
 const CAPTURE_BOARD = [...CAPTURE_JOBS, ...CAPTURE_MERGED];
+const CAPTURE_GROUNDING_FILES = {
+  "spec.md": "# Synthetic grounded export\n\nCapture fixture content, not real job data.\n",
+  "round-1/review-code.md": "CHANGES\n\nThe synthetic code review.\n",
+  "round-1/grounding.md": [
+    "GROUNDING: UNVERIFIED 2",
+    "",
+    "Head: 2222222222222222222222222222222222222222",
+    "Diff: origin/main",
+    "Checked: 5 citations in 1 review files",
+    "",
+    "| Review | Citation | Status | Reason |",
+    "| --- | --- | --- | --- |",
+    "| review-code.md | `worker/push.js:412` | bad-line | worker/push.js has 300 lines |",
+    "| review-code.md | `web/dashboard.html:9` | off-diff | more than 10 lines from every change to web/dashboard.html |",
+    "",
+    "Unverified means the cited path or line did not check out. The finding may still be right. No verdict changed.",
+    "",
+  ].join("\n"),
+};
 const CAPTURE_BACKLOG_CONTEXT = [
   "Recommend: approve",
   "",
@@ -521,6 +581,7 @@ async function capture(outdir, referencePath) {
       "text/markdown",
     );
     // The Worker takes one appended steering note per row and write, so notes land a round at a time.
+    // 132 waits at build until the board lands once more with its needs-human stage.
     const steerRounds = Math.max(...CAPTURE_BOARD.map((j) => j.steer?.length ?? 0));
     for (let n = 0; n <= steerRounds; n++)
       await put(
@@ -528,13 +589,23 @@ async function capture(outdir, referencePath) {
         "/api/board",
         JSON.stringify({
           updated: "2026-01-01T12:00:00Z",
-          jobs: CAPTURE_BOARD.map(({ steer, ...j }) =>
-            steer && n ? { ...j, steer: steer.slice(0, n) } : j,
-          ),
+          jobs: CAPTURE_BOARD.map(({ steer, ...j }) => ({
+            ...j,
+            ...(j.id === "132-steer-human" && { stage: "build" }),
+            ...(steer && n && { steer: steer.slice(0, n) }),
+          })),
         }),
         "application/json",
       );
+    await put(
+      origin,
+      "/api/board",
+      JSON.stringify({ updated: "2026-01-01T12:00:00Z", jobs: CAPTURE_BOARD }),
+      "application/json",
+    );
     await put(origin, "/api/backlog", CAPTURE_BACKLOG, "text/markdown");
+    for (const [name, body] of Object.entries(CAPTURE_GROUNDING_FILES))
+      await put(origin, "/api/jobs/sample/130-ground-export/" + name, body, "text/markdown");
     await put(origin, "/api/jobs/sample/001-capture/spec.md", CAPTURE_SPEC, "text/markdown");
     await put(origin, "/api/jobs/sample/001-capture/build.md", CAPTURE_BUILD, "text/markdown");
     await put(origin, "/api/jobs/sample/001-capture/answers.md", CAPTURE_ANSWERS, "text/markdown");
@@ -2086,6 +2157,48 @@ async function capture(outdir, referencePath) {
       return clipOf(page, wrap);
     };
     await view("held-card-390", 390, 844, "dark", openHeldCard, true);
+    // The reference page has no grounding tab, so its side shows the drawer on its spec tab.
+    const openGroundingTab = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#130-ground-export/round-1/grounding";
+      });
+      const text = side === "before" ? "Synthetic grounded export" : "GROUNDING: UNVERIFIED 2";
+      await page.waitForFunction(
+        (t) =>
+          document.getElementById("d-meta").textContent.includes("130-ground-export") &&
+          document.getElementById("d-doc").textContent.includes(t),
+        { timeout: 30000 },
+        text,
+      );
+    };
+    await view("grounding-tab-1280", 1280, 900, "light", openGroundingTab);
+    await view("grounding-tab-390", 390, 844, "dark", openGroundingTab, true);
+    // keepViewport, since a full-page capture would lay the board out again and shift the clip.
+    await view(
+      "grounding-chips-1280",
+      1280,
+      900,
+      "light",
+      async (page) => {
+        const wrap = '.card-wrap:has(.card[data-id="130-ground-export"])';
+        await page.evaluate(
+          (s) => document.querySelector(s).scrollIntoView({ block: "center", inline: "center" }),
+          wrap,
+        );
+        return clipOf(page, wrap);
+      },
+      false,
+      true,
+    );
+    await view("not-before-launch-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#131-launch-retry";
+      });
+      await page.waitForFunction(() =>
+        document.getElementById("d-meta").textContent.includes("131-launch-retry"),
+      );
+      return clipOf(page, ".detail-head");
+    });
     const openIdeaChips = async (page) => {
       const wrap = (id) => `.card-wrap:has(.card[data-id="${id}"])`;
       await page.evaluate(
@@ -2512,6 +2625,20 @@ async function capture(outdir, referencePath) {
     // The reference page has no steering notes, so its side shows the drawer head alone.
     await view("steer-drawer-1280", 1280, 900, "light", async (page) => {
       await openSteered(page);
+      await page.evaluate(() => {
+        const list = document.getElementById("d-steer-notes");
+        if (list) list.open = true;
+      });
+      return clipOf(page, ".detail-head");
+    });
+    await view("steer-human-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#132-steer-human";
+      });
+      await page.waitForFunction(
+        () => document.getElementById("d-meta").textContent.includes("132-steer-human"),
+        { timeout: 30000 },
+      );
       await page.evaluate(() => {
         const list = document.getElementById("d-steer-notes");
         if (list) list.open = true;

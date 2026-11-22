@@ -24,8 +24,18 @@ const JOBS = [
   idea("401-sample-hold", { not_before: "2099-01-01T14:00:00Z" }),
   idea("402-sample-past", { not_before: "2020-01-01T00:00:00Z" }),
   idea("403-sample-none", {}),
+  idea("404-sample-retry", {
+    not_before: "2099-01-01T14:00:00Z",
+    launch_failure: { count: 2, reason: "launcher exited 1: no free agent slot" },
+  }),
+  idea("405-sample-bad", {
+    not_before: "2099-01-01T14:00:00Z",
+    launch_failure: { count: "2", reason: 5 },
+  }),
 ];
 const TITLE = "Pickup leaves this job alone until Jan 1, 9:00 AM (2099-01-01T14:00:00Z).";
+const RETRY_TITLE =
+  TITLE + " Launch failed 2 times in a row. Last error: launcher exited 1: no free agent slot";
 
 test("not before chip", { timeout: 120000 }, async () => {
   await prepareAssets();
@@ -51,11 +61,28 @@ test("not before chip", { timeout: 120000 }, async () => {
             .map((c) => [c.dataset.id, c.querySelector(".chip.not-before").textContent]),
         ),
       );
-    assert.deepEqual(await chips(), { "401-sample-hold": "Not before Jan 1, 9:00 AM" });
-    assert.equal(
-      await page.$eval('.card[data-id="401-sample-hold"] .chip.not-before', (el) => el.title),
-      TITLE,
-    );
+    assert.deepEqual(await chips(), {
+      "401-sample-hold": "Not before Jan 1, 9:00 AM",
+      "404-sample-retry": "Not before Jan 1, 9:00 AM",
+      "405-sample-bad": "Not before Jan 1, 9:00 AM",
+    });
+    const chipTitle = (id) =>
+      page.$eval(`.card[data-id="${id}"] .chip.not-before`, (el) => el.title);
+    assert.equal(await chipTitle("401-sample-hold"), TITLE);
+    assert.equal(await chipTitle("404-sample-retry"), RETRY_TITLE);
+    assert.equal(await chipTitle("405-sample-bad"), TITLE);
+    for (const [id, title] of [
+      ["404-sample-retry", RETRY_TITLE],
+      ["405-sample-bad", TITLE],
+    ]) {
+      await page.evaluate((id) => (location.hash = "#" + id), id);
+      await page.waitForFunction(
+        (id) => document.getElementById("d-title").textContent === id,
+        {},
+        id,
+      );
+      assert.equal(await page.$eval("#d-not-before", (el) => el.textContent), title);
+    }
     await page.evaluate(() => (location.hash = "#401-sample-hold"));
     await page.waitForSelector("#d-not-before:not([hidden])");
     assert.equal(await page.$eval("#d-not-before", (el) => el.textContent), TITLE);

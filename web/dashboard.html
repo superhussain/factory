@@ -625,7 +625,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .detail-head .pr-link { position: relative; font-size: 12px; }
   .detail-head .pr-link[hidden] { display: none; }
   .rounds { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
-  .round { display: flex; align-items: center; gap: 4px; }
+  .round { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
   .round .rn { font-size: 10px; color: var(--muted); width: 18px; flex: none; }
   .chip {
     font-size: 10px; line-height: 1; padding: 4px 6px; border-radius: 999px;
@@ -634,6 +634,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .chip.PASS { background: var(--pass-bg); color: var(--pass-fg); }
   .chip.CHANGES { background: var(--changes-bg); color: var(--changes-fg); font-weight: 600; }
   .chip.SKIPPED { background: transparent; color: var(--pending-fg); outline: 1px dashed var(--pending-fg); outline-offset: -1px; }
+  .chip.unverified { background: transparent; color: var(--changes-fg); outline: 1px solid var(--changes-fg); outline-offset: -1px; }
 
   .detail {
     position: fixed; top: 0; right: 0; bottom: 0; width: min(var(--drawer-w, 760px), 100%);
@@ -1871,6 +1872,19 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
 
 const REVIEW_STATE_WORDS = { PASS: 'passed', CHANGES: 'changes requested', SKIPPED: 'skipped', pending: 'pending' };
 
+// Mirrors GROUNDING_BOARD_MAX in factory.py. Change both together.
+const GROUNDING_BOARD_MAX = 20;
+
+// Round n's unverified citations as a chip, or '' when grounding flagged none.
+function unverifiedChip(r, n) {
+  const list = Array.isArray(r?.unverified) ? r.unverified.filter((e) => typeof e === 'string') : [];
+  if (!list.length) return '';
+  const count = list.length >= GROUNDING_BOARD_MAX ? GROUNDING_BOARD_MAX + '+' : String(list.length);
+  const title = 'Round ' + n + ' grounding could not check ' + count + ' citation' + (list.length === 1 ? '' : 's') +
+    '. The R' + n + ' grounding tab has the reasons.\n' + list.join('\n');
+  return '<span class="chip unverified" title="' + esc(title) + '">' + count + ' unverified</span>';
+}
+
 function chips(rounds) {
   if (!Array.isArray(rounds) || !rounds.length) return '';
   return '<div class="rounds">' + rounds.map((r, i) =>
@@ -1879,7 +1893,7 @@ function chips(rounds) {
       const v = (r && r[k]) || 'pending';
       const cls = v === 'PASS' || v === 'CHANGES' || v === 'SKIPPED' ? v : 'pending';
       return '<span class="chip ' + cls + '" title="' + esc(k + ': ' + v) + '">' + esc(k) + '<span class="sr-only"> ' + REVIEW_STATE_WORDS[cls] + '</span></span>';
-    }).join('') + '</div>'
+    }).join('') + unverifiedChip(r, i + 1) + '</div>'
   ).join('') + '</div>';
 }
 
@@ -2066,6 +2080,7 @@ const steerNotes = (j) => Array.isArray(j.steer) ? j.steer.filter((n) => typeof 
 function steerStatus(j, n) {
   const sent = agentRows(j).find((r) => r.role === 'build' && typeof r.at === 'string' && r.at >= n.at);
   if (sent) return 'Sent to the builder ' + agentWhen(sent.at) + '.';
+  if (j.stage === 'needs-human') return 'Waiting for a person. The builder gets this note if the job goes back to build.';
   return STEER_STAGES.includes(j.stage) ? 'Waiting for the builder\'s next round.' : 'Not sent: no builder round ran after it.';
 }
 
@@ -2369,7 +2384,10 @@ function notBefore(j) {
   const at = j.not_before;
   if (!NOT_BEFORE_STAMP.test(String(at)) || !(Date.parse(at) > Date.now())) return null;
   const local = new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  return { text: 'Not before ' + local, title: 'Pickup leaves this job alone until ' + local + ' (' + at + ').' };
+  const { count, reason } = j.launch_failure ?? {};
+  const failed = Number.isInteger(count) && count >= 1 && typeof reason === 'string' && reason.trim()
+    ? ' Launch failed ' + count + (count === 1 ? ' time' : ' times') + ' in a row. Last error: ' + reason : '';
+  return { text: 'Not before ' + local, title: 'Pickup leaves this job alone until ' + local + ' (' + at + ').' + failed };
 }
 
 // Mirrors AUTO_BABYSIT_COPY in factory.py. Change both together.
@@ -5467,6 +5485,7 @@ function candidates(j) {
   const list = ['spec.md', 'build.md', 'pre-review.md'];
   for (let i = 1; i <= n; i++) {
     for (const r of REVIEWERS) list.push('round-' + i + '/review-' + r + '.md');
+    list.push('round-' + i + '/grounding.md');
     list.push('rework-' + i + '.md');
   }
   list.push('rework-' + (n + 1) + '.md', 'decision.md', 'needs.md', 'answers.md', 'scratchpad.md');
@@ -6044,7 +6063,7 @@ function writeHash() {
 
 function label(name) {
   if (name === 'pre-review.md') return 'Pre-review';
-  return name.replace(/^round-(\d+)\/review-(\w+)\.md$/, 'R$1 $2').replace(/-(\d+)\.md$/, ' $1').replace(/\.md$/, '');
+  return name.replace(/^round-(\d+)\/review-(\w+)\.md$/, 'R$1 $2').replace(/^round-(\d+)\/grounding\.md$/, 'R$1 grounding').replace(/-(\d+)\.md$/, ' $1').replace(/\.md$/, '');
 }
 
 // pre-review.md's first line as a review chip class: FAIL reads like changes requested, NONE like a skipped review.

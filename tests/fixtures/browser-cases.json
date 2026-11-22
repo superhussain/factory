@@ -122,6 +122,7 @@
   "tests/browser/dashboard-routing.test.mjs",
   "tests/browser/scratchpad-tab.test.mjs",
   "tests/browser/pre-review-tab.test.mjs",
+  "tests/browser/grounding-tab.test.mjs",
   "tests/browser/doc-long-words.test.mjs",
   "tests/browser/board-status-pause.test.mjs",
   "tests/browser/offline-mermaid.test.mjs",
