@@ -479,8 +479,8 @@ class RolesTest(IsolatedTestCase):
                        "80 characters", "`steer:` source"):
             self.assertIn(phrase, builder)
         skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn("`prompt ... build` also wraps steering notes (board `steer`). A builder resume is a dispatch: "
-                      "build a fresh prompt, run `agent record`, send the new pointer.", skill)
+        self.assertIn("Only `build` takes `--port`. It wraps `steer` notes. A builder resume is a dispatch: fresh "
+                      "prompt, `agent record`.", skill)
 
     def test_builder_waits_in_background(self):
         builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())

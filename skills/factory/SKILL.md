@@ -269,8 +269,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   and handle its non-zero exits as theirs. It names the job folder, worktree, base
   branch, `$PROJECT`, the absolute path in `$DOCUMENTS` and the role's own lines.
   Roles are `spec`, `build`, `review-security`, `review-ux`, `review-ui`, `review-code` and `approve`.
-  Only `build` and the four reviews take `--round`, and the reviews need it. Only `build` takes `--port`.
-  `prompt ... build` also wraps steering notes (board `steer`). A builder resume is a dispatch: build a fresh prompt, run `agent record`, send the new pointer.
+  Only `build` and the four reviews take `--round`, and the reviews need it. Only `build` takes `--port`. It wraps `steer` notes. A builder resume is a dispatch: fresh prompt, `agent record`.
   Dispatch the agent with `Your full prompt is in <printed path>. Read it first and follow it exactly.`
   Never edit the file or paste its contents. Only the builder's tier, source and
   reason, its round or rework file, and the approver's `Rounds left` go on short
