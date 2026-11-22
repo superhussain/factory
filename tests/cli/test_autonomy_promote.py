@@ -118,9 +118,13 @@ class AutonomyPromoteTest(IsolatedTestCase):
     def test_malformed_promoted_map(self):
         self.assert_refused(board(promoted="bad"),
                             "alpha visible cannot be promoted yet: autonomy.promoted is not a map; nothing was changed")
+        visible = {"at": NOW, "by": "device", "jobs": 20, "days": 30, "until": "2026-12-06T10:00:00Z"}
         other = {"alpha/internal": {"at": "x"}}
         code, _, _, puts = self.run_promote("alpha", "visible", data=board(promoted=other))
         self.assertEqual(code, 0)
-        self.assertEqual(puts[0]["autonomy"]["promoted"], {
-            "alpha/internal": {"at": "x"},
-            "alpha/visible": {"at": NOW, "by": "device", "jobs": 20, "days": 30, "until": "2026-12-06T10:00:00Z"}})
+        self.assertEqual(puts[0]["autonomy"]["promoted"], {**other, "alpha/visible": visible})
+        cooldown = {"alpha/internal": {"at": "2026-11-01T10:00:00Z", "by": "device", "jobs": 20, "days": 7,
+                                       "until": "2026-11-15T10:00:00Z"}}
+        code, _, _, puts = self.run_promote("alpha", "visible", data=board(paused="yes", promoted=cooldown))
+        self.assertEqual(code, 0)
+        self.assertEqual(puts[0]["autonomy"]["promoted"], {**cooldown, "alpha/visible": visible})

@@ -3084,7 +3084,9 @@ def autonomy_cmd(sub, slug=None, cls=None):
             record["restored"] = {**autonomy_restored(data), f"{slug}/{cls}": stamp}
             if gate:
                 until = (stamp_of(stamp) + timedelta(days=AUTONOMY_COOLDOWN_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
-                record["promoted"] = {**record.get("promoted", {}), f"{slug}/{cls}": {
+                raw = data.get("autonomy")
+                stored = raw.get("promoted", {}) if isinstance(raw, dict) else {}
+                record["promoted"] = {**stored, f"{slug}/{cls}": {
                     "at": stamp, "by": device, "jobs": gate["jobs"], "days": gate["days"], "until": until}}
         else:
             key = "projects" if sub == "allow" else "self"
