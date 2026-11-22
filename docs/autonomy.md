@@ -17,6 +17,7 @@ All of these run through `factory.py` on a device.
 | `autonomy resume` | human at a terminal | Sets `paused: false` after you type `resume`. |
 | `autonomy allow <slug>` | human at a terminal | Adds a registered project to the allowlist after you type its slug. |
 | `autonomy deny <slug>` | anyone | Removes a project from the allowlist. |
+| `autonomy restore <slug> <class>` | human at a terminal | Lifts the earned-autonomy hold on that class. Later APPROVE PRs merge on green again. |
 | `autonomy self <slug>` | anyone | Marks a project as part of the factory itself, so the classifier flags its cards. |
 | `suggest admit <file>` | trusted launcher | Checks a `factory.suggestions/1` file and adds one gated idea card per new suggestion. |
 | `suggest approve <job-id> <A\|B\|C>` | human at a terminal, or an orchestrator relaying the person's chat message (`--chat-file`) | Approves one option after you type the job id, or records the chat quote with `--chat-file`, which lets `factory.py pickup` promote the card. |
@@ -629,3 +630,37 @@ alpha visible hold: reverted 1019-add-z; rework 17% over 10%; rounds 2.0 over 1.
 alpha: recommend merge human until every class shows automerge
 report only: a person changes Merge under Settings, Pipeline; nothing was written
 ```
+
+## Earned autonomy hold
+
+A revert in a project and job class holds that class's APPROVE PRs for a person. Pickup's hold pass covers PRs already waiting at `pr-open`, and `checks` exits 8 before any agent merge. Both write the hold.
+
+A class is held while a board job meets every condition:
+
+| Condition on a board job | Needed |
+| --- | --- |
+| `stage` | `merged`, `done` within 90 days (same filter as the report) |
+| `outcome.result` | `reverted` |
+| class | `internal` or `visible`, from `rounds[0]` |
+| `outcome.at` | later than `autonomy.restored["<slug>/<class>"]`, or no restore exists |
+
+The hold on synthetic job `1031-add-w`, PR #631, after `1019-add-z` was reverted in `alpha` `visible`:
+
+| Field | Value |
+| --- | --- |
+| `automerge` | `false` |
+| `needs` | `review and merge PR #631: earned autonomy holds alpha visible PRs after reverted 1019-add-z; a person lifts it with factory.py autonomy restore alpha visible` |
+| `note` | `earned autonomy hold: a person reviews and merges` |
+| pickup prints | `held 1031-add-w alpha PR #631 for a person` |
+
+A person restores the class:
+
+| Step | Result |
+| --- | --- |
+| `autonomy restore alpha visible` | asks `Type alpha visible to let alpha visible APPROVE PRs merge without a person again: ` |
+| types `alpha visible` | `restored["alpha/visible"] = "<UTC time>"` |
+| a revert recorded later | holds again |
+
+- Restore needs a terminal, like `autonomy resume`, because it loosens autonomy.
+- A malformed `restored` entry is ignored, so the hold stays.
+- PRs already held keep their `needs` until a person merges them.
