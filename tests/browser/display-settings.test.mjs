@@ -25,6 +25,7 @@ const KEYS = [
   "factory-poll",
   "factory-projects-hidden",
   "factory-drawer-width",
+  "factory-toast-position",
 ];
 const LIGHT = "rgb(249, 250, 251)";
 const DARK = "rgb(17, 24, 39)";
@@ -351,6 +352,46 @@ test("display settings", { timeout: 180000 }, async (t) => {
         wait,
       );
       await page.setViewport({ width: 1280, height: 900 });
+    });
+
+    await t.test("display V10 notification position", async () => {
+      const stored = () => page.evaluate(() => localStorage.getItem("factory-toast-position"));
+      const position = () =>
+        page.evaluate(() => [
+          document.getElementById("display-toast-position").value,
+          document.getElementById("notify-toasts").dataset.position,
+        ]);
+      assert.deepEqual(await position(), ["bottom-right", "bottom-right"]);
+      assert.deepEqual(
+        await page.$$eval("#display-toast-position option", (els) => els.map((el) => el.value)),
+        ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"],
+      );
+      await page.select("#display-toast-position", "top-left");
+      assert.equal(await stored(), "top-left");
+      assert.deepEqual(await position(), ["top-left", "top-left"]);
+      assert.equal(
+        await page.$eval("#display-status", (el) => el.textContent),
+        "Saved in this browser.",
+      );
+      const box = await page.evaluate(() => {
+        showNotifyToast("spec", "#073-sample-retry", "Synthetic retry limit", "073-sample-retry");
+        const { left, top } = document.querySelector(".notify-toast").getBoundingClientRect();
+        document.getElementById("notify-toasts").replaceChildren();
+        return { left, top };
+      });
+      assert.ok(box.left <= 20 && box.top <= 20, JSON.stringify(box));
+      await reload();
+      assert.deepEqual(await position(), ["top-left", "top-left"]);
+      await page.select("#display-toast-position", "bottom-right");
+      assert.equal(await stored(), null);
+      assert.deepEqual(await position(), ["bottom-right", "bottom-right"]);
+      await page.select("#display-toast-position", "top-left");
+      await page.click("#display-reset");
+      assert.equal(await stored(), null);
+      assert.deepEqual(await position(), ["bottom-right", "bottom-right"]);
+      await setStorage({ "factory-toast-position": "sideways" });
+      await reload();
+      assert.deepEqual(await position(), ["bottom-right", "bottom-right"]);
     });
 
     assert.deepEqual(errors, []);

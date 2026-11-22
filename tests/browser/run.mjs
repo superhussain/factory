@@ -1473,6 +1473,13 @@ async function capture(outdir, referencePath) {
         return { x: innerWidth - width, y: innerHeight - 220, width, height: 220 };
       });
     };
+    // Both sides show the toasts when the page has a toast stack.
+    const showCaptureToasts = (page) =>
+      page.evaluate(() => {
+        if (typeof showNotifyToast !== "function") return;
+        showNotifyToast("spec", "#073-sample-retry", "Synthetic retry limit", "073-sample-retry");
+        showNotifyToast("backlog", "#/backlog/0123456789ab", "Synthetic backlog idea", "sample");
+      });
     notifyBoard = true;
     try {
       await view("notifications-menu-1280", 1280, 900, "light", openNotificationsMenu("click"));
@@ -1499,6 +1506,43 @@ async function capture(outdir, referencePath) {
       await view("inbox-split-1280", 1280, 900, "light", openInboxSplit);
       await view("notify-toast-1280", 1280, 900, "light", openToasts);
       await view("notify-toast-390", 390, 844, "dark", openToasts);
+      // The reference page has no position select, so its side centers the poll select above.
+      await view("display-toast-position-1280", 1280, 900, "light", async (page, side) => {
+        await page.evaluate(() => {
+          location.hash = "#/settings/display";
+        });
+        await page.waitForSelector("#settings-display:not([hidden])");
+        await page.evaluate(
+          (s) => document.querySelector(s).scrollIntoView({ block: "center" }),
+          side === "after" ? "#display-toast-position" : "#display-poll",
+        );
+      });
+      await view("notify-toast-top-left-1280", 1280, 900, "light", async (page) => {
+        await page.evaluate(() => localStorage.setItem("factory-toast-position", "top-left"));
+        await page.reload({ waitUntil: "networkidle0" });
+        await page.waitForSelector(".card");
+        await showCaptureToasts(page);
+      });
+      await view(
+        "notify-toast-swipe-390",
+        390,
+        844,
+        "dark",
+        async (page) => {
+          await showCaptureToasts(page);
+          await page.evaluate(() => {
+            const first = document.querySelector(".notify-toast");
+            if (first) first.style.transform = "translateX(120px)";
+          });
+          return page.evaluate(() => ({
+            x: 0,
+            y: innerHeight - 220,
+            width: innerWidth,
+            height: 220,
+          }));
+        },
+        true,
+      );
       await view("notifications-menu-kinds-1280", 1280, 900, "light", async (page) => {
         await page.evaluate(() => {
           const at = new Date(Date.now() - 60000).toISOString();
