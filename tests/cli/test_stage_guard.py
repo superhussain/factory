@@ -1,22 +1,53 @@
 import io
 import json
 import os
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
-from support import invoke
-from test_verdict import JOB, ROUND_1, BoardFixture, factory
+from support import IsolatedTestCase, invoke, load_runtime
 
+factory = load_runtime()
+DEVICE = "host-a"
+JOB = "042-sample-export"
 # The spec's made-up running example: round 2 has code CHANGES.
+ROUND_1 = {"security": "PASS", "ux": "PASS", "ui": "SKIPPED", "code": "CHANGES"}
 ROUND_2 = {"security": "PASS", "ux": "SKIPPED", "ui": "SKIPPED", "code": "CHANGES"}
 ROUND_2_MESSAGE = (f"factory.py: {JOB} cannot move to approve: round 2 has code CHANGES. Every verdict in the "
                    "latest round must be PASS or SKIPPED. Nothing was written.\n")
 
 
-class GuardFixture(BoardFixture):
+class GuardFixture(IsolatedTestCase):
     def setUp(self):
-        super().setUp()
-        self.board["jobs"][0]["rounds"] = [dict(ROUND_1), dict(ROUND_2)]
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.home = Path(temp.name).resolve()
+        (self.home / "config.md").write_text(f"---\ndevice: {DEVICE}\n---\n", encoding="utf-8")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.board = {"updated": "2026-01-01T00:00:00Z", "jobs": [
+            {"id": JOB, "stage": "review", "round": 2, "project": "factory", "updated": "2026-01-01T00:00:00Z",
+             "rounds": [dict(ROUND_1), dict(ROUND_2)],
+             "claim": {"device": DEVICE, "session": "d4e5f6", "since": now, "seen": now}}]}
+        self.puts = 0
+        self.addCleanup(patch.stopall)
+        patch.object(factory, "factory_home", return_value=self.home).start()
+        patch.object(factory, "api", side_effect=self.request).start()
         self.folder = self.home / "jobs" / "factory" / JOB
+
+    def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        self.assertEqual(path, "/api/board")
+        if method == "GET":
+            return 200, {"ETag": '"board"'}, factory.dump_board(self.board)
+        self.puts += 1
+        self.board = json.loads(body)
+        return 200, {}, ""
+
+    def job(self):
+        return next(j for j in self.board["jobs"] if j["id"] == JOB)
+
+    def verdict(self, *args):
+        return invoke(factory, ["verdict", f"factory/{JOB}", *args, "--session", "d4e5f6"])
 
     def write(self, body):
         with patch.object(factory.sys, "stdin", io.StringIO(json.dumps(body))), \
