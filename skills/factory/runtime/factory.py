@@ -17,6 +17,8 @@
                          --chat-file <file>
                                             make the dashboard's backlog decision from a person's chat
                                             message, print the job as JSON
+  factory.py triage replay <project-slug> [--threshold N]
+                                            score a threshold against past human backlog decisions, print JSON
   factory.py ideas [--limit N] [--max-inflight N] [--project <slug>]
                                             claim the oldest ideas this device can run, print them as JSON
                                             (exit 3 when none are runnable or the cap is full)
@@ -1727,6 +1729,96 @@ def backlog_triage_pass(home):
     finally:
         if triaged != cached:
             save_triaged(home, triaged)
+
+
+RULE_HOLD_REASONS = ("its author recommends deny", "it asks questions a person must answer")
+
+
+def record_decider(record):
+    """Who made a board backlog decision. Records from before decider existed infer it."""
+    return record.get("decider") or ("model" if record.get("by") == "triage" else "person")
+
+
+def verdict_decider(verdict):
+    """Who made a stored triage hold. Holds from before decider existed infer it."""
+    if verdict.get("decider"):
+        return verdict["decider"]
+    return "rule" if verdict.get("confidence") is None or verdict.get("reason") in RULE_HOLD_REASONS else "model"
+
+
+def triage_replay(slug, threshold=None):
+    """Score the current and the given triage threshold against people's past approve and deny
+    decisions on the project's backlog lines, using each line's stored model confidence. Read only."""
+    home = factory_home()
+    if slug not in registered(home):
+        fail(f"no factory project {slug}", 4)
+    status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+    try:
+        view = json.loads(text) if status == 200 else None
+    except ValueError:
+        view = None
+    triage = view.get("triage") if isinstance(view, dict) else None
+    current = triage.get("threshold") if isinstance(triage, dict) else None
+    if not isinstance(current, int):
+        current = None
+    if current is None and threshold is None:
+        fail(f"project {slug} has no triage threshold; pass --threshold N", 2)
+    jobs, page = list(read_board(home)["jobs"]), 1
+    while True:
+        status, _, text = api(home, "GET", f"/api/board/archive?page={page}", ok=(200, 404))
+        if status == 404:
+            break
+        data = json.loads(text)
+        jobs += data["jobs"]
+        if page >= data["pages"]:
+            break
+        page += 1
+    latest = {}
+    for j in jobs:
+        record = j.get("backlog")
+        if not isinstance(record, dict) or record.get("decision") not in ("approved", "denied"):
+            continue
+        m = BACKLOG_LINE.match(str(record.get("line", "")))
+        if not m or m.group(1) != slug:
+            continue
+        item = f"{slug}: {m.group(2).rstrip()}"
+        if item not in latest or str(record.get("at", "")) > str(latest[item].get("at", "")):
+            latest[item] = record
+    labels = {item: r["decision"] for item, r in latest.items() if record_decider(r) == "person"}
+    items = list(labels)
+    verdicts = [v for i in range(0, len(items), 50) for v in stored_verdicts(home, items[i:i + 50])]
+    unscored, scored = {"rule": 0, "no_verdict": 0}, []
+    for item, verdict in zip(items, verdicts):
+        if not isinstance(verdict, dict):
+            unscored["no_verdict"] += 1
+        elif verdict_decider(verdict) == "rule":
+            unscored["rule"] += 1
+        else:
+            scored.append((verdict["confidence"], labels[item]))
+    rows = []
+    for t in [x for x in dict.fromkeys((current, threshold)) if x is not None]:
+        row = {"threshold": t, "current": t == current, "queue_approved": 0, "queue_denied": 0,
+               "hold_approved": 0, "hold_denied": 0}
+        for confidence, decision in scored:
+            row[f"{'queue' if confidence >= t else 'hold'}_{decision}"] += 1
+        row["agreement"] = round(100 * (row["queue_approved"] + row["hold_denied"]) / len(scored)) \
+            if scored else None
+        rows.append(row)
+    print(json.dumps({"project": slug, "labels": len(labels), "scored": len(scored), "unscored": unscored,
+                      "model_queued": sum(record_decider(r) == "model" for r in latest.values()),
+                      "thresholds": rows}, indent=2))
+
+
+def triage_cmd(sub, slug, *rest):
+    """triage replay <project-slug> [--threshold N]."""
+    if sub != "replay" or not SLUG.fullmatch(slug) or rest and (len(rest) != 2 or rest[0] != "--threshold"):
+        fail("usage: triage replay <project-slug> [--threshold N]", 2)
+    threshold = None
+    if rest:
+        threshold = int(rest[1]) if re.fullmatch(r"[0-9]{1,3}", rest[1]) else 0
+        if not 1 <= threshold <= 100:
+            fail("--threshold: must be a whole number from 1 to 100", 2)
+    triage_replay(slug, threshold)
 
 
 def triage_verdict(text):
@@ -13048,6 +13140,7 @@ COMMANDS["with-cloudflare"] = (with_cloudflare_cmd, 0, sys.maxsize)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
 COMMANDS["inbox"] = (inbox, 0, 0)
+COMMANDS["triage"] = (triage_cmd, 2, 4)
 
 def main(argv=None):
     global _HOME_OVERRIDE, _LOCATED, _READS
