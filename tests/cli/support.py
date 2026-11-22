@@ -77,7 +77,11 @@ def http_fixture(routes):
         def do_GET(self):
             data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
             requests.append((self.command, self.path, dict(self.headers), data))
-            status, body, *extra = routes.get(f"{self.command} {self.path}", routes.get(self.path, (404, b"")))
+            route = routes.get(f"{self.command} {self.path}", routes.get(self.path, (404, b"")))
+            # A list serves its replies in order, and the last one repeats.
+            if isinstance(route, list):
+                route = route.pop(0) if len(route) > 1 else route[0]
+            status, body, *extra = route
             if not isinstance(body, bytes):
                 body = json.dumps(body).encode("utf-8")
             self.send_response(status)

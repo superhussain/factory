@@ -32,7 +32,8 @@ class AutonomyPromoteTest(IsolatedTestCase):
         os.environ["FACTORY_HOME"] = str(self.home)
 
     def run_promote(self, *args, data=None, tty=True, typed="alpha visible"):
-        routes = {"GET /projects.json": (200, [{"slug": "alpha"}]), "/api/board": (200, data or board())}
+        board_route = data if isinstance(data, list) else (200, data or board())
+        routes = {"GET /projects.json": (200, [{"slug": "alpha"}]), "/api/board": board_route}
         with http_fixture(routes) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n", encoding="utf-8")
             with patch.object(factory.sys.stdin, "isatty", return_value=tty), \
@@ -45,6 +46,7 @@ class AutonomyPromoteTest(IsolatedTestCase):
                     code = 0
                 except SystemExit as e:
                     code = e.code
+        self.requests = server.requests
         puts = [json.loads(body) for method, _, _, body in server.requests if method == "PUT"]
         return code, err.getvalue(), asked, puts
 
@@ -103,3 +105,12 @@ class AutonomyPromoteTest(IsolatedTestCase):
                          (2, "factory.py: autonomy promote needs an interactive terminal; a human runs it\n", []))
         code, _, _, puts = self.run_promote("alpha", "visible", typed="alpha")
         self.assertEqual((code, puts), (2, []))
+
+    def test_gate_rechecked_inside_write(self):
+        routes = [(200, board()), (200, board(reverted_at="2026-11-19T10:00:00Z"))]
+        code, err, asked, puts = self.run_promote("alpha", "visible", data=routes)
+        self.assertEqual((code, err, puts), (3, "factory.py: alpha visible cannot be promoted yet: 3 days held, "
+                                                "needs 7; nothing was changed\n", []))
+        asked.assert_called_once_with(PROMPT)
+        self.assertEqual([(method, path) for method, path, _, _ in self.requests if path == "/api/board"],
+                         [("GET", "/api/board")] * 2)
