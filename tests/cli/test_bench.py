@@ -251,7 +251,8 @@ calls.append({"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": prompt,
               "ceiling": os.environ.get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS")})
 log.write_text(json.dumps(calls))
 your = next(line.split(": ", 1)[1] for line in prompt.splitlines() if line.startswith("Your file: "))
-Path(your).write_text("VERDICT: CHANGES\\n\\n- `worker/export.js:44` drops the header row.\\n")
+if not os.environ.get("FAKE_NO_REVIEW"):
+    Path(your).write_text("VERDICT: CHANGES\\n\\n- `worker/export.js:44` drops the header row.\\n")
 session = sys.argv[sys.argv.index("--session-id") + 1]
 transcript = Path(os.environ["CLAUDE_CONFIG_DIR"], "projects", "fake", session + ".jsonl")
 transcript.parent.mkdir(parents=True, exist_ok=True)
@@ -415,6 +416,35 @@ class BenchReplayTest(BenchReplayCase):
         self.assertEqual((run_json["exit"], run_json["seconds"], run_json["models"]), (3, 300, MODELS))
         self.assertEqual(len(self.git("worktree", "list").splitlines()), 1)
 
+    def test_no_review_written(self):
+        os.environ["FAKE_NO_REVIEW"] = "1"
+        code, out, err = self.replay("--role", "review-code")
+        self.assertEqual((code, out, err), (1, "1018-add-y: failed: no review-code.md with a VERDICT line, "
+                                            "see replay.log\n" + SUMMARY.format(0, 0, 1), ""))
+        case_dir = self.arm / "1018-add-y"
+        self.assertFalse((case_dir / "review-code.md").exists())
+        self.assertEqual(json.loads((case_dir / "run.json").read_text(encoding="utf-8"))["exit"], 0)
+
+    def test_commit_missing_after_fetch(self):
+        absent = "0" * 40
+        cases = json.loads(self.cases.read_text(encoding="utf-8"))
+        cases["cases"][0]["head"] = absent
+        self.cases.write_text(json.dumps(cases), encoding="utf-8")
+        code, out, err = self.replay("--role", "review-code")
+        self.assertEqual((code, out, err), (1, f"1018-add-y: failed: commit {absent} is not in {self.repo} after "
+                                            "fetch\n" + SUMMARY.format(0, 0, 1), ""))
+        self.assertEqual(self.calls(), [])
+
+    def test_no_merge_base(self):
+        tree = self.git("rev-parse", "HEAD^{tree}")
+        first = self.git("commit-tree", tree, "-m", "unrelated")
+        self.merges = {18: self.git("commit-tree", tree, "-p", first, "-m", "unrelated merge")}
+        code, out, err = self.replay("--role", "review-code")
+        self.assertEqual((code, out, err), (1, f"1018-add-y: failed: no merge base of {self.merges[18]}^1 and "
+                                            f"{self.head} in {self.repo}\n" + SUMMARY.format(0, 0, 1), ""))
+        self.assertEqual(self.calls(), [])
+        self.assertFalse((self.arm / "1018-add-y").exists())
+
 
 class BenchReplayErrorTest(BenchReplayCase):
     def assertFails(self, flags, code, message, arm=None):
@@ -469,6 +499,16 @@ class BenchReplayErrorTest(BenchReplayCase):
         self.project.write_text("---\nrepo: example/other\n---\n", encoding="utf-8")
         self.assertFails(["--role", "review-code"], 2,
                          "bench: 1018-add-y: pr is not in example/other, the repo of project alpha")
+
+    def test_project_without_repo(self):
+        for text in ("---\nbase: main\n---\n", None):
+            with self.subTest(text=text):
+                if text:
+                    self.project.write_text(text, encoding="utf-8")
+                else:
+                    self.project.unlink()
+                self.assertFails(["--role", "review-code"], 4,
+                                 "bench: 1018-add-y: project alpha has no repo; pull it with factory.py pull alpha")
 
     def test_no_checkout(self):
         (self.home / "paths.md").write_text("---\nbeta: /tmp/beta\n---\n", encoding="utf-8")
