@@ -8451,7 +8451,7 @@ function removePriority(board, id, now) {
   return '';
 }
 
-// factory.py pickup and stuck leave a paused job alone; a running session keeps running.
+// factory.py pickup and stuck leave a paused job alone; pickup stops its running Paseo session.
 // Each returns an error message, 'unchanged', or '' once the board is changed.
 function pauseJob(board, id, now) {
   const j = board.jobs.find((x) => x.id === id);
@@ -8750,7 +8750,7 @@ function openCloseDialog(ctx) {
   const j = jobs.find((x) => x.id === ctx.id);
   if (closeDialog || !j) return;
   closeDialog = { id: j.id, opener: ctx.opener };
-  $('close-job-help').textContent = j.id + ' stops at ' + j.stage + '. The next pickup run writes decision.md with your reason, then moves the job to Closed. If a session is running it, the close waits for that session to stop.';
+  $('close-job-help').textContent = j.id + ' stops at ' + j.stage + '. The next pickup run writes decision.md with your reason, then moves the job to Closed. If a Paseo session is running it, pickup stops that session first. Any other session stops when it next writes to the board.';
   $('close-job-reason').value = '';
   $('close-job-err').textContent = '';
   $('close-job-err').classList.remove('saved');

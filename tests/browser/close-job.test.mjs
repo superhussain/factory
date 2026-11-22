@@ -218,7 +218,8 @@ test("close job", { timeout: 240000 }, async (t) => {
         assert.equal(
           await page.$eval("#close-job-help", (el) => el.textContent),
           "042-sample-export stops at build. The next pickup run writes decision.md with your reason, " +
-            "then moves the job to Closed. If a session is running it, the close waits for that session to stop.",
+            "then moves the job to Closed. If a Paseo session is running it, pickup stops that session first. " +
+            "Any other session stops when it next writes to the board.",
         );
         assert.equal(
           await page.$eval("#close-job-reason", (el) => el.getAttribute("aria-describedby")),
