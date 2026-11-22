@@ -6517,6 +6517,73 @@ def idle_watch_pass(home, data, device, dry):
         write_atomic(Path(home, "idle-watch.json"), json.dumps({"version": 1, "jobs": watch}, indent=2) + "\n")
 
 
+def token_cap_pass(home, data, device, dry):
+    """Warn once when an in-flight job claimed on this host passes TOKEN_WARN_PERCENT of config.md's
+    job_token_cap, and move it to needs-human and stop its Paseo agent when it reaches the cap.
+    This host scans its own transcripts; other hosts count through their recorded tokens entry."""
+    cap = job_token_cap(home)
+    if cap is None:
+        return
+
+    def due(j):
+        c, job_id = j.get("claim"), j.get("id")
+        return (j.get("stage") in IN_FLIGHT and isinstance(c, dict) and c.get("device") == device
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"]) and not closing(j))
+
+    for j in [j for j in data["jobs"] if due(j)]:
+        job_id, project = j["id"], j["project"]
+        try:
+            fresh = usage_totals(home, project, job_id)
+        except Exception as e:
+            print(f"factory.py: pickup skips the token cap of {job_id}: scan failed ({type(e).__name__})",
+                  file=sys.stderr)
+            continue
+        tokens = j.get("tokens") if isinstance(j.get("tokens"), dict) else {}
+        total = token_count(fresh["models"]) + sum(
+            token_count(e["models"]) for host, e in tokens.items()
+            if host != device and isinstance(e, dict) and isinstance(e.get("models"), dict))
+        state = j.get("token_cap") if isinstance(j.get("token_cap"), dict) else {}
+        base = state["base"] if type(state.get("base")) is int else 0
+        used = total - base
+        park = used >= cap
+        if park:
+            note = f"tokens: {used:,} reached the {cap:,} job cap on {device}; a resumed session gets another {cap:,}"
+            patch = {"stage": "needs-human", "note": note, "claim": None, "token_cap": {"base": total, "warned": None}}
+            line = f"needs-human {job_id} {project}: {note}"
+            dry_line = f"would move {line}"
+        elif used * 100 >= cap * TOKEN_WARN_PERCENT and "warned" not in state:
+            note = f"tokens: {used:,} of the {cap:,} job cap ({used * 100 // cap}%) on {device}"
+            patch = {"note": note, "token_cap": {"base": base, "warned": now()}}
+            line = f"token warning {job_id} {project}: {note}"
+            dry_line = f"would warn tokens {job_id} {project}: {note}"
+        else:
+            continue
+        if dry:
+            print(dry_line)
+            continue
+
+        def change(text, job_id=job_id, stage=j["stage"], patch=patch, fresh=fresh):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            if (found is None or found.get("stage") != stage
+                    or not isinstance(found.get("claim"), dict) or found["claim"].get("device") != device):
+                return None, False
+            patch_job(board, job_id, patch)
+            old = found.get("tokens") if isinstance(found.get("tokens"), dict) else {}
+            found["tokens"] = {**old, device: {"at": found["updated"], **fresh}}
+            return dump_board(board), True
+        if not cas(home, "/api/board", change):
+            continue
+        print(line)
+        link = j.get("paseo") if isinstance(j.get("paseo"), dict) else {}
+        agent, server = link.get("agent"), paseo_server()
+        if (park and server and link.get("server") == server
+                and isinstance(agent, str) and PASEO_ID.fullmatch(agent) and not agent.startswith("-")
+                and paseo_run(["stop", agent])[0]):
+            print(f"factory.py: pickup could not stop agent {agent} of {job_id}: paseo stop failed", file=sys.stderr)
+
+
 def moved_here(j, device):
     """True when the dashboard moved this in-flight job to this host, no pickup has claimed it yet,
     and no stop of it is still queued on this host, as for a rerun."""
@@ -6538,6 +6605,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
     idle_watch_pass(home, data, device, dry)
+    token_cap_pass(home, data, device, dry)
     auto_babysit_pass(home, data, device, minutes, paths, settings, dry)
     babysit_pass(home, data, device, minutes, paths, settings, dry)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
