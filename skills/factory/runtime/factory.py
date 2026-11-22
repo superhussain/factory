@@ -3936,9 +3936,27 @@ def arm_metrics(arm_jobs, follow_ups, jobs_root):
             "finished": len(finished), "rounds": spread(means), "tokens": spread(tokens)}
 
 
+def compare(a, b):
+    """Whether two arm_metrics dicts can be compared, and per metric whether b's median differs
+    from a's by more than the larger arm's median absolute deviation."""
+    ready = a["finished"] >= MIN_ARM_FINISHED and b["finished"] >= MIN_ARM_FINISHED
+    result = {"min_finished": MIN_ARM_FINISHED, "verdict": "compared" if ready else "inconclusive",
+              "reason": f"needs {MIN_ARM_FINISHED} finished jobs per arm: a has {a['finished']}, b has {b['finished']}"}
+    for metric in ("rounds", "tokens"):
+        sa, sb = a[metric], b[metric]
+        if not ready or sa["n"] < MIN_ARM_FINISHED or sb["n"] < MIN_ARM_FINISHED:
+            result[metric] = {"diff": None, "noise": None, "reads": "inconclusive"}
+            continue
+        diff, noise = round(sb["median"] - sa["median"], 1), max(sa["mad"], sb["mad"])
+        reads = "no difference" if abs(diff) <= noise else "b higher" if diff > 0 else "b lower"
+        result[metric] = {"diff": diff, "noise": noise, "reads": reads}
+    return result
+
+
 def experiment_cmd(sub, name):
     """Read-only per-arm outcome report for one owner-model experiment. Attributes by each
-    job's recorded experiment field, never by re-hashing. Prints JSON, writes nothing."""
+    job's recorded experiment field, never by re-hashing. Prints JSON, writes nothing. The
+    comparison block is advisory: nothing reads it."""
     if sub != "report":
         fail("usage: experiment report <name>", 2)
     if not SLUG.fullmatch(name):
@@ -3971,9 +3989,9 @@ def experiment_cmd(sub, name):
                 follow[arm]["unknown_window"] += 1
             elif (age - anchor).total_seconds() <= WINDOW_SECONDS:
                 follow[arm]["rework_of" if ref["kind"] == "rework-of" else "surfaced"].append(j["id"])
-    print(json.dumps({"name": name,
-                      "a": arm_metrics(arm_jobs["a"], follow["a"], Path(home, "jobs")),
-                      "b": arm_metrics(arm_jobs["b"], follow["b"], Path(home, "jobs"))}, indent=2))
+    a = arm_metrics(arm_jobs["a"], follow["a"], Path(home, "jobs"))
+    b = arm_metrics(arm_jobs["b"], follow["b"], Path(home, "jobs"))
+    print(json.dumps({"name": name, "a": a, "b": b, "comparison": compare(a, b)}, indent=2))
 
 
 def release_claim(home, job_id, device, session):
