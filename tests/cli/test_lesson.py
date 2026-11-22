@@ -3,9 +3,11 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from support import invoke
-from test_backlog_lesson import FACT, WHY, ITEM, card
 from test_backlog_triage import TriageFixture
 
+FACT = "Worker route changes run pnpm test:protocol; pnpm test skips them."
+WHY = "The close reason names the command but not which routes need it."
+ITEM = f"factory: Lesson: {FACT}"
 NOTES = "# Notes\n\n- Run pnpm test.\n"
 JOB = "1712-export-csv"
 
@@ -54,7 +56,9 @@ class LessonTests(TriageFixture):
         key = self.module.backlog_key(f"- [ ] {ITEM}")
         out = (f"added {ITEM} with context\nlink: https://factory.example/#/backlog/{key}\n"
                f"held {ITEM} for review: lesson cards always wait for a person\n")
-        backlog = "# Backlog\n" + card("factory", JOB, today).replace(WHY, why)
+        backlog = (f"# Backlog\n- [ ] {ITEM}\n  Recommend: approve\n\n"
+                   f"  Approve adds this bullet to factory/notes.md. No job starts.\n  Why it waits: {why}\n\n"
+                   f"  Lesson: from {JOB}, queued {today}\n")
         return out, backlog
 
     def test_appends_a_clear_lesson(self):
