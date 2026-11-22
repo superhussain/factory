@@ -34,6 +34,7 @@
   "paseo_writer": {"server": "...", "agent": "..."},
   "token_cap": { "base": 0, "warned": "..." },
   "launch_failure": { "count": 1, "reason": "exit 3", "at": "..." },
+  "repeated": [{ "round": 2, "first": 1, "reviewer": "code", "signature": "worker/export.js#missing-person-check", "at": "..." }],
   "started": "2026-10-15T11:40:00Z",
   "updated": "2026-10-15T12:00:00Z",
   "done": "2026-10-15T12:30:00Z"
@@ -58,6 +59,7 @@ Approving a backlog line turns each `Depends on: <slug>: <feature>` context line
 `started` is when the job first got a claim, and only `factory.py` writes it.
 `token_cap` holds the job token cap state, and only `factory.py pickup` writes it. `base` is the token total at the last park, so a resumed session gets a full cap again, and `warned` is when pickup last warned at 80%. `board` refuses a `token_cap` patch with exit 2.
 `launch_failure` records failed pickup launches in a row, and only `factory.py pickup` writes it. `count` sets the next `not_before` delay, `reason` is the exit code or a path-free start error, and `at` is the last failure. A successful launch removes it. `board` refuses a `launch_failure` patch with exit 2.
+`repeated` holds the newest 20 review findings `factory.py repeats` saw again, and only it writes them. `board` refuses a `repeated` patch with exit 2.
 `escalated` is set when an ESCALATE PR ships, and marks a PR that waits on a human.
 `automerge` marks an APPROVE PR waiting to merge. `board` refuses `automerge` true
 unless the local decision.md opens with APPROVE, and refuses stage `approve` unless
