@@ -13623,7 +13623,7 @@ def bench_replay(*args):
     for row in rows:
         ok, line = bench_replay_case(row, arm, role, model)
         counts[ok] += 1
-        print(f"{row['id']}: {line}", flush=True)
+        print(f"{row['id']}: {'failed: ' if ok is False else ''}{line}", flush=True)
     print(f"replayed {counts[True]}, skipped {counts[None]}, failed {counts[False]} of {len(rows)} cases "
           f"into {arm.name}")
     if counts[False]:
