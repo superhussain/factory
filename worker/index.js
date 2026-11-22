@@ -1339,6 +1339,8 @@ async function backlogLesson(request, env, principal) {
   if (!line || marks.length !== 1)
     return reply("that line is not an open lesson card in the backlog", 409);
   const [, slug, fact] = line;
+  const unsafe = checkOperatorText(fact, "lesson", "note");
+  if (unsafe) return reply(unsafe, 400);
   const [, job, day] = marks[0];
   if (!(await env.BUCKET.head(`projects/${slug}.md`))) return notFound();
   const key = projectFileKey(slug, "notes.md");
