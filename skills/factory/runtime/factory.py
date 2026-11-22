@@ -234,6 +234,7 @@ PASEO_ID = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
 ADAPTER_ID = re.compile(r"[0-9a-fA-F][0-9a-fA-F-]{7,63}")
 ROUTE_MODEL = re.compile(r"[A-Za-z0-9_./:@\[\]-]{1,200}", re.ASCII)
 ROUTE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+REVIEW_ROUTE_KEYS = ("review-low", "review-medium")
 HERE = os.path.dirname(os.path.abspath(__file__))
 WINDOWS = os.name == "nt"
 FALLBACK_CA_FILE = "/etc/ssl/cert.pem"
@@ -3680,14 +3681,34 @@ def read_routes(home):
              "as <name>: <provider> <model> [<effort>]", 2)
     routes = []
     for name, value in meta.items():
-        # The optional experiment line is config, not a route.
-        if name == "experiment":
+        # The optional experiment and review lines are config, not routes.
+        if name == "experiment" or name in REVIEW_ROUTE_KEYS:
             continue
         parts = value.split()
         if not SLUG.fullmatch(name) or len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) \
                 or not ROUTE_MODEL.fullmatch(parts[1]) or parts[2:] and parts[2] not in ROUTE_EFFORTS:
             fail(f"bad route {name!r} in {path}: use <name>: <provider> <model> [<effort>]", 2)
         routes.append((name, parts[0], parts[1], parts[2] if len(parts) == 3 else None))
+    return routes
+
+
+def read_review_routes(home):
+    """{"low": route or None, "medium": route or None} from routes.md's optional review-low and review-medium
+    lines, each route {name, provider, model, effort}."""
+    path = Path(home, "routes.md")
+    meta = frontmatter(path)[0] if path.exists() else {}
+    routes = {}
+    for key in REVIEW_ROUTE_KEYS:
+        tier, value = key.split("-", 1)[1], meta.get(key)
+        if value is None:
+            routes[tier] = None
+            continue
+        parts = value.split()
+        if len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) or not ROUTE_MODEL.fullmatch(parts[1]) \
+                or parts[2:] and parts[2] not in ROUTE_EFFORTS:
+            fail(f"bad review route {key} in {path}: use {key}: <provider> <model> [<effort>]", 2)
+        routes[tier] = {"name": key, "provider": parts[0], "model": parts[1],
+                        "effort": parts[2] if len(parts) == 3 else None}
     return routes
 
 
