@@ -590,14 +590,13 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .board-status:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .board-status[hidden] { display: none; }
   .notify-toasts { position: fixed; z-index: 31; width: 340px; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-  .notify-toast { display: flex; align-items: flex-start; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .notify-toast { display: flex; align-items: flex-start; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); touch-action: pan-y; }
   .notify-toasts[data-position="top-left"] { top: 16px; left: 16px; }
   .notify-toasts[data-position="top-center"] { top: 16px; left: 50%; transform: translateX(-50%); }
   .notify-toasts[data-position="top-right"] { top: 16px; right: 16px; }
   .notify-toasts[data-position="bottom-left"] { bottom: 16px; left: 16px; }
   .notify-toasts[data-position="bottom-center"] { bottom: 16px; left: 50%; transform: translateX(-50%); }
   .notify-toasts[data-position="bottom-right"] { bottom: 16px; right: 16px; }
-  .notify-toast { touch-action: pan-y; }
   .notify-toast.dragging { user-select: none; cursor: grabbing; }
   .notify-toast .notification-link { flex: 1; min-width: 0; border-bottom: 0; }
   @media (max-width: 760px) { .notify-toasts[data-position] { left: 16px; right: 16px; width: auto; transform: none; } }
@@ -9903,9 +9902,9 @@ function showNotifyToast(kind, href, title, meta) {
   const same = [...list.children].find((el) => el.firstChild.getAttribute('href') === href);
   if (same) same.replaceWith(li); else list.append(li);
   while (list.children.length > TOAST_MAX) list.firstElementChild.remove();
-  // A hovered or focused stack, or a hidden tab, holds every toast for another TOAST_MS.
+  // A hovered or focused stack, a hidden tab, or a drag on this toast holds it for another TOAST_MS.
   const expire = () => {
-    if (document.hidden || list.matches(':hover') || list.contains(document.activeElement) || toastDrag?.li === li) setTimeout(expire, TOAST_MS);
+    if (document.hidden || list.matches(':hover') || list.contains(document.activeElement) || toastDrag?.active && toastDrag.li === li) setTimeout(expire, TOAST_MS);
     else li.remove();
   };
   setTimeout(expire, TOAST_MS);
@@ -9960,6 +9959,7 @@ $('notify-toasts').addEventListener('pointermove', (e) => {
     if (Math.abs(e.clientY - d.y) >= TOAST_DRAG_FAIL_Y) { toastDrag = null; return; }
     if (Math.abs(dx) < TOAST_DRAG_START) return;
     d.active = true;
+    getSelection()?.removeAllRanges();
     d.li.setPointerCapture(e.pointerId);
     d.li.classList.add('dragging');
     d.li.style.transition = 'none';

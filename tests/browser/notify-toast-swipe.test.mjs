@@ -101,5 +101,24 @@ test("notification toast swipe", { timeout: 180000 }, async (t) => {
       assert.equal(await hash(phone), "");
       assert.deepEqual(phone.errors, []);
     });
+
+    await t.test("swipe S5 a press released outside the list still expires", async () => {
+      const other = await open({ width: 1280, height: 900 });
+      await showToast(other);
+      const { x, y } = await other.$eval("#notify-toasts .notify-toast", (li) => {
+        const r = li.getBoundingClientRect();
+        return { x: r.x + 2, y: r.y + 2 };
+      });
+      await other.mouse.move(x, y);
+      await other.mouse.down();
+      await other.mouse.move(x, y - 300);
+      await other.mouse.up();
+      const ms = await other.evaluate(() => TOAST_MS);
+      await other.waitForFunction(() => !document.querySelector(".notify-toast"), {
+        ...wait,
+        timeout: ms + 2000,
+      });
+      assert.deepEqual(other.errors, []);
+    });
   });
 });
