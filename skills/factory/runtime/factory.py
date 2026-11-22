@@ -6498,9 +6498,12 @@ def idle_watch_pass(home, data, device, dry):
                 entry["nudged"] = now()
                 print(f"nudged idle {line}")
             continue
-        if dry or not isinstance(entry["nudged"], str) or entry["nudged"] >= cutoff:
+        if not isinstance(entry["nudged"], str) or entry["nudged"] >= cutoff:
             continue
         note = f"idle: no progress {IDLE_NUDGE_MINUTES} minutes after a nudge to agent {agent}"
+        if dry:
+            print(f"would move needs-human {job_id} {project}: {note}")
+            continue
 
         def change(text, job_id=job_id, stage=j["stage"], updated=j.get("updated"), note=note):
             board = load_board(text)

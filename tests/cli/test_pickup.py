@@ -1812,6 +1812,17 @@ class IdleWatchTest(PickupFixture):
                 self.assertEqual((self.sent, self.puts()), ([], []))
                 self.assertEqual(self.job("042-sample-export")["stage"], extra.get("stage", "build"))
 
+    def test_dry_run_prints_the_needs_human_move(self):
+        self.nudged()
+        self.age("nudged")
+        before = (self.home / "idle-watch.json").read_text(encoding="utf-8")
+        self.calls.clear()
+        self.assertEqual(self.pickup("--dry-run"), (
+            0, f"would move needs-human 042-sample-export alpha: {self.NOTE}\nhost {DEVICE}: would launch 0\n", ""))
+        self.assertEqual((self.home / "idle-watch.json").read_text(encoding="utf-8"), before)
+        self.assertEqual((self.sent, self.puts()), ([], []))
+        self.assertEqual(self.job("042-sample-export")["stage"], "build")
+
     def test_needs_human_after_the_second_window(self):
         self.nudged()
         self.age("nudged")
