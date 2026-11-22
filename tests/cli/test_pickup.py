@@ -3051,6 +3051,19 @@ class SessionStopTest(PickupFixture):
         self.assertEqual(self.pickup(), (0, "", ""))
         self.assertEqual((self.run.call_count, self.puts()), (1, []))
 
+    def test_pause_changed_during_stop_skips_write(self):
+        self.export()
+
+        def repause(args):
+            self.board["jobs"][0]["paused"] = {"at": "2026-01-02T13:00:00Z"}
+            return 0, ""
+
+        self.run.side_effect = repause
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.run.assert_called_once_with(["stop", "synthetic-agent"])
+        self.assertEqual(self.puts(), [])
+        self.assertNotIn("session_stop", self.job("042-sample-export")["paused"])
+
     def test_close_stops_then_closes(self):
         self.export(paused=None, close={"reason": "Duplicate of 041-sample-report", "at": "2026-01-02T12:00:00Z"})
         self.assertEqual(self.pickup(), (0, "stopped session synthetic-agent of 042-sample-export alpha: "
