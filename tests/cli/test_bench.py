@@ -1,9 +1,10 @@
 import json
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from support import IsolatedTestCase, invoke, load_runtime
+from support import IsolatedTestCase, http_fixture, invoke, load_runtime
 
 USAGE = "factory.py: usage: factory.py bench score <cases-file> <arm-folder>...\n"
 HEAD = "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
@@ -234,3 +235,92 @@ class BenchErrorTest(BenchCase):
             with self.subTest(name=name):
                 self.assertFails(["score", cases_file, folders[0], folder], 2,
                                  f"bench: arm name {name} must be unique letters, digits, ., _ or -")
+
+
+HEAD_Z = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
+
+
+def outcome_job(job_id, result, pr):
+    return {"id": job_id, "project": "alpha", "stage": "merged", "updated": "2026-01-05T10:00:00Z",
+            "pr": f"https://github.com/{pr}", "outcome": {"result": result, "at": "2026-01-09T12:00:00Z",
+                                                          "evidence": []}}
+
+
+DRAFT_BOARD = {"updated": "2026-01-09T12:00:00Z", "jobs": [
+    outcome_job("1020-add-w", "reworked", "example/beta/pull/20"),
+    outcome_job("1019-add-z", "reverted", "example/alpha/pull/19"),
+    outcome_job("1018-add-y", "reworked", "example/alpha/pull/18"),
+    outcome_job("1017-add-x", "held", "example/alpha/pull/17")]}
+DRAFT_OUT = {"cases": [
+    {"id": "1018-add-y", "pr": "https://github.com/example/alpha/pull/18", "head": HEAD, "source": "reworked",
+     "defects": []},
+    {"id": "1019-add-z", "pr": "https://github.com/example/alpha/pull/19", "head": HEAD_Z, "source": "reverted",
+     "defects": []}]}
+SKIP_W = "factory.py: bench cases skips 1020-add-w: PR is not in example/alpha\n"
+
+
+class BenchDraftTest(BenchCase):
+    def setUp(self):
+        super().setUp()
+        self.home = self.root / "home"
+        (self.home / "projects").mkdir(parents=True)
+        (self.home / "projects/alpha.md").write_text("---\nrepo: example/alpha\n---\n", encoding="utf-8")
+        os.environ["FACTORY_HOME"] = str(self.home)
+
+    def draft(self, *args, board=DRAFT_BOARD, states=({18: ("MERGED", HEAD), 19: ("MERGED", HEAD_Z)}, None)):
+        calls = []
+
+        def pr_states(repo, numbers, device):
+            calls.append((repo, numbers, device))
+            return states
+
+        with http_fixture({"GET /api/board": (200, board), "PUT /api/board": (200, b"ok")}) as server, \
+                patch.object(self.module, "pr_states", pr_states):
+            (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\ndevice: host-a\n---\n",
+                                                 encoding="utf-8")
+            got = self.bench(*args)
+        self.puts = [r for r in server.requests if r[0] == "PUT"]
+        self.calls = calls
+        return got
+
+    def test_running_example(self):
+        code, out, err = self.draft("cases", "alpha")
+        self.assertEqual((code, err), (0, SKIP_W))
+        self.assertEqual(out, json.dumps(DRAFT_OUT, indent=2) + "\n")
+        self.assertEqual(self.puts, [])
+        self.assertEqual(self.calls, [("example/alpha", [18, 19], "host-a")])
+
+    def test_no_head(self):
+        skip = "factory.py: bench cases skips 1019-add-z: no head commit from GitHub\n"
+        for name, states in (("omitted", {18: ("MERGED", HEAD)}),
+                             ("bad head", {18: ("MERGED", HEAD), 19: ("MERGED", "9f8e7d6")}),
+                             ("no head", {18: ("MERGED", HEAD), 19: ("MERGED", None)})):
+            with self.subTest(name):
+                code, out, err = self.draft("cases", "alpha", states=(states, None))
+                self.assertEqual((code, err), (0, SKIP_W + skip))
+                self.assertEqual(json.loads(out), {"cases": DRAFT_OUT["cases"][:1]})
+
+    def test_errors(self):
+        usage = "factory.py: usage: factory.py bench cases <project-slug>\n"
+        nothing = "factory.py: bench: no reverted or reworked jobs to draft in alpha\n"
+        held = {"updated": "2026-01-09T12:00:00Z", "jobs": [DRAFT_BOARD["jobs"][0], DRAFT_BOARD["jobs"][3]]}
+        rows = [("no slug", ["cases"], {}, (2, "", usage)),
+                ("two slugs", ["cases", "alpha", "beta"], {}, (2, "", usage)),
+                ("bad slug", ["cases", "al pha"], {}, (2, "", usage)),
+                ("no project file", ["cases", "beta"], {}, (4, "", "factory.py: bench: no project file for beta\n")),
+                ("gh fails", ["cases", "alpha"], {"states": (None, "gh is not installed on host-a")},
+                 (5, "", SKIP_W + "factory.py: bench: gh is not installed on host-a\n")),
+                ("nothing drafted", ["cases", "alpha"], {"board": held}, (3, "", SKIP_W + nothing))]
+        for name, args, kwargs, want in rows:
+            with self.subTest(name):
+                self.assertEqual(self.draft(*args, **kwargs), want)
+
+    def test_draft_needs_labels(self):
+        code, out, _ = self.draft("cases", "alpha")
+        self.assertEqual(code, 0)
+        path = self.root / "reviewer-cases.json"
+        path.write_text(out, encoding="utf-8")
+        arm = self.root / "arm"
+        arm.mkdir()
+        self.assertEqual(self.bench("score", str(path), str(arm)),
+                         (2, "", f"factory.py: bench: {path}: case 1: defects must be a non-empty list\n"))
