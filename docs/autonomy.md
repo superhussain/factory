@@ -463,6 +463,18 @@ A failed check never blocks a job. It only skips the extra stop. The round cap, 
 approver and the merge rules still apply. The Worker must deploy before hosts upgrade, or
 `factory.py` sees 404 and continues.
 
+## Repeated findings
+
+Loop step 5 runs `factory.py repeats <slug>/<job-id> <round>` below the round cap and before the escalation check, and loop step 4 reads `repeats` from `factory.py pre-review`.
+
+| Case | Result |
+| --- | --- |
+| Round 1, or no `round-<N-1>/` folder | `continue` |
+| CHANGES review with no signature lines | `continue`, round cap still applies |
+| Previous review was PASS | not a repeat |
+| Disputed-only round, reviewer keeps the finding | `repeat`: a person settles the dispute |
+| Corrupt `pre-review-failures.json` | read as `{}` and rewritten |
+
 ## Rollback
 
 | Scope | Rollback |

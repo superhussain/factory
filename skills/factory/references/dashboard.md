@@ -70,4 +70,4 @@ null, so only a signed-in person sets it.
 | PR open, merged, or escalated | `#<id>/decision`, plus the PR URL |
 | Closed without shipping | `#<id>/decision` |
 | Batched build triggered or landed | the run URLs and the jobs that rode it |
-| needs-human | the file that explains the hold: the latest CHANGES review at the round cap, or the failed agent's file. Use `#<id>` plus the note when only the note says why (a git conflict, say). |
+| needs-human | the file that explains the hold: the latest CHANGES review at the round cap, both repeated reviews for a repeat stop, or the failed agent's file. Use `#<id>` plus the note when only the note says why (a git conflict, say). |
