@@ -94,7 +94,15 @@ test("pipeline stage-note trials", { timeout: 180000 }, async (t) => {
         await page.$eval("#pipeline-trials-empty", (el) => el.textContent),
         "No stage-note trials yet.",
       );
-      assert.equal(await shown(page, "pipeline-trials-table"), false);
+      assert.equal(await shown(page, "pipeline-trials-wrap"), false);
+      assert.deepEqual(
+        await page.$eval("#pipeline-trials-wrap", (el) => [
+          el.getAttribute("tabindex"),
+          el.getAttribute("role"),
+          el.getAttribute("aria-labelledby"),
+        ]),
+        ["0", "region", "pipeline-trials-heading"],
+      );
       assert.equal(await shown(page, "pipeline-trials-paused"), false);
     });
 
@@ -122,7 +130,7 @@ test("pipeline stage-note trials", { timeout: 180000 }, async (t) => {
       ]);
       assert.equal(await page.$("#pipeline-trials-body img"), null);
       assert.equal(await page.evaluate(() => window.pwned), undefined);
-      assert.equal(await shown(page, "pipeline-trials-table"), true);
+      assert.equal(await shown(page, "pipeline-trials-wrap"), true);
       assert.equal(await shown(page, "pipeline-trials-empty"), false);
     });
 

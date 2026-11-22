@@ -1070,8 +1070,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           <h4 id="pipeline-trials-heading">Stage-note trials</h4>
           <p id="pipeline-trials-help" class="muted">Retro admit opens a trial for each stage-note edit it saves. Arm a jobs keep the old note and arm b jobs read the edit. <code>factory.py trial settle</code> compares the arms and reverts an edit when b reads higher on rounds or tokens.</p>
           <div id="pipeline-trials-paused" role="status" hidden></div>
-          <div class="reference-scroll">
-            <table id="pipeline-trials-table" class="project-list" hidden>
+          <div class="reference-scroll" id="pipeline-trials-wrap" tabindex="0" role="region" aria-labelledby="pipeline-trials-heading" hidden>
+            <table id="pipeline-trials-table" class="project-list">
               <thead><tr><th scope="col">Trial</th><th scope="col">Stage</th><th scope="col">Status</th><th scope="col">Jobs a / b</th><th scope="col">Rounds</th><th scope="col">Tokens</th></tr></thead>
               <tbody id="pipeline-trials-body"></tbody>
             </table>
@@ -4988,7 +4988,7 @@ function renderPipelineTrials() {
     }));
   }
   $('pipeline-trials-paused').hidden = !paused.length;
-  $('pipeline-trials-table').hidden = !rows.length;
+  $('pipeline-trials-wrap').hidden = !rows.length;
   $('pipeline-trials-empty').hidden = !!rows.length;
 }
 
