@@ -433,6 +433,15 @@ changes nothing. Then install one timer per host.
 - When the job's session on this host was claimed before `priority.at` and its Paseo agent is not closed, `pickup` sends the agent one fixed nudge with `paseo send --no-wait`, then sets `priority.nudged`. A failed send is printed on stderr and retried next run.
 - Only the dashboard, `pickup` and `factory.py control` write `priority`. `board` refuses a `priority` patch with exit 2.
 
+## Stopping the whole factory
+
+- The dashboard's Stop factory form in Settings > Hosts sets the global stop flag, and the banner's Resume factory clears it. Only a signed-in person can clear it.
+- An agent that sees an incident needing every host stopped runs `factory.py halt set --reason <text>`. `factory.py halt status` prints the record.
+- While the flag is set, `pickup` prints `factory.py: pickup launches nothing; factory stopped by ...` on stderr and runs no pass: no launch, takeover, triage or Tracer pass. Its dry run prints `skip all: ...`.
+- `stuck` exits 3, so the resume schedule resumes nothing.
+- Sessions already running keep running. A stop blocks new starts only.
+- A Worker without the `/api/halt` route answers 404, which means not stopped.
+
 ## Nudging an idle job
 
 - `pickup` watches each job at `spec`, `build`, `review` or `approve` that this device claimed and whose Paseo agent runs on this host's server. It skips jobs with an ask, a pause, a queued close or a batch lead.

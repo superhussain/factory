@@ -107,6 +107,7 @@ class PickupFixture(IsolatedTestCase):
         self.board = {"updated": "2026-01-01T00:00:00Z", "jobs": []}
         self.views = {}
         self.hosts = None
+        self.halt = None
         self.calls = []
         self.addCleanup(patch.stopall)
         patch.object(factory, "factory_home", return_value=self.home).start()
@@ -127,6 +128,12 @@ class PickupFixture(IsolatedTestCase):
                                                   encoding="utf-8")
 
     def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        # The halt read stays out of calls, so the call lists below show what pickup did past it.
+        if path == "/api/halt":
+            self.assertEqual((method, ok), ("GET", (200, 404)))
+            if self.halt is None:
+                return 404, {}, ""
+            return 200, {}, json.dumps(self.halt)
         self.calls.append((method, path))
         if path == "/api/board":
             if method == "GET":

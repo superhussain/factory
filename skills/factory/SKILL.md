@@ -513,6 +513,9 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   person text in files, per [chat decisions](references/chat-decisions.md). They never run `autonomy
   resume`, `autonomy allow` or `/factory approve-spec`, or approve scope in Tracer; a human does, there or by pressing Approve spec on the
   dashboard.
+- An agent that sees an incident needing every host stopped, such as runaway launches or a leaked
+  secret, runs `factory.py halt set --reason <text>` and tells the person. It never clears the
+  flag. A person resumes from the dashboard.
 
 ## Security floors
 
