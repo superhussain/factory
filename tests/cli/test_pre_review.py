@@ -358,13 +358,16 @@ class PreReviewTest(IsolatedTestCase):
     def test_budget_survives_non_utf8(self):
         (self.folder / "spec.md").write_bytes(SPEC.encode() + b"\xff\xfe bad\n")
         self.base([check("lint", "pass")])
-        (self.wt / os.fsdecode(b"bad\xff.py")).write_text("x\n")
+        non_utf8 = sys.platform != "darwin"  # APFS rejects non-UTF-8 file names
+        if non_utf8:
+            (self.wt / os.fsdecode(b"bad\xff.py")).write_text("x\n")
         self.write({"tools/a.py": 10})
         code, out, err = self.run_gate()
         self.assertEqual((code, err), (0, ""))
         budget = json.loads(out)["budget"]
-        self.assertEqual((budget["result"], budget["files"], budget["expected_files"]), ("within", 2, 2))
-        self.assertIn("Budget: within (files 2, limit 4; lines 11, limit 900)\n", self.out.read_text())
+        files, lines = (2, 11) if non_utf8 else (1, 10)
+        self.assertEqual((budget["result"], budget["files"], budget["expected_files"]), ("within", files, 2))
+        self.assertIn(f"Budget: within (files {files}, limit 4; lines {lines}, limit 900)\n", self.out.read_text())
 
     def test_budget_within(self):
         self.spec()
