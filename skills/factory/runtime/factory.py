@@ -5764,8 +5764,13 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
         if line is None and ready:
             line = f"wait babysit {j['id']} {j['project']}: one babysit launch per run"
         elif line is None:
-            ready = True
             agent, state = job_agent(j)
+            waits = awaits_permission(agent) if state == "idle" else False
+            if waits is not False:
+                print(f"skip babysit {j['id']} {j['project']}: agent {agent} "
+                      + ("waits at a permission dialog" if waits else "permission state unknown"))
+                continue
+            ready = True
             route = pick_route(home)
             if state in ("idle", "closed"):
                 if dry:
@@ -6709,6 +6714,10 @@ def priority_nudge_pass(home, data, device, dry):
                 print(f"skip nudge {job_id}: agent {agent} is {status or 'missing'}")
             continue
         line = f"{job_id} {j.get('project')}: agent {agent}"
+        waits = awaits_permission(agent)
+        if waits is not False:
+            print(f"skip nudge {line} " + ("waits at a permission dialog" if waits else "permission state unknown"))
+            continue
         if dry:
             print(f"would nudge {line}")
             continue
@@ -6770,7 +6779,11 @@ def idle_watch_pass(home, data, device, dry):
         if "nudged" not in entry:
             if entry["since"] >= cutoff:
                 continue
-            if dry:
+            waits = awaits_permission(agent)
+            if waits is not False:
+                print(f"skip idle nudge {line} "
+                      + ("waits at a permission dialog" if waits else "permission state unknown"))
+            elif dry:
                 print(f"would nudge idle {line}")
             elif not paseo_send(agent, IDLE_NUDGE.format(id=job_id)):
                 print(f"factory.py: pickup could not nudge idle {job_id}: paseo send failed", file=sys.stderr)
@@ -9857,6 +9870,17 @@ def paseo_run(args):
     return r.returncode, r.stdout
 
 
+def awaits_permission(agent):
+    """True when paseo inspect lists pending permission requests for agent, False when it lists none,
+    None when the answer is anything else."""
+    code, out = paseo_run(["inspect", agent, "--json"])
+    try:
+        pending = json.loads(out).get("PendingPermissions") if not code else None
+    except (ValueError, AttributeError):
+        return None
+    return bool(pending) if isinstance(pending, list) else None
+
+
 def workspace_leftovers(cwd):
     """What a workspace holds that no remote, other local branch or the branch's creation point keeps, as strings."""
     def git(verb, *args):
@@ -10121,6 +10145,53 @@ def orphan_pickup_scan(home):
         print(f"factory.py: orphan scan stopped (exit {e.code}); it runs again tomorrow", file=sys.stderr)
 
 
+STOP_CHECKS_FILE = "stop-checks.json"
+
+
+def read_stop_checks(home):
+    """The jobs dict of <home>/stop-checks.json, {} when the file is missing or malformed."""
+    try:
+        doc = json.loads(Path(home, STOP_CHECKS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    jobs = doc.get("jobs") if isinstance(doc, dict) and doc.get("version") == 1 else None
+    return jobs if isinstance(jobs, dict) else {}
+
+
+def stop_state(home, job):
+    """What a stopped job's next step depends on: its board fields, its worktree and origin branch heads,
+    and its R2 files with their ETags. No git fetch runs."""
+    job_id, project = job["id"], job["project"]
+    wt = home / "worktrees" / project / job_id
+    there = wt.exists()
+    listed = json.loads(api(home, "GET", f"/api/jobs/{project}/{job_id}/?etags=1")[2])
+    return dict({k: job.get(k) for k in ("stage", "round", "rounds", "pr", "needs", "note")},
+                head=git(wt, "rev-parse", "HEAD") if there else "",
+                origin=git(wt, "rev-parse", "--verify", "-q", f"refs/remotes/origin/factory/{job_id}") if there else "",
+                files=sorted(f"{o['name']} {o['etag']}" for o in listed if isinstance(o, dict)))
+
+
+def stop_key(state):
+    return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def stop_verdict(home, job, state):
+    """(resume, why, clear_needs) for a stopped job's state."""
+    needs = job.get("needs")
+    if not (isinstance(needs, str) and needs.strip()):
+        why = f"stopped at {state['stage']} with no live session"
+        if state["head"] and state["head"] != state["origin"]:
+            why += ", HEAD not on origin"
+        return True, why, False
+    names = {f.rsplit(" ", 1)[0] for f in state["files"]}
+    if f"#{job['id']}/needs" in needs and {"needs.md", "answers.md"} <= names:
+        base = f"/api/jobs/{job['project']}/{job['id']}/"
+        sha12 = hashlib.sha256(api(home, "GET", base + "needs.md")[2].encode("utf-8")).hexdigest()[:12]
+        if f"For needs.md sha256 {sha12}," in api(home, "GET", base + "answers.md")[2]:
+            return True, "ask answered in answers.md, needs still set", True
+    return False, "waits on its ask", False
+
+
 def stuck(*args):
     """Claim up to --limit jobs that a dead session left mid-loop, and print them as JSON
     for the resume schedule. Only this function writes a job's resumes."""
@@ -10149,23 +10220,54 @@ def stuck(*args):
         agents = statuses[0]
         return agents is not None and agents.get(link.get("agent"), "closed") == "closed"
 
+    def held(job):
+        # A move nobody has claimed yet belongs to its target host's pickup.
+        return (paused(job) or closing(job) or lead_of(job) or waiting_until(job)
+                or isinstance(job.get("move"), dict) and "claimed" not in job["move"])
+
     def is_stuck(job):
-        if paused(job) or closing(job) or lead_of(job) or waiting_until(job):
+        if held(job):
             return False
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
             return False
-        # A move nobody has claimed yet belongs to its target host's pickup.
-        if isinstance(job.get("move"), dict) and "claimed" not in job["move"]:
-            return False
         c = job.get("claim")
         if job.get("stage") in IN_FLIGHT:
-            if stale(c.get("seen") if c else job.get("updated")):
-                return True
-            return bool(c) and c.get("device") == device and dead(job)
+            return stale(c.get("seen") if c else job.get("updated"))
         if job.get("stage") == "pr-open" and job.get("automerge") is True and job.get("escalated") is not True:
             return stale(job.get("updated")) or dead(job)
         return False
+
+    def well_formed(job):
+        # The id goes into a shell command and a prompt, so take only well-formed ones.
+        return (isinstance(job.get("id"), str) and JOB_ID.fullmatch(job["id"]) and ".." not in job["id"]
+                and paths.get(job.get("project")))
+
+    def stopped(job):
+        c = job.get("claim")
+        return (job.get("stage") in IN_FLIGHT and well_formed(job) and not held(job)
+                and (not c or c.get("device") == device) and dead(job))
+
+    resume = {}  # {id: (stage, clear_needs, needs)} for each new state the stop check could not explain.
+    # Without this host's Paseo server no job counts as stopped, so the board read is skipped.
+    if server:
+        jobs = read_board(home)["jobs"]
+        old = read_stop_checks(home)
+        checks = {k: v for k, v in old.items()
+                  if any(j.get("id") == k and j.get("stage") not in TERMINAL for j in jobs)}
+        for job in (j for j in jobs if stopped(j)):
+            state = stop_state(home, job)
+            key = stop_key(state)
+            if (checks.get(job["id"]) or {}).get("key") == key:
+                continue
+            ok, why, clear = stop_verdict(home, job, state)
+            verdict = "resume" if ok else "explained"
+            checks[job["id"]] = {"key": key, "at": now(), "verdict": verdict, "why": why}
+            print(f"stop check {job['id']}: {verdict}, {why}", file=sys.stderr)
+            if ok:
+                resume[job["id"]] = (job["stage"], clear, job.get("needs"))
+        if checks != old:
+            write_atomic(home / STOP_CHECKS_FILE, json.dumps({"version": 1, "jobs": checks}, indent=2) + "\n")
 
     def change(text):
         data = load_board(text)
@@ -10176,9 +10278,10 @@ def stuck(*args):
             data["updated"] = now()
         dropped = [f"dropped stub {s.get('id')!r}: no stage, last seen "
                    f"{(s.get('claim') or {}).get('seen') or s.get('updated')}" for s in stubs]
-        # The id goes into a shell command and a prompt, so take only well-formed ones.
-        found = [j for j in data["jobs"] if isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
-                 and ".." not in j["id"] and paths.get(j.get("project")) and is_stuck(j)]
+        # A resume verdict holds only while the fresh row is still stopped, at its stage, with the same ask.
+        found = [j for j in data["jobs"] if well_formed(j) and (
+            is_stuck(j) or j["id"] in resume and stopped(j) and j.get("stage") == resume[j["id"]][0]
+            and j.get("needs") == resume[j["id"]][2])]
         found.sort(key=lambda j: (j.get("claim") or {}).get("seen") or j.get("updated") or "")
         picked, guarded = [], []
         for job in found:
@@ -10200,7 +10303,11 @@ def stuck(*args):
             # The paseo link belongs to the dead session. The resumed session's first hold sets its own.
             job.pop("paseo", None)
             tag = session or secrets.token_hex(3)
-            patch_job(data, job["id"], {"claim": new_claim(device, tag), "resumes": {"count": count, "key": key}})
+            patch = {"claim": new_claim(device, tag), "resumes": {"count": count, "key": key}}
+            _, clear, needs = resume.get(job["id"], (None, False, None))
+            if clear and job.get("needs") == needs:
+                patch["needs"] = None
+            patch_job(data, job["id"], patch)
             picked.append({"id": job["id"], "project": job["project"], "repo_path": paths[job["project"]],
                            "session": tag, "stage": job["stage"]})
         if not picked and not guarded and not stubs:

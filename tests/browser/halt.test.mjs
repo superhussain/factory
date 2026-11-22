@@ -68,6 +68,10 @@ test("the stop banner shows, Resume clears it and Stop sets it", { timeout: 1200
       await page.click("#halt-stop");
       assert.equal(await page.$eval("#halt-status", (el) => el.textContent), "Enter a reason.");
       assert.equal(await page.evaluate(() => document.activeElement.id), "halt-reason");
+      assert.equal(
+        await page.$eval("#halt-reason", (el) => el.getAttribute("aria-describedby")),
+        "halt-help halt-status",
+      );
       assert.equal((await (await fetch(origin + "/api/halt")).json()).halted, false);
       await page.$eval("#halt-reason", (el) => {
         el.value = "";

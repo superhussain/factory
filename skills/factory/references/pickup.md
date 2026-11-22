@@ -147,7 +147,10 @@ Each run, in order:
   (`paseo ls failed`). An agent absent from `paseo ls`, or no link, launches a new session.
   A failed send to an `idle` agent prints a stderr line, releases the claim and launches
   nothing. A failed send to a `closed` agent prints a stderr line and launches a new session
-  with the same tag. A new babysit session gets workspace slug `babysit-<id>` and title
+  with the same tag. Before it claims the job for an `idle` agent, pickup runs
+  `paseo inspect <agent> --json`: a non-empty `PendingPermissions` list skips the job,
+  dry run or not (`skip babysit <id> <project>: agent <agent> waits at a permission dialog`),
+  and any answer but an empty list skips it with `permission state unknown` at the end. A new babysit session gets workspace slug `babysit-<id>` and title
   `babysit <id>`: pickup rewrites `--worktree-slug` and `--title` in the launcher, and inserts
   `--worktree-slug` after `run` for a `paseo` launcher with `--new-workspace` that lacks it.
   A live holder, such as a `running` agent skipped above, learns of the click from its
@@ -445,6 +448,7 @@ changes nothing. Then install one timer per host.
 - `pickup` claims prioritized ideas before older ones, across projects too. Gates, caps and routes still apply.
 - The dashboard shows a prioritized job at the top of its column in idea, spec, build, review and approve.
 - When the job's session on this host was claimed before `priority.at` and its Paseo agent is not closed, `pickup` sends the agent one fixed nudge with `paseo send --no-wait`, then sets `priority.nudged`. A failed send is printed on stderr and retried next run.
+- An agent waiting at a permission dialog gets no nudge. `pickup` reads `PendingPermissions` from `paseo inspect <agent> --json` and prints `skip nudge <id> <project>: agent <agent> waits at a permission dialog`, dry run or not. Any answer but an empty list counts as unknown and prints `skip nudge <id> <project>: agent <agent> permission state unknown`.
 - Only the dashboard, `pickup` and `factory.py control` write `priority`. `board` refuses a `priority` patch with exit 2.
 
 ## Stopping the whole factory
@@ -462,6 +466,7 @@ changes nothing. Then install one timer per host.
 - The quiet signature is the agent, the worktree's `HEAD`, a hash of `git status --porcelain` and the job's `updated`. It lives in `<home>/idle-watch.json`, never on the board. Any commit, file edit or board write starts the window again.
 - Only an `idle` agent counts. A `running` agent keeps its entry and is skipped that run.
 - After 20 quiet minutes, `pickup` sends the agent one fixed nudge with `paseo send --no-wait` and prints `nudged idle <id> <project>: agent <agent>`. `--dry-run` prints `would nudge idle ...` and writes nothing. A failed send prints `factory.py: pickup could not nudge idle <id>: paseo send failed` on stderr and retries next run.
+- The idle nudge skips an agent waiting at a permission dialog, as the priority nudge does, and prints `skip idle nudge <id> <project>: agent <agent> waits at a permission dialog` or `... permission state unknown`. The entry gets no `nudged`, so the job never moves to `needs-human` while it waits.
 - The nudge reads: "Factory job <id> shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory.py hold for the job with your --session tag, then keep waiting."
 - After 20 more quiet minutes, `pickup` moves the job to `needs-human`, releases the claim and prints `needs-human <id> <project>: idle: no progress 20 minutes after a nudge to agent <agent>`. A board change since the read wins, so a fresh `hold` keeps the job.
 - `--dry-run` prints `would move needs-human <id> <project>: <note>` for that move and writes neither the board nor `idle-watch.json`.
