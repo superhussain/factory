@@ -547,15 +547,19 @@ class PickupTest(PickupFixture):
         code, out, err = self.pickup()
         [log] = (self.home / "logs" / "pickup").iterdir()
         self.assertEqual(code, 1)
-        self.assertEqual(out, "released 001-alpha\n")
+        until = self.job("001-alpha")["not_before"]
+        self.assertEqual(out, f"released 001-alpha\nbacked off 001-alpha until {until} (launch failure 1)\n")
         self.assertEqual(err, f"factory.py: launch of 001-alpha on primary failed: exit 3; see {log}\n")
         self.assertEqual(log.read_text(encoding="utf-8").strip(), "boom")
         self.assertNotIn("claim", self.job("001-alpha"))
         self.assertFalse((self.home / "route-limits.json").exists())
         missing = str(self.root / "no-such-program")
         self.write_launchers({"primary": [missing]})
+        self.board["jobs"] = [idea("001-alpha", "alpha")]
         code, out, err = self.pickup()
-        self.assertEqual((code, out), (1, "released 001-alpha\n"))
+        until = self.job("001-alpha")["not_before"]
+        self.assertEqual((code, out),
+                         (1, f"released 001-alpha\nbacked off 001-alpha until {until} (launch failure 1)\n"))
         self.assertRegex(err, r"^factory\.py: launch of 001-alpha on primary failed: .*no-such-program.*; see ")
         self.assertNotIn("claim", self.job("001-alpha"))
 
@@ -2098,7 +2102,103 @@ class NotBeforeTest(PickupFixture):
         self.assertFalse([line for line in lines if "batches behind" in line], lines)
 
 
-DEPENDS = [{"id": "201-sample-csv-api", "kind": "depends-on"}]
+class LaunchBackoffTest(PickupFixture):
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+
+    def parked(self, job_id):
+        """(count, reason, delay seconds) from a job's launch_failure and not_before."""
+        j = self.job(job_id)
+        record = j["launch_failure"]
+        self.assertEqual(set(record), {"count", "reason", "at"})
+        at, until = (datetime.strptime(t, "%Y-%m-%dT%H:%M:%SZ") for t in (record["at"], j["not_before"]))
+        return record["count"], record["reason"], (until - at).total_seconds()
+
+    def test_first_failure_backs_off(self):
+        self.board["jobs"] = [idea("120-sample-digest", "alpha")]
+        self.configure(line="boom", code=3)
+        before = datetime.now(timezone.utc).replace(microsecond=0)
+        code, out, err = self.pickup()
+        after = datetime.now(timezone.utc)
+        j = self.job("120-sample-digest")
+        until = j["not_before"]
+        self.assertEqual(code, 1)
+        self.assertEqual(out, f"released 120-sample-digest\n"
+                              f"backed off 120-sample-digest until {until} (launch failure 1)\n")
+        self.assertRegex(err, r"^factory\.py: launch of 120-sample-digest on primary failed: exit 3; see ")
+        self.assertNotIn("claim", j)
+        self.assertEqual(self.parked("120-sample-digest"), (1, "exit 3", 300))
+        when = datetime.strptime(until, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        self.assertTrue(before + timedelta(seconds=300) <= when <= after + timedelta(seconds=300), until)
+
+    def test_delay_doubles_and_caps(self):
+        self.assertEqual([factory.launch_backoff_seconds(n) for n in range(1, 9)],
+                         [300, 600, 1200, 2400, 4800, 9600, 14400, 14400])
+        self.board["jobs"] = [idea("120-sample-digest", "alpha", claim=held(DEVICE),
+                                   launch_failure={"count": 2, "reason": "exit 3", "at": stamp(minutes=-10)})]
+        count, until = factory.back_off_launch(self.home, "120-sample-digest", DEVICE, "s1", "exit 4")
+        self.assertEqual((count, until), (3, self.job("120-sample-digest")["not_before"]))
+        self.assertNotIn("claim", self.job("120-sample-digest"))
+        self.assertEqual(self.parked("120-sample-digest"), (3, "exit 4", 1200))
+        self.board["jobs"] = [idea("120-sample-digest", "alpha", claim=held("other-host"))]
+        self.calls.clear()
+        self.assertIsNone(factory.back_off_launch(self.home, "120-sample-digest", DEVICE, "s1", "exit 4"))
+        self.assertIsNone(factory.back_off_launch(self.home, "999-gone", DEVICE, "s1", "exit 4"))
+        self.assertEqual(self.puts(), [])
+
+    def test_success_clears_the_record(self):
+        past = stamp(minutes=-1)
+        self.board["jobs"] = [idea("120-sample-digest", "alpha", not_before=past,
+                                   launch_failure={"count": 3, "reason": "exit 3", "at": stamp(minutes=-21)})]
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, r"^launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n$")
+        j = self.job("120-sample-digest")
+        self.assertNotIn("launch_failure", j)
+        self.assertEqual(j["not_before"], past)
+
+    def test_approved_build_backs_off(self):
+        self.board["jobs"] = [{"id": "120-sample-digest", "stage": "build", "project": "alpha",
+                               "note": "spec approved in Tracer", "updated": stamp()}]
+        self.configure(line="boom", code=3)
+        code, out, err = self.pickup()
+        self.assertEqual(code, 1)
+        self.assertIn("backed off 120-sample-digest until ", out)
+        j = self.job("120-sample-digest")
+        self.assertEqual((j["stage"], j["note"]), ("build", "spec approved in Tracer"))
+        self.assertNotIn("claim", j)
+        self.assertEqual(self.parked("120-sample-digest"), (1, "exit 3", 300))
+
+    def test_limit_failure_does_not_back_off(self):
+        self.board["jobs"] = [idea("120-sample-digest", "alpha")]
+        self.configure(line="You've hit your usage limit. Resets in 3 hours.", code=1)
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        j = self.job("120-sample-digest")
+        self.assertNotIn("not_before", j)
+        self.assertNotIn("launch_failure", j)
+
+    def test_reason_has_no_path(self):
+        self.board["jobs"] = [idea("120-sample-digest", "alpha")]
+        self.write_launchers({"primary": [str(self.root / "no-such-program")]})
+        code, out, err = self.pickup()
+        self.assertEqual(code, 1)
+        reason = self.job("120-sample-digest")["launch_failure"]["reason"]
+        self.assertTrue(reason.startswith("cannot start no-such-program: "), reason)
+        self.assertNotIn(str(self.root), reason)
+        self.assertEqual(factory.launch_reason("exit\t3\n​" + "x" * 300), "exit 3 " + "x" * 193)
+
+    def test_board_refuses_the_field(self):
+        self.board["jobs"] = [idea("120-sample-digest", "alpha")]
+        with patch.object(factory.sys, "stdin", io.StringIO('{"launch_failure": null}')):
+            result = invoke(factory, ["board", str(self.home), "120-sample-digest"])
+        self.assertEqual(result, (2, "", "factory.py: only factory.py pickup sets launch_failure. "
+                                         "Nothing was written.\n"))
+        self.assertEqual(self.puts(), [])
+
+
+DEPENDS =[{"id": "201-sample-csv-api", "kind": "depends-on"}]
 
 
 class DependsOnTest(PickupFixture):
