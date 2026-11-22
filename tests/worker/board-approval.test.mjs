@@ -345,6 +345,24 @@ test("a device PUT keeps a stored steer", async () => {
   assert.equal(response.status, 200);
 });
 
+const dropRefusal =
+  'a board write cannot drop the steering notes stored on "114-steer-export": send the row with its steer as stored. Nothing was written.';
+
+test("a device PUT cannot drop a stored steer", async () => {
+  const s = setup(steered([NOTE]));
+  await refused(s, () => s.put({ ...STEER_ROW, claim: { device: "host-a" } }), dropRefusal);
+});
+
+test("a person's PATCH cannot drop a stored steer", async () => {
+  const s = setup(steered([NOTE]));
+  await refused(s, () => s.patch(STEER_ROW, person), dropRefusal);
+});
+
+test("a device PUT without steer passes when none is stored", async () => {
+  const response = await setup(STEER_ROW).put({ ...STEER_ROW, claim: { device: "host-a" } });
+  assert.equal(response.status, 200);
+});
+
 test("a person's PATCH cannot add an 11th note", async () => {
   const ten = Array.from({ length: 10 }, (_, i) => ({ ...NOTE, note: `Note ${i}.` }));
   const s = setup(steered(ten));

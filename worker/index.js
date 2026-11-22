@@ -1270,6 +1270,7 @@ async function projectRetroPut(request, env, principal, slug, name) {
   const error =
     (name === "project.md" ? validateProjectDocument(next) : validateProjectMarkdown(next)) ??
     checkOperatorText(next, "project document", "document") ??
+    (name === "notes.md" ? checkOperatorText(body.replace, "replace", "note") : null) ??
     checkSummary(body.summary);
   if (error) return reply(error, 400);
   const cond = new Headers(current ? { "If-Match": current.httpEtag } : { "If-None-Match": "*" });
@@ -2972,8 +2973,8 @@ const STEER_MAX = 10;
 const STEER_AT = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
 
 // Only a signed-in person appends a steering note, one {note, at} per write, while the stored
-// row is at spec, build or review. A row whose steer is unchanged or omitted passes. An error
-// message, or null.
+// row is at spec, build or review. A row whose steer is unchanged passes. A row that omits steer
+// passes only when no note is stored. An error message, or null.
 function checkSteer(storedJobs, jobs, principal) {
   const stored = new Map();
   for (const j of storedJobs)
@@ -2982,7 +2983,12 @@ function checkSteer(storedJobs, jobs, principal) {
     if (typeof row !== "object" || row === null || typeof row.id !== "string") continue;
     const s = row.steer;
     const storedRow = stored.get(row.id);
-    if (s === undefined || JSON.stringify(s) === JSON.stringify(storedRow?.steer)) continue;
+    if (s === undefined) {
+      if (Array.isArray(storedRow?.steer) && storedRow.steer.length > 0)
+        return `a board write cannot drop the steering notes stored on ${quoteIdCut(row.id, QUOTED_ID_MAX)}: send the row with its steer as stored. Nothing was written.`;
+      continue;
+    }
+    if (JSON.stringify(s) === JSON.stringify(storedRow?.steer)) continue;
     const id = quoteIdCut(row.id, QUOTED_ID_MAX);
     if (principal?.kind !== "user")
       return `a board write from a device cannot change steer on ${id}: only a signed-in person adds a steering note on the dashboard. Nothing was written.`;

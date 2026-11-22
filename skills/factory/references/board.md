@@ -79,9 +79,9 @@ effect. Setting it on an open job releases the writer's own claim, so a session 
 one board write and ends. `stuck` resumes it after that time.
 `steer` holds up to 10 steering notes a person added on the dashboard while the job is at
 `spec`, `build` or `review`, oldest first. Only a signed-in person appends one, one per write, and the
-Worker refuses any edit, a device write, and notes on riders. `factory.py board` refuses a `steer`
-patch with exit 2. `factory.py prompt ... build` wraps every note as data in each later build
-prompt, as [dashboard](dashboard.md) describes.
+Worker refuses any edit, a device write, a write that drops stored notes, and notes on riders.
+`factory.py board` refuses a `steer` patch with exit 2. `factory.py prompt ... build` wraps every
+note as data in each later build prompt, as [dashboard](dashboard.md) describes.
 `backlog` is set only on jobs decided from the Backlog column or `backlog decide`. It holds
 the backlog line, the decision, when it was made, and any notes typed with the decision.
 Approve also appends the notes to `idea`.
