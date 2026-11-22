@@ -10042,7 +10042,7 @@ setInterval(remindWaiting, REMIND_CHECK_MS);
 
 // Display settings live only in this browser. Each value is read against a fixed list,
 // so a bad stored value falls back to the default.
-const DISPLAY_KEYS = { theme:'factory-theme', density:'factory-density', columns:'factory-hidden-columns', poll:'factory-poll', cardFields:'factory-hidden-card-fields', ideaProject:'factory-idea-project', drawerLinks:'factory-hidden-drawer-links', starred:'factory-starred-view' };
+const DISPLAY_KEYS = { theme:'factory-theme', density:'factory-density', columns:'factory-hidden-columns', poll:'factory-poll', cardFields:'factory-hidden-card-fields', ideaProject:'factory-idea-project', drawerLinks:'factory-hidden-drawer-links', starred:'factory-starred-view', toastPosition:'factory-toast-position' };
 const THEMES = ['system', 'light', 'dark'], DENSITIES = ['comfortable', 'compact'], POLL_SECONDS = [15, 30, 60], POLL_DEFAULT = 30;
 const THEME_COLORS = { light: '#f9fafb', dark: '#111827' };
 const pickDisplay = (value, list, fallback = list[0]) => list.includes(value) ? value : fallback;
@@ -10050,6 +10050,8 @@ let theme = pickDisplay(store.get(DISPLAY_KEYS.theme), THEMES);
 let frameTheme = theme;
 let density = pickDisplay(store.get(DISPLAY_KEYS.density), DENSITIES);
 let pollSeconds = pickDisplay(Number(store.get(DISPLAY_KEYS.poll)), POLL_SECONDS, POLL_DEFAULT);
+const TOAST_POSITIONS = ['bottom-right','bottom-left','bottom-center','top-right','top-left','top-center'];
+let toastPosition = pickDisplay(store.get(DISPLAY_KEYS.toastPosition), TOAST_POSITIONS);
 const hiddenColumns = new Set((store.get(DISPLAY_KEYS.columns) || '').split(',').filter(s => COLUMNS.includes(s) && s !== 'needs-you'));
 const CARD_FIELDS = [['note', 'Note'], ['meta', 'Branch, round and build line'], ['pr', 'PR link']];
 const hiddenCardFields = new Set((store.get(DISPLAY_KEYS.cardFields) || '').split(',').filter(f => CARD_FIELDS.some(([k]) => k === f)));
@@ -10071,6 +10073,7 @@ function applyDisplay() {
   document.body.classList.toggle('compact', density === 'compact');
   $('theme-color-light').content = THEME_COLORS[theme === 'dark' ? 'dark' : 'light'];
   $('theme-color-dark').content = THEME_COLORS[theme === 'light' ? 'light' : 'dark'];
+  $('notify-toasts').dataset.position = toastPosition;
   if (theme === frameTheme) return;
   frameTheme = theme;
   // replace() swaps the fragment without a history entry, so Back cannot undo the theme.
@@ -10225,6 +10228,7 @@ function renderDisplaySettings() {
   $('display-theme').value = theme;
   $('display-density').value = density;
   $('display-poll').value = String(pollSeconds);
+  $('display-toast-position').value = toastPosition;
   $('display-starred').value = starView;
   for (const box of $('display-columns').querySelectorAll('input')) box.checked = !hiddenColumns.has(box.dataset.stage);
   for (const box of $('display-card-fields').querySelectorAll('input')) box.checked = !hiddenCardFields.has(box.dataset.field);
@@ -10281,6 +10285,11 @@ $('display-install').addEventListener('click', async () => {
 renderInstall();
 $('display-theme').addEventListener('change', () => { theme = pickDisplay($('display-theme').value, THEMES); store.set(DISPLAY_KEYS.theme, theme); applyDisplay(); displaySaved(); });
 $('display-density').addEventListener('change', () => { density = pickDisplay($('display-density').value, DENSITIES); store.set(DISPLAY_KEYS.density, density); applyDisplay(); displaySaved(); });
+$('display-toast-position').addEventListener('change', () => {
+  toastPosition = pickDisplay($('display-toast-position').value, TOAST_POSITIONS);
+  if (toastPosition === 'bottom-right') store.remove(DISPLAY_KEYS.toastPosition); else store.set(DISPLAY_KEYS.toastPosition, toastPosition);
+  applyDisplay(); displaySaved();
+});
 $('display-starred').addEventListener('change', () => { setStarView($('display-starred').value); displaySaved(); });
 $('display-poll').addEventListener('change', () => { pollSeconds = pickDisplay(Number($('display-poll').value), POLL_SECONDS, POLL_DEFAULT); store.set(DISPLAY_KEYS.poll, pollSeconds); schedulePoll(); displaySaved(); });
 $('display-columns').addEventListener('change', e => {
@@ -10314,7 +10323,7 @@ $('display-idea-project').addEventListener('change', () => {
 $('display-reset').addEventListener('click', () => {
   for (const key of [...Object.values(DISPLAY_KEYS), PROJECTS_HIDDEN_KEY, 'factory-project']) store.remove(key);
   resetDrawerWidth();
-  theme = 'system'; density = 'comfortable'; pollSeconds = POLL_DEFAULT; starView = 'float';
+  theme = 'system'; density = 'comfortable'; pollSeconds = POLL_DEFAULT; starView = 'float'; toastPosition = 'bottom-right';
   hiddenProjects.clear();
   hiddenColumns.clear();
   hiddenCardFields.clear();
