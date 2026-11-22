@@ -1704,9 +1704,9 @@ async function capture(outdir, referencePath) {
         await page.waitForFunction(() => document.getElementById("board-status").textContent);
         return page.evaluate(() => ({
           x: 0,
-          y: innerHeight - 220,
+          y: innerHeight - 300,
           width: innerWidth,
-          height: 220,
+          height: 300,
         }));
       });
       await view("notify-toast-bottom-status-390", 390, 844, "dark", async (page) => {
