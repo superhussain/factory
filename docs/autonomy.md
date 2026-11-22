@@ -309,7 +309,7 @@ Only `retro admit`, `trial settle` and `trial resume` write `trials`.
 | `run`, `summary` | the retro run and the edit summary |
 | `champion_version` | the pipeline version the edit replaced, `7` |
 | `champion`, `challenger` | the note before (`""` when none, display only) and the saved note |
-| `opened`, `status` | when the trial opened, then `open`, `kept`, `reverted`, `superseded` or `inconclusive` |
+| `opened`, `status` | when the trial opened, then `open`, `kept`, `reverted`, `superseded`, `inconclusive` or `revert-failed` |
 | `settled`, `arms`, `reads` | set by `trial settle`: when it decided, each arm's job ids, and the rounds and tokens reads |
 | `revert_version`, `resumed` | the version a revert saved, and when a person ran `trial resume` |
 
@@ -335,10 +335,12 @@ Only `retro admit`, `trial settle` and `trial resume` write `trials`.
 | reverted | `compare()` reads `b higher` on rounds or tokens; the champion is PUT back with summary `Revert trial <id>` | `trial <id> reverted to version <N>: rounds <reads>, tokens <reads>` |
 | kept | `compare()` compared the arms with no `b higher` read | `trial <id> kept: rounds <reads>, tokens <reads>` |
 | inconclusive | still not compared 28 days after `opened`; the edit stays | `trial <id> inconclusive after 28 days: kept the edit` |
+| revert-failed | the revert is refused 28 days after `opened`; the edit stays | `trial <id> revert failed after 28 days: kept the edit: <status> <text>` |
 | open | not compared yet | `trial <id> open: a <n> finished, b <n> finished` |
 
 A refused revert prints `trial <id> revert failed: <status> <text>` and leaves the trial
-open for the next settle. A revert counts toward the daily retro cap. The board keeps
+open for the next settle until it is 28 days old. A `revert-failed` trial neither blocks
+admit nor counts toward the pause. A revert counts toward the daily retro cap. The board keeps
 open records and the newest 20 settled ones. Settle skips malformed records, including
 one whose `opened` is not a board timestamp, and drops non-dict entries from `trials`
 when it writes the board.
