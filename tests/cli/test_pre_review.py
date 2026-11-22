@@ -290,6 +290,11 @@ class PreReviewTest(IsolatedTestCase):
         self.git("config", f"url.{self.forged()}.insteadOf", str(self.origin))
         self.assertNone("the worktree's git config sets url or http keys")
 
+    def test_unreadable_git_config_is_none(self):
+        self.base([check("base", "pass")])
+        (self.wt / ".git" / "config").write_text("[core\n")
+        self.assertNone("could not read the worktree's git config")
+
     def test_bad_repo_is_none(self):
         self.base([check("base", "pass")])
         (self.home / "projects" / "sample.md").write_text("---\nrepo: ../x\nbase: main\n---\n")

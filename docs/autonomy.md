@@ -488,6 +488,8 @@ Loop step 5 runs `factory.py repeats <slug>/<job-id> <round>` below the round ca
 | CHANGES review with no signature lines | `continue`, round cap still applies |
 | Previous review was PASS | not a repeat |
 | Disputed-only round, reviewer keeps the finding | `repeat`: a person settles the dispute |
+| Same file changed in rounds N-2, N-1 and N | `churn` |
+| Missing round head or rewritten history | `continue` |
 | Corrupt `pre-review-failures.json` | read as `{}` and rewritten |
 
 ## Diff budget

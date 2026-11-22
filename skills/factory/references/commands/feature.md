@@ -83,6 +83,10 @@ feature.
    `push "$SLUG/<id>"`, patch
    `{"stage": "needs-human", "note": "repeat: round <N-1> and round <N> both flag <signature> (<reviewer>)", "needs": "decide on the repeated finding at $DASHBOARD#<id>/round-<N-1>/review-<r> and $DASHBOARD#<id>/round-<N>/review-<r>, then run /factory rework <id> <note> or /factory approve <id>"}`
    from its first `repeats` entry, with ` and <k> more` after the reviewer when it lists
+   k more, and dispatch nothing. When its decision is `churn`, run `push "$SLUG/<id>"`,
+   patch
+   `{"stage": "needs-human", "note": "churn: <path> changed in rounds <a>, <b> and <c>", "needs": "decide on the churned file at $DASHBOARD#<id>/build, then run /factory rework <id> <note> or /factory approve <id>"}`
+   from its first `churn` entry, with ` and <k> more files` after `<c>` when it lists
    k more, and dispatch nothing. A non-zero exit puts its stderr line in the board
    `note` and the step goes on. Otherwise, run
    `python3 "$RUNTIME" escalation "$SLUG/<id>" <N>`. When its decision is `escalate`,
