@@ -422,6 +422,8 @@ a job wait on you or merges it, so an installed dashboard hears about it while c
 is off until the Worker has the `FACTORY_VAPID_KEY` secret (see
 [cloudflare.md](cloudflare.md) §7). The hourly cron also pushes "Stuck: <id>" once for a
 stuck spec, build, review or approve job whose claim went stale 240 minutes earlier.
+It also pushes "Still needs you: <id>" once for a job that has waited on you 1440 minutes
+since its last update.
 
 ```mermaid
 sequenceDiagram
