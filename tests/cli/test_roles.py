@@ -298,15 +298,16 @@ class RolesTest(IsolatedTestCase):
                       "byte for byte", "`expected`", "`stale`",
                       "stale: <host>, latest digest <latest>"):
             self.assertIn(value, schedule)
-        steps = ("routes pick", "autonomy status", "retro push", "retro aggregate --days 3", "factory-retro",
-                 "retro admit <run>")
+        steps = ("routes pick", "autonomy status", "factory.py trial settle", "retro push", "retro aggregate --days 3",
+                 "factory-retro", "retro admit <run>")
         positions = [schedule.index(step) for step in steps]
         self.assertEqual(positions, sorted(positions))
         for banned in ("pause", "resume", "allow", "deny", "self"):
             self.assertIsNone(re.search(rf"autonomy {banned}\b", schedule), banned)
-        approve = [line for line in schedule.splitlines() if "suggest approve" in line]
-        self.assertEqual(len(approve), 1)
-        self.assertTrue(approve[0].startswith("Never "))
+        for never in ("suggest approve", "trial resume"):
+            lines = [line for line in schedule.splitlines() if never in line]
+            self.assertEqual(len(lines), 1)
+            self.assertTrue(lines[0].startswith("Never "))
 
     def test_retro_push_launchd_times(self):
         schedules = (SKILL / "references/schedules.md").read_text(encoding="utf-8")

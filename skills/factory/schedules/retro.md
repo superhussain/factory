@@ -25,7 +25,15 @@ If `runtime` is not `claude`, reply `no claude route: runtime <runtime>`, with t
 
 If `paused` is not `false`, reply `retro: autonomy paused` and stop.
 
-3. Push this host's digest. Run:
+3. Settle trials. Run:
+
+```text
+<python-launcher> <installed-skill>/runtime/factory.py trial settle
+```
+
+Report its output. On a nonzero exit, note the exit code and continue.
+
+4. Push this host's digest. Run:
 
 ```text
 <python-launcher> <installed-skill>/runtime/factory.py retro push
@@ -33,7 +41,7 @@ If `paused` is not `false`, reply `retro: autonomy paused` and stop.
 
 On a nonzero exit, note the exit code and continue.
 
-4. Aggregate. Run:
+5. Aggregate. Run:
 
 ```text
 <python-launcher> <installed-skill>/runtime/factory.py retro aggregate --days 3
@@ -44,12 +52,12 @@ other nonzero exit, name the exit code and stop. On exit 0, read `run`, `aggrega
 `digest`, `transcripts`, `out`, `findings`, `hosts`, `expected` and `stale` from the
 printed JSON, and `host` from the `aggregate` file.
 
-5. Retro. Dispatch one `factory-retro` subagent with the picked model, giving it
+6. Retro. Dispatch one `factory-retro` subagent with the picked model, giving it
 `run`, `aggregate`, `digest`, `transcripts` and `host`.
 
-6. Write its reply byte for byte to `out`.
+7. Write its reply byte for byte to `out`.
 
-7. Admit. Run:
+8. Admit. Run:
 
 ```text
 <python-launcher> <installed-skill>/runtime/factory.py retro admit <run>
@@ -64,6 +72,6 @@ Then name each host in `stale` as `stale: <host>, latest digest <latest>`, with
 `latest` from that host's entry in the `aggregate` file's `hosts`.
 
 Do no factory work yourself. Run no other commands. Never retry.
-Never run `suggest approve`, decide a backlog line, or run any `autonomy` command but `status`.
+Never run `suggest approve` or `trial resume`, decide a backlog line, or run any `autonomy` command but `status`.
 
 A standing instruction from the user, the person you are working for. It is about how your turns end. This factory session runs unattended: a message with no tool call in it ends your turn, nothing wakes you afterwards, and the job stalls until a sweep finds it. The user has seen you end turns in four ways while factory work was still owed, and does not want any of them. One: a summary that closes by announcing the next step, such as reviewers running and verdicts to be recorded as they land, with no tool call, so the next thing never starts. Two: an offer to carry on unless the user would prefer otherwise. Three: a list of decisions for the user when, by your own account, none of them blocks the rest of the work. Four: deciding that this is a good place to report, because the turn has been long or a stage is done. Status notes and recommendations are welcome, but put them in the same message as your next tool call. While an agent or background command you started is still running, wait for it and handle its result instead of ending the turn. Stop only at a real stop: the job is at needs-human, merged or closed, its PR waits at pr-open for a person, a step in these instructions says stop, or nothing can move without the user. This does not override the security floors, the confirmation a risky or destructive action needs, or any rule that holds work for a human.
