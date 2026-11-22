@@ -45,6 +45,9 @@ class OutcomesTestCase(IsolatedTestCase):
         self.clone = self.root / "alpha"
         (self.home / "paths.md").write_text(f"---\nalpha: {self.clone}\n---\n", encoding="utf-8")
         os.environ["FACTORY_HOME"] = str(self.home)
+        url = patch.object(factory, "PROJECT_FETCH_URL", str(self.root / "origin.git"))
+        url.start()
+        self.addCleanup(url.stop)
         self.config("https://factory.example.test")
         subprocess.run(["git", "init", "-q", "--bare", str(self.root / "origin.git")], check=True)
         subprocess.run(["git", "-C", str(self.root / "origin.git"), "symbolic-ref", "HEAD", "refs/heads/main"],
@@ -227,9 +230,9 @@ class OutcomesUnknownTest(OutcomesTestCase):
         self.checkout_unknown(f"({plain} is not a git checkout on host-a)")
 
     def test_fetch_failure(self):
-        self.git("remote", "set-url", "origin", str(self.root / "gone.git"))
         why = f"(could not fetch origin main in {self.clone} on host-a)"
-        self.checkout_unknown(*(f"{i} {why}" for i in ("1017-add-x", "1018-add-y", "1019-add-z")))
+        with patch.object(factory, "PROJECT_FETCH_URL", str(self.root / "gone.git")):
+            self.checkout_unknown(*(f"{i} {why}" for i in ("1017-add-x", "1018-add-y", "1019-add-z")))
 
     def test_other_project_still_judged(self):
         (self.home / "projects/beta.md").write_text("---\nrepo: example/beta\nbase: main\n---\n", encoding="utf-8")

@@ -46,6 +46,9 @@ class GroundingTest(IsolatedTestCase):
         self.origin = self.home / "origin.git"
         subprocess.run(["git", "init", "-q", "--bare", str(self.origin)], check=True)
         self.git("remote", "add", "origin", str(self.origin))
+        url = patch.object(factory, "PROJECT_FETCH_URL", str(self.origin))
+        url.start()
+        self.addCleanup(url.stop)
         (self.wt / "src" / "export.py").write_text(numbered(180))
         (self.wt / "src" / "db.py").write_text(numbered(400))
         self.commit()
@@ -169,8 +172,8 @@ Unverified means the cited path or line did not check out. The finding may still
                                 {"src/export.py": [(40, 75)]}, True)[0], "off-diff")
 
     def test_unreadable_diff(self):
-        self.git("remote", "remove", "origin")
-        result = self.result()
+        with patch.object(factory, "PROJECT_FETCH_URL", str(self.home / "gone.git")):
+            result = self.result()
         self.assertEqual(result["diff"], "could not fetch origin main")
         self.assertEqual([r["status"] for r in result["unverified"]], ["bad-line", "no-file"])
         text = self.out.read_text()
