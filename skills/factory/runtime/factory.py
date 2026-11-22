@@ -6122,16 +6122,16 @@ def outcome_checkout_problem(checkout, base, device):
     return f"{why} in {checkout} on {device}" if why else None
 
 
-def pr_signals(repo, numbers, device):
+def pr_signals(repo, numbers, device, handled):
     """({number: (head oid, pr_signal)}, None) for repo's pull requests from one gh api graphql call,
-    or (None, why), as pr_states reads them."""
+    or (None, why), as pr_states reads them. handled maps each number to its job's handled entries."""
     owner, name = repo.split("/")
     q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
-         + " ".join(f"p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid author {{ login }} "
-                    "reviewThreads(last: 50) { nodes { isResolved comments(first: 20) { nodes { authorAssociation "
-                    "author { __typename login } } } } } commits(last: 1) { nodes { commit { statusCheckRollup { "
-                    "contexts(first: 50) { nodes { __typename ... on CheckRun { conclusion "
-                    f"isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ state "
+         + " ".join(f"p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid baseRefName author {{ login }} "
+                    "reviewThreads(last: 50) { nodes { isResolved path comments(first: 20) { nodes { "
+                    "authorAssociation body author { __typename login } } } } } commits(last: 1) { nodes { commit { "
+                    "statusCheckRollup { contexts(first: 50) { nodes { __typename ... on CheckRun { name conclusion "
+                    f"isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ context state "
                     f"isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }}" for n in numbers)
          + " } }")
     r = gh_cli("api", "graphql", "-f", "query=" + q)
@@ -6148,15 +6148,22 @@ def pr_signals(repo, numbers, device):
             return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
         return None, ("gh api graphql returned no repository "
                       f"(check the project file's repo and gh auth status on {device})")
-    return {n: (found[f"p{n}"].get("headRefOid"), pr_signal(found[f"p{n}"]))
+    return {n: (found[f"p{n}"].get("headRefOid"), pr_signal(found[f"p{n}"], handled.get(n)))
             for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
-def pr_signal(pull):
+def pr_signal(pull, handled=None):
     """What an open pull request needs from babysit, in pr_reading's order: fix-reviews for an open
-    counted review thread, rebase for a merge conflict, fix-ci for a failed required check, else None."""
+    counted review thread, rebase for a merge conflict, fix-ci for a failed required check, else None.
+    handled is the job's handled field, read as pr_reading reads it: a handled thread is skipped, and a
+    conflict or check worked HANDLED_CAP times is no signal."""
     if pull.get("state") != "OPEN":
         return None
+    handled = handled or {}
+
+    def capped(kind, part):
+        sig = handled_sig(kind, part)
+        return sig in handled and handled[sig]["count"] >= HANDLED_CAP
 
     def login(item):
         return str((item.get("author") or {}).get("login") or "")
@@ -6168,16 +6175,19 @@ def pr_signal(pull):
         comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
         if not comments or any(login(c) == author for c in comments):
             continue
-        if (comments[0].get("author") or {}).get("__typename") == "Bot" \
-                or comments[0].get("authorAssociation") in PR_REVIEWERS:
+        if (comments[0].get("author") or {}).get("__typename") != "Bot" \
+                and comments[0].get("authorAssociation") not in PR_REVIEWERS:
+            continue
+        if handled_sig("thread", str(thread.get("path") or ""), str(comments[0].get("body") or "")) not in handled:
             return "fix-reviews"
-    if pull.get("mergeable") == "CONFLICTING":
+    if pull.get("mergeable") == "CONFLICTING" and not capped("conflict", str(pull.get("baseRefName") or "")):
         return "rebase"
     for node in (pull.get("commits") or {}).get("nodes") or []:
         rollup = ((node or {}).get("commit") or {}).get("statusCheckRollup") or {}
         for c in (rollup.get("contexts") or {}).get("nodes") or []:
             if isinstance(c, dict) and c.get("isRequired") is True \
-                    and (c.get("conclusion") or c.get("state")) in CI_FAILED:
+                    and (c.get("conclusion") or c.get("state")) in CI_FAILED \
+                    and not capped("check", str(c.get("name") or c.get("context") or "")):
                 return "fix-ci"
     return None
 
@@ -6493,7 +6503,8 @@ def auto_babysit_pass(home, data, device, minutes, paths, settings, dry):
             print(f"factory.py: pickup checks {AUTO_BABYSIT_LIMIT} of {len(jobs)} auto-babysit candidates for {repo} "
                   "this run, oldest automatic babysit first", file=sys.stderr)
         jobs = jobs[:AUTO_BABYSIT_LIMIT]
-        signals, why = pr_signals(repo, [n for _, n, _ in jobs], device)
+        signals, why = pr_signals(repo, [n for _, n, _ in jobs], device,
+                                  {n: valid_handled(j.get("handled")) for j, n, _ in jobs})
         if signals is None:
             print(f"factory.py: pickup skips auto-babysit for {repo}: {why}", file=sys.stderr)
             continue
