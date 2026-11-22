@@ -1395,7 +1395,8 @@ class RetroRoleCardTest(unittest.TestCase):
 
     def test_role_reads_reviewers(self):
         role = (ROOT / "skills/factory/agents/factory-retro.md").read_text(encoding="utf-8")
-        for text in ("`reviewers`", "Noisy reviewer: <name> accepts <accept_pct>% of findings", "`reviewer-rules`"):
+        for text in ("`reviewers`", "Noisy reviewer: <name> accepts <accept_pct>% of findings", "`reviewer-rules`",
+                     "never an edit to the review stage notes"):
             self.assertIn(text, role)
 
     def test_role_card_fields_pass_admission(self):
