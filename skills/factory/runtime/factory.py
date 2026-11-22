@@ -86,6 +86,9 @@
                                             print one JSON verdict
   factory.py review-plan <project-slug>/<job-id> <round>
                                             skip the ux and ui reviews of a round that changes nothing a person sees, print one JSON plan
+  factory.py pre-review <project-slug>/<job-id>
+                                            run the base branch's .factory/checks.json in the job worktree, write
+                                            pre-review.md, print one JSON line; FAIL exits 1
   factory.py stop <worktree>                stop processes running out of a worktree
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
@@ -6859,6 +6862,109 @@ def review_plan_cmd(target, round_text):
                       "reason": reason}))
 
 
+CHECKS_FILE = ".factory/checks.json"
+PRE_REVIEW_TIMEOUT = 1800
+PRE_REVIEW_TAIL = 40
+PRE_REVIEW_USAGE = "usage: pre-review <project-slug>/<job-id>"
+CHECK_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,39}")
+
+
+def load_checks(text):
+    """(checks, reason): the checks file's list of {name, run}, or [] and why the file is unusable."""
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        return [], f"{CHECKS_FILE} is not valid JSON: {exc}"
+    checks = data.get("checks") if isinstance(data, dict) else None
+    if not isinstance(checks, list) or not 1 <= len(checks) <= 20:
+        return [], f"{CHECKS_FILE} needs a checks list of 1 to 20 entries"
+    names = set()
+    for i, check in enumerate(checks):
+        name = check.get("name") if isinstance(check, dict) else None
+        run = check.get("run") if isinstance(check, dict) else None
+        if not isinstance(name, str) or not CHECK_NAME.fullmatch(name) or name in names:
+            return [], f"check {i + 1} needs a unique name matching {CHECK_NAME.pattern}"
+        if (not isinstance(run, list) or not 1 <= len(run) <= 64
+                or not all(isinstance(a, str) and a and "\0" not in a for a in run)):
+            return [], f"check {name} needs a run list of 1 to 64 nonempty strings"
+        names.add(name)
+    return [{"name": c["name"], "run": c["run"]} for c in checks], None
+
+
+def run_check(argv, cwd, log, timeout):
+    """(exit, seconds): run argv in cwd with output to log; exit is "timeout" or "missing" when it never finished."""
+    start = time.monotonic()
+    with open(log, "wb") as out:
+        try:
+            proc = subprocess.Popen(argv, cwd=cwd, stdout=out, stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL, start_new_session=True)
+        except FileNotFoundError:
+            return "missing", round(time.monotonic() - start, 1)
+        try:
+            code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            if hasattr(os, "killpg"):
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                proc.kill()
+            proc.wait()
+            code = "timeout"
+    return code, round(time.monotonic() - start, 1)
+
+
+def pre_review_cmd(target):
+    """Run the base branch's checks file in the job worktree, write pre-review.md and print one JSON line."""
+    home, slug, job_id = r2_target(target, True)
+    data = read_board(home)
+    if not any(j.get("id") == job_id for j in data["jobs"]):
+        fail(f"no job {job_id} on the board. Nothing was written. " + PRE_REVIEW_USAGE, 4)
+    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
+    stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
+    wt = home / "worktrees" / slug / (stacked or job_id)
+    folder = home / "jobs" / slug / job_id
+    out_file = folder / "pre-review.md"
+    for node in (folder, out_file):
+        if is_link(node):
+            fail(f"{node} is a symlink or junction; nothing was written", 6)
+    if not wt.is_dir():
+        fail(f"no worktree at {wt}; nothing was written", 4)
+
+    def git(*args):
+        proc = subprocess.run(["git", "-C", str(wt), *args], capture_output=True, text=True)
+        return None if proc.returncode else proc.stdout
+
+    head = (git("rev-parse", "HEAD") or "").strip() or None
+    text = git("show", f"origin/{base}:{CHECKS_FILE}")
+    checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
+    if reason:
+        write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\nReason: {printable_line(reason, 300)}\n")
+        print(json.dumps({"result": "none", "head": head, "checks": [], "reason": reason}))
+        return
+    logs = make_job_temp(slug, job_id) / "pre-review"
+    if is_link(logs):
+        fail(f"{logs} is a symlink or junction; nothing was written", 6)
+    logs.mkdir(exist_ok=True)
+    checks_sha = (git("rev-parse", f"origin/{base}") or "").strip()
+    results = []
+    for check in checks:
+        code, seconds = run_check(check["run"], wt, logs / f"{check['name']}.log", PRE_REVIEW_TIMEOUT)
+        results.append({"name": check["name"], "exit": code, "seconds": seconds})
+    failed = [r for r in results if r["exit"] != 0]
+    result = "fail" if failed else "pass"
+    lines = [f"PRE-REVIEW: {result.upper()}", "", f"Head: {head}",
+             f"Checks: origin/{base}:{CHECKS_FILE} at {checks_sha}", f"Logs: {logs}", "",
+             "| Check | Exit | Seconds |", "| --- | --- | --- |"]
+    lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} |" for r in results]
+    for r in failed:
+        log_text = (logs / f"{r['name']}.log").read_text(encoding="utf-8", errors="replace")
+        tail = [printable_line(line, 300).replace("`", "'") for line in log_text.splitlines()[-PRE_REVIEW_TAIL:]]
+        lines += ["", f"## {r['name']}", "", "```text", *tail, "```"]
+    write_atomic(str(out_file), "\n".join(lines) + "\n")
+    print(json.dumps({"result": result, "head": head, "checks": results, "reason": None}))
+    if failed:
+        sys.exit(1)
+
+
 WAIT_ARTIFACT = re.compile(r"spec\.md|spec-evidence\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
 WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]"
 
@@ -11595,6 +11701,7 @@ COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
+COMMANDS["pre-review"] = (pre_review_cmd, 1, 1)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
