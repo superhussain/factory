@@ -11262,6 +11262,7 @@ RETRO_DOC_EDIT_SCHEMA = "factory.retro-doc-edit/1"
 RETRO_EDIT_CHANGE = 600
 MAX_RETRO_EDITS = 2
 RETRO_MERGED_MAX = 100
+RETRO_LESSONS_MAX = 20
 RETRO_EDITS_PER_DAY = 2
 RETRO_EDIT_SCOPE = "retro edits only allowlisted project scopes; global is person-only"
 RETRO_DOC_EDIT_SCOPE = "retro edits only allowlisted projects"
@@ -12379,6 +12380,33 @@ def retro_red_flags(index, board, projects, rows):
     return out
 
 
+def retro_lessons(board, projects, rows, since):
+    """Closed jobs of registered projects done since the window start, newest first, at most RETRO_LESSONS_MAX.
+    A denied job gives its deny notes as reason; a job with a PR gives close.reason, else its note. A row whose
+    reason is empty or fails check_text is dropped. sessions holds up to 5 digest refs of the job on any host."""
+    out = []
+    for j in board["jobs"]:
+        if j.get("stage") != "closed" or not isinstance(j.get("done"), str) or j["done"][:10] < since \
+                or j.get("project") not in projects:
+            continue
+        backlog = retro_dict(j.get("backlog"))
+        if backlog.get("decision") == "denied":
+            kind, raw = "denied", backlog.get("notes")
+        elif isinstance(j.get("pr"), str):
+            kind, raw = "pr-closed", retro_dict(j.get("close")).get("reason") or j.get("note")
+        else:
+            continue
+        reason = printable_line(raw, 300) if isinstance(raw, str) else ""
+        if not reason or check_text(reason, 1, 300):
+            continue
+        number = j["id"].split("-", 1)[0]
+        refs = dict.fromkeys(f"{r['host']}/{r['session']}" for r in rows if str(r.get("job")) == number)
+        out.append({"job": j["id"], "project": j["project"], "kind": kind,
+                    "title": printable_line(str(j.get("title", "")), 120), "reason": reason, "at": j["done"],
+                    "sessions": list(refs)[:5]})
+    return sorted(out, key=lambda r: r["at"], reverse=True)[:RETRO_LESSONS_MAX]
+
+
 def retro_aggregate(days):
     """Pull every host's digest for the last days into <home>/retro/<run>/ for the retro agent."""
     home = factory_home()
@@ -12493,6 +12521,7 @@ def retro_aggregate(days):
     agg["merged"] = sorted(merged, key=lambda m: m["merged"], reverse=True)[:RETRO_MERGED_MAX]
     status, _, text = api(home, "GET", "/api/audit-flags", ok=(200, 404))
     agg["red_flags"] = retro_red_flags(json.loads(text) if status == 200 else {}, board, projects, rows)
+    agg["lessons"] = retro_lessons(board, projects, rows, dates[0])
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")

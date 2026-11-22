@@ -633,7 +633,7 @@ class RetroAggregateTest(RetroWorkerCase):
                           "factory/notes.md": {"version": 4, "text": "- Run pnpm test.\n"},
                           "factory/decisions.md": {"version": 0, "text": "# Decisions\n"},
                           "factory/runbook.md": {"version": 1, "text": "# Runbook\n"}},
-            "merged": [], "red_flags": []})
+            "merged": [], "red_flags": [], "lessons": []})
         self.assertFalse(any(key.startswith("sample-tools") for key in agg["documents"]))
 
     def test_aggregate_lists_merged_jobs(self):
@@ -659,6 +659,69 @@ class RetroAggregateTest(RetroWorkerCase):
             {"id": "1700-guard-the-ls", "project": "factory", "title": ("Guard the ls alias " + "x" * 200)[:120],
              "merged": inside},
             {"id": "1680-pin-node", "project": "sample-tools", "title": "Pin node", "merged": earlier}])
+
+    def lessons(self, jobs, pushed=None):
+        routes = self.window(7, pushed or {0: {"host-a": [digest_row("host-a", S1)]}})
+        routes["GET /api/board"] = (200, {"updated": "2026-11-12T09:00:00Z", "jobs": jobs,
+                                          "autonomy": {"paused": False, "projects": ["factory"], "self": []}})
+        code, out, err = self.aggregate(routes)
+        self.assertEqual((code, err), (0, ""))
+        return json.loads(Path(json.loads(out)["aggregate"]).read_text(encoding="utf-8"))["lessons"]
+
+    def test_aggregate_lists_lessons(self):
+        today = datetime.now().date()
+        inside = f"{today.isoformat()}T12:30:00Z"
+        earlier = f"{(today - timedelta(days=2)).isoformat()}T08:00:00Z"
+        oldest = f"{(today - timedelta(days=3)).isoformat()}T08:00:00Z"
+        reason = "rejected: Worker route changes need pnpm test:protocol; pnpm test skips them"
+        jobs = [{"id": "1715-dark-mode", "project": "factory", "title": "Dark mode", "stage": "closed",
+                 "done": earlier, "backlog": {"line": "Dark mode", "decision": "denied",
+                                              "notes": "duplicate of the theme idea"}},
+                {"id": "1712-export-csv", "project": "factory", "title": "Export CSV", "stage": "closed",
+                 "done": inside, "pr": "https://github.com/example/factory/pull/12", "note": "closed",
+                 "close": {"reason": reason + "\n", "at": inside}},
+                {"id": "1709-pin-node", "project": "sample-tools", "title": "Pin node", "stage": "closed",
+                 "done": oldest, "pr": "https://github.com/example/sample-tools/pull/3",
+                 "note": "Node pins live in mise.toml only", "close": {"closed": oldest}}]
+        pushed = {0: {"host-a": [digest_row("host-a", S1, job="1712")],
+                      "host-b": [digest_row("host-b", S3, job="1712"), digest_row("host-b", S2, job="1715x")]}}
+        self.assertEqual(self.lessons(jobs, pushed), [
+            {"job": "1712-export-csv", "project": "factory", "kind": "pr-closed", "title": "Export CSV",
+             "reason": reason, "at": inside, "sessions": [f"host-a/{S1}", f"host-b/{S3}"]},
+            {"job": "1715-dark-mode", "project": "factory", "kind": "denied", "title": "Dark mode",
+             "reason": "duplicate of the theme idea", "at": earlier, "sessions": []},
+            {"job": "1709-pin-node", "project": "sample-tools", "kind": "pr-closed", "title": "Pin node",
+             "reason": "Node pins live in mise.toml only", "at": oldest, "sessions": []}])
+
+    def test_aggregate_skips_lessons(self):
+        today = datetime.now().date()
+        inside = f"{today.isoformat()}T12:30:00Z"
+        outside = f"{(today - timedelta(days=9)).isoformat()}T08:00:00Z"
+        pr = "https://github.com/example/factory/pull/1"
+        denied = {"decision": "denied", "notes": "Needs a person to pick the theme first"}
+        jobs = [{"id": "1701-old", "project": "factory", "title": "Old", "stage": "closed", "done": outside,
+                 "backlog": denied},
+                {"id": "1702-elsewhere", "project": "unregistered", "title": "Elsewhere", "stage": "closed",
+                 "done": inside, "backlog": denied},
+                {"id": "1703-merged", "project": "factory", "title": "Merged", "stage": "merged", "done": inside,
+                 "pr": pr, "note": "Use the protocol suite"},
+                {"id": "1704-no-pr", "project": "factory", "title": "No PR", "stage": "closed", "done": inside,
+                 "note": "Abandoned before build"},
+                {"id": "1705-empty", "project": "factory", "title": "Empty", "stage": "closed", "done": inside,
+                 "pr": pr, "note": " \n ", "close": {"reason": ""}},
+                {"id": "1706-link", "project": "factory", "title": "Link", "stage": "closed", "done": inside,
+                 "backlog": {"decision": "denied", "notes": "see https://example.test/why"}}]
+        self.assertEqual(self.lessons(jobs), [])
+
+    def test_aggregate_caps_lessons(self):
+        today = datetime.now().date()
+        jobs = [{"id": f"{1800 + n}-job", "project": "factory", "title": f"Job {n}", "stage": "closed",
+                 "done": f"{(today - timedelta(days=n % 5)).isoformat()}T{n:02d}:00:00Z",
+                 "backlog": {"decision": "denied", "notes": f"Reason {n}"}} for n in range(24)]
+        lessons = self.lessons(jobs)
+        expected = sorted(jobs, key=lambda j: j["done"], reverse=True)[:20]
+        self.assertEqual([r["job"] for r in lessons], [j["id"] for j in expected])
+        self.assertEqual(len(lessons), factory.RETRO_LESSONS_MAX)
 
     def test_latest_is_the_newest_kept_row(self):
         code, out, err = self.aggregate(self.window(7, {1: {"host-a": [digest_row("host-a", S1)]},
@@ -1263,6 +1326,11 @@ class RetroRoleCardTest(unittest.TestCase):
                      "denials, classifier friction and recurring red flags"):
             self.assertIn(text, role)
 
+    def test_role_reads_lessons(self):
+        role = (ROOT / "skills/factory/agents/factory-retro.md").read_text(encoding="utf-8")
+        for text in ("`lessons`", "Most rows teach nothing.", "Notes: lesson from <job>"):
+            self.assertIn(text, role)
+
     def test_role_card_fields_pass_admission(self):
         role = (ROOT / "skills/factory/agents/factory-retro.md").read_text(encoding="utf-8")
         table = role.split("| Card field | Limit |\n| --- | --- |\n")[1].split("\n\n")[0]
@@ -1507,6 +1575,19 @@ class RetroDocEditTest(RetroWorkerCase):
         self.assertTrue(text.endswith("\n".join([
             "## Pipeline edits", "", "| Scope | Stage | Result | Summary |", "| --- | --- | --- | --- |",
             f"| {DOC_FILE} |  | version 5 | {DOC_SUMMARY} |", ""])))
+
+    def test_lesson_edit_appends_a_bullet(self):
+        replace = ("- Run pnpm test.\n- Worker route changes run pnpm test:protocol; pnpm test skips them."
+                   " (1712-export-csv, 2026-11-20)")
+        summary = "Notes: lesson from 1712-export-csv"
+        code, out, err, requests, _ = self.admit([doc_edit(find="- Run pnpm test.", replace=replace,
+                                                           summary=summary)])
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn(f"edited {DOC_FILE} to version 5: {summary}\n", out)
+        self.assertEqual([f"{m} {p}" for m, p, _, _ in requests], ["GET /api/board", DOC_HISTORY, DOC_ROUTE])
+        self.assertEqual(json.loads(requests[2][3]), {
+            "schema": "factory.retro-doc-edit/1", "run": RUN, "base_version": 4,
+            "find": "- Run pnpm test.", "replace": replace, "summary": summary})
 
     def test_bad_doc_edits_are_skipped_and_good_ones_still_sent(self):
         cases = [
