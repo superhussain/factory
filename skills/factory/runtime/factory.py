@@ -13375,7 +13375,13 @@ def outcomes_pickup_record(home):
             print(f"factory.py: outcomes record {slug} stopped (exit {e.code}); it runs again tomorrow",
                   file=sys.stderr)
             continue
-        print(f"outcomes record {slug}: {out.getvalue().splitlines()[-1]}")
+        lines = out.getvalue().splitlines()
+        for line in lines:
+            m = re.match(rf"{re.escape(slug)} unknown: (\S+) \((.*?)\)(?:, |$)", line)
+            if m:
+                print(f"factory.py: outcomes record {slug}: {m[1]} is unknown: {m[2]}", file=sys.stderr)
+                break
+        print(f"outcomes record {slug}: {lines[-1]}")
 
 
 BENCH_WEIGHTS = {"high": 3, "medium": 2, "low": 1}

@@ -320,6 +320,12 @@ class OutcomesPickupTest(OutcomesTestCase):
         self.record()
         self.assertEqual(self.record(), ("", "", 0))
 
+    def test_unknown_prints_first_reason(self):
+        self.oids = {}
+        self.assertEqual(self.record(), (
+            "outcomes record alpha: outcomes unchanged; nothing written\n",
+            "factory.py: outcomes record alpha: 1017-add-x is unknown: no merge commit from GitHub\n", 0))
+
     def test_missing_folder_is_skipped(self):
         self.add_checkout("beta", self.root / "gone")
         self.assertEqual(self.record(), ("outcomes record alpha: recorded 3 outcomes on the board\n", "", 1))
