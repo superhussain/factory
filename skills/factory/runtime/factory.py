@@ -7578,8 +7578,72 @@ def review_plan_cmd(target, round_text):
 CHECKS_FILE = ".factory/checks.json"
 PRE_REVIEW_TIMEOUT = 1800
 PRE_REVIEW_TAIL = 40
+DIFF_BUDGET_LINES_PER_FILE = 150
+DIFF_BUDGET_FILE_FACTOR = 2
+DIFF_BUDGET_LINE_FACTOR = 3
+DIFF_BUDGET_UNLISTED_MAX = 20
 PRE_REVIEW_USAGE = "usage: pre-review <project-slug>/<job-id>"
 CHECK_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,39}")
+SPEC_TASKS = re.compile(r"^## (?:\d+\.\s*)?Tasks\b[^\n]*\n(.*?)(?=^## |\Z)", re.M | re.S)
+
+
+def spec_budget_paths(text):
+    """The distinct safe path tokens from the Tasks section's - Files: lines, in first-seen order.
+    A token may carry * as an fnmatch glob."""
+    section = SPEC_TASKS.search(text + "\n")
+    paths = []
+    for line in section.group(1).splitlines() if section else []:
+        if line.strip().startswith("- Files:"):
+            for t in re.findall(r"`([^`]*)`", line):
+                if REPO_PATH.fullmatch(t.replace("*", "")) and not t.startswith("/") and ".." not in t \
+                        and t not in paths:
+                    paths.append(t)
+    return paths
+
+
+def diff_numstat(wt, base):
+    """{path: added plus deleted lines} the branch changes since origin/<base>, binary files as 0, or None on
+    any git failure."""
+    mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
+                        capture_output=True, text=True)
+    if mb.returncode:
+        return None
+    diff = subprocess.run(["git", "-C", str(wt), "diff", "--numstat", "--no-renames", "-z", mb.stdout.strip(),
+                           "HEAD"], capture_output=True, text=True)
+    if diff.returncode:
+        return None
+    counts = {}
+    for record in diff.stdout.split("\0"):
+        if record:
+            added, deleted, path = record.split("\t", 2)
+            counts[path] = sum(int(n) for n in (added, deleted) if n != "-")
+    return counts
+
+
+def budget_covers(token, path):
+    """Whether a spec Files token covers a changed path: a * glob, a directory ending in /, or the exact path."""
+    if "*" in token:
+        return fnmatch.fnmatchcase(path, token)
+    return path.startswith(token) if token.endswith("/") else path == token
+
+
+def diff_budget(paths, numstat):
+    """The pre-review budget object comparing the spec's Files paths with the branch's numstat."""
+    expected_lines = len(paths) * DIFF_BUDGET_LINES_PER_FILE
+    budget = {"files": len(numstat), "lines": sum(numstat.values()), "expected_files": len(paths),
+              "expected_lines": expected_lines, "file_limit": len(paths) * DIFF_BUDGET_FILE_FACTOR,
+              "line_limit": expected_lines * DIFF_BUDGET_LINE_FACTOR,
+              "unlisted": sorted(p for p in numstat if not any(budget_covers(t, p) for t in paths)), "reason": None}
+    over = budget["files"] > budget["file_limit"] or budget["lines"] > budget["line_limit"]
+    return {"result": "over" if over else "within", **budget}
+
+
+def budget_line(budget):
+    """The Budget: line for pre-review.md."""
+    if budget["result"] == "none":
+        return f"Budget: none ({budget['reason']})"
+    return (f"Budget: {budget['result']} (files {budget['files']}, limit {budget['file_limit']}; "
+            f"lines {budget['lines']}, limit {budget['line_limit']})")
 
 
 def load_checks(text):
@@ -11045,7 +11109,7 @@ def tracer_call(base, token, method, path, body=None, ok=(200,)):
 
 def spec_tasks(text):
     """The numbered items under the spec's Tasks section as {title, what, path or None}."""
-    section = re.search(r"^## (?:\d+\.\s*)?Tasks\b[^\n]*\n(.*?)(?=^## |\Z)", text + "\n", re.M | re.S)
+    section = SPEC_TASKS.search(text + "\n")
     if not section:
         return []
     tasks = []
