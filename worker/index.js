@@ -1423,7 +1423,14 @@ async function backlogTriage(request, env) {
     return json(verdict);
   };
   const lines = (context ?? "").split(/\r\n|\r|\n/);
-  const held = (reason) => ({ decision: "hold", confidence: null, threshold, reason, model: null });
+  const held = (reason) => ({
+    decision: "hold",
+    confidence: null,
+    threshold,
+    reason,
+    model: null,
+    decider: "rule",
+  });
   if (lines[0] === "Recommend: deny") return finish(held("its author recommends deny"));
   const source = project?.triage
     ? `pipeline:${slug}@${projectVersion}`
@@ -1452,6 +1459,7 @@ async function backlogTriage(request, env) {
       reason,
       model: TRIAGE_MODEL,
       choices,
+      decider: "rule",
     });
   }
   if (!env.AI)
@@ -1470,6 +1478,7 @@ async function backlogTriage(request, env) {
     threshold,
     reason: triage.rules ? TRIAGE_REASON : TRIAGE_REASON_NO_RULES,
     model: TRIAGE_MODEL,
+    decider: "model",
   };
   if (verdict.decision === "queue")
     await flagDuplicates(env, slug, [{ n: 1, item, context }], [verdict]);
@@ -1518,6 +1527,7 @@ async function backlogTriageBatch(request, env) {
         threshold,
         reason: "its author recommends deny",
         model: null,
+        decider: "rule",
       };
     if (lines.some((line) => line.startsWith("## Question:")))
       return {
@@ -1555,6 +1565,7 @@ async function backlogTriageBatch(request, env) {
               threshold,
               reason: triage.rules ? TRIAGE_REASON : TRIAGE_REASON_NO_RULES,
               model: TRIAGE_MODEL,
+              decider: "model",
             };
     }
     const queued = entries.filter(({ n }) => verdicts[n - 1].decision === "queue");
