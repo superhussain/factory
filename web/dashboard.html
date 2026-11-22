@@ -768,7 +768,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
     #d-title, #d-star, #d-actions, .detail-head .close { position: relative; z-index: 3; }
     .detail-head .close { background: var(--panel); }
-    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
+    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-steer-notes, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
@@ -839,7 +839,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="meta" id="d-not-before" hidden></div><div class="meta" id="d-auto-babysit" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="meta" id="d-not-before" hidden></div><div class="meta" id="d-auto-babysit" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs tracer-tasks" id="d-steer-notes" hidden><summary></summary><ol role="list"></ol></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>
@@ -857,6 +857,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-approve-spec" role="menuitem" tabindex="-1" hidden>Approve spec</button>
         <button class="btn" id="d-rework" role="menuitem" tabindex="-1" hidden>Rework…</button>
         <button class="btn" id="d-approve-as-is" role="menuitem" tabindex="-1" hidden>Approve as is</button>
+        <button class="btn" id="d-steer" role="menuitem" tabindex="-1" title="Give the builder a note for its next round" hidden>Add steering note…</button>
         <button class="btn" id="d-edit-idea" role="menuitem" tabindex="-1" hidden>Edit idea</button>
         <button class="btn" id="d-discard" role="menuitem" tabindex="-1" hidden>Discard idea</button>
         <button class="btn" id="d-follow-tracer" role="menuitem" tabindex="-1" hidden>Follow in Tracer</button>
@@ -1409,6 +1410,16 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
     <p class="sr-only" id="rework-status" role="status"></p>
     <p class="err" id="rework-err" role="alert" hidden></p>
     <div class="actions"><button class="btn" type="button" id="rework-cancel">Cancel</button><button class="btn primary" type="submit" id="rework-save">Start rework</button></div>
+  </form>
+</dialog>
+<dialog id="steer-dlg" aria-labelledby="steer-h">
+  <form id="steer-form">
+    <h2 id="steer-h" tabindex="-1">Add steering note</h2>
+    <p class="muted" id="steer-help"></p>
+    <label>Note<textarea id="steer-note" maxlength="2000" placeholder="What the builder should keep in mind." aria-describedby="steer-help"></textarea></label>
+    <p class="sr-only" id="steer-status" role="status"></p>
+    <p class="err" id="steer-err" role="alert" hidden></p>
+    <div class="actions"><button class="btn" type="button" id="steer-cancel">Cancel</button><button class="btn primary" type="submit" id="steer-save">Add note</button></div>
   </form>
 </dialog>
 <dialog id="job-picker" aria-labelledby="job-picker-heading">
@@ -2040,6 +2051,30 @@ function renderTracerTasks(j) {
   box.querySelector('ol').replaceChildren(...tasks.map((t) => {
     const li = document.createElement('li');
     li.textContent = t.id + ' ' + t.title + ': ' + t.status.replaceAll('_', ' ');
+    return li;
+  }));
+}
+
+// The stages a person can steer a job at, and the dashboard's steering notes on a row, oldest first.
+const STEER_STAGES = ['spec', 'build', 'review'];
+const steerNotes = (j) => Array.isArray(j.steer) ? j.steer.filter((n) => typeof n?.note === 'string' && typeof n.at === 'string') : [];
+
+// Whether the builder got a note: the first build agent row at or after it, else whether one can still come.
+function steerStatus(j, n) {
+  const sent = agentRows(j).find((r) => r.role === 'build' && typeof r.at === 'string' && r.at >= n.at);
+  if (sent) return 'Sent to the builder ' + agentWhen(sent.at) + '.';
+  return STEER_STAGES.includes(j.stage) ? 'Waiting for the builder\'s next round.' : 'Not sent: no builder round ran after it.';
+}
+
+// Replaces the summary and rows only, so an opened list stays open across board polls.
+function renderSteerNotes(j) {
+  const box = $('d-steer-notes'), notes = steerNotes(j);
+  box.hidden = !notes.length;
+  if (!notes.length) return;
+  box.querySelector('summary').textContent = 'Steering notes: ' + notes.length;
+  box.querySelector('ol').replaceChildren(...notes.map((n) => {
+    const li = document.createElement('li');
+    li.textContent = agentWhen(n.at) + ': ' + n.note + ' ' + steerStatus(j, n);
     return li;
   }));
 }
@@ -5856,6 +5891,7 @@ async function openJob(id) {
     $('d-assign-err').hidden = true;
     walkthroughs = new Set();
     $('d-tracer-tasks').open = false;
+    $('d-steer-notes').open = false;
     $('d-agents').open = false;
     $('d-tokens').open = false;
   }
@@ -5884,6 +5920,7 @@ async function openJob(id) {
   const scope = tracerOff ? '' : tracerScopeText(j);
   if (scope) head.append((head.childNodes.length ? ' · ' : '') + scope);
   renderTracerTasks(j);
+  renderSteerNotes(j);
   renderAgentRuns(j);
   renderTokens(j);
   if (first) {
@@ -6467,7 +6504,7 @@ let swipeSettling = false;
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
 // so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
 // On an idea tab the gallery and file list move into the top of the page, so they scroll with it.
-const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
+const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-steer-notes, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
 let headCollapse = 0;
 let headShift = 0;
 let headStop = null;
@@ -7871,7 +7908,7 @@ async function openIdeaEditor(ctx) {
   }
 }
 
-const JOB_ACTIONS = ['d-approve-spec', 'd-rework', 'd-approve-as-is', 'd-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-unbatch', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
+const JOB_ACTIONS = ['d-approve-spec', 'd-rework', 'd-approve-as-is', 'd-steer', 'd-edit-idea', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-babysit', 'd-prioritize', 'd-run-batch', 'd-start-alone', 'd-unbatch', 'd-remove-priority', 'd-pause', 'd-resume', 'd-copy-link', 'd-follow-up', 'd-close-job'];
 
 // The actions a board job offers, in menu order. The drawer menu and the card menu both use it.
 function jobActionsFor(j) {
@@ -7880,6 +7917,7 @@ function jobActionsFor(j) {
     'd-approve-spec': canApproveSpec(j),
     'd-rework': canResolve(j),
     'd-approve-as-is': canResolve(j),
+    'd-steer': canSteer(j),
     'd-edit-idea': canEditIdea(j),
     'd-discard': j.stage === 'idea',
     'd-follow-tracer': !tracerOff && !!j.project && (TRACER_STAGES.includes(j.stage) || TRACER_GATHER_STAGES.includes(j.stage)) && j.tracer?.follow !== true && !tracerLink(j),
@@ -8193,6 +8231,24 @@ function resolveJob(board, id, resolve, now) {
   return '';
 }
 
+// A running job a person can steer: the builder reads each note when its next round starts.
+function canSteer(j) {
+  return !!j.project && STEER_STAGES.includes(j.stage) && !leadOf(j) && !j.paused && !j.close && steerNotes(j).length < 10;
+}
+
+// Returns an error message, '' once the board is changed, or 'unchanged' when the last note
+// already holds this text.
+function steerJob(board, id, note, now) {
+  const j = board.jobs.find((x) => x.id === id);
+  if (!j) return 'This job is no longer on the board.';
+  if (steerNotes(j).at(-1)?.note === note) return 'unchanged';
+  if (!canSteer(j)) return 'This job no longer takes steering notes.';
+  j.steer = [...(Array.isArray(j.steer) ? j.steer : []), { note, at: now }];
+  j.updated = now;
+  board.updated = now;
+  return '';
+}
+
 // A pr-open job with a PR a person can hand to a /factory babysit session, which factory.py pickup launches.
 function canBabysit(j) {
   return !!j.project && j.stage === 'pr-open' && !!prLink(j) && !leadOf(j) && !j.babysit && !j.paused && !j.close;
@@ -8482,6 +8538,69 @@ $('rework-form').addEventListener('submit', async (e) => {
   dismissReworkDialog();
   await poll();
   // The poll hides the bar button that had focus; its opener then names the actions menu button.
+  if (document.activeElement === document.body) focusOpener(opener);
+});
+
+let steerDialog = null;
+
+function openSteerDialog(ctx) {
+  const j = jobs.find((x) => x.id === ctx.id);
+  if (steerDialog || !j || !canSteer(j)) return;
+  steerDialog = { id: j.id, opener: ctx.opener };
+  $('steer-help').textContent = j.id + ' keeps running. The builder reads your note when its next round starts. A note guides work inside the spec and cannot add scope.';
+  $('steer-note').value = '';
+  $('steer-err').textContent = '';
+  $('steer-err').hidden = true;
+  $('steer-save').disabled = false;
+  $('steer-dlg').showModal();
+  $('steer-note').focus();
+}
+
+function dismissSteerDialog() {
+  if (!steerDialog || steerDialog.saving) return;
+  const opener = steerDialog.opener;
+  steerDialog = null;
+  $('steer-dlg').close();
+  focusOpener(opener);
+}
+
+$('steer-cancel').addEventListener('click', dismissSteerDialog);
+$('steer-dlg').addEventListener('cancel', (e) => { e.preventDefault(); dismissSteerDialog(); });
+$('steer-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!steerDialog || $('steer-save').disabled) return;
+  const { id, opener } = steerDialog;
+  const note = $('steer-note').value.trim();
+  if (!note) {
+    $('steer-err').textContent = 'Write what the builder should keep in mind.';
+    $('steer-err').hidden = false;
+    return;
+  }
+  let refused = false;
+  steerDialog.saving = true;
+  setDialogSaving('steer', 'steer-note', 'Add note', true);
+  try {
+    await casBoard((board) => {
+      const message = steerJob(board, id, note, isoNow());
+      if (message === 'unchanged') return BOARD_UNCHANGED;
+      if (message) {
+        refused = true;
+        throw new Error(message);
+      }
+    });
+  } catch (x) {
+    if (x.uncertain) steerDialog.uncertain = true;
+    $('steer-err').textContent = refused ? firstPressText(x.message, steerDialog.uncertain) : boardSaveError(x, 'The note may have saved. Press Add note again to check. It will not add the note twice.');
+    $('steer-err').hidden = false;
+    steerDialog.saving = false;
+    setDialogSaving('steer', 'steer-note', 'Add note', false);
+    $('steer-note').focus();
+    return;
+  }
+  steerDialog.saving = false;
+  setDialogSaving('steer', 'steer-note', 'Add note', false);
+  dismissSteerDialog();
+  await poll();
   if (document.activeElement === document.body) focusOpener(opener);
 });
 
@@ -9246,6 +9365,7 @@ const JOB_ACTION_RUN = {
   'd-approve-spec': approveSpecAction,
   'd-rework': openReworkDialog,
   'd-approve-as-is': approveAsIsAction,
+  'd-steer': openSteerDialog,
   'd-edit-idea': openIdeaEditor,
   'd-discard': discardAction,
   'd-follow-tracer': followTracerAction,
@@ -9495,6 +9615,8 @@ function openBacklogItem(item) {
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
   $('d-tracer-tasks').open = false;
+  $('d-steer-notes').hidden = true;
+  $('d-steer-notes').open = false;
   $('d-agents').hidden = true;
   $('d-agents').open = false;
   $('d-tokens').hidden = true;
