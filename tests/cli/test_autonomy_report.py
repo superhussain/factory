@@ -8,11 +8,11 @@ from support import IsolatedTestCase, http_fixture, invoke, load_runtime
 factory = load_runtime()
 RUNNING_EXAMPLE = """\
 earned autonomy for jobs merged in the last 90 days
-thresholds: 20 scanned jobs, no reverts, rework at most 10%, mean rounds at most 1.5, CHANGES at most 15%
+thresholds: 20 scanned jobs, no reverts, rework at most 10%, mean rounds at most 1.75, CHANGES at most 10%
 project  class     jobs  held  reworked  reverted  unscanned  rounds  changes  recommend
 alpha    internal    20    19         1         0          0     1.2       8%  automerge
 alpha    visible      6     4         1         1          0     2.0      25%  hold
-alpha visible hold: reverted 1019-add-z; rework 17% over 10%; rounds 2.0 over 1.5; changes 25% over 15%
+alpha visible hold: reverted 1019-add-z; rework 17% over 10%; rounds 2.0 over 1.75; changes 25% over 10%
 alpha: recommend merge human until every class shows automerge
 report only: a person changes Merge under Settings, Pipeline; nothing was written
 """
@@ -83,6 +83,14 @@ class AutonomyReportTest(IsolatedTestCase):
         self.assertIn("alpha    internal    20    20         0         0          0     1.0       0%  automerge\n", out)
         self.assertIn("alpha: recommend merge auto\n", out)
         self.assertNotIn("alpha internal", out.split("automerge\n", 1)[1])
+
+    def test_tuned_thresholds(self):
+        board = {"jobs": [merged(f"13{n:02}-x", [INTERNAL_CHANGES, INTERNAL] if n < 6
+                                 else [INTERNAL, INTERNAL] if n < 14 else [INTERNAL]) for n in range(20)]}
+        code, out, err = self.run_cmd(board=board)
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("alpha    internal    20    20         0         0          0     1.7       9%  automerge\n", out)
+        self.assertIn("alpha: recommend merge auto\n", out)
 
     def test_skipped(self):
         board = running_example()
