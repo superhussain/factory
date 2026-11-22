@@ -285,7 +285,7 @@ function validateProjectDocument(text) {
   return null;
 }
 
-async function projects(env) {
+async function listProjects(env) {
   const out = [];
   const { objects } = await env.BUCKET.list({ prefix: "projects/" });
   for (const { key } of objects) {
@@ -293,27 +293,27 @@ async function projects(env) {
     if (!key.endsWith(".md") || !/^[\w-]+$/.test(slug)) continue;
     const obj = await env.BUCKET.get(key);
     if (!obj) continue; // deleted between list and get
-    const meta = frontmatter(await obj.text());
+    out.push({ slug, meta: frontmatter(await obj.text()) });
+  }
+  return out;
+}
+
+async function projects(env) {
+  const out = (await listProjects(env)).map(({ slug, meta }) => {
     const item = { slug, title: meta.title || slug };
     if (REPO.test(meta.repo || "")) item.repo = meta.repo;
     if (BASE.test(meta.base || "")) item.base = meta.base;
     if (REPO.test(meta.archive || "")) item.archive = meta.archive;
     if (/^[1-9]$/.test(meta.auto_babysit || "")) item.auto_babysit = Number(meta.auto_babysit);
-    out.push(item);
-  }
+    return item;
+  });
   return reply(JSON.stringify(out), 200, "application/json");
 }
 
 async function weeklyBudgets(env) {
   const out = new Map();
-  const { objects } = await env.BUCKET.list({ prefix: "projects/" });
-  for (const { key } of objects) {
-    const slug = key.slice("projects/".length, -".md".length);
-    if (!key.endsWith(".md") || !/^[\w-]+$/.test(slug)) continue;
-    const obj = await env.BUCKET.get(key);
-    if (!obj) continue; // deleted between list and get
-    const { weekly_tokens } = frontmatter(await obj.text());
-    if (WEEKLY_TOKENS.test(weekly_tokens || "")) out.set(slug, Number(weekly_tokens));
+  for (const { slug, meta } of await listProjects(env)) {
+    if (WEEKLY_TOKENS.test(meta.weekly_tokens || "")) out.set(slug, Number(meta.weekly_tokens));
   }
   return out;
 }
