@@ -1079,7 +1079,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
       <form id="halt-form">
         <h4>Stop all hosts</h4>
         <p id="halt-help" class="muted">Stops pickup, stalled-session takeover and stuck resumes on every host. Sessions already running keep running. Agents may also stop the factory. Only a signed-in person can resume it.</p>
-        <label for="halt-reason">Reason<input type="text" id="halt-reason" maxlength="200" autocomplete="off" aria-describedby="halt-help" required></label>
+        <label for="halt-reason">Reason<input type="text" id="halt-reason" maxlength="200" autocomplete="off" aria-describedby="halt-help halt-status" required></label>
         <p id="halt-status" role="status"></p>
         <div class="actions"><button class="btn primary" id="halt-stop" type="submit">Stop factory</button></div>
       </form>
