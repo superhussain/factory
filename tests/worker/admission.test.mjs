@@ -358,6 +358,7 @@ test("effectivePipeline keeps notes from both scopes in order with their sources
     pickup: { enabled: false, hosts: [] },
     triage: { enabled: false, threshold: 90, rules: "" },
     hold: { min_ideas: 5, max_wait_hours: 12 },
+    backpressure: { needs_you: 5 },
     stage_notes: {
       spec: [{ source: "pipeline:global@3", text: "global spec" }],
       build: [

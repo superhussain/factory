@@ -320,6 +320,7 @@ test("effective view merges tighter values, 404s unregistered slugs and 409s inv
     pickup: { enabled: false, hosts: [] },
     triage: { enabled: false, threshold: 90, rules: "" },
     hold: { min_ideas: 5, max_wait_hours: 12 },
+    backpressure: { needs_you: 5 },
     stage_notes: {},
     versions: { global: 0, project: 0 },
     floors: ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11"],
@@ -472,6 +473,39 @@ test("the hold key validates field by field and echoes in the effective view", a
   assert.equal((await s.put("/api/pipeline/projects/sample", doc({ hold: project }))).status, 200);
   view = await (await s.send("/api/pipeline/effective/sample")).json();
   assert.deepEqual(view.hold, project);
+});
+
+test("the backpressure key validates and echoes in the effective view", async () => {
+  const s = setup();
+  const copy = "backpressure.needs_you: must be a whole number from 1 to 50";
+  for (const [body, text] of [
+    [doc({ backpressure: [] }), "backpressure: must be an object"],
+    [doc({ backpressure: 5 }), "backpressure: must be an object"],
+    [doc({ backpressure: { needs_you: 3, days: 1 } }), "backpressure.days: unknown field"],
+    [doc({ backpressure: {} }), copy],
+    [doc({ backpressure: { needs_you: 0 } }), copy],
+    [doc({ backpressure: { needs_you: 51 } }), copy],
+    [doc({ backpressure: { needs_you: 2.5 } }), copy],
+    [doc({ backpressure: { needs_you: "3" } }), copy],
+  ]) {
+    const response = await s.put("/api/pipeline/global", body);
+    assert.equal(response.status, 400, body);
+    assert.equal(await response.text(), text);
+  }
+  assert.equal(s.puts().length, 0);
+  let view = await (await s.send("/api/pipeline/effective/sample")).json();
+  assert.deepEqual(view.backpressure, { needs_you: 5 });
+  const global = { needs_you: 3 };
+  assert.equal((await s.put("/api/pipeline/global", doc({ backpressure: global }))).status, 200);
+  view = await (await s.send("/api/pipeline/effective/sample")).json();
+  assert.deepEqual(view.backpressure, global);
+  const project = { needs_you: 50 };
+  assert.equal(
+    (await s.put("/api/pipeline/projects/sample", doc({ backpressure: project }))).status,
+    200,
+  );
+  view = await (await s.send("/api/pipeline/effective/sample")).json();
+  assert.deepEqual(view.backpressure, project);
 });
 
 test("the archive key validates field by field and saves only in the all-projects scope", async () => {
