@@ -536,6 +536,10 @@ Numbers use `,` thousands separators, and `pct` is `used * 100 // cap`. The last
 
 Numbers use `,` thousands separators. The last three lines go to stderr. A real run prints the stop line in place of the skip lines; `--dry-run` prints the skip lines only.
 
+## Weekly expected spend
+
+- The Worker, not pickup, compares finished-job tokens with a project's weekly_tokens and pushes nudges. It never holds a launch.
+
 ## Pausing a job
 
 - The dashboard's Pause pickup item sets `paused = {at}` on a job with a project that is not merged or closed. Resume pickup deletes it.
