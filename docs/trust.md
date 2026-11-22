@@ -52,6 +52,16 @@ catalog order.
 | --- | --- |
 | `spec-approval` | A person approves spec.md before the build starts. |
 
+## Pre-review checks
+
+`factory.py pre-review` runs a job's checks before any reviewer spawns. The check
+list comes only from `.factory/checks.json` on `origin/<base>`, with `<base>` from
+the project file frontmatter. It never reads the job branch's copy and never reads
+a command from R2 (F9), so a branch cannot change which commands run. The checks
+run locally in the job worktree as argv lists with no shell, closed stdin and a
+timeout. A missing or invalid file gives `PRE-REVIEW: NONE` and reviewers work as
+before. Failing tails go to `pre-review.md`, capped at 40 lines per check (F8).
+
 ## Admission rules
 
 `checkOperatorText(text, field)` returns `null` or one message
