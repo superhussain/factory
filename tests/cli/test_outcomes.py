@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import re
@@ -288,3 +290,51 @@ class OutcomesUsageTest(OutcomesTestCase):
                 code, out, err = invoke(factory, ["outcomes", *args])
                 self.assertEqual((code, out, err), (2, "", "factory.py: usage: factory.py outcomes [record] "
                                                            "[<project-slug>]\n"))
+
+
+class OutcomesPickupTest(OutcomesTestCase):
+    outcomes_pickup_record = True
+
+    def record(self):
+        """Run pickup's daily outcomes step against the board fixture: (stdout, stderr, PUT count)."""
+        out, err = io.StringIO(), io.StringIO()
+        with http_fixture({"GET /api/board": (200, self.board), "PUT /api/board": (200, b"ok")}) as server, \
+                patch.object(factory, "pr_merge_commits", lambda *_: (dict(self.oids), None)), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.config(server.origin)
+            factory.outcomes_pickup_record(self.home)
+        return out.getvalue(), err.getvalue(), sum(method == "PUT" for method, *_ in server.requests)
+
+    def add_checkout(self, slug, folder):
+        paths = self.home / "paths.md"
+        paths.write_text(paths.read_text(encoding="utf-8").replace("---\n", f"---\n{slug}: {folder}\n", 1),
+                         encoding="utf-8")
+
+    def test_first_run_records_each_checkout(self):
+        self.assertEqual(self.record(), ("outcomes record alpha: recorded 3 outcomes on the board\n", "", 1))
+        today = datetime.now().astimezone().strftime("%Y-%m-%d")
+        self.assertEqual(json.loads((self.home / "outcomes-record.json").read_text(encoding="utf-8")),
+                         {"version": 1, "date": today})
+
+    def test_same_date_does_nothing(self):
+        self.record()
+        self.assertEqual(self.record(), ("", "", 0))
+
+    def test_missing_folder_is_skipped(self):
+        self.add_checkout("beta", self.root / "gone")
+        self.assertEqual(self.record(), ("outcomes record alpha: recorded 3 outcomes on the board\n", "", 1))
+
+    def test_stopped_project_warns(self):
+        (self.root / "beta").mkdir()
+        self.add_checkout("beta", self.root / "beta")
+        real = factory.outcomes_cmd
+
+        def outcomes_cmd(*args):
+            if args[-1] == "alpha":
+                raise SystemExit(5)
+            real(*args)
+
+        with patch.object(factory, "outcomes_cmd", outcomes_cmd):
+            self.assertEqual(self.record(), (
+                "outcomes record beta: no jobs merged in the last 90 days\n",
+                "factory.py: outcomes record alpha stopped (exit 5); it runs again tomorrow\n", 0))

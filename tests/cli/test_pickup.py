@@ -2697,6 +2697,15 @@ class OrphanPickupHookTest(PickupFixture):
         hook.assert_called_once_with(self.home)
 
 
+class OutcomesPickupHookTest(PickupFixture):
+    def test_pickup_calls_the_hook_once_and_dry_run_never(self):
+        hook = patch.object(factory, "outcomes_pickup_record").start()
+        self.assertEqual(self.pickup("--dry-run"), (0, f"host {DEVICE}: would launch 0\n", ""))
+        hook.assert_not_called()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        hook.assert_called_once_with(self.home)
+
+
 class CloseTest(PickupFixture):
     DECISION = "/api/jobs/alpha/042-sample-export/decision.md"
     REASON = "Duplicate of 041-sample-report"
