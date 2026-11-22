@@ -1936,6 +1936,89 @@ class MoveFenceTest(IsolatedTestCase):
         self.assertEqual([j["id"] for j in json.loads(self.output.getvalue())], ["001-test"])
 
 
+class StopCheckTest(IsolatedTestCase):
+    """The running example: 001-test at build, claimed here, its synthetic-agent closed.
+    It borrows FactoryTest's fixture without inheriting FactoryTest's tests."""
+    git, saved, save, api = FactoryTest.git, FactoryTest.saved, FactoryTest.save, FactoryTest.api
+
+    def setUp(self):
+        FactoryTest.setUp(self)
+        (self.home / "paths.md").write_text(f"---\nsample: {self.home / 'sample'}\n---\n")
+        patch.object(factory, "paseo_server", return_value="synthetic-server").start()
+        patch.object(factory, "paseo_statuses", return_value={"synthetic-agent": "closed"}).start()
+        self.job["paseo"] = {"server": "synthetic-server", "agent": "synthetic-agent"}
+        self.save(self.job)
+        self.store["/api/jobs/sample/001-test/build.md"] = b"# Build\n"
+
+    def stuck(self):
+        """(exit code, stdout, stderr) of one stuck run."""
+        self.output.seek(0)
+        self.output.truncate()
+        err = io.StringIO()
+        code = 0
+        with contextlib.redirect_stderr(err):
+            try:
+                factory.stuck()
+            except SystemExit as e:
+                code = e.code
+        return code, self.output.getvalue(), err.getvalue()
+
+    def checks(self):
+        return json.loads((self.home / "stop-checks.json").read_text())["jobs"]
+
+    def test_resumes_a_new_unexplained_state(self):
+        self.git(self.wt, "commit", "--allow-empty", "-m", "unpushed")
+        key = factory.stop_key(factory.stop_state(self.home, self.job))
+        code, out, err = self.stuck()
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "stop check 001-test: resume, stopped at build with no live session, "
+                              "HEAD not on origin\n")
+        [picked] = json.loads(out)
+        self.assertEqual(sorted(picked), ["id", "project", "repo_path", "session", "stage"])
+        self.assertEqual((picked["id"], picked["stage"]), ("001-test", "build"))
+        entry = self.checks()["001-test"]
+        self.assertEqual((entry["key"], entry["verdict"]), (key, "resume"))
+        self.assertEqual(entry["why"], "stopped at build with no live session, HEAD not on origin")
+        self.assertEqual(self.saved()["claim"]["session"], "sender")
+
+    def test_same_state_is_checked_once(self):
+        self.assertEqual(self.stuck()[0], 0)
+        self.save(self.job)
+        code, out, err = self.stuck()
+        self.assertEqual((code, out), (3, ""))
+        self.assertNotIn("stop check", err)
+        self.assertEqual(list(self.checks()), ["001-test"])
+
+    def test_unclaimed_dead_job_resumes(self):
+        del self.job["claim"]
+        self.job["updated"] = factory.now()
+        self.save(self.job)
+        code, out, err = self.stuck()
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "stop check 001-test: resume, stopped at build with no live session\n")
+        self.assertEqual([j["id"] for j in json.loads(out)], ["001-test"])
+
+    def test_needs_verdicts(self):
+        needs = b"# Needs\n\n## Question 1: Export\n"
+        self.store["/api/jobs/sample/001-test/needs.md"] = needs
+        self.save(dict(self.job, needs="Pick an export format in #001-test/needs"))
+        code, out, err = self.stuck()
+        self.assertEqual((code, out), (3, ""))
+        self.assertEqual(err, "stop check 001-test: explained, waits on its ask\n")
+        self.assertEqual(self.checks()["001-test"]["verdict"], "explained")
+        self.assertIn("needs", self.saved())
+
+        sha12 = hashlib.sha256(needs).hexdigest()[:12]
+        self.store["/api/jobs/sample/001-test/answers.md"] = (
+            f"# Answers\n\nFor needs.md sha256 {sha12}, submitted 2026-01-02T12:00:00Z from chat by test.\n").encode()
+        code, out, err = self.stuck()
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "stop check 001-test: resume, ask answered in answers.md, needs still set\n")
+        self.assertEqual([j["id"] for j in json.loads(out)], ["001-test"])
+        self.assertNotIn("needs", self.saved())
+        self.assertEqual(self.saved()["claim"]["device"], "test")
+
+
 class TracerStartIdeaTest(IsolatedTestCase):
     setUp = IdeaTest.setUp
     request = IdeaTest.request
