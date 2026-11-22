@@ -94,6 +94,15 @@ Each run, in order:
   Settings, Pipeline, Batch follow-ups. The board shows the same state on each
   held idea's chip: "Waits for a batch (n of min, hh of maxh)", "Batches behind
   <id>", or "Batch ready" on the one pickup launches next.
+- Holds back plain ideas while review falls behind. Pickup counts the jobs that
+  wait on you across every project, as the dashboard's Needs you column does:
+  `needs-human`, a set `needs`, or an escalated `pr-open` PR. At or above the
+  effective pipeline's `backpressure.needs_you` (a whole number from 1 to 50,
+  default 5), it skips each idea with
+  `skip <id> <project>: backpressure (<n> waiting on you, pauses at <limit>)`.
+  Prioritized ideas, approved specs and moved jobs still launch. This line
+  replaces a batch line for the same idea. Set it in the dashboard under
+  Settings, Pipeline, Review backpressure.
 - Skips a project whose checkout fails the `unsafe checkout` check, when pickup
   is on and lists this host. It fetches `origin/<base>` (with
   `GIT_TERMINAL_PROMPT=0` and a 60 s limit, so a remote that asks for
