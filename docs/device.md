@@ -493,6 +493,95 @@ Bad arguments exit 2 with `usage: factory.py outcomes [record] [<project-slug>]`
 The only git write is the `origin/<base>` remote-tracking ref, and a failed fetch
 exits 5.
 
+## Reviewer benchmark
+
+```text
+python3 <installed-skill>/runtime/factory.py bench score <cases-file> <arm-folder>...
+```
+
+`bench score` compares reviewer prompts or models, called arms, on past pull
+requests with known defects. It reads a hand-labeled cases file and one folder of
+saved review files per arm, and prints severity-weighted recall, tokens and
+seconds per arm as JSON. It is offline: it reads only the paths you pass, never
+the home, board, R2 or network, and writes no file. It never gates a job.
+
+Cases hold instance data, since they name real pull requests and defects. Keep
+them in the factory home, such as `<home>/bench/reviewer-cases.json`, never in
+the repository.
+
+```json
+{"cases": [{"id": "1018-add-y", "pr": "https://github.com/example/alpha/pull/18",
+  "head": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d", "source": "reworked",
+  "defects": [{"path": "worker/export.js", "lines": [40, 52], "severity": "high", "note": "optional"}]}]}
+```
+
+`pr`, `head` and `source` are not scored yet, but are required so a later replay
+command can rebuild each case. Severity weights are high 3, medium 2 and low 1.
+
+An arm folder's name is the arm name. It holds one `<case-id>/` folder per case,
+with any `review-*.md` files and an optional `run.json` in the shape
+`usage_totals` prints:
+
+```json
+{"seconds": 300, "models": {"<model>": {"input": 200000, "output": 20000, "cache_write": 30000, "cache_read": 0}}}
+```
+
+To fill a case folder by hand:
+
+1. In the project checkout, run `git worktree add --detach <scratch> <head>`.
+2. Run the arm's reviewer there with its prompt and model.
+3. Save its review as `<arm>/<case-id>/review-code.md`, and its wall seconds and
+   `factory.py usage` totals as `<arm>/<case-id>/run.json`.
+4. Run `git worktree remove <scratch>`.
+
+Matching rule, for the defect `worker/export.js:40-52`:
+
+| Review file | Cite | Result |
+| --- | --- | --- |
+| `VERDICT: CHANGES` | `worker/export.js:44` | caught |
+| `VERDICT: CHANGES` | `export.js:50` (bare name) | caught |
+| `VERDICT: CHANGES` | `worker/export.js:60` | missed |
+| `VERDICT: PASS` | `worker/export.js:44` | missed |
+
+Only review files whose first line is `VERDICT: CHANGES` count. A cite hits when
+its path equals the defect path, or has no `/` and equals the defect's file name,
+and a cited line or span overlaps the defect's lines. A missing case folder misses
+every defect and lists the case under `missing`, so arms keep the same
+denominator. A missing or invalid `run.json` lists the case under `no_run` and
+adds no tokens or seconds. `tokens` counts input, output and cache_write;
+`seconds` sums and rounds to a whole number; `weighted_recall` rounds to 2 places.
+
+For two cases with three defects of total weight 6, and arms `opus-medium` and
+`sonnet-low`, it prints (arms in argument order, second arm cut):
+
+```json
+{"cases": 2, "defects": 3, "weights": {"high": 3, "medium": 2, "low": 1}, "arms": [
+ {"arm": "opus-medium", "weighted_recall": 0.83, "caught": 2,
+  "severity": {"high": {"caught": 1, "of": 1}, "medium": {"caught": 1, "of": 1}, "low": {"caught": 0, "of": 1}},
+  "missed": ["1018-add-y docs/device.md:12-12"], "tokens": 413000, "seconds": 540, "runs": 2,
+  "missing": [], "no_run": []}, ...]}
+```
+
+The command checks the cases file and every arm folder before reading any review,
+so a bad input prints nothing on stdout. Errors print after `factory.py: `:
+
+| Input | Exit | Message |
+| --- | --- | --- |
+| wrong arguments | 2 | `usage: factory.py bench score <cases-file> <arm-folder>...` |
+| no cases file | 4 | `bench: no cases file at <path>` |
+| not `{"cases": [non-empty list]}` | 2 | `bench: <path> is not a cases file: needs {"cases": [...]}` |
+| bad case field | 2 | `bench: <path>: case <n>: <reason>` |
+| no arm folder | 4 | `bench: no arm folder at <path>` |
+| arm name not `[\w.-]+` or repeated | 2 | `bench: arm name <name> must be unique letters, digits, ., _ or -` |
+
+Case reasons, with `<n>` and `<m>` counting from 1: `id must look like 1018-add-y`,
+`duplicate id <id>`, `pr must be a GitHub pull request URL`,
+`head must be a 40-character commit`, `source must be reverted or reworked`,
+`defects must be a non-empty list`,
+`defect <m>: path must be a relative repository path` (no leading `/`, no `\`,
+no `..` segment), `defect <m>: lines must be [start, end] with 1 <= start <= end`
+and `defect <m>: severity must be high, medium or low`.
+
 ## Exit recovery
 
 | Exit | Action |

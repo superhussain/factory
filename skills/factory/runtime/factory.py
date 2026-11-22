@@ -19,6 +19,9 @@
                                             message, print the job as JSON
   factory.py triage replay <project-slug> [--threshold N]
                                             score a threshold against past human backlog decisions, print JSON
+  factory.py bench score <cases-file> <arm-folder>...
+                                            score saved reviewer runs against labeled past defects, print JSON
+                                            (offline)
   factory.py ideas [--limit N] [--max-inflight N] [--project <slug>]
                                             claim the oldest ideas this device can run, print them as JSON
                                             (exit 3 when none are runnable or the cap is full)
@@ -12688,6 +12691,130 @@ def outcomes_cmd(*args):
         print(f"recorded {changed} outcomes on the board" if changed else "outcomes unchanged; nothing written")
 
 
+BENCH_WEIGHTS = {"high": 3, "medium": 2, "low": 1}
+BENCH_USAGE = "usage: factory.py bench score <cases-file> <arm-folder>..."
+
+
+def bench_cases(path):
+    """The validated case list of a reviewer-benchmark cases file, failing on the first bad field."""
+    if not Path(path).is_file():
+        fail(f"bench: no cases file at {path}", 4)
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        data = None
+    if not (isinstance(data, dict) and isinstance(data.get("cases"), list) and data["cases"]):
+        fail(f'bench: {path} is not a cases file: needs {{"cases": [...]}}', 2)
+    seen = set()
+    for n, c in enumerate(data["cases"], 1):
+        c = c if isinstance(c, dict) else {}
+        reason = None
+        defects = c.get("defects")
+        if not (isinstance(c.get("id"), str) and JOB_ID.fullmatch(c["id"])):
+            reason = "id must look like 1018-add-y"
+        elif c["id"] in seen:
+            reason = f"duplicate id {c['id']}"
+        elif not (isinstance(c.get("pr"), str) and GH_PR_PARTS.fullmatch(c["pr"])):
+            reason = "pr must be a GitHub pull request URL"
+        elif not (isinstance(c.get("head"), str) and COMMIT.fullmatch(c["head"])):
+            reason = "head must be a 40-character commit"
+        elif c.get("source") not in ("reverted", "reworked"):
+            reason = "source must be reverted or reworked"
+        elif not (isinstance(defects, list) and defects):
+            reason = "defects must be a non-empty list"
+        else:
+            for m, d in enumerate(defects, 1):
+                d = d if isinstance(d, dict) else {}
+                path_, lines = d.get("path"), d.get("lines")
+                if not (isinstance(path_, str) and path_ and not path_.startswith("/") and "\\" not in path_
+                        and ".." not in path_.split("/")):
+                    reason = f"defect {m}: path must be a relative repository path"
+                elif not (isinstance(lines, list) and len(lines) == 2 and all(type(x) is int for x in lines)
+                          and 1 <= lines[0] <= lines[1]):
+                    reason = f"defect {m}: lines must be [start, end] with 1 <= start <= end"
+                elif not (isinstance(d.get("severity"), str) and d["severity"] in BENCH_WEIGHTS):
+                    reason = f"defect {m}: severity must be high, medium or low"
+                if reason:
+                    break
+        if reason:
+            fail(f"bench: {path}: case {n}: {reason}", 2)
+        seen.add(c["id"])
+    return data["cases"]
+
+
+def bench_hit(defect, citations):
+    """True when a find_citations cite names the defect's path, or its basename with no folder, and a cited
+    line or span overlaps the defect's lines."""
+    start, end = defect["lines"]
+    for _, path, lines, span in citations:
+        if path != defect["path"] and ("/" in path or path != defect["path"].rsplit("/", 1)[-1]):
+            continue
+        if any(start <= n <= end for n in lines) or span and span[0] <= end and span[1] >= start:
+            return True
+    return False
+
+
+def bench_arm(folder, cases):
+    """Recall, tokens and seconds for one arm folder of saved reviews, scored against the cases."""
+    folder = Path(folder)
+    severity = {s: {"caught": 0, "of": 0} for s in BENCH_WEIGHTS}
+    weight = caught_weight = caught = tokens = runs = 0
+    seconds, missed, missing, no_run = 0.0, [], [], []
+    for c in cases:
+        case_dir = folder / c["id"]
+        if not case_dir.is_dir():
+            missing.append(c["id"])
+        citations = []
+        for review in sorted(case_dir.glob("review-*.md")) if case_dir.is_dir() else []:
+            if not review.is_file():
+                continue
+            text = review.read_text(encoding="utf-8", errors="replace")
+            if text.splitlines()[:1] == ["VERDICT: CHANGES"]:
+                citations += find_citations(text)
+        for d in c["defects"]:
+            w = BENCH_WEIGHTS[d["severity"]]
+            weight += w
+            severity[d["severity"]]["of"] += 1
+            if bench_hit(d, citations):
+                caught += 1
+                caught_weight += w
+                severity[d["severity"]]["caught"] += 1
+            else:
+                missed.append(f"{c['id']} {d['path']}:{d['lines'][0]}-{d['lines'][1]}")
+        try:
+            run = json.loads((case_dir / "run.json").read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            run = None
+        if (isinstance(run, dict) and type(run.get("seconds")) in (int, float) and 0 <= run["seconds"] < float("inf")
+                and isinstance(run.get("models"), dict)):
+            tokens += token_count(run["models"])
+            seconds += run["seconds"]
+            runs += 1
+        else:
+            no_run.append(c["id"])
+    return {"arm": folder.name, "weighted_recall": round(caught_weight / weight, 2), "caught": caught,
+            "severity": severity, "missed": missed, "tokens": tokens, "seconds": round(seconds), "runs": runs,
+            "missing": missing, "no_run": no_run}
+
+
+def bench_cmd(*args):
+    """bench score <cases-file> <arm-folder>...: score saved reviewer runs against labeled past defects."""
+    if len(args) < 3 or args[0] != "score":
+        fail(BENCH_USAGE, 2)
+    cases = bench_cases(args[1])
+    names = set()
+    for folder in args[2:]:
+        if not Path(folder).is_dir():
+            fail(f"bench: no arm folder at {folder}", 4)
+        name = Path(folder).name
+        if not re.fullmatch(r"[\w.-]+", name, re.ASCII) or name in names:
+            fail(f"bench: arm name {name} must be unique letters, digits, ., _ or -", 2)
+        names.add(name)
+    print(json.dumps({"cases": len(cases), "defects": sum(len(c["defects"]) for c in cases),
+                      "weights": BENCH_WEIGHTS, "arms": [bench_arm(folder, cases) for folder in args[2:]]},
+                     indent=2))
+
+
 AUTONOMY_DAYS = 90
 AUTONOMY_MIN_JOBS = 20
 AUTONOMY_MAX_REWORK = 0.10
@@ -13660,6 +13787,7 @@ COMMANDS["retro"] = (retro_cmd, 1, 3)
 COMMANDS["audit"] = (audit_cmd, 1, 2)
 COMMANDS["usage"] = (usage_cmd, 1, 2)
 COMMANDS["outcomes"] = (outcomes_cmd, 0, 2)
+COMMANDS["bench"] = (bench_cmd, 0, sys.maxsize)
 COMMANDS["with-cloudflare"] = (with_cloudflare_cmd, 0, sys.maxsize)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
