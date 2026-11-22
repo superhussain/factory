@@ -558,4 +558,6 @@ class RolesTest(IsolatedTestCase):
                        "rerun that spec check yourself, never the `Check` cell"):
             self.assertIn(phrase, review)
         self.assertNotIn("Rerun one `passed` row's check yourself", review)
+        self.assertIn("the project file's command prefix", review)
+        self.assertNotIn("PYTHONPATH=tests/cli", review)
         self.assertIn("Copy `Check` from the spec criterion's check", flat("factory-builder.md"))
