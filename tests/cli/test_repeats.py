@@ -1,5 +1,6 @@
 import json
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -10,8 +11,8 @@ CODE = ("VERDICT: CHANGES\n\nThe export route skips the person check.\n"
         "Signature: worker/export.js#missing-person-check\n\nNit: rename `rowsToCsv`.\n")
 PASS = "VERDICT: PASS\n\nNothing to change.\n"
 REPEAT = {"decision": "repeat", "round": 2, "previous": 1,
-          "repeats": [{"reviewer": "code", "signature": "worker/export.js#missing-person-check"}]}
-CONTINUE = {"decision": "continue", "round": 2, "previous": 1, "repeats": []}
+          "repeats": [{"reviewer": "code", "signature": "worker/export.js#missing-person-check"}], "churn": []}
+CONTINUE = {"decision": "continue", "round": 2, "previous": 1, "repeats": [], "churn": []}
 
 
 class RepeatsTest(IsolatedTestCase):
@@ -44,7 +45,8 @@ class RepeatsTest(IsolatedTestCase):
         self.assertEqual(self.check(), (0, REPEAT, ""))
 
     def test_round_1_continues_with_no_previous_round(self):
-        self.assertEqual(self.check("1"), (0, {"decision": "continue", "round": 1, "previous": None, "repeats": []}, ""))
+        self.assertEqual(self.check("1"), (0, {"decision": "continue", "round": 1, "previous": None, "repeats": [],
+                                                       "churn": []}, ""))
 
     def test_a_missing_previous_round_continues(self):
         shutil.rmtree(self.job / "round-1")
@@ -75,3 +77,83 @@ class RepeatsTest(IsolatedTestCase):
         code, out, err = self.check()
         self.assertEqual((code, out), (4, None))
         self.assertEqual(err, f"factory.py: {path} is missing: the round is not complete\n")
+
+
+def changes(slug):
+    return f"VERDICT: CHANGES\n\nThe export still fails.\nSignature: worker/export.js#{slug}\n"
+
+
+SIGNATURES = {1: "missing-csv-route", 2: "missing-person-check", 3: "csv-quote-escape", 4: "missing-header-row"}
+CHURN = [{"path": "worker/export.js", "rounds": [2, 3, 4]}]
+
+
+class ChurnTest(IsolatedTestCase):
+    setUp = RepeatsTest.setUp
+    write = RepeatsTest.write
+    check = RepeatsTest.check
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", str(self.wt), *args], check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def build(self, skip=None):
+        """Commit once per round, changing worker/export.js in every round but skip, and record each head."""
+        self.wt = self.dir / "worktrees" / "sample" / "042-csv-export"
+        (self.wt / "worker").mkdir(parents=True)
+        self.git("init", "-q")
+        for n in range(1, 5):
+            self.write(n, code=changes(SIGNATURES[n]))
+            if n != skip:
+                (self.wt / "worker" / "export.js").write_text(f"// round {n}\n")
+            (self.wt / f"round-{n}.md").write_text(f"round {n}\n")
+            self.git("add", "-A")
+            self.git("commit", "-q", "-m", f"round {n}")
+            self.plan(n, self.git("rev-parse", "HEAD"))
+
+    def plan(self, n, head):
+        (self.job / f"round-{n}" / "review-plan.json").write_text(json.dumps({"round": n, "head": head}))
+
+    def churned(self, decision="continue", churn=(), repeats=()):
+        return (0, {"decision": decision, "round": 4, "previous": 3, "repeats": list(repeats), "churn": list(churn)},
+                "")
+
+    def test_a_file_changed_in_three_consecutive_rounds_is_churn(self):
+        self.build()
+        self.assertEqual(self.check("4"), self.churned("churn", CHURN))
+
+    def test_round_3_never_churns(self):
+        self.build()
+        self.assertEqual(self.check("3"), (0, {"decision": "continue", "round": 3, "previous": 2, "repeats": [],
+                                               "churn": []}, ""))
+
+    def test_a_file_skipped_in_one_round_is_not_churn(self):
+        self.build(skip=3)
+        self.assertEqual(self.check("4"), self.churned())
+
+    def test_a_missing_or_malformed_round_head_is_not_churn(self):
+        self.build()
+        path = self.job / "round-3" / "review-plan.json"
+        head = json.loads(path.read_text())["head"]
+        for text in (None, "{", json.dumps({"head": head[:39]}), json.dumps(["x"])):
+            with self.subTest(text=text):
+                path.unlink(missing_ok=True)
+                if text is not None:
+                    path.write_text(text)
+                self.assertEqual(self.check("4"), self.churned())
+
+    def test_a_non_ancestor_head_is_not_churn(self):
+        self.build()
+        tree = self.git("rev-parse", "HEAD^{tree}")
+        self.plan(2, self.git("commit-tree", tree, "-m", "rewritten"))
+        self.assertEqual(self.check("4"), self.churned())
+
+    def test_no_worktree_is_not_churn(self):
+        self.build()
+        shutil.rmtree(self.wt)
+        self.assertEqual(self.check("4"), self.churned())
+
+    def test_a_repeat_wins_over_churn(self):
+        self.build()
+        self.write(4, code=changes(SIGNATURES[3]))
+        repeats = [{"reviewer": "code", "signature": "worker/export.js#csv-quote-escape"}]
+        self.assertEqual(self.check("4"), self.churned("repeat", CHURN, repeats))
