@@ -84,3 +84,4 @@ A babysit sent to the job's own agent records a babysit row linked to that agent
 only `factory.py deny-notes` writes it.
 `babysit` is `{at}`, set on a `pr-open` job by Babysit PR or `control` (plus `via`, `quote`,
 `by`). A `/factory babysit` session clears it with `null`; `board` refuses other values. Clearing it also drops a priority with the same at.
+`handled` maps babysit item signatures to `{count, at}`. Only `factory.py pr-handled` writes it, newest 32 kept.

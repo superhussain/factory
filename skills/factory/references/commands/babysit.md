@@ -74,9 +74,13 @@ the lower one wins.
 ## Loop
 
 Run `python3 "$RUNTIME" pr-state "$SLUG/<id>"`. It prints one JSON line,
-`{"pr","state","review","bots","checks","queued","conflict","stacked","base","next","ci_log","threads","merge_queue"}`. Exit 4 (bad `pr`) or 5
+`{"pr","state","review","bots","checks","queued","conflict","stacked","base","next","ci_log","threads","merge_queue","items","capped","rearm"}`. Exit 4 (bad `pr`) or 5
 (gh failed): patch `{"needs": "<the stderr line>", "babysit": null, "claim": null}`, report
 that line and stop. Otherwise act on `next`, then read again.
+
+When `rearm` is not empty, run `python3 "$RUNTIME" pr-handled "$SLUG/<id>" --session <tag> --rearm <each sig>` before acting on `next`.
+
+After a push, reply or rerun on a `fix-reviews`, `rebase` or `fix-ci` reading, run `python3 "$RUNTIME" pr-handled "$SLUG/<id>" --session <tag> <each sig in items>` once before the next read.
 
 When the job's pr is in the project's archive repo, not $REPO, babysit only reads it. Pass -R <archive> wherever this file says -R "$REPO". On an archive PR, never push, comment, reply to or resolve a thread, rerun a check, merge or queue, whatever the notes say. Act only on `merged`, `closed`, `wait` and `wait-base`. On any other reading, patch `{"needs": "PR #<n> is in the archive repo and reads <next>: babysit only reads archive PRs, so handle it on GitHub", "babysit": null, "claim": null}` and stop. Never run `pr-queue` or `checks` on it: both exit 4 for an archive PR.
 
@@ -87,6 +91,7 @@ patch, or a hand-back. After a merge or queue command, read again. A queued PR r
 | `next` | Means | When the notes ask | No note |
 | --- | --- | --- | --- |
 | `merged` / `closed` | the PR state | close out, below | close out, below |
+| `capped` | a failing required check or a merge conflict that `pr-handled` has recorded 3 times still shows | patch `{"needs": "PR #<n>: babysit acted 3 times on <capped[0].label> and it still shows. Fix it on GitHub, then press Babysit PR again", "babysit": null, "claim": null}` and stop | patch `{"needs": "PR #<n>: babysit acted 3 times on <capped[0].label> and it still shows. Fix it on GitHub, then press Babysit PR again", "babysit": null, "claim": null}` and stop |
 | `fix-reviews` | a latest reviewer review is `CHANGES_REQUESTED` or `COMMENTED` after both the head commit and the PR author's latest review, or `bots` is above 0: that many unresolved review threads opened by a `Bot` account have no reply from the PR author, or `threads` is above 0: that many unresolved threads a counted reviewer opened have no reply from the PR author | fix the counted comments in `$WT`, commit, push, and reply in the review threads, and resolve each thread when the notes ask, as the notes and the project file's PRs section say | hand back |
 | `needs-review` | GitHub shows no approval and nothing above is left to fix | patch `{"needs": "PR #<n> is ready for review: no required check fails and every counted review has a reply. Request a review on GitHub, then press Babysit PR again once it is approved", "babysit": null, "claim": null}` and stop | patch `{"needs": "PR #<n> is ready for review: no required check fails and every counted review has a reply. Request a review on GitHub, then press Babysit PR again once it is approved", "babysit": null, "claim": null}` and stop |
 | `rebase` | `mergeStateStatus` is `DIRTY` | run `git -C "$WT" fetch origin "<base>"`, merge `origin/<base>` (the reading's `base`) into `$WT`, fix the conflicts, commit, push | hand back |
