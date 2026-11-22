@@ -17,6 +17,9 @@
                          --chat-file <file>
                                             make the dashboard's backlog decision from a person's chat
                                             message, print the job as JSON
+  factory.py lesson <slug>/<job-id> --fact-file <file> [--why-file <file>]
+                                            append a lesson to the project's notes.md under the retro caps,
+                                            or queue it as a lesson card
   factory.py triage replay <project-slug> [--threshold N]
                                             score a threshold against past human backlog decisions, print JSON
   factory.py bench score <cases-file> <arm-folder>...
@@ -2570,28 +2573,90 @@ def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None)
     print(json.dumps({"id": job_id, "project": slug, "decision": stored, "line": raw}, indent=2))
 
 
-def backlog_lesson(target, fact_file, why_file):
-    """Queue a held lesson card: a backlog line only a person's dashboard approve turns into a notes.md bullet."""
+def lesson_target(target, usage):
+    """(slug, job) from <slug>/<job-id>, or exit 2 with usage."""
     m = re.fullmatch(r"([\w-]+)/(\w[\w.-]{0,80})", target, re.ASCII)
     if not m or ".." in target:
-        fail(BACKLOG_USAGE, 2)
-    slug, job = m.groups()
-    home = factory_home()
-    texts = []
-    for path, flag, hi in ((fact_file, "--fact-file", 200), (why_file, "--why-file", 300)):
-        text = read_chat_file(path, flag).strip()
-        why = check_text(text, 1, hi)
-        if why:
-            fail(f"{flag} {why}; nothing was queued", 2)
-        key = env_secret(home, text)
-        if key:
-            fail(f"{flag} holds this device's {key}; nothing was queued", 2)
-        texts.append(text)
-    fact, why = texts
+        fail(usage, 2)
+    return m.groups()
+
+
+def lesson_text(home, path, flag, hi):
+    """The stripped text of a lesson file flag, or exit 2 when it is too long, holds a link or a device secret."""
+    text = read_chat_file(path, flag).strip()
+    why = check_text(text, 1, hi)
+    if why:
+        fail(f"{flag} {why}; nothing was queued", 2)
+    key = env_secret(home, text)
+    if key:
+        fail(f"{flag} holds this device's {key}; nothing was queued", 2)
+    return text
+
+
+def queue_lesson(slug, job, fact, why):
+    """Queue a held lesson card: a backlog line only a person's dashboard approve turns into a notes.md bullet."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     context = (f"Recommend: approve\n\nApprove adds this bullet to {slug}/notes.md. No job starts.\n"
                f"Why it waits: {why}\n\nLesson: from {job}, queued {today}")
     return backlog_add(f"{slug}: Lesson: {fact}", context)
+
+
+def backlog_lesson(target, fact_file, why_file):
+    slug, job = lesson_target(target, BACKLOG_USAGE)
+    home = factory_home()
+    fact = lesson_text(home, fact_file, "--fact-file", 200)
+    why = lesson_text(home, why_file, "--why-file", 300)
+    return queue_lesson(slug, job, fact, why)
+
+
+LESSON_USAGE = "usage: lesson <slug>/<job-id> --fact-file <file> [--why-file <file>]"
+
+
+def lesson_append(home, slug, job, fact):
+    """Append fact as one bullet to <slug>/notes.md through the retro route, under its caps. A missing or
+    empty notes.md, or a refused edit, queues a lesson card instead. A fact already there writes nothing."""
+    file = f"{slug}/notes.md"
+    status, _, text = api(home, "GET", f"/api/project-documents/{file}", ok=(200, 404))
+    lines = text.split("\n") if status == 200 else []
+    status, _, history = api(home, "GET", f"/api/project-history/{file}", ok=(200, 404))
+    versions = json.loads(history) if status == 200 else []
+    if any(line == f"- {fact}" or line.startswith(f"- {fact} (") for line in lines):
+        print(f"already in {file}: {fact}")
+        return False
+    filled = [line for line in lines if line.strip()]
+    if not filled:
+        return queue_lesson(slug, job, fact, f"{file} is missing or empty, and only a person adds its first bullet.")
+    stamp = datetime.now(timezone.utc)
+    bullet = f"- {fact} ({job}, {stamp:%Y-%m-%d})"
+    body = {"schema": RETRO_DOC_EDIT_SCHEMA, "run": "lesson-" + stamp.strftime("%Y%m%dT%H%M%SZ"),
+            "base_version": versions[0]["version"] if versions else 0,
+            "find": filled[-1], "replace": filled[-1] + "\n" + bullet, "summary": f"Notes: lesson from {job}"}
+    status, headers, text = api(home, "PUT", f"/api/project-retro/{file}", json.dumps(body),
+                                ok=(200, 400, 403, 404, 409, 412, 413, 429),
+                                headers={"Content-Type": "application/json"})
+    if status == 200:
+        print(f"added lesson to {file} version {headers['X-Project-Version']}: {bullet}")
+        return True
+    reason = f"{status} {printable_line(text, 200)}"
+    print(f"not appended: {reason}")
+    return queue_lesson(slug, job, fact, printable_line("Not appended directly: " + reason, 300))
+
+
+def lesson_cmd(target, *rest):
+    flags = dict(zip(rest[::2], rest[1::2]))
+    if len(rest) not in (2, 4) or len(flags) != len(rest) // 2 or "--fact-file" not in flags \
+            or not set(flags) <= {"--fact-file", "--why-file"}:
+        fail(LESSON_USAGE, 2)
+    slug, job = lesson_target(target, LESSON_USAGE)
+    home = factory_home()
+    fact = lesson_text(home, flags["--fact-file"], "--fact-file", 200)
+    why = flags.get("--why-file") and lesson_text(home, flags["--why-file"], "--why-file", 300)
+    projects = {p["slug"] for p in json.loads(api(home, "GET", "/projects.json")[2])}
+    if slug not in projects:
+        fail(f"no factory project {slug}. Known projects: {', '.join(sorted(projects)) or 'none'}", 4)
+    if why:
+        return queue_lesson(slug, job, fact, why)
+    return lesson_append(home, slug, job, fact)
 
 
 def backlog_cmd(sub, item, *rest):
@@ -14459,6 +14524,7 @@ COMMANDS["host"] = (host_cmd, 3, 3)
 COMMANDS["cleanup"] = (cleanup, 1, 1)
 COMMANDS["clean"] = (clean_cmd, 2, 3)
 COMMANDS["deny-notes"] = (deny_notes_cmd, 1, 2)
+COMMANDS["lesson"] = (lesson_cmd, 3, 5)
 COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["orphans"] = (orphans_cmd, 0, 0)
