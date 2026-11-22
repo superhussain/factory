@@ -1561,6 +1561,34 @@ async function capture(outdir, referencePath) {
         await page.waitForSelector(".card");
         await showCaptureToasts(page);
       });
+      await view("notify-toast-bottom-center-status-1280", 1280, 900, "light", async (page) => {
+        await page.evaluate(() => localStorage.setItem("factory-toast-position", "bottom-center"));
+        await page.reload({ waitUntil: "networkidle0" });
+        await page.waitForSelector(".card");
+        await showCaptureToasts(page);
+        await page.evaluate(() => showBoardStatus("Could not resume the factory. Try again."));
+        await page.waitForFunction(() => document.getElementById("board-status").textContent);
+        return page.evaluate(() => ({
+          x: 0,
+          y: innerHeight - 220,
+          width: innerWidth,
+          height: 220,
+        }));
+      });
+      await view("notify-toast-bottom-status-390", 390, 844, "dark", async (page) => {
+        await page.evaluate(() => localStorage.removeItem("factory-toast-position"));
+        await page.reload({ waitUntil: "networkidle0" });
+        await page.waitForSelector(".card");
+        await showCaptureToasts(page);
+        await page.evaluate(() => showBoardStatus("Could not resume the factory. Try again."));
+        await page.waitForFunction(() => document.getElementById("board-status").textContent);
+        return page.evaluate(() => ({
+          x: 0,
+          y: innerHeight - 220,
+          width: innerWidth,
+          height: 220,
+        }));
+      });
       await view(
         "notify-toast-swipe-390",
         390,

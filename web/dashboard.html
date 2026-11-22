@@ -596,11 +596,11 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .notify-toasts[data-position="top-center"] { top: 16px; left: 50%; transform: translateX(-50%); }
   .notify-toasts[data-position="top-right"] { top: 16px; right: 16px; }
   .notify-toasts[data-position="bottom-left"] { bottom: 16px; left: 16px; }
-  .notify-toasts[data-position="bottom-center"] { bottom: 16px; left: 50%; transform: translateX(-50%); }
+  .notify-toasts[data-position="bottom-center"] { bottom: calc(16px + var(--board-status-space, 0px)); left: 50%; transform: translateX(-50%); }
   .notify-toasts[data-position="bottom-right"] { bottom: 16px; right: 16px; }
   .notify-toast.dragging { user-select: none; cursor: grabbing; }
   .notify-toast .notification-link { flex: 1; min-width: 0; border-bottom: 0; }
-  @media (max-width: 760px) { .notify-toasts[data-position] { left: 16px; right: 16px; width: auto; transform: none; } }
+  @media (max-width: 760px) { .notify-toasts[data-position] { left: 16px; right: 16px; width: auto; transform: none; } .notify-toasts[data-position^="bottom"] { bottom: calc(16px + var(--board-status-space, 0px)); } }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
   @media (hover: hover) { .pr-link:hover { text-decoration: underline; } }
   .pr-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -7970,6 +7970,13 @@ $('board-status').addEventListener('pointerdown', holdBoardStatus);
 $('board-status').addEventListener('focusin', holdBoardStatus);
 $('board-status').addEventListener('focusout', releaseBoardStatus);
 document.addEventListener('pointerdown', (e) => { if (!$('board-status').contains(e.target)) releaseBoardStatus(); });
+
+// The toast stack moves up while the status line shares its bottom slot.
+function syncToastOffset() {
+  const h = $('board-status').offsetHeight;
+  $('notify-toasts').style.setProperty('--board-status-space', h ? h + 8 + 'px' : '0px');
+}
+new ResizeObserver(syncToastOffset).observe($('board-status'));
 
 function showCopyStatus(text) {
   clearCopyStatus();
