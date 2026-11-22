@@ -496,7 +496,9 @@ exits 5.
 Pickup runs `outcomes record <slug>` on its first run of each local date that
 `<home>/outcomes-record.json` does not record, for each project whose `paths.md`
 checkout folder exists, and prints one line such as
-`outcomes record alpha: recorded 1 outcomes on the board`.
+`outcomes record alpha: recorded 1 outcomes on the board`. When a job comes back
+unknown, it also prints the first one on stderr, such as
+`factory.py: outcomes record alpha: 1017-add-x is unknown: no merge commit from GitHub`.
 
 The Retros page's Cost per merged PR section shows recorded outcomes as a revert
 count beside tokens per merged PR.
@@ -585,9 +587,11 @@ For each case, one at a time, it:
 5. Removes the scratch worktree without `--force`. When that fails it names the
    folder on stderr for you to remove.
 
-It prints one line per case and a total, and exits 1 when any case failed:
+Before each case it runs, it prints `<case-id>: running review-<role> ...`. It
+then prints one line per case and a total, and exits 1 when any case failed:
 
 ```text
+1018-add-y: running review-code ...
 1018-add-y: wrote review-code.md (VERDICT: CHANGES), 300 s, 250000 tokens
 1019-add-z: skipped, review-code.md already exists
 replayed 1, skipped 1, failed 0 of 2 cases into opus-medium
@@ -639,7 +643,7 @@ so a bad input prints nothing on stdout. Errors print after `factory.py: `:
 
 | Input | Exit | Message |
 | --- | --- | --- |
-| wrong arguments | 2 | `usage: factory.py bench score <cases-file> <arm-folder>...` |
+| wrong arguments | 2 | `usage: factory.py bench score <cases-file> <arm-folder>... \| bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] \| bench cases <project-slug>` |
 | no cases file | 4 | `bench: no cases file at <path>` |
 | not `{"cases": [non-empty list]}` | 2 | `bench: <path> is not a cases file: needs {"cases": [...]}` |
 | bad case field | 2 | `bench: <path>: case <n>: <reason>` |

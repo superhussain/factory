@@ -454,5 +454,12 @@ class TrialResumeTest(TrialWorkerCase):
         self.assertIn(factory.TRIAL_RESUME_ONLY, err)
         self.assertNotIn("Access rejected", err)
 
+    def test_generic_403_is_access_rejected(self):
+        code, out, err, _, _ = self.resume("factory", REASON, reply=(403, b"<html><body>Forbidden</body></html>"))
+        self.assertEqual((code, out), (5, ""))
+        self.assertIn("Access rejected", err)
+        self.assertNotIn(factory.TRIAL_RESUME_ONLY, err)
+
+
 if __name__ == "__main__":
     unittest.main()

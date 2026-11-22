@@ -11,7 +11,8 @@ from unittest.mock import Mock, patch
 from support import IsolatedTestCase, http_fixture, invoke, load_runtime
 
 USAGE = ("factory.py: usage: factory.py bench score <cases-file> <arm-folder>... | "
-         "bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]\n")
+         "bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] | "
+         "bench cases <project-slug>\n")
 HEAD = "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
 
 
@@ -242,7 +243,7 @@ class BenchErrorTest(BenchCase):
                                  f"bench: arm name {name} must be unique letters, digits, ., _ or -")
 
 
-FAKE_CLAUDE = """import json, os, sys
+FAKE_CLAUDE = """import json, os, sys, time
 from pathlib import Path
 prompt = sys.stdin.read()
 log = Path(os.environ["FAKE_LOG"])
@@ -250,6 +251,7 @@ calls = json.loads(log.read_text()) if log.exists() else []
 calls.append({"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": prompt,
               "ceiling": os.environ.get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS")})
 log.write_text(json.dumps(calls))
+time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
 your = next(line.split(": ", 1)[1] for line in prompt.splitlines() if line.startswith("Your file: "))
 if not os.environ.get("FAKE_NO_REVIEW"):
     Path(your).write_text("VERDICT: CHANGES\\n\\n- `worker/export.js:44` drops the header row.\\n")
@@ -265,6 +267,7 @@ sys.exit(int(os.environ.get("FAKE_EXIT", "0")))
 REVIEW = "VERDICT: CHANGES\n\n- `worker/export.js:44` drops the header row.\n"
 MODELS = {"claude-opus-5-5": {"input": 200000, "output": 20000, "cache_write": 30000, "cache_read": 999}}
 SUMMARY = "replayed {}, skipped {}, failed {} of 1 cases into opus-medium\n"
+RUNNING = "1018-add-y: running review-code ...\n"
 
 
 class BenchReplayCase(BenchCase):
@@ -339,7 +342,7 @@ class BenchReplayTest(BenchReplayCase):
     def test_running_example(self):
         code, out, err = self.replay("--role", "review-code", "--model", "claude-opus-5-5")
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, "1018-add-y: wrote review-code.md (VERDICT: CHANGES), 300 s, 250000 tokens\n"
+        self.assertEqual(out, RUNNING + "1018-add-y: wrote review-code.md (VERDICT: CHANGES), 300 s, 250000 tokens\n"
                          + SUMMARY.format(1, 0, 0))
         case_dir = self.arm / "1018-add-y"
         self.assertEqual((case_dir / "review-code.md").read_text(encoding="utf-8"), REVIEW)
@@ -408,7 +411,7 @@ class BenchReplayTest(BenchReplayCase):
     def test_claude_failure_keeps_run_json(self):
         os.environ["FAKE_EXIT"] = "3"
         code, out, err = self.replay("--role", "review-code")
-        self.assertEqual((code, out, err), (1, "1018-add-y: failed: claude exited 3, see replay.log\n"
+        self.assertEqual((code, out, err), (1, RUNNING + "1018-add-y: failed: claude exited 3, see replay.log\n"
                                             + SUMMARY.format(0, 0, 1), ""))
         case_dir = self.arm / "1018-add-y"
         self.assertFalse((case_dir / "review-code.md").exists())
@@ -419,11 +422,23 @@ class BenchReplayTest(BenchReplayCase):
     def test_no_review_written(self):
         os.environ["FAKE_NO_REVIEW"] = "1"
         code, out, err = self.replay("--role", "review-code")
-        self.assertEqual((code, out, err), (1, "1018-add-y: failed: no review-code.md with a VERDICT line, "
+        self.assertEqual((code, out, err), (1, RUNNING + "1018-add-y: failed: no review-code.md with a VERDICT line, "
                                             "see replay.log\n" + SUMMARY.format(0, 0, 1), ""))
         case_dir = self.arm / "1018-add-y"
         self.assertFalse((case_dir / "review-code.md").exists())
         self.assertEqual(json.loads((case_dir / "run.json").read_text(encoding="utf-8"))["exit"], 0)
+
+    def test_timeout(self):
+        os.environ["FAKE_SLEEP"] = "30"
+        with patch.object(self.module, "BENCH_REPLAY_SECONDS", 1):
+            code, out, err = self.replay("--role", "review-code")
+        self.assertEqual((code, out, err), (1, RUNNING + "1018-add-y: failed: claude timed out after 1 s\n"
+                                            + SUMMARY.format(0, 0, 1), ""))
+        case_dir = self.arm / "1018-add-y"
+        self.assertFalse((case_dir / "review-code.md").exists())
+        run_json = json.loads((case_dir / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual((run_json["exit"], run_json["models"]), (None, {}))
+        self.assertEqual(len(self.git("worktree", "list").splitlines()), 1)
 
     def test_commit_missing_after_fetch(self):
         absent = "0" * 40
@@ -431,8 +446,8 @@ class BenchReplayTest(BenchReplayCase):
         cases["cases"][0]["head"] = absent
         self.cases.write_text(json.dumps(cases), encoding="utf-8")
         code, out, err = self.replay("--role", "review-code")
-        self.assertEqual((code, out, err), (1, f"1018-add-y: failed: commit {absent} is not in {self.repo} after "
-                                            "fetch\n" + SUMMARY.format(0, 0, 1), ""))
+        self.assertEqual((code, out, err), (1, RUNNING + f"1018-add-y: failed: commit {absent} is not in "
+                                            f"{self.repo} after fetch\n" + SUMMARY.format(0, 0, 1), ""))
         self.assertEqual(self.calls(), [])
 
     def test_no_merge_base(self):
@@ -440,8 +455,8 @@ class BenchReplayTest(BenchReplayCase):
         first = self.git("commit-tree", tree, "-m", "unrelated")
         self.merges = {18: self.git("commit-tree", tree, "-p", first, "-m", "unrelated merge")}
         code, out, err = self.replay("--role", "review-code")
-        self.assertEqual((code, out, err), (1, f"1018-add-y: failed: no merge base of {self.merges[18]}^1 and "
-                                            f"{self.head} in {self.repo}\n" + SUMMARY.format(0, 0, 1), ""))
+        self.assertEqual((code, out, err), (1, RUNNING + "1018-add-y: failed: no merge base of "
+                                            f"{self.merges[18]}^1 and {self.head} in {self.repo}\n" + SUMMARY.format(0, 0, 1), ""))
         self.assertEqual(self.calls(), [])
         self.assertFalse((self.arm / "1018-add-y").exists())
 

@@ -13375,12 +13375,19 @@ def outcomes_pickup_record(home):
             print(f"factory.py: outcomes record {slug} stopped (exit {e.code}); it runs again tomorrow",
                   file=sys.stderr)
             continue
-        print(f"outcomes record {slug}: {out.getvalue().splitlines()[-1]}")
+        lines = out.getvalue().splitlines()
+        for line in lines:
+            m = re.match(rf"{re.escape(slug)} unknown: (\S+) \((.*?)\)(?:, |$)", line)
+            if m:
+                print(f"factory.py: outcomes record {slug}: {m[1]} is unknown: {m[2]}", file=sys.stderr)
+                break
+        print(f"outcomes record {slug}: {lines[-1]}")
 
 
 BENCH_WEIGHTS = {"high": 3, "medium": 2, "low": 1}
 BENCH_USAGE = ("usage: factory.py bench score <cases-file> <arm-folder>... | "
-               "bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]")
+               "bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] | "
+               "bench cases <project-slug>")
 
 
 def bench_cases(path):
@@ -13661,6 +13668,8 @@ def bench_replay(*args):
     rows = bench_replay_plan(factory_home(), cases)
     counts = {True: 0, None: 0, False: 0}
     for row in rows:
+        if not (arm / row["id"] / f"{role}.md").exists():
+            print(f"{row['id']}: running {role} ...", flush=True)
         ok, line = bench_replay_case(row, arm, role, model)
         counts[ok] += 1
         print(f"{row['id']}: {'failed: ' if ok is False else ''}{line}", flush=True)
