@@ -13,8 +13,8 @@ factory = load_runtime()
 JOB = "001-sample-job"
 
 
-def board(round=None):
-    job = {"id": JOB, "project": "sample", "title": "Sample job", "stage": "review"}
+def board(round=None, **extra):
+    job = {"id": JOB, "project": "sample", "title": "Sample job", "stage": "review", **extra}
     if round is not None:
         job["round"] = round
     return {"updated": "", "jobs": [job]}
@@ -67,8 +67,8 @@ class PreReviewTest(IsolatedTestCase):
         self.commit(checks, text)
         self.git("push", "-q", "-f", "origin", "HEAD:refs/heads/main")
 
-    def run_gate(self, round=None):
-        routes = {"/api/board": (200, board(round))}
+    def run_gate(self, round=None, **extra):
+        routes = {"/api/board": (200, board(round, **extra))}
         with http_fixture(routes) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
             return invoke(factory, ["--home", str(self.home), "pre-review", f"sample/{JOB}"])
@@ -407,7 +407,7 @@ class PreReviewTest(IsolatedTestCase):
         self.git("replace", self.git("rev-parse", "HEAD:README.md"), self.git("rev-parse", "HEAD~1:README.md"))
         self.assertIsNone(factory.fetch_base(self.wt, "main", "example/sample"))
         self.assertIn("README.md", factory.changed_files(self.wt, "main"))
-        self.assertIn("README.md", factory.diff_numstat(self.wt, "main"))
+        self.assertIn("README.md", factory.diff_numstat(self.wt, "refs/remotes/origin/main"))
         self.assertIn("README.md", factory.diff_ranges(self.wt, "main", "example/sample")[0])
         (self.wt / ".git" / "info" / "grafts").write_text(self.git("rev-parse", "HEAD") + "\n")
         self.assertIn("README.md", factory.changed_files(self.wt, "main"))
@@ -491,8 +491,27 @@ class PreReviewTest(IsolatedTestCase):
         self.assertIn("Budget: within (files 1, limit 4; lines 10, limit 900)\n", text)
         self.assertNotIn("## ", text)
 
-    def assertBudgetNone(self, reason):
-        code, out, err = self.run_gate()
+    def stacked_rider(self):
+        self.spec()
+        self.base([check("lint", "pass")])
+        self.write({f"src/lead{i}.py": 120 for i in range(6)})
+        self.git("branch", "factory/000-sample-lead")
+        self.write({"tools/a.py": 10})
+        return {"stacked": True, "refs": [{"kind": "batched-into", "id": "000-sample-lead"}]}
+
+    def test_budget_stacked_rider_counts_own_commits(self):
+        code, out, err = self.run_gate(**self.stacked_rider())
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out)["budget"]["result"], "within")
+        self.assertIn("Budget: within (files 1, limit 4; lines 10, limit 900)\n", self.out.read_text())
+
+    def test_budget_stacked_rider_without_lead_branch(self):
+        extra = self.stacked_rider()
+        self.git("branch", "-D", "factory/000-sample-lead")
+        self.assertBudgetNone("the branch diff could not be read", **extra)
+
+    def assertBudgetNone(self, reason, **extra):
+        code, out, err = self.run_gate(**extra)
         self.assertEqual(err, "")
         self.assertEqual(json.loads(out)["budget"], {
             "result": "none", "files": 0, "lines": 0, "expected_files": 0, "expected_lines": 0, "file_limit": 0,
