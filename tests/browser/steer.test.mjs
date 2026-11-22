@@ -58,10 +58,15 @@ const VIEWPORTS = [
 const HELP =
   "114-steer-export keeps running. The builder reads your note when its next round starts. A note guides work inside the spec and cannot add scope.";
 
-// The Worker takes one appended note per row and write, so the seed adds the notes a round at a
-// time after a write that drops them, with 117 and 119 at build until the last write moves them back.
+// The Worker takes one appended note per row and write, and refuses a write that drops stored notes,
+// so the seed first drops the steered rows, then adds the notes a round at a time, with 117 and 119
+// at build until the last write moves them back.
 async function seedSteered(origin) {
   const rounds = Math.max(...JOBS.map((j) => j.steer?.length ?? 0));
+  await seedBoard(
+    origin,
+    JOBS.filter((j) => !j.steer),
+  );
   for (let n = 0; n <= rounds; n++)
     await seedBoard(
       origin,
