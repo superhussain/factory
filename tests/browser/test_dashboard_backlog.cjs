@@ -64,7 +64,7 @@ function helpers(fetch, extra = {}) {
         script.indexOf("function answersMarkdown("),
       ) +
       script.slice(script.indexOf("function ideaSlug("), script.indexOf("let ideaEditor =")) +
-      "\nthis.api = { backlogItems, parseBacklogContext, backlogAnswersText, loadBacklog, ideaWithContext, addBacklogJob, backlogReworkHistory, markBacklogLine, removeBacklogJob," +
+      "\nthis.api = { backlogItems, parseBacklogContext, isLessonCard, backlogAnswersText, loadBacklog, ideaWithContext, addBacklogJob, backlogReworkHistory, markBacklogLine, removeBacklogJob," +
       " casBacklog, decideBacklog, backlogDepends, boardSaveError, backlogBusy, backlogPending, BOARD_UNCHANGED, get backlog() { return backlog; } };",
     context,
   );
@@ -1822,9 +1822,104 @@ async function browserTest(url) {
   }
 }
 
+// A lesson card: approve posts the Worker route, then adds a closed job and checks the line off.
+async function offlineLesson() {
+  const line =
+    "- [ ] sample: Lesson: Worker route changes run pnpm test:protocol; pnpm test skips them.";
+  const backlog = [
+    "# Backlog",
+    line,
+    "  Recommend: approve",
+    "",
+    "  Approve adds this bullet to sample/notes.md. No job starts.",
+    "  Why it waits: The close reason names the command but not which routes need it.",
+    "",
+    "  Lesson: from 001-capture, queued 2026-10-27",
+    "- [ ] sample: Lesson: a plain line",
+    "",
+  ].join("\n");
+  const run = (answer) => {
+    const s = store({ updated: "old", jobs: [] }, backlog);
+    s.posts = [];
+    const { api } = helpers(async (url, opts) => {
+      if (url !== "./api/backlog/lesson") return s.fetch(url, opts);
+      s.posts.push(clone([opts.method, opts.headers, JSON.parse(opts.body)]));
+      return answer();
+    });
+    return { s, api, items: api.backlogItems(backlog) };
+  };
+  const saved = { file: "sample/notes.md", version: 8, added: true };
+  const { s, api, items } = run(() => response(saved));
+  const [card, plain] = items;
+  assert.deepEqual([api.isLessonCard(card), api.isLessonCard(plain)], [true, false]);
+  const id = await api.decideBacklog(card, "approved", "", "");
+  assert.deepEqual(s.posts, [["POST", { "Content-Type": "application/json" }, { line }]]);
+  assert.deepEqual(clone(s.board.jobs), [
+    {
+      id,
+      project: "sample",
+      title: card.text,
+      idea: card.text,
+      stage: "closed",
+      updated: now,
+      done: now,
+      note: "lesson added to sample/notes.md version 8",
+      capture_id: "uuid-1",
+      backlog: { line, decision: "approved", at: now, decider: "person" },
+    },
+  ]);
+  assert.equal(s.backlog.split("\n")[1], "- [x] sample: " + card.feature + " (" + id + ")");
+  const board = clone(s.board);
+  assert.equal(
+    api.removeBacklogJob(board, id, "uuid-1"),
+    "removed",
+    "a lesson job undoes like a deny",
+  );
+
+  const refused = run(() => response("that line is not an open lesson card in the backlog", 409));
+  await assert.rejects(refused.api.decideBacklog(refused.items[0], "approved", "", ""), {
+    message: "saving the lesson failed: 409 that line is not an open lesson card in the backlog",
+  });
+  assert.deepEqual([refused.s.board.jobs, refused.s.backlog], [[], backlog]);
+  const dropped = run(() => {
+    throw new TypeError("connection reset");
+  });
+  await assert.rejects(dropped.api.decideBacklog(dropped.items[0], "approved", "", ""), {
+    message: "Not confirmed: connection reset. Try again. It will not add a duplicate.",
+  });
+  assert.deepEqual([dropped.s.board.jobs, dropped.s.backlog], [[], backlog]);
+  const denied = run(() => assert.fail("deny never posts the lesson route"));
+  await denied.api.decideBacklog(denied.items[0], "denied", "", "");
+  assert.equal(denied.s.board.jobs[0].note, "denied from the backlog");
+
+  const view = vm.createContext({
+    ...api,
+    md: (t) => t,
+    autolink: (t) => t,
+    backlogHistoryHtml: () => "",
+    backlogDrafts: new Map(),
+    backlogText: backlog,
+    jobs: [],
+    archivedJobs: new Map(),
+  });
+  vm.runInContext(
+    script.match(/^function esc\(s\) \{[\s\S]*?^\}/m)[0] +
+      script.match(/^function renderBacklogDecision\([\s\S]*?^\}/m)[0] +
+      "\nthis.render = renderBacklogDecision;",
+    view,
+  );
+  const page = view.render(card, "");
+  assert.ok(page.includes("It adds the lesson to sample/notes.md. No job starts."));
+  assert.ok(!page.includes("pickup starts it"));
+  assert.ok(!page.includes('value="rework"'), "a lesson card offers no Rework");
+  assert.ok(view.render(plain, "").includes('value="rework"'));
+  console.log("PASS backlog offline lesson");
+}
+
 (async () => {
   await offline();
   await offlineContext();
+  await offlineLesson();
   const i = process.argv.indexOf("--browser");
   if (i >= 0) await browserTest(process.argv[i + 1]);
 })().catch((error) => {

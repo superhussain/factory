@@ -7483,6 +7483,11 @@ function addIdea(board, snap, now) {
 // factory.py BACKLOG_LINE, and the (kind id) suffix /factory next turns into refs.
 const BACKLOG_LINE = /^- \[ \] ([\w-]+): (\S.*)$/;
 const BACKLOG_REF = / \((rework-of|follow-up-of|sub-job-of|depends-on) (\w[\w.-]*)\)$/;
+// factory.py LESSON_MARK: a lesson card's provenance line. Approve adds a notes.md bullet, never a job.
+const LESSON_CARD_MARK = /^Lesson: from \w[\w.-]{0,80}, queued \d{4}-\d\d-\d\d$/m;
+function isLessonCard(item) {
+  return item.feature.startsWith('Lesson: ') && LESSON_CARD_MARK.test(item.context ?? '');
+}
 let backlog = [];               // parsed items from the last good read
 let backlogText = '';           // the last good read's whole text, checked lines included
 let backlogLoaded = false;      // a 200 or 404 has been read at least once
@@ -7657,7 +7662,7 @@ function ideaWithContext(head, context, tail) {
 }
 
 // Adds the decided item as a job, or returns the id it already saved under captureId.
-function addBacklogJob(board, item, decision, notes, answers, captureId, now) {
+function addBacklogJob(board, item, decision, notes, answers, captureId, now, lesson) {
   const prior = board.jobs.find((j) => j.capture_id === captureId);
   if (prior) {
     if (prior.backlog?.line !== item.raw) throw new Error('this decision was already saved as ' + prior.id + ' for another item, so nothing was changed.');
@@ -7668,7 +7673,11 @@ function addBacklogJob(board, item, decision, notes, answers, captureId, now) {
   const note = notes.trim();
   const ans = answers.trim();
   const answered = ans ? { answers: ans } : {};
-  board.jobs.push(decision === 'approved'
+  board.jobs.push(lesson
+    ? { id, project: item.project, title: ideaTitle(item.text), idea: item.text, stage: 'closed', updated: now,
+        done: now, note: 'lesson added to ' + lesson.file + ' version ' + lesson.version, capture_id: captureId,
+        backlog: { line: item.raw, decision: 'approved', at: now, ...(note ? { notes: note } : {}), ...answered, decider: 'person' }, ...refs }
+    : decision === 'approved'
     ? { id, project: item.project, title: ideaTitle(item.text), stage: 'idea', updated: now,
         idea: ideaWithContext(item.text, item.context,
           (note ? '\n\nNotes from the backlog decision:\n' + note : '') + (ans ? '\n\nAnswers from the backlog decision:\n' + ans : '')),
@@ -7717,7 +7726,8 @@ function removeBacklogJob(board, id, captureId) {
   const i = board.jobs.findIndex((j) => j.id === id);
   const j = board.jobs[i];
   if (!j || j.capture_id !== captureId ||
-    !((j.stage === 'idea' && j.claim == null) || (j.stage === 'closed' && j.backlog?.decision === 'denied'))) return 'kept';
+    !((j.stage === 'idea' && j.claim == null) || (j.stage === 'closed' && j.backlog?.decision === 'denied') ||
+      (j.stage === 'closed' && j.note?.startsWith('lesson added to ')))) return 'kept';
   board.jobs.splice(i, 1);
   board.updated = isoNow();
   return 'removed';
@@ -7754,6 +7764,24 @@ async function casBacklog(change) {
   throw new Error('the backlog kept changing, so nothing was saved after 10 tries');
 }
 
+// POST /api/backlog/lesson: the Worker appends the card's bullet to notes.md. A retry answers added: false.
+async function saveLesson(item) {
+  let r;
+  try {
+    r = await fetch('./api/backlog/lesson', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ line: item.raw }) });
+  } catch (x) {
+    x.uncertain = true;
+    throw x;
+  }
+  if (r.headers.get('X-Factory-Offline') || !r.ok) {
+    const x = new Error('saving the lesson failed: ' + r.status);
+    x.uncertain = !!r.headers.get('X-Factory-Offline');
+    try { x.message += ' ' + (await r.text()).slice(0, 200); } catch {}
+    throw x;
+  }
+  return r.json();
+}
+
 // Board write first, so the id exists before the line names it. captureId makes a retry reuse the job.
 async function decideBacklog(item, decision, notes, answers) {
   let captureId = backlogPending.get(item.raw);
@@ -7773,8 +7801,9 @@ async function decideBacklog(item, decision, notes, answers) {
       }
       item = { ...item, refs: [...item.refs, ...refs] };
     }
+    const lesson = decision === 'approved' && isLessonCard(item) ? await saveLesson(item) : undefined;
     const now = isoNow();
-    const id = await casBoard((board) => addBacklogJob(board, item, decision, notes, answers, captureId, now));
+    const id = await casBoard((board) => addBacklogJob(board, item, decision, notes, answers, captureId, now, lesson));
     if (await casBacklog((text) => markBacklogLine(text, item, id)) === 'gone') {
       const kept = await casBoard((board) => removeBacklogJob(board, id, captureId) === 'kept' ? BOARD_UNCHANGED : undefined);
       throw new Error(kept === BOARD_UNCHANGED
@@ -9810,6 +9839,7 @@ function renderBacklogDecision(item, triageHtml) {
   const ctx = item.context === undefined ? null : parseBacklogContext(item.context);
   const draft = backlogDrafts.get(item.raw) ?? { pick: '', notes: '', answers: [] };
   const { waiting } = backlogDepends(item.context ?? '', backlogText);
+  const lesson = isLessonCard(item);
   const radio = (value, name, desc, key) =>
     '<label class="ask-option"><input type="radio" name="backlog-pick" value="' + value + '"' + (key ? ' aria-keyshortcuts="' + key + '"' : '') + (draft.pick === value ? ' checked' : '') +
     '><span><strong>' + name + '</strong>' +
@@ -9839,9 +9869,9 @@ function renderBacklogDecision(item, triageHtml) {
     '<form id="backlog-form" novalidate><fieldset class="ask"><legend>Decision</legend>' +
     '<p>What should happen to this backlog item?</p><p class="muted backlog-key-hint">' + (ctx?.questions.length ? 'Choose one. Answer the questions below first, then press A to approve or D to deny, and the next item opens.' : 'Choose one. Press A to approve or D to deny, then the next item opens.') + '</p>' +
     '<p class="muted backlog-tap-hint">On a touch screen, the decision submits by itself once you tap Approve or Deny and every question has an answer. Write any notes first.</p>' +
-    radio('approved', 'Approve', 'It moves to the idea column, and pickup starts it.', 'a') +
+    radio('approved', 'Approve', lesson ? 'It adds the lesson to ' + esc(item.project) + '/notes.md. No job starts.' : 'It moves to the idea column, and pickup starts it.', 'a') +
     radio('denied', 'Deny', 'It moves to closed and is not built.', 'd') +
-    radio('rework', 'Rework', 'An agent rewrites it from your notes, and it comes back here for another decision.') +
+    (lesson ? '' : radio('rework', 'Rework', 'An agent rewrites it from your notes, and it comes back here for another decision.')) +
     '<label class="ask-other-label"><span id="backlog-notes-label">Notes (optional)</span><textarea class="ask-other" id="backlog-notes" maxlength="2000" rows="4"' +
     ' placeholder="Add context for the agent that picks it up, say why you denied it, or say what to change.">' + esc(draft.notes) + '</textarea></label>' +
     '</fieldset>' +

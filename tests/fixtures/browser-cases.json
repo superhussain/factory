@@ -95,6 +95,7 @@
    "cases": [
     "PASS backlog offline helpers",
     "PASS backlog offline context",
+    "PASS backlog offline lesson",
     "PASS backlog browser approve",
     "PASS backlog browser deny",
     "PASS backlog browser gone line",
