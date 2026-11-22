@@ -3848,7 +3848,7 @@ $('audit-flags-prev').addEventListener('click', () => auditFlagsMove(-1, $('audi
 $('audit-flags-next').addEventListener('click', () => auditFlagsMove(1, $('audit-flags-next'), $('audit-flags-prev')));
 
 // Cost per merged PR: the Worker's /api/spend rollup, one table per project.
-let spend = null, spendFailed = false;
+let spend = null, spendExpected = [], spendFailed = false;
 
 async function loadSpend() {
   spendFailed = false;
@@ -3856,7 +3856,9 @@ async function loadSpend() {
   try {
     const r = await fetch('./api/spend', { cache: 'no-store' });
     if (r.status !== 200) throw new Error(String(r.status));
-    spend = (await r.json()).rows;
+    const body = await r.json();
+    spend = body.rows;
+    spendExpected = body.expected ?? [];
     spendFailed = false;
   } catch { spend = null; spendFailed = true; }
   renderSpend();
@@ -3867,7 +3869,7 @@ function renderSpend() {
   $('spend-status').textContent = spendFailed ? 'Could not load cost per merged PR. Reload to try again.'
     : spend === null ? 'Loading cost per merged PR…'
     : !rows.length ? 'No merged or closed jobs in the last 8 weeks.'
-    : 'Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged.';
+    : 'Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged. Set weekly_tokens in a project file to see this week\'s share of it and get a nudge at 50, 80 and 100 percent.';
   const num = (n) => n.toLocaleString('en-US');
   const cell = (tag, text) => {
     const el = document.createElement(tag);
@@ -3899,7 +3901,11 @@ function renderSpend() {
     }));
     table.append(body);
     wrap.append(table);
-    return [cell('h4', slug), wrap];
+    const expected = spendExpected.find((e) => e.project === slug);
+    if (!expected) return [cell('h4', slug), wrap];
+    const line = cell('p', 'This week: ' + num(expected.tokens) + ' of ' + num(expected.weekly_tokens) + ' expected tokens (' + expected.percent + '%).');
+    line.className = 'muted spend-expected';
+    return [cell('h4', slug), line, wrap];
   }));
 }
 
