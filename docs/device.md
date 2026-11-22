@@ -500,6 +500,7 @@ count beside tokens per merged PR.
 
 ```text
 python3 <installed-skill>/runtime/factory.py bench score <cases-file> <arm-folder>...
+python3 <installed-skill>/runtime/factory.py bench cases <project-slug>
 ```
 
 `bench score` compares reviewer prompts or models, called arms, on past pull
@@ -517,6 +518,21 @@ the repository.
   "head": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d", "source": "reworked",
   "defects": [{"path": "worker/export.js", "lines": [40, 52], "severity": "high", "note": "optional"}]}]}
 ```
+
+`bench cases` drafts this file. It reads the board for the project's jobs whose
+recorded outcome is `reverted` or `reworked`, asks GitHub for each pull request's
+head commit, and prints one case per job with an empty `defects` list. Redirect it
+to `<home>/bench/reviewer-cases.json`, then add each defect by hand. `bench score`
+refuses a case with no defects, so delete any case you cannot label.
+
+`bench cases` errors:
+
+| Input | Exit | Message |
+| --- | --- | --- |
+| not exactly one project slug | 2 | `usage: factory.py bench cases <project-slug>` |
+| no `projects/<slug>.md` | 4 | `bench: no project file for <slug>` |
+| GitHub lookup fails | 5 | `bench: <why>` |
+| nothing drafted | 3 | `bench: no reverted or reworked jobs to draft in <slug>` |
 
 `pr`, `head` and `source` are not scored yet, but are required so a later replay
 command can rebuild each case. Severity weights are high 3, medium 2 and low 1.
