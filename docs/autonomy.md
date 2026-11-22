@@ -484,7 +484,7 @@ Loop step 5 runs `factory.py repeats <slug>/<job-id> <round>` below the round ca
 
 | Case | Result |
 | --- | --- |
-| Round 1, or no `round-<N-1>/` folder | `continue` |
+| Round 1, or no earlier round folder | `continue` |
 | CHANGES review with no signature lines | `continue`, round cap still applies |
 | A PASS round between the two | `repeat` |
 | Disputed-only round, reviewer keeps the finding | `repeat`: a person settles the dispute |
