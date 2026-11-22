@@ -7306,6 +7306,24 @@ def pr_checks(pr, required=False):
     return [], f"exited {code} with no check list" if code else "printed no check list"
 
 
+def pr_behind(pr):
+    """(behind_by, head sha, base): how many commits of its base the PR's head lacks, from GitHub's compare API."""
+    try:
+        view = json.loads(gh_pr_view(pr, "--json", "headRefOid,baseRefName"))
+    except ValueError:
+        view = None
+    sha, base = (view.get("headRefOid"), view.get("baseRefName")) if isinstance(view, dict) else (None, None)
+    if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
+            and isinstance(base, str) and re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", base)):
+        fail("gh pr view printed an unusable headRefOid or baseRefName", 5)
+    repo = GH_PR.fullmatch(pr)[1]
+    behind = gh_answer(gh_cli("api", f"repos/{repo}/compare/{base}...{sha}", "--jq", ".behind_by"),
+                       "gh api compare").strip()
+    if not re.fullmatch(r"[0-9]+", behind):
+        fail("gh api compare printed no behind_by", 5)
+    return int(behind), sha, base
+
+
 def checks_cmd(target, *args):
     """Print each PR check as `<bucket> <name>` once none is pending, checking every 10 seconds until --timeout."""
     home, slug, job_id = r2_target(target, True)
