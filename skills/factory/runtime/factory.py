@@ -156,6 +156,9 @@
   factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, add its cards to the backlog
   factory.py audit <job-id>                 list this host's tool calls in the job's worktree, risky ones flagged
   factory.py audit push <job-id>            upload this host's audit rows to audit/<job-id>/<device>.jsonl
+  factory.py usage <project-slug>/<job-id>  sum this host's transcript tokens for the job by model
+  factory.py usage record <project-slug>/<job-id>
+                                            write those totals to the board job under tokens.<device>
   factory.py with-cloudflare -- <command> [<arg>...]
                                             run one command with the CLOUDFLARE_* keys of this home's .env
                                             in its environment; prints no value
@@ -10886,6 +10889,146 @@ def audit_cmd(*args):
         print("  ".join(cell.ljust(w) for cell, w in zip(line, widths)).rstrip())
 
 
+USAGE_TOKENS = {"input": "input_tokens", "output": "output_tokens", "cache_write": "cache_creation_input_tokens",
+                "cache_read": "cache_read_input_tokens"}
+USAGE_PROMPT_LINES = 50
+
+
+def usage_prompt(path):
+    """The text of a transcript's first non-meta user line within USAGE_PROMPT_LINES, else ""."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for _, line in zip(range(USAGE_PROMPT_LINES), f):
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(e, dict) and e.get("type") == "user" and not e.get("isMeta"):
+                    msg = e.get("message")
+                    return retro_text(msg.get("content")) if isinstance(msg, dict) else ""
+    except OSError:
+        pass
+    return ""
+
+
+def usage_scan(path, main):
+    """({model: {kind: tokens}}, unreadable line count) for one transcript, each message.id counted once.
+    main=True skips isSidechain lines."""
+    turns, bad = {}, 0
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                e = json.loads(line)
+            except ValueError:
+                bad += 1
+                continue
+            if not isinstance(e, dict) or e.get("type") != "assistant" or (main and e.get("isSidechain")):
+                continue
+            msg = e.get("message")
+            if not isinstance(msg, dict) or not isinstance(msg.get("id"), str) or not isinstance(msg.get("usage"), dict):
+                continue
+            model = msg.get("model")
+            model = model if isinstance(model, str) and ROUTE_MODEL.fullmatch(model) else "other"
+            best = turns.setdefault(msg["id"], (model, dict.fromkeys(USAGE_TOKENS, 0)))[1]
+            for key, field in USAGE_TOKENS.items():
+                value = msg["usage"].get(field)
+                if type(value) is int and value > best[key]:
+                    best[key] = value
+    models = {}
+    for model, counts in turns.values():
+        total = models.setdefault(model, dict.fromkeys(USAGE_TOKENS, 0))
+        for key in USAGE_TOKENS:
+            total[key] += counts[key]
+    return {m: c for m, c in models.items() if any(c.values())}, bad
+
+
+def usage_transcripts(home, slug, job_id):
+    """[(path, main)] for this host's transcripts that ran in the job's worktree or whose first
+    prompt names the job folder or the job's prompt folder."""
+    root = retro_transcripts()
+    if not root.is_dir():
+        return []
+    needles = {s for base in ("jobs", "prompts") for p in [home / base / slug / job_id] for s in (str(p), p.as_posix())}
+    named = re.compile("(?:" + "|".join(re.escape(n) for n in sorted(needles)) + r")(?![\w-])")
+    worktrees, found = set(audit_folders(job_id)), []
+    for project in sorted(p for p in root.iterdir() if p.is_dir()):
+        for path in sorted(project.glob("*.jsonl")):
+            subs = sorted((project / path.stem / "subagents").glob("*.jsonl"))
+            if project in worktrees or named.search(usage_prompt(path)):
+                found += [(path, True)] + [(sub, False) for sub in subs]
+            else:
+                found += [(sub, False) for sub in subs if named.search(usage_prompt(sub))]
+    return found
+
+
+def usage_totals(home, slug, job_id):
+    """{"transcripts": n, "models": {model: {kind: tokens}}} summed over the job's transcripts here.
+    Warns on stderr about unreadable files and lines."""
+    totals, read = {}, 0
+    for path, main in usage_transcripts(home, slug, job_id):
+        try:
+            models, bad = usage_scan(path, main)
+        except OSError:
+            print(f"factory.py: usage: cannot read {path.name}", file=sys.stderr)
+            continue
+        read += 1
+        if bad:
+            print(f"factory.py: usage: {bad} unreadable line{'' if bad == 1 else 's'} in {path.name}", file=sys.stderr)
+        for model, counts in models.items():
+            total = totals.setdefault(model, dict.fromkeys(USAGE_TOKENS, 0))
+            for key in USAGE_TOKENS:
+                total[key] += counts[key]
+    return {"transcripts": read, "models": dict(sorted(totals.items()))}
+
+
+def usage_record(home, slug, job_id, device, totals):
+    """Write this host's token totals to the board job under tokens.<device>, keeping other hosts' entries."""
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None:
+            fail(f"no job {slug}/{job_id} on the board. Nothing was written.", 4)
+        if job.get("project") != slug:
+            fail(f"{job_id} is not assigned to {slug}. Nothing was written.", 2)
+        old = job.get("tokens") if isinstance(job.get("tokens"), dict) else {}
+        patch_job(data, job_id, {})
+        job["tokens"] = {**old, device: {"at": job["updated"], **totals}}
+        return dump_board(data), None
+    cas(home, "/api/board", change)
+
+
+def usage_cmd(*args):
+    if len(args) == 2 and args[0] != "record":
+        fail("usage: factory.py usage [record] <project-slug>/<job-id>", 2)
+    home, slug, job_id = r2_target(args[-1], True)
+    host = retro_host()
+    if len(args) == 2:
+        config = home / "config.md"
+        host = (frontmatter(config)[0] if config.is_file() else {}).get("device") or ""
+        if not HOST_NAME.fullmatch(host):
+            fail(f"set device: in {config}; pair this host with factory.py host pair <id> <code>", 2)
+    try:
+        totals = usage_totals(home, slug, job_id)
+    except Exception as e:
+        print(f"factory.py: usage: scan failed ({type(e).__name__}: {e}); nothing recorded", file=sys.stderr)
+        return
+    n = totals["transcripts"]
+    if not n:
+        print(f"no Claude Code transcripts on {host} name {job_id}; nothing recorded")
+        return
+    print(f"job {job_id} on {host}: {n} transcript{'' if n == 1 else 's'}")
+    lines = [("model",) + tuple(USAGE_TOKENS)] + [
+        (model,) + tuple(f"{counts[key]:,}" for key in USAGE_TOKENS) for model, counts in totals["models"].items()]
+    widths = [max(len(line[i]) for line in lines) for i in range(len(lines[0]))]
+    for line in lines:
+        print("  ".join([line[0].ljust(widths[0])] + [cell.rjust(w) for cell, w in zip(line[1:], widths[1:])]))
+    if len(args) == 2:
+        usage_record(home, slug, job_id, host, totals)
+        print(f"recorded {host} tokens on {job_id}")
+
+
 def with_cloudflare_cmd(*argv):
     if len(argv) < 2 or argv[0] != "--":
         fail("usage: factory.py with-cloudflare -- <command> [<arg>...]", 2)
@@ -11744,6 +11887,7 @@ COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
 COMMANDS["audit"] = (audit_cmd, 1, 2)
+COMMANDS["usage"] = (usage_cmd, 1, 2)
 COMMANDS["with-cloudflare"] = (with_cloudflare_cmd, 0, sys.maxsize)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)

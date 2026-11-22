@@ -637,7 +637,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   @media (hover: hover) { .detail-resize:hover { background: var(--resize-grip); } }
   body.resizing-drawer { user-select: none; cursor: col-resize; }
   .detail-head { padding: 18px 24px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; flex-wrap: wrap; row-gap: 0; align-items: flex-start; }
-  .detail-head > #d-agents { flex-basis: 100%; min-width: 0; }
+  .detail-head > #d-agents, .detail-head > #d-tokens { flex-basis: 100%; min-width: 0; }
   .detail-head .titles { flex: 1; min-width: 0; }
   .detail-head .title { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
   .detail-head .meta, .backlog-history .meta { font: 12px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
@@ -694,7 +694,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .doc table.audit td:last-child { min-width: 14em; }
   .agent-runs td a + a { margin-left: 8px; }
   /* A long run list scrolls in its own box, so the tabs and page stay on a desktop screen. */
-  .detail-head > #d-agents .table-wrap { max-height: 40vh; overflow-y: auto; scroll-padding-top: 2.5em; }
+  .detail-head > #d-agents .table-wrap, .detail-head > #d-tokens .table-wrap { max-height: 40vh; overflow-y: auto; scroll-padding-top: 2.5em; }
   .agent-runs thead th { position: sticky; top: 0; z-index: 1; }
   .doc td code { overflow-wrap: anywhere; }
   .doc .mermaid { overflow-x: auto; margin: 1em 0; }
@@ -746,8 +746,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head .titles { flex: 1 1 0; min-width: 0; }
     .detail-head .close { flex: none; }
     .detail-head .links { order: 3; flex-basis: 100%; height: auto; }
-    .detail-head > #d-agents { order: 4; }
-    .detail-head > #d-agents .table-wrap { max-height: none; }
+    .detail-head > #d-agents, .detail-head > #d-tokens { order: 4; }
+    .detail-head > #d-agents .table-wrap, .detail-head > #d-tokens .table-wrap { max-height: none; }
     .detail-head .pr-link { margin-top: 8px; }
     /* The bar buttons get their own row under the links, so the title keeps the width beside the icons. */
     .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar { order: 3; margin-top: 8px; }
@@ -759,7 +759,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
     #d-title, #d-star, #d-actions, .detail-head .close { position: relative; z-index: 3; }
     .detail-head .close { background: var(--panel); }
-    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
+    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
@@ -867,6 +867,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     </div>
     <button class="close" id="d-close" aria-label="Close" title="Close (Esc or H)" aria-keyshortcuts="Escape h"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
     <details class="refs agent-runs" id="d-agents" hidden><summary></summary><div class="table-wrap"><table><thead><tr><th scope="col">When</th><th scope="col">Role</th><th scope="col">Session</th><th scope="col">Stage</th><th scope="col">Round</th><th scope="col">Model</th><th scope="col">Effort</th><th scope="col">Harness</th><th scope="col">Via</th></tr></thead><tbody></tbody></table></div></details>
+    <details class="refs agent-runs" id="d-tokens" hidden><summary></summary><div class="table-wrap"><table><thead><tr><th scope="col">Host</th><th scope="col">Model</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Cache write</th><th scope="col">Cache read</th></tr></thead><tbody></tbody></table></div></details>
   </div>
   <p class="err" id="d-edit-idea-err" role="alert" hidden></p>
   <p class="err" id="d-prioritize-err" role="alert" hidden></p>
@@ -2047,6 +2048,40 @@ function renderAgentRuns(j) {
     }
     tr.append(session);
     for (const v of [r.stage, r.round, r.model, r.effort, r.harness, r.via]) cell(v);
+    return tr;
+  }));
+}
+
+const TOKEN_KINDS = ['input', 'output', 'cache_write', 'cache_read'];
+// One [host, model, ...counts] row per host and model in j.tokens, sorted; a malformed count reads 0.
+function tokenRows(j) {
+  const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  if (!isObject(j.tokens)) return [];
+  const rows = [];
+  for (const host of Object.keys(j.tokens).sort()) {
+    const models = j.tokens[host]?.models;
+    if (!isObject(j.tokens[host]) || !isObject(models)) continue;
+    for (const model of Object.keys(models).sort()) {
+      if (!isObject(models[model])) continue;
+      rows.push([host, model, ...TOKEN_KINDS.map((k) => (Number.isSafeInteger(models[model][k]) && models[model][k] >= 0 ? models[model][k] : 0))]);
+    }
+  }
+  return rows;
+}
+// Replaces the summary and rows only, so an opened table stays open across board polls.
+function renderTokens(j) {
+  const box = $('d-tokens'), rows = tokenRows(j);
+  box.hidden = !rows.length;
+  if (!rows.length) return;
+  const total = rows.reduce((sum, r) => sum + r[2] + r[3] + r[4] + r[5], 0), hosts = new Set(rows.map((r) => r[0])).size;
+  box.querySelector('summary').textContent = 'Tokens: ' + total.toLocaleString('en-US') + ' on ' + hosts + (hosts === 1 ? ' host' : ' hosts');
+  box.querySelector('tbody').replaceChildren(...rows.map((r) => {
+    const tr = document.createElement('tr');
+    for (const v of r) {
+      const td = document.createElement('td');
+      td.textContent = typeof v === 'number' ? v.toLocaleString('en-US') : v;
+      tr.append(td);
+    }
     return tr;
   }));
 }
@@ -5722,6 +5757,7 @@ async function openJob(id) {
     walkthroughs = new Set();
     $('d-tracer-tasks').open = false;
     $('d-agents').open = false;
+    $('d-tokens').open = false;
   }
   syncIdeaEditor();
   // DOM properties, not markup, so the board can't inject attributes into the header.
@@ -5749,6 +5785,7 @@ async function openJob(id) {
   if (scope) head.append((head.childNodes.length ? ' · ' : '') + scope);
   renderTracerTasks(j);
   renderAgentRuns(j);
+  renderTokens(j);
   if (first) {
     activeFile = null;
     files = [];
@@ -6320,7 +6357,7 @@ let swipeSettling = false;
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
 // so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
 // On an idea tab the gallery and file list move into the top of the page, so they scroll with it.
-const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
+const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
 let headCollapse = 0;
 let headShift = 0;
 let headStop = null;
@@ -9341,6 +9378,8 @@ function openBacklogItem(item) {
   $('d-tracer-tasks').open = false;
   $('d-agents').hidden = true;
   $('d-agents').open = false;
+  $('d-tokens').hidden = true;
+  $('d-tokens').open = false;
   closeJobActions(false);
   clearCopyStatus();
   syncIdeaEditor();

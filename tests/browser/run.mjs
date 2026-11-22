@@ -194,6 +194,20 @@ const CAPTURE_JOBS = [
         effort: "medium",
       },
     ],
+    tokens: {
+      "host-a": {
+        at: "2026-01-02T13:10:00Z",
+        transcripts: 3,
+        models: {
+          "model-a": { input: 1200, output: 48000, cache_write: 210000, cache_read: 3400000 },
+        },
+      },
+      "host-b": {
+        at: "2026-01-02T13:00:00Z",
+        transcripts: 1,
+        models: { "model-a": { input: 300, output: 9100, cache_write: 52000, cache_read: 610000 } },
+      },
+    },
   },
   {
     id: "102-move-comment",
@@ -1932,6 +1946,29 @@ async function capture(outdir, referencePath) {
     };
     await view("agent-runs-390", 390, 844, "dark", openAgentRuns, true);
     await view("agent-runs-1280", 1280, 900, "light", openAgentRuns);
+    // The reference page has no Tokens table, so its side shows the drawer head with Agents only.
+    const openJobTokens = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#101-wrap-doc-line";
+      });
+      await page.waitForFunction(
+        () => document.getElementById("d-title").textContent === "Synthetic wrap doc line",
+      );
+      await page.waitForSelector(
+        side === "after" ? "#d-tokens:not([hidden])" : "#d-agents:not([hidden])",
+      );
+      await page.evaluate(() => {
+        document.getElementById("detail").style.setProperty("--drawer-w", "1200px");
+        const box = document.getElementById("d-tokens");
+        if (!box) return;
+        box.open = true;
+        const wrap = box.querySelector(".table-wrap");
+        wrap.scrollLeft = wrap.scrollWidth;
+      });
+      return clipOf(page, ".detail-head");
+    };
+    await view("job-tokens-390", 390, 844, "dark", openJobTokens, true);
+    await view("job-tokens-1280", 1280, 900, "light", openJobTokens);
     const openLeadAgents = async (page) => {
       await page.evaluate(() => {
         location.hash = "#101-wrap-doc-line";
