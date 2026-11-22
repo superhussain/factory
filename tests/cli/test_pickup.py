@@ -1819,6 +1819,17 @@ class IdleWatchTest(PickupFixture):
                 self.assertEqual((self.sent, self.puts()), ([], []))
                 self.assertEqual(self.job("042-sample-export")["stage"], extra.get("stage", "build"))
 
+    def test_dry_run_prints_the_needs_human_move(self):
+        self.nudged()
+        self.age("nudged")
+        before = (self.home / "idle-watch.json").read_text(encoding="utf-8")
+        self.calls.clear()
+        self.assertEqual(self.pickup("--dry-run"), (
+            0, f"would move needs-human 042-sample-export alpha: {self.NOTE}\nhost {DEVICE}: would launch 0\n", ""))
+        self.assertEqual((self.home / "idle-watch.json").read_text(encoding="utf-8"), before)
+        self.assertEqual((self.sent, self.puts()), ([], []))
+        self.assertEqual(self.job("042-sample-export")["stage"], "build")
+
     def test_needs_human_after_the_second_window(self):
         self.nudged()
         self.age("nudged")
@@ -1866,6 +1877,142 @@ class IdleWatchTest(PickupFixture):
         self.send_ok = True
         self.assertEqual(self.pickup(), (0, f"nudged idle {self.LINE}\n", ""))
         self.assertEqual(len(self.sent), 2)
+
+
+class TokenCapTest(PickupFixture):
+    WARN = "tokens: 1,640,000 of the 2,000,000 job cap (82%) on host-a"
+    PARK = "tokens: 2,050,000 reached the 2,000,000 job cap on host-a; a resumed session gets another 2,000,000"
+    HOST_B = {"at": "2026-01-01T09:00:00Z", "transcripts": 1,
+              "models": {"model-b": {"input": 100000, "output": 200000, "cache_write": 0, "cache_read": 5000000}}}
+    export = IdleWatchTest.export
+
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.scan = {"transcripts": 2, "models": {"model-a": {"input": 40000, "output": 600000,
+                                                              "cache_write": 700000, "cache_read": 9000000}}}
+        self.totals = patch.object(factory, "usage_totals", side_effect=lambda home, slug, job_id: self.scan).start()
+        self.stop = patch.object(factory, "paseo_run", return_value=(0, "")).start()
+        patch.object(factory, "paseo_server", return_value="synthetic-server").start()
+        patch.object(factory, "paseo_statuses", return_value={"synthetic-agent": "running"}).start()
+
+    def set_cap(self, value="2000000"):
+        (self.home / "config.md").write_text(f"---\ndevice: {DEVICE}\njob_token_cap: {value}\n---\n", encoding="utf-8")
+
+    def output(self, n):
+        self.scan["models"]["model-a"]["output"] = n
+
+    def test_off_without_cap(self):
+        self.export(tokens={"host-b": self.HOST_B})
+        self.output(1010000)
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.totals.assert_not_called()
+        self.assertEqual(self.puts(), [])
+
+    def test_warns_once_at_eighty_percent(self):
+        self.set_cap()
+        self.export(tokens={"host-b": self.HOST_B})
+        self.assertEqual(self.pickup(), (0, f"token warning 042-sample-export alpha: {self.WARN}\n", ""))
+        self.assertEqual(len(self.puts()), 1)
+        job = self.job("042-sample-export")
+        self.assertEqual((job["stage"], job["note"], job["claim"]["device"]), ("build", self.WARN, DEVICE))
+        self.assertEqual(set(job["token_cap"]), {"base", "warned"})
+        self.assertEqual(job["token_cap"]["base"], 0)
+        self.assertRegex(job["token_cap"]["warned"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertEqual(job["tokens"], {"host-b": self.HOST_B, DEVICE: {"at": job["updated"], **self.scan}})
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(len(self.puts()), 1)
+
+    def test_parks_at_cap(self):
+        self.set_cap()
+        self.export(tokens={"host-b": self.HOST_B})
+        self.output(1010000)
+        self.assertEqual(self.pickup(), (0, f"needs-human 042-sample-export alpha: {self.PARK}\n", ""))
+        job = self.job("042-sample-export")
+        self.assertEqual((job["stage"], job["note"]), ("needs-human", self.PARK))
+        self.assertNotIn("claim", job)
+        self.assertEqual(job["token_cap"], {"base": 2050000})
+        self.assertEqual(job["tokens"][DEVICE], {"at": job["updated"], **self.scan})
+        self.stop.assert_called_once_with(["stop", "synthetic-agent"])
+
+    def test_resumed_job_gets_a_fresh_cap(self):
+        self.set_cap()
+        self.export(tokens={"host-b": self.HOST_B})
+        self.output(1010000)
+        self.pickup()
+        job = self.job("042-sample-export")
+        job.update(stage="build", claim={"device": DEVICE, "session": "d4e5f6", "since": stamp()})
+        self.output(1060000)
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.job("042-sample-export")["stage"], "build")
+
+    def test_counts_other_hosts_without_cache_read(self):
+        self.set_cap()
+        stale = {"at": "2026-01-01T08:00:00Z", "transcripts": 9,
+                 "models": {"model-a": {"input": 0, "output": 5000000, "cache_write": 0, "cache_read": 0}}}
+        self.export(tokens={DEVICE: stale})
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(self.puts(), [])
+        self.export(tokens={DEVICE: stale, "host-b": self.HOST_B})
+        self.assertEqual(self.pickup(), (0, f"token warning 042-sample-export alpha: {self.WARN}\n", ""))
+
+    def test_dry_run_writes_nothing(self):
+        self.set_cap()
+        self.export(tokens={"host-b": self.HOST_B})
+        self.assertEqual(self.pickup("--dry-run"), (
+            0, f"would warn tokens 042-sample-export alpha: {self.WARN}\nhost {DEVICE}: would launch 0\n", ""))
+        self.output(1010000)
+        self.assertEqual(self.pickup("--dry-run"), (
+            0, f"would move needs-human 042-sample-export alpha: {self.PARK}\nhost {DEVICE}: would launch 0\n", ""))
+        self.assertEqual(self.puts(), [])
+        self.stop.assert_not_called()
+        self.assertNotIn("token_cap", self.job("042-sample-export"))
+
+    def test_board_refuses_token_cap(self):
+        self.export()
+        with patch.object(factory.sys, "stdin", io.StringIO('{"token_cap": {"base": 0}}')):
+            result = invoke(factory, ["board", str(self.home), "042-sample-export"])
+        self.assertEqual(result, (2, "", "factory.py: only factory.py pickup sets token_cap. Nothing was written.\n"))
+        self.assertEqual(self.puts(), [])
+
+    def test_invalid_cap_is_off(self):
+        self.export(tokens={"host-b": self.HOST_B})
+        self.output(1010000)
+        line = (f"factory.py: pickup ignores job_token_cap in {self.home / 'config.md'}: "
+                "must be a whole number of at least 1\n")
+        for value in ("0", "abc", "1.5", "-3", "2e6"):
+            with self.subTest(value=value):
+                self.set_cap(value)
+                self.assertEqual(self.pickup(), (0, "", line))
+        self.totals.assert_not_called()
+        self.assertEqual(self.puts(), [])
+
+    def test_negative_counts_are_skipped(self):
+        self.set_cap()
+        self.export(tokens={"host-b": {"at": "2026-01-01T09:00:00Z", "transcripts": 1,
+                                       "models": {"model-b": {"input": 0, "output": -300000, "cache_write": 0}}}})
+        self.output(1310000)
+        self.assertEqual(self.pickup(), (0, f"needs-human 042-sample-export alpha: {self.PARK}\n", ""))
+
+    def test_scan_error_skips_the_job(self):
+        self.set_cap()
+        self.export(tokens={"host-b": self.HOST_B})
+        self.totals.side_effect = ValueError
+        self.assertEqual(self.pickup(), (
+            0, "", "factory.py: pickup skips the token cap of 042-sample-export: scan failed (ValueError)\n"))
+        self.assertEqual(self.puts(), [])
+
+    def test_failed_stop_keeps_the_park(self):
+        self.set_cap()
+        self.export(tokens={"host-b": self.HOST_B})
+        self.output(1010000)
+        self.stop.return_value = (1, "")
+        self.assertEqual(self.pickup(), (
+            0, f"needs-human 042-sample-export alpha: {self.PARK}\n",
+            "factory.py: pickup could not stop agent synthetic-agent of 042-sample-export: paseo stop failed\n"))
+        self.assertEqual(self.job("042-sample-export")["stage"], "needs-human")
 
 
 class PauseTest(PickupFixture):

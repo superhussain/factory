@@ -999,6 +999,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
              "run factory.py control <job-id> close --reason-file <file> --chat-file <file>", 2)
     if "github" in patch:
         fail("only factory.py pickup sets github. Nothing was written.", 2)
+    if "token_cap" in patch:
+        fail("only factory.py pickup sets token_cap. Nothing was written.", 2)
     if "auto_babysit" in patch:
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
     if "handled" in patch:
@@ -6551,9 +6553,12 @@ def idle_watch_pass(home, data, device, dry):
                 entry["nudged"] = now()
                 print(f"nudged idle {line}")
             continue
-        if dry or not isinstance(entry["nudged"], str) or entry["nudged"] >= cutoff:
+        if not isinstance(entry["nudged"], str) or entry["nudged"] >= cutoff:
             continue
         note = f"idle: no progress {IDLE_NUDGE_MINUTES} minutes after a nudge to agent {agent}"
+        if dry:
+            print(f"would move needs-human {job_id} {project}: {note}")
+            continue
 
         def change(text, job_id=job_id, stage=j["stage"], updated=j.get("updated"), note=note):
             board = load_board(text)
@@ -6568,6 +6573,73 @@ def idle_watch_pass(home, data, device, dry):
         del watch[job_id]
     if not dry and watch != old:
         write_atomic(Path(home, "idle-watch.json"), json.dumps({"version": 1, "jobs": watch}, indent=2) + "\n")
+
+
+def token_cap_pass(home, data, device, dry):
+    """Warn once when an in-flight job claimed on this host passes TOKEN_WARN_PERCENT of config.md's
+    job_token_cap, and move it to needs-human and stop its Paseo agent when it reaches the cap.
+    This host scans its own transcripts; other hosts count through their recorded tokens entry."""
+    cap = job_token_cap(home)
+    if cap is None:
+        return
+
+    def due(j):
+        c, job_id = j.get("claim"), j.get("id")
+        return (j.get("stage") in IN_FLIGHT and isinstance(c, dict) and c.get("device") == device
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"]) and not closing(j))
+
+    for j in [j for j in data["jobs"] if due(j)]:
+        job_id, project = j["id"], j["project"]
+        try:
+            fresh = usage_totals(home, project, job_id)
+        except Exception as e:
+            print(f"factory.py: pickup skips the token cap of {job_id}: scan failed ({type(e).__name__})",
+                  file=sys.stderr)
+            continue
+        tokens = j.get("tokens") if isinstance(j.get("tokens"), dict) else {}
+        total = token_count(fresh["models"]) + sum(
+            token_count(e["models"]) for host, e in tokens.items()
+            if host != device and isinstance(e, dict) and isinstance(e.get("models"), dict))
+        state = j.get("token_cap") if isinstance(j.get("token_cap"), dict) else {}
+        base = state["base"] if type(state.get("base")) is int else 0
+        used = total - base
+        park = used >= cap
+        if park:
+            note = f"tokens: {used:,} reached the {cap:,} job cap on {device}; a resumed session gets another {cap:,}"
+            patch = {"stage": "needs-human", "note": note, "claim": None, "token_cap": {"base": total, "warned": None}}
+            line = f"needs-human {job_id} {project}: {note}"
+            dry_line = f"would move {line}"
+        elif used * 100 >= cap * TOKEN_WARN_PERCENT and "warned" not in state:
+            note = f"tokens: {used:,} of the {cap:,} job cap ({used * 100 // cap}%) on {device}"
+            patch = {"note": note, "token_cap": {"base": base, "warned": now()}}
+            line = f"token warning {job_id} {project}: {note}"
+            dry_line = f"would warn tokens {job_id} {project}: {note}"
+        else:
+            continue
+        if dry:
+            print(dry_line)
+            continue
+
+        def change(text, job_id=job_id, stage=j["stage"], patch=patch, fresh=fresh):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            if (found is None or found.get("stage") != stage
+                    or not isinstance(found.get("claim"), dict) or found["claim"].get("device") != device):
+                return None, False
+            patch_job(board, job_id, patch)
+            old = found.get("tokens") if isinstance(found.get("tokens"), dict) else {}
+            found["tokens"] = {**old, device: {"at": found["updated"], **fresh}}
+            return dump_board(board), True
+        if not cas(home, "/api/board", change):
+            continue
+        print(line)
+        link = j.get("paseo") if isinstance(j.get("paseo"), dict) else {}
+        agent, server = link.get("agent"), paseo_server()
+        if (park and server and link.get("server") == server
+                and isinstance(agent, str) and PASEO_ID.fullmatch(agent) and not agent.startswith("-")
+                and paseo_run(["stop", agent])[0]):
+            print(f"factory.py: pickup could not stop agent {agent} of {job_id}: paseo stop failed", file=sys.stderr)
 
 
 def moved_here(j, device):
@@ -6591,6 +6663,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
     idle_watch_pass(home, data, device, dry)
+    token_cap_pass(home, data, device, dry)
     auto_babysit_pass(home, data, device, minutes, paths, settings, dry)
     babysit_pass(home, data, device, minutes, paths, settings, dry)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
@@ -9476,11 +9549,25 @@ def orphan_reason(jobs, job_id):
     return "job merged" if job["stage"] == "merged" else "job closed"
 
 
+def workspace_project(cwd, paths):
+    """The paths.md slug whose checkout shares cwd's git common dir, first by slug, else None.
+    git before 2.31 lacks --path-format, so a relative answer resolves against the folder asked."""
+    def common(path):
+        out = git(path, "rev-parse", "--git-common-dir")
+        return os.path.normcase(str(Path(path, out).resolve())) if out else None
+
+    target = common(cwd)
+    if target is None:
+        return None
+    return next((slug for slug, path in sorted(paths.items()) if common(path) == target), None)
+
+
 def orphan_scan(home):
     """(orphans, skipped): factory branches on origin, open factory PRs, job worktrees and factory-<id>
     Paseo workspaces that no open board job owns. Only reads; a source that fails is one skipped line,
     which never carries a tool's stderr."""
     jobs = read_board(home)["jobs"]
+    paths = read_paths(home)
     ids = {j.get("id") for j in jobs}
     orphans, skipped = [], []
 
@@ -9490,7 +9577,7 @@ def orphan_scan(home):
             orphans.append({"kind": kind, "project": project, "job": job_id, "name": name, "reason": reason})
 
     gh_missing = False
-    for slug, path in read_paths(home).items():
+    for slug, path in paths.items():
         if not os.path.isdir(path):
             continue
         try:
@@ -9570,7 +9657,7 @@ def orphan_scan(home):
                 rest = base[len("factory-"):]
                 job_id = rest if rest in ids else re.sub(r"-\d+$", "", rest)
                 job = next((j for j in jobs if j.get("id") == job_id), {})
-                add("workspace", job.get("project"), job_id, cwd)
+                add("workspace", job.get("project") or workspace_project(cwd, paths), job_id, cwd)
 
     orphans.sort(key=lambda o: (ORPHAN_KINDS.index(o["kind"]), o["name"]))
     return orphans, skipped
@@ -11714,6 +11801,29 @@ def usage_pickup_record(home, job):
         return
     usage_record(home, slug, job_id, device, totals)
     print(f"recorded {device} tokens on {job_id}")
+
+
+TOKEN_WARN_PERCENT = 80
+
+
+def token_count(models):
+    """Input, output and cache_write tokens summed over a {model: {kind: tokens}} map. cache_read and
+    negative counts are left out."""
+    return sum(v for counts in models.values() if isinstance(counts, dict)
+               for k, v in counts.items() if k in ("input", "output", "cache_write") and type(v) is int and v >= 0)
+
+
+def job_token_cap(home):
+    """config.md's job_token_cap as an int, else None. A bad value prints one stderr line and is off."""
+    config = Path(home, "config.md")
+    value = (frontmatter(config)[0] if config.is_file() else {}).get("job_token_cap")
+    if value is None:
+        return None
+    if not (value.isdecimal() and int(value) >= 1):
+        print(f"factory.py: pickup ignores job_token_cap in {config}: must be a whole number of at least 1",
+              file=sys.stderr)
+        return None
+    return int(value)
 
 
 def usage_cmd(*args):
