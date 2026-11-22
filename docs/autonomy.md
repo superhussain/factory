@@ -319,7 +319,7 @@ Only `retro admit`, `trial settle` and the Worker's resume route write `trials`.
   trial is open, `prompt` gives an arm `a` job in the trial's stage the champion note.
   Arm `b` reads the challenger. When the stored note is no longer the challenger, nothing
   is swapped.
-- **Champion source.** The Worker checks only the resume fields of board `trials`, so the champion note
+- **Champion source.** The Worker checks board `trials` only for the resume rules below, so the champion note
   that `prompt` and a revert use is read from pipeline history at `champion_version`, never
   from the record's `champion` text. A record is ignored unless its `project` is a slug, its
   `stage` is a pipeline stage, its versions are integers and its `id` is
