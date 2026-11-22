@@ -28,6 +28,14 @@ install scripts, ships native code, or comes from a single unvetted maintainer (
 the security review's dependency table), or hits a trigger in the project file's Escalate section. Also
 escalate when a reviewer's nit hides one of these.
 
+**Protected paths.** Read the newest `round-N/review-plan.json` the listing shows.
+Its `protected` list names the branch's CI, check, hook and test-config files. For
+each path, ESCALATE with a sign-off bullet that names it, or APPROVE only after you
+justify it under a `## Protected paths` heading in decision.md, one bullet per path:
+the path, the spec task that names it, and why every check stays at least as strict.
+A path no spec task names is ESCALATE. When `protected` is null or no plan file
+exists, apply this rule to every such file in the diff.
+
 CHANGES sends the job back to the builder for one more fix round. Use it for gaps
 the builder can close:
 a UI change with no screenshots, a criterion that is only claimed when it could be

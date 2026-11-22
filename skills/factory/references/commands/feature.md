@@ -44,7 +44,8 @@ feature.
    all-`pending` entry to `rounds`. Before spawning anyone, run
    `python3 "$RUNTIME" review-plan "$SLUG/<id>" <N>` and run
    `python3 "$RUNTIME" verdict "$SLUG/<id>" <N> <r> SKIPPED` for each reviewer `<r>` in its
-   `skipped` list. Spawn only the reviewers in its
+   `skipped` list. Its `protected` list stays in `round-N/review-plan.json` for the
+   approver. Spawn only the reviewers in its
    `run` list, from `factory-review-security`, `factory-review-ux`,
    `factory-review-ui`, and `factory-review-code`, each with the pointer to its own
    `prompt "$SLUG/<id>" review-<r> --round <N> --out` file. A non-zero exit
