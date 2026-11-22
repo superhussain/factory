@@ -95,8 +95,8 @@ you disagree with a finding, leave the code as it is and add a row for it under
 `Reviewer`, `Signature` and `Reason`. `Reviewer` is `security`, `ux`, `ui` or `code`,
 and `Signature` is the finding's `Signature:` value copied exactly. The retro counts
 each row against that reviewer's accept rate. Write `None.` under the heading when you
-dispute nothing. When the round folder holds `grounding.md`, read it first. Each row there is a citation that
-did not check out. Open the cited path and line before you act on that finding. When
+dispute nothing. When the round folder holds `grounding.md`, read it first. Each row
+there is a citation that did not check out. Open the cited path and line before you act on that finding. When
 the code does not show the problem, change nothing for it and say so in build.md with
 the row's citation and status. An `off-diff` row can still be a real finding about
 surrounding code, so judge it on the code. A finding
