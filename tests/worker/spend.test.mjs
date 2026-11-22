@@ -184,6 +184,8 @@ test("GET /api/spend answers empty rows with no archive and 404 for PUT", async 
 });
 
 const EXPECTED = { project: "sample", weekly_tokens: 1000000, tokens: 800000, percent: 80 };
+// The state as spendNudgePass writes it to NUDGE_KEY.
+const stored = (state) => JSON.parse(JSON.stringify(state));
 const projectFile = (extra) =>
   `---\nrepo: example/sample\nbase: main\ntitle: Sample\n${extra}---\n# Sample\n`;
 
@@ -225,7 +227,7 @@ test("spendNudges sends 50, then 80, then nothing on the example", () => {
       title: "500,000 of 1,000,000 expected weekly tokens (50%), week of 2026-11-16",
     },
   ]);
-  assert.deepEqual(first.state, {
+  assert.deepEqual(stored(first.state), {
     schema: "factory.spend-nudges/1",
     week,
     sent: { sample: [50] },
@@ -239,7 +241,7 @@ test("spendNudges sends 50, then 80, then nothing on the example", () => {
       title: "800,000 of 1,000,000 expected weekly tokens (80%), week of 2026-11-16",
     },
   ]);
-  assert.deepEqual(second.state.sent, { sample: [50, 80] });
+  assert.deepEqual(stored(second.state).sent, { sample: [50, 80] });
   const third = spendNudges(at(80), week, second.state);
   assert.deepEqual(third.events, []);
   assert.deepEqual(third.state, second.state);
@@ -252,17 +254,29 @@ test("spendNudges pushes only the highest new threshold and resets on a new week
     events.map((e) => [e.threshold, e.title]),
     [[100, "1,200,000 of 1,000,000 expected weekly tokens (120%), week of 2026-11-16"]],
   );
-  assert.deepEqual(state.sent, { sample: [50, 80, 100] });
+  assert.deepEqual(stored(state).sent, { sample: [50, 80, 100] });
   const next = spendNudges([{ ...EXPECTED, tokens: 500000, percent: 50 }], "2026-11-23", state);
   assert.deepEqual(
     next.events.map((e) => e.threshold),
     [50],
   );
-  assert.deepEqual(next.state, {
+  assert.deepEqual(stored(next.state), {
     schema: "factory.spend-nudges/1",
     week: "2026-11-23",
     sent: { sample: [50] },
   });
+});
+
+test("spendNudges pushes a __proto__ project once and then stays silent", () => {
+  const row = [{ ...EXPECTED, project: "__proto__" }];
+  const first = spendNudges(row, "2026-11-16", null);
+  assert.deepEqual(
+    first.events.map((e) => [e.id, e.threshold]),
+    [["__proto__", 80]],
+  );
+  const saved = stored(first.state);
+  assert.deepEqual(saved.sent, JSON.parse('{"__proto__": [50, 80]}'));
+  assert.deepEqual(spendNudges(row, "2026-11-16", saved).events, []);
 });
 
 test("spendRows reads 2,000 finished rows quickly", () => {

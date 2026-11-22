@@ -107,14 +107,19 @@ export function spendExpected(rows, budgets, now) {
  * A state from another week starts empty. */
 export function spendNudges(expected, week, state) {
   const sent = state?.week === week && isObject(state.sent) ? state.sent : {};
-  const next = { schema: "factory.spend-nudges/1", week, sent: { ...sent } };
+  // A null prototype keeps a project named __proto__ an ordinary key.
+  const next = {
+    schema: "factory.spend-nudges/1",
+    week,
+    sent: Object.assign(Object.create(null), sent),
+  };
+  const n = (v) => v.toLocaleString("en-US");
   const events = [];
   for (const { project, weekly_tokens, tokens, percent } of expected) {
-    const done = Array.isArray(sent[project]) ? sent[project] : [];
+    const done = Object.hasOwn(sent, project) && Array.isArray(sent[project]) ? sent[project] : [];
     const crossed = SPEND_THRESHOLDS.filter((t) => t <= percent && !done.includes(t));
     if (!crossed.length) continue;
     next.sent[project] = [...done, ...crossed];
-    const n = (v) => v.toLocaleString("en-US");
     events.push({
       kind: "spend",
       id: project,
