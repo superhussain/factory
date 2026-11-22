@@ -535,7 +535,7 @@ approver and the merge rules still apply. The Worker must deploy before hosts up
 
 ## Repeated findings
 
-Loop step 5 runs `factory.py repeats <slug>/<job-id> <round>`, which saves each repeat in the board job's `repeated`, below the round cap and before the escalation check, and loop step 4 reads `repeats` from `factory.py pre-review`.
+Loop step 5 runs `factory.py repeats <slug>/<job-id> <round>` below the round cap and before the escalation check, and loop step 4 reads `repeats` from `factory.py pre-review`. `factory.py repeats` saves each repeat in the board job's `repeated`.
 
 | Case | Result |
 | --- | --- |
