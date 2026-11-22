@@ -7319,8 +7319,26 @@ def pr_checks(pr, required=False):
     return [], f"exited {code} with no check list" if code else "printed no check list"
 
 
+def pr_behind(pr):
+    """(behind_by, head sha, base): how many commits of its base the PR's head lacks, from GitHub's compare API."""
+    try:
+        view = json.loads(gh_pr_view(pr, "--json", "headRefOid,baseRefName"))
+    except ValueError:
+        view = None
+    sha, base = (view.get("headRefOid"), view.get("baseRefName")) if isinstance(view, dict) else (None, None)
+    if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
+            and isinstance(base, str) and re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", base)):
+        fail("gh pr view printed an unusable headRefOid or baseRefName", 5)
+    repo = GH_PR.fullmatch(pr)[1]
+    behind = gh_answer(gh_cli("api", f"repos/{repo}/compare/{base}...{sha}", "--jq", ".behind_by"),
+                       "gh api compare").strip()
+    if not re.fullmatch(r"[0-9]+", behind):
+        fail("gh api compare printed no behind_by", 5)
+    return int(behind), sha, base
+
+
 def checks_cmd(target, *args):
-    """Print each PR check as `<bucket> <name>` once none is pending, checking every 10 seconds until --timeout."""
+    """Print each PR check as `<bucket> <name>` once none is pending and the head is up to date with its base, updating a behind branch and checking every 10 seconds until --timeout."""
     home, slug, job_id = r2_target(target, True)
     if args and (args[0] != "--timeout" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
                  or int(args[1]) > 600):
@@ -7333,8 +7351,9 @@ def checks_cmd(target, *args):
     state = gh_pr_view(pr, "--json", "state", "--jq", ".state").strip()
     if state != "OPEN":
         fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
-    start = time.monotonic()
+    start = since = time.monotonic()
     usable = False
+    updated_from = seen = None
     while True:
         checks, problem = pr_checks(pr)
         if problem:
@@ -7343,20 +7362,46 @@ def checks_cmd(target, *args):
             usable = True
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
-            for c in checks:
-                print(f"{c['bucket']} {c['name']}")
             failing = [c["name"] for c in checks if c["bucket"] not in ("pass", "skipping")]
-            if failing:
-                fail("failing checks: " + ", ".join(failing), 1)
-            return
+            done = bool(failing)
+            if not failing:
+                behind, sha, base = pr_behind(pr)
+                # After an update, gh pr checks may still list the old head's checks while pr_behind
+                # already sees the new head, so exit only once an earlier reading saw the same head.
+                done = not behind and sha != updated_from and (updated_from is None or sha == seen)
+                seen = sha
+            if done:
+                for c in checks:
+                    print(f"{c['bucket']} {c['name']}")
+                if failing:
+                    fail("failing checks: " + ", ".join(failing), 1)
+                return
+            if behind and sha != updated_from:
+                n = pr.rsplit("/", 1)[1]
+                result = gh_pr("update-branch", pr, stderr=True)
+                if result is None:
+                    fail("gh is not installed", 5)
+                code, out, err = result
+                if code == "timeout":
+                    fail("gh pr update-branch timed out after 60 seconds", 5)
+                if code:
+                    fail(f"gh pr update-branch could not bring PR #{n} up to date with {base}: "
+                         f"{printable_line(err or out, 200)}. Merge {base} into the branch and push.", 6)
+                print(f"factory.py: PR #{n} was {behind} commit{'' if behind == 1 else 's'} behind {base}; "
+                      f"gh pr update-branch merged {base} into it, so checks run again on the new head.",
+                      file=sys.stderr)
+                updated_from = sha
+                since = time.monotonic()
         elapsed = time.monotonic() - start
-        if not checks and not usable and elapsed >= min(CHECKS_REGISTER, timeout):
+        waited = time.monotonic() - since
+        if not checks and not usable and waited >= min(CHECKS_REGISTER, timeout):
             fail("gh pr checks never gave a usable reply", 5)
-        if not checks and elapsed >= CHECKS_REGISTER:
+        if not checks and waited >= CHECKS_REGISTER:
             print("no checks reported")
             return
         if elapsed >= timeout:
-            fail("still pending: " + ", ".join(pending) if pending else "no checks listed yet", 3)
+            fail("still pending: " + ", ".join(pending) if pending
+                 else "still waiting for checks on the updated head" if updated_from else "no checks listed yet", 3)
         time.sleep(min(CHECKS_INTERVAL, max(0, timeout - elapsed)))
 
 
