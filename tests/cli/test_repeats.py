@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -17,7 +18,7 @@ class RepeatsTest(IsolatedTestCase):
     def setUp(self):
         self.module = load_runtime()
         self.dir = Path(tempfile.mkdtemp())
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.dir, ignore_errors=True))
+        self.addCleanup(lambda: shutil.rmtree(self.dir, ignore_errors=True))
         self.job = self.dir / "jobs" / "sample" / "042-csv-export"
         for n in (1, 2):
             self.write(n, code=CODE)
@@ -46,7 +47,7 @@ class RepeatsTest(IsolatedTestCase):
         self.assertEqual(self.check("1"), (0, {"decision": "continue", "round": 1, "previous": None, "repeats": []}, ""))
 
     def test_a_missing_previous_round_continues(self):
-        __import__("shutil").rmtree(self.job / "round-1")
+        shutil.rmtree(self.job / "round-1")
         self.assertEqual(self.check(), (0, CONTINUE, ""))
 
     def test_changes_reviews_without_signatures_continue(self):
