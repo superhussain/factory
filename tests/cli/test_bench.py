@@ -141,12 +141,22 @@ class BenchScoreTest(BenchCase):
 
     def test_invalid_run_json_counts_as_no_run(self):
         cases_file, folders = write_example(self.root)
-        (Path(folders[0]) / "1019-add-z" / "run.json").write_text("not json", encoding="utf-8")
-        code, out, _ = self.bench("score", cases_file, folders[0])
-        self.assertEqual(code, 0)
-        arm = json.loads(out)["arms"][0]
-        self.assertEqual((arm["no_run"], arm["tokens"], arm["seconds"], arm["runs"]),
-                         (["1019-add-z"], 250000, 300, 1))
+        run_json = Path(folders[0]) / "1019-add-z" / "run.json"
+        for text in ("not json", '{"seconds": Infinity, "models": {}}', '{"seconds": NaN, "models": {}}'):
+            with self.subTest(text=text):
+                run_json.write_text(text, encoding="utf-8")
+                code, out, _ = self.bench("score", cases_file, folders[0])
+                self.assertEqual(code, 0)
+                arm = json.loads(out)["arms"][0]
+                self.assertEqual((arm["no_run"], arm["tokens"], arm["seconds"], arm["runs"]),
+                                 (["1019-add-z"], 250000, 300, 1))
+
+    def test_review_folder_is_skipped(self):
+        cases_file, folders = write_example(self.root)
+        (Path(folders[0]) / "1018-add-y" / "review-extra.md").mkdir()
+        code, out, err = self.bench("score", cases_file, *folders)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out), EXAMPLE_OUT)
 
 
 class BenchErrorTest(BenchCase):
@@ -201,6 +211,7 @@ class BenchErrorTest(BenchCase):
             (with_defect(lines=[4]), 1, "defect 2: lines must be [start, end] with 1 <= start <= end"),
             (with_defect(lines=[True, 4]), 1, "defect 2: lines must be [start, end] with 1 <= start <= end"),
             (with_defect(severity="critical"), 1, "defect 2: severity must be high, medium or low"),
+            (with_defect(severity=["high"]), 1, "defect 2: severity must be high, medium or low"),
         ]
         for bad, n, reason in rows:
             with self.subTest(reason=reason, bad=bad):

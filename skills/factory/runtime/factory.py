@@ -12641,7 +12641,7 @@ def bench_cases(path):
                 elif not (isinstance(lines, list) and len(lines) == 2 and all(type(x) is int for x in lines)
                           and 1 <= lines[0] <= lines[1]):
                     reason = f"defect {m}: lines must be [start, end] with 1 <= start <= end"
-                elif d.get("severity") not in BENCH_WEIGHTS:
+                elif not (isinstance(d.get("severity"), str) and d["severity"] in BENCH_WEIGHTS):
                     reason = f"defect {m}: severity must be high, medium or low"
                 if reason:
                     break
@@ -12675,6 +12675,8 @@ def bench_arm(folder, cases):
             missing.append(c["id"])
         citations = []
         for review in sorted(case_dir.glob("review-*.md")) if case_dir.is_dir() else []:
+            if not review.is_file():
+                continue
             text = review.read_text(encoding="utf-8", errors="replace")
             if text.splitlines()[:1] == ["VERDICT: CHANGES"]:
                 citations += find_citations(text)
@@ -12692,7 +12694,7 @@ def bench_arm(folder, cases):
             run = json.loads((case_dir / "run.json").read_text(encoding="utf-8"))
         except (ValueError, OSError):
             run = None
-        if (isinstance(run, dict) and type(run.get("seconds")) in (int, float) and run["seconds"] >= 0
+        if (isinstance(run, dict) and type(run.get("seconds")) in (int, float) and 0 <= run["seconds"] < float("inf")
                 and isinstance(run.get("models"), dict)):
             tokens += token_count(run["models"])
             seconds += run["seconds"]
