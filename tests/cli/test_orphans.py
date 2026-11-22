@@ -114,6 +114,19 @@ class OrphanScanTest(IsolatedTestCase):
                                              "prs factory: the project file names no repo",
                                              "workspaces: paseo workspace ls failed (exit 3)"])
 
+    def test_unreadable_worktrees_are_skipped(self):
+        real_iterdir = Path.iterdir
+
+        def iterdir(path):
+            if path == self.worktrees:
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_iterdir(path)
+
+        with patch.object(Path, "iterdir", iterdir):
+            result = self.orphans()
+        self.assertEqual(result["skipped"], [f"worktrees: could not read {self.worktrees}"])
+        self.assertEqual([o["kind"] for o in result["orphans"]], ["branch", "pr", "workspace"])
+
 
 class OrphanSummaryTest(unittest.TestCase):
     def row(self, kind):

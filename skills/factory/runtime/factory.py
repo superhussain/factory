@@ -9012,15 +9012,22 @@ def orphan_scan(home):
                 add("pr", slug, head[len("factory/"):], pr.get("url"))
 
     root = home / "worktrees"
-    for project in [root] if is_link(root) else sorted(root.iterdir()) if root.is_dir() else ():
-        if is_link(project):
-            skipped.append(f"worktrees: {project} is a symlink or junction")
-            continue
-        for folder in sorted(project.iterdir()) if project.is_dir() else ():
-            if is_link(folder):
-                skipped.append(f"worktrees: {folder} is a symlink or junction")
-            elif folder.is_dir():
-                add("worktree", project.name, folder.name, str(folder))
+    try:
+        if is_link(root):
+            projects = [root]
+        else:
+            projects = sorted(root.iterdir()) if root.is_dir() else []
+        for project in projects:
+            if is_link(project):
+                skipped.append(f"worktrees: {project} is a symlink or junction")
+                continue
+            for folder in sorted(project.iterdir()) if project.is_dir() else ():
+                if is_link(folder):
+                    skipped.append(f"worktrees: {folder} is a symlink or junction")
+                elif folder.is_dir():
+                    add("worktree", project.name, folder.name, str(folder))
+    except OSError as e:
+        skipped.append(f"worktrees: could not read {e.filename or root}")
 
     if not shutil.which("paseo"):
         skipped.append("workspaces: paseo is not on PATH")
