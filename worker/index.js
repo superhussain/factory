@@ -67,6 +67,7 @@ import {
   triageConfidence,
   triageInput,
 } from "./triage.js";
+import { spendGet } from "./spend.js";
 
 export { BoardEvents } from "./events.js";
 
@@ -3236,6 +3237,7 @@ async function api(request, env, path, principal, ctx) {
   if (path === "/api/review/escalation" && method === "POST") return reviewEscalation(request, env);
   if (path === "/api/board/archive")
     return method === "GET" ? archiveGet(request, env) : notFound();
+  if (path === "/api/spend") return method === "GET" ? spendGet(env) : notFound();
   if (path === "/api/push/key" || path === "/api/push/subscriptions") {
     if (principal.kind !== "user") return notFound();
     if (path === "/api/push/key") return method === "GET" ? pushKeyGet(env) : notFound();

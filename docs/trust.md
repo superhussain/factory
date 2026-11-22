@@ -81,6 +81,22 @@ and never move it to global config, where every repository on the host would sen
 it. Move a harmless key you need, such as `http.postBuffer`, to
 `git config --global`, which the check does not read.
 
+## Review floor
+
+`review-plan` picks the review tier from spec.md's `Tier:` line and decision.md's
+`## Full review` heading, and a builder can edit both between rounds. So the job
+folder keeps `review-floor.json`, such as `{"tier": "medium", "full_review": true}`.
+`factory.py review-floor` writes it before the first build and after each approver
+CHANGES, and `review-plan` rewrites it each round it records a plan. Each write keeps
+the higher of the recorded tier and the spec's tier, and keeps `full_review` once
+either the record or decision.md sets it. `review-plan` then rates the round at least
+the recorded tier, and high when `full_review` is true. A file with bad JSON or values
+counts as a high floor, and a linked file or job folder stops either command with
+exit 6. The record stays on the host and never syncs. A missing file means no floor,
+so a builder that deletes it, or a host that recovers the job elsewhere, gets the
+plain spec and decision rules back. The approver's check of the plan's head and tier
+still bounds that gap.
+
 ## Review citation check
 
 `factory.py grounding` reads each review file of a round and checks every

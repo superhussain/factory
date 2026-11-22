@@ -125,7 +125,7 @@ A job's worktree is `WT="$WORKTREES/<id>"`, on branch `factory/<id>` cut from `$
 | Path | What |
 | --- | --- |
 | `$PROJECT` | project context for every agent |
-| `$JOBS/<id>/` | `spec.md`, `build.md`, `pre-review.md` (written by `factory.py pre-review`), `round-N/review-{security,ux,ui,code}.md`, `round-N/grounding.md` (written by `factory.py grounding`), `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, `<file>-evidence.md`, `scratchpad.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
+| `$JOBS/<id>/` | `spec.md`, `build.md`, `pre-review.md` (written by `factory.py pre-review`), `round-N/review-{security,ux,ui,code}.md`, `round-N/grounding.md` (written by `factory.py grounding`), `review-floor.json` (written by `factory.py review-floor` and `review-plan`), `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, `<file>-evidence.md`, `scratchpad.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
 | `$WT` | the builder's worktree |
 | `$FACTORY/config.md`, `$FACTORY/.env` | device settings and the private Access service token |
 
@@ -335,7 +335,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   the last allowed round of a cycle still has a CHANGES verdict, the job goes to
   `needs-human` with a note naming the reviewers that still want changes. A `/factory rework` starts a new cycle, so count
   rounds since the latest rework.
-- Repeat stop: the same reviewer `Signature:` in two consecutive rounds, or the same pre-review check failing in two consecutive rounds, or the same file changed in three consecutive fix rounds, sends the job to `needs-human` as loop steps 4 and 5 describe, even below the round cap.
+- Repeat stop: the same reviewer `Signature:` in any two rounds, or the same pre-review check failing deterministically in any two rounds, or the same file changed in three consecutive fix rounds, sends the job to `needs-human` as loop steps 4 and 5 describe, even below the round cap. Pre-review retries only a transient failure, once.
 - The builder is named `builder-<job-id>`. Before every dispatch (initial, fix,
   approver CHANGES, rework, recovery, handoff resume), assess the remaining work
   and pick a builder tier by the selection rule below. Pass the chosen tier, its

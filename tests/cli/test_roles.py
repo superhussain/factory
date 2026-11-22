@@ -367,6 +367,13 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("Its `protected` list stays in `round-N/review-plan.json` for the approver.",
                       flat("references/commands/feature.md"))
 
+    def test_review_floor_steps(self):
+        feature = " ".join((SKILL / "references/commands/feature.md").read_text(encoding="utf-8").split())
+        self.assertIn('Run `python3 "$RUNTIME" review-floor "$SLUG/<id>"`. A non-zero exit puts its stderr line in '
+                      "the board `note`, and the build goes ahead. Set stage `build`", feature)
+        self.assertIn('CHANGES is a normal fix round: run `python3 "$RUNTIME" review-floor "$SLUG/<id>"` before '
+                      "sending the builder `decision.md`.", feature)
+
     def test_review_tier_rubric_and_dispatch(self):
         def flat(name):
             return " ".join((SKILL / name).read_text(encoding="utf-8").split())
@@ -479,6 +486,11 @@ class RolesTest(IsolatedTestCase):
         builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
         self.assertIn("run_in_background", builder)
         self.assertIn("Never `sleep` then `tail` its log", builder)
+
+    def test_builder_dispute_table(self):
+        builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
+        self.assertIn("### Disputed findings", builder)
+        self.assertIn("`Round`, `Reviewer`, `Signature` and `Reason`", builder)
 
     def test_checks_are_sized_to_the_change(self):
         builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())

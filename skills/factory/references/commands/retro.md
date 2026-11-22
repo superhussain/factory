@@ -28,7 +28,9 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    `skipped suggestions[N]: finding fixed by <id>` line means every finding the card links was
    fixed, so the card is not admitted. Exit 2 after a wrote line means every card failed:
    findings.md is written and no card was admitted. Exit 3 with `every clean card's finding is
-   already fixed` means every clean card was skipped.
+   already fixed` means every clean card was skipped. findings.md includes a Reviewer accept
+   rate table built from reviewers in the aggregate: each reviewer's CHANGES findings in jobs
+   done in the window, and how many the builder disputed.
    An `edited <scope> stage_notes.<stage> to version N: <summary>` line means that
    edit is saved; a `skipped edits[i]` line or `autonomy is paused; no pipeline edit`
    means it is not. findings.md lists each under Pipeline edits. Edits never change

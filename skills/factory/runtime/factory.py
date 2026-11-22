@@ -96,10 +96,12 @@
                                             ask whether a review round's CHANGES findings need a person,
                                             print one JSON verdict
   factory.py repeats <project-slug>/<job-id> <round>
-                                            compare a review round's CHANGES signatures with the round before, print one JSON verdict
+                                            compare a review round's CHANGES signatures with every earlier round, print one JSON verdict
                                               and flag files changed in each of the last 3 fix rounds
   factory.py review-plan <project-slug>/<job-id> <round>
                                             skip the ux and ui reviews of a round that changes nothing a person sees, print one JSON plan
+  factory.py review-floor <project-slug>/<job-id>
+                                            record the review tier and full-review flag so a later edit cannot lower them
   factory.py pre-review <project-slug>/<job-id>
                                             run the base branch's .factory/checks.json in the job
                                             worktree, write pre-review.md, print one JSON line; FAIL exits 1
@@ -1997,18 +1999,31 @@ def escalation_cmd(target, round_text):
 SIGNATURE = re.compile(r"(?:[-*] )?Signature: ([A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5})")
 
 
-def review_signatures(path):
-    """The Signature: lines of a CHANGES review, or an empty set for any other or missing review."""
-    if not path.is_file():
-        return set()
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+def changes_signatures(text):
+    """The Signature: lines of a CHANGES review's text, or an empty set for any other review."""
+    lines = text.splitlines()
     if lines[:1] != ["VERDICT: CHANGES"]:
         return set()
     return {m.group(1) for m in map(SIGNATURE.fullmatch, (line.strip() for line in lines)) if m}
 
 
+def review_signatures(path):
+    """The Signature: lines of a CHANGES review, or an empty set for any other or missing review."""
+    if not path.is_file():
+        return set()
+    return changes_signatures(path.read_text(encoding="utf-8", errors="replace"))
+
+
+DISPUTE_ROW = re.compile(r"\|\s*([1-9][0-9]*)\s*\|\s*(security|ux|ui|code)\s*\|\s*`?([A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5})`?\s*\|")
+
+
+def build_disputes(text):
+    """(round, reviewer, signature) for every Disputed findings row in build.md, across all run sections."""
+    return {(int(m[1]), m[2], m[3]) for m in map(DISPUTE_ROW.match, (line.strip() for line in text.splitlines())) if m}
+
+
 def repeats_cmd(target, round_text):
-    """Print one JSON verdict on whether a reviewer repeats a CHANGES signature from the round before."""
+    """Print one JSON verdict on whether a reviewer repeats a CHANGES signature from any earlier round."""
     home, slug, job_id = r2_target(target, True)
     if not re.fullmatch(r"[1-9][0-9]*", round_text):
         fail("round must be a positive integer", 2)
@@ -2020,11 +2035,13 @@ def repeats_cmd(target, round_text):
         if not path.is_file():
             fail(f"{path} is missing: the round is not complete", 4)
     repeats = []
-    if n > 1:
-        before = job / f"round-{n - 1}"
-        for name in TRACER_REVIEWERS:
-            same = review_signatures(folder / f"review-{name}.md") & review_signatures(before / f"review-{name}.md")
-            repeats += [{"reviewer": name, "signature": s} for s in sorted(same)]
+    for name in TRACER_REVIEWERS:
+        now_signatures = review_signatures(folder / f"review-{name}.md")
+        first = {}
+        for k in range(n - 1, 0, -1):
+            for s in now_signatures & review_signatures(job / f"round-{k}" / f"review-{name}.md"):
+                first[s] = k
+        repeats += [{"reviewer": name, "signature": s, "first": first[s]} for s in sorted(first)]
     wt = home / "worktrees" / slug / job_id
     churn = churn_files(job, wt, n) if n >= 4 else []
     decision = "repeat" if repeats else "churn" if churn else "continue"
@@ -7391,6 +7408,7 @@ PROTECTED_PATHS = (".github/*", "*/.github/*", "*.gitlab-ci*", "*.circleci/*", "
 VISUAL_CRITERION = re.compile(r"screenshot|captur|before and after|before/after|visual evidence", re.I)
 SKIPPABLE_REVIEWERS = ("ux", "ui")
 REVIEW_PLAN_USAGE = "usage: review-plan <project-slug>/<job-id> <round>"
+REVIEW_FLOOR_USAGE = "usage: review-floor <project-slug>/<job-id>"
 
 
 def markdown_section(text, name):
@@ -7443,20 +7461,61 @@ def plan_reason(spec_text, decision_text, changed, globs):
                    "matches a visible-file glob")
 
 
-def review_tier(spec_text, decision_text, protected):
-    """(tier, reason): the spec's Review tier line, raised to high by the first floor that applies.
-    The spec text never lowers a floor."""
-    if re.search(r"^## Full review[ \t]*$", decision_text, re.M):
+REVIEW_FLOOR_FILE = "review-floor.json"
+TIER_RANK = {"low": 0, "medium": 1, "high": 2}
+FULL_REVIEW = re.compile(r"^## Full review[ \t]*$", re.M)
+
+
+def spec_tier(spec_text):
+    """The spec's Review tier line value, lowercased, or None."""
+    line = re.search(r"^Tier:\s*(low|medium|high)\s*$", markdown_section(spec_text, "Review tier") or "",
+                     re.M | re.I)
+    return line.group(1).lower() if line else None
+
+
+def read_review_floor(path):
+    """The recorded {"tier", "full_review"} floor, None for a missing file, or a high floor marked unreadable
+    for a bad one. tier is None when no spec has rated the job yet."""
+    if not path.is_file():
+        return None
+    try:
+        floor = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        floor = None
+    tier = floor.get("tier") if isinstance(floor, dict) else None
+    if not (isinstance(floor, dict) and (tier is None or isinstance(tier, str) and tier in TIER_RANK)
+            and isinstance(floor.get("full_review"), bool)):
+        return {"tier": "high", "full_review": False, "unreadable": True}
+    return {"tier": floor.get("tier"), "full_review": floor["full_review"]}
+
+
+def merge_review_floor(floor, spec_text, decision_text):
+    """The floor raised by the current spec tier and decision.md's Full review heading. It never lowers."""
+    floor = floor or {"tier": None, "full_review": False}
+    tiers = [t for t in (floor["tier"], spec_tier(spec_text)) if t]
+    merged = {"tier": max(tiers, key=TIER_RANK.get) if tiers else None,
+              "full_review": floor["full_review"] or bool(FULL_REVIEW.search(decision_text))}
+    return {**merged, "unreadable": True} if floor.get("unreadable") else merged
+
+
+def review_tier(spec_text, decision_text, protected, floor):
+    """(tier, reason): the spec's Review tier line, raised to high by the first floor that applies, then to the
+    recorded floor's tier. The spec text never lowers a floor."""
+    if FULL_REVIEW.search(decision_text):
         return "high", "decision.md asks for a full review"
+    if floor and floor["full_review"]:
+        return "high", "review-floor.json records a full review"
     if protected is None:
         return "high", "the protected paths could not be read"
     if protected:
         return "high", "the branch touches protected paths"
-    line = re.search(r"^Tier:\s*(low|medium|high)\s*$", markdown_section(spec_text, "Review tier") or "",
-                     re.M | re.I)
-    if not line:
+    tier = spec_tier(spec_text)
+    if not tier:
         return "high", "spec.md has no Review tier line"
-    tier = line.group(1).lower()
+    if floor and floor["tier"] and TIER_RANK[floor["tier"]] > TIER_RANK[tier]:
+        if floor.get("unreadable"):
+            return floor["tier"], "review-floor.json could not be read"
+        return floor["tier"], f"review-floor.json records {floor['tier']}, above spec.md's {tier}"
     return tier, f"spec.md rates the job {tier}"
 
 
@@ -7522,6 +7581,19 @@ def round_changed_files(wt, head, new="HEAD"):
     return None if diff.returncode else [p for p in diff.stdout.split("\0") if p]
 
 
+def round_own_files(wt, old, new):
+    """The paths the job's own commits change from old to new, walking the first-parent chain and skipping merges,
+    or None when old is not an ancestor of new or git fails."""
+    if subprocess.run(["git", "-C", str(wt), "merge-base", "--is-ancestor", old, new],
+                      capture_output=True).returncode:
+        return None
+    log = subprocess.run(["git", "-C", str(wt), "log", "--first-parent", "--no-merges", "--no-renames", "--name-only",
+                          "-z", "--format=", f"{old}..{new}"], capture_output=True, text=True)
+    if log.returncode:
+        return None
+    return [p for p in (p.strip("\n") for p in log.stdout.split("\0")) if p]
+
+
 CHURN_ROUNDS = 3
 
 
@@ -7542,7 +7614,7 @@ def churn_files(folder, wt, n):
     heads = [round_head(folder, k) for k in range(n - CHURN_ROUNDS, n + 1)]
     if None in heads or not wt.is_dir():
         return []
-    sets = [round_changed_files(wt, old, new) for old, new in zip(heads, heads[1:])]
+    sets = [round_own_files(wt, old, new) for old, new in zip(heads, heads[1:])]
     if None in sets:
         return []
     common = set.intersection(*map(set, sets))
@@ -7582,7 +7654,8 @@ def review_plan_cmd(target, round_text):
     round_folder = folder / f"round-{round_text}"
     targets = [round_folder / f"review-{name}.md" for name in SKIPPABLE_REVIEWERS]
     plan_file = round_folder / "review-plan.json"
-    for node in (folder, round_folder, *targets, plan_file):
+    floor_file = folder / REVIEW_FLOOR_FILE
+    for node in (folder, round_folder, *targets, plan_file, floor_file):
         if is_link(node):
             fail(f"{node} is a symlink or junction; nothing was written", 6)
     if not (folder / "spec.md").is_file():
@@ -7623,7 +7696,8 @@ def review_plan_cmd(target, round_text):
         for path in targets:
             if path.exists():
                 fail(f"{path} already exists; nothing was written", 6)
-    tier, tier_reason = review_tier(spec_text, decision_text, protected)
+    floor = merge_review_floor(read_review_floor(floor_file), spec_text, decision_text)
+    tier, tier_reason = review_tier(spec_text, decision_text, protected, floor)
     run = list(TRACER_REVIEWERS) if visible else ["security", "code"]
     # A low job keeps security on the medium route; a high job keeps every reviewer on the default.
     routes = dict.fromkeys(run) if tier == "high" else {
@@ -7632,12 +7706,34 @@ def review_plan_cmd(target, round_text):
         round_folder.mkdir(exist_ok=True)
         write_atomic(str(plan_file), json.dumps({"round": n, "head": head, "protected": protected, "tier": tier,
                                                  "routes": routes}) + "\n")
+        write_atomic(str(floor_file), json.dumps({"tier": floor["tier"], "full_review": floor["full_review"]}) + "\n")
     if not visible:
         for path in targets:
             write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
     print(json.dumps({"round": n, "run": run, "skipped": [] if visible else list(SKIPPABLE_REVIEWERS),
                       "reason": reason, "protected": protected, "tier": tier, "tier_reason": tier_reason,
                       "routes": routes}))
+
+
+def review_floor_cmd(target):
+    """Raise review-floor.json to the spec's current tier and decision.md's Full review heading, and print it."""
+    home, slug, job_id = r2_target(target, True)
+    if not any(j.get("id") == job_id for j in read_board(home)["jobs"]):
+        fail(f"no job {job_id} on the board. Nothing was written. " + REVIEW_FLOOR_USAGE, 4)
+    folder = home / "jobs" / slug / job_id
+    floor_file = folder / REVIEW_FLOOR_FILE
+    for node in (folder, floor_file):
+        if is_link(node):
+            fail(f"{node} is a symlink or junction; nothing was written", 6)
+    if not (folder / "spec.md").is_file():
+        fail(f"{folder / 'spec.md'} is missing", 4)
+    decision = folder / "decision.md"
+    decision_text = decision.read_text(encoding="utf-8") if decision.is_file() else ""
+    floor = merge_review_floor(read_review_floor(floor_file), (folder / "spec.md").read_text(encoding="utf-8"),
+                               decision_text)
+    record = json.dumps({"tier": floor["tier"], "full_review": floor["full_review"]})
+    write_atomic(str(floor_file), record + "\n")
+    print(record)
 
 
 CHECKS_FILE = ".factory/checks.json"
@@ -7755,6 +7851,28 @@ def run_check(argv, cwd, log, timeout):
     return code, round(time.monotonic() - start)
 
 
+TRANSIENT_LOG = re.compile(r"ECONNRESET|ETIMEDOUT|EAI_AGAIN|Connection reset by peer|Temporary failure in name resolution"
+                           r"|Could not resolve host|429 Too Many Requests|502 Bad Gateway|503 Service Unavailable"
+                           r"|504 Gateway Timeout")
+
+
+def failure_class(code, log):
+    """A check result's class: None on a pass, else budget, structural, canceled, transient or deterministic.
+    The transient match reads the last 65536 bytes of the log file."""
+    if code == 0:
+        return None
+    if code == "timeout":
+        return "budget"
+    if code in ("missing", 126, 127):
+        return "structural"
+    if code < 0 or code in (130, 143):
+        return "canceled"
+    with open(log, "rb") as f:
+        f.seek(max(0, f.seek(0, os.SEEK_END) - 65536))
+        tail = f.read().decode("utf-8", errors="replace")
+    return "transient" if TRANSIENT_LOG.search(tail) else "deterministic"
+
+
 def pre_review_tail(log_text, env):
     """The last PRE_REVIEW_TAIL lines of a failing check's log for pre-review.md: home .env values of
     ENV_SECRET_MIN or more characters and retro_redact's patterns as [redacted], each line printable,
@@ -7839,14 +7957,22 @@ def pre_review_cmd(target):
     checks_sha = (git("rev-parse", f"origin/{base}") or "").strip()
     results = []
     for check in checks:
-        code, seconds = run_check(check["run"], wt, logs / f"{check['name']}.log", PRE_REVIEW_TIMEOUT)
-        results.append({"name": check["name"], "exit": code, "seconds": seconds})
+        log = logs / f"{check['name']}.log"
+        code, seconds = run_check(check["run"], wt, log, PRE_REVIEW_TIMEOUT)
+        kind, retried = failure_class(code, log), False
+        if kind == "transient":
+            os.replace(log, logs / f"{check['name']}.attempt-1.log")
+            code, seconds = run_check(check["run"], wt, log, PRE_REVIEW_TIMEOUT)
+            kind, retried = failure_class(code, log), True
+        results.append({"name": check["name"], "exit": code, "seconds": seconds, "class": kind, "retried": retried})
     failed = [r for r in results if r["exit"] != 0]
     result = "fail" if failed else "pass"
     lines = [f"PRE-REVIEW: {result.upper()}", "", f"Head: {head}", budget_line(budget),
              f"Checks: origin/{base}:{CHECKS_FILE} at {checks_sha}", f"Logs: {logs}", "",
-             "| Check | Exit | Seconds |", "| --- | --- | --- |"]
-    lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} |" for r in results]
+             "| Check | Exit | Seconds | Class |", "| --- | --- | --- | --- |"]
+    lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} | {r['class'] or '-'}"
+              f"{', retried' if r['retried'] else ''} |" for r in results]
+    lines += ["", 'Classes are explained under "Failure classes" in docs/autonomy.md of the factory repository.']
     if budget["result"] == "over":
         lines += ["", "## Diff budget", "", "| Measure | Spec estimate | Limit | Branch |", "| --- | --- | --- | --- |",
                   f"| Files | {budget['expected_files']} | {budget['file_limit']} | {budget['files']} |",
@@ -7856,7 +7982,8 @@ def pre_review_cmd(target):
             lines += ["", "Files outside the spec's task list:", ""]
             for p in unlisted[:DIFF_BUDGET_UNLISTED_MAX]:
                 p = printable_line(p, 200)
-                lines.append(f"- `` {p} ``" if "`" in p else f"- `{p}`")
+                fence = "`" * (max(map(len, re.findall("`+", p)), default=0) + 1)
+                lines.append(f"- {fence} {p} {fence}" if "`" in p else f"- `{p}`")
             if len(unlisted) > DIFF_BUDGET_UNLISTED_MAX:
                 lines.append(f"- and {len(unlisted) - DIFF_BUDGET_UNLISTED_MAX} more")
     env = read_conf(home / ".env") if (home / ".env").exists() else {}
@@ -7866,8 +7993,8 @@ def pre_review_cmd(target):
         lines += ["", f"## {r['name']}", "", "~~~text", *tail, "~~~"]
     write_atomic(str(out_file), "\n".join(lines) + "\n")
     repeats = []
-    if failed:
-        names = {r["name"] for r in failed}
+    names = {r["name"] for r in failed if r["class"] == "deterministic"}
+    if names:
         record_file = make_job_temp(slug, job_id) / "pre-review-failures.json"
         try:
             record = json.loads(record_file.read_text(encoding="utf-8"))
@@ -7878,7 +8005,7 @@ def pre_review_cmd(target):
             record = {}
         record[str(round_n)] = sorted(names | set(record.get(str(round_n), [])))
         write_atomic(str(record_file), json.dumps(record) + "\n")
-        repeats = sorted(names & set(record.get(str(round_n - 1), [])))
+        repeats = sorted(names & {n for k, v in record.items() if k.isdecimal() and int(k) < round_n for n in v})
     print(json.dumps({"result": result, "head": head, "checks": results, "reason": None, "round": round_n,
                       "repeats": repeats, "budget": budget}))
     if failed:
@@ -13068,6 +13195,52 @@ def retro_lessons(board, projects, rows, since):
     return sorted(out, key=lambda r: r["at"], reverse=True)[:RETRO_LESSONS_MAX]
 
 
+def retro_reviewers(home, board, projects, rows, since):
+    """Per reviewer, the CHANGES findings in jobs of registered projects merged or closed since the window start,
+    and how many the builder disputed in build.md's Disputed findings table."""
+    jobs = sorted((j for j in board["jobs"] if j.get("stage") in ("merged", "closed") and isinstance(j.get("done"), str)
+                   and j["done"][:10] >= since and j.get("project") in projects),
+                  key=lambda j: j["done"], reverse=True)[:RETRO_MERGED_MAX]
+    stats = {r: {"changes": 0, "disputed": 0, "jobs": 0, "counts": {}, "sessions": []} for r in REVIEWERS}
+    for j in jobs:
+        base = f"/api/jobs/{j['project']}/{j['id']}"
+        rounds = j.get("rounds") if isinstance(j.get("rounds"), list) else []
+        found = {}
+        for i, e in enumerate(rounds):
+            if not isinstance(e, dict):
+                continue
+            for r in REVIEWERS:
+                if e.get(r) == "CHANGES":
+                    status, _, text = api(home, "GET", f"{base}/round-{i + 1}/review-{r}.md", ok=(200, 404))
+                    if status == 200:
+                        found[(i + 1, r)] = changes_signatures(text)
+        if not any(found.values()):
+            continue
+        status, _, text = api(home, "GET", f"{base}/build.md", ok=(200, 404))
+        disputes = build_disputes(text) if status == 200 else set()
+        number = j["id"].split("-", 1)[0]
+        refs = list(dict.fromkeys(f"{row['host']}/{row['session']}" for row in rows if str(row.get("job")) == number))
+        for r in REVIEWERS:
+            signed = [(n, s) for (n, reviewer), sigs in found.items() if reviewer == r for s in sigs]
+            if not signed:
+                continue
+            st, hits = stats[r], sum((n, r, s) in disputes for n, s in signed)
+            st["changes"] += len(signed)
+            st["disputed"] += hits
+            st["jobs"] += 1
+            st["counts"][j["project"]] = st["counts"].get(j["project"], 0) + 1
+            if hits:
+                st["sessions"] = list(dict.fromkeys(st["sessions"] + refs))[:5]
+    out = {}
+    for r, st in stats.items():
+        n, counts = st["changes"], st["counts"]
+        out[r] = {"changes": n, "fixed": n - st["disputed"], "disputed": st["disputed"],
+                  "accept_pct": round(100 * (n - st["disputed"]) / n) if n else None, "jobs": st["jobs"],
+                  "project": min(counts, key=lambda p: (-counts[p], p)) if counts else None,
+                  "sessions": st["sessions"]}
+    return out
+
+
 def retro_aggregate(days):
     """Pull every host's digest for the last days into <home>/retro/<run>/ for the retro agent."""
     home = factory_home()
@@ -13183,6 +13356,7 @@ def retro_aggregate(days):
     status, _, text = api(home, "GET", "/api/audit-flags", ok=(200, 404))
     agg["red_flags"] = retro_red_flags(json.loads(text) if status == 200 else {}, board, projects, rows)
     agg["lessons"] = retro_lessons(board, projects, rows, dates[0])
+    agg["reviewers"] = retro_reviewers(home, board, projects, rows, dates[0])
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
@@ -13433,6 +13607,15 @@ def render_findings(agg, doc, rejected=(), edits=(), fixed=(), cards=()):
                   quote(f["fix"]), "", "Sessions: " + ", ".join(f"`{r}`" for r in f["sessions"])]
         if "fixed_by" in f:
             lines += ["", f"Fixed by: `{f['fixed_by']}`, but a session started after its merge."]
+    accept = [(r, s) for r, s in (agg.get("reviewers") or {}).items() if s["changes"] > 0]
+    if accept:
+        lines += ["", "## Reviewer accept rate", "",
+                  "CHANGES findings in jobs merged or closed in the window. Disputed counts findings the builder "
+                  "listed under Disputed findings in build.md; fixed is the rest.", "",
+                  "| Reviewer | CHANGES findings | Fixed | Disputed | Accept rate | Jobs |",
+                  "| --- | --- | --- | --- | --- | --- |"]
+        lines += [f"| {r} | {s['changes']} | {s['fixed']} | {s['disputed']} | {s['accept_pct']}% | {s['jobs']} |"
+                  for r, s in accept]
     if rejected:
         lines += ["", "## Rejected findings", "",
                   "Admission dropped these findings. Their text is not shown; read reply.json to see it.", "",
@@ -13841,6 +14024,7 @@ COMMANDS["orphans"] = (orphans_cmd, 0, 0)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["repeats"] = (repeats_cmd, 2, 2)
 COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
+COMMANDS["review-floor"] = (review_floor_cmd, 1, 1)
 COMMANDS["pre-review"] = (pre_review_cmd, 1, 1)
 COMMANDS["grounding"] = (grounding_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
