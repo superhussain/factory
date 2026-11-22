@@ -379,8 +379,10 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   the project file's PRs section: what changed and why, a testing section, the
   screenshots from `build.md`, and any device checks from `decision.md`. Set stage
   `pr-open`, `pr` to the PR URL, and `automerge` true for an APPROVE PR, in one
-  patch. When `$PIPELINE.merge` is `human`, an APPROVE PR ships with `automerge`
-  false and `needs` set to `review and merge PR #<n>: this project's pipeline holds
+  patch. `board` refuses `automerge` true unless decision.md's first line is APPROVE,
+  and refuses stage `approve` unless every verdict in the latest rounds entry is PASS
+  or SKIPPED (factory.py says it cannot move to approve). When `$PIPELINE.merge` is
+  `human`, an APPROVE PR ships with `automerge` false and `needs` set to `review and merge PR #<n>: this project's pipeline holds
   every PR for a person`. The orchestrator never merges it. Pickup, or an agent
   seeing it first, moves it to `merged` or `closed` ([sync](references/pickup.md#syncing-pr-state)).
   An agent that moves it runs `cleanup`.
