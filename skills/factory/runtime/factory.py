@@ -6447,6 +6447,7 @@ def idle_watch_pass(home, data, device, dry):
         return (j.get("stage") in IN_FLIGHT and isinstance(c, dict) and c.get("device") == device
                 and server and isinstance(link, dict) and link.get("server") == server
                 and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"])
                 and not gated(j) and not paused(j) and not closing(j) and not lead_of(j))
 
     old = read_idle_watch(home)
@@ -6464,7 +6465,7 @@ def idle_watch_pass(home, data, device, dry):
             if prev:
                 watch[job_id] = prev
             continue
-        wt = Path(home, "worktrees", str(project), job_id)
+        wt = Path(home, "worktrees", project, job_id)
         there = wt.exists()
         sig = {"agent": agent, "head": git(wt, "rev-parse", "HEAD") if there else "",
                "tree": hashlib.sha256(git(wt, "status", "--porcelain").encode()).hexdigest()[:12] if there else "",

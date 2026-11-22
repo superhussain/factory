@@ -1823,6 +1823,17 @@ class IdleWatchTest(PickupFixture):
         self.assertEqual(self.sent, [])
         self.assertEqual(self.watch(), {})
 
+    def test_unsafe_project_is_never_watched(self):
+        self.export(project="../../elsewhere")
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertFalse((self.home / "idle-watch.json").exists())
+        (self.home / "idle-watch.json").write_text(json.dumps({"version": 1, "jobs": {"042-sample-export": {
+            "agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z",
+            "since": stamp(minutes=-21)}}}), encoding="utf-8")
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.sent, self.puts()), ([], []))
+        self.assertEqual(self.watch(), {})
+
     def test_board_change_wins_over_escalation(self):
         self.nudged()
         self.age("nudged")
