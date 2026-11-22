@@ -4326,6 +4326,7 @@ PICKUP_SCHEDULER = "launchd" if sys.platform == "darwin" else "schtasks" if sys.
 LAUNCH_WAIT_SECONDS = 30
 LAUNCH_BACKOFF_SECONDS = 300
 LAUNCH_BACKOFF_CAP_SECONDS = 14400
+LAUNCH_STOP_FAILURES = 5
 _DETACHED_RUNNING = []
 LIMIT_TEXT = re.compile(r"(?:usage|rate|session|weekly) limit|limit (?:reached|exceeded)", re.I)
 RESET_IN = re.compile(r"(?:resets|try again) in (\d{1,4}) ?(minutes?|mins?|m|hours?|hrs?|h)\b", re.I)
@@ -4607,7 +4608,8 @@ def launch_reason(detail):
 
 def back_off_launch(home, job_id, device, session, reason):
     """Drop this session's claim and park the job after a failed launch, in one board write.
-    (count, until), or None when the job is gone or the claim is not this session's."""
+    From the fifth failure in a row, move it to needs-human with a needs ask instead.
+    (count, until), (count, None) for that stop, or None when the job is gone or the claim is not this session's."""
     def change(text):
         data = load_board(text)
         job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
@@ -4618,9 +4620,16 @@ def back_off_launch(home, job_id, device, session, reason):
         prior = record.get("count") if isinstance(record, dict) else None
         count = (prior if type(prior) is int and prior >= 1 else 0) + 1
         at = datetime.now(timezone.utc).replace(microsecond=0)
+        failure = {"count": count, "reason": reason, "at": at.strftime("%Y-%m-%dT%H:%M:%SZ")}
+        if count >= LAUNCH_STOP_FAILURES:
+            patch_job(data, job_id, {
+                "claim": None, "not_before": None, "stage": "needs-human",
+                "needs": f"Pickup launch failed {count} times in a row on host {device}. Last reason: {reason}. "
+                         f"Fix the launcher, then clear this ask and move the job back to {job.get('stage')}.",
+                "launch_failure": failure})
+            return dump_board(data), (count, None)
         until = (at + timedelta(seconds=launch_backoff_seconds(count))).strftime("%Y-%m-%dT%H:%M:%SZ")
-        patch_job(data, job_id, {"claim": None, "not_before": until, "launch_failure": {
-            "count": count, "reason": reason, "at": at.strftime("%Y-%m-%dT%H:%M:%SZ")}})
+        patch_job(data, job_id, {"claim": None, "not_before": until, "launch_failure": failure})
         return dump_board(data), (count, until)
     return cas(home, "/api/board", change)
 
@@ -5489,7 +5498,9 @@ def launch_failed(home, name, job_id, detail, log_path, release, fatal=True, exp
         return
     parked = backoff() if backoff else release()
     print(f"released {job_id}")
-    if parked:
+    if parked and parked[1] is None:
+        print(f"needs-human {job_id} after {parked[0]} launch failures in a row")
+    elif parked:
         print(f"backed off {job_id} until {parked[1]} (launch failure {parked[0]})")
     message = f"launch of {job_id} on {name} failed: {detail}; see {log_path}"
     if fatal:

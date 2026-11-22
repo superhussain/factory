@@ -2229,6 +2229,42 @@ class LaunchBackoffTest(PickupFixture):
         self.assertNotIn("claim", j)
         self.assertEqual(self.parked("120-sample-digest"), (1, "exit 3", 300))
 
+    def test_fifth_failure_moves_to_needs_human(self):
+        self.board["jobs"] = [idea("120-sample-digest", "alpha",
+                                   launch_failure={"count": 4, "reason": "exit 3", "at": stamp(minutes=-40)})]
+        self.configure(line="boom", code=3)
+        code, out, err = self.pickup()
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "released 120-sample-digest\n"
+                              "needs-human 120-sample-digest after 5 launch failures in a row\n")
+        self.assertRegex(err, r"^factory\.py: launch of 120-sample-digest on primary failed: exit 3; see ")
+        j = self.job("120-sample-digest")
+        self.assertEqual(j["stage"], "needs-human")
+        self.assertEqual(j["needs"], "Pickup launch failed 5 times in a row on host host-a. Last reason: exit 3. "
+                                     "Fix the launcher, then clear this ask and move the job back to idea.")
+        self.assertNotIn("claim", j)
+        self.assertNotIn("not_before", j)
+        self.assertEqual((j["launch_failure"]["count"], j["launch_failure"]["reason"]), (5, "exit 3"))
+
+    def test_stop_keeps_the_note_and_names_the_stage(self):
+        self.board["jobs"] = [{"id": "120-sample-digest", "stage": "build", "project": "alpha",
+                               "note": "spec approved in Tracer", "updated": stamp(),
+                               "launch_failure": {"count": 3, "reason": "exit 3", "at": stamp(minutes=-30)}}]
+        self.configure(line="boom", code=3)
+        code, out, err = self.pickup()
+        self.assertEqual(code, 1)
+        self.assertIn("backed off 120-sample-digest until ", out)
+        self.assertEqual(self.job("120-sample-digest")["stage"], "build")
+        self.assertEqual(self.parked("120-sample-digest"), (4, "exit 3", 2400))
+        self.job("120-sample-digest").pop("not_before")
+        code, out, err = self.pickup()
+        self.assertEqual(code, 1)
+        self.assertIn("needs-human 120-sample-digest after 5 launch failures in a row", out)
+        j = self.job("120-sample-digest")
+        self.assertEqual((j["stage"], j["note"]), ("needs-human", "spec approved in Tracer"))
+        self.assertTrue(j["needs"].endswith("move the job back to build."), j["needs"])
+        self.assertEqual(j["launch_failure"]["count"], 5)
+
     def test_limit_failure_does_not_back_off(self):
         self.board["jobs"] = [idea("120-sample-digest", "alpha")]
         self.configure(line="You've hit your usage limit. Resets in 3 hours.", code=1)
