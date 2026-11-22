@@ -25,6 +25,9 @@
   factory.py bench score <cases-file> <arm-folder>...
                                             score saved reviewer runs against labeled past defects, print JSON
                                             (offline)
+  factory.py bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]
+                                            run a reviewer on each case at its head, write review and run.json
+                                            for bench score
   factory.py bench cases <project-slug>
                                             draft reviewer-benchmark cases from reverted or reworked jobs, print JSON
   factory.py ideas [--limit N] [--max-inflight N] [--project <slug>]
@@ -250,6 +253,7 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import xml.parsers.expat
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13346,7 +13350,8 @@ def outcomes_cmd(*args):
 
 
 BENCH_WEIGHTS = {"high": 3, "medium": 2, "low": 1}
-BENCH_USAGE = "usage: factory.py bench score <cases-file> <arm-folder>..."
+BENCH_USAGE = ("usage: factory.py bench score <cases-file> <arm-folder>... | "
+               "bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]")
 
 
 def bench_cases(path):
@@ -13451,6 +13456,191 @@ def bench_arm(folder, cases):
             "missing": missing, "no_run": no_run}
 
 
+BENCH_REPLAY_SECONDS = 3600
+BENCH_REPLAY_TOOLS = ("Read", "Grep", "Glob", "Write", "Bash(git:*)")
+
+
+def bench_replay_plan(home, cases):
+    """Each case with its job folder, project file, checkout and merge commit added, failing on the
+    first case that cannot run."""
+    paths, device, rows, prs = read_paths(home), device_name(home), [], {}
+    for c in cases:
+        jobs = sorted(p.parent for p in home.glob(f"jobs/*/{c['id']}/spec.md"))
+        if not jobs:
+            fail(f"bench: {c['id']}: no job folder with spec.md under {home / 'jobs'}; "
+                 f"pull it with factory.py pull <project>/{c['id']}", 4)
+        if len(jobs) > 1:
+            fail(f"bench: {c['id']}: job folders in more than one project", 2)
+        slug = jobs[0].parent.name
+        project = project_files(home, slug)[0]
+        repo = (frontmatter(project)[0] if project.exists() else {}).get("repo", "")
+        if not repo:
+            fail(f"bench: {c['id']}: project {slug} has no repo; pull it with factory.py pull {slug}", 4)
+        m =GH_PR_PARTS.fullmatch(c["pr"])
+        if f"{m[1]}/{m[2]}".lower() != repo.lower():
+            fail(f"bench: {c['id']}: pr is not in {repo}, the repo of project {slug}", 2)
+        if not paths.get(slug):
+            fail(f"bench: {c['id']}: no checkout of {slug} in paths.md on {device}", 4)
+        rows.append({**c, "job": jobs[0], "project": project, "checkout": paths[slug], "repo": repo})
+        prs.setdefault(repo, []).append(int(m[3]))
+    merges = {}
+    for repo, numbers in prs.items():
+        oids, why = pr_merge_commits(repo, sorted(set(numbers)), device)
+        if why:
+            fail(f"bench: {why}", 5)
+        merges[repo] = oids
+    for row in rows:
+        row["merge"] = merges[row["repo"]].get(int(GH_PR_PARTS.fullmatch(row["pr"])[3]))
+        if not row["merge"]:
+            fail(f"bench: {row['id']}: GitHub reports no merge commit for {row['pr']}", 4)
+    return rows
+
+
+def bench_have_commit(checkout, oid):
+    """True when checkout holds commit oid, fetching it from origin once when it does not."""
+    def have():
+        return subprocess.run(["git", "-C", str(checkout), "cat-file", "-e", f"{oid}^{{commit}}"],
+                              capture_output=True).returncode == 0
+    if have():
+        return True
+    try:
+        subprocess.run(["git", "-C", str(checkout), "fetch", "-q", "origin", oid], capture_output=True,
+                       timeout=60, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    except subprocess.TimeoutExpired:
+        pass
+    return have()
+
+
+def bench_replay_prompt(row, tmp, base, role):
+    """The reviewer prompt for one replayed case."""
+    job, wt, documents = tmp / "job", tmp / "wt", row["project"].with_name(row["project"].stem + ".documents.md")
+    lines = [f"Job id: {row['id']}", f"Job folder: {job}",
+             f"Worktree: {wt} (detached at {row['head']}, base commit {base})", f"Project file: {row['project']}"]
+    if documents.is_file():
+        lines.append(f"Project documents: {documents}")
+    lines += [f"Round folder: {job / 'round-1'}", f"Your file: {job / 'round-1' / f'{role}.md'}", "",
+              "This is a reviewer benchmark replay. The pull request already merged; review it as if it were open. "
+              f"There is no branch factory/{row['id']}: run git diff {base}...{row['head']} wherever your "
+              "instructions name the branch diff. There is no pre-review.md, and Bash runs only git. "
+              "Write only Your file."]
+    return "\n".join(lines) + "\n"
+
+
+def bench_session_usage(session):
+    """{model: {kind: tokens}} summed over one Claude Code session's main transcript and its subagents."""
+    root, totals = retro_transcripts(), {}
+    files = [(p, True) for p in root.glob(f"*/{session}.jsonl")]
+    files += [(p, False) for p in root.glob(f"*/{session}/subagents/*.jsonl")]
+    for path, main in files:
+        try:
+            models = usage_scan(path, main)[0]
+        except OSError:
+            continue
+        for model, counts in models.items():
+            total = totals.setdefault(model, dict.fromkeys(USAGE_TOKENS, 0))
+            for key in USAGE_TOKENS:
+                total[key] += counts[key]
+    return totals
+
+
+def bench_replay_case(row, arm, role, model):
+    """(True, line) when the reviewer wrote its review into arm/<id>, (None, line) when one is already
+    there, (False, line) when the case failed. run.json and replay.log stay once claude ran."""
+    out, name, checkout = Path(arm) / row["id"], f"{role}.md", row["checkout"]
+    if (out / name).exists():
+        return None, f"skipped, {name} already exists"
+    for oid in (row["head"], row["merge"]):
+        if not bench_have_commit(checkout, oid):
+            return False, f"commit {oid} is not in {checkout} after fetch"
+    base = git(checkout, "merge-base", f"{row['merge']}^1", row["head"])
+    if not base:
+        return False, f"no merge base of {row['merge']}^1 and {row['head']} in {checkout}"
+    tmp =Path(tempfile.mkdtemp(prefix=f"factory-bench-{row['id']}-"))
+    added = subprocess.run(["git", "-C", str(checkout), "worktree", "add", "--detach", str(tmp / "wt"), row["head"]],
+                           capture_output=True)
+    if added.returncode:
+        shutil.rmtree(tmp)
+        return False, f"git worktree add exited {added.returncode}"
+    try:
+        (tmp / "job" / "round-1").mkdir(parents=True)
+        for doc in ("spec.md", "build.md"):
+            if (row["job"] / doc).is_file():
+                shutil.copyfile(row["job"] / doc, tmp / "job" / doc)
+        session = str(uuid.uuid4())
+        argv = [shutil.which("claude"), "-p", "--agent", f"factory-{role}", "--session-id", session,
+                "--permission-mode", "dontAsk", "--allowedTools", *BENCH_REPLAY_TOOLS, "--add-dir", str(tmp / "job")]
+        argv += ["--model", model] if model else []
+        out.mkdir(parents=True, exist_ok=True)
+        start, code = time.monotonic(), None
+        with os.fdopen(os.open(out / "replay.log", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as log:
+            try:
+                code = subprocess.run(argv, input=bench_replay_prompt(row, tmp, base, role), stdout=log,
+                                      stderr=subprocess.STDOUT, cwd=tmp / "wt", text=True,
+                                      timeout=BENCH_REPLAY_SECONDS,
+                                      env={**os.environ, "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"}).returncode
+            except subprocess.TimeoutExpired:
+                pass
+        seconds, models = round(time.monotonic() - start), bench_session_usage(session)
+        (out / "run.json").write_text(json.dumps({"role": role, "model": model, "head": row["head"], "base": base,
+                                                  "exit": code, "seconds": seconds, "models": models}),
+                                      encoding="utf-8")
+        review = tmp / "job" / "round-1" / name
+        first = review.read_text(encoding="utf-8", errors="replace").splitlines()[:1] if review.is_file() else []
+        if code is None:
+            return False, f"claude timed out after {BENCH_REPLAY_SECONDS} s"
+        if code:
+            return False, f"claude exited {code}, see replay.log"
+        if not (first and first[0].startswith("VERDICT: ")):
+            return False, f"no {name} with a VERDICT line, see replay.log"
+        shutil.copyfile(review, out / name)
+        return True, f"wrote {name} ({first[0]}), {seconds} s, {token_count(models)} tokens"
+    finally:
+        removed = subprocess.run(["git", "-C", str(checkout), "worktree", "remove", str(tmp / "wt")],
+                                 capture_output=True)
+        if removed.returncode:
+            print(f"factory.py: bench: left {tmp}; remove it with git -C {checkout} worktree remove {tmp / 'wt'}",
+                  file=sys.stderr)
+        else:
+            shutil.rmtree(tmp)
+
+
+def bench_replay(*args):
+    """bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]: run a reviewer on each case
+    at its head and save what bench score reads."""
+    flags = {}
+    rest = args[2:]
+    if len(args) < 2 or any(a.startswith("--") for a in args[:2]) or len(rest) % 2:
+        fail(BENCH_USAGE, 2)
+    for flag, value in zip(rest[::2], rest[1::2]):
+        if flag not in ("--role", "--model") or flag in flags:
+            fail(BENCH_USAGE, 2)
+        flags[flag] = value
+    if "--role" not in flags:
+        fail(BENCH_USAGE, 2)
+    role, model = ROLE_ALIASES.get(flags["--role"], flags["--role"]), flags.get("--model")
+    if role not in [f"review-{r}" for r in REVIEWERS]:
+        fail("bench: --role must be review-security, review-ux, review-ui or review-code", 2)
+    if model is not None and not ROUTE_MODEL.fullmatch(model):
+        fail("bench: --model must be 1 to 200 letters, digits or _ . / : @ [ ] -", 2)
+    cases, arm = bench_cases(args[0]), Path(args[1])
+    if not re.fullmatch(r"[\w.-]+", arm.name, re.ASCII):
+        fail(f"bench: arm name {arm.name} must be unique letters, digits, ., _ or -", 2)
+    if arm.exists() and not arm.is_dir():
+        fail(f"bench: {arm} is not a folder", 2)
+    if not shutil.which("claude"):
+        fail("bench: replay needs claude on PATH", 4)
+    rows = bench_replay_plan(factory_home(), cases)
+    counts = {True: 0, None: 0, False: 0}
+    for row in rows:
+        ok, line = bench_replay_case(row, arm, role, model)
+        counts[ok] += 1
+        print(f"{row['id']}: {'failed: ' if ok is False else ''}{line}", flush=True)
+    print(f"replayed {counts[True]}, skipped {counts[None]}, failed {counts[False]} of {len(rows)} cases "
+          f"into {arm.name}")
+    if counts[False]:
+        sys.exit(1)
+
+
 BENCH_DRAFT_USAGE = "usage: factory.py bench cases <project-slug>"
 
 
@@ -13498,6 +13688,8 @@ def bench_draft(*args):
 
 def bench_cmd(*args):
     """bench score <cases-file> <arm-folder>...: score saved reviewer runs against labeled past defects."""
+    if args[:1] == ("replay",):
+        return bench_replay(*args[1:])
     if args[:1] == ("cases",):
         return bench_draft(*args[1:])
     if len(args) < 3 or args[0] != "score":

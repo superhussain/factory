@@ -536,8 +536,8 @@ refuses a case with no defects, so delete any case you cannot label.
 | GitHub lookup fails | 5 | `bench: <why>` |
 | nothing drafted | 3 | `bench: no reverted or reworked jobs to draft in <slug>` |
 
-`pr`, `head` and `source` are not scored yet, but are required so a later replay
-command can rebuild each case. Severity weights are high 3, medium 2 and low 1.
+`source` is not scored. `bench replay` uses `pr` and `head`. Severity weights are
+high 3, medium 2 and low 1.
 
 An arm folder's name is the arm name. It holds one `<case-id>/` folder per case,
 with any `review-*.md` files and an optional `run.json` in the shape
@@ -547,7 +547,53 @@ with any `review-*.md` files and an optional `run.json` in the shape
 {"seconds": 300, "models": {"<model>": {"input": 200000, "output": 20000, "cache_write": 30000, "cache_read": 0}}}
 ```
 
-To fill a case folder by hand:
+### Replay
+
+```text
+python3 <installed-skill>/runtime/factory.py bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]
+```
+
+`bench replay` fills an arm folder for `bench score`. `--role` is
+`review-security`, `review-ux`, `review-ui` or `review-code` (or its
+`factory-review-*` name). It needs `claude` and `gh` on PATH, each case's job
+folder pulled into the home with its `spec.md`, and a checkout of the job's
+project in `paths.md`. The project file's `repo` must match each case's `pr`.
+Every case is checked, and GitHub is asked once per repo for the merge commits,
+before any reviewer runs.
+
+For each case, one at a time, it:
+
+1. Fetches the head and merge commits from `origin` when the checkout lacks
+   them, and takes the base as `git merge-base <merge>^1 <head>`.
+2. Adds a detached scratch worktree at the head under a temp folder, and copies
+   the job's `spec.md` and `build.md` into a scratch job folder with an empty
+   `round-1/`.
+3. Runs the installed `factory-<role>` agent through `claude -p` in the scratch
+   worktree, with `--permission-mode dontAsk` and only Read, Grep, Glob, Write
+   and `git` in Bash allowed, `--add-dir` on the scratch job folder, and
+   `--model` when given. Its output goes to `<arm>/<case-id>/replay.log`, and it
+   stops after an hour.
+4. Copies the review to `<arm>/<case-id>/review-<role>.md` when its first line
+   starts `VERDICT: `, and writes `run.json` with role, model, head, base, exit,
+   wall seconds and the session's token totals. `run.json` and `replay.log` stay
+   even when the case fails.
+5. Removes the scratch worktree without `--force`. When that fails it names the
+   folder on stderr for you to remove.
+
+It prints one line per case and a total, and exits 1 when any case failed:
+
+```text
+1018-add-y: wrote review-code.md (VERDICT: CHANGES), 300 s, 250000 tokens
+1019-add-z: skipped, review-code.md already exists
+replayed 1, skipped 1, failed 0 of 2 cases into opus-medium
+```
+
+A failed case prints `<case-id>: failed: <reason>`. A rerun skips cases that
+already have the review, so it resumes after a failure.
+
+### By hand
+
+Without `claude`, fill a case folder by hand:
 
 1. In the project checkout, run `git worktree add --detach <scratch> <head>`.
 2. Run the arm's reviewer there with its prompt and model.
