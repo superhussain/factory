@@ -6792,6 +6792,23 @@ def plan_reason(spec_text, decision_text, changed, globs):
                    "matches a visible-file glob")
 
 
+def review_tier(spec_text, decision_text, protected):
+    """(tier, reason): the spec's Review tier line, raised to high by the first floor that applies.
+    The spec text never lowers a floor."""
+    if re.search(r"^## Full review[ \t]*$", decision_text, re.M):
+        return "high", "decision.md asks for a full review"
+    if protected is None:
+        return "high", "the protected paths could not be read"
+    if protected:
+        return "high", "the branch touches protected paths"
+    line = re.search(r"^Tier:\s*(low|medium|high)\s*$", markdown_section(spec_text, "Review tier") or "",
+                     re.M | re.I)
+    if not line:
+        return "high", "spec.md has no Review tier line"
+    tier = line.group(1).lower()
+    return tier, f"spec.md rates the job {tier}"
+
+
 def fetch_base(wt, base):
     """None once origin/<base> in wt matches the remote, or why it cannot be trusted. A factory/ base is a job
     branch a builder can push, so it is refused."""
@@ -6849,7 +6866,7 @@ def previous_head(folder, n):
 def review_plan_cmd(target, round_text):
     """Write SKIPPED ux and ui reviews for a round that changes nothing a person sees, and print one JSON plan.
     Any doubt (no worktree, a git failure, no Acceptance criteria section) runs all four reviewers.
-    It also lists the branch's protected paths for the approver."""
+    It also lists the branch's protected paths for the approver, and each reviewer's route for the review tier."""
     home, slug, job_id = r2_target(target, True)
     if not re.fullmatch(r"[1-9][0-9]*", round_text):
         fail("round must be a positive integer. " + REVIEW_PLAN_USAGE, 2)
@@ -6869,6 +6886,8 @@ def review_plan_cmd(target, round_text):
             fail(f"{node} is a symlink or junction; nothing was written", 6)
     if not (folder / "spec.md").is_file():
         fail(f"{folder / 'spec.md'} is missing", 4)
+    review_routes = read_review_routes(home)
+    spec_text = (folder / "spec.md").read_text(encoding="utf-8")
     decision = folder / "decision.md"
     decision_text = decision.read_text(encoding="utf-8") if decision.is_file() else ""
     n = int(round_text)
@@ -6884,7 +6903,7 @@ def review_plan_cmd(target, round_text):
         for name in SKIPPABLE_REVIEWERS)
     fixed = round_changed_files(wt, prev[1]) if passed else None
     globs = visible_globs(project_file)
-    branch = changed_files(wt, base) if wt.is_dir() else None
+    branch = changed_files(wt, base) if wt.is_dir() and not fetch_base(wt, base) else None
     protected = touched_protected(branch) if branch is not None else None
     if fixed is not None:
         hit = next(((path, g) for path in fixed for g in globs if fnmatch.fnmatchcase(path, g)), None)
@@ -6898,22 +6917,26 @@ def review_plan_cmd(target, round_text):
     elif branch is None:
         visible, reason = True, f"the diff against origin/{base} could not be read"
     else:
-        visible, reason = plan_reason((folder / "spec.md").read_text(encoding="utf-8"), decision_text, branch, globs)
+        visible, reason = plan_reason(spec_text, decision_text, branch, globs)
     if not visible:
         for path in targets:
             if path.exists():
                 fail(f"{path} already exists; nothing was written", 6)
+    tier, tier_reason = review_tier(spec_text, decision_text, protected)
+    run = list(TRACER_REVIEWERS) if visible else ["security", "code"]
+    # A low job keeps security on the medium route; a high job keeps every reviewer on the default.
+    routes = dict.fromkeys(run) if tier == "high" else {
+        r: review_routes["medium" if tier == "medium" or r == "security" else "low"] for r in run}
     if head:
         round_folder.mkdir(exist_ok=True)
-        write_atomic(str(plan_file), json.dumps({"round": n, "head": head, "protected": protected}) + "\n")
-    if visible:
-        print(json.dumps({"round": n, "run": list(TRACER_REVIEWERS), "skipped": [], "reason": reason,
-                          "protected": protected}))
-        return
-    for path in targets:
-        write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
-    print(json.dumps({"round": n, "run": ["security", "code"], "skipped": list(SKIPPABLE_REVIEWERS),
-                      "reason": reason, "protected": protected}))
+        write_atomic(str(plan_file), json.dumps({"round": n, "head": head, "protected": protected, "tier": tier,
+                                                 "routes": routes}) + "\n")
+    if not visible:
+        for path in targets:
+            write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
+    print(json.dumps({"round": n, "run": run, "skipped": [] if visible else list(SKIPPABLE_REVIEWERS),
+                      "reason": reason, "protected": protected, "tier": tier, "tier_reason": tier_reason,
+                      "routes": routes}))
 
 
 CHECKS_FILE = ".factory/checks.json"
