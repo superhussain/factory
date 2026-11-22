@@ -75,6 +75,7 @@ factory.py needs answer <job-id> --answers <file> --chat-file <file>
 | Prioritize, Remove priority | `factory.py control` | exists |
 | Pause, Resume | `factory.py control` | exists |
 | Babysit PR | `factory.py control <job-id> babysit` | exists |
+| Add steering note | none, dashboard only | exists |
 | Close job with a reason | `factory.py control` | exists |
 | Move to host, Rerun | `factory.py control` | exists |
 | Answer a needs-you form | `factory.py needs answer` | exists |

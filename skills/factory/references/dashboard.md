@@ -59,6 +59,21 @@ stays in needs you until pickup launches `/factory rework <id> --session <tag>` 
 refuses `resolve` from a device token, and `factory.py board` refuses any `resolve` but
 null, so only a signed-in person sets it.
 
+## Steering notes
+
+The job actions menu and the card menu show Add steering note on a job at `spec`, `build` or
+`review` that is not a batch rider, paused or closing and holds fewer than 10 notes. The dialog
+asks for a note of 1 to 2000 characters and appends `{note, at}` to `steer`, stamping `updated`,
+in one board write. It changes no other field. A row that changed meanwhile is never forced, and a
+press that repeats the last note adds nothing. The job keeps running. The next builder dispatch
+gets every note from `factory.py prompt ... build`, wrapped in an operator-preferences envelope
+with a `steer:` source, and records each under `### Steering notes` in build.md. The drawer lists
+the notes under `Steering notes: <n>`. Each line says `Sent to the builder <time>.` once a `build`
+row in `agents` starts at or after it, `Waiting for the builder's next round.` while the job is
+still at spec, build or review, and `Not sent: no builder round ran after it.` otherwise. The
+Worker refuses `steer` changes from a device token, and `factory.py board` refuses a `steer`
+patch, so only a signed-in person adds a note.
+
 ## Stage-change deep links
 
 | Event | Link to |
