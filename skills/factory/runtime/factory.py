@@ -1032,6 +1032,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
     if "launch_failure" in patch:
         fail("only factory.py pickup sets launch_failure. Nothing was written.", 2)
+    if "repeated" in patch:
+        fail("only factory.py repeats sets repeated. Nothing was written.", 2)
     if "handled" in patch:
         fail("only factory.py pr-handled sets handled. Nothing was written.", 2)
     if patch.get("note") in SPEC_APPROVED_NOTES:
@@ -2000,6 +2002,8 @@ def escalation_cmd(target, round_text):
 
 
 SIGNATURE = re.compile(r"(?:[-*] )?Signature: ([A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5})")
+REPEATED_MAX = 20
+REPEATED_SIGNATURE = re.compile(r"[A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5}")
 
 
 def changes_signatures(text):
@@ -2025,6 +2029,34 @@ def build_disputes(text):
     return {(int(m[1]), m[2], m[3]) for m in map(DISPUTE_ROW.match, (line.strip() for line in text.splitlines())) if m}
 
 
+def record_repeats(home, slug, job_id, round_n, repeats):
+    """Save a round's repeats on the board job's repeated list, keeping the newest REPEATED_MAX, in one board
+    write. A missing job or a job of another project is left alone; a failed write warns instead of ending."""
+    at = now()
+    new = [{"round": round_n, "first": r["first"], "reviewer": r["reviewer"], "signature": r["signature"], "at": at}
+           for r in repeats]
+    keys = {(r["round"], r["reviewer"], r["signature"]) for r in new}
+
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None or job.get("project") != slug:
+            return None, None
+        old = job.get("repeated") if isinstance(job.get("repeated"), list) else []
+        kept = [r for r in old if not isinstance(r, dict)
+                or (r.get("round"), r.get("reviewer"), r.get("signature")) not in keys]
+        rows = (kept + new)[-REPEATED_MAX:]
+        if rows == old:
+            return None, None
+        patch_job(data, job_id, {"repeated": rows})
+        return dump_board(data), None
+    try:
+        cas(home, "/api/board", change)
+    except SystemExit:
+        print(f"factory.py: {job_id} repeats were not recorded on the board; the review loop goes on",
+              file=sys.stderr)
+
+
 def repeats_cmd(target, round_text):
     """Print one JSON verdict on whether a reviewer repeats a CHANGES signature from any earlier round."""
     home, slug, job_id = r2_target(target, True)
@@ -2048,6 +2080,8 @@ def repeats_cmd(target, round_text):
     wt = home / "worktrees" / slug / job_id
     churn = churn_files(job, wt, n) if n >= 4 else []
     decision = "repeat" if repeats else "churn" if churn else "continue"
+    if repeats:
+        record_repeats(home, slug, job_id, n, repeats)
     print(json.dumps({"decision": decision, "round": n, "previous": n - 1 if n > 1 else None,
                       "repeats": repeats, "churn": churn}))
 
@@ -13293,14 +13327,37 @@ def retro_red_flags(index, board, projects, rows):
     return out
 
 
+def retro_repeated(job, rows, since):
+    """A repeated-finding row for each valid entry of the job's repeated list from the window start on, at any
+    stage. sessions holds up to 5 digest refs of the job on any host."""
+    listed = job.get("repeated")
+    number = job["id"].split("-", 1)[0]
+    refs = list(dict.fromkeys(f"{r['host']}/{r['session']}" for r in rows if str(r.get("job")) == number))[:5]
+    out = []
+    for r in listed if isinstance(listed, list) else []:
+        if not (isinstance(r, dict) and r.get("reviewer") in TRACER_REVIEWERS
+                and isinstance(r.get("signature"), str) and REPEATED_SIGNATURE.fullmatch(r["signature"])
+                and all(type(r.get(k)) is int and r[k] >= 1 for k in ("round", "first"))
+                and isinstance(r.get("at"), str) and r["at"][:10] >= since):
+            continue
+        out.append({"job": job["id"], "project": job["project"], "kind": "repeated-finding",
+                    "title": printable_line(str(job.get("title", "")), 120),
+                    "reason": f"{r['reviewer']} repeated {r['signature']} from round {r['first']} in round {r['round']}",
+                    "at": r["at"], "sessions": refs, "reviewer": r["reviewer"], "signature": r["signature"]})
+    return out
+
+
 def retro_lessons(board, projects, rows, since):
-    """Closed jobs of registered projects done since the window start, newest first, at most RETRO_LESSONS_MAX.
-    A denied job gives its deny notes as reason; a job with a PR gives close.reason, else its note. A row whose
-    reason is empty or fails check_text is dropped. sessions holds up to 5 digest refs of the job on any host."""
+    """Lessons from jobs of registered projects since the window start, newest first, at most RETRO_LESSONS_MAX:
+    each valid repeated entry at any stage, plus each closed job done since then. A denied job gives its deny
+    notes as reason; a job with a PR gives close.reason, else its note. A closed row whose reason is empty or
+    fails check_text is dropped. sessions holds up to 5 digest refs of the job on any host."""
     out = []
     for j in board["jobs"]:
-        if j.get("stage") != "closed" or not isinstance(j.get("done"), str) or j["done"][:10] < since \
-                or j.get("project") not in projects:
+        if j.get("project") not in projects:
+            continue
+        out += retro_repeated(j, rows, since)
+        if j.get("stage") != "closed" or not isinstance(j.get("done"), str) or j["done"][:10] < since:
             continue
         backlog = retro_dict(j.get("backlog"))
         if backlog.get("decision") == "denied":
