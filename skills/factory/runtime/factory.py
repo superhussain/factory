@@ -7609,7 +7609,7 @@ def diff_numstat(wt, base):
     if mb.returncode:
         return None
     diff = subprocess.run(["git", "-C", str(wt), "diff", "--numstat", "--no-renames", "-z", mb.stdout.strip(),
-                           "HEAD"], capture_output=True, text=True)
+                           "HEAD"], capture_output=True, encoding="utf-8", errors="replace")
     if diff.returncode:
         return None
     counts = {}
@@ -7749,7 +7749,7 @@ def pre_review_cmd(target):
         why = "spec.md is a symlink or junction"
     elif not spec.is_file():
         why = "the job folder has no spec.md"
-    elif not (paths := spec_budget_paths(spec.read_text(encoding="utf-8"))):
+    elif not (paths := spec_budget_paths(spec.read_text(encoding="utf-8", errors="replace"))):
         why = "spec.md has no task Files paths"
     elif reason:
         why = "the base could not be fetched"
@@ -7789,7 +7789,9 @@ def pre_review_cmd(target):
         unlisted = budget["unlisted"]
         if unlisted:
             lines += ["", "Files outside the spec's task list:", ""]
-            lines += [f"- `{printable_line(p, 200)}`" for p in unlisted[:DIFF_BUDGET_UNLISTED_MAX]]
+            for p in unlisted[:DIFF_BUDGET_UNLISTED_MAX]:
+                p = printable_line(p, 200)
+                lines.append(f"- `` {p} ``" if "`" in p else f"- `{p}`")
             if len(unlisted) > DIFF_BUDGET_UNLISTED_MAX:
                 lines.append(f"- and {len(unlisted) - DIFF_BUDGET_UNLISTED_MAX} more")
     env = read_conf(home / ".env") if (home / ".env").exists() else {}

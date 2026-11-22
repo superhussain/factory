@@ -343,6 +343,29 @@ class PreReviewTest(IsolatedTestCase):
         self.assertEqual([line for line in section.splitlines() if line.startswith("- ")],
                          [f"- `{p}`" for p in unlisted])
 
+    def test_budget_cuts_unlisted_and_fences_backticks(self):
+        self.spec()
+        self.base([check("lint", "pass")])
+        self.write({**{f"src/m{i:02}.py": 1 for i in range(21)}, "src/a`odd.py": 1})
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(len(json.loads(out)["budget"]["unlisted"]), 22)
+        bullets = [line for line in self.out.read_text().splitlines() if line.startswith("- ")]
+        self.assertEqual(len(bullets), 21)
+        self.assertEqual(bullets[:2], ["- `` src/a`odd.py ``", "- `src/m00.py`"])
+        self.assertEqual(bullets[19:], ["- `src/m18.py`", "- and 2 more"])
+
+    def test_budget_survives_non_utf8(self):
+        (self.folder / "spec.md").write_bytes(SPEC.encode() + b"\xff\xfe bad\n")
+        self.base([check("lint", "pass")])
+        (self.wt / os.fsdecode(b"bad\xff.py")).write_text("x\n")
+        self.write({"tools/a.py": 10})
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        budget = json.loads(out)["budget"]
+        self.assertEqual((budget["result"], budget["files"], budget["expected_files"]), ("within", 2, 2))
+        self.assertIn("Budget: within (files 2, limit 4; lines 11, limit 900)\n", self.out.read_text())
+
     def test_budget_within(self):
         self.spec()
         self.base([check("lint", "pass")])
