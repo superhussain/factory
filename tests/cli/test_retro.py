@@ -1576,6 +1576,19 @@ class RetroDocEditTest(RetroWorkerCase):
             "## Pipeline edits", "", "| Scope | Stage | Result | Summary |", "| --- | --- | --- | --- |",
             f"| {DOC_FILE} |  | version 5 | {DOC_SUMMARY} |", ""])))
 
+    def test_lesson_edit_appends_a_bullet(self):
+        replace = ("- Run pnpm test.\n- Worker route changes run pnpm test:protocol; pnpm test skips them."
+                   " (1712-export-csv, 2026-11-20)")
+        summary = "Notes: lesson from 1712-export-csv"
+        code, out, err, requests, _ = self.admit([doc_edit(find="- Run pnpm test.", replace=replace,
+                                                           summary=summary)])
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn(f"edited {DOC_FILE} to version 5: {summary}\n", out)
+        self.assertEqual([f"{m} {p}" for m, p, _, _ in requests], ["GET /api/board", DOC_HISTORY, DOC_ROUTE])
+        self.assertEqual(json.loads(requests[2][3]), {
+            "schema": "factory.retro-doc-edit/1", "run": RUN, "base_version": 4,
+            "find": "- Run pnpm test.", "replace": replace, "summary": summary})
+
     def test_bad_doc_edits_are_skipped_and_good_ones_still_sent(self):
         cases = [
             (doc_edit(file="factory/other.md"), "edits[0].file: must be a file in aggregate.json"),
