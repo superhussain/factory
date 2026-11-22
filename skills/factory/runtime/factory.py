@@ -87,8 +87,8 @@
   factory.py review-plan <project-slug>/<job-id> <round>
                                             skip the ux and ui reviews of a round that changes nothing a person sees, print one JSON plan
   factory.py pre-review <project-slug>/<job-id>
-                                            run the base branch's .factory/checks.json in the job worktree, write
-                                            pre-review.md, print one JSON line; FAIL exits 1
+                                            run the base branch's .factory/checks.json in the job
+                                            worktree, write pre-review.md, print one JSON line; FAIL exits 1
   factory.py stop <worktree>                stop processes running out of a worktree
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
@@ -6898,8 +6898,9 @@ def run_check(argv, cwd, log, timeout):
         try:
             proc = subprocess.Popen(argv, cwd=cwd, stdout=out, stderr=subprocess.STDOUT,
                                     stdin=subprocess.DEVNULL, start_new_session=True)
-        except FileNotFoundError:
-            return "missing", round(time.monotonic() - start, 1)
+        except OSError:
+            out.write(f"missing program: {argv[0]}\n".encode())
+            return "missing", round(time.monotonic() - start)
         try:
             code = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -6909,7 +6910,7 @@ def run_check(argv, cwd, log, timeout):
                 proc.kill()
             proc.wait()
             code = "timeout"
-    return code, round(time.monotonic() - start, 1)
+    return code, round(time.monotonic() - start)
 
 
 def pre_review_cmd(target):
@@ -6943,7 +6944,7 @@ def pre_review_cmd(target):
     logs = make_job_temp(slug, job_id) / "pre-review"
     if is_link(logs):
         fail(f"{logs} is a symlink or junction; nothing was written", 6)
-    logs.mkdir(exist_ok=True)
+    logs.mkdir(mode=0o700, exist_ok=True)
     checks_sha = (git("rev-parse", f"origin/{base}") or "").strip()
     results = []
     for check in checks:
@@ -6957,8 +6958,8 @@ def pre_review_cmd(target):
     lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} |" for r in results]
     for r in failed:
         log_text = (logs / f"{r['name']}.log").read_text(encoding="utf-8", errors="replace")
-        tail = [printable_line(line, 300).replace("`", "'") for line in log_text.splitlines()[-PRE_REVIEW_TAIL:]]
-        lines += ["", f"## {r['name']}", "", "```text", *tail, "```"]
+        tail = [printable_line(line, 300).replace("~", "-") for line in log_text.splitlines()[-PRE_REVIEW_TAIL:]]
+        lines += ["", f"## {r['name']}", "", "~~~text", *tail, "~~~"]
     write_atomic(str(out_file), "\n".join(lines) + "\n")
     print(json.dumps({"result": result, "head": head, "checks": results, "reason": None}))
     if failed:

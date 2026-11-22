@@ -90,6 +90,8 @@ class PreReviewTest(IsolatedTestCase):
         head = self.git("rev-parse", "HEAD")
         self.assertEqual((result["result"], result["head"], result["reason"]), ("pass", head, None))
         self.assertEqual([(c["name"], c["exit"]) for c in result["checks"]], [("lint", 0), ("cli", 0)])
+        self.assertTrue(all(type(c["seconds"]) is int for c in result["checks"]))
+        self.assertEqual(self.logs.stat().st_mode & 0o777, 0o700)
         text = self.out.read_text()
         self.assertTrue(text.startswith("PRE-REVIEW: PASS\n\n"))
         self.assertIn(f"Head: {head}\n", text)
@@ -99,7 +101,7 @@ class PreReviewTest(IsolatedTestCase):
         self.assertNotIn("## ", text)
 
     def test_failure_writes_tail_and_log(self):
-        noisy = "import sys\nfor i in range(60): print(f'line {i} `x`')\nsys.exit(1)"
+        noisy = "import sys\nfor i in range(60): print(f'line {i} ~x~')\nsys.exit(1)"
         self.base([check("format", "pass"), check("lint", noisy)])
         code, out, err = self.run_gate()
         self.assertEqual((code, err), (1, ""))
@@ -108,22 +110,26 @@ class PreReviewTest(IsolatedTestCase):
         self.assertTrue(text.startswith("PRE-REVIEW: FAIL\n\n"))
         self.assertIn("| lint | 1 |", text)
         self.assertNotIn("## format", text)
-        block = text.split("## lint\n\n```text\n")[1].split("```\n")[0].splitlines()
+        block = text.split("## lint\n\n~~~text\n")[1].split("~~~\n")[0].splitlines()
         self.assertEqual(len(block), 40)
-        self.assertEqual((block[0], block[-1]), ("line 20 'x'", "line 59 'x'"))
+        self.assertEqual((block[0], block[-1]), ("line 20 -x-", "line 59 -x-"))
         self.assertEqual(len((self.logs / "lint.log").read_text().splitlines()), 60)
 
     def test_timeout_and_missing(self):
         self.base([check("slow", "import time; time.sleep(30)"),
-                   {"name": "gone", "run": ["factory-test-no-such-program"]}])
+                   {"name": "gone", "run": ["factory-test-no-such-program"]},
+                   {"name": "noexec", "run": ["./README.md"]}])
         with mock.patch.object(factory, "PRE_REVIEW_TIMEOUT", 1):
             code, out, err = self.run_gate()
         self.assertEqual((code, err), (1, ""))
         self.assertEqual([(c["name"], c["exit"]) for c in json.loads(out)["checks"]],
-                         [("slow", "timeout"), ("gone", "missing")])
+                         [("slow", "timeout"), ("gone", "missing"), ("noexec", "missing")])
         text = self.out.read_text()
         self.assertIn("| slow | timeout |", text)
         self.assertIn("| gone | missing |", text)
+        self.assertIn("| noexec | missing |", text)
+        self.assertEqual((self.logs / "gone.log").read_text(), "missing program: factory-test-no-such-program\n")
+        self.assertEqual((self.logs / "noexec.log").read_text(), "missing program: ./README.md\n")
 
     def test_invalid_checks_file_is_none(self):
         for text, reason in (("{not json", "is not valid JSON"),
