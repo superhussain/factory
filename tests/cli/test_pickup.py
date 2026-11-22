@@ -2331,7 +2331,7 @@ class AuditPickupTest(PickupFixture):
     def test_token_scan_error_warns(self):
         with patch.object(factory, "usage_totals", side_effect=ValueError("boom")):
             self.assertEqual(self.pickup(), (0, self.line,
-                                             "factory.py: usage: scan failed (ValueError: boom); nothing recorded\n"))
+                                             "factory.py: usage: scan failed on 1017-add-x (ValueError: boom); nothing recorded\n"))
         self.assertEqual(self.board_puts(), 0)
         self.assertEqual(self.record(), {"version": 1, "jobs": {"1017-add-x": factory.audit_stamp("1017-add-x")}})
 

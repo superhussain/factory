@@ -128,9 +128,12 @@ class ReviewPlanTest(IsolatedTestCase):
         self.assertEqual(factory.touched_protected([
             "tools/assets.mjs", "package.json", "paseo-plugin/package.json", ".gitleaks.toml", "mise.toml",
             ".oxfmtrc.json", "nx.json", "tools/verify.py", "tests/cli/support.py",
-            "tests/support/browser-server.mjs", "docs/trust.md", "pnpm-lock.yaml"]),
-            [".gitleaks.toml", ".oxfmtrc.json", "mise.toml", "nx.json", "package.json", "paseo-plugin/package.json",
-             "tests/cli/support.py", "tests/support/browser-server.mjs", "tools/verify.py"])
+            "tests/support/browser-server.mjs", "docs/trust.md", "pnpm-lock.yaml", "tools/secret-scan.py",
+            "pnpm-workspace.yaml", "paseo-plugin/pnpm-workspace.yaml", ".npmrc", "paseo-plugin/.npmrc"]),
+            [".gitleaks.toml", ".npmrc", ".oxfmtrc.json", "mise.toml", "nx.json", "package.json",
+             "paseo-plugin/.npmrc", "paseo-plugin/package.json", "paseo-plugin/pnpm-workspace.yaml",
+             "pnpm-workspace.yaml", "tests/cli/support.py", "tests/support/browser-server.mjs",
+             "tools/secret-scan.py", "tools/verify.py"])
 
     def test_later_round_adds_visible_file(self):
         self.worktree("docs/trust.md")

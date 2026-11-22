@@ -36,7 +36,14 @@ import {
   REVIEWERS,
 } from "./escalation.js";
 import { announce, connectEvents, EVENTS_PATH } from "./events.js";
-import { boardPushes, pushKey, sendPushes, stuckPushes, validSubscription } from "./push.js";
+import {
+  boardPushes,
+  pushKey,
+  sendPushes,
+  stalePushes,
+  stuckPushes,
+  validSubscription,
+} from "./push.js";
 import {
   newPairingCode,
   OFFLINE_MINUTES,
@@ -2497,10 +2504,13 @@ async function storedBoard(env) {
   }
 }
 
-// The hourly stuck-job push. A scheduled env has no config, so it is read here for VAPID.
-async function pushStuck(env, at) {
+// The hourly stuck and stale push. A scheduled env has no config, so it is read here for VAPID.
+async function pushHourly(env, at) {
   const { jobs } = await storedBoard(env);
-  return sendPushes({ ...env, config: readServerConfig(env) }, stuckPushes(jobs, at));
+  return sendPushes({ ...env, config: readServerConfig(env) }, [
+    ...stuckPushes(jobs, at),
+    ...stalePushes(jobs, at),
+  ]);
 }
 
 // JSON-quoted id with every char outside printable ASCII as \uXXXX, safe to echo to a terminal.
@@ -3192,7 +3202,7 @@ export default {
     ctx.waitUntil(pruneRetro(env, new Date(controller.scheduledTime)));
     ctx.waitUntil(pruneRetroRuns(env, new Date(controller.scheduledTime)));
     ctx.waitUntil(pruneIdeaUploads(env, new Date(controller.scheduledTime)));
-    ctx.waitUntil(pushStuck(env, new Date(controller.scheduledTime)).catch(() => {}));
+    ctx.waitUntil(pushHourly(env, new Date(controller.scheduledTime)).catch(() => {}));
   },
 };
 

@@ -6963,7 +6963,8 @@ PROTECTED_PATHS = (".github/*", "*/.github/*", "*.gitlab-ci*", "*.circleci/*", "
                    ".factory/*", ".husky/*", "*.pre-commit-config.yaml", "*lefthook*", "*conftest.py",
                    "*pytest.ini", "*tox.ini", "*jest.config*", "*vitest.config*", "*playwright.config*",
                    "package.json", "*/package.json", "*.gitleaks.toml", "mise.toml", "*/mise.toml", "*.mise.toml",
-                   "*.oxfmtrc*", "nx.json", "tools/verify.py", "tests/cli/support.py", "tests/support/*")
+                   "*.oxfmtrc*", "nx.json", "tools/verify.py", "tests/cli/support.py", "tests/support/*",
+                   "tools/secret-scan.py", "pnpm-workspace.yaml", "*/pnpm-workspace.yaml", "*.npmrc")
 VISUAL_CRITERION = re.compile(r"screenshot|captur|before and after|before/after|visual evidence", re.I)
 SKIPPABLE_REVIEWERS = ("ux", "ui")
 REVIEW_PLAN_USAGE = "usage: review-plan <project-slug>/<job-id> <round>"
@@ -11645,7 +11646,8 @@ def usage_pickup_record(home, job):
     try:
         totals = usage_totals(home, slug, job_id)
     except Exception as e:
-        print(f"factory.py: usage: scan failed ({type(e).__name__}: {e}); nothing recorded", file=sys.stderr)
+        print(f"factory.py: usage: scan failed on {job_id} ({type(e).__name__}: {e}); nothing recorded",
+              file=sys.stderr)
         return
     tokens = job.get("tokens") if isinstance(job.get("tokens"), dict) else {}
     old = tokens.get(device) if isinstance(tokens.get(device), dict) else {}
