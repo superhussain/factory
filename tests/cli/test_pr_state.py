@@ -1,6 +1,8 @@
+import io
 import json
 import tempfile
 from contextlib import nullcontext
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -38,13 +40,18 @@ def author(login):
             "author": {"__typename": "Bot" if login in BOTS else "User", "login": login}}
 
 
-def thread(*logins, resolved=False):
-    return {"isResolved": resolved, "comments": {"nodes": [author(login) for login in logins]}}
+def thread(*logins, resolved=False, path="web/app.js", body="Drop the unused import."):
+    return {"isResolved": resolved, "path": path,
+            "comments": {"nodes": [dict(author(login), body=body) for login in logins]}}
 
 
 def checks(*buckets):
     return 0, json.dumps([{"bucket": b, "name": f"check-{i}"} for i, b in enumerate(buckets)])
 
+
+LINT = "check:da966368ea663ea5"
+LINT_FAILS = (0, json.dumps([{"bucket": "fail", "name": "lint"}]))
+AT = "2026-01-02T10:00:00Z"
 
 TOKEN = "bk-synthetic-token-0001"
 BUILD = "/v2/organizations/example-org/pipelines/sample-web/builds/812"
@@ -75,11 +82,13 @@ class PrStateTest(IsolatedTestCase):
     def sleep(self, seconds):
         self.now += seconds
 
-    def state(self, readings, *args, pr=PR, routes=None, upstream_base="main"):
+    def state(self, readings, *args, pr=PR, routes=None, upstream_base="main", handled=None):
         """Run pr-state with gh answering each (view, checks[, queue]) reading in turn, repeating the last."""
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open"}
         if pr is not None:
             job["pr"] = pr
+        if handled is not None:
+            job["handled"] = handled
         calls = []
 
         def gh(*gh_args, stderr=False):
@@ -493,8 +502,128 @@ class PrStateTest(IsolatedTestCase):
                 self.assertEqual((code, err, json.loads(out)["next"], json.loads(out)["ci_log"]), (0, "", step, None))
                 self.assertEqual(self.buildkite_requests(), [])
 
+    def test_failing_check_is_an_item(self):
+        code, out, err, _ = self.state([(view(), LINT_FAILS)])
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["items"], reading["capped"], reading["rearm"], reading["next"]),
+                         ([{"sig": LINT, "label": "lint", "count": 0}], [], [], "fix-ci"))
+
+    def test_handled_thread_is_skipped(self):
+        sig = factory.handled_sig("thread", "web/app.js", "Drop the unused import.")
+        code, out, err, _ = self.state([(view(), checks("pass"), graph(threads=[thread("ci-helper")]))],
+                                       handled={sig: {"count": 1, "at": AT}})
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["bots"], reading["items"], reading["next"]), (0, [], "merge"))
+        code, out, _, _ = self.state([(view(), checks("pass"), graph(threads=[thread("ci-helper", body="Rename x.")]))],
+                                     handled={sig: {"count": 1, "at": AT}})
+        reading = json.loads(out)
+        self.assertEqual((reading["bots"], reading["next"]), (1, "fix-reviews"))
+        self.assertEqual(reading["items"][0]["label"], "web/app.js")
+
+    def test_check_at_the_cap_reads_capped(self):
+        code, out, err, _ = self.state([(view(), LINT_FAILS)], handled={LINT: {"count": 3, "at": AT}})
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["capped"], reading["items"], reading["next"], reading["ci_log"]),
+                         ([{"sig": LINT, "label": "lint", "count": 3}], [], "capped", None))
+
+    def test_check_under_the_cap_is_worked_again(self):
+        code, out, err, _ = self.state([(view(), LINT_FAILS)], handled={LINT: {"count": 2, "at": AT}})
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["items"], reading["capped"], reading["next"]),
+                         ([{"sig": LINT, "label": "lint", "count": 2}], [], "fix-ci"))
+
+    def test_passing_check_and_mergeable_pr_rearm(self):
+        conflict = factory.handled_sig("conflict", "main")
+        handled = {LINT: {"count": 2, "at": AT}, conflict: {"count": 1, "at": AT}}
+        passing = (0, json.dumps([{"bucket": "pass", "name": "lint"}]))
+        code, out, err, _ = self.state([(view(), passing)], handled=handled)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((json.loads(out)["rearm"], json.loads(out)["next"]), ([LINT, conflict], "merge"))
+        for merge in ("DIRTY", "UNKNOWN"):
+            with self.subTest(merge):
+                code, out, _, _ = self.state([(view(merge=merge), passing)], handled=handled)
+                self.assertEqual((code, json.loads(out)["rearm"]), (0, [LINT]))
+        code, out, _, _ = self.state([(view(merge="DIRTY"), passing)], handled=handled)
+        self.assertEqual((json.loads(out)["items"], json.loads(out)["next"]),
+                         ([{"sig": conflict, "label": "a merge conflict with main", "count": 1}], "rebase"))
+
     def test_bad_wait_exits_2(self):
         for args in (["--wait", "0"], ["--wait", "601"], ["--wait"], ["--wait", "x"], ["--timeout", "5"]):
             with self.subTest(args):
                 code, out, _, calls = self.state([(view(), checks("pass"))], *args)
                 self.assertEqual((code, out, calls), (2, "", []))
+
+
+def recent():
+    return (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class PrHandledTest(IsolatedTestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.home = Path(temp.name).resolve()
+        (self.home / "projects").mkdir()
+        (self.home / "projects" / "sample.md").write_text("---\nrepo: example/sample\nbase: main\n---\n# Sample\n")
+        self.claim = {"device": "host-a", "session": "s1", "since": recent(), "seen": recent()}
+
+    def run_cmd(self, *args, handled=None, claim=None):
+        """Run pr-handled as host-a session s1 and return (code, out, err, the written row or None)."""
+        job = {"id": JOB, "project": "sample", "stage": "pr-open", "pr": PR, "claim": claim or self.claim}
+        if handled is not None:
+            job["handled"] = handled
+        with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job]})}) as server:
+            (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\ndevice: host-a\n---\n")
+            code, out, err = invoke(factory, ["--home", str(self.home), "--session", "s1", "pr-handled",
+                                              f"sample/{JOB}", *args])
+        puts = [r for r in server.requests if r[0] == "PUT"]
+        return code, out, err, json.loads(puts[-1][3])["jobs"][0] if puts else None
+
+    def test_counts_each_sig(self):
+        thread_sig = factory.handled_sig("thread", "web/app.js", "Drop the unused import.")
+        code, out, err, row = self.run_cmd(LINT, thread_sig, handled={LINT: {"count": 2, "at": AT}})
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((row["handled"][LINT]["count"], row["handled"][thread_sig]["count"]), (3, 1))
+        self.assertRegex(row["handled"][LINT]["at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertEqual(row["claim"], self.claim)
+        self.assertEqual(json.loads(out), {"id": JOB, "handled": row["handled"]})
+
+    def test_rearm_drops_entries(self):
+        conflict = factory.handled_sig("conflict", "main")
+        handled = {LINT: {"count": 2, "at": AT}, conflict: {"count": 1, "at": AT}}
+        code, _, err, row = self.run_cmd("--rearm", LINT, handled=handled)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(row["handled"], {conflict: {"count": 1, "at": AT}})
+
+    def test_keeps_the_newest_32(self):
+        old = {f"check:{i:016x}": {"count": 1, "at": f"2026-01-01T00:00:{i:02}Z"} for i in range(32)}
+        code, _, err, row = self.run_cmd(LINT, handled=old)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(len(row["handled"]), 32)
+        self.assertIn(LINT, row["handled"])
+        self.assertNotIn("check:0000000000000000", row["handled"])
+        self.assertIn("check:0000000000000001", row["handled"])
+
+    def test_bad_sigs_exit_2(self):
+        for args in (["lint"], ["check:DA966368EA663EA5"], ["merge:da966368ea663ea5"], ["check:da96636"],
+                     ["--rearm"], [f"check:{i:016x}" for i in range(33)], ["--rearm", "--rearm"]):
+            with self.subTest(args=args[:2]):
+                code, out, err, row = self.run_cmd(*args)
+                self.assertEqual((code, out, row), (2, "", None))
+                self.assertIn("pr-handled", err)
+
+    def test_other_live_claim_exits_6(self):
+        other = {"device": "host-b", "session": "s9", "since": recent(), "seen": recent()}
+        code, out, err, row = self.run_cmd(LINT, claim=other)
+        self.assertEqual((code, out, row), (6, "", None))
+        self.assertIn("is held by host-b session s9", err)
+        self.assertIn("Nothing was written", err)
+
+    def test_board_refuses_handled(self):
+        with patch.object(factory.sys, "stdin", io.StringIO(json.dumps({"handled": {LINT: {"count": 1, "at": AT}}}))):
+            result = invoke(factory, ["board", str(self.home), JOB])
+        self.assertEqual(result, (2, "", "factory.py: only factory.py pr-handled sets handled. Nothing was written.\n"))

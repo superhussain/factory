@@ -71,9 +71,15 @@
                                             check 1, pending at the deadline 3, a bad pr 4, a gh problem 5, an escalated job 7
   factory.py pr-state <project-slug>/<job-id> [--wait S]
                                             print one JSON reading of the job PR for /factory babysit:
-                                            pr, state, review, checks, queued, conflict and next; --wait
+                                            pr, state, review, checks, queued, conflict, items, capped,
+                                            rearm and next; --wait
                                             re-reads every 30 seconds for up to S seconds (1 to 600) while
                                             next is wait; a bad pr exits 4, a gh problem 5
+  factory.py pr-handled <project-slug>/<job-id> [--rearm] <sig>...
+                                            record that babysit acted on up to 32 pr-state item signatures:
+                                            add 1 to each count in the job's handled field, or with --rearm
+                                            drop them; keeps the newest 32 and prints one JSON line of id
+                                            and handled; a bad sig exits 2, another session's claim 6
   factory.py pr-queue <project-slug>/<job-id>
                                             print whether GitHub queued the job PR, by the enqueue mutation first, else merge-async:
                                             one JSON line of pr, status and detail; enqueued exits 0,
@@ -985,6 +991,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
         fail("only factory.py pickup sets github. Nothing was written.", 2)
     if "auto_babysit" in patch:
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
+    if "handled" in patch:
+        fail("only factory.py pr-handled sets handled. Nothing was written.", 2)
     if patch.get("note") in SPEC_APPROVED_NOTES:
         fail(f"only a person approves a spec, on the dashboard or in Tracer, so factory.py board cannot set the "
              f"note '{patch['note']}'. Nothing was written.", 2)
@@ -7393,6 +7401,8 @@ def job_handled(home, job_id):
     """The job's valid handled entries from the board, else {}."""
     job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
     return valid_handled((job or {}).get("handled"))
+
+
 BUILDKITE_API = "https://api.buildkite.com/v2"
 BUILDKITE_BUILD = re.compile(r"https://buildkite\.com/([A-Za-z0-9-]{1,100})/([A-Za-z0-9_-]{1,100})/builds/([0-9]{1,12})"
                              r"(?:#([0-9a-f-]{36}))?", re.ASCII)
@@ -7607,6 +7617,42 @@ def pr_state_cmd(target, *args):
             print(json.dumps(reading))
             return
         time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
+
+
+PR_HANDLED_USAGE = "usage: pr-handled <project-slug>/<job-id> [--rearm] <sig>..."
+
+
+def pr_handled_cmd(target, *args):
+    """Add 1 to the handled count of each signature and stamp its time, or with --rearm drop them,
+    keeping the newest HANDLED_KEEP entries, in one CAS write that keeps the claim."""
+    home, slug, job_id = r2_target(target, True)
+    rearm = args[0] == "--rearm"
+    sigs = args[1:] if rearm else args
+    if not 1 <= len(sigs) <= HANDLED_KEEP or not all(HANDLED_SIG.fullmatch(s) for s in sigs):
+        fail(f"give 1 to {HANDLED_KEEP} signatures like check:0123456789abcdef. " + PR_HANDLED_USAGE, 2)
+    device, session, minutes = holder(home)
+
+    def change(text):
+        data = load_board(text)
+        j = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if j is None:
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
+        if j.get("project") != slug:
+            fail(f"{job_id} belongs to {j.get('project')}, not {slug}. Nothing was written.", 2)
+        held = blocking(j, device, session, minutes)
+        if held:
+            fail(f"{held_by(job_id, held)}. Nothing was written.", 6)
+        handled = valid_handled(j.get("handled"))
+        stamp = now()
+        for sig in sigs:
+            if rearm:
+                handled.pop(sig, None)
+            else:
+                handled[sig] = {"count": handled.get(sig, {}).get("count", 0) + 1, "at": stamp}
+        j["handled"] = dict(sorted(handled.items(), key=lambda e: e[1]["at"], reverse=True)[:HANDLED_KEEP])
+        j["updated"] = data["updated"] = stamp
+        return dump_board(data), {"id": job_id, "handled": j["handled"]}
+    print(json.dumps(cas(home, "/api/board", change)))
 
 
 PR_ENQUEUE_MUTATION = ("query=mutation($id:ID!,$sha:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$sha})"
@@ -11945,6 +11991,7 @@ COMMANDS["round-wait"] = (round_wait_cmd, 2, 4)
 COMMANDS["verdict"] = (verdict_cmd, 4, 4)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
 COMMANDS["pr-state"] = (pr_state_cmd, 1, 3)
+COMMANDS["pr-handled"] = (pr_handled_cmd, 2, 34)
 COMMANDS["pr-queue"] = (pr_queue_cmd, 1, 1)
 COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
