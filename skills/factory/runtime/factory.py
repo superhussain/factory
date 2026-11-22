@@ -8330,7 +8330,7 @@ def pre_review_cmd(target):
     base, repo = meta.get("base") or "main", meta.get("repo", "")
     lead = lead_of(job) if job.get("stacked") is True else None
     budget_ref = f"refs/remotes/origin/{base}" if lead is None else f"refs/heads/factory/{lead}" \
-        if JOB_ID.fullmatch(lead) and ".." not in lead else None
+        if isinstance(lead, str) and JOB_ID.fullmatch(lead) and ".." not in lead else None
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
     folder = home / "jobs" / slug / job_id

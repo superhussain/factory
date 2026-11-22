@@ -529,6 +529,11 @@ class PreReviewTest(IsolatedTestCase):
         self.git("branch", "-D", "factory/000-sample-lead")
         self.assertBudgetNone("the branch diff could not be read", **extra)
 
+    def test_budget_stacked_rider_with_non_string_lead(self):
+        self.stacked_rider()
+        self.assertBudgetNone("the branch diff could not be read", stacked=True,
+                              refs=[{"kind": "batched-into", "id": 7}])
+
     def assertBudgetNone(self, reason, **extra):
         code, out, err = self.run_gate(**extra)
         self.assertEqual(err, "")
