@@ -287,8 +287,8 @@ class RolesTest(IsolatedTestCase):
                       "stale: <host>, latest digest <latest>"):
             self.assertIn(value, command)
         self.assertNotIn("suggest approve", command)
-        self.assertIn("\nNever run an autonomy command or decide a backlog line; a person decides each line.\n",
-                      command)
+        self.assertIn("\nNever run an autonomy command or `trial resume`, or decide a backlog line; "
+                      "a person decides each line.\n", command)
         self.assertIn("| `/factory retro [--days N]` | [retro](references/commands/retro.md) |",
                       (SKILL / "SKILL.md").read_text(encoding="utf-8"))
 

@@ -5,16 +5,18 @@ and the unacknowledged red flags (`red_flags` in `aggregate.json`) and closed or
 into a ranked `findings.md`, up to 5 backlog lines that wait for a person, and up to 2
 stage-note edits that retro admit saves as restorable pipeline versions.
 
-1. Run `python3 "$RUNTIME" retro push`. On a nonzero exit, note the exit code and
+1. Run `python3 "$RUNTIME" trial settle`. Report its output. On a nonzero exit, note
+   the exit code and continue.
+2. Run `python3 "$RUNTIME" retro push`. On a nonzero exit, note the exit code and
    continue.
-2. Run `python3 "$RUNTIME" retro aggregate [--days N]`. On exit 3, report the stderr
+3. Run `python3 "$RUNTIME" retro aggregate [--days N]`. On exit 3, report the stderr
    line and stop. On any other nonzero exit, report the exit code and stop. On exit 0,
    read `run`, `aggregate`, `digest`, `transcripts`, `out`, `findings` and `stale`
    from the printed JSON, and `host` from the `aggregate` file.
-3. Dispatch one `factory-retro` subagent, giving it `run`, `aggregate`, `digest`,
+4. Dispatch one `factory-retro` subagent, giving it `run`, `aggregate`, `digest`,
    `transcripts` and `host`.
-4. Write its reply byte for byte to `out`.
-5. Run `python3 "$RUNTIME" retro admit <run>`. Report its output and the `findings`
+5. Write its reply byte for byte to `out`.
+6. Run `python3 "$RUNTIME" retro admit <run>`. Report its output and the `findings`
    path. Then name each host in `stale` as `stale: <host>, latest digest <latest>`,
    with `latest` from that host's entry in the `aggregate` file's `hosts`. Exit 3
    means the agent found nothing, autonomy is paused, or every card was a duplicate,
@@ -37,6 +39,11 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    the exit code. Retro may edit only project scopes on the autonomy allowlist; `global`
    is person-only, and admit skips any other scope. A person undoes an edit with Restore
    to draft in Settings, Pipeline.
+   A `trial <id> opened` line means that saved stage-note edit is on trial: alternate jobs
+   keep the old note until `trial settle` decides. A `skipped edits[i]: a trial is open for
+   <scope> stage_notes.<stage>` line means that stage already has an open trial, and
+   `skipped edits[i]: stage-note trials are paused after 2 reverts` means two trials reverted
+   and a person must run `trial resume <slug>` first.
    An `uploaded retro run <run>` line means the findings and the cards' outcomes are on the
    `#/retros` page. A `retro upload failed` or `retro upload skipped` line on stderr means
    they are not; it never changes the exit code.
@@ -48,6 +55,6 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    A person decides each line on the dashboard Backlog decision page.
 
 Do the retro through these commands only, and edit neither the reply nor the run folder.
-Never run an autonomy command or decide a backlog line; a person decides each line.
+Never run an autonomy command or `trial resume`, or decide a backlog line; a person decides each line.
 
 `schedules/retro.md` runs this each weekday from one host.
