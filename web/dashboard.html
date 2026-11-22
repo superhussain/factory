@@ -771,7 +771,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
     #d-title, #d-star, #d-actions, .detail-head .close { position: relative; z-index: 3; }
     .detail-head .close { background: var(--panel); }
-    #d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-steer-notes, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
+    #d-meta, #d-pipeline, #d-chat, #d-held, #d-backpressure, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-steer-notes, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
@@ -6615,7 +6615,7 @@ let swipeSettling = false;
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
 // so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
 // On an idea tab the gallery and file list move into the top of the page, so they scroll with it.
-const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-steer-notes, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
+const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-backpressure, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-steer-notes, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
 let headCollapse = 0;
 let headShift = 0;
 let headStop = null;
@@ -9721,7 +9721,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-star', 'd-pipeline', 'd-chat', 'd-held', 'd-not-before', 'd-auto-babysit', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-approve-spec', 'd-approve-spec-bar', 'd-approve-spec-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-rework', 'd-rework-bar', 'd-approve-as-is', 'd-approve-as-is-bar', 'd-resolve-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-star', 'd-pipeline', 'd-chat', 'd-held', 'd-backpressure', 'd-not-before', 'd-auto-babysit', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-approve-spec', 'd-approve-spec-bar', 'd-approve-spec-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-rework', 'd-rework-bar', 'd-approve-as-is', 'd-approve-as-is-bar', 'd-resolve-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;
