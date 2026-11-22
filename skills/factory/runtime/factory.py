@@ -6961,6 +6961,7 @@ IDLE_NUDGE = ("Factory job {id} shows no commit, file or board change for 20 min
               "idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent "
               "or command that is still running, run factory.py hold for the job with your --session tag, then "
               "keep waiting.")
+PERMISSION_NOTE = "permission: agent {agent} has waited at a permission dialog for {minutes} minutes; answer it in Paseo"
 
 
 def read_idle_watch(home):
@@ -7084,6 +7085,26 @@ def idle_watch_pass(home, data, device, dry):
             if waits is not False:
                 print(f"skip idle nudge {line} "
                       + ("waits at a permission dialog" if waits else "permission state unknown"))
+                if waits and "surfaced" not in entry:
+                    note = PERMISSION_NOTE.format(agent=agent, minutes=IDLE_NUDGE_MINUTES)
+                    if dry:
+                        print(f"would surface {job_id} {project}: {note}")
+                        continue
+
+                    def change(text, job_id=job_id, stage=j["stage"], note=note):
+                        board = load_board(text)
+                        found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+                        if (found is None or found.get("stage") != stage
+                                or not isinstance(found.get("claim"), dict) or found["claim"].get("device") != device):
+                            return None, None
+                        if found.get("note") == note:
+                            return None, found.get("updated")
+                        patch_job(board, job_id, {"note": note})
+                        return dump_board(board), found["updated"]
+                    updated = cas(home, "/api/board", change)
+                    if updated:
+                        entry.update(surfaced=now(), updated=updated)
+                        print(f"surfaced {job_id} {project}: {note}")
             elif dry:
                 print(f"would nudge idle {line}")
             elif not paseo_send(agent, IDLE_NUDGE.format(id=job_id)):

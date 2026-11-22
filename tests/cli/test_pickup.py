@@ -4170,22 +4170,46 @@ class PermissionGuardTest(PickupFixture):
                 self.assertEqual((self.sent, self.puts()), ([], []))
                 self.assertNotIn("nudged", self.job("042-sample-export")["priority"])
 
+    def quiet(self):
+        """An idle-watch entry quiet for 41 minutes."""
+        (self.home / "idle-watch.json").write_text(json.dumps({"version": 1, "jobs": {"042-sample-export": {
+            "agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z",
+            "since": stamp(minutes=-41)}}}), encoding="utf-8")
+
     def test_idle_nudge_skips_and_never_moves_to_needs_human(self):
-        for waits, end in self.ENDS:
-            with self.subTest(waits=waits):
-                self.waits = waits
-                self.build()
-                (self.home / "idle-watch.json").write_text(json.dumps({"version": 1, "jobs": {"042-sample-export": {
-                    "agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z",
-                    "since": stamp(minutes=-41)}}}), encoding="utf-8")
-                line = f"skip idle nudge 042-sample-export alpha: agent synthetic-agent {end}\n"
-                self.assertEqual(self.pickup("--dry-run"), (0, line + f"host {DEVICE}: would launch 0\n", ""))
-                for _ in range(2):
-                    self.assertEqual(self.pickup(), (0, line, ""))
-                entry = json.loads((self.home / "idle-watch.json").read_text(encoding="utf-8"))["jobs"]
-                self.assertNotIn("nudged", entry["042-sample-export"])
-                self.assertEqual((self.sent, self.puts()), ([], []))
-                self.assertEqual(self.job("042-sample-export")["stage"], "build")
+        self.waits = None
+        self.build()
+        self.quiet()
+        line = "skip idle nudge 042-sample-export alpha: agent synthetic-agent permission state unknown\n"
+        self.assertEqual(self.pickup("--dry-run"), (0, line + f"host {DEVICE}: would launch 0\n", ""))
+        for _ in range(2):
+            self.assertEqual(self.pickup(), (0, line, ""))
+        entry = json.loads((self.home / "idle-watch.json").read_text(encoding="utf-8"))["jobs"]
+        self.assertNotIn("nudged", entry["042-sample-export"])
+        self.assertEqual((self.sent, self.puts()), ([], []))
+        self.assertEqual(self.job("042-sample-export")["stage"], "build")
+
+    def test_idle_permission_wait_sets_a_note_once(self):
+        self.waits = True
+        self.build()
+        self.quiet()
+        note = ("permission: agent synthetic-agent has waited at a permission dialog for 20 minutes; "
+                "answer it in Paseo")
+        line = "skip idle nudge 042-sample-export alpha: agent synthetic-agent waits at a permission dialog\n"
+        self.assertEqual(self.pickup("--dry-run"), (0, line + f"would surface 042-sample-export alpha: {note}\n"
+                                                    f"host {DEVICE}: would launch 0\n", ""))
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.pickup(), (0, line + f"surfaced 042-sample-export alpha: {note}\n", ""))
+        self.assertEqual(self.puts(), [("PUT", "/api/board")])
+        job = self.job("042-sample-export")
+        self.assertEqual((job["note"], job["stage"]), (note, "build"))
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, line, ""))
+        self.assertEqual((self.sent, self.puts()), ([], []))
+        entry = json.loads((self.home / "idle-watch.json").read_text(encoding="utf-8"))["jobs"]["042-sample-export"]
+        self.assertEqual(entry["updated"], job["updated"])
+        self.assertNotIn("nudged", entry)
+        self.assertEqual(self.job("042-sample-export")["stage"], "build")
 
     def test_babysit_send_skips(self):
         for waits, end in self.ENDS:
