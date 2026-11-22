@@ -147,6 +147,12 @@ class PreReviewTest(IsolatedTestCase):
         code, out, _ = self.run_gate(round=3)
         self.assertEqual(json.loads(out)["repeats"], [])
         self.assertEqual(json.loads(record.read_text()), {"4": ["lint"]})
+        for bad in ({"4": 5}, {"4": "lint"}, {"4": [5]}):
+            with self.subTest(record=bad):
+                record.write_text(json.dumps(bad))
+                code, out, _ = self.run_gate(round=4)
+                self.assertEqual((code, json.loads(out)["repeats"]), (1, []))
+                self.assertEqual(json.loads(record.read_text()), {"5": ["lint"]})
 
     def test_failure_tail_is_redacted(self):
         (self.home / ".env").write_text("FACTORY_TEST_SECRET=synthetic-secret-0123456789\n")  # gitleaks:allow synthetic secret

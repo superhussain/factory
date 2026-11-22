@@ -7243,7 +7243,8 @@ def pre_review_cmd(target):
             record = json.loads(record_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             record = {}
-        if not isinstance(record, dict):
+        if not isinstance(record, dict) or not all(
+                isinstance(v, list) and all(isinstance(n, str) for n in v) for v in record.values()):
             record = {}
         record[str(round_n)] = sorted(names | set(record.get(str(round_n), [])))
         write_atomic(str(record_file), json.dumps(record) + "\n")
