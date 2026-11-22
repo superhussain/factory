@@ -242,7 +242,7 @@ class BenchErrorTest(BenchCase):
                                  f"bench: arm name {name} must be unique letters, digits, ., _ or -")
 
 
-FAKE_CLAUDE = """import json, os, sys
+FAKE_CLAUDE = """import json, os, sys, time
 from pathlib import Path
 prompt = sys.stdin.read()
 log = Path(os.environ["FAKE_LOG"])
@@ -250,6 +250,7 @@ calls = json.loads(log.read_text()) if log.exists() else []
 calls.append({"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": prompt,
               "ceiling": os.environ.get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS")})
 log.write_text(json.dumps(calls))
+time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
 your = next(line.split(": ", 1)[1] for line in prompt.splitlines() if line.startswith("Your file: "))
 if not os.environ.get("FAKE_NO_REVIEW"):
     Path(your).write_text("VERDICT: CHANGES\\n\\n- `worker/export.js:44` drops the header row.\\n")
@@ -425,6 +426,18 @@ class BenchReplayTest(BenchReplayCase):
         case_dir = self.arm / "1018-add-y"
         self.assertFalse((case_dir / "review-code.md").exists())
         self.assertEqual(json.loads((case_dir / "run.json").read_text(encoding="utf-8"))["exit"], 0)
+
+    def test_timeout(self):
+        os.environ["FAKE_SLEEP"] = "30"
+        with patch.object(self.module, "BENCH_REPLAY_SECONDS", 1):
+            code, out, err = self.replay("--role", "review-code")
+        self.assertEqual((code, out, err), (1, RUNNING + "1018-add-y: failed: claude timed out after 1 s\n"
+                                            + SUMMARY.format(0, 0, 1), ""))
+        case_dir = self.arm / "1018-add-y"
+        self.assertFalse((case_dir / "review-code.md").exists())
+        run_json = json.loads((case_dir / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual((run_json["exit"], run_json["models"]), (None, {}))
+        self.assertEqual(len(self.git("worktree", "list").splitlines()), 1)
 
     def test_commit_missing_after_fetch(self):
         absent = "0" * 40
