@@ -148,6 +148,10 @@ test("pause", { timeout: 240000 }, async (t) => {
           "044-closed": [false, false],
           "045-no-project": [false, false],
         });
+        assert.equal(
+          await page.$eval("#d-pause", (el) => el.title),
+          "Stops new starts and stops this job's running Paseo session",
+        );
       });
 
       await t.test(`session stop line ${width}`, async () => {
