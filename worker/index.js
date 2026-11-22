@@ -2859,6 +2859,7 @@ function checkSteer(storedJobs, jobs, principal) {
     const kept = Array.isArray(storedRow?.steer) ? storedRow.steer : [];
     const added = Array.isArray(s) ? s[s.length - 1] : undefined;
     const wellFormed =
+      Array.isArray(s) &&
       STEER_STAGES.includes(storedRow?.stage) &&
       s.length === kept.length + 1 &&
       s.length <= STEER_MAX &&

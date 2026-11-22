@@ -375,6 +375,8 @@ test("a person's PATCH cannot add a malformed note", async () => {
     const s = setup(STEER_ROW);
     await refused(s, () => s.patch(steered([bad]), person), steerShapeRefusal);
   }
+  const s = setup(STEER_ROW);
+  await refused(s, () => s.patch(steered(null), person), steerShapeRefusal);
 });
 
 test("a person's PATCH cannot add a note with a link", async () => {
