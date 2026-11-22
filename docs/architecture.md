@@ -172,6 +172,7 @@ date.
 | `GET /api/retro/<id>/<date>.jsonl` | any service token | that host's digest as `application/x-ndjson` |
 | `PUT /api/pipeline/retro/<scope>` | the bound service token of a paired or active host, while autonomy runs, for an allowlisted project scope only (never `global`) | replace one stage note as the next pipeline version, saved by `retro`; see [autonomy.md](autonomy.md#retro-pipeline-edits) |
 | `PUT /api/project-retro/<slug>/<name>` | the bound service token of a paired or active host, while autonomy runs, for an allowlisted project only | splice one find-and-replace into a project file or document as the next version, saved by `retro`; see [autonomy.md](autonomy.md#retro-file-edits) |
+| `POST /api/backlog/lesson` | a signed-in person | append an open lesson card's bullet to `<slug>/notes.md` as the next version |
 
 Audit routes store one JSON-lines file per host per job at
 `audit/<job>/<host>.jsonl`, written by `factory.py audit push`. The bound host

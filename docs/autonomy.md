@@ -203,6 +203,46 @@ Retro idea cards admitted before this change keep `origin.by: "retro"` and still
 take `suggest approve`, which skips the allowlist for them but needs a registered
 project and a human typing at a terminal, or a relayed chat message.
 
+## Lesson cards
+
+`factory.py backlog lesson <slug>/<job-id> --fact-file <file> --why-file <file>`
+queues a lesson an agent will not save alone as one held backlog line. The fact is 1
+to 200 characters and the why 1 to 300. Both pass the untrusted-text checks and the
+`.env` value check, or the command exits 2 with nothing queued.
+
+```
+- [ ] factory: Lesson: Worker route changes run pnpm test:protocol; pnpm test skips them.
+  Recommend: approve
+
+  Approve adds this bullet to factory/notes.md. No job starts.
+  Why it waits: The close reason names the command but not which routes need it.
+
+  Lesson: from 1712-export-csv, queued 2026-11-22
+```
+
+Nothing automatic starts a card. Each path checks the `Lesson: from` line in the
+line's context.
+
+| Path | Lesson card |
+| --- | --- |
+| `backlog add` triage | skipped, prints held |
+| `backlog_triage_pass` | skipped |
+| `next` (`first_item`) | skipped: `a lesson card waits for a person` |
+| `batch` (`backlog_candidates`) | left out |
+| `backlog decide` approve or rework | exit 2; deny works |
+
+Approve on the dashboard's Backlog decision page calls `POST /api/backlog/lesson`,
+which only a signed-in person reaches. The Worker builds the bullet from the stored
+`backlog.md`, never from the request, and appends
+`- <fact> (<job-id>, <date>)` to `<slug>/notes.md` as the next version, saved by that
+person with the summary `Notes: lesson from <job-id>`. A bullet already present answers
+`added: false` with no new version, so a retry is safe. The line is then checked off
+against a closed job whose note is `lesson added to <slug>/notes.md version <n>`. No
+idea job is made, and the page offers no Rework. Deny keeps the closed denied job.
+Settings history and Restore to draft undo a bullet. Upgrade every pickup host before
+the first `backlog lesson`, since an older runtime's `next` would take a card as an
+idea job.
+
 ## Retro pipeline edits
 
 A retro reply may carry up to 2 `edits`, each `{"scope", "stage", "note", "summary"}`.

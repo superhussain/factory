@@ -27,6 +27,7 @@ A decision from the dashboard's backlog decision page checks lines off the same 
 To queue work, run `factory.py backlog add "<slug>: <feature>" [--context <file>]`, or edit
 `backlog.md` in R2 by hand. Rework lines carry `(rework-of <id>)` like any other ref.
 Report a queued item with the `link:` line `backlog add` prints.
+To queue a lesson a person must accept, run `factory.py backlog lesson <slug>/<job-id> --fact-file <file> --why-file <file>`. `next` skips it.
 
 A question for him about the backlog itself, such as which line to run next or
 whether to drop one, has no job folder. When the decisions-via-askuserquestion
