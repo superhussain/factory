@@ -8085,6 +8085,18 @@ def pr_checks(pr, required=False):
     return [], f"exited {code} with no check list" if code else "printed no check list"
 
 
+def behind_by(pr, base, sha):
+    """How many commits of base the PR head sha lacks, from GitHub's compare API."""
+    if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)):
+        fail("gh pr view printed an unusable headRefOid", 5)
+    repo = GH_PR.fullmatch(pr)[1]
+    behind = gh_answer(gh_cli("api", f"repos/{repo}/compare/{base}...{sha}", "--jq", ".behind_by"),
+                       "gh api compare").strip()
+    if not re.fullmatch(r"[0-9]+", behind):
+        fail("gh api compare printed no behind_by", 5)
+    return int(behind)
+
+
 def pr_behind(pr):
     """(behind_by, head sha, base): how many commits of its base the PR's head lacks, from GitHub's compare API."""
     try:
@@ -8095,12 +8107,7 @@ def pr_behind(pr):
     if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
             and isinstance(base, str) and re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", base)):
         fail("gh pr view printed an unusable headRefOid or baseRefName", 5)
-    repo = GH_PR.fullmatch(pr)[1]
-    behind = gh_answer(gh_cli("api", f"repos/{repo}/compare/{base}...{sha}", "--jq", ".behind_by"),
-                       "gh api compare").strip()
-    if not re.fullmatch(r"[0-9]+", behind):
-        fail("gh api compare printed no behind_by", 5)
-    return int(behind), sha, base
+    return behind_by(pr, base, sha), sha, base
 
 
 def checks_cmd(target, *args):
