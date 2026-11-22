@@ -7428,20 +7428,57 @@ def plan_reason(spec_text, decision_text, changed, globs):
                    "matches a visible-file glob")
 
 
-def review_tier(spec_text, decision_text, protected):
-    """(tier, reason): the spec's Review tier line, raised to high by the first floor that applies.
-    The spec text never lowers a floor."""
-    if re.search(r"^## Full review[ \t]*$", decision_text, re.M):
+REVIEW_FLOOR_FILE = "review-floor.json"
+TIER_RANK = {"low": 0, "medium": 1, "high": 2}
+FULL_REVIEW = re.compile(r"^## Full review[ \t]*$", re.M)
+
+
+def spec_tier(spec_text):
+    """The spec's Review tier line value, lowercased, or None."""
+    line = re.search(r"^Tier:\s*(low|medium|high)\s*$", markdown_section(spec_text, "Review tier") or "",
+                     re.M | re.I)
+    return line.group(1).lower() if line else None
+
+
+def read_review_floor(path):
+    """The recorded {"tier", "full_review"} floor, None for a missing file, or a high floor for a bad one.
+    tier is None when no spec has rated the job yet."""
+    if not path.is_file():
+        return None
+    try:
+        floor = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        floor = None
+    if not (isinstance(floor, dict) and (floor.get("tier") is None or floor.get("tier") in TIER_RANK)
+            and isinstance(floor.get("full_review"), bool)):
+        return {"tier": "high", "full_review": False}
+    return {"tier": floor.get("tier"), "full_review": floor["full_review"]}
+
+
+def merge_review_floor(floor, spec_text, decision_text):
+    """The floor raised by the current spec tier and decision.md's Full review heading. It never lowers."""
+    floor = floor or {"tier": None, "full_review": False}
+    tiers = [t for t in (floor["tier"], spec_tier(spec_text)) if t]
+    return {"tier": max(tiers, key=TIER_RANK.get) if tiers else None,
+            "full_review": floor["full_review"] or bool(FULL_REVIEW.search(decision_text))}
+
+
+def review_tier(spec_text, decision_text, protected, floor):
+    """(tier, reason): the spec's Review tier line, raised to high by the first floor that applies, then to the
+    recorded floor's tier. The spec text never lowers a floor."""
+    if FULL_REVIEW.search(decision_text):
         return "high", "decision.md asks for a full review"
+    if floor and floor["full_review"]:
+        return "high", "review-floor.json records a full review"
     if protected is None:
         return "high", "the protected paths could not be read"
     if protected:
         return "high", "the branch touches protected paths"
-    line = re.search(r"^Tier:\s*(low|medium|high)\s*$", markdown_section(spec_text, "Review tier") or "",
-                     re.M | re.I)
-    if not line:
+    tier = spec_tier(spec_text)
+    if not tier:
         return "high", "spec.md has no Review tier line"
-    tier = line.group(1).lower()
+    if floor and floor["tier"] and TIER_RANK[floor["tier"]] > TIER_RANK[tier]:
+        return floor["tier"], f"review-floor.json records {floor['tier']}, above spec.md's {tier}"
     return tier, f"spec.md rates the job {tier}"
 
 
