@@ -86,7 +86,7 @@ Builder tier follows task complexity and plan clarity under the builder selectio
 rule in Rules. A blocked run skips review. The round cap still applies first.
 
 The factory runs on its own. A human sees a job only when it escalates, hits the
-round cap, repeats a finding or failing check, fails twice, or its review findings need a person. Everything else specs,
+round cap, repeats a finding or failing check, churns a file, fails twice, or its review findings need a person. Everything else specs,
 builds, reviews, merges, and waits in the build queue without asking.
 
 Read [feature](references/commands/feature.md) before step 1 of any loop run. It holds the numbered steps the other commands continue.
@@ -334,7 +334,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   the last allowed round of a cycle still has a CHANGES verdict, the job goes to
   `needs-human` with a note naming the reviewers that still want changes. A `/factory rework` starts a new cycle, so count
   rounds since the latest rework.
-- Repeat stop: the same reviewer `Signature:` in two consecutive rounds, or the same pre-review check failing in two consecutive rounds, sends the job to `needs-human` as loop steps 4 and 5 describe, even below the round cap.
+- Repeat stop: the same reviewer `Signature:` in two consecutive rounds, or the same pre-review check failing in two consecutive rounds, or the same file changed in three consecutive fix rounds, sends the job to `needs-human` as loop steps 4 and 5 describe, even below the round cap.
 - The builder is named `builder-<job-id>`. Before every dispatch (initial, fix,
   approver CHANGES, rework, recovery, handoff resume), assess the remaining work
   and pick a builder tier by the selection rule below. Pass the chosen tier, its
