@@ -248,7 +248,8 @@ Only `retro admit`, `trial settle` and `trial resume` write `trials`.
 | `id` | `factory-spec-v8` |
 | `project`, `stage`, `version` | `factory`, `spec`, `8` |
 | `run`, `summary` | the retro run and the edit summary |
-| `champion`, `challenger` | the note before (`""` when none) and the saved note |
+| `champion_version` | the pipeline version the edit replaced, `7` |
+| `champion`, `challenger` | the note before (`""` when none, display only) and the saved note |
 | `opened`, `status` | when the trial opened, then `open`, `kept`, `reverted`, `superseded` or `inconclusive` |
 | `settled`, `arms`, `reads` | set by `trial settle`: when it decided, each arm's job ids, and the rounds and tokens reads |
 | `revert_version`, `resumed` | the version a revert saved, and when a person ran `trial resume` |
@@ -258,6 +259,11 @@ Only `retro admit`, `trial settle` and `trial resume` write `trials`.
   trial is open, `prompt` gives an arm `a` job in the trial's stage the champion note.
   Arm `b` reads the challenger. When the stored note is no longer the challenger, nothing
   is swapped.
+- **Champion source.** The Worker does not validate board `trials`, so the champion note
+  that `prompt` and a revert use is read from pipeline history at `champion_version`, never
+  from the record's `champion` text. A record is ignored unless its `project` is a slug, its
+  `stage` is a pipeline stage, its versions are integers and its `id` is
+  `<project>-<stage>-v<version>`.
 - **Admit.** `retro admit` skips a stage-note edit while its stage has an open trial
   (`skipped edits[i]: a trial is open for <scope> stage_notes.<stage>`) or while the
   project is paused. Both checks run before the daily cap.

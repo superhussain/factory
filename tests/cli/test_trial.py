@@ -15,6 +15,7 @@ CHAMPION = "Name the acceptance check for each criterion."
 CHALLENGER = CHAMPION + " Put the test file in the Check column."
 EDIT_SUMMARY = "Spec note: name the test file for each criterion"
 PIPELINE_GET = "GET /api/pipeline/projects/factory"
+HISTORY_GET = "GET /api/pipeline/history/projects/factory/7"
 REVERT_ROUTE = "PUT /api/pipeline/retro/projects/factory"
 PAUSE_LINE = ("stage-note trials paused for factory after 2 reverts; "
               "a person runs trial resume factory")
@@ -39,10 +40,11 @@ def stamp(**delta):
 
 
 def trial(**over):
-    t = {"id": TRIAL, "project": "factory", "stage": "spec", "version": 8, "run": RUN,
-         "summary": EDIT_SUMMARY, "champion": CHAMPION, "challenger": CHALLENGER,
+    t = {"project": "factory", "stage": "spec", "version": 8, "run": RUN, "summary": EDIT_SUMMARY,
+         "champion_version": 7, "champion": CHAMPION, "challenger": CHALLENGER,
          "opened": stamp(days=-3), "status": "open"}
     t.update(over)
+    t.setdefault("id", f"{t['project']}-{t['stage']}-v{t['version']}")
     return t
 
 
@@ -81,12 +83,12 @@ class TrialHelpersTest(unittest.TestCase):
         self.assertEqual(arms, [factory.trial_arm(TRIAL, f"{n}-x") for n in range(2100, 2300)])
 
     def test_open_trial_for_and_pause(self):
-        data = running([trial(status="kept"), trial(id="factory-build-v8", stage="build"),
-                        trial(id="sample-spec-v2", project="sample")])
+        data = running([trial(status="kept"), trial(stage="build"),
+                        trial(project="sample", version=2)])
         self.assertIsNone(factory.open_trial_for(data, "factory", "spec"))
         self.assertEqual(factory.open_trial_for(data, "factory", "build")["id"], "factory-build-v8")
         self.assertIsNone(factory.open_trial_for({"jobs": []}, "factory", "spec"))
-        reverted = [trial(id="factory-spec-v5", status="reverted"), trial(id="factory-spec-v6", status="reverted")]
+        reverted = [trial(version=5, status="reverted"), trial(version=6, status="reverted")]
         self.assertTrue(factory.trials_paused(running(reverted), "factory"))
         self.assertFalse(factory.trials_paused(running(reverted), "sample"))
         self.assertFalse(factory.trials_paused(running(reverted[:1]), "factory"))
@@ -140,8 +142,8 @@ class TrialOpenTest(IsolatedTestCase):
         record = board["trials"][0]
         self.assertTrue(before <= record.pop("opened") <= stamp())
         self.assertEqual(record, {"id": TRIAL, "project": "factory", "stage": "spec", "version": 8, "run": RUN,
-                                  "summary": EDIT_SUMMARY, "champion": CHAMPION, "challenger": CHALLENGER,
-                                  "status": "open"})
+                                  "summary": EDIT_SUMMARY, "champion_version": 7, "champion": CHAMPION,
+                                  "challenger": CHALLENGER, "status": "open"})
 
     def test_new_stage_opens_with_an_empty_champion(self):
         build = edit(stage="build", note="Run the tests.", summary="Build note: run the tests")
@@ -163,7 +165,7 @@ class TrialOpenTest(IsolatedTestCase):
         self.assertIn("trial factory-build-v8 opened", out)
 
     def test_paused_project_skips_stage_note_edits(self):
-        reverts = [trial(id="factory-spec-v5", status="reverted"), trial(id="factory-spec-v6", status="reverted")]
+        reverts = [trial(version=5, status="reverted"), trial(version=6, status="reverted")]
         line = "stage-note trials are paused after 2 reverts; a person runs trial resume factory"
         code, out, err, requests, table = self.admit([edit()], reverts)
         self.assertEqual((code, err), (0, ""))
@@ -192,15 +194,18 @@ class TrialPromptTest(IsolatedTestCase):
         tempdir.start()
         self.addCleanup(tempdir.stop)
 
-    def prompt(self, job_id, stored=CHALLENGER, champion=CHAMPION, started=None, role="spec"):
-        t = trial(id=SAMPLE_TRIAL, project="sample", champion=champion)
+    def prompt(self, job_id, stored=CHALLENGER, champion=CHAMPION, started=None, role="spec", shown=CHAMPION):
+        """champion is version 7's spec note in pipeline history; shown is the board record's champion text."""
+        t = trial(project="sample", champion=shown)
         board = {"updated": "", "trials": [t], "jobs": [
             {"id": job_id, "project": "sample", "title": "Job", "idea": "Do it.", "stage": "spec",
              "started": started or stamp(days=-1)}]}
         view = dict(PROMPT_VIEW, stage_notes={stage: [{"source": "pipeline:global@1", "text": f"Global {stage}."},
                                                       {"source": "pipeline:sample@8", "text": stored}]
                                               for stage in ("spec", "build")})
-        routes = {"/api/board": (200, board), "/api/pipeline/effective/sample": (200, view)}
+        history = {"stage_notes": {"spec": champion} if champion else {}}
+        routes = {"/api/board": (200, board), "/api/pipeline/effective/sample": (200, view),
+                  "/api/pipeline/history/projects/sample/7": (200, history)}
         with http_fixture(routes) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
             code, out, err = invoke(factory, ["--home", str(self.home), "prompt", f"sample/{job_id}", role])
@@ -234,6 +239,22 @@ class TrialPromptTest(IsolatedTestCase):
         self.assertNotIn("pipeline:sample@8", out)
         self.assertIn("Global spec.", out)
 
+    def test_board_champion_text_is_never_used(self):
+        a = arm_ids(SAMPLE_TRIAL, "a", 1)[0]
+        out = self.prompt(a, shown="Text a board writer put on the record.")
+        self.assertIn(f'source="pipeline:sample@8" stage="spec" trust="data">\n{CHAMPION}\n', out)
+        self.assertNotIn("Text a board writer put on the record.", out)
+        out = self.prompt(a, champion="", shown="Text a board writer put on the record.")
+        self.assertNotIn("Text a board writer put on the record.", out)
+        self.assertNotIn("pipeline:sample@8", out)
+
+    def test_malformed_trial_record_is_ignored(self):
+        a = arm_ids(SAMPLE_TRIAL, "a", 1)[0]
+        data = {"trials": [trial(project="sample", id="sample-spec-v9"), trial(project="sample", stage="../x"),
+                           trial(project="../sample"), trial(project="sample", champion_version="7")]}
+        self.assertIsNone(factory.open_trial_for(data, "sample", "spec"))
+        self.assertIsNotNone(factory.open_trial_for({"trials": [trial(project="sample")]}, "sample", "spec"))
+
 
 class TrialWorkerCase(IsolatedTestCase):
     def setUp(self):
@@ -245,6 +266,7 @@ class TrialWorkerCase(IsolatedTestCase):
     def run_trial(self, board, *args, routes=None):
         routes = {"GET /api/board": (200, board), "PUT /api/board": (200, b"ok"),
                   PIPELINE_GET: (200, {"stage_notes": {"spec": CHALLENGER}}, {"X-Pipeline-Version": "8"}),
+                  HISTORY_GET: (200, {"stage_notes": {"spec": CHAMPION}}),
                   REVERT_ROUTE: (200, b"ok", {"X-Pipeline-Version": "9"}), **(routes or {})}
         with http_fixture(routes) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\ndevice: host-a\n---\n")
@@ -262,8 +284,9 @@ class TrialSettleTest(TrialWorkerCase):
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(out, f"trial {TRIAL} reverted to version 9: rounds b higher, tokens no difference\n")
         self.assertEqual([f"{m} {p}" for m, p, *_ in requests],
-                         ["GET /api/board", PIPELINE_GET, REVERT_ROUTE, "GET /api/board", "PUT /api/board"])
-        self.assertEqual(json.loads(requests[2][3]), {
+                         ["GET /api/board", PIPELINE_GET, HISTORY_GET, REVERT_ROUTE, "GET /api/board",
+                          "PUT /api/board"])
+        self.assertEqual(json.loads(requests[3][3]), {
             "schema": "factory.retro-edit/1", "run": RUN, "base_version": 8, "stage": "spec",
             "note": CHAMPION, "summary": f"Revert trial {TRIAL}"})
         record = written[0]["trials"][0]
@@ -316,13 +339,26 @@ class TrialSettleTest(TrialWorkerCase):
         self.assertIn("autonomy is paused; no trial settled", err)
         self.assertEqual([f"{m} {p}" for m, p, *_ in requests], ["GET /api/board"])
 
+    def test_revert_reads_the_champion_from_history_not_the_board(self):
+        board = running([trial(champion="Text a board writer put on the record.")], arm_jobs(b={"rounds": 3}))
+        _, _, _, requests, _ = self.settle(board)
+        self.assertEqual(json.loads(next(body for m, p, _, body in requests if f"{m} {p}" == REVERT_ROUTE))["note"],
+                         CHAMPION)
+
+    def test_malformed_records_are_skipped(self):
+        bad = [trial(id="other-spec-v8"), trial(project="../x", id="../x-spec-v8"),
+               trial(stage="nope", id="factory-nope-v8"), trial(champion_version=None)]
+        code, out, _, requests, _ = self.settle(running(bad, arm_jobs(b={"rounds": 3})))
+        self.assertEqual((code, out), (0, "no open trials\n"))
+        self.assertEqual(len(requests), 1)
+
     def test_no_open_trials(self):
         code, out, _, requests, _ = self.settle(running([trial(status="kept")]))
         self.assertEqual((code, out), (0, "no open trials\n"))
         self.assertEqual(len(requests), 1)
 
     def test_board_keeps_open_records_and_the_newest_settled_ones(self):
-        old = [trial(id=f"factory-spec-v{n}", status="kept", settled=f"2026-10-{n:02d}T09:00:00Z")
+        old = [trial(version=n, status="kept", settled=f"2026-10-{n:02d}T09:00:00Z")
                for n in range(1, 22)]
         _, _, _, _, written = self.settle(running([*old, trial()], arm_jobs()))
         ids = [t["id"] for t in written[0]["trials"]]
@@ -339,7 +375,7 @@ class TrialSettleTest(TrialWorkerCase):
 
 class TrialResumeTest(TrialWorkerCase):
     def test_second_revert_prints_the_pause_line(self):
-        earlier = trial(id="factory-spec-v5", status="reverted", settled=stamp(days=-10))
+        earlier = trial(version=5, status="reverted", settled=stamp(days=-10))
         code, out, _, _, _ = self.run_trial(running([earlier, trial()], arm_jobs(b={"rounds": 3})), "settle")
         self.assertEqual(code, 0)
         self.assertEqual(out, f"trial {TRIAL} reverted to version 9: rounds b higher, tokens no difference\n"
@@ -356,9 +392,9 @@ class TrialResumeTest(TrialWorkerCase):
 
     def test_resume_marks_unresumed_reverts_after_confirmation(self):
         earlier = stamp(days=-5)
-        board = running([trial(id="factory-spec-v5", status="reverted"),
-                         trial(id="factory-spec-v4", status="reverted", resumed=earlier),
-                         trial(id="sample-spec-v6", project="sample", status="reverted"),
+        board = running([trial(version=5, status="reverted"),
+                         trial(version=4, status="reverted", resumed=earlier),
+                         trial(project="sample", version=6, status="reverted"),
                          trial(status="kept")])
         code, out, err, _, written, asked = self.resume(board, "factory")
         self.assertEqual((code, out, err), (0, "stage-note trials resumed for factory\n", ""))
@@ -371,7 +407,7 @@ class TrialResumeTest(TrialWorkerCase):
         self.assertFalse(factory.trials_paused(written[0], "factory"))
 
     def test_resume_needs_a_person(self):
-        board = running([trial(id="factory-spec-v5", status="reverted")])
+        board = running([trial(version=5, status="reverted")])
         for typed, tty, message in (("sample", True, "confirmation did not match factory"),
                                     ("factory", False, "trial resume needs an interactive terminal")):
             with self.subTest(message=message):

@@ -3952,10 +3952,32 @@ def trial_arm(trial_id, job_id):
     return experiment_arm(f"{trial_id}/{job_id}", 50)
 
 
+def trial_valid(t):
+    """True for a well-formed trial record: a slug project, a pipeline stage, integer versions and
+    the id open_trial gives it. Board records are not validated by the Worker."""
+    return (isinstance(t, dict) and isinstance(t.get("project"), str) and bool(SLUG.fullmatch(t["project"]))
+            and t.get("stage") in PIPELINE_STAGES and type(t.get("version")) is int
+            and type(t.get("champion_version")) is int and t["champion_version"] >= 0
+            and t.get("id") == f"{t['project']}-{t['stage']}-v{t['version']}")
+
+
 def open_trial_for(data, slug, stage):
-    """The board's open trial for slug's stage note, or None."""
-    return next((t for t in data.get("trials") or [] if isinstance(t, dict) and t.get("status") == "open"
-                 and t.get("project") == slug and t.get("stage") == stage), None)
+    """The board's open, well-formed trial for slug's stage note, or None."""
+    return next((t for t in data.get("trials") or [] if trial_valid(t) and t.get("status") == "open"
+                 and t["project"] == slug and t["stage"] == stage), None)
+
+
+def trial_champion(home, trial):
+    """The trial stage's note in the pipeline version the edit replaced, read from Worker history,
+    or "" when that version or note is absent. The board's champion text is for display only."""
+    version = trial["champion_version"]
+    if not version:
+        return ""
+    status, _, text = api(home, "GET", f"/api/pipeline/history/projects/{trial['project']}/{version}",
+                          ok=(200, 404))
+    notes = json.loads(text).get("stage_notes") if status == 200 else None
+    note = notes.get(trial["stage"]) if isinstance(notes, dict) else None
+    return note if isinstance(note, str) else ""
 
 
 def trials_paused(data, slug):
@@ -7242,8 +7264,9 @@ def fetch_pipeline(home, slug, trial=None):
     entry = next((n for n in entries if isinstance(n, dict) and isinstance(n.get("source"), str)
                   and n["source"].startswith(f"pipeline:{slug}@")), None) if isinstance(entries, list) else None
     if entry and entry.get("text") == trial["challenger"]:
-        if trial["champion"]:
-            entry["text"] = trial["champion"]
+        champion = trial_champion(home, trial)
+        if champion:
+            entry["text"] = champion
         else:
             entries.remove(entry)
             if not entries:
@@ -13420,13 +13443,13 @@ def retro_doc_edits_today(home, file):
                for v in (json.loads(text) if status == 200 else []))
 
 
-def open_trial(home, run, e, version, champion):
+def open_trial(home, run, e, version, champion_version, champion):
     """Append an open trial record for one saved stage-note edit to the board, print its line
-    and return it."""
+    and return it. champion_version is the version the edit replaced; champion is display text."""
     slug = e["scope"][len("projects/"):]
     record = {"id": f"{slug}-{e['stage']}-v{version}", "project": slug, "stage": e["stage"], "version": int(version),
-              "run": run, "summary": e["summary"], "champion": champion, "challenger": e["note"],
-              "opened": now(), "status": "open"}
+              "run": run, "summary": e["summary"], "champion_version": champion_version, "champion": champion,
+              "challenger": e["note"], "opened": now(), "status": "open"}
 
     def change(text):
         data = load_board(text)
@@ -13511,7 +13534,8 @@ def retro_apply_edits(home, run, edits, agg):
                 scope["version"] = int(version)
                 scope["stage_notes"][e["stage"]] = e["note"]
                 print(f"edited {e['scope']} stage_notes.{e['stage']} to version {version}: {e['summary']}")
-                board.setdefault("trials", []).append(open_trial(home, run, e, version, champion))
+                board.setdefault("trials", []).append(
+                    open_trial(home, run, e, version, body["base_version"], champion))
             results.append(dict(row, result=f"version {version}"))
         else:
             reason = f"{status} {printable_line(text, 200)}".strip()
@@ -13526,7 +13550,7 @@ def trial_settle(home):
     data = read_board(home)
     if load_autonomy(data)["paused"] is not False:
         fail("autonomy is paused; no trial settled", 3)
-    trials = [t for t in data.get("trials") or [] if isinstance(t, dict) and t.get("status") == "open"]
+    trials = [t for t in data.get("trials") or [] if trial_valid(t) and t.get("status") == "open"]
     if not trials:
         print("no open trials")
         return
@@ -13547,7 +13571,7 @@ def trial_settle(home):
         update = updates[tid] = {"arms": {arm: sorted(arms[arm]) for arm in arms}, "reads": reads}
         if result["verdict"] == "compared" and "b higher" in reads.values():
             body = {"schema": RETRO_EDIT_SCHEMA, "run": t["run"], "base_version": int(headers["X-Pipeline-Version"]),
-                    "stage": stage, "note": t["champion"], "summary": f"Revert trial {tid}"}
+                    "stage": stage, "note": trial_champion(home, t), "summary": f"Revert trial {tid}"}
             status, got, text = api(home, "PUT", f"/api/pipeline/retro/projects/{slug}", json.dumps(body),
                                     ok=(200, 400, 403, 404, 409, 412, 413, 429),
                                     headers={"Content-Type": "application/json"})

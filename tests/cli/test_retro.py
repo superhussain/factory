@@ -1461,7 +1461,7 @@ class RetroEditTest(RetroWorkerCase):
         trial = json.loads(requests[4][3])["trials"][0]
         self.assertEqual({k: trial[k] for k in trial if k != "opened"}, {
             "id": "factory-spec-v8", "project": "factory", "stage": "spec", "version": 8, "run": RUN,
-            "summary": EDIT_SUMMARY, "champion": NOTE, "challenger": edit()["note"], "status": "open"})
+            "summary": EDIT_SUMMARY, "champion_version": 7, "champion": NOTE, "challenger": edit()["note"], "status": "open"})
         _, _, headers, body = requests[2]
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertEqual(json.loads(body), {
