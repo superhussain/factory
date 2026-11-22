@@ -146,6 +146,14 @@ test("pipeline stage-note trials", { timeout: 180000 }, async (t) => {
         await page.$eval("#pipeline-trials-paused p code", (el) => el.textContent),
         'factory.py trial resume sample "<reason>"',
       );
+      // The quoted reason never wraps apart, so a lone quote never ends a line.
+      assert.deepEqual(
+        await page.$eval("#pipeline-trials-paused p code span", (el) => [
+          el.textContent,
+          getComputedStyle(el).whiteSpace,
+        ]),
+        ['"<reason>"', "nowrap"],
+      );
       assert.equal(
         await page.$eval("#pipeline-trials-paused", (el) => el.getAttribute("role")),
         "status",
