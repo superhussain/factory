@@ -7444,17 +7444,18 @@ def spec_tier(spec_text):
 
 
 def read_review_floor(path):
-    """The recorded {"tier", "full_review"} floor, None for a missing file, or a high floor for a bad one.
-    tier is None when no spec has rated the job yet."""
+    """The recorded {"tier", "full_review"} floor, None for a missing file, or a high floor marked unreadable
+    for a bad one. tier is None when no spec has rated the job yet."""
     if not path.is_file():
         return None
     try:
         floor = json.loads(path.read_text(encoding="utf-8"))
     except (ValueError, UnicodeDecodeError):
         floor = None
-    if not (isinstance(floor, dict) and (floor.get("tier") is None or floor.get("tier") in TIER_RANK)
+    tier = floor.get("tier") if isinstance(floor, dict) else None
+    if not (isinstance(floor, dict) and (tier is None or isinstance(tier, str) and tier in TIER_RANK)
             and isinstance(floor.get("full_review"), bool)):
-        return {"tier": "high", "full_review": False}
+        return {"tier": "high", "full_review": False, "unreadable": True}
     return {"tier": floor.get("tier"), "full_review": floor["full_review"]}
 
 
@@ -7462,8 +7463,9 @@ def merge_review_floor(floor, spec_text, decision_text):
     """The floor raised by the current spec tier and decision.md's Full review heading. It never lowers."""
     floor = floor or {"tier": None, "full_review": False}
     tiers = [t for t in (floor["tier"], spec_tier(spec_text)) if t]
-    return {"tier": max(tiers, key=TIER_RANK.get) if tiers else None,
-            "full_review": floor["full_review"] or bool(FULL_REVIEW.search(decision_text))}
+    merged = {"tier": max(tiers, key=TIER_RANK.get) if tiers else None,
+              "full_review": floor["full_review"] or bool(FULL_REVIEW.search(decision_text))}
+    return {**merged, "unreadable": True} if floor.get("unreadable") else merged
 
 
 def review_tier(spec_text, decision_text, protected, floor):
@@ -7481,6 +7483,8 @@ def review_tier(spec_text, decision_text, protected, floor):
     if not tier:
         return "high", "spec.md has no Review tier line"
     if floor and floor["tier"] and TIER_RANK[floor["tier"]] > TIER_RANK[tier]:
+        if floor.get("unreadable"):
+            return floor["tier"], "review-floor.json could not be read"
         return floor["tier"], f"review-floor.json records {floor['tier']}, above spec.md's {tier}"
     return tier, f"spec.md rates the job {tier}"
 
@@ -7672,7 +7676,7 @@ def review_plan_cmd(target, round_text):
         round_folder.mkdir(exist_ok=True)
         write_atomic(str(plan_file), json.dumps({"round": n, "head": head, "protected": protected, "tier": tier,
                                                  "routes": routes}) + "\n")
-        write_atomic(str(floor_file), json.dumps(floor) + "\n")
+        write_atomic(str(floor_file), json.dumps({"tier": floor["tier"], "full_review": floor["full_review"]}) + "\n")
     if not visible:
         for path in targets:
             write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
@@ -7697,8 +7701,9 @@ def review_floor_cmd(target):
     decision_text = decision.read_text(encoding="utf-8") if decision.is_file() else ""
     floor = merge_review_floor(read_review_floor(floor_file), (folder / "spec.md").read_text(encoding="utf-8"),
                                decision_text)
-    write_atomic(str(floor_file), json.dumps(floor) + "\n")
-    print(json.dumps(floor))
+    record = json.dumps({"tier": floor["tier"], "full_review": floor["full_review"]})
+    write_atomic(str(floor_file), record + "\n")
+    print(record)
 
 
 CHECKS_FILE = ".factory/checks.json"

@@ -322,21 +322,25 @@ class ReviewPlanTest(IsolatedTestCase):
         (self.folder / "spec.md").write_text(LOW)
         self.worktree("docs/trust.md")
         floor = self.folder / "review-floor.json"
-        bads = ("not json", '{"tier": "huge", "full_review": false}', '{"tier": "low"}', "[]")
+        bads = ("not json", '{"tier": "huge", "full_review": false}', '{"tier": [], "full_review": false}',
+                '{"tier": {}, "full_review": false}', '{"tier": "low"}', "[]")
+        high = {"tier": "high", "full_review": False}
         for n, bad in enumerate(bads, 1):
             with self.subTest(bad):
                 floor.write_text(bad)
                 code, out, _ = self.floor_cmd()
-                self.assertEqual((code, json.loads(out)), (0, {"tier": "high", "full_review": False}))
+                self.assertEqual((code, json.loads(out), json.loads(floor.read_text())), (0, high, high))
                 floor.write_text(bad)
-                plan = json.loads(self.plan(str(n))[1])
-                self.assertEqual((plan["tier"], plan["tier_reason"]),
-                                 ("high", "review-floor.json records high, above spec.md's low"))
+                code, out, err = self.plan(str(n))
+                self.assertEqual((code, err), (0, ""))
+                plan = json.loads(out)
+                self.assertEqual((plan["tier"], plan["tier_reason"]), ("high", "review-floor.json could not be read"))
+                self.assertEqual(json.loads(floor.read_text()), high)
         floor.unlink()
         real = self.home / "elsewhere.json"
         real.write_text('{"tier": "low", "full_review": false}\n')
         floor.symlink_to(real)
-        for code, out, err in (self.floor_cmd(), self.plan("5")):
+        for code, out, err in (self.floor_cmd(), self.plan(str(len(bads) + 1))):
             self.assertEqual((code, out), (6, ""))
             self.assertIn("symlink or junction; nothing was written", err)
         self.assertEqual(real.read_text(), '{"tier": "low", "full_review": false}\n')
