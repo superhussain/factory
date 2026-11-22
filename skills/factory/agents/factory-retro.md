@@ -63,6 +63,7 @@ tool, flags, target, sessions}`. `sessions` holds the digest refs of that job on
 **Reviewers.**
 - `reviewers` in `aggregate` maps each reviewer (`security`, `ux`, `ui`, `code`) to `{changes, fixed, disputed, accept_pct, jobs, project, sessions}` over jobs merged or closed in the window. `disputed` counts CHANGES findings the builder listed under Disputed findings in build.md.
 - A reviewer with `changes` of at least 4 and `accept_pct` below 60 is one finding: category `reviewer-rules`, title `Noisy reviewer: <name> accepts <accept_pct>% of findings`, `count` its `disputed`, `cost` 5000, `sessions` its `sessions`, and `project` its `project`.
+- A noisy-reviewer finding becomes a backlog card for a person to decide, never an edit to the review stage notes. Propose no edit for it.
 - Skip a reviewer whose `sessions` is empty. findings.md already shows the whole table, so report no reviewer above the bar.
 
 **Reply.** Exactly one `factory.retro/1` JSON object, with no prose and no code fence

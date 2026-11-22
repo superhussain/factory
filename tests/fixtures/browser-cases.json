@@ -186,6 +186,7 @@
   "tests/browser/next-waiting.test.mjs",
   "tests/browser/retros-page.test.mjs",
   "tests/browser/audit-flags.test.mjs",
+  "tests/browser/spend.test.mjs",
   "tests/browser/inbox-page.test.mjs",
   "tests/browser/inbox-count.test.mjs",
   "tests/browser/notifications.test.mjs",

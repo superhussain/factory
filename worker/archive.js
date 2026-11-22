@@ -102,7 +102,7 @@ export function nextArchived(prev, moved) {
 }
 
 // The parsed object and its etag, or null when the key is missing or not JSON.
-async function readJson(env, key) {
+export async function readJson(env, key) {
   const object = await env.BUCKET.get(key);
   if (!object) return null;
   try {
@@ -112,7 +112,7 @@ async function readJson(env, key) {
   }
 }
 
-const jobsOf = (doc) => (Array.isArray(doc?.data?.jobs) ? doc.data.jobs : null);
+export const jobsOf = (doc) => (Array.isArray(doc?.data?.jobs) ? doc.data.jobs : null);
 
 // Log why a write was refused so wrangler tail shows it. Key names only.
 const conflict = (reason) => {
@@ -172,7 +172,7 @@ export async function runArchive(env, now) {
   return { status: "archived", moved: [...ids] };
 }
 
-const reply = (body, status = 200, type = "text/plain") =>
+export const reply = (body, status = 200, type = "text/plain") =>
   new Response(typeof body === "string" ? body : JSON.stringify(body), {
     status,
     headers: {

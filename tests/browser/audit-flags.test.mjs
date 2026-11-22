@@ -125,8 +125,8 @@ test(
 
         let shown = await open("5 flagged");
         assert.equal(shown.previous, "retros-page-heading");
-        assert.equal(shown.next, "retros-runs-heading");
-        assert.equal(shown.afterNext, "retros-status");
+        assert.equal(shown.next, "spend");
+        assert.equal(shown.afterNext, "retros-runs-heading");
         assert.equal(shown.heading, "Red flags");
         assert.equal(
           shown.status,

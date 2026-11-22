@@ -3,8 +3,9 @@
 // fixtures style, frozen clock, request guard) with an owned ephemeral loopback port, light
 // theme, and no reference page. Never part of CI: run manually with
 // `node tools/capture-screenshots.mjs` to rewrite docs/screenshots/{board,idea-entry,
-// project-settings,inbox,notifications,retros-red-flags,settings-notifications,
-// settings-display,settings-hosts,settings-pipeline,board-phone,idea-attachment}.png.
+// project-settings,inbox,notifications,retros-red-flags,retros-spend,retros-spend-phone,
+// settings-notifications,settings-display,settings-hosts,settings-pipeline,board-phone,
+// idea-attachment}.png.
 import { readFileSync } from "node:fs";
 import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { prepareAssets } from "./assets.mjs";
@@ -155,6 +156,22 @@ const RED_FLAGS = [
 const STUBS = {
   "/api/hosts": HOSTS,
   "/api/audit-flags": { schema: "factory.audit-flags/1", rows: RED_FLAGS },
+  "/api/spend": {
+    schema: "factory.spend/1",
+    weeks: 8,
+    rows: [
+      {
+        project: "sample",
+        week: "2026-11-16",
+        merged_prs: 2,
+        tokens: 800000,
+        tokens_per_pr: 400000,
+        judged: 2,
+        reverted: 1,
+        reworked: 0,
+      },
+    ],
+  },
 };
 
 async function put(origin, route, body, type) {
@@ -313,6 +330,21 @@ async function capture() {
           ),
       );
     });
+    for (const [name, viewport] of [
+      ["retros-spend", undefined],
+      ["retros-spend-phone", { width: 390, height: 844 }],
+    ])
+      await view(
+        name,
+        async (page) => {
+          await go(page, "#/retros");
+          await page.waitForSelector("#spend-tables table");
+          await page.evaluate(() =>
+            document.getElementById("spend").scrollIntoView({ block: "start" }),
+          );
+        },
+        viewport,
+      );
     for (const section of ["notifications", "display"])
       await view(`settings-${section}`, async (page) => {
         await go(page, `#/settings/${section}`);

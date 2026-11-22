@@ -215,6 +215,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   body[data-view="notifications"] #board { display: none; }
   #retros-page { max-width: 1040px; }
   .retros-runs-heading { font-size: 15px; margin: 24px 0 12px; }
+  #spend { margin-top: 20px; }
   #audit-flags td a { color: var(--accent); }
   #audit-flags td a { white-space: nowrap; }
   #audit-flags td:nth-child(5) a { display: block; }
@@ -1320,6 +1321,7 @@ py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\lo
       <button class="btn" type="button" id="audit-flags-next">Older</button>
     </div>
   </section>
+  <section class="settings-section" id="spend" aria-labelledby="spend-heading"><h3 id="spend-heading">Cost per merged PR</h3><p class="muted" id="spend-status" role="status"></p><div id="spend-tables"></div></section>
   <h3 class="retros-runs-heading" id="retros-runs-heading">Retro runs</h3>
   <p class="muted" id="retros-status" role="status"></p>
   <div id="retros-list"></div>
@@ -3460,7 +3462,7 @@ function renderRoute() {
   if (inboxOpen) renderInboxPage();
   if (notificationsOpen && !notificationsWas) { notificationsHtml = ''; $('notifications-page-heading').focus(); }
   renderNotifications();
-  if (retrosOpen && !retrosWas) { retrosOpener = null; retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); }
+  if (retrosOpen && !retrosWas) { retrosOpener = null; retrosScrolled = ''; retrosHtml = ''; $('retros-page-heading').focus(); loadRetros(); loadAuditFlags(); loadSpend(); }
   else if (retrosOpen) renderRetrosPage();
   if (!retrosOpen) retrosScrolled = '';
   syncRetrosLink();
@@ -3758,6 +3760,62 @@ function auditFlagsMove(step, button, other) {
 }
 $('audit-flags-prev').addEventListener('click', () => auditFlagsMove(-1, $('audit-flags-prev'), $('audit-flags-next')));
 $('audit-flags-next').addEventListener('click', () => auditFlagsMove(1, $('audit-flags-next'), $('audit-flags-prev')));
+
+// Cost per merged PR: the Worker's /api/spend rollup, one table per project.
+let spend = null, spendFailed = false;
+
+async function loadSpend() {
+  spendFailed = false;
+  renderSpend();
+  try {
+    const r = await fetch('./api/spend', { cache: 'no-store' });
+    if (r.status !== 200) throw new Error(String(r.status));
+    spend = (await r.json()).rows;
+    spendFailed = false;
+  } catch { spend = null; spendFailed = true; }
+  renderSpend();
+}
+
+function renderSpend() {
+  const rows = spend ?? [];
+  $('spend-status').textContent = spendFailed ? 'Could not load cost per merged PR. Reload to try again.'
+    : spend === null ? 'Loading cost per merged PR…'
+    : !rows.length ? 'No merged or closed jobs in the last 8 weeks.'
+    : 'Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged.';
+  const num = (n) => n.toLocaleString('en-US');
+  const cell = (tag, text) => {
+    const el = document.createElement(tag);
+    el.textContent = text;
+    if (tag === 'th') el.scope = 'col';
+    return el;
+  };
+  const projects = [...new Set(rows.map((row) => row.project))];
+  $('spend-tables').replaceChildren(...projects.flatMap((slug) => {
+    const wrap = document.createElement('div'), table = document.createElement('table');
+    const head = document.createElement('tr'), body = document.createElement('tbody');
+    wrap.className = 'reference-scroll';
+    wrap.tabIndex = 0;
+    wrap.setAttribute('role', 'region');
+    wrap.setAttribute('aria-label', 'Cost per merged PR for ' + slug);
+    table.className = 'reference-table';
+    head.append(...['Week of (UTC)', 'Merged PRs', 'Tokens', 'Tokens per merged PR', 'Reverted'].map((t) => cell('th', t)));
+    table.createTHead().append(head);
+    body.append(...rows.filter((row) => row.project === slug).map((row) => {
+      const tr = document.createElement('tr');
+      tr.append(
+        cell('td', row.week),
+        cell('td', num(row.merged_prs)),
+        cell('td', num(row.tokens)),
+        cell('td', row.tokens_per_pr === null ? 'none merged' : num(row.tokens_per_pr)),
+        cell('td', row.judged ? row.reverted + ' of ' + row.judged + ' (' + Math.round(row.reverted * 100 / row.judged) + '%)' : 'none judged'),
+      );
+      return tr;
+    }));
+    table.append(body);
+    wrap.append(table);
+    return [cell('h4', slug), wrap];
+  }));
+}
 
 const RETRO_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // "Nov 13, 2026, 22:43 UTC" from a run id that starts with its UTC timestamp, else the id.
