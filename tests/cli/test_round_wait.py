@@ -104,3 +104,11 @@ class RoundWaitTest(IsolatedTestCase):
                 self.assertEqual((code, out, self.puts), (2, "", []))
                 self.assertIn(factory.ROUND_WAIT_USAGE, err)
         self.assertEqual(self.holds, [])
+
+    def test_keeps_unverified(self):
+        flags = ["review-code.md export.py:412 bad-line"]
+        self.sleeps[212] = lambda: self.write("security", "VERDICT: CHANGES\n")
+        code, out, err = self.round_wait("2", "--timeout", "300", rounds=(ROUND_1, {**ROUND_2, "unverified": flags}))
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([body["jobs"][0]["rounds"][1] for body in self.puts],
+                         [{**ROUND_2, "security": "CHANGES", "unverified": flags}])

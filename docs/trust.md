@@ -65,6 +65,15 @@ characters and every pattern `retro_redact` knows becomes `[redacted]`. The full
 logs stay in the host's job temp folder and never sync. A missing or invalid file
 gives `PRE-REVIEW: NONE` and reviewers work as before.
 
+## Review citation check
+
+`factory.py grounding` reads each review file of a round and checks every
+`path:line` it cites against the job worktree: the file exists, the line is
+inside it, and for review-code the line is within 10 lines of a change on the
+branch. Citations that fail go in `round-N/grounding.md` and the round's board
+entry as unverified. The builder and approver check those lines before acting on
+the finding. The check never changes a verdict.
+
 ## Admission rules
 
 `checkOperatorText(text, field)` returns `null` or one message

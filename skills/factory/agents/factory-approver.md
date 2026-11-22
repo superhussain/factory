@@ -64,6 +64,10 @@ holds their context. Otherwise APPROVE, and the orchestrator queues them as
 follow-ups, except cosmetic nits (line wrapping, comment placement, punctuation,
 wording), which it drops. Never return CHANGES for an item outside the spec.
 
+Read each `round-N/grounding.md` the listing shows. A CHANGES gap may not rest only
+on a finding whose citation it lists, unless you opened the cited lines and confirmed
+the problem. Grounding never changes a reviewer's verdict.
+
 Write exactly one markdown file, `<job folder>/decision.md`. Its first line is `APPROVE`,
 `ESCALATE`, or `CHANGES`. Its second line is a one-sentence reason, which the orchestrator uses
 as the board note. For ESCALATE, then list the sign-off items concretely, one bullet
