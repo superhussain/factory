@@ -1310,6 +1310,67 @@ async function pipelineEffective(env, slug) {
   return reply(JSON.stringify(view), 200, "application/json");
 }
 
+const LESSON_LINE = /^- \[ \] ([\w-]+): Lesson: (\S.{0,199})$/;
+const LESSON_MARK = /^Lesson: from (\w[\w.-]{0,80}), queued (\d{4}-\d\d-\d\d)$/;
+
+// A person's approve of a lesson card: append the card's bullet, built from the stored backlog.md,
+// to <slug>/notes.md as the next version. A bullet already there adds nothing, so a retry is safe.
+async function backlogLesson(request, env, principal) {
+  if (principal.kind !== "user")
+    return reply("lesson cards are approved only by a signed-in person", 403);
+  const body = await readJson(request);
+  if (body instanceof Response) return body;
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    Array.isArray(body) ||
+    Object.keys(body).join() !== "line" ||
+    typeof body.line !== "string"
+  )
+    return reply('body must be {"line": "- [ ] <slug>: Lesson: <fact>"}', 400);
+  const backlog = await env.BUCKET.get("backlog.md");
+  const lines = (backlog ? await backlog.text() : "").split("\n").map((l) => l.replace(/\r$/, ""));
+  const at = lines.indexOf(body.line);
+  const line = at < 0 ? null : LESSON_LINE.exec(body.line);
+  const held = [];
+  for (let i = at + 1; at >= 0 && (lines[i] === "" || lines[i]?.startsWith("  ")); i++)
+    held.push(lines[i].slice(2));
+  const marks = held.map((l) => LESSON_MARK.exec(l)).filter(Boolean);
+  if (!line || marks.length !== 1)
+    return reply("that line is not an open lesson card in the backlog", 409);
+  const [, slug, fact] = line;
+  const [, job, day] = marks[0];
+  if (!(await env.BUCKET.head(`projects/${slug}.md`))) return notFound();
+  const key = projectFileKey(slug, "notes.md");
+  const current = await env.BUCKET.get(key);
+  const text = current ? await current.text() : "";
+  const bullet = `- ${fact} (${job}, ${day})`;
+  const answer = (version, added) =>
+    reply(JSON.stringify({ file: `${slug}/notes.md`, version, added }), 200, "application/json");
+  if (text.split("\n").some((l) => l.replace(/\r$/, "") === bullet))
+    return answer(storedVersion(current), false);
+  const next = text + (text && !text.endsWith("\n") ? "\n" : "") + bullet + "\n";
+  const bytes = new TextEncoder().encode(next);
+  if (bytes.length > MAX_BODY) return reply("notes.md over 1 MiB; nothing was saved", 413);
+  const error =
+    validateProjectMarkdown(next) ?? checkOperatorText(next, "project document", "document");
+  if (error) return reply(error, 400);
+  const cond = new Headers(current ? { "If-Match": current.httpEtag } : { "If-None-Match": "*" });
+  const saved = await storeVersion(
+    env,
+    key,
+    (n) => projectHistoryKey(slug, "notes.md", n),
+    bytes,
+    current,
+    cond,
+    "text/markdown; charset=utf-8",
+    { saved_by: principal.email, summary: `Notes: lesson from ${job}` },
+    "project",
+  );
+  if (!saved) return reply("precondition failed", 412);
+  return answer(saved.version, true);
+}
+
 const BACKLOG_ITEM = /^([\w-]+): (\S.*)$/;
 const BAD_BACKLOG_ITEM = 'item: must be one "<slug>: <feature>" line of at most 2000 characters';
 const backlogItemMatch = (item) =>
@@ -3228,6 +3289,8 @@ async function api(request, env, path, principal, ctx) {
     if (method === "PUT") return ideaFilePut(request, env, name);
     return notFound();
   }
+  if (path === "/api/backlog/lesson" && method === "POST")
+    return backlogLesson(request, env, principal);
   if (path === "/api/backlog/triage/batch" && method === "POST")
     return backlogTriageBatch(request, env);
   if (path === "/api/backlog/triage/verdicts" && method === "POST")
