@@ -76,6 +76,14 @@ class AutonomyReportTest(IsolatedTestCase):
         self.assertIn("alpha internal collect: needs 15 more scanned jobs\n", out)
         self.assertIn("alpha: recommend merge human until every class shows automerge\n", out)
 
+    def test_automerge(self):
+        board = {"jobs": [merged(f"12{n:02}-x", [INTERNAL]) for n in range(20)]}
+        code, out, err = self.run_cmd(board=board)
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("alpha    internal    20    20         0         0          0     1.0       0%  automerge\n", out)
+        self.assertIn("alpha: recommend merge auto\n", out)
+        self.assertNotIn("alpha internal", out.split("automerge\n", 1)[1])
+
     def test_skipped(self):
         board = running_example()
         board["jobs"] += [merged("1040-rider", []), merged("1041-orphan", [INTERNAL], project=""),
