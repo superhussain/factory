@@ -185,7 +185,7 @@ final `## Earlier decision` heading. Then queue its left-out items as
 **Closing without shipping** step 1 describes. Run `python3 "$RUNTIME" push "$SLUG/<id>"`.
 Only when it exits 0, patch `{"stage": "closed", "note": "<reason>", "needs": null}`,
 run `cleanup` on it, and send `closed: <reason> · $DASHBOARD#<id>/decision`.
-Then give the final summary and finish with **Closing without shipping** step 2.
+Then give the final summary and finish with **Closing without shipping** step 3.
 A non-zero push moves the job to `needs-human` with the push error as the note.
 Approver verdicts never start with `CLOSED:`, and no reader treats it as one.
 
@@ -203,7 +203,13 @@ first line `CLOSED: <reason>`, pushed before the stage moves to `closed`.
    `Left out by <id> (closed at <stage>): <source file>`. An `already in backlog:` line
    means it is queued. List person-only items but never queue them or set `needs`.
    Append `## Follow-ups` as step 9 describes.
-2. After the `closed:` line and the final summary are sent, run step 10 with `closed`
+2. If the close reason states a durable project fact, such as a command, a path, a naming
+   rule, or why a kind of change was rejected, write it as one sentence of at most 200
+   characters to a file and run `python3 "$RUNTIME" lesson "$SLUG/<id>" --fact-file <file>`.
+   Add `--why-file <file>` when a person should judge the fact first. Skip it when the
+   reason only names an outcome, such as duplicate, already fixed, superseded or out of
+   scope. Never infer a fact the reason does not state. Record at most one lesson per job.
+3. After the `closed:` line and the final summary are sent, run step 10 with `closed`
    in place of `merged`, so the archive is the session's last command.
 
 End with a short summary: the job's final stage, its rounds, what a human needs to
