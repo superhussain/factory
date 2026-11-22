@@ -357,7 +357,9 @@ exits 5. A bad job id, or a second argument without `push`, exits 2 with
 
 `pickup` also pushes this host's audit rows for each job at spec, build, review,
 approve or pr-open whose transcripts here changed since `<home>/audit-push.json`
-records; a failed push prints one warning and the run goes on.
+records; a failed push prints one warning and the run goes on. When the push
+succeeds and this host's token totals for the job changed, it also writes them to
+`tokens.<device>` and prints `recorded <device> tokens on <job-id>`.
 
 ## Token usage
 
@@ -371,9 +373,10 @@ folders as `audit`. A transcript belongs to the job when:
 
 - its main session ran in a `factory-<job-id>` worktree, which also counts every
   subagent of that session, or
-- the first user prompt of a main session or subagent names the job folder
-  `<home>/jobs/<slug>/<id>` or the prompt folder `<home>/prompts/<slug>/<id>`.
-  `1017-add-x` never matches `1017-add-xy`.
+- outside that worktree, a main session or subagent whose own first prompt names
+  the job folder `<home>/jobs/<slug>/<id>` or the prompt folder
+  `<home>/prompts/<slug>/<id>`. A main session that names the job does not bring
+  its subagents along. `1017-add-x` never matches `1017-add-xy`.
 
 Each `message.id` counts once, with the largest value seen for each kind. Models
 whose counts are all 0 are dropped, and a model name that is not a plain model
@@ -397,7 +400,7 @@ claude-opus-5-5  1,200  48,000      210,000   3,400,000
 
 Only model names, counts and the host name reach the board. The job drawer shows
 every host's entry as a Tokens table. Close-out runs `usage record` before
-`audit push`.
+`audit push`. Pickup refreshes each host's entry, as `## Tool-call audit` says.
 
 A parse failure warns and never blocks close-out:
 
