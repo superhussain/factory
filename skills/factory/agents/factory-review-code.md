@@ -39,6 +39,15 @@ When spec.md has a `## Repro` section, return CHANGES unless build.md has a
 passed, both running the spec's repro test or steps. Name what is missing. Run the
 repro test once yourself to confirm the after-fix row.
 
+**Assertion ledger.** Read the `### Assertion ledger` in build.md's latest run section.
+Return CHANGES when it is missing, when a spec acceptance criterion has no row, when a
+row is `failed`, or when an `untested` row's `Evidence` does not start with `needs
+device` or `needs a person`. An `untested` row is excused only when its check truly
+needs a device or a person this environment lacks. Rerun one `passed` row's check
+yourself and compare its output with `Expected`. Give each gap the signature
+`spec.md#criterion-<n>-<result>`, such as `spec.md#criterion-2-untested`, or
+`spec.md#assertion-ledger-missing`.
+
 Write exactly one markdown file, `<round folder>/review-code.md`. Its first line is
 `VERDICT: PASS` or `VERDICT: CHANGES`. Then list findings, each with file:line and
 the fix. CHANGES is only for issues that must be fixed before merge. Put a nit under
