@@ -30,6 +30,9 @@
                                             the first not marked limited (exit 3 when all are)
   factory.py experiment report <name>       print per-arm outcome metrics for one owner-model
                                             experiment as JSON (read-only)
+  factory.py trial settle                   keep, revert, supersede or time out each open retro
+                                            stage-note trial; 2 reverts pause a project's trials
+  factory.py trial resume <slug>            a human at a terminal clears that pause
   factory.py unclaim <job-id>               release this session's claim on an idea, so it waits again
   factory.py deny-notes <job-id> [done]   print a denied job's unread notes wrapped as data, or mark them read
   factory.py pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]
@@ -3947,6 +3950,66 @@ def experiment_arm(job_id, percent):
     return "b" if bucket < percent else "a"
 
 
+# Retro stage-note trials: an open trial that cannot compare after TRIAL_MAX_DAYS keeps its edit,
+# TRIAL_PAUSE_REVERTS unresumed reverts pause a project's stage-note edits, and the board keeps
+# the newest TRIAL_KEEP settled records.
+TRIAL_MAX_DAYS = 28
+TRIAL_PAUSE_REVERTS = 2
+TRIAL_KEEP = 20
+
+
+def trial_arm(trial_id, job_id):
+    """A job's arm in one stage-note trial: "a" reads the champion note, "b" the challenger."""
+    return experiment_arm(f"{trial_id}/{job_id}", 50)
+
+
+def trial_valid(t):
+    """True for a well-formed trial record: a slug project, a pipeline stage, integer versions and
+    the id open_trial gives it. Board records are not validated by the Worker."""
+    return (isinstance(t, dict) and isinstance(t.get("project"), str) and bool(SLUG.fullmatch(t["project"]))
+            and t.get("stage") in PIPELINE_STAGES and type(t.get("version")) is int
+            and type(t.get("champion_version")) is int and t["champion_version"] >= 0
+            and t.get("id") == f"{t['project']}-{t['stage']}-v{t['version']}")
+
+
+def open_trial_for(data, slug, stage):
+    """The board's open, well-formed trial for slug's stage note, or None."""
+    return next((t for t in data.get("trials") or [] if trial_valid(t) and t.get("status") == "open"
+                 and t["project"] == slug and t["stage"] == stage), None)
+
+
+def trial_champion(home, trial):
+    """The trial stage's note in the pipeline version the edit replaced, read from Worker history,
+    or "" when that version or note is absent. The board's champion text is for display only."""
+    version = trial["champion_version"]
+    if not version:
+        return ""
+    status, _, text = api(home, "GET", f"/api/pipeline/history/projects/{trial['project']}/{version}",
+                          ok=(200, 404))
+    notes = json.loads(text).get("stage_notes") if status == 200 else None
+    note = notes.get(trial["stage"]) if isinstance(notes, dict) else None
+    return note if isinstance(note, str) else ""
+
+
+def trials_paused(data, slug):
+    """True when slug has TRIAL_PAUSE_REVERTS reverted trials no person resumed."""
+    return sum(1 for t in data.get("trials") or [] if isinstance(t, dict) and t.get("project") == slug
+               and t.get("status") == "reverted" and not t.get("resumed")) >= TRIAL_PAUSE_REVERTS
+
+
+def trial_jobs(data, trial):
+    """{"a": {id: job}, "b": {id: job}}: the trial project's jobs started at or after it opened."""
+    opened = stamp_of(trial.get("opened"))
+    arms = {"a": {}, "b": {}}
+    for j in data["jobs"]:
+        if not isinstance(j, dict) or not isinstance(j.get("id"), str) or j.get("project") != trial["project"]:
+            continue
+        started = stamp_of(j.get("started"))
+        if opened and started and started >= opened:
+            arms[trial_arm(trial["id"], j["id"])][j["id"]] = j
+    return arms
+
+
 def read_limits(home):
     """{route name: limited until} from this host's route-limits.json."""
     path = Path(home, "route-limits.json")
@@ -7216,8 +7279,9 @@ def pipeline_view(slug, data):
             "versions": versions, "prompts": prompts}
 
 
-def fetch_pipeline(home, slug):
-    """The project's effective pipeline configuration, as pipeline_view returns it. Nothing falls back to defaults."""
+def fetch_pipeline(home, slug, trial=None):
+    """The project's effective pipeline configuration, as pipeline_view returns it. Nothing falls back to defaults.
+    With a trial, the project's note for the trial's stage reads the champion while it still holds the challenger."""
     status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
     if status == 404:
         fail(f"no pipeline view for {slug}: register the project, or deploy the current Worker", 4)
@@ -7227,6 +7291,18 @@ def fetch_pipeline(home, slug):
         data = json.loads(text)
     except ValueError:
         fail(f"malformed pipeline view for {slug}: body", 5)
+    notes = data.get("stage_notes") if trial and isinstance(data, dict) else None
+    entries = notes.get(trial["stage"]) if isinstance(notes, dict) else None
+    entry = next((n for n in entries if isinstance(n, dict) and isinstance(n.get("source"), str)
+                  and n["source"].startswith(f"pipeline:{slug}@")), None) if isinstance(entries, list) else None
+    if entry and entry.get("text") == trial["challenger"]:
+        champion = trial_champion(home, trial)
+        if champion:
+            entry["text"] = champion
+        else:
+            entries.remove(entry)
+            if not entries:
+                del notes[trial["stage"]]
     return pipeline_view(slug, data)
 
 
@@ -7347,7 +7423,8 @@ def prompt_cmd(target, role, *flags):
     if not documents.is_file():
         fail(f"no {documents}: run factory.py documents {slug} first", 4)
     stage = "review" if review else role
-    pipeline = fetch_pipeline(home, slug)
+    trial = open_trial_for(data, slug, stage)
+    pipeline = fetch_pipeline(home, slug, trial if trial and job_id in trial_jobs(data, trial)["a"] else None)
     base = frontmatter(project_file)[0].get("base") or "main"
     folder = home / "jobs" / slug / job_id
     worktrees = home / "worktrees" / slug
@@ -13513,11 +13590,32 @@ def retro_doc_edits_today(home, file):
                for v in (json.loads(text) if status == 200 else []))
 
 
+def open_trial(home, run, e, version, champion_version, champion):
+    """Append an open trial record for one saved stage-note edit to the board, print its line
+    and return it. champion_version is the version the edit replaced; champion is display text."""
+    slug = e["scope"][len("projects/"):]
+    record = {"id": f"{slug}-{e['stage']}-v{version}", "project": slug, "stage": e["stage"], "version": int(version),
+              "run": run, "summary": e["summary"], "champion_version": champion_version, "champion": champion,
+              "challenger": e["note"], "opened": now(), "status": "open"}
+
+    def change(text):
+        data = load_board(text)
+        data.setdefault("trials", []).append(record)
+        data["updated"] = record["opened"]
+        return dump_board(data), None
+    cas(home, "/api/board", change)
+    print(f"trial {record['id']} opened: alternate jobs keep the old note until trial settle decides")
+    return record
+
+
 def retro_apply_edits(home, run, edits, agg):
     """PUT each checked edit to the Worker's retro route while autonomy runs. Returns one
     {scope, stage, result, summary} row per edit; a bad edit's text is left out. A saved
-    edit moves agg's version and note on, so a later edit to the same scope builds on it."""
-    autonomy = load_autonomy(load_board(api(home, "GET", "/api/board")[2]))
+    edit moves agg's version and note on, so a later edit to the same scope builds on it.
+    A saved stage-note edit opens a trial, and no stage-note edit is sent while its stage has an
+    open trial or its project's trials are paused."""
+    board = load_board(api(home, "GET", "/api/board")[2])
+    autonomy = load_autonomy(board)
     if autonomy["paused"] is not False:
         print("autonomy is paused; no pipeline edit")
         return [{"scope": f"edits[{i}]", "stage": "", "result": "not sent: autonomy is paused", "summary": ""}
@@ -13541,6 +13639,16 @@ def retro_apply_edits(home, run, edits, agg):
             print(f"skipped edits[{i}]: {rule}")
             results.append(dict(row, result=f"skipped: {rule}"))
             continue
+        if not file:
+            slug = e["scope"][len("projects/"):]
+            reason = (f"stage-note trials are paused after {TRIAL_PAUSE_REVERTS} reverts; "
+                      f"a person runs trial resume {slug}" if trials_paused(board, slug)
+                      else f"a trial is open for {e['scope']} stage_notes.{e['stage']}"
+                      if open_trial_for(board, slug, e["stage"]) else None)
+            if reason:
+                print(f"skipped edits[{i}]: {reason}")
+                results.append(dict(row, result=f"skipped: {reason}"))
+                continue
         today = retro_doc_edits_today(home, file) if file else retro_edits_today(home, e["scope"])
         if today >= RETRO_EDITS_PER_DAY:
             reason = f"retro edit cap: {RETRO_EDITS_PER_DAY} per {'file' if file else 'scope'} per day"
@@ -13569,15 +13677,108 @@ def retro_apply_edits(home, run, edits, agg):
             else:
                 version = headers["X-Pipeline-Version"]
                 scope = agg["pipeline"][e["scope"]]
+                champion = scope["stage_notes"].get(e["stage"], "")
                 scope["version"] = int(version)
                 scope["stage_notes"][e["stage"]] = e["note"]
                 print(f"edited {e['scope']} stage_notes.{e['stage']} to version {version}: {e['summary']}")
+                board.setdefault("trials", []).append(
+                    open_trial(home, run, e, version, body["base_version"], champion))
             results.append(dict(row, result=f"version {version}"))
         else:
             reason = f"{status} {printable_line(text, 200)}".strip()
             print(f"skipped edits[{i}]: {reason}")
             results.append(dict(row, result=f"skipped: {reason}"))
     return results
+
+
+def trial_settle(home):
+    """Decide each open stage-note trial with compare(): revert the edit when arm b reads higher on
+    rounds or tokens, else keep it. Writes every record in one board write."""
+    data = read_board(home)
+    if load_autonomy(data)["paused"] is not False:
+        fail("autonomy is paused; no trial settled", 3)
+    trials = [t for t in data.get("trials") or [] if trial_valid(t) and t.get("status") == "open"]
+    if not trials:
+        print("no open trials")
+        return
+    updates = {}
+    for t in trials:
+        tid, slug, stage = t["id"], t["project"], t["stage"]
+        status, headers, text = api(home, "GET", f"/api/pipeline/projects/{slug}", ok=(200, 404))
+        notes = json.loads(text).get("stage_notes", {}) if status == 200 else {}
+        if notes.get(stage, "") != t["challenger"]:
+            updates[tid] = {"status": "superseded", "settled": now()}
+            print(f"trial {tid} superseded: the {stage} note changed after the edit")
+            continue
+        arms = trial_jobs(data, t)
+        a, b = (arm_metrics(arms[arm], {}, Path(home, "jobs")) for arm in ("a", "b"))
+        result = compare(a, b)
+        reads = {metric: result[metric]["reads"] for metric in ("rounds", "tokens")}
+        said = f"rounds {reads['rounds']}, tokens {reads['tokens']}"
+        update = updates[tid] = {"arms": {arm: sorted(arms[arm]) for arm in arms}, "reads": reads}
+        if result["verdict"] == "compared" and "b higher" in reads.values():
+            body = {"schema": RETRO_EDIT_SCHEMA, "run": t["run"], "base_version": int(headers["X-Pipeline-Version"]),
+                    "stage": stage, "note": trial_champion(home, t), "summary": f"Revert trial {tid}"}
+            status, got, text = api(home, "PUT", f"/api/pipeline/retro/projects/{slug}", json.dumps(body),
+                                    ok=(200, 400, 403, 404, 409, 412, 413, 429),
+                                    headers={"Content-Type": "application/json"})
+            if status != 200:
+                print(f"trial {tid} revert failed: {status} {printable_line(text, 200)}".strip())
+                continue
+            version = int(got["X-Pipeline-Version"])
+            update.update(status="reverted", settled=now(), revert_version=version)
+            print(f"trial {tid} reverted to version {version}: {said}")
+        elif result["verdict"] == "compared":
+            update.update(status="kept", settled=now())
+            print(f"trial {tid} kept: {said}")
+        elif datetime.now(timezone.utc) - stamp_of(t["opened"]) >= timedelta(days=TRIAL_MAX_DAYS):
+            update.update(status="inconclusive", settled=now())
+            print(f"trial {tid} inconclusive after {TRIAL_MAX_DAYS} days: kept the edit")
+        else:
+            print(f"trial {tid} open: a {a['finished']} finished, b {b['finished']} finished")
+
+    def change(text):
+        data = load_board(text)
+        records = data.get("trials") or []
+        for t in records:
+            if t.get("status") == "open" and t.get("id") in updates:
+                t.update(updates[t["id"]])
+        settled = sorted((t for t in records if t.get("status") != "open"),
+                         key=lambda t: t.get("settled") or "", reverse=True)[:TRIAL_KEEP]
+        data["trials"] = [t for t in records if t.get("status") == "open" or any(t is k for k in settled)]
+        data["updated"] = now()
+        return dump_board(data), data
+    data = cas(home, "/api/board", change)
+    for slug in sorted({t["project"] for t in trials if updates.get(t["id"], {}).get("status") == "reverted"}):
+        if trials_paused(data, slug):
+            print(f"stage-note trials paused for {slug} after {TRIAL_PAUSE_REVERTS} reverts; "
+                  f"a person runs trial resume {slug}")
+
+
+def trial_resume(home, slug):
+    """A person at a terminal clears slug's stage-note trial pause by marking its reverts resumed."""
+    human_confirm(slug, f"Type {slug} to resume stage-note trials for it: ", "trial resume")
+
+    def change(text):
+        data = load_board(text)
+        stamp = now()
+        for t in data.get("trials") or []:
+            if t.get("project") == slug and t.get("status") == "reverted" and not t.get("resumed"):
+                t["resumed"] = stamp
+        data["updated"] = stamp
+        return dump_board(data), None
+    cas(home, "/api/board", change)
+    print(f"stage-note trials resumed for {slug}")
+
+
+def trial_cmd(sub, slug=None):
+    """Settle the board's open retro stage-note trials, or resume one project's paused trials."""
+    if not (sub == "settle" and slug is None or sub == "resume" and slug is not None and SLUG.fullmatch(slug)):
+        fail("usage: trial settle | trial resume <slug>", 2)
+    if sub == "settle":
+        trial_settle(factory_home())
+    else:
+        trial_resume(factory_home(), slug)
 
 
 def check_finding(f, projects, merged=()):
@@ -14048,6 +14249,7 @@ COMMANDS["suggest"] = (suggest_cmd, 2, 5)
 COMMANDS["control"] = (control_cmd, 4, 6)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
 COMMANDS["experiment"] = (experiment_cmd, 2, 2)
+COMMANDS["trial"] = (trial_cmd, 1, 2)
 COMMANDS["unclaim"] = (unclaim, 1, 1)
 COMMANDS["pipeline"] = (pipeline_cmd, 1, 2)
 COMMANDS["documents"] = (documents_cmd, 1, 1)

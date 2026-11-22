@@ -236,6 +236,61 @@ Retro edits never change the Babysit note.
   version before it, type a Change summary such as `Undo retro run a1b2c3`, and Save.
   That writes a new version; history keeps every one.
 
+## Retro edit trials
+
+Each stage-note edit `retro admit` saves runs as a trial over the next jobs. After the
+PUT it appends one record to the board's `trials` list and prints
+`trial <id> opened: alternate jobs keep the old note until trial settle decides`.
+Only `retro admit`, `trial settle` and `trial resume` write `trials`.
+
+| Field | Example |
+| --- | --- |
+| `id` | `factory-spec-v8` |
+| `project`, `stage`, `version` | `factory`, `spec`, `8` |
+| `run`, `summary` | the retro run and the edit summary |
+| `champion_version` | the pipeline version the edit replaced, `7` |
+| `champion`, `challenger` | the note before (`""` when none, display only) and the saved note |
+| `opened`, `status` | when the trial opened, then `open`, `kept`, `reverted`, `superseded` or `inconclusive` |
+| `settled`, `arms`, `reads` | set by `trial settle`: when it decided, each arm's job ids, and the rounds and tokens reads |
+| `revert_version`, `resumed` | the version a revert saved, and when a person ran `trial resume` |
+
+- **Arms.** A job is in a trial when its project matches and its `started` is at or after
+  `opened`. `trial_arm` hashes `<id>/<job-id>` into arm `a` or `b`, half each. While the
+  trial is open, `prompt` gives an arm `a` job in the trial's stage the champion note.
+  Arm `b` reads the challenger. When the stored note is no longer the challenger, nothing
+  is swapped.
+- **Champion source.** The Worker does not validate board `trials`, so the champion note
+  that `prompt` and a revert use is read from pipeline history at `champion_version`, never
+  from the record's `champion` text. A record is ignored unless its `project` is a slug, its
+  `stage` is a pipeline stage, its versions are integers and its `id` is
+  `<project>-<stage>-v<version>`.
+- **Admit.** `retro admit` skips a stage-note edit while its stage has an open trial
+  (`skipped edits[i]: a trial is open for <scope> stage_notes.<stage>`) or while the
+  project is paused. Both checks run before the daily cap.
+- **Settle.** `factory.py trial settle` runs first in each retro. It stops with
+  `autonomy is paused; no trial settled` (exit 3) while autonomy is paused. For each open trial:
+
+| Outcome | When | Prints |
+| --- | --- | --- |
+| superseded | the stored note differs from `challenger` | `trial <id> superseded: the <stage> note changed after the edit` |
+| reverted | `compare()` reads `b higher` on rounds or tokens; the champion is PUT back with summary `Revert trial <id>` | `trial <id> reverted to version <N>: rounds <reads>, tokens <reads>` |
+| kept | `compare()` compared the arms with no `b higher` read | `trial <id> kept: rounds <reads>, tokens <reads>` |
+| inconclusive | still not compared 28 days after `opened`; the edit stays | `trial <id> inconclusive after 28 days: kept the edit` |
+| open | not compared yet | `trial <id> open: a <n> finished, b <n> finished` |
+
+A refused revert prints `trial <id> revert failed: <status> <text>` and leaves the trial
+open for the next settle. A revert counts toward the daily retro cap. The board keeps
+open records and the newest 20 settled ones.
+- **Pause.** Two reverted trials without `resumed` pause a project's stage-note edits.
+  Settle then prints
+  `stage-note trials paused for <slug> after 2 reverts; a person runs trial resume <slug>`,
+  and admit skips with
+  `skipped edits[i]: stage-note trials are paused after 2 reverts; a person runs trial resume <slug>`.
+  `factory.py trial resume <slug>` needs a human at a terminal typing the slug. It sets
+  `resumed` on that project's reverts and prints `stage-note trials resumed for <slug>`.
+- **Scope.** Retro file edits are not trialled. A host on an older bundle ignores
+  `trials`, so its jobs read the current note.
+
 ## Retro file edits
 
 A retro reply may also carry file edits, each `{"file", "find", "replace", "summary"}`.
