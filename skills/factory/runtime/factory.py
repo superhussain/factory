@@ -1032,6 +1032,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
     if "launch_failure" in patch:
         fail("only factory.py pickup sets launch_failure. Nothing was written.", 2)
+    if "repeated" in patch:
+        fail("only factory.py repeats sets repeated. Nothing was written.", 2)
     if "handled" in patch:
         fail("only factory.py pr-handled sets handled. Nothing was written.", 2)
     if patch.get("note") in SPEC_APPROVED_NOTES:

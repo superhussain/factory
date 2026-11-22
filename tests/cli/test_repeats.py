@@ -1,3 +1,4 @@
+import io
 import json
 import shutil
 import subprocess
@@ -122,6 +123,12 @@ class RepeatsTest(IsolatedTestCase):
         self.assertEqual((code, verdict), (0, REPEAT))
         self.assertTrue(err.endswith("factory.py: 042-csv-export repeats were not recorded on the board; "
                                      "the review loop goes on\n"), err)
+
+    def test_board_refuses_repeated(self):
+        with patch.object(self.module.sys, "stdin", io.StringIO('{"repeated": []}')):
+            result = invoke(self.module, ["board", str(self.dir), "042-csv-export"])
+        self.assertEqual(result, (2, "", "factory.py: only factory.py repeats sets repeated. Nothing was written.\n"))
+        self.assertEqual(self.puts, 0)
 
 
 def changes(slug):
