@@ -26,6 +26,8 @@ feature.
    Every builder dispatch for this job, fix rounds and recovery included, also gets that
    rider worktree. Exit 2, 4 or 6 writes nothing: report the line, create no rider
    worktree, and tell the builder to build every task on `factory/<id>`.
+   Run `python3 "$RUNTIME" review-floor "$SLUG/<id>"`. A non-zero exit puts its stderr
+   line in the board `note`, and the build goes ahead.
    Set stage `build`, then
    spawn `factory-builder` as `builder-<id>` at the
    tier Rules selects from the spec, with its assigned dev-server port if the job
@@ -112,9 +114,10 @@ feature.
    APPROVE ships the PR and merges it as Rules describes. ESCALATE ships a held PR
    at `pr-open` with `escalated` true and the board note "escalated:" plus the
    decision's reason. The PR URL goes in `pr`, not the note. CHANGES is a normal fix
-   round: send the builder `decision.md` as in step 5 and run the next review round,
-   still under the round cap. One approver CHANGES per build cycle. A second one moves
-   the job to `needs-human`.
+   round: run `python3 "$RUNTIME" review-floor "$SLUG/<id>"` before sending the
+   builder `decision.md`. Send `decision.md` as in step 5 and run the next review
+   round, still under the round cap. One approver CHANGES per build cycle. A second
+   one moves the job to `needs-human`.
 7. After a merge, queue the job for a device build if the project file's Device
    builds section says its diff needs one: patch `{"build": {"state": "queued"}}`.
    Then check the build queue as Builds describes.

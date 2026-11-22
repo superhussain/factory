@@ -100,6 +100,8 @@
                                               and flag files changed in each of the last 3 fix rounds
   factory.py review-plan <project-slug>/<job-id> <round>
                                             skip the ux and ui reviews of a round that changes nothing a person sees, print one JSON plan
+  factory.py review-floor <project-slug>/<job-id>
+                                            record the review tier and full-review flag so a later edit cannot lower them
   factory.py pre-review <project-slug>/<job-id>
                                             run the base branch's .factory/checks.json in the job
                                             worktree, write pre-review.md, print one JSON line; FAIL exits 1
@@ -7376,6 +7378,7 @@ PROTECTED_PATHS = (".github/*", "*/.github/*", "*.gitlab-ci*", "*.circleci/*", "
 VISUAL_CRITERION = re.compile(r"screenshot|captur|before and after|before/after|visual evidence", re.I)
 SKIPPABLE_REVIEWERS = ("ux", "ui")
 REVIEW_PLAN_USAGE = "usage: review-plan <project-slug>/<job-id> <round>"
+REVIEW_FLOOR_USAGE = "usage: review-floor <project-slug>/<job-id>"
 
 
 def markdown_section(text, name):
@@ -7428,20 +7431,61 @@ def plan_reason(spec_text, decision_text, changed, globs):
                    "matches a visible-file glob")
 
 
-def review_tier(spec_text, decision_text, protected):
-    """(tier, reason): the spec's Review tier line, raised to high by the first floor that applies.
-    The spec text never lowers a floor."""
-    if re.search(r"^## Full review[ \t]*$", decision_text, re.M):
+REVIEW_FLOOR_FILE = "review-floor.json"
+TIER_RANK = {"low": 0, "medium": 1, "high": 2}
+FULL_REVIEW = re.compile(r"^## Full review[ \t]*$", re.M)
+
+
+def spec_tier(spec_text):
+    """The spec's Review tier line value, lowercased, or None."""
+    line = re.search(r"^Tier:\s*(low|medium|high)\s*$", markdown_section(spec_text, "Review tier") or "",
+                     re.M | re.I)
+    return line.group(1).lower() if line else None
+
+
+def read_review_floor(path):
+    """The recorded {"tier", "full_review"} floor, None for a missing file, or a high floor marked unreadable
+    for a bad one. tier is None when no spec has rated the job yet."""
+    if not path.is_file():
+        return None
+    try:
+        floor = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        floor = None
+    tier = floor.get("tier") if isinstance(floor, dict) else None
+    if not (isinstance(floor, dict) and (tier is None or isinstance(tier, str) and tier in TIER_RANK)
+            and isinstance(floor.get("full_review"), bool)):
+        return {"tier": "high", "full_review": False, "unreadable": True}
+    return {"tier": floor.get("tier"), "full_review": floor["full_review"]}
+
+
+def merge_review_floor(floor, spec_text, decision_text):
+    """The floor raised by the current spec tier and decision.md's Full review heading. It never lowers."""
+    floor = floor or {"tier": None, "full_review": False}
+    tiers = [t for t in (floor["tier"], spec_tier(spec_text)) if t]
+    merged = {"tier": max(tiers, key=TIER_RANK.get) if tiers else None,
+              "full_review": floor["full_review"] or bool(FULL_REVIEW.search(decision_text))}
+    return {**merged, "unreadable": True} if floor.get("unreadable") else merged
+
+
+def review_tier(spec_text, decision_text, protected, floor):
+    """(tier, reason): the spec's Review tier line, raised to high by the first floor that applies, then to the
+    recorded floor's tier. The spec text never lowers a floor."""
+    if FULL_REVIEW.search(decision_text):
         return "high", "decision.md asks for a full review"
+    if floor and floor["full_review"]:
+        return "high", "review-floor.json records a full review"
     if protected is None:
         return "high", "the protected paths could not be read"
     if protected:
         return "high", "the branch touches protected paths"
-    line = re.search(r"^Tier:\s*(low|medium|high)\s*$", markdown_section(spec_text, "Review tier") or "",
-                     re.M | re.I)
-    if not line:
+    tier = spec_tier(spec_text)
+    if not tier:
         return "high", "spec.md has no Review tier line"
-    tier = line.group(1).lower()
+    if floor and floor["tier"] and TIER_RANK[floor["tier"]] > TIER_RANK[tier]:
+        if floor.get("unreadable"):
+            return floor["tier"], "review-floor.json could not be read"
+        return floor["tier"], f"review-floor.json records {floor['tier']}, above spec.md's {tier}"
     return tier, f"spec.md rates the job {tier}"
 
 
@@ -7580,7 +7624,8 @@ def review_plan_cmd(target, round_text):
     round_folder = folder / f"round-{round_text}"
     targets = [round_folder / f"review-{name}.md" for name in SKIPPABLE_REVIEWERS]
     plan_file = round_folder / "review-plan.json"
-    for node in (folder, round_folder, *targets, plan_file):
+    floor_file = folder / REVIEW_FLOOR_FILE
+    for node in (folder, round_folder, *targets, plan_file, floor_file):
         if is_link(node):
             fail(f"{node} is a symlink or junction; nothing was written", 6)
     if not (folder / "spec.md").is_file():
@@ -7621,7 +7666,8 @@ def review_plan_cmd(target, round_text):
         for path in targets:
             if path.exists():
                 fail(f"{path} already exists; nothing was written", 6)
-    tier, tier_reason = review_tier(spec_text, decision_text, protected)
+    floor = merge_review_floor(read_review_floor(floor_file), spec_text, decision_text)
+    tier, tier_reason = review_tier(spec_text, decision_text, protected, floor)
     run = list(TRACER_REVIEWERS) if visible else ["security", "code"]
     # A low job keeps security on the medium route; a high job keeps every reviewer on the default.
     routes = dict.fromkeys(run) if tier == "high" else {
@@ -7630,12 +7676,34 @@ def review_plan_cmd(target, round_text):
         round_folder.mkdir(exist_ok=True)
         write_atomic(str(plan_file), json.dumps({"round": n, "head": head, "protected": protected, "tier": tier,
                                                  "routes": routes}) + "\n")
+        write_atomic(str(floor_file), json.dumps({"tier": floor["tier"], "full_review": floor["full_review"]}) + "\n")
     if not visible:
         for path in targets:
             write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
     print(json.dumps({"round": n, "run": run, "skipped": [] if visible else list(SKIPPABLE_REVIEWERS),
                       "reason": reason, "protected": protected, "tier": tier, "tier_reason": tier_reason,
                       "routes": routes}))
+
+
+def review_floor_cmd(target):
+    """Raise review-floor.json to the spec's current tier and decision.md's Full review heading, and print it."""
+    home, slug, job_id = r2_target(target, True)
+    if not any(j.get("id") == job_id for j in read_board(home)["jobs"]):
+        fail(f"no job {job_id} on the board. Nothing was written. " + REVIEW_FLOOR_USAGE, 4)
+    folder = home / "jobs" / slug / job_id
+    floor_file = folder / REVIEW_FLOOR_FILE
+    for node in (folder, floor_file):
+        if is_link(node):
+            fail(f"{node} is a symlink or junction; nothing was written", 6)
+    if not (folder / "spec.md").is_file():
+        fail(f"{folder / 'spec.md'} is missing", 4)
+    decision = folder / "decision.md"
+    decision_text = decision.read_text(encoding="utf-8") if decision.is_file() else ""
+    floor = merge_review_floor(read_review_floor(floor_file), (folder / "spec.md").read_text(encoding="utf-8"),
+                               decision_text)
+    record = json.dumps({"tier": floor["tier"], "full_review": floor["full_review"]})
+    write_atomic(str(floor_file), record + "\n")
+    print(record)
 
 
 CHECKS_FILE = ".factory/checks.json"
@@ -7874,6 +7942,7 @@ def pre_review_cmd(target):
              "| Check | Exit | Seconds | Class |", "| --- | --- | --- | --- |"]
     lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} | {r['class'] or '-'}"
               f"{', retried' if r['retried'] else ''} |" for r in results]
+    lines += ["", 'Classes are explained under "Failure classes" in docs/autonomy.md of the factory repository.']
     if budget["result"] == "over":
         lines += ["", "## Diff budget", "", "| Measure | Spec estimate | Limit | Branch |", "| --- | --- | --- | --- |",
                   f"| Files | {budget['expected_files']} | {budget['file_limit']} | {budget['files']} |",
@@ -13925,6 +13994,7 @@ COMMANDS["orphans"] = (orphans_cmd, 0, 0)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["repeats"] = (repeats_cmd, 2, 2)
 COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
+COMMANDS["review-floor"] = (review_floor_cmd, 1, 1)
 COMMANDS["pre-review"] = (pre_review_cmd, 1, 1)
 COMMANDS["grounding"] = (grounding_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
