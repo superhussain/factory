@@ -1989,6 +1989,24 @@ class TokenCapTest(PickupFixture):
         self.output(1310000)
         self.assertEqual(self.pickup(), (0, f"needs-human 042-sample-export alpha: {self.PARK}\n", ""))
 
+    def test_scan_error_skips_the_job(self):
+        self.set_cap()
+        self.export(tokens={"host-b": self.HOST_B})
+        self.totals.side_effect = ValueError
+        self.assertEqual(self.pickup(), (
+            0, "", "factory.py: pickup skips the token cap of 042-sample-export: scan failed (ValueError)\n"))
+        self.assertEqual(self.puts(), [])
+
+    def test_failed_stop_keeps_the_park(self):
+        self.set_cap()
+        self.export(tokens={"host-b": self.HOST_B})
+        self.output(1010000)
+        self.stop.return_value = (1, "")
+        self.assertEqual(self.pickup(), (
+            0, f"needs-human 042-sample-export alpha: {self.PARK}\n",
+            "factory.py: pickup could not stop agent synthetic-agent of 042-sample-export: paseo stop failed\n"))
+        self.assertEqual(self.job("042-sample-export")["stage"], "needs-human")
+
 
 class PauseTest(PickupFixture):
     PAUSED = {"at": "2026-01-02T12:00:00Z"}
