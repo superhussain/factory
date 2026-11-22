@@ -2537,6 +2537,7 @@ async function rateNeeds(env, slug, id, text) {
       ms,
       at: new Date().toISOString(),
       choices,
+      decider: "model",
     }),
     JSON_TYPE,
   );
