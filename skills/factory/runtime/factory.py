@@ -10849,8 +10849,8 @@ def usage_record(home, slug, job_id, device, totals):
         if job.get("project") != slug:
             fail(f"{job_id} is not assigned to {slug}. Nothing was written.", 2)
         old = job.get("tokens") if isinstance(job.get("tokens"), dict) else {}
-        job["tokens"] = {**old, device: {"at": now(), **totals}}
         patch_job(data, job_id, {})
+        job["tokens"] = {**old, device: {"at": job["updated"], **totals}}
         return dump_board(data), None
     cas(home, "/api/board", change)
 
