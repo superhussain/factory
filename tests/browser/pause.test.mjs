@@ -35,6 +35,31 @@ const JOBS = [
     updated: "2026-01-01T00:00:00Z",
     claim: { device: "host-a", session: "a1b2c3", since: "2026-01-01T10:00:00Z" },
   },
+  {
+    id: "043-sample-stopped",
+    project: "sample",
+    title: "Sample stopped job",
+    stage: "build",
+    branch: "factory/043-sample-stopped",
+    round: 1,
+    updated: "2026-01-01T00:00:00Z",
+    paused: {
+      at: "2026-01-02T09:30:00Z",
+      session_stop: { "host-a": { agent: "synthetic-agent", at: "2026-01-02T10:00:00Z" } },
+    },
+  },
+  {
+    id: "046-sample-closing",
+    project: "sample",
+    title: "Sample closing job",
+    stage: "review",
+    updated: "2026-01-01T00:00:00Z",
+    close: {
+      reason: "Duplicate",
+      at: "2026-01-02T08:30:00Z",
+      session_stop: { "host-b": { agent: "synthetic-agent", at: "2026-01-02T09:00:00Z" } },
+    },
+  },
   { id: "044-closed", project: "sample", title: "Closed job", stage: "closed", updated: NOW },
   { id: "045-no-project", title: "No project", stage: "build", updated: NOW },
 ];
@@ -118,9 +143,21 @@ test("pause", { timeout: 240000 }, async (t) => {
         assert.deepEqual(items, {
           "100-sample-idea": [true, false],
           "042-sample-export": [true, false],
+          "043-sample-stopped": [false, true],
+          "046-sample-closing": [true, false],
           "044-closed": [false, false],
           "045-no-project": [false, false],
         });
+      });
+
+      await t.test(`session stop line ${width}`, async () => {
+        await openDrawer(page, "043-sample-stopped");
+        if (width === 390)
+          await (
+            await page.$(".detail-head")
+          ).screenshot({
+            path: `${SHOTS}session-stop-390.png`,
+          });
       });
 
       await t.test(`Pause pickup writes paused ${width}`, async () => {
