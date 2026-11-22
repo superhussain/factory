@@ -2080,6 +2080,7 @@ const steerNotes = (j) => Array.isArray(j.steer) ? j.steer.filter((n) => typeof 
 function steerStatus(j, n) {
   const sent = agentRows(j).find((r) => r.role === 'build' && typeof r.at === 'string' && r.at >= n.at);
   if (sent) return 'Sent to the builder ' + agentWhen(sent.at) + '.';
+  if (j.stage === 'needs-human') return 'Waiting for a person. The builder gets this note if the job goes back to build.';
   return STEER_STAGES.includes(j.stage) ? 'Waiting for the builder\'s next round.' : 'Not sent: no builder round ran after it.';
 }
 

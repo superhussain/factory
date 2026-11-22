@@ -40,7 +40,11 @@ const JOBS = [
   job("113-steer-lead", "spec"),
   job("115-steer-rider", "spec", { refs: [{ id: "113-steer-lead", kind: "batched-into" }] }),
   job("116-steer-paused", "review", { paused: AT }),
-  job("117-steer-human", "needs-human", { note: "builder failed twice" }),
+  job("117-steer-human", "needs-human", {
+    note: "builder failed twice",
+    steer: [FIRST],
+    agents: [build("2026-01-02T13:00:00Z")],
+  }),
   job("118-steer-full", "build", {
     steer: Array.from({ length: 10 }, (_, i) => ({ note: `Note ${i}.`, at: FIRST.at })),
   }),
@@ -55,7 +59,7 @@ const HELP =
   "114-steer-export keeps running. The builder reads your note when its next round starts. A note guides work inside the spec and cannot add scope.";
 
 // The Worker takes one appended note per row and write, so the seed adds the notes a round at a
-// time after a write that drops them, with 119 at build until the last write moves it to approve.
+// time after a write that drops them, with 117 and 119 at build until the last write moves them back.
 async function seedSteered(origin) {
   const rounds = Math.max(...JOBS.map((j) => j.steer?.length ?? 0));
   for (let n = 0; n <= rounds; n++)
@@ -63,7 +67,7 @@ async function seedSteered(origin) {
       origin,
       JOBS.map(({ steer, ...j }) => ({
         ...j,
-        ...(j.stage === "approve" && { stage: "build" }),
+        ...((j.stage === "approve" || j.stage === "needs-human") && { stage: "build" }),
         ...(steer && n && { steer: steer.slice(0, n) }),
       })),
     );
@@ -167,6 +171,10 @@ test("add steering note", { timeout: 240000 }, async (t) => {
         await openDrawer(page, "119-steer-approve");
         assert.deepEqual((await notesList(page)).items, [
           "2026-01-02 14:00 UTC: Keep the CSV header order the same as the old report. Not sent: no builder round ran after it.",
+        ]);
+        await openDrawer(page, "117-steer-human");
+        assert.deepEqual((await notesList(page)).items, [
+          "2026-01-02 14:00 UTC: Keep the CSV header order the same as the old report. Waiting for a person. The builder gets this note if the job goes back to build.",
         ]);
         await openDrawer(page, "113-steer-lead");
         assert.equal((await notesList(page)).hidden, true);
