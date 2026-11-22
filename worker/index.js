@@ -2728,7 +2728,8 @@ async function spendEvents(env, at) {
   try {
     return await spendNudgePass(env, await weeklyBudgets(env), at);
   } catch (error) {
-    console.warn(`spend nudge pass failed: ${error.message}`);
+    if (error instanceof Error) console.warn(`spend nudge pass failed: ${error.message}`);
+    else console.warn("spend nudge pass failed:", error);
     return [];
   }
 }
