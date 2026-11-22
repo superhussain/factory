@@ -58,6 +58,7 @@ class BacklogLessonTests(TriageFixture):
             ({"target": "factory"}, 2, self.module.BACKLOG_USAGE),
             ({"target": "factory/../x"}, 2, self.module.BACKLOG_USAGE),
             ({"target": "factory/1712 x"}, 2, self.module.BACKLOG_USAGE),
+            ({"target": "factory/1712-é"}, 2, self.module.BACKLOG_USAGE),
             ({"fact": "x" * 201}, 2, "--fact-file must be a string of 1-200 characters; nothing was queued"),
             ({"why": "x" * 301}, 2, "--why-file must be a string of 1-300 characters; nothing was queued"),
             ({"fact": "See https://example.test for it."}, 2,

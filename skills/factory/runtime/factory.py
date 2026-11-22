@@ -2537,7 +2537,7 @@ def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None)
 
 def backlog_lesson(target, fact_file, why_file):
     """Queue a held lesson card: a backlog line only a person's dashboard approve turns into a notes.md bullet."""
-    m = re.fullmatch(r"([\w-]+)/(\w[\w.-]{0,80})", target)
+    m = re.fullmatch(r"([\w-]+)/(\w[\w.-]{0,80})", target, re.ASCII)
     if not m or ".." in target:
         fail(BACKLOG_USAGE, 2)
     slug, job = m.groups()
