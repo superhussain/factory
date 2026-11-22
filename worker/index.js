@@ -67,7 +67,7 @@ import {
   triageConfidence,
   triageInput,
 } from "./triage.js";
-import { spendGet } from "./spend.js";
+import { spendGet, spendNudgePass } from "./spend.js";
 
 export { BoardEvents } from "./events.js";
 
@@ -222,6 +222,8 @@ function frontmatter(text) {
   return {};
 }
 
+const WEEKLY_TOKENS = /^[1-9][0-9]{0,11}$/;
+
 function validateProjectDocument(text) {
   // oxlint-disable-next-line no-control-regex -- this pattern exists to reject control characters.
   if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/u.test(text))
@@ -231,10 +233,11 @@ function validateProjectDocument(text) {
   if (lines[0] !== "---" || end < 0) return "project document needs closed --- frontmatter";
   const meta = new Map();
   const fieldsError =
-    "project frontmatter allows one repo, base and title, plus an optional archive, buildkite_org and auto_babysit";
+    "project frontmatter allows one repo, base and title, plus an optional archive, buildkite_org, auto_babysit and weekly_tokens";
   for (const line of lines.slice(1, end)) {
     if (!line.trim() || line.trim().startsWith("#")) continue;
-    const match = /^(repo|base|title|archive|buildkite_org|auto_babysit):\s*(.*)$/.exec(line);
+    const match =
+      /^(repo|base|title|archive|buildkite_org|auto_babysit|weekly_tokens):\s*(.*)$/.exec(line);
     if (!match || meta.has(match[1])) return fieldsError;
     let value = match[2].trim();
     if (/^["']|["']$/.test(value)) {
@@ -248,7 +251,8 @@ function validateProjectDocument(text) {
     3 +
       (meta.has("archive") ? 1 : 0) +
       (meta.has("buildkite_org") ? 1 : 0) +
-      (meta.has("auto_babysit") ? 1 : 0)
+      (meta.has("auto_babysit") ? 1 : 0) +
+      (meta.has("weekly_tokens") ? 1 : 0)
   )
     return fieldsError;
   const repo = meta.get("repo"),
@@ -265,6 +269,8 @@ function validateProjectDocument(text) {
     return "invalid project buildkite_org";
   if (meta.has("auto_babysit") && !/^[1-9]$/.test(meta.get("auto_babysit")))
     return "invalid project auto_babysit";
+  if (meta.has("weekly_tokens") && !WEEKLY_TOKENS.test(meta.get("weekly_tokens")))
+    return "invalid project weekly_tokens";
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(base) ||
     base.includes("..") ||
@@ -296,6 +302,20 @@ async function projects(env) {
     out.push(item);
   }
   return reply(JSON.stringify(out), 200, "application/json");
+}
+
+async function weeklyBudgets(env) {
+  const out = new Map();
+  const { objects } = await env.BUCKET.list({ prefix: "projects/" });
+  for (const { key } of objects) {
+    const slug = key.slice("projects/".length, -".md".length);
+    if (!key.endsWith(".md") || !/^[\w-]+$/.test(slug)) continue;
+    const obj = await env.BUCKET.get(key);
+    if (!obj) continue; // deleted between list and get
+    const { weekly_tokens } = frontmatter(await obj.text());
+    if (WEEKLY_TOKENS.test(weekly_tokens || "")) out.set(slug, Number(weekly_tokens));
+  }
+  return out;
 }
 
 async function getFile(env, key, type, headers = {}) {
@@ -2701,12 +2721,13 @@ async function storedBoard(env) {
   }
 }
 
-// The hourly stuck and stale push. A scheduled env has no config, so it is read here for VAPID.
+// The hourly stuck, stale and spend push. A scheduled env has no config, so it is read here for VAPID.
 async function pushHourly(env, at) {
   const { jobs } = await storedBoard(env);
   return sendPushes({ ...env, config: readServerConfig(env) }, [
     ...stuckPushes(jobs, at),
     ...stalePushes(jobs, at),
+    ...(pushKey(env) ? await spendNudgePass(env, await weeklyBudgets(env), at) : []),
   ]);
 }
 
@@ -3349,7 +3370,8 @@ async function api(request, env, path, principal, ctx) {
   if (path === "/api/review/escalation" && method === "POST") return reviewEscalation(request, env);
   if (path === "/api/board/archive")
     return method === "GET" ? archiveGet(request, env) : notFound();
-  if (path === "/api/spend") return method === "GET" ? spendGet(env) : notFound();
+  if (path === "/api/spend")
+    return method === "GET" ? spendGet(env, await weeklyBudgets(env)) : notFound();
   if (path === "/api/push/key" || path === "/api/push/subscriptions") {
     if (principal.kind !== "user") return notFound();
     if (path === "/api/push/key") return method === "GET" ? pushKeyGet(env) : notFound();

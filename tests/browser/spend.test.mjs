@@ -38,7 +38,8 @@ const ROWS = [
   },
 ];
 const LOADED =
-  "Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged.";
+  "Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged. Set weekly_tokens in a project file to see this week's share of it and get a nudge at 50, 80 and 100 percent.";
+const EXPECTED = [{ project: "sample", weekly_tokens: 1000000, tokens: 800000, percent: 80 }];
 const HEADERS = ["Week of (UTC)", "Merged PRs", "Tokens", "Tokens per merged PR", "Reverted"];
 
 test(
@@ -53,7 +54,7 @@ test(
         await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
         const errors = [];
         page.on("pageerror", (error) => errors.push(String(error)));
-        let answer = { status: 200, rows: ROWS };
+        let answer = { status: 200, rows: ROWS, expected: EXPECTED };
         const held = [];
         await page.setRequestInterception(true);
         page.on("request", (request) => {
@@ -62,7 +63,13 @@ test(
           return request.respond({
             status: answer.status,
             contentType: "application/json",
-            body: JSON.stringify({ schema: "factory.spend/1", weeks: 8, rows: answer.rows }),
+            body: JSON.stringify({
+              schema: "factory.spend/1",
+              weeks: 8,
+              rows: answer.rows,
+              week: "2026-11-16",
+              expected: answer.expected ?? [],
+            }),
           });
         });
         const open = async (text) => {
@@ -79,6 +86,11 @@ test(
             heading: section.querySelector("h3").textContent,
             status: section.querySelector("#spend-status").textContent,
             projects: [...section.querySelectorAll("#spend-tables > h4")].map((h) => h.innerHTML),
+            expected: [...section.querySelectorAll("#spend-tables > h4")].map((h) =>
+              h.nextElementSibling.matches("p.muted.spend-expected")
+                ? h.nextElementSibling.textContent
+                : null,
+            ),
             regions: [...section.querySelectorAll("#spend-tables > .reference-scroll")].map(
               (div) => [div.tabIndex, div.getAttribute("role"), div.getAttribute("aria-label")],
             ),
@@ -98,6 +110,10 @@ test(
         assert.equal(shown.heading, "Cost per merged PR");
         assert.equal(shown.status, LOADED);
         assert.deepEqual(shown.projects, ["sample", "&lt;b&gt;zeta&lt;/b&gt;"]);
+        assert.deepEqual(shown.expected, [
+          "This week: 800,000 of 1,000,000 expected tokens (80%).",
+          null,
+        ]);
         assert.deepEqual(shown.regions, [
           [0, "region", "Cost per merged PR for sample"],
           [0, "region", "Cost per merged PR for <b>zeta</b>"],

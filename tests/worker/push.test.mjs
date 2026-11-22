@@ -627,3 +627,60 @@ test("the hourly cron pushes 042-sample-retry once when its wait goes stale", as
     url: "/",
   });
 });
+
+test("the hourly cron pushes Spend 80%: sample once and writes nothing without a VAPID key", async (t) => {
+  const sent = stubFetch(t);
+  const { env, call } = setup();
+  const phone = await browser("https://fcm.googleapis.com/fcm/send/sample-cron");
+  await call("/api/push/subscriptions", { method: "PUT", body: phone.body });
+  const spent = row("070-sample-spent", "merged", {
+    project: "sample",
+    done: "2026-11-17T01:00:00Z",
+    tokens: { mac: { models: { "model-a": { output: 800000 } } } },
+  });
+  await env.BUCKET.put("board.json", JSON.stringify({ jobs: [spent] }));
+  await env.BUCKET.put(
+    "projects/sample.md",
+    "---\nrepo: example/sample\nbase: main\ntitle: Sample\nweekly_tokens: 1000000\n---\n",
+  );
+  await env.BUCKET.put(
+    "spend-nudges.json",
+    JSON.stringify({
+      schema: "factory.spend-nudges/1",
+      week: "2026-11-16",
+      sent: { sample: [50] },
+    }),
+  );
+  const { scheduled } = (await loadProduction()).default;
+  const run = async (hhmm, cronEnv) => {
+    const pending = [];
+    scheduled({ scheduledTime: at(hhmm).getTime() }, cronEnv, {
+      waitUntil: (p) => pending.push(p),
+    });
+    await Promise.allSettled(pending);
+  };
+  const nudges = async () => JSON.parse(await (await env.BUCKET.get("spend-nudges.json")).text());
+
+  await run("12:17", { ...serverEnv, BUCKET: env.BUCKET });
+  assert.equal(sent.length, 0);
+  assert.deepEqual((await nudges()).sent, { sample: [50] });
+
+  const cronEnv = { ...serverEnv, BUCKET: env.BUCKET, FACTORY_VAPID_KEY: env.FACTORY_VAPID_KEY };
+  const start = performance.now();
+  await run("12:17", cronEnv);
+  console.log(`hourly cron with spend: ${(performance.now() - start).toFixed(1)} ms`);
+  assert.equal(sent.length, 1);
+  assert.deepEqual(await decrypt(phone, sent[0].body), {
+    title: "Spend 80%: sample",
+    body: "800,000 of 1,000,000 expected weekly tokens (80%), week of 2026-11-16",
+    tag: "factory-spend-sample",
+    url: "/#/retros",
+  });
+  assert.deepEqual(await nudges(), {
+    schema: "factory.spend-nudges/1",
+    week: "2026-11-16",
+    sent: { sample: [50, 80] },
+  });
+  await run("13:17", cronEnv);
+  assert.equal(sent.length, 1);
+});

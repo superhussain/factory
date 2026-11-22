@@ -169,7 +169,8 @@ const LINE = {
   stuck: "Stuck: ",
   stale: "Still needs you: ",
 };
-const line = (e) => LINE[e.kind] + String(e.id).slice(0, 80);
+const line = (e) =>
+  (e.kind === "spend" ? `Spend ${e.threshold}%: ` : LINE[e.kind]) + String(e.id).slice(0, 80);
 
 /** The notification payload for one write's events. */
 export function pushMessage(events) {
@@ -179,7 +180,7 @@ export function pushMessage(events) {
       title: line(e),
       body: String(e.title || e.id).slice(0, 120),
       tag: `factory-${e.kind}-${e.id}`,
-      url: "/#" + encodeURIComponent(e.id),
+      url: e.kind === "spend" ? "/#/retros" : "/#" + encodeURIComponent(e.id),
     };
   }
   const lines = events.slice(0, 3).map(line);

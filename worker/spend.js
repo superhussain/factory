@@ -4,6 +4,8 @@ import { ARCHIVE_KEY, jobsOf, readJson, reply, terminal } from "./archive.js";
 
 export const SPEND_WEEKS = 8;
 export const SPEND_SCHEMA = "factory.spend/1";
+export const SPEND_THRESHOLDS = [50, 80, 100];
+export const NUDGE_KEY = "spend-nudges.json";
 
 const DAY = 86400000;
 const WEEK = 7 * DAY;
@@ -73,15 +75,84 @@ export function spendRows(jobs, now) {
     });
 }
 
-/** GET /api/spend. */
-export async function spendGet(env, now = new Date()) {
+const weekOf = (now) => new Date(weekStart(now.getTime())).toISOString().slice(0, 10);
+
+/** Spend rows from board.json plus archive rows not on the board, at Date `now`. */
+export async function readSpendRows(env, now) {
   const board = jobsOf(await readJson(env, "board.json")) ?? [];
   const boardIds = new Set(board.map((j) => j?.id));
   const archive = (jobsOf(await readJson(env, ARCHIVE_KEY)) ?? []).filter(
     (j) => !boardIds.has(j?.id),
   );
+  return spendRows([...board, ...archive], now);
+}
+
+/** This week's tokens against each project's weekly_tokens in `budgets`, sorted by project. */
+export function spendExpected(rows, budgets, now) {
+  const week = weekOf(now);
+  return [...budgets]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([project, weekly_tokens]) => {
+      const tokens = rows.find((r) => r.project === project && r.week === week)?.tokens ?? 0;
+      return {
+        project,
+        weekly_tokens,
+        tokens,
+        percent: Math.floor((tokens * 100) / weekly_tokens),
+      };
+    });
+}
+
+/** One event per project for the highest newly crossed threshold, and the next stored state.
+ * A state from another week starts empty. */
+export function spendNudges(expected, week, state) {
+  const sent = state?.week === week && isObject(state.sent) ? state.sent : {};
+  // A null prototype keeps a project named __proto__ an ordinary key.
+  const next = {
+    schema: "factory.spend-nudges/1",
+    week,
+    sent: Object.assign(Object.create(null), sent),
+  };
+  const n = (v) => v.toLocaleString("en-US");
+  const events = [];
+  for (const { project, weekly_tokens, tokens, percent } of expected) {
+    const done = Object.hasOwn(sent, project) && Array.isArray(sent[project]) ? sent[project] : [];
+    const crossed = SPEND_THRESHOLDS.filter((t) => t <= percent && !done.includes(t));
+    if (!crossed.length) continue;
+    next.sent[project] = [...done, ...crossed];
+    events.push({
+      kind: "spend",
+      id: project,
+      threshold: crossed.at(-1),
+      title: `${n(tokens)} of ${n(weekly_tokens)} expected weekly tokens (${percent}%), week of ${week}`,
+    });
+  }
+  return { events, state: next };
+}
+
+/** The spend events at Date `at`, storing NUDGE_KEY only when there are some. */
+export async function spendNudgePass(env, budgets, at) {
+  const expected = spendExpected(await readSpendRows(env, at), budgets, at);
+  const { events, state } = spendNudges(
+    expected,
+    weekOf(at),
+    (await readJson(env, NUDGE_KEY))?.data,
+  );
+  if (events.length) await env.BUCKET.put(NUDGE_KEY, JSON.stringify(state));
+  return events;
+}
+
+/** GET /api/spend. */
+export async function spendGet(env, budgets = new Map(), now = new Date()) {
+  const rows = await readSpendRows(env, now);
   return reply(
-    { schema: SPEND_SCHEMA, weeks: SPEND_WEEKS, rows: spendRows([...board, ...archive], now) },
+    {
+      schema: SPEND_SCHEMA,
+      weeks: SPEND_WEEKS,
+      rows,
+      week: weekOf(now),
+      expected: spendExpected(rows, budgets, now),
+    },
     200,
     "application/json",
   );
