@@ -76,6 +76,7 @@ const expectedItems = {
     "d-copy-link",
   ],
   "non-idea": [
+    "d-steer",
     "d-follow-tracer",
     "d-move-host",
     "d-prioritize",
@@ -168,6 +169,7 @@ async function geometry(page) {
     const bounds = Object.fromEntries(selectors.map((s) => [s, rect(document.querySelector(s))]));
     const items = [
       "d-approve-spec",
+      "d-steer",
       "d-edit-idea",
       "d-discard",
       "d-follow-tracer",
