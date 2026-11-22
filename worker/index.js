@@ -1684,6 +1684,7 @@ async function reviewEscalation(request, env) {
       threshold: ESCALATION_THRESHOLD,
       reason: escalate ? ESCALATION_REASON_PERSON : ESCALATION_REASON_BUILDER,
       model: ESCALATION_MODEL,
+      decider: "model",
     }),
     200,
     "application/json",

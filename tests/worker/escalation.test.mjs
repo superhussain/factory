@@ -62,6 +62,7 @@ test("confidence at or above 80 escalates, below continues, with the contract fi
       "threshold",
       "reason",
       "model",
+      "decider",
     ]);
     assert.deepEqual(JSON.parse(r.text), {
       decision,
@@ -69,6 +70,7 @@ test("confidence at or above 80 escalates, below continues, with the contract fi
       threshold: 80,
       reason,
       model: MODEL,
+      decider: "model",
     });
   }
 });
