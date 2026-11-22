@@ -34,7 +34,14 @@ feature.
    needs one. It commits on
    the branch and writes `build.md`. Push the branch.
    After every builder run, read the first line of its build.md run section. When it
-   starts `BLOCKED-ENV:`, start no pre-review or review round and keep the tier. Count
+   starts `BLOCKED-ENV:`, start no pre-review or review round and keep the tier.
+   Before either patch below, reduce the line. `<kind>` is the builder's kind when it
+   is `secret`, `tool`, `network` or `service`, else `unknown`. `<what is missing>` is
+   only the name of the missing piece: the first env var, command, host or service the
+   line names, without quotes or backticks and cut at its first `=`. Write `unnamed`
+   instead when that name is not 1 to 64 characters of letters, digits, `_`, `.` or
+   `-`, or holds a run of 16 or more letters and digits that mixes both. Never copy
+   any other word of the line, a value, a token or a URL into `note` or `needs`. Count
    the run sections that start `BLOCKED-ENV:` since the latest rework. On one, patch
    `{"note": "env block: <kind>: <what is missing>; one retry on the same tier"}` and
    dispatch a fresh builder on the same tier with the line on a short line. On two, run

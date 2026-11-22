@@ -375,6 +375,16 @@ class RolesTest(IsolatedTestCase):
         self.assertIn('CHANGES is a normal fix round: run `python3 "$RUNTIME" review-floor "$SLUG/<id>"` before '
                       "sending the builder `decision.md`.", feature)
 
+    def test_env_block_copies_only_the_name(self):
+        feature = " ".join((SKILL / "references/commands/feature.md").read_text(encoding="utf-8").split())
+        self.assertIn("start no pre-review or review round and keep the tier. Before either patch below, reduce the "
+                      "line. `<kind>` is the builder's kind when it is `secret`, `tool`, `network` or `service`, else "
+                      "`unknown`. `<what is missing>` is only the name of the missing piece: the first env var, "
+                      "command, host or service the line names, without quotes or backticks and cut at its first "
+                      "`=`. Write `unnamed` instead when that name is not 1 to 64 characters of letters, digits, "
+                      "`_`, `.` or `-`, or holds a run of 16 or more letters and digits that mixes both. Never copy "
+                      "any other word of the line, a value, a token or a URL into `note` or `needs`.", feature)
+
     def test_review_tier_rubric_and_dispatch(self):
         def flat(name):
             return " ".join((SKILL / name).read_text(encoding="utf-8").split())
