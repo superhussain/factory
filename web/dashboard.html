@@ -574,6 +574,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .detail-head .refs a { color: var(--accent); }
   .tracer-tasks ol { margin: 2px 0 0; padding-left: 14px; list-style: none; }
   .tracer-tasks li { padding-left: 10px; text-indent: -10px; }
+  #d-steer-notes li .muted { display: block; text-indent: 0; }
   .tracer-tasks summary, .agent-runs summary { cursor: pointer; padding-left: 14px; text-indent: -14px; }
   .card.needs-you .note { color: var(--alert); }
   /* A needs-you ask wraps to two rows, so a touch user can read it without the tooltip. */
@@ -2073,8 +2074,10 @@ function renderSteerNotes(j) {
   if (!notes.length) return;
   box.querySelector('summary').textContent = 'Steering notes: ' + notes.length;
   box.querySelector('ol').replaceChildren(...notes.map((n) => {
-    const li = document.createElement('li');
-    li.textContent = agentWhen(n.at) + ': ' + n.note + ' ' + steerStatus(j, n);
+    const li = document.createElement('li'), status = document.createElement('span');
+    status.className = 'muted';
+    status.textContent = steerStatus(j, n);
+    li.append(agentWhen(n.at) + ': ' + n.note + ' ', status);
     return li;
   }));
 }

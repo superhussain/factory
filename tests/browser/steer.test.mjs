@@ -155,6 +155,15 @@ test("add steering note", { timeout: 240000 }, async (t) => {
             "2026-01-02 14:30 UTC: Name the file export.csv. Waiting for the builder's next round.",
           ],
         });
+        assert.deepEqual(
+          await page.$$eval("#d-steer-notes li .muted", (els) =>
+            els.map((el) => [el.textContent, getComputedStyle(el).display]),
+          ),
+          [
+            ["Sent to the builder 2026-01-02 14:20 UTC.", "block"],
+            ["Waiting for the builder's next round.", "block"],
+          ],
+        );
         await openDrawer(page, "119-steer-approve");
         assert.deepEqual((await notesList(page)).items, [
           "2026-01-02 14:00 UTC: Keep the CSV header order the same as the old report. Not sent: no builder round ran after it.",
@@ -184,6 +193,7 @@ test("add steering note", { timeout: 240000 }, async (t) => {
         );
         await page.keyboard.press("Escape");
         await page.waitForSelector("#steer-dlg:not([open])", wait);
+        await page.waitForFunction(() => document.activeElement.id === "d-actions", wait);
         assert.equal(await boardText(origin), before);
       });
 
