@@ -7107,6 +7107,17 @@ def run_check(argv, cwd, log, timeout):
     return code, round(time.monotonic() - start)
 
 
+def pre_review_tail(log_text, env):
+    """The last PRE_REVIEW_TAIL lines of a failing check's log for pre-review.md: home .env values of
+    ENV_SECRET_MIN or more characters and retro_redact's patterns as [redacted], each line printable,
+    at most 300 characters, with ~ as -."""
+    for value in env.values():
+        if len(value) >= ENV_SECRET_MIN:
+            log_text = log_text.replace(value, "[redacted]")
+    tail = "\n".join(line[:4000] for line in log_text.splitlines()[-PRE_REVIEW_TAIL:])
+    return [printable_line(line, 300).replace("~", "-") for line in retro_redact(tail).split("\n")]
+
+
 def pre_review_cmd(target):
     """Run the base branch's checks file in the job worktree, write pre-review.md and print one JSON line."""
     home, slug, job_id = r2_target(target, True)
@@ -7152,9 +7163,10 @@ def pre_review_cmd(target):
              f"Checks: origin/{base}:{CHECKS_FILE} at {checks_sha}", f"Logs: {logs}", "",
              "| Check | Exit | Seconds |", "| --- | --- | --- |"]
     lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} |" for r in results]
+    env = read_conf(home / ".env") if (home / ".env").exists() else {}
     for r in failed:
         log_text = (logs / f"{r['name']}.log").read_text(encoding="utf-8", errors="replace")
-        tail = [printable_line(line, 300).replace("~", "-") for line in log_text.splitlines()[-PRE_REVIEW_TAIL:]]
+        tail = pre_review_tail(log_text, env)
         lines += ["", f"## {r['name']}", "", "~~~text", *tail, "~~~"]
     write_atomic(str(out_file), "\n".join(lines) + "\n")
     print(json.dumps({"result": result, "head": head, "checks": results, "reason": None}))
