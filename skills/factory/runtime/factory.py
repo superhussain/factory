@@ -153,6 +153,9 @@
   factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, add its cards to the backlog
   factory.py audit <job-id>                 list this host's tool calls in the job's worktree, risky ones flagged
   factory.py audit push <job-id>            upload this host's audit rows to audit/<job-id>/<device>.jsonl
+  factory.py usage <project-slug>/<job-id>  sum this host's transcript tokens for the job by model
+  factory.py usage record <project-slug>/<job-id>
+                                            write those totals to the board job under tokens.<device>
   factory.py with-cloudflare -- <command> [<arg>...]
                                             run one command with the CLOUDFLARE_* keys of this home's .env
                                             in its environment; prints no value
