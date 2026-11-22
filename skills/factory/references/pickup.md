@@ -189,6 +189,11 @@ Each run, in order:
   failure in a row up to 4 hours, and `launch_failure` with the `count`, a
   path-free `reason` and `at`. It prints `backed off <id> until <time> (launch
   failure <n>)` and exits 1. The next successful launch removes `launch_failure`.
+- On the fifth failure in a row, the same write moves the job to `needs-human`
+  instead of parking it, with no `not_before`, `launch_failure` kept, and `needs`
+  `Pickup launch failed 5 times in a row on host <host>. Last reason: <reason>.
+  Fix the launcher, then clear this ask and move the job back to <stage>.` It
+  prints `needs-human <id> after 5 launch failures in a row` and exits 1.
 - Stops after `--limit` launches (default 1) or when a full pass claims nothing.
   It is silent when there is nothing to do, and it never calls a model.
 - Caps in-flight work. On a host with a registry record, the cap is the host's
