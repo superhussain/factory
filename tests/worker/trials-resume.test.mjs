@@ -157,6 +157,17 @@ test("a bound host resumes with an instruction, recording who and why", async ()
   assert.deepEqual((await board()).doc, doc);
 });
 
+test("an unreadable stored board is refused and left as stored", async () => {
+  const { bucket, resume } = await setup();
+  await bucket.put("board.json", "not json");
+  const got = await resume({ instruction: INSTRUCTION });
+  assert.deepEqual(
+    [got.status, got.text],
+    [400, "the stored board is not readable JSON. Nothing was written."],
+  );
+  assert.equal(await (await bucket.get("board.json")).text(), "not json");
+});
+
 test("a person resumes with {} and no email is stored", async () => {
   const { board, resume } = await setup();
   const got = await resume({}, { principal: person });
