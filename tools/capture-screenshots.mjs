@@ -171,6 +171,8 @@ const STUBS = {
         reworked: 0,
       },
     ],
+    week: "2026-11-16",
+    expected: [{ project: "sample", weekly_tokens: 1000000, tokens: 800000, percent: 80 }],
   },
 };
 
