@@ -7937,6 +7937,7 @@ def pre_review_cmd(target):
              "| Check | Exit | Seconds | Class |", "| --- | --- | --- | --- |"]
     lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} | {r['class'] or '-'}"
               f"{', retried' if r['retried'] else ''} |" for r in results]
+    lines += ["", 'Classes are explained under "Failure classes" in docs/autonomy.md of the factory repository.']
     if budget["result"] == "over":
         lines += ["", "## Diff budget", "", "| Measure | Spec estimate | Limit | Branch |", "| --- | --- | --- | --- |",
                   f"| Files | {budget['expected_files']} | {budget['file_limit']} | {budget['files']} |",

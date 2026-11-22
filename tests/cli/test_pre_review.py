@@ -161,7 +161,8 @@ class PreReviewTest(IsolatedTestCase):
                 text = self.out.read_text()
                 self.assertIn("| Check | Exit | Seconds | Class |\n| --- | --- | --- | --- |\n", text)
                 self.assertRegex(text, r"\| lint \| 0 \| \d+ \| - \|\n")
-                self.assertRegex(text, rf"\| unit \| {exit} \| \d+ \| {cell} \|\n")
+                self.assertRegex(text, rf"\| unit \| {exit} \| \d+ \| {cell} \|\n\nClasses are explained under "
+                                       r'"Failure classes" in docs/autonomy\.md of the factory repository\.\n')
                 self.assertEqual(record.exists(), row == "deterministic")
 
     def test_a_transient_failure_is_retried_once(self):
