@@ -66,6 +66,12 @@ spec.md sections:
    `factory.py review-plan` reads this line to route reviewers.
 9. **Sub-jobs**: only when the request was split.
 
+A job is a bug fix when it makes existing behaviour work as intended. A bug-fix spec
+adds a `## Repro` section right before Tasks: the failing test, by file and test name,
+or numbered repro steps when no test can reach the bug, then the expected and the
+actual result. Its first task adds that failing test or records those steps, and its
+Check is the command or step that fails before the fix and passes after it.
+
 When the feature text references an earlier job (a rework or follow-up), read that
 job's `spec.md` and PR first and say what this job changes about it.
 

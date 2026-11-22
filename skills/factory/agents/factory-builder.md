@@ -136,6 +136,15 @@ file, what changed, and the spec task that changed the behaviour it checks. Neve
 weaken a test only to make it pass. Fix the code instead. Write `None.` under an
 empty heading. Report failures plainly.
 
+When spec.md has a `## Repro` section, reproduce before you fix. Run its test or
+steps before you change any source file, then again after the fix. Add a `### Repro`
+table to the run section with `Run`, `Command or step`, `Commit`, `Exit` and `Result`
+columns: a `before fix` row that fails and an `after fix` row that passes. Quote at
+most five lines of the failing output under the table and put the rest in
+`build-evidence.md`. The before-fix run is an expected red check,
+never a failed candidate verification. A later run that changes the fix reruns the
+repro and adds a new `after fix` row.
+
 ### Job files stay readable
 
 - After any required first line (verdict, decision, routing record), open with a summary of at most 120 words: what changed and why, current status, remaining gates, and the next action.

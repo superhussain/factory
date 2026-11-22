@@ -34,6 +34,11 @@ spec task that changed the behaviour it checks. Give the test's file:line, what 
 weakened, and the fix: restore the check, or fix the code so the original test
 passes.
 
+When spec.md has a `## Repro` section, return CHANGES unless build.md has a
+`### Repro` table with a `before fix` row that failed and an `after fix` row that
+passed, both running the spec's repro test or steps. Name what is missing. Run the
+repro test once yourself to confirm the after-fix row.
+
 Write exactly one markdown file, `<round folder>/review-code.md`. Its first line is
 `VERDICT: PASS` or `VERDICT: CHANGES`. Then list findings, each with file:line and
 the fix. CHANGES is only for issues that must be fixed before merge. Put a nit under
