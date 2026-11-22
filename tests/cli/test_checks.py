@@ -13,6 +13,7 @@ PR = "https://github.com/example/sample/pull/42"
 OPEN = (0, "OPEN\n")
 WARN = "factory.py: warning: gh api graphql gave no usable check list ({})\n"
 NEVER = "factory.py: gh api graphql never gave a usable check list\n"
+DEADLINE = "factory.py: gh api graphql gave no usable check list by the deadline (exited 1 with no check list)\n"
 OLD = "a1" * 20
 NEW = "b2" * 20
 UPDATED = ("factory.py: PR #42 was 1 commit behind main; gh pr update-branch merged main into it, so checks run "
@@ -28,6 +29,9 @@ def listed(*checks):
 
 def unusable(problem):
     return [], problem
+
+
+MISS = unusable("exited 1 with no check list")
 
 
 class ChecksTest(IsolatedTestCase):
@@ -171,11 +175,23 @@ class ChecksTest(IsolatedTestCase):
                 self.assertEqual(err, WARN.format(problem) * 13 + NEVER)
                 self.assertEqual(self.now, 120)
 
-    def test_one_usable_reply_keeps_exit_0(self):
-        miss = unusable("exited 1 with no check list")
-        code, out, err, _ = self.checks(OPEN, [miss, listed(), miss], "--timeout", "540")
-        self.assertEqual((code, out), (0, "no checks reported\n"))
-        self.assertEqual(err, WARN.format("exited 1 with no check list") * 12)
+    def test_unusable_replies_after_a_usable_one_exit_5_at_deadline(self):
+        warn = WARN.format("exited 1 with no check list")
+        code, out, err, _ = self.checks(OPEN, [MISS, listed(), MISS], "--timeout", "540")
+        self.assertEqual((code, out, err), (5, "", warn * 54 + DEADLINE))
+        self.assertEqual(self.now, 540)
+        code, out, err, _ = self.checks(OPEN, [listed(), MISS], "--timeout", "30")
+        self.assertEqual((code, out, err), (5, "", warn * 3 + DEADLINE))
+
+    def test_pending_then_unusable_replies_exit_5(self):
+        code, out, err, _ = self.checks(OPEN, [listed(("pending", "ci")), MISS], "--timeout", "540")
+        self.assertEqual((code, out, err), (5, "", WARN.format("exited 1 with no check list") * 54 + DEADLINE))
+        self.assertEqual(self.now, 540)
+
+    def test_usable_empty_reply_after_misses_reports_none(self):
+        code, out, err, _ = self.checks(OPEN, [listed()] + [MISS] * 12 + [listed()], "--timeout", "540")
+        self.assertEqual((code, out, err), (0, "no checks reported\n", WARN.format("exited 1 with no check list") * 12))
+        self.assertEqual(self.now, 130)
 
     def test_failing_or_other_bucket_exits_1(self):
         for bucket in ("fail", "cancel", "neutral"):
