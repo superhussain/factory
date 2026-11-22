@@ -58,15 +58,28 @@ test("the stop banner shows, Resume clears it and Stop sets it", { timeout: 1200
       await page.waitForSelector("#halt-banner", { hidden: true });
       const stored = await (await fetch(origin + "/api/halt")).json();
       assert.equal(stored.halted, false);
+      assert.equal(await page.evaluate(() => document.activeElement.id), "board-status");
 
       await page.evaluate(() => {
         location.hash = "#/settings/hosts";
       });
       await page.waitForSelector("#halt-form:not([hidden])");
+      await page.type("#halt-reason", "   ");
+      await page.click("#halt-stop");
+      assert.equal(await page.$eval("#halt-status", (el) => el.textContent), "Enter a reason.");
+      assert.equal((await (await fetch(origin + "/api/halt")).json()).halted, false);
+      await page.$eval("#halt-reason", (el) => {
+        el.value = "";
+      });
       await page.type("#halt-reason", "Synthetic stop");
       await page.click("#halt-stop");
       await page.waitForSelector("#halt-banner:not([hidden])");
       assert.match(await page.$eval("#halt-text", (el) => el.textContent), /Synthetic stop/);
+      assert.equal(await page.evaluate(() => document.activeElement.id), "halt-resume");
+
+      await page.click("#halt-resume");
+      await page.waitForSelector("#halt-form:not([hidden])");
+      assert.equal(await page.evaluate(() => document.activeElement.id), "halt-reason");
 
       assert.deepEqual(external, [], "no external requests");
       assert.deepEqual(errors, [], "no page errors");

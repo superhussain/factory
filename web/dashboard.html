@@ -3387,7 +3387,7 @@ function unsavedWork() {
   return !!document.querySelector('dialog[open]')
     || settingsUnsaved()
     || [...document.querySelectorAll(typing)].some(el => !blank(el))
-    || [...document.querySelectorAll('#host-add input[type=text], #host-add input:not([type])')].some(el => !blank(el))
+    || [...document.querySelectorAll('#host-add input[type=text], #host-add input:not([type]), #halt-reason')].some(el => !blank(el))
     || hostDrafts.size > 0
     || backlogSaving || needsSaving || inboxAnswer?.saving || boardWrites > 0
     || needsStorageFailed && [...needsMemory.values()].some(a => a.some(x => x.picked.length || x.other.trim()))
@@ -4893,7 +4893,7 @@ function renderHalt() {
   $('halt-form').hidden = halted;
   if (!halted) return;
   const {by, at, reason} = haltRecord;
-  $('halt-text').textContent = 'Factory stopped by ' + (by || 'a host') + (at ? ' at ' + hostUtc(at) : '') + '. ' + (reason || '');
+  $('halt-text').textContent = 'Factory stopped by ' + (by || 'an unknown source') + (at ? ' at ' + hostUtc(at) : '') + '. ' + (reason || '');
 }
 
 async function saveHalt(body) {
@@ -4904,6 +4904,9 @@ async function saveHalt(body) {
   if (r?.status === 200 && !r.redirected) {
     haltRecord = await r.json();
     renderHalt();
+    if (body.halted) $('halt-resume').focus();
+    else if ($('halt-reason').checkVisibility()) $('halt-reason').focus();
+    else { showBoardStatus('Factory resumed.'); $('board-status').focus(); }
     return true;
   }
   if (body.halted) $('halt-status').textContent = 'Could not stop the factory. Try again.';
@@ -5095,7 +5098,9 @@ $('host-add').addEventListener('submit', async e => {
 $('hosts-load').addEventListener('click', () => { loadHosts(); loadHostProjects(); });
 $('halt-form').addEventListener('submit', async e => {
   e.preventDefault();
-  if (!await saveHalt({halted:true, reason:$('halt-reason').value.trim()})) return;
+  const reason = $('halt-reason').value.trim();
+  if (!reason) { $('halt-status').textContent = 'Enter a reason.'; return; }
+  if (!await saveHalt({halted:true, reason})) return;
   $('halt-reason').value = '';
   $('halt-status').textContent = '';
 });
