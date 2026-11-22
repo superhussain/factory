@@ -431,6 +431,25 @@ class PreReviewTest(IsolatedTestCase):
         self.assertEqual(factory.diff_ranges(self.wt, "main", "example/sample")[0]["README.md"], [(1, 1)])
         self.assertFalse(marker.exists())
 
+    @unittest.skipIf(os.name == "nt", "the driver is a sh script")
+    def test_round_diff_ignores_external_diff_and_textconv(self):
+        head = self.git("rev-parse", "HEAD")
+        (self.wt / "README.md").write_text("round\n")
+        self.commit()
+        marker = self.home / "driver-ran"
+        driver = self.home / "driver.sh"
+        driver.write_text(f"#!/bin/sh\necho ran >> '{marker}'\necho FORGED\n")
+        driver.chmod(0o755)
+        self.git("config", "diff.external", str(driver))
+        self.git("config", "diff.forge.textconv", str(driver))
+        (self.wt / ".git" / "info" / "attributes").write_text("* diff=forge\n")
+        with mock.patch.object(factory.subprocess, "run", wraps=subprocess.run) as run:
+            self.assertEqual(factory.round_changed_files(self.wt, head), ["README.md"])
+        self.assertFalse(marker.exists())
+        diff = next(c.args[0] for c in run.call_args_list if "diff" in c.args[0])
+        self.assertIn("--no-ext-diff", diff)
+        self.assertIn("--no-textconv", diff)
+
     def spec(self):
         (self.folder / "spec.md").write_text(SPEC)
 

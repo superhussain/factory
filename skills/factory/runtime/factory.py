@@ -7996,8 +7996,8 @@ def round_changed_files(wt, head, new="HEAD"):
     if subprocess.run(["git", "-C", str(wt), "merge-base", "--is-ancestor", head, new],
                       capture_output=True).returncode:
         return None
-    diff = subprocess.run(["git", "-C", str(wt), "diff", "--name-only", "--no-renames", "-z", head, new],
-                          capture_output=True, text=True)
+    diff = subprocess.run(["git", "-C", str(wt), "diff", "--no-ext-diff", "--no-textconv", "--name-only",
+                           "--no-renames", "-z", head, new], capture_output=True, text=True)
     return None if diff.returncode else [p for p in diff.stdout.split("\0") if p]
 
 
@@ -11234,8 +11234,8 @@ def prebuild(home, slug, job_id, wt):
                  for prefix in ["/".join(d.split("/")[:i]) + "/" if i else "" for i in range(len(d.split("/")) + 1)]
                  for name in PREBUILD_CONFIG_FILES]
         files += [f"{d}/{name}" for name in PREBUILD_DIR_FILES]
-        diff = subprocess.run(["git", "-C", str(wt), "diff", "--quiet", f"refs/remotes/origin/{base}", "--", *files],
-                              capture_output=True)
+        diff = subprocess.run(["git", "-C", str(wt), "diff", "--no-ext-diff", "--no-textconv", "--quiet",
+                               f"refs/remotes/origin/{base}", "--", *files], capture_output=True)
         status = subprocess.run(["git", "-C", str(wt), "status", "--porcelain", "--untracked-files=all", "--ignored",
                                  "--", *files], capture_output=True, text=True)
         if diff.returncode or status.returncode or status.stdout.strip():

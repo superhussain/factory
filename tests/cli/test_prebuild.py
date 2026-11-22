@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -229,6 +230,24 @@ class PrebuildTest(IsolatedTestCase):
         with patch.dict("os.environ", {"FAIL": "1"}):
             self.assertEqual(self.prebuild(), f"factory.py: prebuild of sample failed (exit 1); log: {self.log}\n")
         self.assertEqual(len(self.calls()), 1)
+
+
+    @unittest.skipIf(os.name == "nt", "the driver is a sh script")
+    def test_diff_ignores_external_diff_and_textconv(self):
+        self.config(["sample"])
+        marker = self.root / "driver-ran"
+        driver = self.root / "driver.sh"
+        driver.write_text(f"#!/bin/sh\necho ran >> '{marker}'\necho FORGED\n", encoding="utf-8")
+        driver.chmod(0o755)
+        self.git(self.wt, "config", "diff.external", str(driver))
+        self.git(self.wt, "config", "diff.forge.textconv", str(driver))
+        (self.wt / ".git" / "info" / "attributes").write_text("* diff=forge\n", encoding="utf-8")
+        with patch.object(factory.subprocess, "run", wraps=subprocess.run) as run:
+            self.assertEqual(self.prebuild(), "prebuilt sample with pnpm install --frozen-lockfile\n")
+        self.assertFalse(marker.exists())
+        diff = next(c.args[0] for c in run.call_args_list if "diff" in c.args[0])
+        self.assertIn("--no-ext-diff", diff)
+        self.assertIn("--no-textconv", diff)
 
 
 if __name__ == "__main__":
