@@ -7969,14 +7969,19 @@ def fetch_base(wt, base, repo):
     return f"could not fetch origin {base}" if r.returncode else None
 
 
+def base_read(wt, *args, **kw):
+    """Run git in wt with replace refs and grafts off, so the worktree cannot swap the base's objects. The -c flag
+    is there because GIT_NO_REPLACE_OBJECTS loses to a worktree's core.useReplaceRefs=true."""
+    return subprocess.run(["git", "-C", str(wt), "-c", "core.useReplaceRefs=false", *args], capture_output=True,
+                          env={**os.environ, "GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": os.devnull}, **kw)
+
+
 def changed_files(wt, base):
     """The paths the worktree's branch changes since it left origin/<base>, or None on any git failure."""
-    mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
-                        capture_output=True, text=True)
+    mb = base_read(wt, "merge-base", f"refs/remotes/origin/{base}", "HEAD", text=True)
     if mb.returncode:
         return None
-    diff = subprocess.run(["git", "-C", str(wt), "diff", "--name-only", "--no-renames", "-z", mb.stdout.strip(),
-                           "HEAD"], capture_output=True, text=True)
+    diff = base_read(wt, "diff", "--name-only", "--no-renames", "-z", mb.stdout.strip(), "HEAD", text=True)
     if diff.returncode:
         return None
     return [p for p in diff.stdout.split("\0") if p]
@@ -8177,12 +8182,11 @@ def spec_budget_paths(text):
 def diff_numstat(wt, base):
     """{path: added plus deleted lines} the branch changes since origin/<base>, binary files as 0, or None on
     any git failure."""
-    mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
-                        capture_output=True, text=True)
+    mb = base_read(wt, "merge-base", f"refs/remotes/origin/{base}", "HEAD", text=True)
     if mb.returncode:
         return None
-    diff = subprocess.run(["git", "-C", str(wt), "diff", "--numstat", "--no-renames", "-z", mb.stdout.strip(),
-                           "HEAD"], capture_output=True, encoding="utf-8", errors="replace")
+    diff = base_read(wt, "diff", "--numstat", "--no-renames", "-z", mb.stdout.strip(), "HEAD", encoding="utf-8",
+                     errors="replace")
     if diff.returncode:
         return None
     counts = {}
@@ -8334,7 +8338,7 @@ def pre_review_cmd(target):
         fail(f"no worktree at {wt}; nothing was written", 4)
 
     def git(*args):
-        proc = subprocess.run(["git", "-C", str(wt), *args], capture_output=True, text=True)
+        proc = base_read(wt, *args, text=True)
         return None if proc.returncode else proc.stdout
 
     head = (git("rev-parse", "HEAD") or "").strip() or None
@@ -8354,7 +8358,7 @@ def pre_review_cmd(target):
         "result": "none", "files": 0, "lines": 0, "expected_files": 0, "expected_lines": 0, "file_limit": 0,
         "line_limit": 0, "unlisted": [], "reason": why}
     if not reason:
-        text = git("show", f"origin/{base}:{CHECKS_FILE}")
+        text = git("show", f"refs/remotes/origin/{base}:{CHECKS_FILE}")
         checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
     if reason:
         write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\n{budget_line(budget)}\n"
@@ -8366,7 +8370,7 @@ def pre_review_cmd(target):
     if is_link(logs):
         fail(f"{logs} is a symlink or junction; nothing was written", 6)
     logs.mkdir(mode=0o700, exist_ok=True)
-    checks_sha = (git("rev-parse", f"origin/{base}") or "").strip()
+    checks_sha = (git("rev-parse", f"refs/remotes/origin/{base}") or "").strip()
     results = []
     for check in checks:
         log = logs / f"{check['name']}.log"
@@ -8454,12 +8458,11 @@ def diff_ranges(wt, base, repo):
     if reason:
         return None, reason
     unreadable = f"the diff against origin/{base} could not be read"
-    mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
-                        capture_output=True, text=True)
+    mb = base_read(wt, "merge-base", f"refs/remotes/origin/{base}", "HEAD", text=True)
     if mb.returncode:
         return None, unreadable
-    diff = subprocess.run(["git", "-C", str(wt), "diff", "-U0", "--no-renames", mb.stdout.strip(), "HEAD"],
-                          capture_output=True, encoding="utf-8", errors="replace")
+    diff = base_read(wt, "diff", "-U0", "--no-renames", mb.stdout.strip(), "HEAD", encoding="utf-8",
+                     errors="replace")
     if diff.returncode:
         return None, unreadable
     ranges, path, header = {}, None, False

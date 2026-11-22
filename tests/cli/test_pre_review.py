@@ -376,6 +376,42 @@ class PreReviewTest(IsolatedTestCase):
         self.git("config", "--worktree", f"url.{forged}.insteadOf", str(self.origin))
         self.assertNone("the worktree's git config sets url or http keys")
 
+    def test_replaced_checks_blob_is_ignored(self):
+        self.base([check("base", "print('base ran')")])
+        real = self.git("rev-parse", "HEAD:.factory/checks.json")
+        forged = subprocess.run(["git", "-C", str(self.wt), "hash-object", "-w", "--stdin"], check=True,
+                                capture_output=True, text=True,
+                                input=json.dumps({"checks": [check("forged", "raise SystemExit(3)")]})).stdout.strip()
+        self.git("replace", real, forged)
+        self.git("config", "core.useReplaceRefs", "true")
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([c["name"] for c in json.loads(out)["checks"]], ["base"])
+        self.assertFalse((self.logs / "forged.log").exists())
+
+    def test_forged_tag_is_ignored(self):
+        self.base([check("base", "print('base ran')")])
+        pushed = self.git("rev-parse", "HEAD")
+        self.commit([check("forged", "raise SystemExit(3)")])
+        self.git("tag", "origin/main", "HEAD")
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([c["name"] for c in json.loads(out)["checks"]], ["base"])
+        self.assertIn(f"Checks: origin/main:.factory/checks.json at {pushed}\n", self.out.read_text())
+        self.assertIn(".factory/checks.json", factory.changed_files(self.wt, "main"))
+
+    def test_base_diff_ignores_replace_and_grafts(self):
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+        (self.wt / "README.md").write_text("branch\n")
+        self.commit()
+        self.git("replace", self.git("rev-parse", "HEAD:README.md"), self.git("rev-parse", "HEAD~1:README.md"))
+        self.assertIsNone(factory.fetch_base(self.wt, "main", "example/sample"))
+        self.assertIn("README.md", factory.changed_files(self.wt, "main"))
+        self.assertIn("README.md", factory.diff_numstat(self.wt, "main"))
+        self.assertIn("README.md", factory.diff_ranges(self.wt, "main", "example/sample")[0])
+        (self.wt / ".git" / "info" / "grafts").write_text(self.git("rev-parse", "HEAD") + "\n")
+        self.assertIn("README.md", factory.changed_files(self.wt, "main"))
+
     def spec(self):
         (self.folder / "spec.md").write_text(SPEC)
 

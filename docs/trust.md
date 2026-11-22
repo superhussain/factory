@@ -67,6 +67,12 @@ characters and every pattern `retro_redact` knows becomes `[redacted]`. The full
 logs stay in the host's job temp folder and never sync. A missing or invalid file
 gives `PRE-REVIEW: NONE` and reviewers work as before.
 
+Every base read names `refs/remotes/origin/<base>` in full, so a tag or branch
+called `origin/<base>` cannot stand in for it. Those reads run git with
+`-c core.useReplaceRefs=false`, `GIT_NO_REPLACE_OBJECTS=1` and `GIT_GRAFT_FILE`
+set to the null device, so replace refs and grafts in the worktree cannot swap
+the base's objects.
+
 The refusal also fires on harmless keys. A linked worktree's local config is the
 main checkout's shared `.git/config`. So one `http.*` key there, such as
 `http.postBuffer` or the `http.https://github.com/.extraheader` that
