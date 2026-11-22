@@ -8219,8 +8219,9 @@ def head_checks(pr, sha):
                 bucket = {"SUCCESS": "pass", "PENDING": "pending", "EXPECTED": "pending"}.get(state, "fail")
             else:
                 raise TypeError
-            if not all(isinstance(v, str) for v in (check, when, state)):
+            if not (isinstance(check, str) and isinstance(state, str)):
                 raise TypeError
+            when = when or ""
             if check not in latest or when > latest[check][0]:
                 latest[check] = when, bucket
     except (ValueError, TypeError, KeyError):

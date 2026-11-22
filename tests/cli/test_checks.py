@@ -333,11 +333,11 @@ class HeadChecksTest(IsolatedTestCase):
             run("c"), run("d", conclusion="SKIPPED"), run("e", conclusion="NEUTRAL"), run("f", conclusion="CANCELLED"),
             run("g", conclusion="FAILURE"), run("h", conclusion="TIMED_OUT"), run("i", conclusion=None),
             run("j", conclusion="STALE"), status("k", "SUCCESS"), status("l", "PENDING"), status("m", "EXPECTED"),
-            status("n", "FAILURE"), status("o", "ERROR")))
+            status("n", "FAILURE"), status("o", "ERROR"), run("p", status="QUEUED", conclusion=None, started=None)))
         self.assertEqual(result, ([{"name": n, "bucket": b} for n, b in (
             ("a", "pending"), ("b", "pending"), ("c", "pass"), ("d", "skipping"), ("e", "skipping"), ("f", "cancel"),
             ("g", "fail"), ("h", "fail"), ("i", "fail"), ("j", "fail"), ("k", "pass"), ("l", "pending"),
-            ("m", "pending"), ("n", "fail"), ("o", "fail"))], None))
+            ("m", "pending"), ("n", "fail"), ("o", "fail"), ("p", "pending"))], None))
 
     def test_repeated_name_keeps_latest(self):
         result, _ = self.head(rollup(
@@ -361,7 +361,7 @@ class HeadChecksTest(IsolatedTestCase):
 
     def test_malformed_list_counts_as_none_listed(self):
         for node in ("pass test", None, {"__typename": "CheckRun", "status": "COMPLETED", "startedAt": "x"},
-                     {**run("ci"), "name": 7}, {**run("ci"), "startedAt": None},
+                     {**run("ci"), "name": 7},
                      {"__typename": "StatusContext", "context": "ci", "state": "SUCCESS"},
                      {"__typename": "Other", "name": "ci"}):
             with self.subTest(node):
