@@ -6792,6 +6792,23 @@ def plan_reason(spec_text, decision_text, changed, globs):
                    "matches a visible-file glob")
 
 
+def fetch_base(wt, base):
+    """None once origin/<base> in wt matches the remote, or why it cannot be trusted. A factory/ base is a job
+    branch a builder can push, so it is refused."""
+    if base.startswith("factory/"):
+        return f"base {base} is a factory branch"
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}", base) or ".." in base:
+        return f"base {base} is not a safe branch name"
+    # git's stderr can carry origin's URL, credentials included, so the reason leaves it out.
+    try:
+        r = subprocess.run(["git", "-C", str(wt), "fetch", "-q", "origin",
+                            f"+refs/heads/{base}:refs/remotes/origin/{base}"], capture_output=True,
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=120)
+    except subprocess.TimeoutExpired:
+        return f"could not fetch origin {base}"
+    return f"could not fetch origin {base}" if r.returncode else None
+
+
 def changed_files(wt, base):
     """The paths the worktree's branch changes since it left origin/<base>, or None on any git failure."""
     mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
@@ -6972,8 +6989,10 @@ def pre_review_cmd(target):
         return None if proc.returncode else proc.stdout
 
     head = (git("rev-parse", "HEAD") or "").strip() or None
-    text = git("show", f"origin/{base}:{CHECKS_FILE}")
-    checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
+    checks, reason = [], fetch_base(wt, base)
+    if not reason:
+        text = git("show", f"origin/{base}:{CHECKS_FILE}")
+        checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
     if reason:
         write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\nReason: {printable_line(reason, 300)}\n")
         print(json.dumps({"result": "none", "head": head, "checks": [], "reason": reason}))

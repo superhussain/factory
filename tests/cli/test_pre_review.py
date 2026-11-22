@@ -39,6 +39,9 @@ class PreReviewTest(IsolatedTestCase):
         self.wt = self.home / "worktrees" / "sample" / JOB
         self.wt.mkdir(parents=True)
         self.git("init", "-q")
+        self.origin = self.home / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(self.origin)], check=True)
+        self.git("remote", "add", "origin", str(self.origin))
         (self.wt / "README.md").write_text("base\n")
         self.commit()
 
@@ -55,7 +58,7 @@ class PreReviewTest(IsolatedTestCase):
 
     def base(self, checks=None, text=None):
         self.commit(checks, text)
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("push", "-q", "-f", "origin", "HEAD:refs/heads/main")
 
     def run_gate(self):
         routes = {"/api/board": (200, board())}
@@ -64,7 +67,7 @@ class PreReviewTest(IsolatedTestCase):
             return invoke(factory, ["--home", str(self.home), "pre-review", f"sample/{JOB}"])
 
     def test_no_checks_file_is_none(self):
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
         code, out, err = self.run_gate()
         self.assertEqual((code, err), (0, ""))
         result = json.loads(out)
@@ -160,3 +163,30 @@ class PreReviewTest(IsolatedTestCase):
         code, out, err = self.run_gate()
         self.assertEqual((code, out), (6, ""))
         self.assertEqual(list(real.iterdir()), [])
+
+    def assertNone(self, reason):
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        result = json.loads(out)
+        self.assertEqual((result["result"], result["checks"], result["reason"]), ("none", [], reason))
+        self.assertIn(f"Reason: {reason}\n", self.out.read_text())
+        self.assertFalse(self.logs.exists())
+
+    def test_forged_local_base_is_refetched(self):
+        self.base([check("base", "print('base ran')")])
+        self.commit([check("forged", "raise SystemExit(3)")])
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([c["name"] for c in json.loads(out)["checks"]], ["base"])
+        self.assertFalse((self.logs / "forged.log").exists())
+
+    def test_factory_base_is_none(self):
+        self.base([check("lint", "pass")])
+        (self.home / "projects" / "sample.md").write_text("---\nrepo: example/sample\nbase: factory/x\n---\n")
+        self.assertNone("base factory/x is a factory branch")
+
+    def test_fetch_failure_is_none(self):
+        self.commit([check("lint", "pass")])
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.assertNone("could not fetch origin main")
