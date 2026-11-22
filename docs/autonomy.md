@@ -18,6 +18,7 @@ All of these run through `factory.py` on a device.
 | `autonomy allow <slug>` | human at a terminal | Adds a registered project to the allowlist after you type its slug. |
 | `autonomy deny <slug>` | anyone | Removes a project from the allowlist. |
 | `autonomy restore <slug> <class>` | human at a terminal | Lifts the earned-autonomy hold on that class. Later APPROVE PRs merge on green again. |
+| `autonomy promote <slug> <class>` | human at a terminal | Lifts a hold once the class earns it, then starts a 14-day cooldown. |
 | `autonomy self <slug>` | anyone | Marks a project as part of the factory itself, so the classifier flags its cards. |
 | `suggest admit <file>` | trusted launcher | Checks a `factory.suggestions/1` file and adds one gated idea card per new suggestion. |
 | `suggest approve <job-id> <A\|B\|C>` | human at a terminal, or an orchestrator relaying the person's chat message (`--chat-file`) | Approves one option after you type the job id, or records the chat quote with `--chat-file`, which lets `factory.py pickup` promote the card. |
@@ -689,3 +690,40 @@ A person restores the class:
 - Restore needs a terminal, like `autonomy resume`, because it loosens autonomy.
 - A malformed `restored` entry is ignored, so the hold stays.
 - PRs already held keep their `needs` until a person merges them.
+
+## Earned autonomy promotion
+
+`autonomy promote <slug> <class>` lifts a hold only after the class earns it. `restore` stays the ungated override. The example is synthetic: `1019-add-z` in `alpha` was reverted at `2026-10-23T10:00:00Z`, then 20 `visible` jobs merged, all `held`, and the time is `2026-11-22T10:00:00Z`.
+
+| Gate | Rule | Example |
+| --- | --- | --- |
+| held | `autonomy_holds(data)` has `("alpha", "visible")` | yes |
+| since | latest `outcome.at` (else `done`) of the held reverts | `2026-10-23T10:00:00Z` |
+| jobs | `autonomy_cell` of cell jobs with `done` after since gives `automerge` | 20 scanned, passes |
+| time at level | whole days since `since` at least 7 | 30 |
+| cooldown | now past `promoted["alpha/visible"].until` | no record |
+| person | types `alpha visible` at a terminal | yes |
+
+Promote on the example:
+
+| Field | Value |
+| --- | --- |
+| prompt | `Type alpha visible to promote alpha visible so its APPROVE PRs merge without a person: ` |
+| `restored["alpha/visible"]` | `2026-11-22T10:00:00Z` |
+| `promoted["alpha/visible"]` | `{"at": "2026-11-22T10:00:00Z", "by": "<device>", "jobs": 20, "days": 30, "until": "2026-12-06T10:00:00Z"}` |
+| stderr | `alpha visible promoted. PRs already held keep their needs line until a person merges them.` |
+
+Refusals change nothing:
+
+| Case | Exit | stderr after `factory.py: ` |
+| --- | --- | --- |
+| 12 scanned | 3 | `alpha visible cannot be promoted yet: needs 8 more scanned jobs; nothing was changed` |
+| 3 days at hold | 3 | `alpha visible cannot be promoted yet: 3 days held, needs 7; nothing was changed` |
+| not held | 3 | `alpha visible is not held, so there is nothing to promote; nothing was changed` |
+| no TTY, typo, bad class | 2 | the usual terminal and usage text |
+| unregistered | 4 | `no factory project beta` |
+
+- The gates run before the prompt and again on the fresh board inside the write.
+- Promote also stamps `restored`, so the next revert starts a fresh window.
+- A malformed `promoted` entry for the class refuses promotion rather than dropping the cooldown.
+- The 7-day and 14-day values are starting guesses.
