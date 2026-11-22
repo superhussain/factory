@@ -110,6 +110,17 @@ export async function seedTrials(origin, trials) {
   return put(origin, "/api/board", JSON.stringify({ ...board, trials }));
 }
 
+// Resumes slug's paused stage-note trials as a signed-in person, through the Worker's resume route.
+export async function resumeTrials(origin, slug) {
+  const response = await fetch(origin + `/api/trials/resume/${slug}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (response.status !== 200)
+    throw new Error(`resume trials ${slug}: ${response.status} ${await response.text()}`);
+}
+
 export async function seedPipeline(origin, doc) {
   return put(origin, "/api/pipeline/global", JSON.stringify(doc), {
     "Content-Type": "application/json",

@@ -8,6 +8,7 @@ import {
   seedProject,
   seedBoard,
   seedTrials,
+  resumeTrials,
 } from "../support/browser-server.mjs";
 import { waitForBoard } from "../support/board-ready.cjs";
 
@@ -51,7 +52,7 @@ const TRIALS = [
   { id: XSS, project: "other", stage: "spec", status: "open", opened: "2026-11-13T09:00:00Z" },
 ];
 const BANNER =
-  "Stage-note trials for sample are paused after 2 reverts. Retro edits no sample stage note until a person runs factory.py trial resume sample at a terminal.";
+  'Stage-note trials for sample are paused after 2 reverts. Retro edits no sample stage note until a person runs factory.py trial resume sample "<reason>" or asks an agent to run it.';
 const wait = { polling: 50 };
 
 const rows = (page) =>
@@ -99,9 +100,10 @@ test("pipeline stage-note trials", { timeout: 180000 }, async (t) => {
         await page.$eval("#pipeline-trials-wrap", (el) => [
           el.getAttribute("tabindex"),
           el.getAttribute("role"),
+          el.getAttribute("aria-label"),
           el.getAttribute("aria-labelledby"),
         ]),
-        ["0", "region", "pipeline-trials-heading"],
+        ["0", "region", "Stage-note trials table", null],
       );
       assert.equal(await shown(page, "pipeline-trials-paused"), false);
     });
@@ -142,7 +144,7 @@ test("pipeline stage-note trials", { timeout: 180000 }, async (t) => {
       );
       assert.equal(
         await page.$eval("#pipeline-trials-paused p code", (el) => el.textContent),
-        "factory.py trial resume sample",
+        'factory.py trial resume sample "<reason>"',
       );
       assert.equal(
         await page.$eval("#pipeline-trials-paused", (el) => el.getAttribute("role")),
@@ -169,11 +171,7 @@ test("pipeline stage-note trials", { timeout: 180000 }, async (t) => {
     await t.test("trials T4", async () => {
       await page.select("#pipeline-scope", "global");
       await rowCount(page, 4);
-      const resumed = "2026-11-14T09:00:00Z";
-      await seedTrials(
-        origin,
-        TRIALS.map((trial) => (trial.status === "reverted" ? { ...trial, resumed } : trial)),
-      );
+      await resumeTrials(origin, "sample");
       await page.evaluate(() => poll());
       await page.waitForFunction(
         () => document.getElementById("pipeline-trials-paused").hidden,
@@ -194,7 +192,7 @@ test("pipeline stage-note trials", { timeout: 180000 }, async (t) => {
       );
       assert.deepEqual(
         await page.$$eval("#pipeline-trials-paused code", (els) => els.map((el) => el.textContent)),
-        ["factory.py trial resume other", "factory.py trial resume sample"],
+        ['factory.py trial resume other "<reason>"', 'factory.py trial resume sample "<reason>"'],
       );
       assert.equal((await rows(page)).length, 4);
     });
