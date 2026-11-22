@@ -4205,7 +4205,8 @@ def read_halt(home):
 
 
 def halt_line(record):
-    by = record.get("by") if isinstance(record.get("by"), str) else "a person"
+    fallback = {"person": "a person", "host": "a host"}.get(str(record.get("by_kind")), "an unknown source")
+    by = record.get("by") if isinstance(record.get("by"), str) else fallback
     at = record.get("at") if isinstance(record.get("at"), str) else "an unknown time"
     reason = record.get("reason") if isinstance(record.get("reason"), str) else "no reason given"
     return (f"factory stopped by {printable_line(by, 80)} at {printable_line(at, 40)}: "

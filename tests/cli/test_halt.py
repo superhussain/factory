@@ -26,6 +26,11 @@ class HaltPickupTest(TakeoverTest):
         self.assertEqual(self.launched(), [])
         self.assertEqual(self.recorded(), [])
 
+    def test_a_hidden_person_reads_as_a_person(self):
+        self.halt = {"halted": True, "reason": "Runaway launches on wsl", "by_kind": "person",
+                     "at": "2026-11-22T10:00:00Z"}
+        self.assertIn("factory stopped by a person at", self.pickup()[2])
+
     def test_dry_run_skips_all(self):
         code, out, err = self.pickup("--dry-run")
         self.assertEqual((code, out, err), (0, f"skip all: {LINE}\n", ""))
@@ -40,7 +45,7 @@ class HaltPickupTest(TakeoverTest):
         self.halt = "not json"
         code, _, err = self.pickup()
         self.assertEqual(code, 0)
-        self.assertIn("pickup launches nothing", err)
+        self.assertIn("pickup launches nothing; factory stopped by an unknown source at an unknown time", err)
         self.assertEqual(self.puts(), [])
         self.assertEqual(self.launched(), [])
 
