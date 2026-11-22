@@ -14305,11 +14305,19 @@ def trial_settle(home):
                   f"a person runs trial resume {slug}")
 
 
+TRIAL_RESUME_ONLY = ("only a signed-in person, or a paired host passing a person's instruction, "
+                     "resumes stage-note trials")
+
+
 def trial_resume(home, slug, reason):
     """Clears slug's stage-note trial pause through the Worker's resume route, which records the
     host and the person's instruction given as reason."""
-    _, _, text = api(home, "POST", f"/api/trials/resume/{slug}", json.dumps({"instruction": reason.strip()}),
-                     headers={"Content-Type": "application/json"})
+    status, _, text = api(home, "POST", f"/api/trials/resume/{slug}", json.dumps({"instruction": reason.strip()}),
+                          ok=(200, 403), headers={"Content-Type": "application/json"})
+    if status == 403 and text.strip() == TRIAL_RESUME_ONLY:
+        fail(TRIAL_RESUME_ONLY, 5)
+    if status == 403:
+        fail(access_message(os.path.abspath(os.path.join(home, ".env"))), 5)
     n = json.loads(text)["resumed"]
     if n:
         print(f"stage-note trials resumed for {slug}: {n} reverts cleared")

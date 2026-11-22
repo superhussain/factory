@@ -448,5 +448,11 @@ class TrialResumeTest(TrialWorkerCase):
         self.assertEqual(code, 5)
         self.assertIn("instruction: links are not allowed", err)
 
+    def test_unbound_host_gets_the_worker_reason(self):
+        code, out, err, _, _ = self.resume("factory", REASON, reply=(403, factory.TRIAL_RESUME_ONLY.encode()))
+        self.assertEqual((code, out), (5, ""))
+        self.assertIn(factory.TRIAL_RESUME_ONLY, err)
+        self.assertNotIn("Access rejected", err)
+
 if __name__ == "__main__":
     unittest.main()
