@@ -17,7 +17,7 @@
                          --chat-file <file>
                                             make the dashboard's backlog decision from a person's chat
                                             message, print the job as JSON
-  factory.py triage replay <project-slug> [--threshold N]
+  factory.py triage replay <project-slug> [--threshold N] [--rules-file PATH]
                                             score a threshold against past human backlog decisions, print JSON
   factory.py bench score <cases-file> <arm-folder>...
                                             score saved reviewer runs against labeled past defects, print JSON
@@ -1782,9 +1782,10 @@ def verdict_decider(verdict):
     return "rule" if verdict.get("confidence") is None or verdict.get("reason") in RULE_HOLD_REASONS else "model"
 
 
-def triage_replay(slug, threshold=None):
+def triage_replay(slug, threshold=None, rules=None, rules_file=None):
     """Score the current and the given triage threshold against people's past approve and deny
-    decisions on the project's backlog lines, using each line's stored model confidence. Read only."""
+    decisions on the project's backlog lines, using each line's stored model confidence. With rules,
+    the Worker re-rates each scored line bare under those rules and stores nothing. Read only."""
     home = factory_home()
     if slug not in registered(home):
         fail(f"no factory project {slug}", 4)
@@ -1834,33 +1835,61 @@ def triage_replay(slug, threshold=None):
         elif verdict_decider(verdict) == "rule":
             unscored["rule"] += 1
         else:
-            scored.append((verdict["confidence"], labels[item]))
+            scored.append((item, verdict["confidence"], labels[item]))
+    if rules is not None:
+        unscored["rating_failed"] = 0
+        rated = []
+        for i in range(0, len(scored), TRIAGE_BATCH_LIMIT):
+            chunk = scored[i:i + TRIAGE_BATCH_LIMIT]
+            _, _, text = api(home, "POST", "/api/backlog/triage/rate",
+                             json.dumps({"rules": rules, "items": [item for item, _, _ in chunk]},
+                                        ensure_ascii=False),
+                             headers={"Content-Type": "application/json"})
+            rated += zip(chunk, json.loads(text)["confidences"])
+        scored = []
+        for (item, _, decision), confidence in rated:
+            if confidence is None:
+                unscored["rating_failed"] += 1
+            else:
+                scored.append((item, confidence, decision))
     rows = []
     for t in [x for x in dict.fromkeys((current, threshold)) if x is not None]:
         row = {"threshold": t, "current": t == current, "queue_approved": 0, "queue_denied": 0,
                "hold_approved": 0, "hold_denied": 0}
-        for confidence, decision in scored:
+        for _, confidence, decision in scored:
             row[f"{'queue' if confidence >= t else 'hold'}_{decision}"] += 1
         row["agreement"] = round(100 * (row["queue_approved"] + row["hold_denied"]) / len(scored)) \
             if scored else None
         rows.append(row)
-    print(json.dumps({"project": slug, "labels": len(labels), "scored": len(scored), "unscored": unscored,
-                      "model_queued": sum(record_decider(r) == "model" for r in latest.values()),
-                      "thresholds": rows}, indent=2))
+    out = {"project": slug}
+    if rules is not None:
+        out["rules_file"] = rules_file
+    out.update({"labels": len(labels), "scored": len(scored), "unscored": unscored,
+                "model_queued": sum(record_decider(r) == "model" for r in latest.values()), "thresholds": rows})
+    print(json.dumps(out, indent=2))
 
 
 def triage_cmd(*args):
-    """triage replay <project-slug> [--threshold N]."""
-    if len(args) not in (2, 4) or args[0] != "replay" or not SLUG.fullmatch(args[1]) \
-            or len(args) == 4 and args[2] != "--threshold":
-        fail("usage: triage replay <project-slug> [--threshold N]", 2)
-    slug, rest = args[1], args[2:]
+    """triage replay <project-slug> [--threshold N] [--rules-file PATH]."""
+    flags = dict(zip(args[2::2], args[3::2]))
+    if len(args) not in (2, 4, 6) or args[0] != "replay" or not SLUG.fullmatch(args[1]) \
+            or len(flags) != len(args[2:]) // 2 or not set(flags) <= {"--threshold", "--rules-file"}:
+        fail("usage: triage replay <project-slug> [--threshold N] [--rules-file PATH]", 2)
     threshold = None
-    if rest:
-        threshold = int(rest[1]) if re.fullmatch(r"[0-9]{1,3}", rest[1]) else 0
+    if "--threshold" in flags:
+        value = flags["--threshold"]
+        threshold = int(value) if re.fullmatch(r"[0-9]{1,3}", value) else 0
         if not 1 <= threshold <= 100:
             fail("--threshold: must be a whole number from 1 to 100", 2)
-    triage_replay(slug, threshold)
+    rules_file = flags.get("--rules-file")
+    rules = None
+    if rules_file is not None:
+        try:
+            with open(rules_file, encoding="utf-8") as f:
+                rules = f.read()
+        except (OSError, UnicodeError):
+            fail(f"--rules-file: cannot read {rules_file}", 2)
+    triage_replay(args[1], threshold, rules, rules_file)
 
 
 def triage_verdict(text):

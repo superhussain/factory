@@ -1,9 +1,10 @@
 import json
+import os
 from unittest.mock import patch
 
 from support import IsolatedTestCase, invoke, load_runtime
 
-USAGE = "factory.py: usage: triage replay <project-slug> [--threshold N]\n"
+USAGE = "factory.py: usage: triage replay <project-slug> [--threshold N] [--rules-file PATH]\n"
 AT = "2026-10-27T12:00:00Z"
 MODEL = "@cf/cloudflare/clef-flash"
 
@@ -38,6 +39,20 @@ EXAMPLE_OUT = {
          "hold_denied": 1, "agreement": 33},
         {"threshold": 80, "current": False, "queue_approved": 2, "queue_denied": 0, "hold_approved": 0,
          "hold_denied": 1, "agreement": 100}]}
+RULES = "Pick up small export and settings features. Hold anything that touches deploy.\n"
+EXAMPLE_RATED = {
+    "sample: Add CSV export to reports": 93,
+    "sample: Add a dark mode toggle": 88,
+    "sample: Rotate the deploy token": 41,
+}
+RULES_OUT = {
+    "project": "sample", "rules_file": "rules.txt", "labels": 4, "scored": 3,
+    "unscored": {"rule": 1, "no_verdict": 0, "rating_failed": 0}, "model_queued": 0,
+    "thresholds": [
+        {"threshold": 90, "current": True, "queue_approved": 1, "queue_denied": 0, "hold_approved": 1,
+         "hold_denied": 1, "agreement": 67},
+        {"threshold": 80, "current": False, "queue_approved": 2, "queue_denied": 0, "hold_approved": 0,
+         "hold_denied": 1, "agreement": 100}]}
 
 
 class TriageReplayTests(IsolatedTestCase):
@@ -49,6 +64,8 @@ class TriageReplayTests(IsolatedTestCase):
         self.stored = dict(EXAMPLE_STORED)
         self.view = (200, {"triage": {"enabled": True, "threshold": 90, "rules": ""}})
         self.calls = []
+        self.rated = dict(EXAMPLE_RATED)
+        self.rate_bodies = []
 
         def api(home, method, path, body=None, ok=(200,), headers=None, raw=False):
             self.calls.append((method, path))
@@ -66,6 +83,12 @@ class TriageReplayTests(IsolatedTestCase):
             if (method, path) == ("GET", "/api/pipeline/effective/sample"):
                 status, view = self.view
                 return status, {}, json.dumps(view)
+            if (method, path) == ("POST", "/api/backlog/triage/rate"):
+                self.assertEqual(ok, (200,))
+                payload = json.loads(body)
+                self.rate_bodies.append(payload)
+                return 200, {}, json.dumps({"model": MODEL,
+                                            "confidences": [self.rated.get(i) for i in payload["items"]]})
             self.assertEqual((method, path), ("POST", "/api/backlog/triage/verdicts"))
             items = json.loads(body)["items"]
             self.assertLessEqual(len(items), 50)
@@ -75,6 +98,12 @@ class TriageReplayTests(IsolatedTestCase):
             patcher = patch.object(self.module, target, fake)
             patcher.start()
             self.addCleanup(patcher.stop)
+
+    def rules_file(self, text=RULES):
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(os.environ["HOME"])
+        with open("rules.txt", "w", encoding="utf-8") as f:
+            f.write(text)
 
     def replay(self, *args):
         code, out, err = invoke(self.module, ["triage", "replay", *args])
@@ -188,3 +217,42 @@ class TriageReplayTests(IsolatedTestCase):
             for args in ((), ("--threshold", "80")):
                 code, out, err = invoke(self.module, ["triage", "replay", "sample", *args])
                 self.assertEqual((code, out, err), (2, "", f"factory.py: {message}\n"), (status, args))
+
+    def test_rules_file_rerates_scored_lines_and_prints_the_spec_json(self):
+        self.rules_file()
+        code, out, err = invoke(self.module, ["triage", "replay", "sample", "--threshold", "80",
+                                              "--rules-file", "rules.txt"])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, json.dumps(RULES_OUT, indent=2) + "\n")
+        self.assertEqual(self.calls, [
+            ("GET", "/projects.json"), ("GET", "/api/pipeline/effective/sample"), ("GET", "/api/board"),
+            ("GET", "/api/board/archive?page=1"), ("POST", "/api/backlog/triage/verdicts"),
+            ("POST", "/api/backlog/triage/rate")])
+        self.assertEqual(self.rate_bodies, [{"rules": RULES, "items": list(EXAMPLE_RATED)}])
+        code, out, _ = self.replay("sample", "--rules-file", "rules.txt", "--threshold", "80")
+        self.assertEqual((code, out), (0, RULES_OUT))
+
+    def test_rules_file_rates_eight_per_call_and_counts_null_as_rating_failed(self):
+        self.rules_file()
+        self.board["jobs"] = [job(n, f"sample: Item {n}", "approved", decider="person") for n in range(1, 10)]
+        self.stored = {f"sample: Item {n}": hold(50, decider="model") for n in range(1, 10)}
+        self.rated = {f"sample: Item {n}": 95 for n in range(1, 9)}
+        code, out, _ = self.replay("sample", "--rules-file", "rules.txt")
+        self.assertEqual(code, 0)
+        self.assertEqual([len(b["items"]) for b in self.rate_bodies], [8, 1])
+        self.assertEqual(out["scored"], 8)
+        self.assertEqual(out["unscored"], {"rule": 0, "no_verdict": 0, "rating_failed": 1})
+        self.assertEqual(out["thresholds"][0]["queue_approved"], 8)
+
+    def test_rules_file_errors_exit_2_before_any_call(self):
+        self.rules_file()
+        with open("bad.txt", "wb") as f:
+            f.write(b"\xff\xfe rules")
+        for path in ("missing.txt", "bad.txt", "."):
+            code, out, err = invoke(self.module, ["triage", "replay", "sample", "--rules-file", path])
+            self.assertEqual((code, out, err), (2, "", f"factory.py: --rules-file: cannot read {path}\n"), path)
+        for args in (["--rules-file"], ["--rules-file", "rules.txt", "--rules-file", "rules.txt"],
+                     ["--threshold", "80", "--threshold", "80"], ["--rules-file", "rules.txt", "--threshold"]):
+            code, out, err = invoke(self.module, ["triage", "replay", "sample", *args])
+            self.assertEqual((code, out, err), (2, "", USAGE), args)
+        self.assertEqual(self.calls, [])
