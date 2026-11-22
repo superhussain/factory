@@ -12,8 +12,11 @@ factory = load_runtime()
 JOB = "001-sample-job"
 
 
-def board():
-    return {"updated": "", "jobs": [{"id": JOB, "project": "sample", "title": "Sample job", "stage": "review"}]}
+def board(round=None):
+    job = {"id": JOB, "project": "sample", "title": "Sample job", "stage": "review"}
+    if round is not None:
+        job["round"] = round
+    return {"updated": "", "jobs": [job]}
 
 
 def check(name, code):
@@ -60,8 +63,8 @@ class PreReviewTest(IsolatedTestCase):
         self.commit(checks, text)
         self.git("push", "-q", "-f", "origin", "HEAD:refs/heads/main")
 
-    def run_gate(self):
-        routes = {"/api/board": (200, board())}
+    def run_gate(self, round=None):
+        routes = {"/api/board": (200, board(round))}
         with http_fixture(routes) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
             return invoke(factory, ["--home", str(self.home), "pre-review", f"sample/{JOB}"])
@@ -71,7 +74,7 @@ class PreReviewTest(IsolatedTestCase):
         code, out, err = self.run_gate()
         self.assertEqual((code, err), (0, ""))
         result = json.loads(out)
-        self.assertEqual((result["result"], result["checks"]), ("none", []))
+        self.assertEqual((result["result"], result["checks"], result["round"], result["repeats"]), ("none", [], 1, []))
         text = self.out.read_text()
         self.assertTrue(text.startswith("PRE-REVIEW: NONE\n\n"))
         self.assertIn("Reason: origin/main has no .factory/checks.json", text)
@@ -92,6 +95,7 @@ class PreReviewTest(IsolatedTestCase):
         result = json.loads(out)
         head = self.git("rev-parse", "HEAD")
         self.assertEqual((result["result"], result["head"], result["reason"]), ("pass", head, None))
+        self.assertEqual((result["round"], result["repeats"]), (1, []))
         self.assertEqual([(c["name"], c["exit"]) for c in result["checks"]], [("lint", 0), ("cli", 0)])
         self.assertTrue(all(type(c["seconds"]) is int for c in result["checks"]))
         self.assertEqual(self.logs.stat().st_mode & 0o777, 0o700)
@@ -117,6 +121,32 @@ class PreReviewTest(IsolatedTestCase):
         self.assertEqual(len(block), 40)
         self.assertEqual((block[0], block[-1]), ("line 20 -x-", "line 59 -x-"))
         self.assertEqual(len((self.logs / "lint.log").read_text().splitlines()), 60)
+
+    def test_a_check_failing_in_two_consecutive_rounds_is_a_repeat(self):
+        self.base([check("lint", "pass"), check("unit", "raise SystemExit(1)")])
+        code, out, _ = self.run_gate()
+        self.assertEqual(code, 1)
+        self.assertEqual((json.loads(out)["round"], json.loads(out)["repeats"]), (1, []))
+        code, out, _ = self.run_gate(round=1)
+        self.assertEqual(code, 1)
+        self.assertEqual((json.loads(out)["round"], json.loads(out)["repeats"]), (2, ["unit"]))
+        record = self.logs.parent / "pre-review-failures.json"
+        self.assertEqual(json.loads(record.read_text()), {"1": ["unit"], "2": ["unit"]})
+
+    def test_two_failures_in_one_round_are_not_a_repeat(self):
+        self.base([check("unit", "raise SystemExit(1)")])
+        self.run_gate(round=2)
+        self.base([check("lint", "raise SystemExit(1)"), check("unit", "pass")])
+        code, out, _ = self.run_gate(round=2)
+        self.assertEqual(code, 1)
+        self.assertEqual((json.loads(out)["round"], json.loads(out)["repeats"]), (3, []))
+        record = self.logs.parent / "pre-review-failures.json"
+        self.assertEqual(json.loads(record.read_text()), {"3": ["lint", "unit"]})
+        record.write_text("[not an object]")
+        self.base([check("lint", "raise SystemExit(1)")])
+        code, out, _ = self.run_gate(round=3)
+        self.assertEqual(json.loads(out)["repeats"], [])
+        self.assertEqual(json.loads(record.read_text()), {"4": ["lint"]})
 
     def test_failure_tail_is_redacted(self):
         (self.home / ".env").write_text("FACTORY_TEST_SECRET=synthetic-secret-0123456789\n")  # gitleaks:allow synthetic secret

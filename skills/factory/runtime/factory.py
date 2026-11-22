@@ -7184,8 +7184,11 @@ def pre_review_cmd(target):
     """Run the base branch's checks file in the job worktree, write pre-review.md and print one JSON line."""
     home, slug, job_id = r2_target(target, True)
     data = read_board(home)
-    if not any(j.get("id") == job_id for j in data["jobs"]):
+    job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+    if job is None:
         fail(f"no job {job_id} on the board. Nothing was written. " + PRE_REVIEW_USAGE, 4)
+    board_round = job.get("round")
+    round_n = (board_round if type(board_round) is int and board_round >= 0 else 0) + 1
     base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
@@ -7208,7 +7211,8 @@ def pre_review_cmd(target):
         checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
     if reason:
         write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\nReason: {printable_line(reason, 300)}\n")
-        print(json.dumps({"result": "none", "head": head, "checks": [], "reason": reason}))
+        print(json.dumps({"result": "none", "head": head, "checks": [], "reason": reason, "round": round_n,
+                          "repeats": []}))
         return
     logs = make_job_temp(slug, job_id) / "pre-review"
     if is_link(logs):
@@ -7231,7 +7235,21 @@ def pre_review_cmd(target):
         tail = pre_review_tail(log_text, env)
         lines += ["", f"## {r['name']}", "", "~~~text", *tail, "~~~"]
     write_atomic(str(out_file), "\n".join(lines) + "\n")
-    print(json.dumps({"result": result, "head": head, "checks": results, "reason": None}))
+    repeats = []
+    if failed:
+        names = {r["name"] for r in failed}
+        record_file = make_job_temp(slug, job_id) / "pre-review-failures.json"
+        try:
+            record = json.loads(record_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            record = {}
+        if not isinstance(record, dict):
+            record = {}
+        record[str(round_n)] = sorted(names | set(record.get(str(round_n), [])))
+        write_atomic(str(record_file), json.dumps(record) + "\n")
+        repeats = sorted(names & set(record.get(str(round_n - 1), [])))
+    print(json.dumps({"result": result, "head": head, "checks": results, "reason": None, "round": round_n,
+                      "repeats": repeats}))
     if failed:
         sys.exit(1)
 
