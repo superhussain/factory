@@ -38,7 +38,9 @@ const ROWS = [
   },
 ];
 const LOADED =
-  "Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged. Set weekly_tokens in a project file to see this week's share of it and get a nudge at 50, 80 and 100 percent.";
+  "Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged.";
+const HINT =
+  " Set weekly_tokens in a project file to see this week's share of it and get a nudge at 50, 80 and 100 percent.";
 const EXPECTED = [{ project: "sample", weekly_tokens: 1000000, tokens: 800000, percent: 80 }];
 const HEADERS = ["Week of (UTC)", "Merged PRs", "Tokens", "Tokens per merged PR", "Reverted"];
 
@@ -132,6 +134,10 @@ test(
             rows: [["2026-11-16", "0", "140,800", "none merged", "none judged"]],
           },
         ]);
+
+        answer = { status: 200, rows: ROWS, expected: [] };
+        const unbudgeted = await open("Last 8 weeks");
+        assert.equal(unbudgeted.status, LOADED + HINT);
 
         answer = { status: 200, rows: [] };
         const empty = await open("No merged");
