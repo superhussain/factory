@@ -197,6 +197,12 @@ Each run, in order:
 - Pushes this host's audit rows for each job at spec, build, review, approve or
   pr-open whose transcripts here changed since `<home>/audit-push.json` records;
   a failed push prints one warning and the run goes on.
+- Runs the read-only orphan scan on its first run of each local date that
+  `<home>/orphan-scan.json` does not record, and prints one line such as
+  `orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory.py orphans to list them`.
+  The date is recorded before the scan, so a stopped scan prints one warning and
+  waits for the next local date. `pickup --dry-run` skips it. Run
+  `factory.py orphans` for the full list; nothing is removed.
 
 Pickup skips an idea held by a live claim, and any job whose `not_before` is still
 in the future. The board `needs` field is only for input from a human. A session
