@@ -1958,8 +1958,9 @@ async function haltPut(request, env, principal) {
     (keys === "halted,reason" &&
       body.halted === true &&
       reason.length >= 1 &&
-      reason.length <= 200 &&
-      !/[\u0000-\u001f\u007f-\u009f]/.test(body.reason)) ||
+      [...reason].length <= 200 &&
+      // oxlint-disable-next-line no-control-regex -- this pattern exists to reject control characters.
+      !/[\x00-\x1f\x7f-\x9f]/u.test(body.reason)) ||
     (keys === "halted" && body.halted === false);
   if (!valid) return reply(HALT_SHAPE, 400);
   if (!body.halted && principal.kind !== "user") return reply(HALT_PERSON_ONLY, 403);
