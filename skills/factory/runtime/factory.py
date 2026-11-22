@@ -11957,6 +11957,85 @@ def outcomes_cmd(*args):
         print(f"recorded {changed} outcomes on the board" if changed else "outcomes unchanged; nothing written")
 
 
+AUTONOMY_DAYS = 90
+AUTONOMY_MIN_JOBS = 20
+AUTONOMY_MAX_REWORK = 0.10
+AUTONOMY_MAX_ROUNDS = 1.5
+AUTONOMY_MAX_CHANGES = 0.15
+
+
+def job_class(job):
+    """internal when review-plan skipped ux and ui in the first round, visible otherwise, None with no rounds."""
+    rounds = job.get("rounds")
+    if not isinstance(rounds, list) or not rounds or not isinstance(rounds[0], dict):
+        return None
+    return "internal" if rounds[0].get("ux") == rounds[0].get("ui") == "SKIPPED" else "visible"
+
+
+def autonomy_report(home, slug=None):
+    """Print an earned-autonomy recommendation per project and job class from recorded outcomes."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=AUTONOMY_DAYS)
+    recent = [j for j in read_board(home)["jobs"]
+              if j.get("stage") == "merged" and (stamp_of(j.get("done")) or cutoff) > cutoff]
+    orphans = sorted(str(j.get("id")) for j in recent if not isinstance(j.get("project"), str) or not j["project"])
+    jobs = [j for j in recent if isinstance(j.get("project"), str) and j["project"]
+            and (slug is None or j["project"] == slug)]
+    unreviewed = sorted(str(j.get("id")) for j in jobs if job_class(j) is None)
+    skipped = ([f"merged jobs with no review rounds, skipped: {', '.join(unreviewed)}"] if unreviewed else []) + \
+        ([f"merged jobs with no project, skipped: {', '.join(orphans)}"] if orphans and slug is None else [])
+    cells = {}
+    for j in jobs:
+        if job_class(j):
+            cells.setdefault((j["project"], job_class(j)), []).append(j)
+    if not cells:
+        print(f"no reviewed jobs merged in the last {AUTONOMY_DAYS} days")
+        for line in skipped:
+            print(line)
+        return
+    print(f"earned autonomy for jobs merged in the last {AUTONOMY_DAYS} days")
+    print(f"thresholds: {AUTONOMY_MIN_JOBS} scanned jobs, no reverts, rework at most "
+          f"{round(100 * AUTONOMY_MAX_REWORK)}%, mean rounds at most {AUTONOMY_MAX_ROUNDS}, "
+          f"CHANGES at most {round(100 * AUTONOMY_MAX_CHANGES)}%")
+    rows = [("project", "class", "jobs", "held", "reworked", "reverted", "unscanned", "rounds", "changes",
+             "recommend")]
+    reasons, verdicts = [], {}
+    for (project, cls), group in sorted(cells.items()):
+        result = {r: [j["id"] for j in group if isinstance(j.get("outcome"), dict) and j["outcome"].get("result") == r]
+                  for r in ("held", "reworked", "reverted")}
+        scanned = sum(len(ids) for ids in result.values())
+        rework = len(result["reworked"]) / scanned if scanned else 0
+        mean = sum(len(j["rounds"]) for j in group) / len(group)
+        votes = [v for j in group for entry in j["rounds"] if isinstance(entry, dict)
+                 for v in entry.values() if v in ("PASS", "CHANGES")]
+        changes = votes.count("CHANGES") / len(votes) if votes else 0
+        why = ([f"reverted {', '.join(sorted(result['reverted']))}"] if result["reverted"] else []) + \
+            ([f"rework {round(100 * rework)}% over {round(100 * AUTONOMY_MAX_REWORK)}%"]
+             if rework > AUTONOMY_MAX_REWORK else []) + \
+            ([f"rounds {mean:.1f} over {AUTONOMY_MAX_ROUNDS}"] if mean > AUTONOMY_MAX_ROUNDS else []) + \
+            ([f"changes {round(100 * changes)}% over {round(100 * AUTONOMY_MAX_CHANGES)}%"]
+             if changes > AUTONOMY_MAX_CHANGES else [])
+        verdict = "hold" if why else "collect" if scanned < AUTONOMY_MIN_JOBS else "automerge"
+        if verdict == "collect":
+            why.append(f"needs {AUTONOMY_MIN_JOBS - scanned} more scanned jobs")
+        if why:
+            reasons.append(f"{project} {cls} {verdict}: {'; '.join(why)}")
+        verdicts.setdefault(project, []).append(verdict)
+        rows.append((project, cls, str(len(group)), *(str(len(ids)) for ids in result.values()),
+                     str(len(group) - scanned), f"{mean:.1f}", f"{round(100 * changes)}%", verdict))
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
+    for row in rows:
+        print("  ".join([c.ljust(w) if i in (0, 1, 9) else c.rjust(w)
+                         for i, (c, w) in enumerate(zip(row, widths))]).rstrip())
+    for line in reasons:
+        print(line)
+    for project, got in verdicts.items():
+        print(f"{project}: recommend merge auto" if set(got) == {"automerge"}
+              else f"{project}: recommend merge human until every class shows automerge")
+    for line in skipped:
+        print(line)
+    print("report only: a person changes Merge under Settings, Pipeline; nothing was written")
+
+
 def with_cloudflare_cmd(*argv):
     if len(argv) < 2 or argv[0] != "--":
         fail("usage: factory.py with-cloudflare -- <command> [<arg>...]", 2)
