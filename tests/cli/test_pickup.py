@@ -2021,6 +2021,63 @@ class TokenCapTest(PickupFixture):
         self.assertEqual(self.job("042-sample-export")["stage"], "needs-human")
 
 
+class DailyTokenCapTest(PickupFixture):
+    LAUNCHED = r"^launched 100-sample-idea alpha on primary session [0-9a-f]{6}\n$"
+    REACHED = "daily token cap reached (5,120,000/5,000,000 since local midnight)"
+
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.board["jobs"] = [idea("100-sample-idea", "alpha")]
+        self.used = 5120000
+        self.daily = patch.object(factory, "daily_tokens", side_effect=lambda midnight: self.used).start()
+
+    def set_cap(self, value="5000000"):
+        (self.home / "config.md").write_text(f"---\ndevice: {DEVICE}\ndaily_token_cap: {value}\n---\n",
+                                             encoding="utf-8")
+
+    def test_off_without_cap(self):
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, self.LAUNCHED)
+        self.daily.assert_not_called()
+
+    def test_under_cap_launches(self):
+        self.set_cap()
+        self.used = 4999999
+        code, out, err = self.pickup()
+        self.assertEqual((code, err), (0, ""))
+        self.assertRegex(out, self.LAUNCHED)
+
+    def test_dry_run_skip_line(self):
+        self.set_cap()
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[0], f"skip 100-sample-idea alpha: host {DEVICE} {self.REACHED}")
+        self.assertEqual(self.puts(), [])
+
+    def test_real_run_holds(self):
+        self.set_cap()
+        self.assertEqual(self.pickup(), (
+            0, "", f"factory.py: pickup launches no new job on {DEVICE}: {self.REACHED}\n"))
+        self.assertEqual(self.launched(), [])
+        self.assertNotIn("claim", self.job("100-sample-idea"))
+
+    def test_bad_value_is_off(self):
+        self.set_cap("lots")
+        code, out, err = self.pickup()
+        self.assertIn(f"factory.py: pickup ignores daily_token_cap in {self.home}/config.md: "
+                      "must be a whole number of at least 1", err)
+        self.assertRegex(out, self.LAUNCHED)
+
+    def test_scan_error_is_off(self):
+        self.set_cap()
+        self.daily.side_effect = OSError
+        code, out, err = self.pickup()
+        self.assertIn("factory.py: pickup skips the daily token cap: scan failed (OSError)", err)
+        self.assertRegex(out, self.LAUNCHED)
+
+
 class PauseTest(PickupFixture):
     PAUSED = {"at": "2026-01-02T12:00:00Z"}
 

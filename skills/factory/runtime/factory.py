@@ -6924,6 +6924,26 @@ def moved_here(j, device):
             and not any(x["from"] == device for x in queued_stops(m)))
 
 
+def daily_cap_holds(home, device, jobs, free, dry):
+    """{job id: skip line} for every free job once this host's job tokens since local midnight reach
+    daily_token_cap. Off without the key; a failed scan prints one stderr line and holds nothing."""
+    cap = token_cap(home, "daily_token_cap")
+    held = [j for j in jobs if free(j)] if cap else []
+    if not held:
+        return {}
+    try:
+        used = daily_tokens(local_midnight())
+    except Exception as e:
+        print(f"factory.py: pickup skips the daily token cap: scan failed ({type(e).__name__})", file=sys.stderr)
+        return {}
+    if used < cap:
+        return {}
+    reached = f"daily token cap reached ({used:,}/{cap:,} since local midnight)"
+    if not dry:
+        print(f"factory.py: pickup launches no new job on {device}: {reached}", file=sys.stderr)
+    return {j["id"]: f"skip {j['id']} {j.get('project')}: host {device} {reached}" for j in held}
+
+
 def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     """One pickup run after flags and the holder are resolved. Reads the board unless given it."""
     paths = read_paths(home)
@@ -6993,7 +7013,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
 
     waiting = sum(1 for j in data["jobs"] if waits_on_you(j))
     holds = {**batch_holds(home, jobs, lambda j: base_skip(j) is None),
-             **backpressure_holds(home, jobs, waiting, lambda j: base_skip(j) is None)}
+             **backpressure_holds(home, jobs, waiting, lambda j: base_skip(j) is None),
+             **daily_cap_holds(home, device, jobs, lambda j: base_skip(j) is None, dry)}
 
     def skip(j):
         """Why this idea is not a candidate, or None."""
