@@ -6853,7 +6853,7 @@ def token_cap_pass(home, data, device, dry):
     """Warn once when an in-flight job claimed on this host passes TOKEN_WARN_PERCENT of config.md's
     job_token_cap, and move it to needs-human and stop its Paseo agent when it reaches the cap.
     This host scans its own transcripts; other hosts count through their recorded tokens entry."""
-    cap = job_token_cap(home)
+    cap = token_cap(home, "job_token_cap")
     if cap is None:
         return
 
@@ -12515,9 +12515,9 @@ def usage_prompt(path):
     return ""
 
 
-def usage_scan(path, main):
+def usage_scan(path, main, since=None):
     """({model: {kind: tokens}}, unreadable line count) for one transcript, each message.id counted once.
-    main=True skips isSidechain lines."""
+    main=True skips isSidechain lines. A str since keeps only lines whose timestamp is at or after it."""
     turns, bad = {}, 0
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -12529,6 +12529,8 @@ def usage_scan(path, main):
                 bad += 1
                 continue
             if not isinstance(e, dict) or e.get("type") != "assistant" or (main and e.get("isSidechain")):
+                continue
+            if isinstance(since, str) and not (isinstance(e.get("timestamp"), str) and e["timestamp"] >= since):
                 continue
             msg = e.get("message")
             if not isinstance(msg, dict) or not isinstance(msg.get("id"), str) or not isinstance(msg.get("usage"), dict):
@@ -12637,14 +12639,19 @@ def token_count(models):
                for k, v in counts.items() if k in ("input", "output", "cache_write") and type(v) is int and v >= 0)
 
 
-def job_token_cap(home):
-    """config.md's job_token_cap as an int, else None. A bad value prints one stderr line and is off."""
+def local_midnight():
+    """The start of today in the host's local time zone, as an aware datetime."""
+    return datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def token_cap(home, key):
+    """config.md's key as an int, else None. A bad value prints one stderr line and is off."""
     config = Path(home, "config.md")
-    value = (frontmatter(config)[0] if config.is_file() else {}).get("job_token_cap")
+    value = (frontmatter(config)[0] if config.is_file() else {}).get(key)
     if value is None:
         return None
     if not (value.isdecimal() and int(value) >= 1):
-        print(f"factory.py: pickup ignores job_token_cap in {config}: must be a whole number of at least 1",
+        print(f"factory.py: pickup ignores {key} in {config}: must be a whole number of at least 1",
               file=sys.stderr)
         return None
     return int(value)
