@@ -1464,7 +1464,8 @@ def next_item():
     fail("the backlog kept changing under us; gave up after 20 tries", 5)
 
 
-BACKLOG_USAGE = 'usage: backlog add "<slug>: <feature>" [--context <file>] | backlog rework <job-id> (feature on stdin)'
+BACKLOG_USAGE = 'usage: backlog add "<slug>: <feature>" [--context <file>] | backlog rework <job-id> (feature on stdin)' \
+    ' | backlog lesson <slug>/<job-id> --fact-file <file> --why-file <file>'
 
 
 def backlog_context_error(text):
@@ -1568,6 +1569,9 @@ def backlog_add(item, context=None):
         return False
     print(f"added {item}" + (" with context" if context else ""))
     print(f"link: {backlog_link(home, line)}")
+    if context and LESSON_MARK.search(context):
+        print(f"held {item} for review: lesson cards always wait for a person")
+        return True
     if context and RETRO_MARK.search(context):
         print(f"held {item} for review: retro items always wait for a person")
         return True
@@ -2164,6 +2168,7 @@ BACKLOG_SUFFIX = re.compile(r" \((rework-of|follow-up-of|sub-job-of|depends-on) 
 
 
 DEPENDS_ON = re.compile(r"^Depends on: ([\w-]+: \S.*)$", re.M)
+LESSON_MARK = re.compile(r"^Lesson: from \w[\w.-]{0,80}, queued \d{4}-\d\d-\d\d$", re.M | re.ASCII)
 
 
 def backlog_depends(text, context, same_call=None):
@@ -2525,9 +2530,38 @@ def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None)
     print(json.dumps({"id": job_id, "project": slug, "decision": stored, "line": raw}, indent=2))
 
 
+def backlog_lesson(target, fact_file, why_file):
+    """Queue a held lesson card: a backlog line only a person's dashboard approve turns into a notes.md bullet."""
+    m = re.fullmatch(r"([\w-]+)/(\w[\w.-]{0,80})", target)
+    if not m or ".." in target:
+        fail(BACKLOG_USAGE, 2)
+    slug, job = m.groups()
+    home = factory_home()
+    texts = []
+    for path, flag, hi in ((fact_file, "--fact-file", 200), (why_file, "--why-file", 300)):
+        text = read_chat_file(path, flag).strip()
+        why = check_text(text, 1, hi)
+        if why:
+            fail(f"{flag} {why}; nothing was queued", 2)
+        key = env_secret(home, text)
+        if key:
+            fail(f"{flag} holds this device's {key}; nothing was queued", 2)
+        texts.append(text)
+    fact, why = texts
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    context = (f"Recommend: approve\n\nApprove adds this bullet to {slug}/notes.md. No job starts.\n"
+               f"Why it waits: {why}\n\nLesson: from {job}, queued {today}")
+    return backlog_add(f"{slug}: Lesson: {fact}", context)
+
+
 def backlog_cmd(sub, item, *rest):
     if sub == "rework" and not rest:
         return backlog_rework(item)
+    if sub == "lesson":
+        flags = dict(zip(rest[::2], rest[1::2]))
+        if len(rest) != 4 or set(flags) != {"--fact-file", "--why-file"}:
+            fail(BACKLOG_USAGE, 2)
+        return backlog_lesson(item, flags["--fact-file"], flags["--why-file"])
     if sub == "decide" and rest:
         flags = dict(zip(rest[1::2], rest[2::2]))
         if len(rest) % 2 == 0 or len(flags) != len(rest) // 2 \
