@@ -603,15 +603,15 @@ The class comes from the job's first review round:
 | anything else | `visible` |
 | `rounds` missing or empty | skipped and listed |
 
-Each cell is measured against starting thresholds, which are guesses the report prints:
+Each cell is measured against these thresholds, which the report prints. Threshold evidence below shows where each comes from:
 
-| Metric | Formula | Starting threshold |
-| --- | --- | --- |
-| scanned | held + reworked + reverted | at least 20 |
-| reverts | count of `reverted` | 0 |
-| rework | reworked / scanned | at most 10% |
-| rounds | mean `len(rounds)` | at most 1.5 |
-| changes | `CHANGES` / (`PASS` + `CHANGES`) over every round | at most 15% |
+| Metric | Formula | Threshold | Source |
+| --- | --- | --- | --- |
+| scanned | held + reworked + reverted | at least 20 | starting guess |
+| reverts | count of `reverted` | 0 | starting guess |
+| rework | reworked / scanned | at most 10% | starting guess |
+| rounds | mean `len(rounds)` | at most 1.75 | tuned 2026-11-22 |
+| changes | `CHANGES` / (`PASS` + `CHANGES`) over every round | at most 10% | tuned 2026-11-22 |
 
 - Any revert, or any metric over its threshold, means `hold`.
 - Fewer than 20 scanned jobs means `collect`.
@@ -621,11 +621,36 @@ Synthetic project `alpha`, with 20 internal jobs and 6 visible jobs, one of them
 
 ```text
 earned autonomy for jobs merged in the last 90 days
-thresholds: 20 scanned jobs, no reverts, rework at most 10%, mean rounds at most 1.5, CHANGES at most 15%
+thresholds: 20 scanned jobs, no reverts, rework at most 10%, mean rounds at most 1.75, CHANGES at most 10%
 project  class     jobs  held  reworked  reverted  unscanned  rounds  changes  recommend
 alpha    internal    20    19         1         0          0     1.2       8%  automerge
 alpha    visible      6     4         1         1          0     2.0      25%  hold
-alpha visible hold: reverted 1019-add-z; rework 17% over 10%; rounds 2.0 over 1.5; changes 25% over 15%
+alpha visible hold: reverted 1019-add-z; rework 17% over 10%; rounds 2.0 over 1.75; changes 25% over 10%
 alpha: recommend merge human until every class shows automerge
 report only: a person changes Merge under Settings, Pipeline; nothing was written
 ```
+
+### Threshold evidence
+
+Measured from the live board on 2026-11-22:
+
+| Fact | Value |
+| --- | --- |
+| Merged jobs in 90 days | 1,894, oldest merged 2026-10-23 |
+| With review rounds | 1,273 in 14 cells |
+| Recorded `outcome` | 0 |
+| `rework-of` refs | 16 |
+
+| Cell (20 or more jobs) | Jobs | Rounds | CHANGES |
+| --- | --- | --- | --- |
+| `factory` visible | 766 | 1.49 | 4.6% |
+| `factory` internal | 55 | 1.36 | 2.5% |
+| project B visible | 169 | 1.34 | 6.3% |
+| project C visible | 156 | 1.35 | 6.2% |
+| project D visible | 62 | 1.37 | 5.1% |
+| project E visible | 33 | 2.03 | 13.4% |
+
+- For each metric, sort the cell values, take the largest gap between neighbors, and set the limit at its midpoint. Round rounds to 0.05 and CHANGES to 1 point.
+- Rounds: the largest gap runs from 1.49 to 2.03, midpoint 1.76, so the limit is 1.75. CHANGES: from 6.3% to 13.4%, midpoint 9.85%, so 10%.
+
+Kept as guesses: 20 scanned jobs, no reverts and rework at most 10%. The board had no recorded outcomes and only 30 days of merges, so nothing could tune them. Re-tune them once `outcomes record` has filled 90 days.
