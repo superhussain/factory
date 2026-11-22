@@ -13380,7 +13380,8 @@ def outcomes_pickup_record(home):
 
 BENCH_WEIGHTS = {"high": 3, "medium": 2, "low": 1}
 BENCH_USAGE = ("usage: factory.py bench score <cases-file> <arm-folder>... | "
-               "bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]")
+               "bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] | "
+               "bench cases <project-slug>")
 
 
 def bench_cases(path):

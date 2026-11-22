@@ -11,7 +11,8 @@ from unittest.mock import Mock, patch
 from support import IsolatedTestCase, http_fixture, invoke, load_runtime
 
 USAGE = ("factory.py: usage: factory.py bench score <cases-file> <arm-folder>... | "
-         "bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]\n")
+         "bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] | "
+         "bench cases <project-slug>\n")
 HEAD = "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
 
 
