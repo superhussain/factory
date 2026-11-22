@@ -1715,6 +1715,7 @@ class IdleWatchTest(PickupFixture):
         patch.object(factory, "paseo_statuses", side_effect=lambda: self.statuses).start()
         patch.object(factory, "paseo_send", side_effect=self.send).start()
         patch.object(factory, "awaits_permission", return_value=False).start()
+        patch.object(factory, "paseo_run", return_value=(0, "")).start()
 
     def export(self, **extra):
         job = {"id": "042-sample-export", "stage": "build", "project": "alpha", "updated": "2026-01-01T10:00:00Z",
@@ -2088,6 +2089,7 @@ class PauseTest(PickupFixture):
         patch.object(factory, "paseo_server", return_value="synthetic-server").start()
         patch.object(factory, "paseo_statuses", return_value={"synthetic-agent": "idle"}).start()
         patch.object(factory, "paseo_send", side_effect=lambda agent, message: self.sent.append(agent)).start()
+        patch.object(factory, "paseo_run", return_value=(0, "")).start()
 
     def test_paused_idea_is_skipped(self):
         self.board["jobs"] = [idea("100-sample-idea", "alpha", paused=self.PAUSED),
@@ -2106,8 +2108,9 @@ class PauseTest(PickupFixture):
                                "claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"},
                                "paseo": {"server": "synthetic-server", "agent": "synthetic-agent"},
                                "priority": {"at": "2026-01-02T12:00:00Z"}, "paused": self.PAUSED}]
-        self.assertEqual(self.pickup(), (0, "", ""))
-        self.assertEqual((self.sent, self.puts()), ([], []))
+        self.assertEqual(self.pickup(), (0, "stopped session synthetic-agent of 042-sample-export alpha: "
+                                            "the job is paused\n", ""))
+        self.assertEqual((self.sent, self.puts()), ([], [("PUT", "/api/board")]))
 
 
 class NotBeforeTest(PickupFixture):
@@ -2731,6 +2734,7 @@ class CloseTest(PickupFixture):
         self.gh_answers = {"view": (0, "OPEN false factory/042-sample-export\n"), "close": (0, "")}
         patch.object(factory, "api_url", return_value="https://factory.example.test").start()
         patch.object(factory, "gh_pr", side_effect=self.gh).start()
+        patch.object(factory, "paseo_run", return_value=(0, "")).start()
         (self.home / "projects").mkdir()
         (self.home / "projects" / "alpha.md").write_text("---\nrepo: sample/alpha\n---\n", encoding="utf-8")
 
@@ -3002,6 +3006,102 @@ class CloseTest(PickupFixture):
                          f"would close 042-sample-export alpha and stacked pull request {self.RIDER_PR}")
         self.assertEqual([call for call in self.calls if call[0] == "gh"], [])
         self.assertEqual((self.puts(), self.files), ([], {}))
+
+
+class SessionStopTest(PickupFixture):
+    PAUSED_LINE = "stopped session synthetic-agent of 042-sample-export alpha: the job is paused\n"
+
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.files = {}
+        self.statuses = {"synthetic-agent": "running"}
+        patch.object(factory, "api_url", return_value="https://factory.example.test").start()
+        patch.object(factory, "paseo_server", return_value="synthetic-server").start()
+        patch.object(factory, "paseo_statuses", side_effect=lambda: self.statuses).start()
+        self.run = patch.object(factory, "paseo_run", return_value=(0, "")).start()
+
+    def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if not path.endswith("/decision.md"):
+            return super().request(home, method, path, body, ok, headers, raw)
+        self.calls.append((method, path))
+        if method == "GET":
+            return (200, {"ETag": '"decision"'}, self.files[path]) if path in self.files else (404, {}, "")
+        self.files[path] = body
+        return 200, {}, ""
+
+    def export(self, **extra):
+        """The paused running example; an extra value of None drops that key."""
+        job = dict({"id": "042-sample-export", "stage": "build", "project": "alpha",
+                    "updated": "2026-01-01T10:00:00Z", "claim": held(DEVICE),
+                    "paseo": {"server": "synthetic-server", "agent": "synthetic-agent"},
+                    "paused": {"at": "2026-01-02T12:00:00Z"}}, **extra)
+        self.board["jobs"] = [{k: v for k, v in job.items() if v is not None}]
+
+    def test_pause_stops_once(self):
+        self.export()
+        self.assertEqual(self.pickup(), (0, self.PAUSED_LINE, ""))
+        self.run.assert_called_once_with(["stop", "synthetic-agent"])
+        self.assertEqual(self.puts(), [("PUT", "/api/board")])
+        job = self.job("042-sample-export")
+        self.assertEqual(job["claim"]["device"], DEVICE)
+        self.assertEqual(set(job["paused"]["session_stop"]), {DEVICE})
+        self.assertEqual(job["paused"]["session_stop"][DEVICE]["agent"], "synthetic-agent")
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.run.call_count, self.puts()), (1, []))
+
+    def test_close_stops_then_closes(self):
+        self.export(paused=None, close={"reason": "Duplicate of 041-sample-report", "at": "2026-01-02T12:00:00Z"})
+        self.assertEqual(self.pickup(), (0, "stopped session synthetic-agent of 042-sample-export alpha: "
+                                            "the job is closing\nclosed 042-sample-export alpha\n", ""))
+        self.run.assert_called_once_with(["stop", "synthetic-agent"])
+        job = self.job("042-sample-export")
+        self.assertEqual(job["stage"], "closed")
+        self.assertNotIn("claim", job)
+        self.assertEqual(job["close"]["session_stop"][DEVICE]["agent"], "synthetic-agent")
+
+    def test_closed_window(self):
+        for hours, out in ((-1, "stopped session synthetic-agent of 042-sample-export alpha: the job is closed\n"),
+                           (-25, "")):
+            with self.subTest(hours=hours):
+                self.run.reset_mock()
+                self.calls.clear()
+                self.export(stage="closed", claim=None, paused=None,
+                            close={"reason": "Duplicate", "at": "2026-01-02T12:00:00Z", "closed": stamp(hours=hours)})
+                self.assertEqual(self.pickup(), (0, out, ""))
+                self.assertEqual(self.run.call_count, 1 if out else 0)
+                self.assertEqual(len(self.puts()), 1 if out else 0)
+
+    def test_skips(self):
+        cases = (("other server", {"paseo": {"server": "other-server", "agent": "synthetic-agent"}}, {}, {}),
+                 ("other device", {"claim": held("other-host")}, {}, {}),
+                 ("closed agent", {}, {"synthetic-agent": "closed"}, {}),
+                 ("missing agent", {}, {}, {}),
+                 ("this session", {}, None, {"PASEO_AGENT_ID": "synthetic-agent"}),
+                 ("rider", {"refs": [{"kind": "batched-into", "id": "041-sample-report"}]}, None, {}))
+        for name, extra, statuses, env in cases:
+            with self.subTest(case=name), patch.dict(os.environ, env):
+                self.run.reset_mock()
+                self.calls.clear()
+                self.statuses = {"synthetic-agent": "running"} if statuses is None else statuses
+                self.export(**extra)
+                self.assertEqual(self.pickup(), (0, "", ""))
+                self.assertEqual((self.run.call_count, self.puts()), (0, []))
+
+    def test_failed_stop_and_dry_run(self):
+        self.export()
+        self.run.return_value = (1, "")
+        self.assertEqual(self.pickup(), (0, "", "factory.py: pickup could not stop agent synthetic-agent of "
+                                                "042-sample-export: paseo stop failed\n"))
+        self.assertEqual(self.puts(), [])
+        self.assertNotIn("session_stop", self.job("042-sample-export")["paused"])
+        self.run.reset_mock()
+        self.run.return_value = (0, "")
+        self.assertEqual(self.pickup("--dry-run"), (0, "would stop session synthetic-agent of 042-sample-export "
+                                                       f"alpha: the job is paused\nhost {DEVICE}: would launch 0\n",
+                                                    ""))
+        self.assertEqual((self.run.call_count, self.puts()), (0, []))
 
 
 class GhPrTest(IsolatedTestCase):
@@ -4070,22 +4170,46 @@ class PermissionGuardTest(PickupFixture):
                 self.assertEqual((self.sent, self.puts()), ([], []))
                 self.assertNotIn("nudged", self.job("042-sample-export")["priority"])
 
+    def quiet(self):
+        """An idle-watch entry quiet for 41 minutes."""
+        (self.home / "idle-watch.json").write_text(json.dumps({"version": 1, "jobs": {"042-sample-export": {
+            "agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z",
+            "since": stamp(minutes=-41)}}}), encoding="utf-8")
+
     def test_idle_nudge_skips_and_never_moves_to_needs_human(self):
-        for waits, end in self.ENDS:
-            with self.subTest(waits=waits):
-                self.waits = waits
-                self.build()
-                (self.home / "idle-watch.json").write_text(json.dumps({"version": 1, "jobs": {"042-sample-export": {
-                    "agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z",
-                    "since": stamp(minutes=-41)}}}), encoding="utf-8")
-                line = f"skip idle nudge 042-sample-export alpha: agent synthetic-agent {end}\n"
-                self.assertEqual(self.pickup("--dry-run"), (0, line + f"host {DEVICE}: would launch 0\n", ""))
-                for _ in range(2):
-                    self.assertEqual(self.pickup(), (0, line, ""))
-                entry = json.loads((self.home / "idle-watch.json").read_text(encoding="utf-8"))["jobs"]
-                self.assertNotIn("nudged", entry["042-sample-export"])
-                self.assertEqual((self.sent, self.puts()), ([], []))
-                self.assertEqual(self.job("042-sample-export")["stage"], "build")
+        self.waits = None
+        self.build()
+        self.quiet()
+        line = "skip idle nudge 042-sample-export alpha: agent synthetic-agent permission state unknown\n"
+        self.assertEqual(self.pickup("--dry-run"), (0, line + f"host {DEVICE}: would launch 0\n", ""))
+        for _ in range(2):
+            self.assertEqual(self.pickup(), (0, line, ""))
+        entry = json.loads((self.home / "idle-watch.json").read_text(encoding="utf-8"))["jobs"]
+        self.assertNotIn("nudged", entry["042-sample-export"])
+        self.assertEqual((self.sent, self.puts()), ([], []))
+        self.assertEqual(self.job("042-sample-export")["stage"], "build")
+
+    def test_idle_permission_wait_sets_a_note_once(self):
+        self.waits = True
+        self.build()
+        self.quiet()
+        note = ("permission: agent synthetic-agent has waited at a permission dialog for 20 minutes; "
+                "answer it in Paseo")
+        line = "skip idle nudge 042-sample-export alpha: agent synthetic-agent waits at a permission dialog\n"
+        self.assertEqual(self.pickup("--dry-run"), (0, line + f"would surface 042-sample-export alpha: {note}\n"
+                                                    f"host {DEVICE}: would launch 0\n", ""))
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.pickup(), (0, line + f"surfaced 042-sample-export alpha: {note}\n", ""))
+        self.assertEqual(self.puts(), [("PUT", "/api/board")])
+        job = self.job("042-sample-export")
+        self.assertEqual((job["note"], job["stage"]), (note, "build"))
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, line, ""))
+        self.assertEqual((self.sent, self.puts()), ([], []))
+        entry = json.loads((self.home / "idle-watch.json").read_text(encoding="utf-8"))["jobs"]["042-sample-export"]
+        self.assertEqual(entry["updated"], job["updated"])
+        self.assertNotIn("nudged", entry)
+        self.assertEqual(self.job("042-sample-export")["stage"], "build")
 
     def test_babysit_send_skips(self):
         for waits, end in self.ENDS:
