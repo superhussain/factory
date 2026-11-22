@@ -159,6 +159,8 @@
   factory.py usage <project-slug>/<job-id>  sum this host's transcript tokens for the job by model
   factory.py usage record <project-slug>/<job-id>
                                             write those totals to the board job under tokens.<device>
+  factory.py outcomes [record] [<project-slug>]
+                                            sort jobs merged in the last 30 days into held, reworked or reverted; record writes outcome
   factory.py with-cloudflare -- <command> [<arg>...]
                                             run one command with the CLOUDFLARE_* keys of this home's .env
                                             in its environment; prints no value
@@ -5723,7 +5725,9 @@ def outcome_of(checkout, base, oid, rework_ids):
     touched = set(git(checkout, "diff", "--name-only", f"{oid}^1", oid).splitlines())
     log = git(checkout, "log", "--no-merges", "--name-only", "--format=%x1e%H%x1f%ct%x1f%B%x1f",
               f"{oid}..refs/remotes/origin/{base}")
-    commits = [c.split("\x1f") for c in log.split("\x1e")[1:]]
+    # git() strips the output, and str.strip counts \x1e and \x1f as whitespace, so the first commit
+    # loses its \x1e and a last commit with no files loses its closing \x1f.
+    commits = [(c + "\x1f").split("\x1f")[:4] for c in log.split("\x1e") if c]
     for sha, _, body, _ in commits:
         if f"This reverts commit {oid}" in body:
             return "reverted", [f"commit {sha[:12]}"]
@@ -11094,6 +11098,96 @@ def usage_cmd(*args):
         print(f"recorded {host} tokens on {job_id}")
 
 
+OUTCOME_RESULTS = ("held", "reworked", "reverted", "unknown")
+
+
+def outcomes_record(home, results):
+    """Write each known result to its job's outcome in one board write, touching only jobs whose
+    result or evidence changed, and never a job's updated. Returns how many jobs changed."""
+    def change(text):
+        data = load_board(text)
+        stamp, changed = now(), 0
+        for j in data["jobs"]:
+            got = results.get(j.get("id"))
+            if not got or got[0] == "unknown":
+                continue
+            old = j.get("outcome") if isinstance(j.get("outcome"), dict) else {}
+            if (old.get("result"), old.get("evidence")) == got:
+                continue
+            j["outcome"] = {"result": got[0], "at": stamp, "evidence": got[1]}
+            changed += 1
+        if not changed:
+            return None, 0
+        data["updated"] = stamp
+        return dump_board(data), changed
+    return cas(home, "/api/board", change)
+
+
+def outcomes_cmd(*args):
+    record = bool(args) and args[0] == "record"
+    rest = args[1:] if record else args
+    if len(rest) > 1 or rest and not SLUG.fullmatch(rest[0]):
+        fail("usage: factory.py outcomes [record] [<project-slug>]", 2)
+    home = factory_home()
+    data = read_board(home)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=OUTCOME_DAYS)
+    jobs = [j for j in data["jobs"] if j.get("stage") == "merged" and (stamp_of(j.get("done")) or cutoff) > cutoff
+            and (not rest or j.get("project") == rest[0])]
+    if not jobs:
+        print(f"no jobs merged in the last {OUTCOME_DAYS} days")
+        return
+    rework = {}
+    for j in data["jobs"]:
+        for ref in j.get("refs") if isinstance(j.get("refs"), list) else []:
+            if isinstance(ref, dict) and ref.get("kind") == "rework-of":
+                rework.setdefault(ref.get("id"), []).append(j["id"])
+    paths, device = read_paths(home), retro_host()
+    results, slugs = {}, sorted({j["project"] for j in jobs})
+    for slug in slugs:
+        md = project_files(home, slug)[0]
+        meta = frontmatter(md)[0] if md.exists() else {}
+        repo, base, checkout = meta.get("repo", ""), meta.get("base") or "main", paths.get(slug)
+        prs = {}
+        for j in jobs:
+            if j["project"] != slug:
+                continue
+            m = GH_PR_PARTS.fullmatch(j.get("pr") or "")
+            if not checkout:
+                results[j["id"]] = "unknown", [f"no checkout of {slug} in paths.md on {device}"]
+            elif not (m and f"{m[1]}/{m[2]}".lower() == repo.lower()):
+                results[j["id"]] = "unknown", [f"PR is not in {repo or 'the project file repo'}"]
+            else:
+                prs.setdefault(int(m[3]), []).append(j["id"])
+        if not prs:
+            continue
+        origin_git(checkout, "fetch", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+        oids, why = pr_merge_commits(repo, sorted(prs), device)
+        for n, ids in prs.items():
+            if why:
+                got = "unknown", [why]
+            elif not oids.get(n):
+                got = "unknown", ["no merge commit from GitHub"]
+            else:
+                got = outcome_of(checkout, base, oids[n], [r for i in ids for r in rework.get(i, [])])
+            results.update(dict.fromkeys(ids, got))
+    print(f"outcomes of jobs merged in the last {OUTCOME_DAYS} days")
+    rows = [("project",) + OUTCOME_RESULTS] + [
+        (slug,) + tuple(str(sum(results[j["id"]][0] == r for j in jobs if j["project"] == slug))
+                        for r in OUTCOME_RESULTS) for slug in slugs]
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
+    for row in rows:
+        print("  ".join([row[0].ljust(widths[0])] + [cell.rjust(w) for cell, w in zip(row[1:], widths[1:])]))
+    for slug in slugs:
+        for r in OUTCOME_RESULTS:
+            ids = sorted(j["id"] for j in jobs if j["project"] == slug and results[j["id"]][0] == r)
+            if ids:
+                print(f"{slug} {r}: " + ", ".join(
+                    f"{i} ({results[i][1][0]})" if r == "unknown" else i for i in ids))
+    if record:
+        changed = outcomes_record(home, results)
+        print(f"recorded {changed} outcomes on the board" if changed else "outcomes unchanged; nothing written")
+
+
 def with_cloudflare_cmd(*argv):
     if len(argv) < 2 or argv[0] != "--":
         fail("usage: factory.py with-cloudflare -- <command> [<arg>...]", 2)
@@ -11953,6 +12047,7 @@ COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
 COMMANDS["audit"] = (audit_cmd, 1, 2)
 COMMANDS["usage"] = (usage_cmd, 1, 2)
+COMMANDS["outcomes"] = (outcomes_cmd, 0, 2)
 COMMANDS["with-cloudflare"] = (with_cloudflare_cmd, 0, sys.maxsize)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
