@@ -209,6 +209,46 @@ class OutcomesUnknownTest(OutcomesTestCase):
         self.assertEqual((len(calls), why), (2, None))
         self.assertEqual((found[1], found[2], found[51]), (f"{1:040x}", None, None))
 
+    def checkout_unknown(self, *lines):
+        (code, out, err), _ = self.run_cmd()
+        self.assertEqual((code, err), (0, ""))
+        for line in lines:
+            self.assertIn(line, out)
+
+    def test_missing_folder(self):
+        gone = self.root / "gone"
+        (self.home / "paths.md").write_text(f"---\nalpha: {gone}\n---\n", encoding="utf-8")
+        self.checkout_unknown(f"alpha unknown: 1017-add-x (no folder at {gone} on host-a)")
+
+    def test_not_a_checkout(self):
+        plain = self.root / "plain"
+        plain.mkdir()
+        (self.home / "paths.md").write_text(f"---\nalpha: {plain}\n---\n", encoding="utf-8")
+        self.checkout_unknown(f"({plain} is not a git checkout on host-a)")
+
+    def test_fetch_failure(self):
+        self.git("remote", "set-url", "origin", str(self.root / "gone.git"))
+        why = f"(could not fetch origin main in {self.clone} on host-a)"
+        self.checkout_unknown(*(f"{i} {why}" for i in ("1017-add-x", "1018-add-y", "1019-add-z")))
+
+    def test_other_project_still_judged(self):
+        (self.home / "projects/beta.md").write_text("---\nrepo: example/beta\nbase: main\n---\n", encoding="utf-8")
+        gone = self.root / "gone"
+        (self.home / "paths.md").write_text(f"---\nalpha: {self.clone}\nbeta: {gone}\n---\n", encoding="utf-8")
+        self.board["jobs"].append(merged("1030-beta-job", 3, repo="example/beta", project="beta"))
+        self.checkout_unknown("alpha held: 1017-add-x",
+                              f"beta unknown: 1030-beta-job (no folder at {gone} on host-a)")
+
+    def test_job_without_project(self):
+        self.board["jobs"].append({"id": "1031-no-project", "stage": "merged", "done": stamp(1),
+                                   "updated": "2026-01-05T10:00:00Z", "pr": "https://github.com/example/alpha/pull/7"})
+        (code, out, err), _ = self.run_cmd()
+        self.assertEqual((code, out, err), (0, RUNNING_EXAMPLE + "merged jobs with no project, skipped: 1031-no-project\n", ""))
+        (code, _, _), puts = self.run_cmd("record")
+        self.assertEqual(code, 0)
+        saved = {j["id"]: j for j in puts[0]["jobs"]}
+        self.assertNotIn("outcome", saved["1031-no-project"])
+
 
 class OutcomesRecordTest(OutcomesTestCase):
     def test_record(self):

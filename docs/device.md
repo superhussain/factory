@@ -451,12 +451,17 @@ A job the command cannot judge counts as `unknown` and prints its reason, as in
 | Reason | Printed |
 | --- | --- |
 | no checkout | `no checkout of alpha in paths.md on host-a` |
+| the checkout folder is missing | `no folder at /src/alpha on host-a` |
+| the folder is not a git checkout | `/src/alpha is not a git checkout on host-a` |
+| the fetch fails | `could not fetch origin main in /src/alpha on host-a` |
 | the PR is not in the project's repo | `PR is not in example/alpha` |
 | gh fails | gh's failure, such as `gh is not installed on host-a` |
 | GitHub reports no merge commit | `no merge commit from GitHub` |
 | the merge commit is not on `origin/<base>` | `merge commit <sha12> is not on origin/main` |
 
-With no matching jobs it prints `no jobs merged in the last 30 days`.
+With no matching jobs it prints `no jobs merged in the last 30 days`. A merged
+job with no project is left out, and a scan without a project filter prints
+`merged jobs with no project, skipped: <ids>` after the result lines.
 
 `outcomes record` prints the same table, then writes each known result to its
 job in one board write and prints `recorded 3 outcomes on the board`:

@@ -654,6 +654,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     position: relative; z-index: 1;
   }
   .tab.active { border-color: transparent; color: var(--accent); }
+  .tab .chip { margin-left: 4px; padding: 2px 5px; vertical-align: 1px; }
   .tab-pill { position: absolute; z-index: 0; border-radius: 6px; background: var(--accent-soft); pointer-events: none; }
   .pager { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .doc-peek { position: absolute; top: 0; left: 0; width: 100%; height: 100%; box-sizing: border-box; overflow: hidden; }
@@ -5268,7 +5269,7 @@ $('board').addEventListener('click', (e) => {
 
 function candidates(j) {
   const n = Array.isArray(j.rounds) ? j.rounds.length : 0;
-  const list = ['spec.md', 'build.md'];
+  const list = ['spec.md', 'build.md', 'pre-review.md'];
   for (let i = 1; i <= n; i++) {
     for (const r of REVIEWERS) list.push('round-' + i + '/review-' + r + '.md');
     list.push('rework-' + i + '.md');
@@ -5845,7 +5846,17 @@ function writeHash() {
 }
 
 function label(name) {
+  if (name === 'pre-review.md') return 'Pre-review';
   return name.replace(/^round-(\d+)\/review-(\w+)\.md$/, 'R$1 $2').replace(/-(\d+)\.md$/, ' $1').replace(/\.md$/, '');
+}
+
+// pre-review.md's first line as a review chip class: FAIL reads like changes requested, NONE like a skipped review.
+const PRE_REVIEW_CHIP = { PASS: 'PASS', FAIL: 'CHANGES', NONE: 'SKIPPED' };
+
+// The status chip after a tab's label: pre-review.md's PASS, FAIL or NONE, else ''.
+function tabStatus(f) {
+  const m = f.name === 'pre-review.md' && f.text.split('\n')[0].trim().match(/^PRE-REVIEW: (PASS|FAIL|NONE)$/);
+  return m ? ' <span class="chip ' + PRE_REVIEW_CHIP[m[1]] + '">' + m[1] + '</span>' : '';
 }
 
 function tabBox(tab) {
@@ -6089,7 +6100,7 @@ function addWalkthrough(root, live, page) {
 function renderDetail() {
   const prev = pillBox();
   $('d-tabs').innerHTML = files.map((f) =>
-    '<button class="tab' + (f.name === activeFile ? ' active' : '') + '" data-name="' + esc(f.name) + '" title="' + esc(f.name) + '">' + esc(label(f.name)) + '</button>'
+    '<button class="tab' + (f.name === activeFile ? ' active' : '') + '" data-name="' + esc(f.name) + '" title="' + esc(f.name) + '">' + esc(label(f.name)) + tabStatus(f) + '</button>'
   ).join('') + '<span class="tab-pill" id="d-tab-pill" aria-hidden="true"></span>';
   $('d-tabs').hidden = !files.length;
   placePill(prev);

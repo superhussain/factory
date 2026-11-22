@@ -60,8 +60,10 @@ branch's copy and never takes a command from R2, so a branch cannot change what
 judges it and the Access token cannot run code on a host. The commands still run
 the branch's code, such as its package scripts, and reviewers read that code as
 before. Output tails of failing checks go into `pre-review.md` and reach R2,
-capped at 40 lines per check. A missing or invalid file gives `PRE-REVIEW: NONE`
-and reviewers work as before.
+capped at 40 lines per check. Before that, every home `.env` value of 12 or more
+characters and every pattern `retro_redact` knows becomes `[redacted]`. The full
+logs stay in the host's job temp folder and never sync. A missing or invalid file
+gives `PRE-REVIEW: NONE` and reviewers work as before.
 
 ## Admission rules
 

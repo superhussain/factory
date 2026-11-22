@@ -118,6 +118,29 @@ class PreReviewTest(IsolatedTestCase):
         self.assertEqual((block[0], block[-1]), ("line 20 -x-", "line 59 -x-"))
         self.assertEqual(len((self.logs / "lint.log").read_text().splitlines()), 60)
 
+    def test_failure_tail_is_redacted(self):
+        (self.home / ".env").write_text("FACTORY_TEST_SECRET=synthetic-secret-0123456789\n")  # gitleaks:allow synthetic secret
+        leak = ("import sys\nprint('token=synthetic-secret-0123456789')\n"  # gitleaks:allow synthetic secret
+                "print('Authorization: Bearer abcdefghijklmnop123456')\nsys.exit(1)")
+        self.base([check("leak", leak)])
+        code, out, err = self.run_gate()
+        self.assertEqual(code, 1)
+        text = self.out.read_text()
+        self.assertNotIn("synthetic-secret-0123456789", text)
+        self.assertNotIn("abcdefghijklmnop123456", text)
+        self.assertIn("token=[redacted]", text)
+        self.assertIn("Authorization: [redacted]", text)
+        self.assertIn("synthetic-secret-0123456789", (self.logs / "leak.log").read_text())
+
+    def test_nested_env_values_are_redacted_longest_first(self):
+        (self.home / ".env").write_text("FACTORY_TEST_SHORT=abcdefghijkl\nFACTORY_TEST_LONG=abcdefghijklMNOP\n")
+        self.base([check("nested", "import sys\nprint('value abcdefghijklMNOP')\nsys.exit(1)")])
+        code, _, _ = self.run_gate()
+        self.assertEqual(code, 1)
+        text = self.out.read_text()
+        self.assertNotIn("MNOP", text)
+        self.assertIn("value [redacted]", text)
+
     def test_timeout_and_missing(self):
         self.base([check("slow", "import time; time.sleep(30)"),
                    {"name": "gone", "run": ["factory-test-no-such-program"]},

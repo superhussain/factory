@@ -5818,6 +5818,18 @@ def outcome_of(checkout, base, oid, rework_ids):
     return ("reworked", sorted(evidence)) if evidence else ("held", [])
 
 
+def outcome_checkout_problem(checkout, base, device):
+    """Why outcomes cannot read origin/<base> in checkout on device, or None once the fetch worked."""
+    path = Path(checkout)
+    if not path.is_dir():
+        return f"no folder at {checkout} on {device}"
+    top = git(path, "rev-parse", "--show-toplevel")
+    if not top or Path(top).resolve() != path.resolve():
+        return f"{checkout} is not a git checkout on {device}"
+    why = fetch_base(path, base)
+    return f"{why} in {checkout} on {device}" if why else None
+
+
 def pr_signals(repo, numbers, device):
     """({number: (head oid, pr_signal)}, None) for repo's pull requests from one gh api graphql call,
     or (None, why), as pr_states reads them."""
@@ -7108,6 +7120,17 @@ def run_check(argv, cwd, log, timeout):
     return code, round(time.monotonic() - start)
 
 
+def pre_review_tail(log_text, env):
+    """The last PRE_REVIEW_TAIL lines of a failing check's log for pre-review.md: home .env values of
+    ENV_SECRET_MIN or more characters and retro_redact's patterns as [redacted], each line printable,
+    at most 300 characters, with ~ as -. Longer values go first, so one holding another leaves no suffix."""
+    for value in sorted(env.values(), key=len, reverse=True):
+        if len(value) >= ENV_SECRET_MIN:
+            log_text = log_text.replace(value, "[redacted]")
+    tail = "\n".join(line[:4000] for line in log_text.splitlines()[-PRE_REVIEW_TAIL:])
+    return [printable_line(line, 300).replace("~", "-") for line in retro_redact(tail).split("\n")]
+
+
 def pre_review_cmd(target):
     """Run the base branch's checks file in the job worktree, write pre-review.md and print one JSON line."""
     home, slug, job_id = r2_target(target, True)
@@ -7153,9 +7176,10 @@ def pre_review_cmd(target):
              f"Checks: origin/{base}:{CHECKS_FILE} at {checks_sha}", f"Logs: {logs}", "",
              "| Check | Exit | Seconds |", "| --- | --- | --- |"]
     lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} |" for r in results]
+    env = read_conf(home / ".env") if (home / ".env").exists() else {}
     for r in failed:
         log_text = (logs / f"{r['name']}.log").read_text(encoding="utf-8", errors="replace")
-        tail = [printable_line(line, 300).replace("~", "-") for line in log_text.splitlines()[-PRE_REVIEW_TAIL:]]
+        tail = pre_review_tail(log_text, env)
         lines += ["", f"## {r['name']}", "", "~~~text", *tail, "~~~"]
     write_atomic(str(out_file), "\n".join(lines) + "\n")
     print(json.dumps({"result": result, "head": head, "checks": results, "reason": None}))
@@ -11422,10 +11446,15 @@ def outcomes_cmd(*args):
     home = factory_home()
     data = read_board(home)
     cutoff = datetime.now(timezone.utc) - timedelta(days=OUTCOME_DAYS)
-    jobs = [j for j in data["jobs"] if j.get("stage") == "merged" and (stamp_of(j.get("done")) or cutoff) > cutoff
-            and (not rest or j.get("project") == rest[0])]
+    recent = [j for j in data["jobs"] if j.get("stage") == "merged" and (stamp_of(j.get("done")) or cutoff) > cutoff]
+    orphans = sorted(str(j.get("id")) for j in recent if not isinstance(j.get("project"), str) or not j["project"])
+    jobs = [j for j in recent if isinstance(j.get("project"), str) and j["project"]
+            and (not rest or j["project"] == rest[0])]
+    skipped = f"merged jobs with no project, skipped: {', '.join(orphans)}" if orphans and not rest else None
     if not jobs:
         print(f"no jobs merged in the last {OUTCOME_DAYS} days")
+        if skipped:
+            print(skipped)
         return
     rework = {}
     for j in data["jobs"]:
@@ -11451,7 +11480,11 @@ def outcomes_cmd(*args):
                 prs.setdefault(int(m[3]), []).append(j["id"])
         if not prs:
             continue
-        origin_git(checkout, "fetch", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+        problem = outcome_checkout_problem(checkout, base, device)
+        if problem:
+            for ids in prs.values():
+                results.update(dict.fromkeys(ids, ("unknown", [problem])))
+            continue
         oids, why = pr_merge_commits(repo, sorted(prs), device)
         for n, ids in prs.items():
             if why:
@@ -11474,6 +11507,8 @@ def outcomes_cmd(*args):
             if ids:
                 print(f"{slug} {r}: " + ", ".join(
                     f"{i} ({results[i][1][0]})" if r == "unknown" else i for i in ids))
+    if skipped:
+        print(skipped)
     if record:
         changed = outcomes_record(home, results)
         print(f"recorded {changed} outcomes on the board" if changed else "outcomes unchanged; nothing written")
