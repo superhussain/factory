@@ -9035,7 +9035,7 @@ def pr_behind(pr):
 
 
 def checks_cmd(target, *args):
-    """Print each PR check as `<bucket> <name>` once none is pending and the head is up to date with its base, updating a behind branch and checking every 10 seconds until --timeout."""
+    """Print each PR check as `<bucket> <name>` once none is pending and the head is up to date with its base, updating a behind branch and checking every 10 seconds until --timeout. An unusable reply at the deadline exits 5."""
     home, slug, job_id = r2_target(target, True)
     if args and (args[0] != "--timeout" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
                  or int(args[1]) > 600):
@@ -9092,10 +9092,12 @@ def checks_cmd(target, *args):
         waited = time.monotonic() - since
         if not checks and not usable and waited >= min(CHECKS_REGISTER, timeout):
             fail("gh api graphql never gave a usable check list", 5)
-        if not checks and waited >= CHECKS_REGISTER:
+        if not checks and not problem and waited >= CHECKS_REGISTER:
             print("no checks reported")
             return
         if elapsed >= timeout:
+            if problem:
+                fail(f"gh api graphql gave no usable check list by the deadline ({problem})", 5)
             fail("still pending: " + ", ".join(pending) if pending
                  else "still waiting for checks on the updated head" if updated_from else "no checks listed yet", 3)
         time.sleep(min(CHECKS_INTERVAL, max(0, timeout - elapsed)))
