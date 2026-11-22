@@ -71,9 +71,15 @@
                                             check 1, pending at the deadline 3, a bad pr 4, a gh problem 5, an escalated job 7
   factory.py pr-state <project-slug>/<job-id> [--wait S]
                                             print one JSON reading of the job PR for /factory babysit:
-                                            pr, state, review, checks, queued, conflict and next; --wait
+                                            pr, state, review, checks, queued, conflict, items, capped,
+                                            rearm and next; --wait
                                             re-reads every 30 seconds for up to S seconds (1 to 600) while
                                             next is wait; a bad pr exits 4, a gh problem 5
+  factory.py pr-handled <project-slug>/<job-id> [--rearm] <sig>...
+                                            record that babysit acted on up to 32 pr-state item signatures:
+                                            add 1 to each count in the job's handled field, or with --rearm
+                                            drop them; keeps the newest 32 and prints one JSON line of id
+                                            and handled; a bad sig exits 2, another session's claim 6
   factory.py pr-queue <project-slug>/<job-id>
                                             print whether GitHub queued the job PR, by the enqueue mutation first, else merge-async:
                                             one JSON line of pr, status and detail; enqueued exits 0,
@@ -985,6 +991,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
         fail("only factory.py pickup sets github. Nothing was written.", 2)
     if "auto_babysit" in patch:
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
+    if "handled" in patch:
+        fail("only factory.py pr-handled sets handled. Nothing was written.", 2)
     if patch.get("note") in SPEC_APPROVED_NOTES:
         fail(f"only a person approves a spec, on the dashboard or in Tracer, so factory.py board cannot set the "
              f"note '{patch['note']}'. Nothing was written.", 2)
@@ -7145,6 +7153,7 @@ def watch_cmd(target, *args):
         pr = board_pr(home, slug, job_id, archive=True)
         meta = frontmatter(project_files(home, slug)[0])[0]
         base = pr_base(meta, pr)
+        handled = job_handled(home, job_id)
     start = time.monotonic()
     deadline = start + (WATCH_TIMEOUT if timeout is None else timeout)
     reading, read_at, bad_before = None, start, {}
@@ -7152,7 +7161,7 @@ def watch_cmd(target, *args):
         lines = job_file_lines(folder, artifacts)
         bad = {a: lines[a] for a in artifacts if (lines.get(a) or "").strip() and not wait_valid(a, lines[a])}
         if watch_pr and time.monotonic() >= read_at:
-            reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""))
+            reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""), handled)
             read_at = time.monotonic() + PR_STATE_INTERVAL
         if artifacts and all(a in lines and wait_valid(a, lines[a]) for a in artifacts):
             event = "files"
@@ -7458,10 +7467,35 @@ PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMerge
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
 PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
-                    "{isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved"
-                    " comments(first:100){nodes{authorAssociation author{__typename login}}}}}"
+                    "{isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved path"
+                    " comments(first:100){nodes{authorAssociation body author{__typename login}}}}}"
                     " latestReviews(first:100){nodes{author{__typename login}}}}}}")
 PR_STATE_INTERVAL = 30
+HANDLED_SIG = re.compile(r"(review|thread|check|conflict):[0-9a-f]{16}")
+HANDLED_CAP = 3
+HANDLED_KEEP = 32
+
+
+def handled_sig(kind, *parts):
+    """The signature babysit records for one PR item: its kind and a hash of what identifies it."""
+    return kind + ":" + hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
+def valid_handled(value):
+    """The well-formed entries of a job's handled field."""
+    if not isinstance(value, dict):
+        return {}
+    return {sig: {"count": e["count"], "at": e["at"]} for sig, e in value.items()
+            if isinstance(sig, str) and HANDLED_SIG.fullmatch(sig) and isinstance(e, dict)
+            and type(e.get("count")) is int and e["count"] > 0 and isinstance(e.get("at"), str)}
+
+
+def job_handled(home, job_id):
+    """The job's valid handled entries from the board, else {}."""
+    job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
+    return valid_handled((job or {}).get("handled"))
+
+
 BUILDKITE_API = "https://api.buildkite.com/v2"
 BUILDKITE_BUILD = re.compile(r"https://buildkite\.com/([A-Za-z0-9-]{1,100})/([A-Za-z0-9_-]{1,100})/builds/([0-9]{1,12})"
                              r"(?:#([0-9a-f-]{36}))?", re.ASCII)
@@ -7527,8 +7561,10 @@ def buildkite_log(home, check, buildkite_org):
             "tail": "\n".join(lines[-BUILDKITE_TAIL_LINES:])[-BUILDKITE_TAIL_CHARS:]}
 
 
-def pr_reading(home, pr, base, buildkite_org):
-    """One reading of the PR for a babysit session, with the next step it calls for."""
+def pr_reading(home, pr, base, buildkite_org, handled=None):
+    """One reading of the PR for a babysit session, with the next step it calls for. handled is the job's
+    handled field: a handled review or thread is skipped, and a check or conflict worked HANDLED_CAP times
+    reads as capped."""
     try:
         view = json.loads(gh_pr_view(pr, "--json", PR_STATE_FIELDS))
     except ValueError:
@@ -7571,8 +7607,25 @@ def pr_reading(home, pr, base, buildkite_org):
     replied = max([head] + [str(r.get("submittedAt") or "") for r in reviews if login(r) == author])
     human = [r for r in reviews if r.get("authorAssociation") in PR_REVIEWERS
              and login(r) != author and login(r) not in bot_logins]
-    unanswered = any(r.get("state") in ("CHANGES_REQUESTED", "COMMENTED")
-                     and str(r.get("submittedAt") or "") > replied for r in human)
+    handled = handled or {}
+    items, capped = [], []
+
+    def note(kind, label, *parts):
+        """Add one item to items or capped. False when it is a review or thread babysit already handled."""
+        sig = handled_sig(kind, *parts)
+        if kind in ("review", "thread") and sig in handled:
+            return False
+        count = handled[sig]["count"] if sig in handled else 0
+        entry = {"sig": sig, "label": printable_line(label, 100), "count": count}
+        listed_in = capped if count >= HANDLED_CAP else items
+        if entry not in listed_in:
+            listed_in.append(entry)
+        return True
+
+    unanswered = False
+    for r in human:
+        if r.get("state") in ("CHANGES_REQUESTED", "COMMENTED") and str(r.get("submittedAt") or "") > replied:
+            unanswered = note("review", login(r), login(r), str(r.get("body") or "")) or unanswered
     decision = view.get("reviewDecision") or ""
     approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
     state = str(view.get("state") or "").lower()
@@ -7584,20 +7637,40 @@ def pr_reading(home, pr, base, buildkite_org):
         comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
         if not comments or any(login(c) == author for c in comments):
             continue
-        if (comments[0].get("author") or {}).get("__typename") == "Bot":
+        bot = (comments[0].get("author") or {}).get("__typename") == "Bot"
+        if not bot and comments[0].get("authorAssociation") not in PR_REVIEWERS:
+            continue
+        path = str(thread.get("path") or "")
+        if not note("thread", path or "a review thread", path, str(comments[0].get("body") or "")):
+            continue
+        if bot:
             bots += 1
-        elif comments[0].get("authorAssociation") in PR_REVIEWERS:
+        else:
             threads += 1
     queued = in_queue or bool(view.get("autoMergeRequest"))
-    conflict = view.get("mergeStateStatus") == "DIRTY"
+    merge_state = view.get("mergeStateStatus")
+    conflict = merge_state == "DIRTY"
+    if conflict:
+        note("conflict", f"a merge conflict with {target}", target)
+    for c in listed:
+        if c["bucket"] in ("fail", "cancel"):
+            note("check", c["name"], c["name"])
+    listed_sigs = {i["sig"] for i in items + capped}
+    rearm = [s for s in dict.fromkeys(handled_sig("check", c["name"]) for c in listed
+                                      if c["bucket"] in ("pass", "skipping")) if s in handled and s not in listed_sigs]
+    if merge_state not in ("DIRTY", "UNKNOWN"):
+        rearm += [s for s in handled if s.startswith("conflict:")]
+    kinds = {i["sig"].split(":", 1)[0] for i in items}
     stacked = target != base
     if state in ("merged", "closed"):
         step = state
-    elif unanswered or bots or threads:
+    elif capped:
+        step = "capped"
+    elif kinds & {"review", "thread"}:
         step = "fix-reviews"
-    elif conflict:
+    elif "conflict" in kinds:
         step = "rebase"
-    elif checks == "fail":
+    elif "check" in kinds:
         step = "fix-ci"
     elif checks == "pending" or (checks == "none" and new):
         step = "wait"
@@ -7615,7 +7688,8 @@ def pr_reading(home, pr, base, buildkite_org):
             "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
             "base": target, "next": step, "ci_log": buildkite_log(home, failed, buildkite_org) if failed else None,
-            "threads": threads, "merge_queue": pull.get("isMergeQueueEnabled") is True}
+            "threads": threads, "merge_queue": pull.get("isMergeQueueEnabled") is True,
+            "items": items, "capped": capped, "rearm": rearm}
 
 
 def pr_state_cmd(target, *args):
@@ -7628,14 +7702,51 @@ def pr_state_cmd(target, *args):
     pr = board_pr(home, slug, job_id, archive=True)
     meta = frontmatter(project_files(home, slug)[0])[0]
     base = pr_base(meta, pr)
+    handled = job_handled(home, job_id)
     start = time.monotonic()
     while True:
-        reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""))
+        reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""), handled)
         elapsed = time.monotonic() - start
         if reading["next"] not in ("wait", "wait-base") or elapsed >= wait:
             print(json.dumps(reading))
             return
         time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
+
+
+PR_HANDLED_USAGE = "usage: pr-handled <project-slug>/<job-id> [--rearm] <sig>..."
+
+
+def pr_handled_cmd(target, *args):
+    """Add 1 to the handled count of each signature and stamp its time, or with --rearm drop them,
+    keeping the newest HANDLED_KEEP entries, in one CAS write that keeps the claim."""
+    home, slug, job_id = r2_target(target, True)
+    rearm = args[0] == "--rearm"
+    sigs = args[1:] if rearm else args
+    if not 1 <= len(sigs) <= HANDLED_KEEP or not all(HANDLED_SIG.fullmatch(s) for s in sigs):
+        fail(f"give 1 to {HANDLED_KEEP} signatures like check:0123456789abcdef. " + PR_HANDLED_USAGE, 2)
+    device, session, minutes = holder(home)
+
+    def change(text):
+        data = load_board(text)
+        j = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if j is None:
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
+        if j.get("project") != slug:
+            fail(f"{job_id} belongs to {j.get('project')}, not {slug}. Nothing was written.", 2)
+        held = blocking(j, device, session, minutes)
+        if held:
+            fail(f"{held_by(job_id, held)}. Nothing was written.", 6)
+        handled = valid_handled(j.get("handled"))
+        stamp = now()
+        for sig in sigs:
+            if rearm:
+                handled.pop(sig, None)
+            else:
+                handled[sig] = {"count": handled.get(sig, {}).get("count", 0) + 1, "at": stamp}
+        j["handled"] = dict(sorted(handled.items(), key=lambda e: e[1]["at"], reverse=True)[:HANDLED_KEEP])
+        j["updated"] = data["updated"] = stamp
+        return dump_board(data), {"id": job_id, "handled": j["handled"]}
+    print(json.dumps(cas(home, "/api/board", change)))
 
 
 PR_ENQUEUE_MUTATION = ("query=mutation($id:ID!,$sha:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$sha})"
@@ -11974,6 +12085,7 @@ COMMANDS["round-wait"] = (round_wait_cmd, 2, 4)
 COMMANDS["verdict"] = (verdict_cmd, 4, 4)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
 COMMANDS["pr-state"] = (pr_state_cmd, 1, 3)
+COMMANDS["pr-handled"] = (pr_handled_cmd, 2, 34)
 COMMANDS["pr-queue"] = (pr_queue_cmd, 1, 1)
 COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
