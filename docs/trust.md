@@ -55,7 +55,9 @@ catalog order.
 ## Pre-review checks
 
 `factory.py pre-review` runs the commands in `.factory/checks.json` as read from
-`origin/<base>`, where `<base>` comes from the project file. It never reads the
+`origin/<base>`, where `<base>` comes from the project file. It fetches `<base>`
+from `https://github.com/<repo>.git`, never from the `origin` remote, and refuses
+a worktree whose own git config sets `url.*` or `http.*` keys. It never reads the
 branch's copy and never takes a command from R2, so a branch cannot change what
 judges it and the Access token cannot run code on a host. The commands still run
 the branch's code, such as its package scripts, and reviewers read that code as
