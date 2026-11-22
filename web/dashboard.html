@@ -842,7 +842,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="meta" id="d-not-before" hidden></div><div class="meta" id="d-auto-babysit" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs tracer-tasks" id="d-steer-notes" hidden><summary></summary><ol role="list"></ol></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="meta" id="d-backpressure" hidden></div><div class="meta" id="d-not-before" hidden></div><div class="meta" id="d-auto-babysit" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs tracer-tasks" id="d-steer-notes" hidden><summary></summary><ol role="list"></ol></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>
@@ -2303,19 +2303,24 @@ function chatDecision(j) {
 
 // The hold of each project's effective pipeline, filled by loadHoldConfigs. A project not loaded uses the defaults, as hold_config does.
 const HOLD_DEFAULT = { min_ideas: 5, max_wait_hours: 12 };
+const BACKPRESSURE_DEFAULT = 5;
 const holdConfigs = new Map();
+const backpressureConfigs = new Map();
 // The epoch each slug's hold fetch started in. clearHoldConfigs moves the epoch, so an older fetch's result is dropped.
 const holdLoading = new Map();
 let holdEpoch = 0;
 
 function clearHoldConfigs() {
   holdConfigs.clear();
+  backpressureConfigs.clear();
   holdLoading.clear();
   holdEpoch++;
 }
 
 async function loadHoldConfigs() {
-  const slugs = new Set(jobs.filter(batchHeld).map((j) => j.project).filter((p) => typeof p === 'string' && !holdConfigs.has(p) && !holdLoading.has(p)));
+  const anyWaiting = jobs.some(waitsOnYou);
+  const slugs = new Set(jobs.filter((j) => batchHeld(j) || (anyWaiting && backpressurePlain(j))).map((j) => j.project)
+    .filter((p) => typeof p === 'string' && !holdConfigs.has(p) && !backpressureConfigs.has(p) && !holdLoading.has(p)));
   let set = false;
   await Promise.all([...slugs].map(async (slug) => {
     const epoch = holdEpoch;
@@ -2323,11 +2328,16 @@ async function loadHoldConfigs() {
     try {
       const r = await fetch('./api/pipeline/effective/' + encodeURIComponent(slug), { cache: 'no-store' });
       if (!r.ok || r.redirected) return;
-      const hold = (await r.json())?.hold;
+      const body = await r.json();
       if (epoch !== holdEpoch) return;
+      const hold = body?.hold, needs = body?.backpressure?.needs_you;
       if (Number.isInteger(hold?.min_ideas) && hold.min_ideas >= 1 && hold.min_ideas <= 20 &&
         Number.isInteger(hold.max_wait_hours) && hold.max_wait_hours >= 1 && hold.max_wait_hours <= 168) {
         holdConfigs.set(slug, { min_ideas: hold.min_ideas, max_wait_hours: hold.max_wait_hours });
+        set = true;
+      }
+      if (Number.isInteger(needs) && needs >= 1 && needs <= 50) {
+        backpressureConfigs.set(slug, needs);
         set = true;
       }
     } catch {} finally {
@@ -2347,6 +2357,23 @@ function pickupCanLaunch(j) {
 }
 function batchRunnable(j) {
   return batchHeld(j) && pickupCanLaunch(j);
+}
+
+// Mirrors backpressure_holds in factory.py. Change both together.
+function backpressurePlain(j) {
+  return j.stage === 'idea' && typeof j.project === 'string' && typeof j.priority?.at !== 'string' && !j.claim && !notBefore(j) && pickupCanLaunch(j);
+}
+
+// The paused chip as { text, title } while the jobs waiting on you, in every project, reach the idea's project limit, or null.
+function backpressureState(j) {
+  if (!backpressurePlain(j)) return null;
+  const waiting = jobs.filter(waitsOnYou).length;
+  const limit = backpressureConfigs.get(j.project) ?? BACKPRESSURE_DEFAULT;
+  if (waiting < limit) return null;
+  return {
+    text: 'Paused: ' + waiting + ' waiting on you',
+    title: 'Pickup starts no new idea while ' + waiting + ' jobs wait on you. It pauses at ' + limit + '. Approved specs, moved jobs and prioritized ideas still start. Settings, Pipeline, Review backpressure sets the number.',
+  };
 }
 
 // A job that started its project's held batch from the dashboard and that pickup can launch, so a
@@ -2439,7 +2466,8 @@ function card(j, inNeeds, archived = false) {
   const refText = refs(j).map((r) => REF_KINDS[r.kind] + ' ' + r.id).join(' · ');
   const dup = duplicateOf(j);
   const dupOnBoard = dup !== null && jobs.some((x) => x.id === dup);
-  const chat = chatDecision(j), held = batchState(j), later = notBefore(j), auto = autoBabysit(j);
+  const paused = backpressureState(j);
+  const chat = chatDecision(j), held = paused ? null : batchState(j), later = notBefore(j), auto = autoBabysit(j);
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
   const tags = (!archived && starred.has(j.id) ? '<span class="chip">Starred</span>' : '') +
     (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
@@ -2447,6 +2475,7 @@ function card(j, inNeeds, archived = false) {
     (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
     (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
     (chat ? '<span class="chip chat" title="' + esc(chat.title) + '">' + esc(chat.text) + '</span>' : '') +
+    (paused ? '<span class="chip backpressure" title="' + esc(paused.title) + '">' + esc(paused.text) + '</span>' : '') +
     (held ? '<span class="chip held" title="' + esc(held.title) + '">' + esc(held.text) + '</span>' : '') +
     (later ? '<span class="chip not-before" title="' + esc(later.title) + '">' + esc(later.text) + '</span>' : '') +
     (j.babysit?.at ? '<span class="chip" title="' + esc(auto ? auto.title : prLink(j) ? 'An agent is working PR #' + prLink(j).n + ' as the Babysit note asks' : 'An agent is working this PR as the Babysit note asks') + '">' + esc(auto ? auto.text : 'Babysitting') + '</span>' : '');
@@ -4576,7 +4605,6 @@ const backpressureFromFields = () => $('pipeline-backpressure-mode').value
   ? {needs_you:$('pipeline-backpressure-needs').value === '' ? null : Number($('pipeline-backpressure-needs').value)} : undefined;
 const ARCHIVE_DEFAULT_N = {age:30, count:200};
 const HOLD_DEFAULTS = {min:5, hours:12};
-const BACKPRESSURE_DEFAULT = 5;
 // Client-side only: the Worker accepts any valid name and its effective filter drops unregistered ones.
 function pickupRegistryError(pickup) {
   if (!hostRegistry?.length || !Array.isArray(pickup?.hosts)) return null;
@@ -5841,11 +5869,14 @@ function drawerMeta(j) {
 
 // The chat decision, held, not-before and auto-babysit state as drawer lines, so touch, keyboard and screen reader users get what the chip titles say.
 function renderDrawerStatus(j) {
-  const chat = chatDecision(j), held = batchState(j), later = notBefore(j);
+  const paused = backpressureState(j);
+  const chat = chatDecision(j), held = paused ? null : batchState(j), later = notBefore(j);
   $('d-chat').textContent = chat ? chat.title : '';
   $('d-chat').hidden = !chat;
   $('d-held').textContent = held ? held.title : '';
   $('d-held').hidden = !held;
+  $('d-backpressure').textContent = paused ? paused.title : '';
+  $('d-backpressure').hidden = !paused;
   $('d-not-before').textContent = later ? later.title : '';
   $('d-not-before').hidden = !later;
   const auto = autoBabysit(j);
