@@ -3684,6 +3684,15 @@ def explore(slug, *rest):
 
 
 
+def parse_route(value):
+    """(provider, model, effort or None) from "<provider> <model> [<effort>]", or None when it is malformed."""
+    parts = value.split()
+    if len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) or not ROUTE_MODEL.fullmatch(parts[1]) \
+            or parts[2:] and parts[2] not in ROUTE_EFFORTS:
+        return None
+    return parts[0], parts[1], parts[2] if len(parts) == 3 else None
+
+
 def read_routes(home):
     """[(name, provider, model, effort or None)] from this host's routes.md, in preference order."""
     path = Path(home, "routes.md")
@@ -3696,11 +3705,10 @@ def read_routes(home):
         # The optional experiment and review lines are config, not routes.
         if name == "experiment" or name in REVIEW_ROUTE_KEYS:
             continue
-        parts = value.split()
-        if not SLUG.fullmatch(name) or len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) \
-                or not ROUTE_MODEL.fullmatch(parts[1]) or parts[2:] and parts[2] not in ROUTE_EFFORTS:
+        route = parse_route(value)
+        if not SLUG.fullmatch(name) or route is None:
             fail(f"bad route {name!r} in {path}: use <name>: <provider> <model> [<effort>]", 2)
-        routes.append((name, parts[0], parts[1], parts[2] if len(parts) == 3 else None))
+        routes.append((name, *route))
     return routes
 
 
@@ -3715,12 +3723,10 @@ def read_review_routes(home):
         if value is None:
             routes[tier] = None
             continue
-        parts = value.split()
-        if len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) or not ROUTE_MODEL.fullmatch(parts[1]) \
-                or parts[2:] and parts[2] not in ROUTE_EFFORTS:
+        route = parse_route(value)
+        if route is None:
             fail(f"bad review route {key} in {path}: use {key}: <provider> <model> [<effort>]", 2)
-        routes[tier] = {"name": key, "provider": parts[0], "model": parts[1],
-                        "effort": parts[2] if len(parts) == 3 else None}
+        routes[tier] = {"name": key, "provider": route[0], "model": route[1], "effort": route[2]}
     return routes
 
 
@@ -6866,7 +6872,9 @@ VISIBLE_GLOBS = ("*.html", "*.htm", "*.css", "*.scss", "*.sass", "*.less", "*.sv
 # Repo-relative fnmatch patterns for CI, check, hook and test-config files the approver must escalate or justify.
 PROTECTED_PATHS = (".github/*", "*/.github/*", "*.gitlab-ci*", "*.circleci/*", "*buildkite*", "*jenkinsfile*",
                    ".factory/*", ".husky/*", "*.pre-commit-config.yaml", "*lefthook*", "*conftest.py",
-                   "*pytest.ini", "*tox.ini", "*jest.config*", "*vitest.config*", "*playwright.config*")
+                   "*pytest.ini", "*tox.ini", "*jest.config*", "*vitest.config*", "*playwright.config*",
+                   "package.json", "*/package.json", "*.gitleaks.toml", "mise.toml", "*/mise.toml", "*.mise.toml",
+                   "*.oxfmtrc*", "nx.json", "tools/verify.py", "tests/cli/support.py", "tests/support/*")
 VISUAL_CRITERION = re.compile(r"screenshot|captur|before and after|before/after|visual evidence", re.I)
 SKIPPABLE_REVIEWERS = ("ux", "ui")
 REVIEW_PLAN_USAGE = "usage: review-plan <project-slug>/<job-id> <round>"

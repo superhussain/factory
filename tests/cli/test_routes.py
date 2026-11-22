@@ -47,6 +47,13 @@ class RoutesTest(IsolatedTestCase):
     def write_limits(self, limits):
         self.limits.write_text(json.dumps(limits), encoding="utf-8")
 
+    def test_parse_route(self):
+        self.assertEqual(factory.parse_route("provider-a model-a low"), ("provider-a", "model-a", "low"))
+        self.assertEqual(factory.parse_route("provider-a model-a"), ("provider-a", "model-a", None))
+        for value in ("provider-a", "provider-a model-a extra", "provider/a model-a", "provider-a model;rm",
+                      "a b low c"):
+            self.assertIsNone(factory.parse_route(value), value)
+
     def test_pick_first(self):
         self.assertEqual(self.run_routes("pick"), {"route": "alpha", "provider": "provider-a",
                                                     "runtime": "provider-a", "model": "model-a"})
