@@ -160,7 +160,8 @@ Each run, in order:
   prints to stderr how many candidates it checked when a repo has more. It skips a job that
   waits on a human, is paused, closing, escalated, batched into another, already babysat or
   held by a live claim, whose project has no Babysit note, or whose project pickup does not
-  list this host.
+  list this host. It reads the job's `handled` field as babysit's `pr-state` does: a handled
+  review thread is no signal, and neither is a check or merge conflict babysit worked 3 times.
   One board write for the whole pass sets, on each job,
   `babysit = {at, via: "pickup", by, reason}`, `auto_babysit = {count, head, reason, at}` and
   the note, and prints `auto-babysat <id> <project>: PR #<n> <what it has> (<count> of <cap>)`.
