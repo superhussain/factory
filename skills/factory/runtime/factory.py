@@ -3969,7 +3969,7 @@ def trial_valid(t):
     return (isinstance(t, dict) and isinstance(t.get("project"), str) and bool(SLUG.fullmatch(t["project"]))
             and t.get("stage") in PIPELINE_STAGES and type(t.get("version")) is int
             and type(t.get("champion_version")) is int and t["champion_version"] >= 0
-            and t.get("id") == f"{t['project']}-{t['stage']}-v{t['version']}")
+            and t.get("id") == f"{t['project']}-{t['stage']}-v{t['version']}" and isinstance(t.get("opened"), str))
 
 
 def open_trial_for(data, slug, stage):
@@ -13759,7 +13759,7 @@ def trial_settle(home):
 
     def change(text):
         data = load_board(text)
-        records = data.get("trials") or []
+        records = [t for t in data.get("trials") or [] if isinstance(t, dict)]
         for t in records:
             if t.get("status") == "open" and t.get("id") in updates:
                 t.update(updates[t["id"]])
@@ -13783,7 +13783,7 @@ def trial_resume(home, slug):
         data = load_board(text)
         stamp = now()
         for t in data.get("trials") or []:
-            if t.get("project") == slug and t.get("status") == "reverted" and not t.get("resumed"):
+            if isinstance(t, dict) and t.get("project") == slug and t.get("status") == "reverted" and not t.get("resumed"):
                 t["resumed"] = stamp
         data["updated"] = stamp
         return dump_board(data), None
