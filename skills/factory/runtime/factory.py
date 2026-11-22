@@ -7410,7 +7410,7 @@ def review_tier(spec_text, decision_text, protected):
 
 
 PROJECT_FETCH_URL = "https://github.com/{repo}.git"
-PROJECT_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", re.ASCII)
+PROJECT_REPO = re.compile(r"\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z", re.ASCII)
 
 
 def fetch_base(wt, base, repo):
