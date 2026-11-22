@@ -466,6 +466,16 @@ class RolesTest(IsolatedTestCase):
                       "list them. When it lacks one, add a task that extends the tool.",
                       flat("agents/factory-spec-writer.md"))
 
+    def test_builder_steering_notes(self):
+        builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
+        for phrase in ("**Steering notes.**", "`### Steering notes`", "`At`, `Note`, `Applied` and `Why`",
+                       "80 characters", "`steer:` source"):
+            self.assertIn(phrase, builder)
+        skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("`prompt ... build` also wraps the job's dashboard steering notes (board `steer`). A builder "
+                      "resume counts as a dispatch: build a fresh build prompt, run `agent record`, and send the new "
+                      "pointer.", skill)
+
     def test_builder_waits_in_background(self):
         builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
         self.assertIn("run_in_background", builder)
