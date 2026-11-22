@@ -13273,6 +13273,29 @@ def autonomy_hold_pass(home, data, dry):
             print(f"held {line}")
 
 
+def autonomy_cell(group):
+    """The earned-autonomy metrics and verdict for one project and class's merged jobs."""
+    result = {r: [j["id"] for j in group if isinstance(j.get("outcome"), dict) and j["outcome"].get("result") == r]
+              for r in ("held", "reworked", "reverted")}
+    scanned = sum(len(ids) for ids in result.values())
+    rework = len(result["reworked"]) / scanned if scanned else 0
+    mean = sum(len(j["rounds"]) for j in group) / len(group) if group else 0
+    votes = [v for j in group for entry in j["rounds"] if isinstance(entry, dict)
+             for v in entry.values() if v in ("PASS", "CHANGES")]
+    changes = votes.count("CHANGES") / len(votes) if votes else 0
+    why = ([f"reverted {', '.join(sorted(result['reverted']))}"] if result["reverted"] else []) + \
+        ([f"rework {round(100 * rework)}% over {round(100 * AUTONOMY_MAX_REWORK)}%"]
+         if rework > AUTONOMY_MAX_REWORK else []) + \
+        ([f"rounds {mean:.1f} over {AUTONOMY_MAX_ROUNDS}"] if mean > AUTONOMY_MAX_ROUNDS else []) + \
+        ([f"changes {round(100 * changes)}% over {round(100 * AUTONOMY_MAX_CHANGES)}%"]
+         if changes > AUTONOMY_MAX_CHANGES else [])
+    verdict = "hold" if why else "collect" if scanned < AUTONOMY_MIN_JOBS else "automerge"
+    if verdict == "collect":
+        why.append(f"needs {AUTONOMY_MIN_JOBS - scanned} more scanned jobs")
+    return {"result": result, "scanned": scanned, "rework": rework, "mean": mean, "changes": changes, "why": why,
+            "verdict": verdict}
+
+
 def autonomy_report(home, slug=None):
     """Print an earned-autonomy recommendation per project and job class from recorded outcomes."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=AUTONOMY_DAYS)
@@ -13301,23 +13324,9 @@ def autonomy_report(home, slug=None):
              "recommend")]
     reasons, verdicts = [], {}
     for (project, cls), group in sorted(cells.items()):
-        result = {r: [j["id"] for j in group if isinstance(j.get("outcome"), dict) and j["outcome"].get("result") == r]
-                  for r in ("held", "reworked", "reverted")}
-        scanned = sum(len(ids) for ids in result.values())
-        rework = len(result["reworked"]) / scanned if scanned else 0
-        mean = sum(len(j["rounds"]) for j in group) / len(group)
-        votes = [v for j in group for entry in j["rounds"] if isinstance(entry, dict)
-                 for v in entry.values() if v in ("PASS", "CHANGES")]
-        changes = votes.count("CHANGES") / len(votes) if votes else 0
-        why = ([f"reverted {', '.join(sorted(result['reverted']))}"] if result["reverted"] else []) + \
-            ([f"rework {round(100 * rework)}% over {round(100 * AUTONOMY_MAX_REWORK)}%"]
-             if rework > AUTONOMY_MAX_REWORK else []) + \
-            ([f"rounds {mean:.1f} over {AUTONOMY_MAX_ROUNDS}"] if mean > AUTONOMY_MAX_ROUNDS else []) + \
-            ([f"changes {round(100 * changes)}% over {round(100 * AUTONOMY_MAX_CHANGES)}%"]
-             if changes > AUTONOMY_MAX_CHANGES else [])
-        verdict = "hold" if why else "collect" if scanned < AUTONOMY_MIN_JOBS else "automerge"
-        if verdict == "collect":
-            why.append(f"needs {AUTONOMY_MIN_JOBS - scanned} more scanned jobs")
+        cell = autonomy_cell(group)
+        result, scanned, mean, changes, why, verdict = (cell[k] for k in ("result", "scanned", "mean", "changes",
+                                                                          "why", "verdict"))
         if why:
             reasons.append(f"{project} {cls} {verdict}: {'; '.join(why)}")
         verdicts.setdefault(project, []).append(verdict)
