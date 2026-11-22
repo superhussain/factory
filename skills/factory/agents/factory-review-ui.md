@@ -49,6 +49,14 @@ cosmetic nit (line wrapping, comment placement, punctuation, wording) goes under
 `### Fix now` or is dropped, never under `### Follow-up`. Nits never change the
 verdict.
 
+Give each finding that makes the verdict CHANGES its own line
+`Signature: <path>#<issue>`. `<path>` is the repository path the finding is about, or
+`spec.md` when it is about no single file. `<issue>` is 2 to 6 lowercase kebab-case
+words, such as `Signature: worker/export.js#missing-person-check`. Nits get no
+signature. Before you write, read `<job folder>/round-<N-1>/review-ui.md` when it
+exists, where N is this round. Reuse a signature exactly when its finding is still not
+fixed. The same signature in two rounds in a row sends the job to a person.
+
 You may also write `<round folder>/review-ui.walkthrough.html`, as the
 interactive walkthrough rules below say, when a CHANGES fix is easier shown than
 told: a flow, a layout, or a state change. Skip it otherwise.

@@ -36,7 +36,9 @@ feature.
    completion notification. Exit 1 means a check failed: patch
    `{"stage": "build", "note": "pre-review: <failed check names> failed"}`, resume the
    builder with `<job folder>/pre-review.md` on a short line, and create no round
-   folder. A second exit 1 in one builder run counts as the Rules row for verification
+   folder. When its JSON `repeats` list is not empty, run `push "$SLUG/<id>"`, patch
+   `{"stage": "needs-human", "note": "repeat: pre-review <names> failed in round <round - 1> and round <round>", "needs": "decide on the repeated check failure at $DASHBOARD#<id>/pre-review, then run /factory rework <id> <note> or /factory approve <id>"}`
+   and do not resume the builder. A second exit 1 in one builder run counts as the Rules row for verification
    failing twice. Any other nonzero exit puts its stderr line in the board `note`, and
    the round goes ahead. A disputed-only round skips pre-review, since the head did not
    move.
@@ -67,7 +69,13 @@ feature.
    the board `note`, and the loop goes on. When it prints `"result": "unverified"`, the
    builder dispatch below and the approver in step 6 get `round-<N>/grounding.md` on a
    short line. Then any CHANGES first checks the round cap. At the cap, the job
-   goes to `needs-human`. Below the cap, run
+   goes to `needs-human`. Below the cap, first run
+   `python3 "$RUNTIME" repeats "$SLUG/<id>" <N>`. When its decision is `repeat`, run
+   `push "$SLUG/<id>"`, patch
+   `{"stage": "needs-human", "note": "repeat: round <N-1> and round <N> both flag <signature> (<reviewer>)", "needs": "decide on the repeated finding at $DASHBOARD#<id>/round-<N-1>/review-<r> and $DASHBOARD#<id>/round-<N>/review-<r>, then run /factory rework <id> <note> or /factory approve <id>"}`
+   from its first `repeats` entry, with ` and <k> more` after the reviewer when it lists
+   k more, and dispatch nothing. A non-zero exit puts its stderr line in the board
+   `note` and the step goes on. Otherwise, run
    `python3 "$RUNTIME" escalation "$SLUG/<id>" <N>`. When its decision is `escalate`,
    run `push "$SLUG/<id>"`, patch
    `{"stage": "needs-human", "note": "review panel: round <N> findings need a person (clef-flash <confidence>%)", "needs": "decide on the round-<N> findings at $DASHBOARD#<id>/round-<N>/review-<r>, then run /factory rework <id> <note> or /factory approve <id>"}`,

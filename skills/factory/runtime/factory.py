@@ -90,6 +90,8 @@
   factory.py escalation <project-slug>/<job-id> <round>
                                             ask whether a review round's CHANGES findings need a person,
                                             print one JSON verdict
+  factory.py repeats <project-slug>/<job-id> <round>
+                                            compare a review round's CHANGES signatures with the round before, print one JSON verdict
   factory.py review-plan <project-slug>/<job-id> <round>
                                             skip the ux and ui reviews of a round that changes nothing a person sees, print one JSON plan
   factory.py pre-review <project-slug>/<job-id>
@@ -1872,6 +1874,41 @@ def escalation_cmd(target, round_text):
         print(f"factory.py: review escalation check failed ({why}); the review loop continues", file=sys.stderr)
         verdict = {**unchanged, "reason": "the escalation check failed"}
     print(json.dumps(verdict))
+
+
+SIGNATURE = re.compile(r"(?:[-*] )?Signature: ([A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5})")
+
+
+def review_signatures(path):
+    """The Signature: lines of a CHANGES review, or an empty set for any other or missing review."""
+    if not path.is_file():
+        return set()
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    if lines[:1] != ["VERDICT: CHANGES"]:
+        return set()
+    return {m.group(1) for m in map(SIGNATURE.fullmatch, (line.strip() for line in lines)) if m}
+
+
+def repeats_cmd(target, round_text):
+    """Print one JSON verdict on whether a reviewer repeats a CHANGES signature from the round before."""
+    home, slug, job_id = r2_target(target, True)
+    if not re.fullmatch(r"[1-9][0-9]*", round_text):
+        fail("round must be a positive integer", 2)
+    n = int(round_text)
+    job = safe_job_folder(home, slug, job_id)
+    folder = job / f"round-{n}"
+    for name in TRACER_REVIEWERS:
+        path = folder / f"review-{name}.md"
+        if not path.is_file():
+            fail(f"{path} is missing: the round is not complete", 4)
+    repeats = []
+    if n > 1:
+        before = job / f"round-{n - 1}"
+        for name in TRACER_REVIEWERS:
+            same = review_signatures(folder / f"review-{name}.md") & review_signatures(before / f"review-{name}.md")
+            repeats += [{"reviewer": name, "signature": s} for s in sorted(same)]
+    print(json.dumps({"decision": "repeat" if repeats else "continue", "round": n,
+                      "previous": n - 1 if n > 1 else None, "repeats": repeats}))
 
 
 IDEA_LIMIT = 4000
@@ -7364,8 +7401,11 @@ def pre_review_cmd(target):
     """Run the base branch's checks file in the job worktree, write pre-review.md and print one JSON line."""
     home, slug, job_id = r2_target(target, True)
     data = read_board(home)
-    if not any(j.get("id") == job_id for j in data["jobs"]):
+    job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+    if job is None:
         fail(f"no job {job_id} on the board. Nothing was written. " + PRE_REVIEW_USAGE, 4)
+    board_round = job.get("round")
+    round_n = (board_round if type(board_round) is int and board_round >= 0 else 0) + 1
     base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
@@ -7388,7 +7428,8 @@ def pre_review_cmd(target):
         checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
     if reason:
         write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\nReason: {printable_line(reason, 300)}\n")
-        print(json.dumps({"result": "none", "head": head, "checks": [], "reason": reason}))
+        print(json.dumps({"result": "none", "head": head, "checks": [], "reason": reason, "round": round_n,
+                          "repeats": []}))
         return
     logs = make_job_temp(slug, job_id) / "pre-review"
     if is_link(logs):
@@ -7411,7 +7452,22 @@ def pre_review_cmd(target):
         tail = pre_review_tail(log_text, env)
         lines += ["", f"## {r['name']}", "", "~~~text", *tail, "~~~"]
     write_atomic(str(out_file), "\n".join(lines) + "\n")
-    print(json.dumps({"result": result, "head": head, "checks": results, "reason": None}))
+    repeats = []
+    if failed:
+        names = {r["name"] for r in failed}
+        record_file = make_job_temp(slug, job_id) / "pre-review-failures.json"
+        try:
+            record = json.loads(record_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            record = {}
+        if not isinstance(record, dict) or not all(
+                isinstance(v, list) and all(isinstance(n, str) for n in v) for v in record.values()):
+            record = {}
+        record[str(round_n)] = sorted(names | set(record.get(str(round_n), [])))
+        write_atomic(str(record_file), json.dumps(record) + "\n")
+        repeats = sorted(names & set(record.get(str(round_n - 1), [])))
+    print(json.dumps({"result": result, "head": head, "checks": results, "reason": None, "round": round_n,
+                      "repeats": repeats}))
     if failed:
         sys.exit(1)
 
@@ -12977,6 +13033,7 @@ COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["orphans"] = (orphans_cmd, 0, 0)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
+COMMANDS["repeats"] = (repeats_cmd, 2, 2)
 COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["pre-review"] = (pre_review_cmd, 1, 1)
 COMMANDS["grounding"] = (grounding_cmd, 2, 2)
