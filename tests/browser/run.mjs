@@ -290,6 +290,36 @@ const CAPTURE_JOBS = [
     note: "review panel: round 2 findings need a person",
     needs: "decide on the round-2 findings",
   },
+  {
+    id: "114-steer-export",
+    project: "sample",
+    title: "Synthetic steered export",
+    stage: "build",
+    updated: "2026-01-02T14:30:00Z",
+    round: 2,
+    steer: [
+      { note: "Keep the CSV header order the same as the old report.", at: "2026-01-02T14:00:00Z" },
+      { note: "Name the file export.csv.", at: "2026-01-02T14:30:00Z" },
+    ],
+    agents: [
+      {
+        at: "2026-01-02T13:00:00Z",
+        stage: "build",
+        role: "build",
+        round: 1,
+        harness: "provider-a",
+        via: "native",
+      },
+      {
+        at: "2026-01-02T14:20:00Z",
+        stage: "build",
+        role: "build",
+        round: 2,
+        harness: "provider-a",
+        via: "native",
+      },
+    ],
+  },
 ];
 // More merged rows than the slim board read carries, so the merged column loads the rest on demand.
 const CAPTURE_MERGED = Array.from({ length: 30 }, (_, n) => {
@@ -490,12 +520,20 @@ async function capture(outdir, referencePath) {
       "---\nrepo: example/sample\nbase: main\ntitle: Synthetic sample\n---\n",
       "text/markdown",
     );
-    await put(
-      origin,
-      "/api/board",
-      JSON.stringify({ updated: "2026-01-01T12:00:00Z", jobs: CAPTURE_BOARD }),
-      "application/json",
-    );
+    // The Worker takes one appended steering note per row and write, so notes land a round at a time.
+    const steerRounds = Math.max(...CAPTURE_BOARD.map((j) => j.steer?.length ?? 0));
+    for (let n = 0; n <= steerRounds; n++)
+      await put(
+        origin,
+        "/api/board",
+        JSON.stringify({
+          updated: "2026-01-01T12:00:00Z",
+          jobs: CAPTURE_BOARD.map(({ steer, ...j }) =>
+            steer && n ? { ...j, steer: steer.slice(0, n) } : j,
+          ),
+        }),
+        "application/json",
+      );
     await put(origin, "/api/backlog", CAPTURE_BACKLOG, "text/markdown");
     await put(origin, "/api/jobs/sample/001-capture/spec.md", CAPTURE_SPEC, "text/markdown");
     await put(origin, "/api/jobs/sample/001-capture/build.md", CAPTURE_BUILD, "text/markdown");
@@ -2457,6 +2495,46 @@ async function capture(outdir, referencePath) {
           document.getElementById("rework-save").click();
         });
         await page.waitForFunction(() => document.getElementById("rework-save").disabled);
+      },
+      true,
+    );
+    const openSteered = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#114-steer-export";
+      });
+      await page.waitForFunction(
+        () =>
+          document.getElementById("d-meta").textContent.includes("114-steer-export") &&
+          document.querySelector("#d-doc").textContent !== "loading files",
+        { timeout: 30000 },
+      );
+    };
+    // The reference page has no steering notes, so its side shows the drawer head alone.
+    await view("steer-drawer-1280", 1280, 900, "light", async (page) => {
+      await openSteered(page);
+      await page.evaluate(() => {
+        const list = document.getElementById("d-steer-notes");
+        if (list) list.open = true;
+      });
+      return clipOf(page, ".detail-head");
+    });
+    // The reference page has no Add steering note, so its side shows the drawer alone.
+    await view(
+      "steer-dialog-390",
+      390,
+      844,
+      "dark",
+      async (page) => {
+        await openSteered(page);
+        await page.evaluate(() => document.getElementById("d-steer")?.click());
+        await page.waitForFunction(
+          () => !document.getElementById("d-steer") || document.getElementById("steer-dlg").open,
+          { timeout: 30000 },
+        );
+        await page.evaluate(() => {
+          const note = document.getElementById("steer-note");
+          if (note) note.value = "Keep the CSV header order the same as the old report.";
+        });
       },
       true,
     );

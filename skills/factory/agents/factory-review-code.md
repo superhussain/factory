@@ -64,8 +64,8 @@ device` or `needs a person`. An `untested` row is excused only when its check tr
 needs a device or a person this environment lacks. Compare each row's `Check` cell
 with the check spec.md gives for that criterion. A cell that runs a different or
 narrower command, test or step is a CHANGES finding with the signature
-`spec.md#criterion-<n>-check-differs`. A different working directory, a `git -C` or
-`PYTHONPATH=tests/cli` prefix, or whitespace is not a difference. Pick one `passed`
+`spec.md#criterion-<n>-check-differs`. A different working directory, a `git -C`
+prefix or the project file's command prefix, or whitespace is not a difference. Pick one `passed`
 row whose spec check is a command, rerun that spec check yourself, never the `Check`
 cell, and compare its output with `Expected`. Give each gap the signature
 `spec.md#criterion-<n>-<result>`, such as `spec.md#criterion-2-untested`, or

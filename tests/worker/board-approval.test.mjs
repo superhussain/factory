@@ -308,3 +308,93 @@ test("a device PUT moves a kept dashboard note out of build", async () => {
   const response = await s.put({ ...ROW, note: DASHBOARD });
   assert.equal(response.status, 200);
 });
+
+// Only a signed-in person appends a steering note while the job runs. Rows are the made-up
+// running example: 114-steer-export sits at review, and a person adds one note at 14:00.
+const STEER_ROW = { id: "114-steer-export", project: "sample", stage: "review" };
+const NOTE = {
+  note: "Keep the CSV header order the same as the old report.",
+  at: "2026-01-02T14:00:00Z",
+};
+const steered = (steer, row = STEER_ROW) => ({ ...row, steer });
+const deviceSteerRefusal =
+  'a board write from a device cannot change steer on "114-steer-export": only a signed-in person adds a steering note on the dashboard. Nothing was written.';
+const steerShapeRefusal =
+  'steer on "114-steer-export" must keep its stored notes and add one {note, at} while the job is at spec, build or review, at most 10 notes. Nothing was written.';
+
+test("a person's PATCH appends a steering note", async () => {
+  assert.equal((await setup(STEER_ROW).patch(steered([NOTE]), person)).status, 200);
+  const later = { note: "Name the file export.csv.", at: "2026-01-02T14:30:00Z" };
+  const response = await setup(steered([NOTE])).patch(steered([NOTE, later]), person);
+  assert.equal(response.status, 200);
+});
+
+test("a device PUT cannot change steer", async () => {
+  const s = setup(STEER_ROW);
+  await refused(s, () => s.put(steered([NOTE])), deviceSteerRefusal);
+});
+
+test("a device PATCH cannot change steer", async () => {
+  const s = setup(STEER_ROW);
+  await refused(s, () => s.patch(steered([NOTE]), device), deviceSteerRefusal);
+});
+
+test("a device PUT keeps a stored steer", async () => {
+  const stored = steered([NOTE]);
+  const response = await setup(stored).put({ ...stored, claim: { device: "host-a" } });
+  assert.equal(response.status, 200);
+});
+
+test("a person's PATCH cannot add an 11th note", async () => {
+  const ten = Array.from({ length: 10 }, (_, i) => ({ ...NOTE, note: `Note ${i}.` }));
+  const s = setup(steered(ten));
+  await refused(s, () => s.patch(steered([...ten, NOTE]), person), steerShapeRefusal);
+});
+
+test("a person's PATCH cannot edit a stored note", async () => {
+  const s = setup(steered([NOTE]));
+  const edited = { ...NOTE, note: "Drop the header row." };
+  const later = { ...NOTE, at: "2026-01-02T14:30:00Z" };
+  await refused(s, () => s.patch(steered([edited, later]), person), steerShapeRefusal);
+});
+
+test("a person's PATCH cannot add a note at merged", async () => {
+  const merged = { ...STEER_ROW, stage: "merged" };
+  const s = setup(merged);
+  await refused(s, () => s.patch(steered([NOTE], merged), person), steerShapeRefusal);
+});
+
+test("a person's PATCH cannot add a malformed note", async () => {
+  for (const bad of [
+    { note: "   ", at: NOTE.at },
+    { note: NOTE.note, at: "2026-01-02 14:00" },
+    { note: NOTE.note },
+    { ...NOTE, extra: true },
+    null,
+  ]) {
+    const s = setup(STEER_ROW);
+    await refused(s, () => s.patch(steered([bad]), person), steerShapeRefusal);
+  }
+  const s = setup(STEER_ROW);
+  await refused(s, () => s.patch(steered(null), person), steerShapeRefusal);
+});
+
+test("a person's PATCH cannot add a note with a link", async () => {
+  const s = setup(STEER_ROW);
+  const linked = { ...NOTE, note: "Copy https://example.test/report." };
+  await refused(
+    s,
+    () => s.patch(steered([linked]), person),
+    'steer on "114-steer-export" note: links are not allowed. Nothing was written.',
+  );
+});
+
+test("a person's PATCH cannot add steer to a rider", async () => {
+  const rider = { ...STEER_ROW, refs: [{ id: "113-export-core", kind: "batched-into" }] };
+  const s = setup(rider);
+  await refused(
+    s,
+    () => s.patch(steered([NOTE], rider), person),
+    'a board write cannot add steer to "114-steer-export": it is batched into "113-export-core" and follows its lead. Act on the lead instead. Nothing was written.',
+  );
+});

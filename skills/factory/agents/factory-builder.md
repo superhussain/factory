@@ -105,6 +105,13 @@ as blocked, as above. When the orchestrator resumes you with `pre-review.md` ins
 fix each check it marks failed, reading the full log at its `Logs:` path, then verify
 and commit as below.
 
+**Steering notes.** Your prompt may carry notes a person added to this running job on
+the dashboard, each in an operator-preferences envelope with a `steer:` source. Add a
+`### Steering notes` table to this run's build.md section, one row per note, with the
+columns `At`, `Note`, `Applied` and `Why`. Cut each note to 80 characters in the table.
+`Applied` is `yes` when you acted on the note inside the spec's scope, or `no` with the
+reason in `Why`, such as a note that would add scope.
+
 **Recovery.** A rework file may say an earlier builder died mid-run. Then there are
 no findings to fix. Check `git status` and `git log main..HEAD` in the worktree,
 judge any uncommitted edits against the spec (keep and commit what's right, revert

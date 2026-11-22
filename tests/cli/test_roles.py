@@ -473,6 +473,15 @@ class RolesTest(IsolatedTestCase):
                       "list them. When it lacks one, add a task that extends the tool.",
                       flat("agents/factory-spec-writer.md"))
 
+    def test_builder_steering_notes(self):
+        builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
+        for phrase in ("**Steering notes.**", "`### Steering notes`", "`At`, `Note`, `Applied` and `Why`",
+                       "80 characters", "`steer:` source"):
+            self.assertIn(phrase, builder)
+        skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("Only `build` takes `--port`. It wraps `steer` notes. A builder resume is a dispatch: fresh "
+                      "prompt, `agent record`.", skill)
+
     def test_builder_waits_in_background(self):
         builder = " ".join((SKILL / "agents/factory-builder.md").read_text(encoding="utf-8").split())
         self.assertIn("run_in_background", builder)
@@ -560,4 +569,6 @@ class RolesTest(IsolatedTestCase):
                        "rerun that spec check yourself, never the `Check` cell"):
             self.assertIn(phrase, review)
         self.assertNotIn("Rerun one `passed` row's check yourself", review)
+        self.assertIn("the project file's command prefix", review)
+        self.assertNotIn("PYTHONPATH=tests/cli", review)
         self.assertIn("Copy `Check` from the spec criterion's check", flat("factory-builder.md"))

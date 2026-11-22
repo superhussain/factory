@@ -20,6 +20,7 @@
   "tracer": { "follow": true, "gather": true, "feature": "factory-42", "url": "set only by factory.py after a Tracer mirror", "scope": "gathering, approved or declined; set only by factory.py", "building": "true only while a Tracer build agent holds the feature; set by pickup", "stopped": "true once factory.py asked Tracer to stop the build scope approval queued; set only by factory.py", "tasks": "up to 30 {id, title, status} from the Tracer feature; set by pickup once Tracer builds the job" },
   "note": "optional one-line status, e.g. escalation reason",
   "needs": "optional: what only a human can do, e.g. approve spec.md",
+  "steer": [{ "note": "Keep the CSV header order the same as the old report.", "at": "2026-01-02T14:00:00Z" }],
   "not_before": "optional UTC time; pickup and stuck leave the job alone until it, e.g. 2026-11-17T09:00:00Z",
   "port": "optional dev-server port or block the builder holds, e.g. 8130-8139",
   "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | depends-on | batched-into (set only by factory.py batch; dropped by the lead's close or merge, or the dashboard's Remove from batch while the lead is at spec)" }],
@@ -74,6 +75,11 @@ device build. Jobs whose `runs` match rode the same build. Both are optional, an
 does not count toward `max_inflight`. `{"not_before": null}` clears it, and a past time has no
 effect. Setting it on an open job releases the writer's own claim, so a session parks a job with
 one board write and ends. `stuck` resumes it after that time.
+`steer` holds up to 10 steering notes a person added on the dashboard while the job is at
+`spec`, `build` or `review`, oldest first. Only a signed-in person appends one, one per write, and the
+Worker refuses any edit, a device write, and notes on riders. `factory.py board` refuses a `steer`
+patch with exit 2. `factory.py prompt ... build` wraps every note as data in each later build
+prompt, as [dashboard](dashboard.md) describes.
 `backlog` is set only on jobs decided from the Backlog column or `backlog decide`. It holds
 the backlog line, the decision, when it was made, and any notes typed with the decision.
 Approve also appends the notes to `idea`.

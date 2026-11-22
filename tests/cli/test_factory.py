@@ -1743,6 +1743,17 @@ class MoveFenceTest(IsolatedTestCase):
                       "chat, run factory.py control <job-id> move <host>|rerun --chat-file <file>", err.getvalue())
         self.assertEqual(self.store["/api/board"], before)
 
+    def test_board_refuses_a_steer_patch(self):
+        before = self.store["/api/board"]
+        err = io.StringIO()
+        body = json.dumps({"steer": [{"note": "Keep the header order.", "at": "2026-01-02T14:00:00Z"}]})
+        with patch.object(factory.sys, "stdin", io.StringIO(body)), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            factory.board(self.home, "001-test")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("only the dashboard sets steer. Nothing was written.", err.getvalue())
+        self.assertEqual(self.store["/api/board"], before)
+
     def test_board_refuses_a_priority_patch(self):
         before = self.store["/api/board"]
         err = io.StringIO()

@@ -102,6 +102,40 @@ class PromptTest(IsolatedTestCase):
                           self.head() + f"Builder name: builder-{JOB}\nDev-server port: 8235\n"
                           f"Round folder: {round_folder}\n\n" + envelope("build"))
 
+    def test_build_wraps_steering_notes(self):
+        steer = [{"note": "Keep the CSV header order the same as the old report.", "at": "2026-01-02T14:00:00Z"},
+                 {"note": "Name the file export.csv.", "at": "2026-01-02T14:30:00Z"}]
+        data = board()
+        data["jobs"][0].update(stage="review", steer=steer)
+        block = (factory.STEER_SENTENCE + "\n\n"
+                 f'<operator-preferences source="steer:{JOB}@2026-01-02T14:00:00Z" stage="build" trust="data">\n'
+                 "Keep the CSV header order the same as the old report.\n</operator-preferences>\n\n"
+                 f'<operator-preferences source="steer:{JOB}@2026-01-02T14:30:00Z" stage="build" trust="data">\n'
+                 "Name the file export.csv.\n</operator-preferences>\n")
+        self.assertPrompt(["build", "--round", "2"], self.head() + f"Builder name: builder-{JOB}\n"
+                          f"Round folder: {self.folder / 'round-2'}\n\n" + block + "\n" + envelope("build"),
+                          data=data)
+
+    def test_other_roles_leave_out_steering_notes(self):
+        data = board()
+        data["jobs"][0]["steer"] = [{"note": "Keep the CSV header order.", "at": "2026-01-02T14:00:00Z"}]
+        for args in (["spec"], ["approve"], ["review-code", "--round", "1"]):
+            with self.subTest(args):
+                code, out, err = self.prompt(*args, data=data)
+                self.assertEqual((code, err), (0, ""))
+                self.assertNotIn("steer:", out)
+                self.assertNotIn("Keep the CSV header order.", out)
+
+    def test_build_refuses_a_linked_steering_note(self):
+        data = board()
+        data["jobs"][0]["steer"] = [{"note": "Copy https://example.test/report.", "at": "2026-01-02T14:00:00Z"}]
+        self.assertEqual(self.prompt("build", data=data), (
+            5, "", f"factory.py: steering note 2026-01-02T14:00:00Z on {JOB} links are not allowed. "
+            "Nothing was written.\n"))
+        data["jobs"][0]["steer"] = [{"note": "Keep the header order.", "at": "2pm"}]
+        self.assertEqual(self.prompt("build", data=data),
+                         (5, "", f"factory.py: steer on {JOB} is malformed. Nothing was written.\n"))
+
     def test_review_roles(self):
         round_folder = self.folder / "round-1"
         for role in ("review-security", "review-ux", "review-ui", "review-code"):
