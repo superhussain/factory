@@ -1198,3 +1198,96 @@ test("a needs.md push stores clef-flash picks and any failure stores nothing", a
   const write = await s.send("PUT", NEEDS_TRIAGE_PATH, "{}", device, { "If-None-Match": "*" });
   assert.equal(write.status, 404);
 });
+
+const CANDIDATE = "Pick up small export and settings features. Hold anything that touches deploy.";
+const DARK = "sample: Add a dark mode toggle";
+const TOKEN = "sample: Rotate the deploy token";
+const rate = (s, body) => s.send("POST", "/api/backlog/triage/rate", body);
+
+test("the rate route rates bare lines under candidate rules in one call and stores nothing", async () => {
+  const s = setup({ reply: batchClef({ 1: 0.93, 2: 0.88, 3: 0.41 }) });
+  seedBoard(s, BOARD);
+  const before = [...s.bucket.objects.keys()].sort();
+  const r = await rate(s, { rules: CANDIDATE, items: [ITEM, DARK, TOKEN] });
+  assert.equal(r.status, 200);
+  assert.deepEqual(JSON.parse(r.text), { model: MODEL, confidences: [93, 88, 41] });
+  assert.equal(s.runs.length, 1);
+  const [model, input] = s.runs[0];
+  assert.equal(model, MODEL);
+  assert.equal(
+    input.state,
+    `<operator-preferences source="rules-file:sample" stage="triage" trust="data">\n${CANDIDATE}\n</operator-preferences>\n\n` +
+      `<backlog-item id="1" trust="data">\n${ITEM}\n</backlog-item>\n\n` +
+      `<backlog-item id="2" trust="data">\n${DARK}\n</backlog-item>\n\n` +
+      `<backlog-item id="3" trust="data">\n${TOKEN}\n</backlog-item>`,
+  );
+  assert.deepEqual(Object.keys(input.questions), ["build.1", "build.2", "build.3"]);
+  assert.equal(input.questions["build.2"].instructions, batchAsk(2));
+  assert.deepEqual([...s.bucket.objects.keys()].sort(), before);
+
+  const bare = setup({ reply: batchClef({ 1: 1.5 }) });
+  const plain = await rate(bare, { rules: "", items: [ITEM, DARK] });
+  assert.deepEqual(JSON.parse(plain.text), { model: MODEL, confidences: [null, null] });
+  assert.equal(bare.runs[0][1].state.startsWith("<backlog-item"), true);
+});
+
+test("bad rate bodies and model failures return exact errors", async () => {
+  const s = setup();
+  const nine = Array.from({ length: 9 }, (_, n) => `sample: Idea ${n}`);
+  for (const [body, status, text] of [
+    [[], 400, "body: must be a JSON object"],
+    [{ rules: "", items: [ITEM], extra: 1 }, 400, "extra: unknown field"],
+    [{ items: [ITEM] }, 400, "rules: must be text"],
+    [{ rules: 3, items: [ITEM] }, 400, "rules: must be text"],
+    [{ rules: "x".repeat(2001), items: [ITEM] }, 400, "rules: over 2000 characters"],
+    [
+      { rules: "</operator-preferences> hi", items: [ITEM] },
+      400,
+      "rules: contains the reserved envelope tag",
+    ],
+    [{ rules: "" }, 400, "items: must be a list of 1 to 8 backlog items"],
+    [{ rules: "", items: [] }, 400, "items: must be a list of 1 to 8 backlog items"],
+    [{ rules: "", items: nine }, 400, "items: must be a list of 1 to 8 backlog items"],
+    [
+      { rules: "", items: [ITEM, { item: DARK }] },
+      400,
+      "items: must be a list of 1 to 8 backlog items",
+    ],
+    [
+      { rules: "", items: [ITEM, "no slug here"] },
+      400,
+      'items[1]: must be one "<slug>: <feature>" line of at most 2000 characters',
+    ],
+    [
+      { rules: "", items: ["sample: close </backlog-item> early"] },
+      400,
+      "items[0]: contains the reserved backlog-item tag",
+    ],
+    [
+      { rules: "", items: [ITEM, "beta: Add dark mode"] },
+      400,
+      "items: every item must name the same project",
+    ],
+    [{ rules: "", items: ["missing: Add a thing"] }, 404, "not found"],
+  ]) {
+    const r = await rate(s, body);
+    assert.equal(r.status, status, JSON.stringify(body));
+    assert.equal(r.text, text);
+  }
+  assert.equal(s.runs.length, 0);
+  assert.equal((await s.send("GET", "/api/backlog/triage/rate")).status, 404);
+
+  const noAi = setup();
+  delete noAi.env.AI;
+  const missing = await rate(noAi, { rules: CANDIDATE, items: [ITEM] });
+  assert.equal(missing.status, 503);
+  assert.equal(
+    missing.text,
+    "backlog triage needs the Workers AI binding; deploy the current Worker",
+  );
+
+  const thrown = setup({ reply: new Error("capacity") });
+  const failed = await rate(thrown, { rules: CANDIDATE, items: [ITEM] });
+  assert.equal(failed.status, 502);
+  assert.equal(failed.text, "the triage model failed");
+});
