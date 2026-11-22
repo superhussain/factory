@@ -159,7 +159,8 @@ class TriageReplayTests(IsolatedTestCase):
 
     def test_bad_arguments_exit_2(self):
         for args in (["triage", "rerun", "sample"], ["triage", "replay", "sample", "--threshold"],
-                     ["triage", "replay", "sample", "--limit", "80"], ["triage", "replay", "bad slug!"]):
+                     ["triage", "replay", "sample", "--limit", "80"], ["triage", "replay", "bad slug!"],
+                     ["triage", "replay"], ["triage"], ["triage", "replay", "sample", "--threshold", "80", "x"]):
             code, out, err = invoke(self.module, args)
             self.assertEqual((code, out, err), (2, "", USAGE), args)
         for value in ("0", "101", "8.5", "x", "-5"):
@@ -173,9 +174,17 @@ class TriageReplayTests(IsolatedTestCase):
         self.assertEqual((code, err), (4, "factory.py: no factory project missing\n"))
 
     def test_no_threshold_and_no_flag_exits_2(self):
-        self.view = (404, {})
+        self.view = (200, {"triage": {"enabled": False}})
         code, _, err = invoke(self.module, ["triage", "replay", "sample"])
         self.assertEqual((code, err), (2, "factory.py: project sample has no triage threshold; pass --threshold N\n"))
         code, out, _ = self.replay("sample", "--threshold", "80")
         self.assertEqual(code, 0)
         self.assertEqual(out["thresholds"], [dict(EXAMPLE_OUT["thresholds"][1], current=False)])
+
+    def test_missing_or_invalid_pipeline_view_exits_2(self):
+        for status, message in ((404, "no pipeline view; register the project or deploy the current Worker"),
+                                (409, "stored pipeline configuration no longer validates")):
+            self.view = (status, {})
+            for args in ((), ("--threshold", "80")):
+                code, out, err = invoke(self.module, ["triage", "replay", "sample", *args])
+                self.assertEqual((code, out, err), (2, "", f"factory.py: {message}\n"), (status, args))

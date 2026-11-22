@@ -1753,8 +1753,12 @@ def triage_replay(slug, threshold=None):
     if slug not in registered(home):
         fail(f"no factory project {slug}", 4)
     status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+    if status == 404:
+        fail("no pipeline view; register the project or deploy the current Worker", 2)
+    if status == 409:
+        fail("stored pipeline configuration no longer validates", 2)
     try:
-        view = json.loads(text) if status == 200 else None
+        view = json.loads(text)
     except ValueError:
         view = None
     triage = view.get("triage") if isinstance(view, dict) else None
@@ -1809,10 +1813,12 @@ def triage_replay(slug, threshold=None):
                       "thresholds": rows}, indent=2))
 
 
-def triage_cmd(sub, slug, *rest):
+def triage_cmd(*args):
     """triage replay <project-slug> [--threshold N]."""
-    if sub != "replay" or not SLUG.fullmatch(slug) or rest and (len(rest) != 2 or rest[0] != "--threshold"):
+    if len(args) not in (2, 4) or args[0] != "replay" or not SLUG.fullmatch(args[1]) \
+            or len(args) == 4 and args[2] != "--threshold":
         fail("usage: triage replay <project-slug> [--threshold N]", 2)
+    slug, rest = args[1], args[2:]
     threshold = None
     if rest:
         threshold = int(rest[1]) if re.fullmatch(r"[0-9]{1,3}", rest[1]) else 0
@@ -13140,7 +13146,7 @@ COMMANDS["with-cloudflare"] = (with_cloudflare_cmd, 0, sys.maxsize)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)
 COMMANDS["inbox"] = (inbox, 0, 0)
-COMMANDS["triage"] = (triage_cmd, 2, 4)
+COMMANDS["triage"] = (triage_cmd, 0, sys.maxsize)
 
 def main(argv=None):
     global _HOME_OVERRIDE, _LOCATED, _READS
