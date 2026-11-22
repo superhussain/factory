@@ -1541,6 +1541,7 @@ function syncAppBadge(count) {
 }
 
 let jobs = [];
+let boardTrials = [];
 let openId = null;
 // The Worker's global stop record, or null before the first read.
 let haltRecord = null;
@@ -1785,6 +1786,7 @@ function takeBoard(data) {
   boardArchived = Number.isInteger(data.archived?.max_id);
   boardUpdated = data.updated || '';
   boardMaxId = Number.isInteger(data.archived?.max_id) ? data.archived.max_id : 0;
+  boardTrials = Array.isArray(data.trials) ? data.trials : [];
 }
 
 // Saved copies paint the board at once. The network read that follows replaces them.
@@ -1815,6 +1817,7 @@ function boardTaken() {
   boardSound();
   toastBoard();
   if (settingsShown === 'projects') renderProjectList();
+  if (settingsShown === 'pipeline') renderPipelineTrials();
   syncDetail();
   syncBacklogRoute();
   syncIdeaEditor();
@@ -4528,6 +4531,8 @@ const pipelineLoads = new Map();
 let pipelineGeneration = 0;
 const PIPELINE_STAGES = ['spec', 'build', 'review', 'approve', 'babysit'];
 const PIPELINE_GATES = ['spec-approval'];
+// Same as factory.py TRIAL_PAUSE_REVERTS.
+const TRIAL_PAUSE_REVERTS = 2;
 const pipelineObject = doc => !!doc && typeof doc === 'object' && !Array.isArray(doc);
 // Same pattern and messages as the pickup block of validatePipeline in worker/admission.js.
 const PIPELINE_HOST = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -4930,6 +4935,49 @@ function selectPipelineScope() {
   loadPipelineHistory(scope);
   loadPipelineEffective(scope);
   renderPipelineSettings();
+  renderPipelineTrials();
+}
+
+// Board trials are agent-written records, so every cell is textContent.
+const trialRow = (t) => !!t && typeof t === 'object' && ['id', 'project', 'stage', 'status'].every((k) => typeof t[k] === 'string');
+
+function trialsPaused(slug) {
+  return boardTrials.filter((t) => trialRow(t) && t.project === slug && t.status === 'reverted' && !t.resumed).length >= TRIAL_PAUSE_REVERTS;
+}
+
+function renderPipelineTrials() {
+  const scope = $('pipeline-scope').value;
+  const slug = scope.startsWith('projects/') ? scope.slice(9) : '';
+  const rows = boardTrials
+    .filter((t) => trialRow(t) && (!slug || t.project === slug))
+    .sort((a, b) => String(b.opened ?? '').localeCompare(String(a.opened ?? '')));
+  const unsettled = 'not settled yet';
+  $('pipeline-trials-body').replaceChildren(...rows.map((t) => {
+    const tr = document.createElement('tr');
+    const head = document.createElement('th');
+    head.scope = 'row';
+    head.textContent = t.id;
+    tr.append(head);
+    for (const text of [
+      t.stage,
+      t.status + (t.status === 'reverted' && t.resumed ? ', resumed' : ''),
+      Array.isArray(t.arms?.a) && Array.isArray(t.arms?.b) ? t.arms.a.length + ' / ' + t.arms.b.length : unsettled,
+      typeof t.reads?.rounds === 'string' ? t.reads.rounds : unsettled,
+      typeof t.reads?.tokens === 'string' ? t.reads.tokens : unsettled,
+    ]) tr.insertCell().textContent = text;
+    return tr;
+  }));
+  const paused = (slug ? [slug] : [...new Set(rows.map((t) => t.project))].sort()).filter(trialsPaused);
+  $('pipeline-trials-paused').replaceChildren(...paused.map((p) => {
+    const line = document.createElement('p');
+    const code = document.createElement('code');
+    code.textContent = 'factory.py trial resume ' + p;
+    line.append('Stage-note trials for ' + p + ' are paused after 2 reverts. Retro edits no ' + p + ' stage note until a person runs ', code, ' at a terminal.');
+    return line;
+  }));
+  $('pipeline-trials-paused').hidden = !paused.length;
+  $('pipeline-trials-table').hidden = !rows.length;
+  $('pipeline-trials-empty').hidden = !!rows.length;
 }
 
 function enterPipelineSection() {
