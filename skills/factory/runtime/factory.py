@@ -6368,6 +6368,21 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
 
 PRIORITY_NUDGE = ("The owner prioritized factory job {id}. If your turn ended while work "
                   "on it is still owed, continue with the next step now.")
+IDLE_NUDGE_MINUTES = 20
+IDLE_NUDGE = ("Factory job {id} shows no commit, file or board change for 20 minutes while this session sits "
+              "idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent "
+              "or command that is still running, run factory.py hold for the job with your --session tag, then "
+              "keep waiting.")
+
+
+def read_idle_watch(home):
+    """The jobs dict of <home>/idle-watch.json, {} when the file is missing or malformed."""
+    try:
+        doc = json.loads(Path(home, "idle-watch.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    jobs = doc.get("jobs") if isinstance(doc, dict) and doc.get("version") == 1 else None
+    return jobs if isinstance(jobs, dict) else {}
 
 
 def paseo_send(agent, message):
@@ -6431,6 +6446,75 @@ def priority_nudge_pass(home, data, device, dry):
             print(f"nudged {line}")
 
 
+def idle_watch_pass(home, data, device, dry):
+    """Nudge the idle Paseo agent of an in-flight job claimed on this host once its worktree and
+    board job sit unchanged for IDLE_NUDGE_MINUTES, and move the job to needs-human when they
+    stay unchanged that long again. The quiet signatures live in <home>/idle-watch.json."""
+    server = paseo_server()
+
+    def due(j):
+        c, link, job_id = j.get("claim"), j.get("paseo"), j.get("id")
+        return (j.get("stage") in IN_FLIGHT and isinstance(c, dict) and c.get("device") == device
+                and server and isinstance(link, dict) and link.get("server") == server
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"])
+                and not gated(j) and not paused(j) and not closing(j) and not lead_of(j))
+
+    old = read_idle_watch(home)
+    watch = {}
+    jobs = [j for j in data["jobs"] if due(j)]
+    statuses = paseo_statuses() if jobs else {}
+    if statuses is None:
+        print("factory.py: pickup skips idle checks: paseo did not answer", file=sys.stderr)
+        return
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=IDLE_NUDGE_MINUTES)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for j in jobs:
+        job_id, project, agent = j["id"], j.get("project"), j["paseo"].get("agent")
+        prev = old.get(job_id) if isinstance(old.get(job_id), dict) else {}
+        if statuses.get(agent) != "idle":
+            if prev:
+                watch[job_id] = prev
+            continue
+        wt = Path(home, "worktrees", project, job_id)
+        there = wt.exists()
+        sig = {"agent": agent, "head": git(wt, "rev-parse", "HEAD") if there else "",
+               "tree": hashlib.sha256(git(wt, "status", "--porcelain").encode()).hexdigest()[:12] if there else "",
+               "updated": j.get("updated")}
+        if any(prev.get(k) != v for k, v in sig.items()) or not isinstance(prev.get("since"), str):
+            watch[job_id] = dict(sig, since=now())
+            continue
+        entry = watch[job_id] = dict(prev)
+        line = f"{job_id} {project}: agent {agent}"
+        if "nudged" not in entry:
+            if entry["since"] >= cutoff:
+                continue
+            if dry:
+                print(f"would nudge idle {line}")
+            elif not paseo_send(agent, IDLE_NUDGE.format(id=job_id)):
+                print(f"factory.py: pickup could not nudge idle {job_id}: paseo send failed", file=sys.stderr)
+            else:
+                entry["nudged"] = now()
+                print(f"nudged idle {line}")
+            continue
+        if dry or not isinstance(entry["nudged"], str) or entry["nudged"] >= cutoff:
+            continue
+        note = f"idle: no progress {IDLE_NUDGE_MINUTES} minutes after a nudge to agent {agent}"
+
+        def change(text, job_id=job_id, stage=j["stage"], updated=j.get("updated"), note=note):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            if (found is None or found.get("stage") != stage or found.get("updated") != updated
+                    or not isinstance(found.get("claim"), dict) or found["claim"].get("device") != device):
+                return None, False
+            patch_job(board, job_id, {"stage": "needs-human", "note": note, "claim": None})
+            return dump_board(board), True
+        if cas(home, "/api/board", change):
+            print(f"needs-human {job_id} {project}: {note}")
+        del watch[job_id]
+    if not dry and watch != old:
+        write_atomic(Path(home, "idle-watch.json"), json.dumps({"version": 1, "jobs": watch}, indent=2) + "\n")
+
+
 def moved_here(j, device):
     """True when the dashboard moved this in-flight job to this host, no pickup has claimed it yet,
     and no stop of it is still queued on this host, as for a rerun."""
@@ -6451,6 +6535,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     close_pass(home, data, device, minutes, dry)
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
+    idle_watch_pass(home, data, device, dry)
     auto_babysit_pass(home, data, device, minutes, paths, settings, dry)
     babysit_pass(home, data, device, minutes, paths, settings, dry)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0

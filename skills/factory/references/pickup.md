@@ -433,6 +433,16 @@ changes nothing. Then install one timer per host.
 - When the job's session on this host was claimed before `priority.at` and its Paseo agent is not closed, `pickup` sends the agent one fixed nudge with `paseo send --no-wait`, then sets `priority.nudged`. A failed send is printed on stderr and retried next run.
 - Only the dashboard, `pickup` and `factory.py control` write `priority`. `board` refuses a `priority` patch with exit 2.
 
+## Nudging an idle job
+
+- `pickup` watches each job at `spec`, `build`, `review` or `approve` that this device claimed and whose Paseo agent runs on this host's server. It skips jobs with an ask, a pause, a queued close or a batch lead.
+- The quiet signature is the agent, the worktree's `HEAD`, a hash of `git status --porcelain` and the job's `updated`. It lives in `<home>/idle-watch.json`, never on the board. Any commit, file edit or board write starts the window again.
+- Only an `idle` agent counts. A `running` agent keeps its entry and is skipped that run.
+- After 20 quiet minutes, `pickup` sends the agent one fixed nudge with `paseo send --no-wait` and prints `nudged idle <id> <project>: agent <agent>`. `--dry-run` prints `would nudge idle ...` and writes nothing. A failed send prints `factory.py: pickup could not nudge idle <id>: paseo send failed` on stderr and retries next run.
+- The nudge reads: "Factory job <id> shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory.py hold for the job with your --session tag, then keep waiting."
+- After 20 more quiet minutes, `pickup` moves the job to `needs-human`, releases the claim and prints `needs-human <id> <project>: idle: no progress 20 minutes after a nudge to agent <agent>`. A board change since the read wins, so a fresh `hold` keeps the job.
+- When paseo does not answer, `pickup` prints `factory.py: pickup skips idle checks: paseo did not answer` on stderr.
+
 ## Pausing a job
 
 - The dashboard's Pause pickup item sets `paused = {at}` on a job with a project that is not merged or closed. Resume pickup deletes it.
