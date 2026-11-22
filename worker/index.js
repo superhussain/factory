@@ -481,7 +481,8 @@ async function boardRefusal(env, stored, data, sameBase, principal) {
         checkBatchRefs(stored.jobs, data.jobs) ??
         checkNewStarters(stored.jobs, data.jobs) ??
         (await checkApprovalNotes(env, stored.jobs, data.jobs, principal)) ??
-        checkResolve(stored.jobs, data.jobs, principal))
+        checkResolve(stored.jobs, data.jobs, principal) ??
+        checkSteer(stored.jobs, data.jobs, principal))
       : null)
   );
 }
@@ -2693,7 +2694,7 @@ function checkArchived(stored, data) {
   return null;
 }
 
-const RIDER_CONTROLS = ["move", "priority", "paused", "close", "babysit", "resolve"];
+const RIDER_CONTROLS = ["move", "priority", "paused", "close", "babysit", "resolve", "steer"];
 const DASHBOARD_APPROVED_NOTE = "spec approved on the dashboard";
 const TRACER_APPROVED_NOTE = "spec approved in Tracer";
 const RECEIPT_PREFIX = "tracer-scope-approval/v2";
@@ -2832,6 +2833,47 @@ function checkResolve(storedJobs, jobs, principal) {
         (r.action === "approve" && keys === "action,at"));
     if (!wellFormed)
       return `resolve on ${id} must be {action: "rework", note, at} or {action: "approve", at}. Nothing was written.`;
+  }
+  return null;
+}
+
+const STEER_STAGES = ["spec", "build", "review"];
+const STEER_MAX = 10;
+const STEER_AT = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
+
+// Only a signed-in person appends a steering note, one {note, at} per write, while the stored
+// row is at spec, build or review. A row whose steer is unchanged or omitted passes. An error
+// message, or null.
+function checkSteer(storedJobs, jobs, principal) {
+  const stored = new Map();
+  for (const j of storedJobs)
+    if (typeof j?.id === "string" && !stored.has(j.id)) stored.set(j.id, j);
+  for (const row of jobs) {
+    if (typeof row !== "object" || row === null || typeof row.id !== "string") continue;
+    const s = row.steer;
+    const storedRow = stored.get(row.id);
+    if (s === undefined || JSON.stringify(s) === JSON.stringify(storedRow?.steer)) continue;
+    const id = quoteIdCut(row.id, QUOTED_ID_MAX);
+    if (principal?.kind !== "user")
+      return `a board write from a device cannot change steer on ${id}: only a signed-in person adds a steering note on the dashboard. Nothing was written.`;
+    const kept = Array.isArray(storedRow?.steer) ? storedRow.steer : [];
+    const added = Array.isArray(s) ? s[s.length - 1] : undefined;
+    const wellFormed =
+      STEER_STAGES.includes(storedRow?.stage) &&
+      s.length === kept.length + 1 &&
+      s.length <= STEER_MAX &&
+      JSON.stringify(s.slice(0, -1)) === JSON.stringify(kept) &&
+      added !== null &&
+      typeof added === "object" &&
+      Object.keys(added).sort().join() === "at,note" &&
+      typeof added.at === "string" &&
+      STEER_AT.test(added.at) &&
+      typeof added.note === "string" &&
+      added.note.trim().length >= 1;
+    if (!wellFormed)
+      return `steer on ${id} must keep its stored notes and add one {note, at} while the job is at spec, build or review, at most 10 notes. Nothing was written.`;
+    const text = checkOperatorText(added.note, "note");
+    if (text) return `steer on ${id} ${text}. Nothing was written.`;
   }
   return null;
 }
