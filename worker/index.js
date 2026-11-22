@@ -87,6 +87,8 @@ const PROJECT_HISTORY = /^\/api\/project-history\/([\w-]+)\/([\w.-]+)(?:\/([1-9]
 // Retro admit's find-and-replace write to a project file or document.
 const PROJECT_RETRO = /^\/api\/project-retro\/([\w-]+)\/([\w.-]+)$/;
 const PROJECT_FILE_NAMES = ["project.md", ...PROJECT_DOCUMENT_NAMES];
+// The one route that clears a project's stage-note trial pause.
+const TRIALS_RESUME = /^\/api\/trials\/resume\/([\w-]+)$/;
 const REPO = /^[\w.-]+\/[\w.-]+$/;
 const BASE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 // Pipeline scopes are "global" or "projects/<slug>"; history keeps every saved version.
@@ -503,7 +505,8 @@ async function boardRefusal(env, stored, data, sameBase, principal) {
         checkNewStarters(stored.jobs, data.jobs) ??
         (await checkApprovalNotes(env, stored.jobs, data.jobs, principal)) ??
         checkResolve(stored.jobs, data.jobs, principal) ??
-        checkSteer(stored.jobs, data.jobs, principal))
+        checkSteer(stored.jobs, data.jobs, principal) ??
+        checkTrials(stored.doc, data))
       : null)
   );
 }
@@ -2130,6 +2133,69 @@ async function haltPut(request, env, principal) {
   return reply(JSON.stringify(haltView(record, principal)), 200, "application/json");
 }
 
+const TRIAL_RESUME_SHAPE =
+  "a trial resume needs {instruction: 1-500 characters}; a signed-in person may send {}";
+const TRIAL_RESUME_ONLY =
+  "only a signed-in person, or a paired host passing a person's instruction, resumes stage-note trials";
+
+// Marks slug's unresumed reverted trials resumed, recording who resumed them. An R2 race with
+// another board writer is retried here.
+async function trialsResume(request, env, principal, slug) {
+  const text = await readBody(request, 16384);
+  if (text === null) return reply("body over 16 KiB", 413);
+  let body = null;
+  try {
+    body = JSON.parse(text);
+  } catch {}
+  const keys =
+    typeof body === "object" && body !== null && !Array.isArray(body)
+      ? Object.keys(body).join(",")
+      : null;
+  const person = principal.kind === "user";
+  if (!(keys === "instruction" || (person && keys === ""))) return reply(TRIAL_RESUME_SHAPE, 400);
+  const instruction = typeof body.instruction === "string" ? body.instruction.trim() : "";
+  if (keys === "instruction") {
+    if (instruction.length < 1 || [...instruction].length > 500)
+      return reply(TRIAL_RESUME_SHAPE, 400);
+    const error = checkOperatorText(instruction, "instruction");
+    if (error) return reply(error, 400);
+  }
+  const host = person ? null : await boundHost(env, principal);
+  if (!person && !host) return reply(TRIAL_RESUME_ONLY, 403);
+  const resumedBy = person ? { kind: "person" } : { kind: "host", by: host.id, instruction };
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const stored = await storedBoard(env);
+    if (stored.etag && !stored.doc)
+      return reply("the stored board is not readable JSON. Nothing was written.", 400);
+    const resumed = new Date().toISOString().slice(0, 19) + "Z";
+    let n = 0;
+    const trials = (Array.isArray(stored.doc?.trials) ? stored.doc.trials : []).map((t) => {
+      if (
+        typeof t !== "object" ||
+        t === null ||
+        t.project !== slug ||
+        t.status !== "reverted" ||
+        t.resumed
+      )
+        return t;
+      n++;
+      return { ...t, resumed, resumed_by: resumedBy };
+    });
+    if (!n) return reply(JSON.stringify({ resumed: 0 }), 200, "application/json");
+    const data = { ...stored.doc, trials };
+    const obj = await env.BUCKET.put("board.json", JSON.stringify(data), {
+      onlyIf: new Headers({ "If-Match": stored.etag }),
+      httpMetadata: { contentType: "application/json" },
+    });
+    if (obj) {
+      await announce(env, "board.json", rowsFrame(stored, data, obj.httpEtag));
+      return reply(JSON.stringify({ resumed: n }), 200, "application/json");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 80));
+  }
+  return reply(JSON.stringify({ error: "busy" }), 409, "application/json");
+}
+
 // A re-push replaces the host's file for that day. Every line is a JSON object naming the host.
 async function retroPut(request, env, principal, id, date) {
   if ((await boundHost(env, principal))?.id !== id) return reply(RETRO_WRITE_ONLY, 403);
@@ -3026,6 +3092,36 @@ function checkSteer(storedJobs, jobs, principal) {
   return null;
 }
 
+// Only POST /api/trials/resume clears a stage-note trial pause. Every stored unresumed revert
+// must be written unchanged, and no written record may carry resumed or resumed_by unless it
+// equals a stored record. An error message, or null.
+function checkTrials(storedDoc, data) {
+  const trials = (doc) => (Array.isArray(doc?.trials) ? doc.trials : []);
+  const label = (t, i) =>
+    typeof t?.id === "string" ? quoteIdCut(t.id, QUOTED_ID_MAX) : `at trials[${i}]`;
+  const stored = trials(storedDoc).map(canonicalJson),
+    written = trials(data);
+  const writtenJson = new Set(written.map(canonicalJson));
+  for (const [i, t] of trials(storedDoc).entries())
+    if (
+      typeof t === "object" &&
+      t !== null &&
+      t.status === "reverted" &&
+      !t.resumed &&
+      !writtenJson.has(stored[i])
+    )
+      return `a board write cannot change or drop the unresumed reverted trial ${label(t, i)}: only POST /api/trials/resume clears a stage-note trial pause. Nothing was written.`;
+  for (const [i, t] of written.entries())
+    if (
+      typeof t === "object" &&
+      t !== null &&
+      ("resumed" in t || "resumed_by" in t) &&
+      !stored.includes(canonicalJson(t))
+    )
+      return `a board write cannot set resumed or resumed_by on trial ${label(t, i)}: only POST /api/trials/resume clears a stage-note trial pause. Nothing was written.`;
+  return null;
+}
+
 // The dashboard's Remove from batch: a rider that is not stacked, stored or written, goes from spec to idea and
 // drops its one ref, while its lead is at spec both stored and written.
 const unbatchedAtSpec = (storedRow, row, storedLead, lead) =>
@@ -3400,6 +3496,12 @@ async function api(request, env, path, principal, ctx) {
     if (method === "GET") return haltGet(env, principal);
     if (method === "PUT") return haltPut(request, env, principal);
     return notFound();
+  }
+  m = path.match(TRIALS_RESUME);
+  if (m) {
+    if (method !== "POST") return notFound();
+    if (!(await env.BUCKET.head(`projects/${m[1]}.md`))) return notFound();
+    return trialsResume(request, env, principal, m[1]);
   }
   if (path === "/api/board" || path === "/api/backlog") {
     const [key, type] =
