@@ -9873,7 +9873,7 @@ function renderBacklogDecision(item, triageHtml) {
     radio('denied', 'Deny', 'It moves to closed and is not built.', 'd') +
     (lesson ? '' : radio('rework', 'Rework', 'An agent rewrites it from your notes, and it comes back here for another decision.')) +
     '<label class="ask-other-label"><span id="backlog-notes-label">Notes (optional)</span><textarea class="ask-other" id="backlog-notes" maxlength="2000" rows="4"' +
-    ' placeholder="Add context for the agent that picks it up, say why you denied it, or say what to change.">' + esc(draft.notes) + '</textarea></label>' +
+    ' placeholder="' + (lesson ? 'Say why you denied it, if you deny it.' : 'Add context for the agent that picks it up, say why you denied it, or say what to change.') + '">' + esc(draft.notes) + '</textarea></label>' +
     '</fieldset>' +
     (questions ? '<p class="muted" id="backlog-q-note">Questions from the agent. Answer each one before you approve or deny. Your answers are copied to the job this decision creates.</p>' + questions : '') +
     '<div class="ask-bar"><button class="btn primary" id="backlog-submit" type="submit">Submit decision</button>' +

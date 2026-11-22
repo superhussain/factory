@@ -1912,7 +1912,9 @@ async function offlineLesson() {
   assert.ok(page.includes("It adds the lesson to sample/notes.md. No job starts."));
   assert.ok(!page.includes("pickup starts it"));
   assert.ok(!page.includes('value="rework"'), "a lesson card offers no Rework");
+  assert.ok(page.includes('placeholder="Say why you denied it, if you deny it."'));
   assert.ok(view.render(plain, "").includes('value="rework"'));
+  assert.ok(view.render(plain, "").includes("or say what to change."));
   console.log("PASS backlog offline lesson");
 }
 
