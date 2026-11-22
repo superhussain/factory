@@ -4051,7 +4051,7 @@ def trial_valid(t):
     return (isinstance(t, dict) and isinstance(t.get("project"), str) and bool(SLUG.fullmatch(t["project"]))
             and t.get("stage") in PIPELINE_STAGES and type(t.get("version")) is int
             and type(t.get("champion_version")) is int and t["champion_version"] >= 0
-            and t.get("id") == f"{t['project']}-{t['stage']}-v{t['version']}")
+            and t.get("id") == f"{t['project']}-{t['stage']}-v{t['version']}" and stamp_of(t.get("opened")) is not None)
 
 
 def open_trial_for(data, slug, stage):
@@ -4408,6 +4408,7 @@ PICKUP_SCHEDULER = "launchd" if sys.platform == "darwin" else "schtasks" if sys.
 LAUNCH_WAIT_SECONDS = 30
 LAUNCH_BACKOFF_SECONDS = 300
 LAUNCH_BACKOFF_CAP_SECONDS = 14400
+LAUNCH_STOP_FAILURES = 5
 _DETACHED_RUNNING = []
 LIMIT_TEXT = re.compile(r"(?:usage|rate|session|weekly) limit|limit (?:reached|exceeded)", re.I)
 RESET_IN = re.compile(r"(?:resets|try again) in (\d{1,4}) ?(minutes?|mins?|m|hours?|hrs?|h)\b", re.I)
@@ -4689,7 +4690,8 @@ def launch_reason(detail):
 
 def back_off_launch(home, job_id, device, session, reason):
     """Drop this session's claim and park the job after a failed launch, in one board write.
-    (count, until), or None when the job is gone or the claim is not this session's."""
+    From the fifth failure in a row, move it to needs-human with a needs ask instead.
+    (count, until), (count, None) for that stop, or None when the job is gone or the claim is not this session's."""
     def change(text):
         data = load_board(text)
         job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
@@ -4700,9 +4702,16 @@ def back_off_launch(home, job_id, device, session, reason):
         prior = record.get("count") if isinstance(record, dict) else None
         count = (prior if type(prior) is int and prior >= 1 else 0) + 1
         at = datetime.now(timezone.utc).replace(microsecond=0)
+        failure = {"count": count, "reason": reason, "at": at.strftime("%Y-%m-%dT%H:%M:%SZ")}
+        if count >= LAUNCH_STOP_FAILURES:
+            patch_job(data, job_id, {
+                "claim": None, "not_before": None, "stage": "needs-human",
+                "needs": f"Pickup launch failed {count} times in a row on host {device}. Last reason: {reason}. "
+                         f"Fix the launcher, then clear this ask and move the job back to {job.get('stage')}.",
+                "launch_failure": failure})
+            return dump_board(data), (count, None)
         until = (at + timedelta(seconds=launch_backoff_seconds(count))).strftime("%Y-%m-%dT%H:%M:%SZ")
-        patch_job(data, job_id, {"claim": None, "not_before": until, "launch_failure": {
-            "count": count, "reason": reason, "at": at.strftime("%Y-%m-%dT%H:%M:%SZ")}})
+        patch_job(data, job_id, {"claim": None, "not_before": until, "launch_failure": failure})
         return dump_board(data), (count, until)
     return cas(home, "/api/board", change)
 
@@ -5571,7 +5580,9 @@ def launch_failed(home, name, job_id, detail, log_path, release, fatal=True, exp
         return
     parked = backoff() if backoff else release()
     print(f"released {job_id}")
-    if parked:
+    if parked and parked[1] is None:
+        print(f"needs-human {job_id} after {parked[0]} launch failures in a row")
+    elif parked:
         print(f"backed off {job_id} until {parked[1]} (launch failure {parked[0]})")
     message = f"launch of {job_id} on {name} failed: {detail}; see {log_path}"
     if fatal:
@@ -10826,6 +10837,7 @@ def stuck(*args):
                 and (not c or c.get("device") == device) and dead(job))
 
     resume = {}  # {id: (stage, clear_needs, needs)} for each new state the stop check could not explain.
+    old, checks = {}, {}
     # Without this host's Paseo server no job counts as stopped, so the board read is skipped.
     if server:
         jobs = read_board(home)["jobs"]
@@ -10843,8 +10855,6 @@ def stuck(*args):
             print(f"stop check {job['id']}: {verdict}, {why}", file=sys.stderr)
             if ok:
                 resume[job["id"]] = (job["stage"], clear, job.get("needs"))
-        if checks != old:
-            write_atomic(home / STOP_CHECKS_FILE, json.dumps({"version": 1, "jobs": checks}, indent=2) + "\n")
 
     def change(text):
         data = load_board(text)
@@ -10891,6 +10901,16 @@ def stuck(*args):
             return None, ([], [])
         return dump_board(data), (picked, guarded + dropped)
     picked, guarded = cas(home, "/api/board", change)
+    # A resume verdict counts only for a job this run claimed, so a job cut by --limit is checked again.
+    claimed = {p["id"] for p in picked}
+    for job_id in resume:
+        if job_id not in claimed:
+            if job_id in old:
+                checks[job_id] = old[job_id]
+            else:
+                checks.pop(job_id, None)
+    if checks != old:
+        write_atomic(home / STOP_CHECKS_FILE, json.dumps({"version": 1, "jobs": checks}, indent=2) + "\n")
     for line in guarded:
         print(line, file=sys.stderr)
     if not picked:
@@ -13930,7 +13950,7 @@ def trial_settle(home):
 
     def change(text):
         data = load_board(text)
-        records = data.get("trials") or []
+        records = [t for t in data.get("trials") or [] if isinstance(t, dict)]
         for t in records:
             if t.get("status") == "open" and t.get("id") in updates:
                 t.update(updates[t["id"]])
@@ -13954,7 +13974,7 @@ def trial_resume(home, slug):
         data = load_board(text)
         stamp = now()
         for t in data.get("trials") or []:
-            if t.get("project") == slug and t.get("status") == "reverted" and not t.get("resumed"):
+            if isinstance(t, dict) and t.get("project") == slug and t.get("status") == "reverted" and not t.get("resumed"):
                 t["resumed"] = stamp
         data["updated"] = stamp
         return dump_board(data), None

@@ -1961,7 +1961,7 @@ class StopCheckTest(IsolatedTestCase):
         self.save(self.job)
         self.store["/api/jobs/sample/001-test/build.md"] = b"# Build\n"
 
-    def stuck(self):
+    def stuck(self, *args):
         """(exit code, stdout, stderr) of one stuck run."""
         self.output.seek(0)
         self.output.truncate()
@@ -1969,7 +1969,7 @@ class StopCheckTest(IsolatedTestCase):
         code = 0
         with contextlib.redirect_stderr(err):
             try:
-                factory.stuck()
+                factory.stuck(*args)
             except SystemExit as e:
                 code = e.code
         return code, self.output.getvalue(), err.getvalue()
@@ -2028,6 +2028,21 @@ class StopCheckTest(IsolatedTestCase):
         self.assertEqual([j["id"] for j in json.loads(out)], ["001-test"])
         self.assertNotIn("needs", self.saved())
         self.assertEqual(self.saved()["claim"]["device"], "test")
+
+    def test_limit_cut_job_is_checked_again(self):
+        other = dict(self.job, id="002-test")
+        self.store["/api/board"] = factory.dump_board({"jobs": [self.job, other]}).encode()
+        code, out, err = self.stuck("--limit", "1")
+        self.assertEqual(code, 0)
+        self.assertIn("stop check 001-test: resume", err)
+        self.assertIn("stop check 002-test: resume", err)
+        self.assertEqual([j["id"] for j in json.loads(out)], ["001-test"])
+        self.assertEqual(list(self.checks()), ["001-test"])
+        code, out, err = self.stuck("--limit", "1")
+        self.assertEqual(code, 0)
+        self.assertIn("stop check 002-test: resume", err)
+        self.assertEqual([j["id"] for j in json.loads(out)], ["002-test"])
+        self.assertEqual(sorted(self.checks()), ["001-test", "002-test"])
 
     def test_a_board_change_before_the_write_wins(self):
         """The stop check reads one board; the claim write rechecks the row cas hands it."""

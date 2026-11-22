@@ -36,8 +36,10 @@ whose Paseo agent on this host is closed or gone, gets a stop check first. Its s
 state is the board's `stage`, `round`, `rounds`, `pr`, `needs` and `note`, the worktree
 `HEAD`, `origin/factory/<id>` (no fetch) and the job's R2 files with their ETags. `stuck`
 acts once per state: a state whose 12-hex key matches the job's entry in
-`<home>/stop-checks.json` gets no fast resume and waits for the stale path above. A new
-state gets a verdict, recorded in that file and printed on stderr as
+`<home>/stop-checks.json` gets no fast resume and waits for the stale path above.
+A resume verdict is kept only for a job stuck claims, so a job cut by --limit is
+checked again next run. A new state gets a verdict, recorded in that file and printed
+on stderr as
 `stop check <id>: resume, <why>` or `stop check <id>: explained, <why>`:
 
 - No `needs`: resume, `stopped at <stage> with no live session`, plus `, HEAD not on origin`
