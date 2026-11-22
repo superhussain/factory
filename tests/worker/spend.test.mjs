@@ -161,7 +161,8 @@ function setup({ board, archive, projects = {} }) {
     serveFactory(new Request("http://local/api/spend", { method }), { BUCKET: bucket }, person);
 }
 
-test("GET /api/spend merges board and archive rows, the board row winning", async () => {
+test("GET /api/spend merges board and archive rows, the board row winning", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: NOW });
   const board = JOBS.filter((j) => j.id !== "1012-fix-a");
   const stale = { ...JOBS[1], outcome: { result: "held" }, tokens: tokens({ output: 1 }) };
   const send = setup({ board, archive: [stale, JOBS[4]] });
