@@ -12,6 +12,7 @@ All of these run through `factory.py` on a device.
 | Command | Who | What it does |
 | --- | --- | --- |
 | `autonomy status` | anyone | Prints the board's `autonomy` record with defaults filled. Writes nothing. |
+| `autonomy report [<slug>]` | anyone | Prints earned-autonomy recommendations. Writes nothing. |
 | `autonomy pause` | anyone | Sets `paused: true`. The next `suggest admit` exits 3. |
 | `autonomy resume` | human at a terminal | Sets `paused: false` after you type `resume`. |
 | `autonomy allow <slug>` | human at a terminal | Adds a registered project to the allowlist after you type its slug. |
@@ -471,3 +472,42 @@ approver and the merge rules still apply. The Worker must deploy before hosts up
 | Admission | `autonomy pause` from any device. The next admit exits 3. |
 | Stage 0 code | Pause, discard open explorer cards, revert the PR. No data migration: older code ignores the `autonomy` and `origin` keys. |
 | Stage 1 and later | Pause, then `autonomy deny <slug>`, and revert that stage's PR. |
+
+## Earned autonomy report
+
+`factory.py autonomy report [<slug>]` reads the board and prints, for each project and job class, the outcomes `outcomes record` stored on jobs merged in the last 90 days. It recommends `automerge`, `hold` or `collect` and writes nothing. A person changes Merge under Settings, Pipeline.
+
+The class comes from the job's first review round:
+
+| `rounds[0]` | Class |
+| --- | --- |
+| `ux` and `ui` both `SKIPPED` | `internal` |
+| anything else | `visible` |
+| `rounds` missing or empty | skipped and listed |
+
+Each cell is measured against starting thresholds, which are guesses the report prints:
+
+| Metric | Formula | Starting threshold |
+| --- | --- | --- |
+| scanned | held + reworked + reverted | at least 20 |
+| reverts | count of `reverted` | 0 |
+| rework | reworked / scanned | at most 10% |
+| rounds | mean `len(rounds)` | at most 1.5 |
+| changes | `CHANGES` / (`PASS` + `CHANGES`) over every round | at most 15% |
+
+- Any revert, or any metric over its threshold, means `hold`.
+- Fewer than 20 scanned jobs means `collect`.
+- Otherwise the cell gets `automerge`. A project gets `merge auto` only when every one of its cells is `automerge`.
+
+Synthetic project `alpha`, with 20 internal jobs and 6 visible jobs, one of them reverted:
+
+```text
+earned autonomy for jobs merged in the last 90 days
+thresholds: 20 scanned jobs, no reverts, rework at most 10%, mean rounds at most 1.5, CHANGES at most 15%
+project  class     jobs  held  reworked  reverted  unscanned  rounds  changes  recommend
+alpha    internal    20    19         1         0          0     1.2       8%  automerge
+alpha    visible      6     4         1         1          0     2.0      25%  hold
+alpha visible hold: reverted 1019-add-z; rework 17% over 10%; rounds 2.0 over 1.5; changes 25% over 15%
+alpha: recommend merge human until every class shows automerge
+report only: a person changes Merge under Settings, Pipeline; nothing was written
+```
