@@ -128,8 +128,11 @@ each task with its check and result, how each review finding was handled, the
 verification commands with pass or fail, each acceptance criterion with its
 result. Under `### Absorbed`, list each absorbed item with its commit hash. Under
 `### Left open`, list each item not done with its reason: outside the spec, large,
-risky, needs its own design, or needs a person. Write `None.` under an empty
-heading. Report failures plainly.
+risky, needs its own design, or needs a person. Under `### Tests changed`, list
+each existing test this run weakened, skipped, deleted or special-cased, with its
+file, what changed, and the spec task that changed the behaviour it checks. Never
+weaken a test only to make it pass. Fix the code instead. Write `None.` under an
+empty heading. Report failures plainly.
 
 ### Job files stay readable
 

@@ -22,6 +22,16 @@ and anything the project file's Code section calls out. Items build.md lists und
 scope creep. You may re-run the project file's Verify commands in the worktree to
 confirm build.md's claims.
 
+Check every existing test the diff changes or deletes. A weakened test is a CHANGES
+finding: a removed or loosened assertion, a deleted test, an added skip, focus or
+expected-failure marker (such as `unittest.skip`, `skipIf`, `expectedFailure`,
+`pytest.mark.xfail`, `it.skip`, `.only` or `test.todo`), source code that branches
+on a test name or a test-only environment flag, or a widened timeout or retry
+count. It is fine only when build.md's `### Tests changed` lists that test with a
+spec task that changed the behaviour it checks. Give the test's file:line, what was
+weakened, and the fix: restore the check, or fix the code so the original test
+passes.
+
 Write exactly one markdown file, `<round folder>/review-code.md`. Its first line is
 `VERDICT: PASS` or `VERDICT: CHANGES`. Then list findings, each with file:line and
 the fix. CHANGES is only for issues that must be fixed before merge. Put a nit under
