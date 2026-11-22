@@ -5133,7 +5133,7 @@ $('hosts-load').addEventListener('click', () => { loadHosts(); loadHostProjects(
 $('halt-form').addEventListener('submit', async e => {
   e.preventDefault();
   const reason = $('halt-reason').value.trim();
-  if (!reason) { $('halt-status').textContent = 'Enter a reason.'; return; }
+  if (!reason) { $('halt-status').textContent = 'Enter a reason.'; $('halt-reason').focus(); return; }
   if (!await saveHalt({halted:true, reason})) return;
   $('halt-reason').value = '';
   $('halt-status').textContent = '';

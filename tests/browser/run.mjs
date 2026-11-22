@@ -1247,6 +1247,16 @@ async function capture(outdir, referencePath) {
       await page.waitForSelector("#settings-hosts:not([hidden])");
       await putHalt(page, '{"halted":false}');
     });
+    await view("settings-halt-blank-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/hosts";
+      });
+      await page.waitForSelector("#settings-hosts:not([hidden])");
+      await putHalt(page, '{"halted":false}');
+      await page.type("#halt-reason", "   ");
+      await page.click("#halt-stop");
+      return clipOf(page, "#halt-form");
+    });
     const expandMerged = (page) =>
       page.evaluate(() => document.querySelector('.column-toggle[data-stage="merged"]').click());
     const mergedHeader = async (page) => {
