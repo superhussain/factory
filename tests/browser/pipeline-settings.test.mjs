@@ -771,6 +771,65 @@ test("pipeline settings page", { timeout: 180000 }, async (t) => {
       );
     });
 
+    await t.test("pipeline P19 backpressure field saves", async () => {
+      const fill = (value) =>
+        page.$eval(
+          "#pipeline-backpressure-needs",
+          (el, v) => {
+            el.value = v;
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+          },
+          value,
+        );
+      const field = () =>
+        page.$eval("#pipeline-backpressure-needs", (el) => [
+          el.value,
+          el.disabled,
+          el.getAttribute("aria-invalid"),
+        ]);
+      await page.select("#pipeline-scope", "global");
+      await page.waitForFunction(
+        () => !document.getElementById("pipeline-backpressure-mode").disabled,
+        wait,
+      );
+      assert.equal(
+        await page.$eval("#pipeline-backpressure legend", (el) => el.textContent),
+        "Review backpressure",
+      );
+      assert.equal(await page.$eval("#pipeline-backpressure-mode", (el) => el.value), "");
+      assert.deepEqual(await field(), ["", true, "false"]);
+      await page.select("#pipeline-backpressure-mode", "on");
+      assert.deepEqual(await field(), ["5", false, "false"]);
+      for (const bad of ["0", "51", "2.5"]) {
+        await fill(bad);
+        await waitStatus(
+          page,
+          "Fix before saving: backpressure.needs_you: must be a whole number from 1 to 50",
+        );
+        assert.equal(await page.$eval("#pipeline-save", (el) => el.disabled), true);
+        assert.equal((await field())[2], "true");
+      }
+      await fill("3");
+      await waitStatus(page, "Unsaved changes");
+      await clickSave(page);
+      await page.waitForFunction(
+        () => document.getElementById("pipeline-status").textContent.startsWith("Saved as version"),
+        wait,
+      );
+      const stored = JSON.parse(await (await fetch(origin + "/api/pipeline/global")).text());
+      assert.equal(validatePipeline(stored), null);
+      assert.deepEqual(stored.backpressure, { needs_you: 3 });
+      assert.deepEqual(stored.hold, { min_ideas: 3, max_wait_hours: 6 });
+      await page.select("#pipeline-scope", "projects/sample");
+      await page.waitForFunction(
+        () =>
+          document
+            .getElementById("pipeline-effective")
+            .textContent.includes('"backpressure": {\n    "needs_you": 3\n  }'),
+        wait,
+      );
+    });
+
     await t.test("pipeline P10 archive setting", async () => {
       const fill = (value) =>
         page.$eval(
