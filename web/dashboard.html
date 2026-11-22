@@ -215,6 +215,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   body[data-view="notifications"] #board { display: none; }
   #retros-page { max-width: 1040px; }
   .retros-runs-heading { font-size: 15px; margin: 24px 0 12px; }
+  #spend { margin-top: 20px; }
   #audit-flags td a { color: var(--accent); }
   #audit-flags td a { white-space: nowrap; }
   #audit-flags td:nth-child(5) a { display: block; }
@@ -3764,6 +3765,7 @@ $('audit-flags-next').addEventListener('click', () => auditFlagsMove(1, $('audit
 let spend = null, spendFailed = false;
 
 async function loadSpend() {
+  spendFailed = false;
   renderSpend();
   try {
     const r = await fetch('./api/spend', { cache: 'no-store' });

@@ -54,9 +54,11 @@ test(
         const errors = [];
         page.on("pageerror", (error) => errors.push(String(error)));
         let answer = { status: 200, rows: ROWS };
+        const held = [];
         await page.setRequestInterception(true);
         page.on("request", (request) => {
           if (new URL(request.url()).pathname !== "/api/spend") return request.continue();
+          if (answer.hold) return held.push(request);
           return request.respond({
             status: answer.status,
             contentType: "application/json",
@@ -124,6 +126,26 @@ test(
         const failed = await open("Could not");
         assert.equal(failed.status, "Could not load cost per merged PR. Reload to try again.");
         assert.deepEqual(failed.tables, []);
+
+        // Reopening the page after a failed load shows the loading copy while it refetches.
+        answer = { hold: true };
+        await page.evaluate(() => (location.hash = "#/"));
+        await page.waitForSelector("#retros-page", { hidden: true });
+        const refetch = page.waitForRequest((r) => new URL(r.url()).pathname === "/api/spend");
+        await page.evaluate(() => (location.hash = "#/retros"));
+        await refetch;
+        assert.equal(
+          await page.$eval("#spend-status", (el) => el.textContent),
+          "Loading cost per merged PR\u2026",
+        );
+        await held[0].respond({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ schema: "factory.spend/1", weeks: 8, rows: [] }),
+        });
+        await page.waitForFunction(() =>
+          document.getElementById("spend-status").textContent.startsWith("No merged"),
+        );
         assert.deepEqual(errors, []);
       } finally {
         await context.close();
