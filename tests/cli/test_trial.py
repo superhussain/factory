@@ -17,6 +17,8 @@ EDIT_SUMMARY = "Spec note: name the test file for each criterion"
 PIPELINE_GET = "GET /api/pipeline/projects/factory"
 HISTORY_GET = "GET /api/pipeline/history/projects/factory/7"
 REVERT_ROUTE = "PUT /api/pipeline/retro/projects/factory"
+RESUME_ROUTE = "POST /api/trials/resume/factory"
+REASON = "Owner asked in chat to resume factory trials"
 PAUSE_LINE = ("stage-note trials paused for factory after 2 reverts; "
               "a person runs trial resume factory")
 
@@ -395,7 +397,20 @@ class TrialSettleTest(TrialWorkerCase):
     def test_usage(self):
         code, out, err, _, _ = self.run_trial(running(), "resume")
         self.assertEqual((code, out), (2, ""))
-        self.assertIn("usage: trial settle | trial resume <slug>", err)
+        self.assertIn("usage: trial settle | trial resume <slug> <reason>", err)
+
+    def test_board_keeps_unresumed_reverts(self):
+        old = [trial(version=n, status="kept", settled=f"2026-10-{n:02d}T09:00:00Z")
+               for n in range(2, 23)]
+        locked = trial(version=1, status="reverted", settled="2026-09-01T09:00:00Z")
+        resumed = dict(locked, version=0, id="factory-spec-v0", resumed="2026-09-02T09:00:00Z")
+        _, _, _, _, written = self.settle(running([locked, resumed, *old, trial()], arm_jobs()))
+        ids = [t["id"] for t in written[0]["trials"]]
+        self.assertEqual(len(ids), factory.TRIAL_KEEP + 1)
+        self.assertIn("factory-spec-v1", ids)
+        self.assertNotIn("factory-spec-v0", ids)
+        self.assertNotIn("factory-spec-v2", ids)
+        self.assertIn(TRIAL, ids)
 
 
 class TrialResumeTest(TrialWorkerCase):
@@ -409,44 +424,29 @@ class TrialResumeTest(TrialWorkerCase):
         _, out, _, _, _ = self.run_trial(running([resumed, trial()], arm_jobs(b={"rounds": 3})), "settle")
         self.assertNotIn(PAUSE_LINE, out)
 
-    def resume(self, board, typed, tty=True):
-        with patch.object(factory.sys.stdin, "isatty", return_value=tty), \
-                patch("builtins.input", return_value=typed) as asked:
-            result = self.run_trial(board, "resume", "factory")
-        return (*result, asked)
+    def resume(self, *args, reply=(200, {"resumed": 2})):
+        return self.run_trial(running(), "resume", *args, routes={RESUME_ROUTE: reply})
 
-    def test_resume_marks_unresumed_reverts_after_confirmation(self):
-        earlier = stamp(days=-5)
-        board = running([trial(version=5, status="reverted"),
-                         trial(version=4, status="reverted", resumed=earlier),
-                         trial(project="sample", version=6, status="reverted"),
-                         trial(status="kept")])
-        code, out, err, _, written, asked = self.resume(board, "factory")
-        self.assertEqual((code, out, err), (0, "stage-note trials resumed for factory\n", ""))
-        asked.assert_called_once_with("Type factory to resume stage-note trials for it: ")
-        trials = {t["id"]: t for t in written[0]["trials"]}
-        self.assertIsNotNone(factory.stamp_of(trials["factory-spec-v5"]["resumed"]))
-        self.assertEqual(trials["factory-spec-v4"]["resumed"], earlier)
-        self.assertNotIn("resumed", trials["sample-spec-v6"])
-        self.assertNotIn("resumed", trials[TRIAL])
-        self.assertFalse(factory.trials_paused(written[0], "factory"))
+    def test_resume_posts_the_reason_to_the_worker(self):
+        code, out, err, requests, written = self.resume("factory", f"  {REASON} ")
+        self.assertEqual((code, out, err), (0, "stage-note trials resumed for factory: 2 reverts cleared\n", ""))
+        self.assertEqual([(f"{m} {p}", json.loads(body)) for m, p, _, body in requests],
+                         [(RESUME_ROUTE, {"instruction": REASON})])
+        self.assertEqual(written, [])
 
-    def test_resume_skips_non_dict_records(self):
-        code, out, err, _, written, _ = self.resume(running(["junk", trial(version=5, status="reverted")]), "factory")
-        self.assertEqual((code, out, err), (0, "stage-note trials resumed for factory\n", ""))
-        self.assertEqual(written[0]["trials"][0], "junk")
-        self.assertIsNotNone(factory.stamp_of(written[0]["trials"][1]["resumed"]))
+    def test_resume_with_nothing_to_clear(self):
+        code, out, _, _, _ = self.resume("factory", REASON, reply=(200, {"resumed": 0}))
+        self.assertEqual((code, out), (0, "no unresumed reverts for factory; nothing changed\n"))
 
-    def test_resume_needs_a_person(self):
-        board = running([trial(version=5, status="reverted")])
-        for typed, tty, message in (("sample", True, "confirmation did not match factory"),
-                                    ("factory", False, "trial resume needs an interactive terminal")):
-            with self.subTest(message=message):
-                code, out, err, requests, written, _ = self.resume(board, typed, tty)
-                self.assertEqual((code, out), (2, ""))
-                self.assertIn(message, err)
-                self.assertEqual((requests, written), ([], []))
+    def test_resume_needs_a_reason(self):
+        code, out, err, requests, _ = self.resume("factory")
+        self.assertEqual((code, out, requests), (2, "", []))
+        self.assertIn("usage: trial settle | trial resume <slug> <reason>", err)
 
+    def test_worker_refusal_exits_5(self):
+        code, _, err, _, _ = self.resume("factory", REASON, reply=(400, b"instruction: links are not allowed"))
+        self.assertEqual(code, 5)
+        self.assertIn("instruction: links are not allowed", err)
 
 if __name__ == "__main__":
     unittest.main()
