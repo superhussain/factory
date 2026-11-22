@@ -292,6 +292,7 @@ Each later stage is its own gated job.
 | --- | --- | --- |
 | `depends-on` ref | approving a backlog line, `next`, `batch`, or a board patch | pickup, `ideas` and `batch` skip the idea until the named job is merged, closed or off the board. The card shows "depends on <id>". |
 | `not_before` | a board patch such as `{"not_before": "2026-11-17T09:00:00Z"}`, cleared with `null` | pickup, `ideas` and `stuck` skip the job until that UTC time. It does not count toward `max_inflight`. The card shows "Not before <time>". |
+| `launch_failure` | `factory.py pickup`, after a launch fails for a reason other than a usage limit | pickup sets `not_before` 5 minutes out, doubling with each failure in a row up to 4 hours, and records `count`, `reason` and `at`. The next successful launch removes the record. `board` refuses the field. |
 | `Depends on: <slug>: <feature>` backlog line | context under a backlog line | Approve is refused while that prerequisite line is unchecked. The dashboard shows "Waits on" and Open the prerequisite. Approve turns the line into a `depends-on` ref. |
 | Spec sub-jobs | a spec's Sub-jobs list with `Depends on: <n>` bullets | after merge, each sub-job is queued as a backlog line ending `(sub-job-of <id>)`, with `Depends on:` lines for its prerequisites, so approval follows list order. |
 
