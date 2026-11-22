@@ -8066,9 +8066,6 @@ def review_plan_cmd(target, round_text):
     project_file = project_files(home, slug)[0]
     meta = frontmatter(project_file)[0]
     base, repo = meta.get("base") or "main", meta.get("repo", "")
-    lead = lead_of(job) if job.get("stacked") is True else None
-    budget_ref = f"refs/remotes/origin/{base}" if lead is None else f"refs/heads/factory/{lead}" \
-        if JOB_ID.fullmatch(lead) and ".." not in lead else None
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
     folder = home / "jobs" / slug / job_id
@@ -8535,9 +8532,6 @@ def grounding_cmd(target, round_text):
         fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
     meta = frontmatter(project_files(home, slug)[0])[0]
     base, repo = meta.get("base") or "main", meta.get("repo", "")
-    lead = lead_of(job) if job.get("stacked") is True else None
-    budget_ref = f"refs/remotes/origin/{base}" if lead is None else f"refs/heads/factory/{lead}" \
-        if JOB_ID.fullmatch(lead) and ".." not in lead else None
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
     folder = home / "jobs" / slug / job_id
