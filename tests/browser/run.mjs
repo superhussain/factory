@@ -1691,6 +1691,24 @@ async function capture(outdir, referencePath) {
           height: 220,
         }));
       });
+      await view("notify-toast-corner-status-1280", 1280, 900, "light", async (page) => {
+        await page.evaluate(() => localStorage.removeItem("factory-toast-position"));
+        await page.reload({ waitUntil: "networkidle0" });
+        await page.waitForSelector(".card");
+        await showCaptureToasts(page);
+        await page.evaluate(() =>
+          showBoardStatus(
+            "Could not save the board. Another device changed 073-sample-retry and 074-sample-queue while you edited. Reload the board to see their changes, then try again.",
+          ),
+        );
+        await page.waitForFunction(() => document.getElementById("board-status").textContent);
+        return page.evaluate(() => ({
+          x: 0,
+          y: innerHeight - 220,
+          width: innerWidth,
+          height: 220,
+        }));
+      });
       await view("notify-toast-bottom-status-390", 390, 844, "dark", async (page) => {
         await page.evaluate(() => localStorage.removeItem("factory-toast-position"));
         await page.reload({ waitUntil: "networkidle0" });
