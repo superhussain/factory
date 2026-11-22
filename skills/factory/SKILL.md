@@ -400,16 +400,17 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   and ends with `Stacked: #<rider PR number>`.
 - Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
   at `pr-open` until its parent merges and it is retargeted to `$BASE`. Wait for
-  checks with `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0 means
-  they passed, or the repo has none. When checks pass on a PR behind `$BASE`, checks
-  runs `gh pr update-branch` and waits for checks on the new head. Exit 3 means they
-  are still pending, so run it again. Exit 1 names the failing checks. Exit 4 means
-  no open PR; 5 means gh never gave a usable reply. Exit 6 means
-  `gh pr update-branch` failed, usually on a conflict: treat it as a merge conflict.
+  checks with `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0: they
+  passed, or the repo has none. On a PR behind `$BASE`, it runs
+  `gh pr update-branch` and rechecks the new head. Exit 3: still pending; run it
+  again. Exit 1 names failing checks. Exit 4: no open PR. Exit 5: no usable gh
+  reply. Exit 6: `gh pr update-branch` failed; treat it as a merge conflict.
   Exit 7 means the approver escalated the job: the board marks
   it escalated or its decision.md says ESCALATE. Nothing merges. Patch
   {"automerge": false, "escalated": true, "needs": "review and merge PR #<n>: the
   approver escalated it", "note": "escalated: checks held the merge"} and stop.
+  Exit 8: earned autonomy holds the class after a revert; checks already set
+  automerge false and needs. Stop.
   Never poll `gh pr checks` in a loop or with `--watch`.
   Immediately before every `gh pr merge`, run `factory.py pipeline "$SLUG"` again
   and use that fresh `$PIPELINE`. A non-zero exit moves the job to `needs-human` as

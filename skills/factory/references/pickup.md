@@ -102,7 +102,9 @@ Each run, in order:
   `skip <id> <project>: backpressure (<n> waiting on you, pauses at <limit>)`.
   Prioritized ideas, approved specs and moved jobs still launch. This line
   replaces a batch line for the same idea. Set it in the dashboard under
-  Settings, Pipeline, Review backpressure.
+  Settings, Pipeline, Review backpressure. The board shows
+  "Paused: <n> waiting on you" on each idea card pickup holds this way, in
+  place of its batch chip.
 - Skips a project whose checkout fails the `unsafe checkout` check, when pickup
   is on and lists this host. It fetches `origin/<base>` (with
   `GIT_TERMINAL_PROMPT=0` and a 60 s limit, so a remote that asks for
@@ -114,6 +116,13 @@ Each run, in order:
   of each `pr-open` or `needs-human` job's pull request from GitHub, one
   `gh api graphql` call per repo, and moves a merged job to `merged` or queues a
   close for a closed one. See [Syncing PR state](#syncing-pr-state).
+- Earned autonomy hold: right after the PR sync, sets `automerge` false, `needs`
+  and the note `earned autonomy hold: a person reviews and merges` on each
+  automerging, non-escalated `pr-open` job whose project and class have a merged
+  job reverted since the last `factory.py autonomy restore <slug> <class>`. It
+  prints `held <id> <project> PR #<n> for a person`, or on a dry run
+  `would hold <id> <project> PR #<n> for a person`. See docs/autonomy.md,
+  Earned autonomy hold.
 - Deny notes: before ideas, launches at most one `/factory deny-notes <id>` session
   for a `closed` job denied from the backlog whose `backlog.notes` are unread (no
   `backlog.notes_read`). The session gets the notes from `factory.py deny-notes <id>`

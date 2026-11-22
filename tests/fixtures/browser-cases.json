@@ -149,6 +149,7 @@
   "tests/browser/run-child.test.mjs",
   "tests/browser/card-chips.test.mjs",
   "tests/browser/batch-hold-card.test.mjs",
+  "tests/browser/backpressure-chip.test.mjs",
   "tests/browser/held-batch-actions.test.mjs",
   "tests/browser/remove-from-batch.test.mjs",
   "tests/browser/chat-decision-chip.test.mjs",

@@ -155,10 +155,11 @@
   factory.py builds <project-slug>          print the project's build queue and in-flight jobs as JSON
   factory.py stuck [--limit N]              claim up to N (default 1) jobs a dead session left mid-loop,
                                             print them as JSON for the resume schedule
-  factory.py autonomy status|pause|resume|allow <slug>|deny <slug>|self <slug>
+  factory.py autonomy status|pause|resume|allow <slug>|deny <slug>|self <slug>|restore <slug> <class>
                                             show or change the explorer kill switch and allowlist;
                                             resume and allow need a human typing at a terminal
   factory.py autonomy report [<project-slug>]  recommend which project and job classes may automerge; writes nothing
+  factory.py autonomy restore <project-slug> internal|visible  lift an earned-autonomy hold; a human types at a terminal
   factory.py halt status | halt set --reason <text>
                                             show or set the global stop flag that pickup, its takeover
                                             and stuck honor; only a signed-in person clears it
@@ -1032,6 +1033,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
     if "launch_failure" in patch:
         fail("only factory.py pickup sets launch_failure. Nothing was written.", 2)
+    if "repeated" in patch:
+        fail("only factory.py repeats sets repeated. Nothing was written.", 2)
     if "handled" in patch:
         fail("only factory.py pr-handled sets handled. Nothing was written.", 2)
     if patch.get("note") in SPEC_APPROVED_NOTES:
@@ -2000,6 +2003,8 @@ def escalation_cmd(target, round_text):
 
 
 SIGNATURE = re.compile(r"(?:[-*] )?Signature: ([A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5})")
+REPEATED_MAX = 20
+REPEATED_SIGNATURE = re.compile(r"[A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5}")
 
 
 def changes_signatures(text):
@@ -2025,6 +2030,34 @@ def build_disputes(text):
     return {(int(m[1]), m[2], m[3]) for m in map(DISPUTE_ROW.match, (line.strip() for line in text.splitlines())) if m}
 
 
+def record_repeats(home, slug, job_id, round_n, repeats):
+    """Save a round's repeats on the board job's repeated list, keeping the newest REPEATED_MAX, in one board
+    write. A missing job or a job of another project is left alone; a failed write warns instead of ending."""
+    at = now()
+    new = [{"round": round_n, "first": r["first"], "reviewer": r["reviewer"], "signature": r["signature"], "at": at}
+           for r in repeats]
+    keys = {(r["round"], r["reviewer"], r["signature"]) for r in new}
+
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None or job.get("project") != slug:
+            return None, None
+        old = job.get("repeated") if isinstance(job.get("repeated"), list) else []
+        kept = [r for r in old if not isinstance(r, dict)
+                or (r.get("round"), r.get("reviewer"), r.get("signature")) not in keys]
+        rows = (kept + new)[-REPEATED_MAX:]
+        if rows == old:
+            return None, None
+        patch_job(data, job_id, {"repeated": rows})
+        return dump_board(data), None
+    try:
+        cas(home, "/api/board", change)
+    except SystemExit:
+        print(f"factory.py: {job_id} repeats were not recorded on the board; the review loop goes on",
+              file=sys.stderr)
+
+
 def repeats_cmd(target, round_text):
     """Print one JSON verdict on whether a reviewer repeats a CHANGES signature from any earlier round."""
     home, slug, job_id = r2_target(target, True)
@@ -2048,6 +2081,8 @@ def repeats_cmd(target, round_text):
     wt = home / "worktrees" / slug / job_id
     churn = churn_files(job, wt, n) if n >= 4 else []
     decision = "repeat" if repeats else "churn" if churn else "continue"
+    if repeats:
+        record_repeats(home, slug, job_id, n, repeats)
     print(json.dumps({"decision": decision, "round": n, "previous": n - 1 if n > 1 else None,
                       "repeats": repeats, "churn": churn}))
 
@@ -2922,12 +2957,14 @@ def registered(home):
     return {p["slug"] for p in json.loads(api(home, "GET", "/projects.json")[2])}
 
 
-def autonomy_cmd(sub, slug=None):
+def autonomy_cmd(sub, slug=None, cls=None):
     """Show or change the board's autonomy record."""
-    if sub not in ("status", "pause", "resume", "report", "allow", "deny", "self") \
+    if sub not in ("status", "pause", "resume", "report", "allow", "deny", "self", "restore") \
             or sub != "report" and (slug is None) != (sub in ("status", "pause", "resume")) \
-            or slug is not None and not SLUG.fullmatch(slug):
-        fail("usage: autonomy status|pause|resume|report [<slug>]|allow <slug>|deny <slug>|self <slug>", 2)
+            or slug is not None and not SLUG.fullmatch(slug) \
+            or (cls in AUTONOMY_CLASSES) != (sub == "restore") or cls is not None and sub != "restore":
+        fail("usage: autonomy status|pause|resume|report [<slug>]|allow <slug>|deny <slug>|self <slug>"
+             "|restore <slug> internal|visible", 2)
     home = factory_home()
     if sub == "report":
         autonomy_report(home, slug)
@@ -2935,7 +2972,7 @@ def autonomy_cmd(sub, slug=None):
     if sub == "status":
         print(json.dumps(load_autonomy(read_board(home)), indent=2))
         return
-    if sub == "allow" and slug not in registered(home):
+    if sub in ("allow", "restore") and slug not in registered(home):
         fail(f"no factory project {slug}", 4)
     listed = load_autonomy(read_board(home))["projects"] if sub == "allow" else []
     if listed and slug not in listed:
@@ -2944,21 +2981,27 @@ def autonomy_cmd(sub, slug=None):
         human_confirm("resume", "Type resume to let explorer suggestions in: ", "autonomy resume")
     if sub == "allow":
         human_confirm(slug, f"Type {slug} to allow explorer suggestions for it: ", "autonomy allow")
+    if sub == "restore":
+        human_confirm(f"{slug} {cls}", f"Type {slug} {cls} to let {slug} {cls} APPROVE PRs merge without a person "
+                      "again: ", "autonomy restore")
     device = holder(home)[0]
 
     def change(text):
         data = load_board(text)
         record = load_autonomy(data)
+        stamp = now()
         if sub in ("pause", "resume"):
             record["paused"] = sub == "pause"
         elif sub == "allow" and record["projects"] and slug not in record["projects"]:
             fail("only one project may be on the autonomy allowlist; run autonomy deny <current> first", 2)
         elif sub == "deny":
             record["projects"] = [p for p in record["projects"] if p != slug]
+        elif sub == "restore":
+            record["restored"] = {**autonomy_restored(data), f"{slug}/{cls}": stamp}
         else:
             key = "projects" if sub == "allow" else "self"
             record[key] = record[key] + [slug] if slug not in record[key] else record[key]
-        record.update(changed=now(), by=device)
+        record.update(changed=stamp, by=device)
         data["autonomy"], data["updated"] = record, record["changed"]
         return dump_board(data), record
     print(json.dumps(cas(home, "/api/board", change), indent=2))
@@ -7038,6 +7081,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     settings = {}
     move_stop_pass(home, data, device, paths, settings, dry, stalls[0] if stalls else None)
     pr_sync_pass(home, data, device, minutes, paths, settings, dry)
+    autonomy_hold_pass(home, data, dry)
     close_pass(home, data, device, minutes, dry)
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
@@ -8739,6 +8783,11 @@ def checks_cmd(target, *args):
     why = escalation_hold(home, slug, job_id)
     if why:
         fail(f"{job_id} {why}, so a person reviews and merges {pr}. Nothing merges.", 7)
+    data = read_board(home)
+    why = autonomy_hold(data, next((j for j in data["jobs"] if j.get("id") == job_id), {}))
+    if why:
+        autonomy_hold_write(home, job_id)
+        fail(f"{job_id} is held: {why}. A person reviews and merges {pr}. Nothing merges.", 8)
     state = gh_pr_view(pr, "--json", "state", "--jq", ".state").strip()
     if state != "OPEN":
         fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
@@ -13164,6 +13213,86 @@ def job_class(job):
     return "internal" if rounds[0].get("ux") == rounds[0].get("ui") == "SKIPPED" else "visible"
 
 
+AUTONOMY_CLASSES = ("internal", "visible")
+AUTONOMY_HOLD_NOTE = "earned autonomy hold: a person reviews and merges"
+
+
+def autonomy_restored(data):
+    """The board's well-formed {"<slug>/<class>": "<UTC time>"} restores; a malformed entry is dropped."""
+    record = data.get("autonomy")
+    restored = record.get("restored") if isinstance(record, dict) else None
+    if not isinstance(restored, dict):
+        return {}
+    return {k: v for k, v in restored.items()
+            if isinstance(k, str) and k.count("/") == 1 and SLUG.fullmatch(k.split("/")[0])
+            and k.split("/")[1] in AUTONOMY_CLASSES and stamp_of(v)}
+
+
+def autonomy_holds(data):
+    """{(project, class): sorted reverted job ids} for each class with a revert recorded after its last restore."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=AUTONOMY_DAYS)
+    restored = autonomy_restored(data)
+    holds = {}
+    for j in data["jobs"]:
+        project, cls, outcome = j.get("project"), job_class(j), j.get("outcome")
+        if not (j.get("stage") == "merged" and (stamp_of(j.get("done")) or cutoff) > cutoff
+                and isinstance(project, str) and project and cls
+                and isinstance(outcome, dict) and outcome.get("result") == "reverted"):
+            continue
+        lifted, at = stamp_of(restored.get(f"{project}/{cls}")), stamp_of(outcome.get("at"))
+        if lifted and not (at and at > lifted):
+            continue
+        holds.setdefault((project, cls), []).append(str(j.get("id")))
+    return {key: sorted(ids) for key, ids in holds.items()}
+
+
+def autonomy_hold(data, job):
+    """Why earned autonomy holds the job's project and class from an agent merge, or None."""
+    project, cls = job.get("project"), job_class(job)
+    held = autonomy_holds(data).get((project, cls))
+    if not held:
+        return None
+    return (f"earned autonomy holds {project} {cls} PRs after reverted {', '.join(held)}; "
+            f"a person lifts it with factory.py autonomy restore {project} {cls}")
+
+
+def autonomy_hold_write(home, job_id):
+    """Set automerge false and needs on a held pr-open job. Returns the needs line, or None with no write."""
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        why = (job is not None and job.get("stage") == "pr-open" and job.get("automerge") is True
+               and not escalated(job) and autonomy_hold(data, job))
+        m = why and isinstance(job.get("pr"), str) and GH_PR_PARTS.fullmatch(job["pr"])
+        if not m:
+            return None, None
+        needs = f"review and merge PR #{m[3]}: {why}"
+        patch_job(data, job_id, {"automerge": False, "needs": needs, "note": AUTONOMY_HOLD_NOTE})
+        return dump_board(data), needs
+    return cas(home, "/api/board", change)
+
+
+def autonomy_hold_pass(home, data, dry):
+    """Hold each automerging pr-open job whose project and class earned autonomy holds after a revert."""
+    holds = autonomy_holds(data)
+    if not holds:
+        return
+    for j in data["jobs"]:
+        pr = j.get("pr")
+        m = isinstance(pr, str) and GH_PR_PARTS.fullmatch(pr)
+        if not (m and isinstance(j.get("id"), str) and j.get("stage") == "pr-open" and j.get("automerge") is True
+                and not escalated(j) and (j.get("project"), job_class(j)) in holds):
+            continue
+        line = f"{j['id']} {j['project']} PR #{m[3]} for a person"
+        if dry:
+            print(f"would hold {line}")
+            continue
+        needs = autonomy_hold_write(home, j["id"])
+        if needs:
+            j.update(automerge=False, needs=needs, note=AUTONOMY_HOLD_NOTE)
+            print(f"held {line}")
+
+
 def autonomy_report(home, slug=None):
     """Print an earned-autonomy recommendation per project and job class from recorded outcomes."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=AUTONOMY_DAYS)
@@ -13313,14 +13442,37 @@ def retro_red_flags(index, board, projects, rows):
     return out
 
 
+def retro_repeated(job, rows, since):
+    """A repeated-finding row for each valid entry of the job's repeated list from the window start on, at any
+    stage. sessions holds up to 5 digest refs of the job on any host."""
+    listed = job.get("repeated")
+    number = job["id"].split("-", 1)[0]
+    refs = list(dict.fromkeys(f"{r['host']}/{r['session']}" for r in rows if str(r.get("job")) == number))[:5]
+    out = []
+    for r in listed if isinstance(listed, list) else []:
+        if not (isinstance(r, dict) and r.get("reviewer") in TRACER_REVIEWERS
+                and isinstance(r.get("signature"), str) and REPEATED_SIGNATURE.fullmatch(r["signature"])
+                and all(type(r.get(k)) is int and r[k] >= 1 for k in ("round", "first"))
+                and isinstance(r.get("at"), str) and r["at"][:10] >= since):
+            continue
+        out.append({"job": job["id"], "project": job["project"], "kind": "repeated-finding",
+                    "title": printable_line(str(job.get("title", "")), 120),
+                    "reason": f"{r['reviewer']} repeated {r['signature']} from round {r['first']} in round {r['round']}",
+                    "at": r["at"], "sessions": refs, "reviewer": r["reviewer"], "signature": r["signature"]})
+    return out
+
+
 def retro_lessons(board, projects, rows, since):
-    """Closed jobs of registered projects done since the window start, newest first, at most RETRO_LESSONS_MAX.
-    A denied job gives its deny notes as reason; a job with a PR gives close.reason, else its note. A row whose
-    reason is empty or fails check_text is dropped. sessions holds up to 5 digest refs of the job on any host."""
+    """Lessons from jobs of registered projects since the window start, newest first, at most RETRO_LESSONS_MAX:
+    each valid repeated entry at any stage, plus each closed job done since then. A denied job gives its deny
+    notes as reason; a job with a PR gives close.reason, else its note. A closed row whose reason is empty or
+    fails check_text is dropped. sessions holds up to 5 digest refs of the job on any host."""
     out = []
     for j in board["jobs"]:
-        if j.get("stage") != "closed" or not isinstance(j.get("done"), str) or j["done"][:10] < since \
-                or j.get("project") not in projects:
+        if j.get("project") not in projects:
+            continue
+        out += retro_repeated(j, rows, since)
+        if j.get("stage") != "closed" or not isinstance(j.get("done"), str) or j["done"][:10] < since:
             continue
         backlog = retro_dict(j.get("backlog"))
         if backlog.get("decision") == "denied":
@@ -14263,7 +14415,7 @@ COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3)
              "idea-images": (idea_images, 1, 1), "idea-files": (idea_files, 1, 1)}
 COMMANDS["adopt-home"] = (adopt_home_cmd, 1, 1)
 COMMANDS["doctor"] = (doctor_cmd, 0, 0)
-COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
+COMMANDS["autonomy"] = (autonomy_cmd, 1, 3)
 COMMANDS["halt"] = (halt_cmd, 1, 3)
 COMMANDS["suggest"] = (suggest_cmd, 2, 5)
 COMMANDS["control"] = (control_cmd, 4, 6)
