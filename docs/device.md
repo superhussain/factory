@@ -522,7 +522,9 @@ the repository.
 `bench cases` drafts this file. It reads the board for the project's jobs whose
 recorded outcome is `reverted` or `reworked`, asks GitHub for each pull request's
 head commit, and prints one case per job with an empty `defects` list. Redirect it
-to `<home>/bench/reviewer-cases.json`, then add each defect by hand. `bench score`
+to `<home>/bench/reviewer-cases.json`, then add each defect by hand. A redirect
+replaces the file even when the command fails, so once you have labeled cases,
+draft into a new file and copy over the cases you want. `bench score`
 refuses a case with no defects, so delete any case you cannot label.
 
 `bench cases` errors:
