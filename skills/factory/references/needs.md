@@ -35,3 +35,11 @@ On pickup, `pull`, then read `answers.md` only when its line
 `For needs.md sha256 <12 hex>, submitted ...` matches the first 12 hex characters of
 `sha256sum needs.md`. Otherwise it answers an older ask. The picks and the Other text
 together are the decision, and Other text may refine an option that was not picked.
+
+## Wrong and right needs
+
+| Situation | Wrong | Right |
+| --- | --- | --- |
+| APPROVE PR #34, CI still running | `{"needs": "coordinator: merge PR #34 once CI is green"}` | `{"stage": "pr-open", "automerge": true, "note": "CI running; merges on green"}` |
+| Coordinator holds PR #33 until CI passes | `{"needs": "review CI and merge PR #33 (coordinator holds the merge)"}` | `{"note": "coordinator hold: merge PR #33 after CI"}` |
+| `$PIPELINE.merge` is `human` | `{"note": "waiting for merge"}` | `{"automerge": false, "needs": "review and merge PR #33: this project's pipeline holds every PR for a person"}` |

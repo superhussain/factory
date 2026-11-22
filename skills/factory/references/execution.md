@@ -29,9 +29,9 @@ dispatch set none. `<via>` names the launch path:
 
 The orchestrator alone holds the factory claim and writes the board. Role workers
 write only their assigned files and the builder's branch. Never give them the
-orchestrator's factory session tag. Choose each builder per SKILL.md's builder
-selection rule before every dispatch. Resume a reachable builder through the
-native prompt tool only when the actual model need not change. A model change
+orchestrator's factory session tag. Choose each builder per
+[Builder selection](#builder-selection) before every dispatch. Resume a reachable
+builder through the native prompt tool only when the actual model need not change. A model change
 stops the old worker, then launches a fresh builder against the same files.
 
 ### Routing sources
@@ -71,6 +71,23 @@ fallback.
 
 The old orchestrator owns new-role dispatch until a whole-job handoff releases its
 claim. A delegated builder or reviewer is not a whole-job handoff.
+
+### Builder selection
+
+| Situation | Dispatch |
+| --- | --- |
+| Bounded task, clear files and checks, known fix | Start on the user's configured available implementation workhorse. |
+| Unclear design, unknown root cause, tricky concurrency, or work beyond the plan | Pick an allowed stronger design, debugging, or implementation tier from the active sheet. Complexity does not waive opt-in, named-only, high-stakes, or demonstrated-failure requirements. |
+| Current builder blocks, or its verification fails twice | End that run. Assess the next allowed rung with the concrete failure evidence. Add no retries beyond the existing failure and review budgets. |
+| Builder writes `BLOCKED-ENV:` | Same tier, one fresh builder, then `needs-human`, as [feature](commands/feature.md) step 3 says. |
+| Historical or quoted block, or two CHANGES rounds | Neither permanently selects the highest tier. Reassess the remaining work from the latest evidence. The review cap still stops the cycle first. |
+| An allowed stronger worker still blocks, or no permitted route can proceed | Move the job to `needs-human` with the reason. Do not loop through providers or relax restrictions. |
+
+A block is a line starting `BLOCKED:` written by a builder in its own run
+section of `build.md`, not a quote or example. A blocked run gets no review
+round. Only an explicitly assigned stronger builder may resolve an in-scope
+design gap, and it records the decision. It never overrides scope, permissions,
+or human gates.
 
 ## Handoff
 
