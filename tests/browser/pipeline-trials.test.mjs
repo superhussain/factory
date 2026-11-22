@@ -136,6 +136,19 @@ test("pipeline stage-note trials", { timeout: 180000 }, async (t) => {
         await page.$eval("#pipeline-trials-paused p code", (el) => el.textContent),
         "factory.py trial resume sample",
       );
+      assert.equal(
+        await page.$eval("#pipeline-trials-paused", (el) => el.getAttribute("role")),
+        "status",
+      );
+      // An unchanged paused set keeps the same banner node, so the status region stays quiet.
+      assert.equal(
+        await page.evaluate(() => {
+          const before = document.querySelector("#pipeline-trials-paused p");
+          renderPipelineTrials();
+          return document.querySelector("#pipeline-trials-paused p") === before;
+        }),
+        true,
+      );
     });
 
     await t.test("trials T3", async () => {
@@ -160,6 +173,22 @@ test("pipeline stage-note trials", { timeout: 180000 }, async (t) => {
       );
       const build = (await rows(page)).find((r) => r[0] === "sample-build-v5");
       assert.equal(build[2], "reverted, resumed");
+    });
+
+    await t.test("trials T5", async () => {
+      // Like factory.py trials_paused, reverts count even when the record cannot render as a row.
+      const bare = { project: "other", status: "reverted" };
+      await seedTrials(origin, [...TRIALS, bare, { ...bare }]);
+      await page.evaluate(() => poll());
+      await page.waitForFunction(
+        () => !document.getElementById("pipeline-trials-paused").hidden,
+        wait,
+      );
+      assert.deepEqual(
+        await page.$$eval("#pipeline-trials-paused code", (els) => els.map((el) => el.textContent)),
+        ["factory.py trial resume other", "factory.py trial resume sample"],
+      );
+      assert.equal((await rows(page)).length, 4);
     });
 
     assert.deepEqual(errors, []);
