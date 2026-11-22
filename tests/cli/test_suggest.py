@@ -527,7 +527,10 @@ class SuggestTest(SuggestCase):
         asked.assert_called_once_with(f"Type {card} to approve option B: ")
         job = self.board["jobs"][-1]
         approved = job["origin"]["approved"]
-        self.assertEqual(approved, {"option": "B", "device": "device", "at": approved["at"]})
+        self.assertEqual(list(approved.items()), [
+            ("option", "B"), ("device", "device"), ("at", approved["at"]), ("decider", "person")])
+        self.assertEqual(factory.record_decider(
+            {"option": "B", "device": "device", "at": "2026-10-01T00:00:00Z"}), "person")
         self.assertEqual(job["project"], "sample")
         self.assertNotIn("needs", job)
         self.assertTrue(job["idea"].endswith(f"\n\n---\nApproved option B by device at {approved['at']}."))
@@ -558,7 +561,7 @@ class SuggestTest(SuggestCase):
         approved = job["origin"]["approved"]
         self.assertEqual(list(approved.items()), [
             ("option", "A"), ("via", "chat"), ("quote", "approve the ls alias item,\ninteractive only"),
-            ("device", "device"), ("at", approved["at"])])
+            ("device", "device"), ("at", approved["at"]), ("decider", "person")])
         self.assertEqual(job["project"], "sample")
         self.assertNotIn("needs", job)
         self.assertTrue(job["idea"].endswith(f"\n\n---\nApproved option A in chat by device at {approved['at']}: "

@@ -1770,7 +1770,7 @@ RULE_HOLD_REASONS = ("its author recommends deny", "it asks questions a person m
 
 
 def record_decider(record):
-    """Who made a board backlog decision. Records from before decider existed infer it."""
+    """Who made a board backlog decision or an origin.approved approval. Records from before decider existed infer it."""
     return record.get("decider") or ("model" if record.get("by") == "triage" else "person")
 
 
@@ -3562,10 +3562,11 @@ def suggest_approve(job_id, option, chat_file=None):
             fail(f"{slug} is not a registered project on the autonomy allowlist; nothing was changed", 2)
         stamp = now()
         if quote is None:
-            origin["approved"] = {"option": option, "device": device, "at": stamp}
+            origin["approved"] = {"option": option, "device": device, "at": stamp, "decider": "person"}
             footer = f"Approved option {option} by {device} at {stamp}."
         else:
-            origin["approved"] = {"option": option, "via": "chat", "quote": quote, "device": device, "at": stamp}
+            origin["approved"] = {"option": option, "via": "chat", "quote": quote, "device": device, "at": stamp,
+                                  "decider": "person"}
             footer = f'Approved option {option} in chat by {device} at {stamp}: "{" ".join(quote.split())}"'
         job["project"] = slug
         job.pop("needs", None)
