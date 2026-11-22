@@ -434,13 +434,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   `merged` or `closed`. The dashboard's needs you column lists every job with
   `needs`, at `needs-human`, or with an escalated PR, and `stuck` and `ideas` skip
   any job with `needs`.
-- Before you write `needs.md` or read `answers.md`, read [needs.md format](references/needs.md).
-
-  | Situation | Wrong | Right |
-  | --- | --- | --- |
-  | APPROVE PR #34, CI still running | `{"needs": "coordinator: merge PR #34 once CI is green"}` | `{"stage": "pr-open", "automerge": true, "note": "CI running; merges on green"}` |
-  | Coordinator holds PR #33 until CI passes | `{"needs": "review CI and merge PR #33 (coordinator holds the merge)"}` | `{"note": "coordinator hold: merge PR #33 after CI"}` |
-  | `$PIPELINE.merge` is `human` | `{"note": "waiting for merge"}` | `{"automerge": false, "needs": "review and merge PR #33: this project's pipeline holds every PR for a person"}` |
+- Before you write `needs.md`, read `answers.md` or patch `needs`, read [needs.md format](references/needs.md). It shows wrong and right `needs` patches.
 - When you see a job's PR closed unmerged, move the job to `closed`, keep `pr`, put
   the reason in `note` (superseded by #N, rejected, abandoned), and run `cleanup` on
   it. A human can close a job at any stage the same way.
