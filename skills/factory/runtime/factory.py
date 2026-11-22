@@ -7285,6 +7285,166 @@ def pre_review_cmd(target):
         sys.exit(1)
 
 
+GROUNDING_USAGE = "usage: grounding <project-slug>/<job-id> <round>"
+GROUNDING_NEAR = 10
+GROUNDING_BOARD_MAX = 20
+GROUNDING_ROWS_MAX = 100
+CITATION = re.compile(r"(?<![\w./:-])((?:[\w.-]+/)*[\w-][\w.-]*\.[A-Za-z][A-Za-z0-9]{0,9}):([0-9]+)(?:-([0-9]+))?"
+                      r"((?:,[0-9]+)*)(?![\w])")
+
+
+def find_citations(text):
+    """[(citation, path, lines)] for each distinct path:line a review cites, in order of first appearance."""
+    found, seen = [], set()
+    for m in CITATION.finditer(text):
+        path = m[1]
+        while path.startswith("./"):
+            path = path[2:]
+        if m[0] in seen or ".." in path.split("/"):
+            continue
+        seen.add(m[0])
+        lines = [int(m[2])] + ([int(m[3])] if m[3] else []) + [int(x) for x in m[4].split(",") if x]
+        found.append((m[0], path, lines))
+    return found
+
+
+def diff_ranges(wt, base):
+    """({path: [(start, end)]}, None) for the lines the branch changes since origin/<base>, or (None, reason)."""
+    reason = fetch_base(wt, base)
+    if reason:
+        return None, reason
+    unreadable = f"the diff against origin/{base} could not be read"
+    mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
+                        capture_output=True, text=True)
+    if mb.returncode:
+        return None, unreadable
+    diff = subprocess.run(["git", "-C", str(wt), "diff", "-U0", "--no-renames", mb.stdout.strip(), "HEAD"],
+                          capture_output=True, encoding="utf-8", errors="replace")
+    if diff.returncode:
+        return None, unreadable
+    ranges, path, header = {}, None, False
+    for line in diff.stdout.splitlines():
+        if line.startswith("diff --git "):
+            path, header = None, True
+        elif header and line.startswith("+++ "):
+            path = line[len("+++ b/"):] if line.startswith("+++ b/") else None
+        elif line.startswith("@@ "):
+            header = False
+            m = re.match(r"@@ -\S+ \+([0-9]+)(?:,([0-9]+))? @@", line)
+            if path and m:
+                start, count = int(m[1]), int(m[2] or 1)
+                ranges.setdefault(path, []).append((start, start + max(count, 1) - 1))
+    return ranges, None
+
+
+def ground_citation(path, lines, wt, folder, tracked, ranges, near):
+    """(status, resolved, reason) for one cited path and its lines: ok, no-file, bad-line or off-diff."""
+    def regular(root, rel):
+        file = root / rel
+        return file.is_file() and not is_link(file) and root.resolve() in file.resolve().parents
+
+    if regular(wt, path):
+        files = [path]
+    elif "/" not in path and (named := [t for t in tracked if t.rsplit("/", 1)[-1] == path and regular(wt, t)]):
+        files = named
+    elif JOB_REL.fullmatch(path) and regular(folder, path):
+        files = None
+    else:
+        return "no-file", "no-file", f"no file at {path} in the worktree or job folder"
+    resolved = f"job:{path}" if files is None else ", ".join(files)
+    counts = [len((folder / path).read_bytes().splitlines())] if files is None else \
+        [len((wt / f).read_bytes().splitlines()) for f in files]
+    missing = next((line for line in lines if not any(1 <= line <= n for n in counts)), None)
+    if missing is not None:
+        reason = f"{resolved} has {counts[0]} lines" if len(counts) == 1 else \
+            f"{len(counts)} files named {path}, none has line {missing}"
+        return "bad-line", resolved, reason
+    if near and ranges is not None and files is not None:
+        changed = [r for f in files for r in ranges.get(f, [])]
+        if not changed:
+            return "off-diff", resolved, f"{resolved} is not changed on this branch"
+        if not any(start - GROUNDING_NEAR <= line <= end + GROUNDING_NEAR
+                   for line in lines for start, end in changed):
+            return "off-diff", resolved, f"more than {GROUNDING_NEAR} lines from every change to {resolved}"
+    return "ok", resolved, ""
+
+
+def grounding_cmd(target, round_text):
+    """Check each path:line a round's reviews cite against the job worktree, write round-N/grounding.md and
+    the round's unverified board list, and print one JSON line. It flags only and never changes a verdict."""
+    home, slug, job_id = r2_target(target, True)
+    if not re.fullmatch(r"[1-9][0-9]*", round_text):
+        fail(f"bad round {round_text!r}. " + GROUNDING_USAGE, 2)
+    n = int(round_text)
+    hold(target)
+    data = read_board(home)
+    job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+    rounds = (job or {}).get("rounds")
+    if not isinstance(rounds, list) or len(rounds) < n or not isinstance(rounds[n - 1], dict):
+        fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
+    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
+    stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
+    wt = home / "worktrees" / slug / (stacked or job_id)
+    folder = home / "jobs" / slug / job_id
+    round_folder = folder / f"round-{n}"
+    out_file = round_folder / "grounding.md"
+    for node in (folder, round_folder, out_file):
+        if is_link(node):
+            fail(f"{node} is a symlink or junction; nothing was written", 6)
+    if not wt.is_dir():
+        fail(f"no worktree at {wt}; nothing was written", 4)
+    if not round_folder.is_dir():
+        fail(f"no round folder at {round_folder}; nothing was written", 4)
+
+    def git(*args):
+        proc = subprocess.run(["git", "-C", str(wt), *args], capture_output=True, text=True)
+        return None if proc.returncode else proc.stdout
+
+    head = (git("rev-parse", "HEAD") or "").strip() or None
+    tracked = [p for p in (git("ls-files", "-z") or "").split("\0") if p]
+    ranges, diff_reason = diff_ranges(wt, base)
+    rows, checked, files = [], 0, 0
+    for name in REVIEWERS:
+        review = f"review-{name}.md"
+        path = round_folder / review
+        if not path.is_file() or is_link(path):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if (text.splitlines() or [""])[0] == "VERDICT: SKIPPED":
+            continue
+        files += 1
+        for citation, cited, lines in find_citations(text):
+            checked += 1
+            status, _, reason = ground_citation(cited, lines, wt, folder, tracked, ranges, name == "code")
+            if status != "ok":
+                rows.append({"review": review, "citation": citation, "status": status, "reason": reason})
+
+    def cell(text):
+        return printable_line(text, 200).replace("|", "/")
+
+    out = [f"GROUNDING: UNVERIFIED {len(rows)}" if rows else "GROUNDING: CLEAN", "", f"Head: {head}",
+           f"Diff: origin/{base}" if ranges is not None else f"Diff: unreadable: {cell(diff_reason)}",
+           f"Checked: {checked} citations in {files} review files"]
+    if rows:
+        out += ["", "| Review | Citation | Status | Reason |", "| --- | --- | --- | --- |"]
+        out += [f"| {cell(r['review'])} | `{cell(r['citation'])}` | {r['status']} | {cell(r['reason'])} |"
+                for r in rows[:GROUNDING_ROWS_MAX]]
+        if len(rows) > GROUNDING_ROWS_MAX:
+            out += ["", f"And {len(rows) - GROUNDING_ROWS_MAX} more."]
+    out += ["", "Unverified means the cited path or line did not check out. The finding may still be right. "
+                "No verdict changed."]
+    write_atomic(str(out_file), "\n".join(out) + "\n")
+    entry = {k: v for k, v in rounds[n - 1].items() if k != "unverified"}
+    if rows:
+        entry["unverified"] = [f"{r['review']} {r['citation']} {r['status']}" for r in rows][:GROUNDING_BOARD_MAX]
+    if entry != rounds[n - 1]:
+        rounds = list(rounds)
+        rounds[n - 1] = entry
+        board_write(home, job_id, {"rounds": rounds}, show=False, rewrite_round=n)
+    print(json.dumps({"round": n, "result": "unverified" if rows else "clean", "checked": checked,
+                      "unverified": rows, "diff": diff_reason}))
+
+
 WAIT_ARTIFACT = re.compile(r"spec\.md|spec-evidence\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
 WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]"
 
