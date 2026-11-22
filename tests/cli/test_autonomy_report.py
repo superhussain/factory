@@ -110,8 +110,10 @@ class AutonomyReportTest(IsolatedTestCase):
         self.assertEqual(self.methods, ["GET"])
 
     def test_usage(self):
-        usage = "factory.py: usage: autonomy status|pause|resume|report [<slug>]|allow <slug>|deny <slug>|self <slug>\n"
+        usage = ("factory.py: usage: autonomy status|pause|resume|report [<slug>]|allow <slug>|deny <slug>|self <slug>"
+                 "|restore <slug> internal|visible\n")
         self.assertEqual(invoke(factory, ["autonomy", "report", "Bad!"]), (2, "", usage))
-        code, out, err = invoke(factory, ["autonomy", "report", "a", "b"])
+        self.assertEqual(invoke(factory, ["autonomy", "report", "a", "b"]), (2, "", usage))
+        code, out, err = invoke(factory, ["autonomy", "report", "a", "b", "c"])
         self.assertEqual((code, out), (2, ""))
         self.assertIn("factory.py autonomy report [<project-slug>]", err)

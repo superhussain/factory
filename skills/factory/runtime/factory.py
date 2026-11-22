@@ -2928,7 +2928,7 @@ def autonomy_cmd(sub, slug=None, cls=None):
     if sub not in ("status", "pause", "resume", "report", "allow", "deny", "self", "restore") \
             or sub != "report" and (slug is None) != (sub in ("status", "pause", "resume")) \
             or slug is not None and not SLUG.fullmatch(slug) \
-            or (cls in AUTONOMY_CLASSES) != (sub == "restore"):
+            or (cls in AUTONOMY_CLASSES) != (sub == "restore") or cls is not None and sub != "restore":
         fail("usage: autonomy status|pause|resume|report [<slug>]|allow <slug>|deny <slug>|self <slug>"
              "|restore <slug> internal|visible", 2)
     home = factory_home()
