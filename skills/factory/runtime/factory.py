@@ -5679,6 +5679,61 @@ def pr_states(repo, numbers, device):
             for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
+OUTCOME_DAYS = 30
+OUTCOME_FIX_DAYS = 7
+OUTCOME_SUBJECT = re.compile(r"(?:fix|revert)", re.I)
+
+
+def pr_merge_commits(repo, numbers, device):
+    """({number: merge commit oid, or None when GitHub reports none}, None) for repo's merged pull
+    requests, from one gh api graphql call for each 50 numbers, or (None, why) as pr_states reads them."""
+    owner, name = repo.split("/")
+    oids = {}
+    for i in range(0, len(numbers), 50):
+        chunk = numbers[i:i + 50]
+        q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
+             + "".join(f"p{n}: pullRequest(number: {n}) {{ state mergeCommit {{ oid }} }} " for n in chunk) + "} }")
+        r = gh_cli("api", "graphql", "-f", "query=" + q)
+        if r is None:
+            return None, f"gh is not installed on {device}"
+        if r[0] == "timeout":
+            return None, f"gh api graphql timed out after 60 seconds on {device}"
+        try:
+            found = json.loads(r[1])["data"]["repository"]
+        except (ValueError, KeyError, TypeError):
+            found = None
+        if not isinstance(found, dict):
+            if r[0]:
+                return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
+            return None, ("gh api graphql returned no repository "
+                          f"(check the project file's repo and gh auth status on {device})")
+        for n in chunk:
+            pr = found.get(f"p{n}")
+            merged = isinstance(pr, dict) and pr.get("state") == "MERGED"
+            oids[n] = (pr.get("mergeCommit") or {}).get("oid") if merged else None
+    return oids, None
+
+
+def outcome_of(checkout, base, oid, rework_ids):
+    """(result, evidence) for one merge commit, read from the commits on origin/<base> after it, as
+    docs/device.md "Post-merge outcomes" lists. An unknown result's evidence is its one reason."""
+    if not git(checkout, "branch", "-r", "--contains", oid, "--list", f"origin/{base}"):
+        return "unknown", [f"merge commit {oid[:12]} is not on origin/{base}"]
+    merged = int(git(checkout, "show", "-s", "--format=%ct", oid))
+    touched = set(git(checkout, "diff", "--name-only", f"{oid}^1", oid).splitlines())
+    log = git(checkout, "log", "--no-merges", "--name-only", "--format=%x1e%H%x1f%ct%x1f%B%x1f",
+              f"{oid}..refs/remotes/origin/{base}")
+    commits = [c.split("\x1f") for c in log.split("\x1e")[1:]]
+    for sha, _, body, _ in commits:
+        if f"This reverts commit {oid}" in body:
+            return "reverted", [f"commit {sha[:12]}"]
+    evidence = [f"rework-of {i}" for i in rework_ids] + [
+        f"commit {sha[:12]}" for sha, at, body, files in commits
+        if int(at) <= merged + OUTCOME_FIX_DAYS * 86400 and OUTCOME_SUBJECT.search(body.partition("\n")[0])
+        and touched & set(files.splitlines())]
+    return ("reworked", sorted(evidence)) if evidence else ("held", [])
+
+
 def pr_signals(repo, numbers, device):
     """({number: (head oid, pr_signal)}, None) for repo's pull requests from one gh api graphql call,
     or (None, why), as pr_states reads them."""
