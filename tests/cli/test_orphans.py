@@ -128,8 +128,10 @@ class OrphanSummaryTest(unittest.TestCase):
     def test_plurals_and_skips(self):
         rows = [self.row("branch"), self.row("branch"), self.row("workspace"), self.row("workspace")]
         self.assertEqual(factory.orphan_summary(rows, ["prs: gh is not on PATH"]),
-                         "orphan scan: 4 orphaned (2 branches, 2 Paseo workspaces), 1 source(s) skipped; "
+                         "orphan scan: 4 orphaned (2 branches, 2 Paseo workspaces), 1 source skipped; "
                          "run factory.py orphans to list them")
+        self.assertEqual(factory.orphan_summary([], ["prs: gh is not on PATH", "workspaces: paseo is not on PATH"]),
+                         "orphan scan: nothing orphaned, 2 sources skipped; run factory.py orphans to list them")
 
     def test_nothing_orphaned(self):
         self.assertEqual(factory.orphan_summary([], []), "orphan scan: nothing orphaned")

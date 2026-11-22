@@ -9059,7 +9059,7 @@ def orphan_summary(orphans, skipped):
     kinds = ", ".join(f"{n} {ORPHAN_NOUNS[k][n != 1]}" for k, n in counts if n)
     line = f"orphan scan: {len(orphans)} orphaned ({kinds})" if orphans else "orphan scan: nothing orphaned"
     if skipped:
-        line += f", {len(skipped)} source(s) skipped"
+        line += ", 1 source skipped" if len(skipped) == 1 else f", {len(skipped)} sources skipped"
     return line + "; run factory.py orphans to list them"
 
 
