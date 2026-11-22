@@ -270,6 +270,24 @@ class RoutesTest(IsolatedTestCase):
             with self.subTest(args=args):
                 self.assertIn("usage: routes pick|list", self.exit_message(*args))
 
+    def test_review_lines_are_not_routes(self):
+        self.routes.write_text("---\nreview-low: provider-a model-small low\nreview-medium: provider-a model-mid\n"
+                               + ROUTES[4:], encoding="utf-8")
+        self.assertEqual(self.run_routes("pick")["route"], "alpha")
+        self.output.truncate(0), self.output.seek(0)
+        self.assertEqual([r["route"] for r in self.run_routes("list")], ["alpha", "beta"])
+        self.assertEqual(factory.read_review_routes(self.home), {
+            "low": {"name": "review-low", "provider": "provider-a", "model": "model-small", "effort": "low"},
+            "medium": {"name": "review-medium", "provider": "provider-a", "model": "model-mid", "effort": None}})
+        self.routes.write_text(ROUTES, encoding="utf-8")
+        self.assertEqual(factory.read_review_routes(self.home), {"low": None, "medium": None})
+        self.routes.write_text("---\nreview-low: provider-a\n---\n", encoding="utf-8")
+        with self.assertRaises(SystemExit) as raised:
+            factory.read_review_routes(self.home)
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn(f"bad review route review-low in {self.routes}: use review-low: <provider> <model> [<effort>]",
+                      self.errors.getvalue())
+
 
 class UnclaimTest(IsolatedTestCase):
     def setUp(self):

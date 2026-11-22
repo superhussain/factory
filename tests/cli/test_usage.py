@@ -89,6 +89,27 @@ class UsageScanTest(UsageTestCase):
         self.assertEqual(factory.usage_prompt(late), "")
 
 
+class UsageTranscriptsTest(UsageTestCase):
+    def test_sweep_session_counts_each_subagent_once(self):
+        outside = self.projects / "-home-u-dev-factory"
+        write(outside / "o2.jsonl", prompt(f"Sweep {self.home}/jobs/alpha/1017-add-x"), turn("m7", OPUS, 1, 1, 1, 1))
+        write(outside / "o2/subagents/agent-c1.jsonl", prompt(f"Prompt: {self.home}/prompts/alpha/1017-add-x/b.txt"),
+              turn("m8", OPUS, 1, 1, 1, 1, side=True))
+        write(outside / "o2/subagents/agent-c2.jsonl", prompt(f"Prompt: {self.home}/prompts/alpha/1018-add-y/b.txt"),
+              turn("m9", OPUS, 1, 1, 1, 1, side=True))
+
+        def found(job_id):
+            return {(p.relative_to(self.projects).as_posix(), main)
+                    for p, main in factory.usage_transcripts(self.home, "alpha", job_id)}
+        self.assertEqual(found("1017-add-x"), {
+            ("-home-u--paseo-worktrees-ab12-factory-1017-add-x/s1.jsonl", True),
+            ("-home-u--paseo-worktrees-ab12-factory-1017-add-x/s1/subagents/agent-a1.jsonl", False),
+            ("-home-u-dev-factory/o1/subagents/agent-b1.jsonl", False),
+            ("-home-u-dev-factory/o2.jsonl", True),
+            ("-home-u-dev-factory/o2/subagents/agent-c1.jsonl", False)})
+        self.assertEqual(found("1018-add-y"), {("-home-u-dev-factory/o2/subagents/agent-c2.jsonl", False)})
+
+
 class UsageCommandTest(UsageTestCase):
     def test_running_example(self):
         code, out, err = invoke(factory, ["usage", "alpha/1017-add-x"])

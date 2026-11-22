@@ -367,6 +367,35 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("Its `protected` list stays in `round-N/review-plan.json` for the approver.",
                       flat("references/commands/feature.md"))
 
+    def test_review_tier_rubric_and_dispatch(self):
+        def flat(name):
+            return " ".join((SKILL / name).read_text(encoding="utf-8").split())
+        writer = flat("agents/factory-spec-writer.md")
+        self.assertIn("8. **Review tier**: a `## Review tier` section with one line, `Tier: low`, `Tier: medium` or "
+                      "`Tier: high`, then one bullet of why. Low is docs, copy, tests only, or one isolated change "
+                      "with no runtime behavior change. High is auth, credentials, sandbox, storage or state layout, "
+                      "a protocol or wire format, a migration, a dependency, CI or check config, or three or more "
+                      "components. Everything else is medium. When unsure, pick the higher tier. `factory.py "
+                      "review-plan` reads this line to route reviewers.", writer)
+        self.assertIn("9. **Sub-jobs**: only when the request was split.", writer)
+        self.assertIn("Dispatch each reviewer `<r>` on `routes.<r>` from the plan: null keeps the default reviewer "
+                      "selection, and a route runs on its `provider`, `model` and `effort` through the runtime's own "
+                      "model selection, recorded with `agent record`. When the runtime cannot select that model, "
+                      "dispatch on the default and record the model that ran. A disputed-only round re-runs "
+                      "reviewers on the default.", flat("references/commands/feature.md"))
+        self.assertIn("- `review-plan` prints a `routes` entry per reviewer from the host's optional `review-low` and "
+                      "`review-medium` lines in `routes.md`. That entry beats the family preference above. The "
+                      "builder and the approver never take a review route.", flat("references/execution.md"))
+
+    def test_approver_plan_head_and_tier(self):
+        approver = " ".join((SKILL / "agents/factory-approver.md").read_text(encoding="utf-8").split())
+        self.assertIn("**Plan head and tier.** Run `git rev-parse factory/<id>`. When the plan file has no `head`, or "
+                      "its `head` differs, treat `protected` as null and the plan's `tier` as unknown. When the tier "
+                      "is `low`, `medium` or unknown, and the diff touches auth, credentials, sandboxing, storage or "
+                      "state layout, a protocol or wire format, a migration, a dependency or a protected path, return "
+                      "CHANGES and put the reason under a `## Full review` heading, so the next round runs every "
+                      "reviewer on the default route.", approver)
+
     def test_role_openers_name_files_not_globs(self):
         def flat(name):
             return " ".join((SKILL / name).read_text(encoding="utf-8").split())

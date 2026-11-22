@@ -43,6 +43,7 @@ job's own `$REPO`.
 `round` is 0 before the first review. `rounds[i]` is round i+1. Verdicts are
 `pending`, `PASS`, `CHANGES`, or `SKIPPED` (ux and ui only, written by `review-plan`). Reviewer keys are fixed: security, ux, ui, code.
 `factory.py verdict` sets one reviewer's verdict in one write and keeps the rest of `rounds`.
+A `board` patch cannot rewrite a recorded round: it may only keep the stored rounds and append all-pending ones.
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
 which ports live jobs hold. Only `factory.py` writes `claim`.
 A `board` patch that would change only `updated` stamps, or only this session's `claim.seen` while the stored one is under 10 minutes old, sends no PUT and prints the stored row.
@@ -84,3 +85,4 @@ A babysit sent to the job's own agent records a babysit row linked to that agent
 only `factory.py deny-notes` writes it.
 `babysit` is `{at}`, set on a `pr-open` job by Babysit PR or `control` (plus `via`, `quote`,
 `by`). A `/factory babysit` session clears it with `null`; `board` refuses other values. Clearing it also drops a priority with the same at.
+`handled` maps babysit item signatures to `{count, at}`. Only `factory.py pr-handled` writes it, newest 32 kept.

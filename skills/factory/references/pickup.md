@@ -196,7 +196,9 @@ Each run, in order:
   records nothing.
 - Pushes this host's audit rows for each job at spec, build, review, approve or
   pr-open whose transcripts here changed since `<home>/audit-push.json` records;
-  a failed push prints one warning and the run goes on.
+  a failed push prints one warning and the run goes on. When the push succeeds
+  and this host's token totals for the job changed, it also writes them to
+  `tokens.<device>` and prints `recorded <device> tokens on <job-id>`.
 - Runs the read-only orphan scan on its first run of each local date that
   `<home>/orphan-scan.json` does not record, and prints one line such as
   `orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory.py orphans to list them`.
@@ -281,7 +283,11 @@ shared project lists both.
   evidence (`missing_round_review`, `missing_decision`, `pr_before_approve`),
   and `coverage_unknown` where a job's local evidence is incomplete. It is
   read-only and writes nothing. Role dispatch does not read the field: only
-  pickup's launch path and the report do.
+  pickup's launch path and the report do. It also prints `comparison`:
+  `inconclusive` until each arm has 5 finished (merged or closed) jobs, then for
+  review rounds and tokens the median difference against a MAD noise figure,
+  where a difference inside the noise reads `no difference`. It is advisory and
+  nothing reads it.
 
 ## Launcher examples
 

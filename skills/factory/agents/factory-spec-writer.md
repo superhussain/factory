@@ -57,7 +57,14 @@ spec.md sections:
    acceptance criteria it satisfies). Every criterion is covered by some task.
 7. **Risks**: auth, secrets, data, build, or deploy impact, if any, including the
    risks the project file's Spec section calls out.
-8. **Sub-jobs**: only when the request was split.
+8. **Review tier**: a `## Review tier` section with one line, `Tier: low`,
+   `Tier: medium` or `Tier: high`, then one bullet of why. Low is docs, copy, tests
+   only, or one isolated change with no runtime behavior change. High is auth,
+   credentials, sandbox, storage or state layout, a protocol or wire format, a
+   migration, a dependency, CI or check config, or three or more components.
+   Everything else is medium. When unsure, pick the higher tier.
+   `factory.py review-plan` reads this line to route reviewers.
+9. **Sub-jobs**: only when the request was split.
 
 When the feature text references an earlier job (a rework or follow-up), read that
 job's `spec.md` and PR first and say what this job changes about it.

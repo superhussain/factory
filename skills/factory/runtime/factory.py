@@ -71,9 +71,15 @@
                                             check 1, pending at the deadline 3, a bad pr 4, a gh problem 5, an escalated job 7
   factory.py pr-state <project-slug>/<job-id> [--wait S]
                                             print one JSON reading of the job PR for /factory babysit:
-                                            pr, state, review, checks, queued, conflict and next; --wait
+                                            pr, state, review, checks, queued, conflict, items, capped,
+                                            rearm and next; --wait
                                             re-reads every 30 seconds for up to S seconds (1 to 600) while
                                             next is wait; a bad pr exits 4, a gh problem 5
+  factory.py pr-handled <project-slug>/<job-id> [--rearm] <sig>...
+                                            record that babysit acted on up to 32 pr-state item signatures:
+                                            add 1 to each count in the job's handled field, or with --rearm
+                                            drop them; keeps the newest 32 and prints one JSON line of id
+                                            and handled; a bad sig exits 2, another session's claim 6
   factory.py pr-queue <project-slug>/<job-id>
                                             print whether GitHub queued the job PR, by the enqueue mutation first, else merge-async:
                                             one JSON line of pr, status and detail; enqueued exits 0,
@@ -162,6 +168,9 @@
   factory.py usage <project-slug>/<job-id>  sum this host's transcript tokens for the job by model
   factory.py usage record <project-slug>/<job-id>
                                             write those totals to the board job under tokens.<device>
+  factory.py outcomes [record] [<project-slug>]
+                                            sort jobs merged in the last 30 days into held, reworked or reverted;
+                                            record writes outcome
   factory.py with-cloudflare -- <command> [<arg>...]
                                             run one command with the CLOUDFLARE_* keys of this home's .env
                                             in its environment; prints no value
@@ -237,6 +246,7 @@ PASEO_ID = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
 ADAPTER_ID = re.compile(r"[0-9a-fA-F][0-9a-fA-F-]{7,63}")
 ROUTE_MODEL = re.compile(r"[A-Za-z0-9_./:@\[\]-]{1,200}", re.ASCII)
 ROUTE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+REVIEW_ROUTE_KEYS = ("review-low", "review-medium")
 HERE = os.path.dirname(os.path.abspath(__file__))
 WINDOWS = os.name == "nt"
 FALLBACK_CA_FILE = "/etc/ssl/cert.pem"
@@ -944,7 +954,7 @@ def board(factory, job_id):
     board_write(factory, job_id, patch)
 
 
-def board_write(factory, job_id, patch, show=True, verdict=None):
+def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=None):
     if patch.get("claim") is not None:
         fail('only hold sets a claim. {"claim": null} releases it', 2)
     if "paseo" in patch:
@@ -988,6 +998,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
         fail("only factory.py pickup sets github. Nothing was written.", 2)
     if "auto_babysit" in patch:
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
+    if "handled" in patch:
+        fail("only factory.py pr-handled sets handled. Nothing was written.", 2)
     if patch.get("note") in SPEC_APPROVED_NOTES:
         fail(f"only a person approves a spec, on the dashboard or in Tracer, so factory.py board cannot set the "
              f"note '{patch['note']}'. Nothing was written.", 2)
@@ -1057,7 +1069,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None):
         if "stage" in patch and not patch["stage"]:
             fail(f"a board write cannot clear {job_id}'s stage. "
                  'Close the job with {"stage": "closed"} instead. Nothing was written.', 2)
-        refusal = move_refusal(Path(factory), job_id, found, patch)
+        refusal = "rounds" in patch and not verdict and rounds_refusal(job_id, found, patch["rounds"], rewrite_round)
+        refusal = refusal or move_refusal(Path(factory), job_id, found, patch)
         if refusal:
             fail(refusal, 2)
         if "refs" in patch and batch_refs(patch["refs"]) != batch_refs((found or {}).get("refs")):
@@ -3683,14 +3696,34 @@ def read_routes(home):
              "as <name>: <provider> <model> [<effort>]", 2)
     routes = []
     for name, value in meta.items():
-        # The optional experiment line is config, not a route.
-        if name == "experiment":
+        # The optional experiment and review lines are config, not routes.
+        if name == "experiment" or name in REVIEW_ROUTE_KEYS:
             continue
         parts = value.split()
         if not SLUG.fullmatch(name) or len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) \
                 or not ROUTE_MODEL.fullmatch(parts[1]) or parts[2:] and parts[2] not in ROUTE_EFFORTS:
             fail(f"bad route {name!r} in {path}: use <name>: <provider> <model> [<effort>]", 2)
         routes.append((name, parts[0], parts[1], parts[2] if len(parts) == 3 else None))
+    return routes
+
+
+def read_review_routes(home):
+    """{"low": route or None, "medium": route or None} from routes.md's optional review-low and review-medium
+    lines, each route {name, provider, model, effort}."""
+    path = Path(home, "routes.md")
+    meta = frontmatter(path)[0] if path.exists() else {}
+    routes = {}
+    for key in REVIEW_ROUTE_KEYS:
+        tier, value = key.split("-", 1)[1], meta.get(key)
+        if value is None:
+            routes[tier] = None
+            continue
+        parts = value.split()
+        if len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) or not ROUTE_MODEL.fullmatch(parts[1]) \
+                or parts[2:] and parts[2] not in ROUTE_EFFORTS:
+            fail(f"bad review route {key} in {path}: use {key}: <provider> <model> [<effort>]", 2)
+        routes[tier] = {"name": key, "provider": parts[0], "model": parts[1],
+                        "effort": parts[2] if len(parts) == 3 else None}
     return routes
 
 
@@ -3842,6 +3875,8 @@ def routes_cmd(sub, *args):
 REVIEW_PAST_STAGES = ("approve", "pr-open", "merged", "closed")
 # The window a follow-up of an arm job counts in: 7 days from the original's done, else started.
 WINDOW_SECONDS = 7 * 86400
+# Finished (merged or closed) jobs each arm needs before the report compares arms.
+MIN_ARM_FINISHED = 5
 # decision.md's verdict formats, from SKILL.md. Anything else before the PR ships is a skipped step.
 DECISION_VERDICTS = ("APPROVE", "ESCALATE", "CLOSED:")
 
@@ -3852,6 +3887,31 @@ def stamp_of(value):
         return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
         return None
+
+
+def spread(values):
+    """{n, median, mad} of a list of numbers; median and mad are None when it is empty."""
+    if not values:
+        return {"n": 0, "median": None, "mad": None}
+    m = statistics.median(values)
+    return {"n": len(values), "median": round(m, 1), "mad": round(statistics.median(abs(x - m) for x in values), 1)}
+
+
+def job_tokens(j):
+    """A job's recorded token total over every tokens.<device>.models.<model> dict, or None when
+    no device entry has a models dict. Non-int values are skipped."""
+    if not isinstance(j.get("tokens"), dict):
+        return None
+    total, found = 0, False
+    for entry in j["tokens"].values():
+        models = entry.get("models") if isinstance(entry, dict) else None
+        if not isinstance(models, dict):
+            continue
+        found = True
+        for counts in models.values():
+            if isinstance(counts, dict):
+                total += sum(counts[key] for key in USAGE_TOKENS if type(counts.get(key)) is int)
+    return total if found else None
 
 
 def arm_metrics(arm_jobs, follow_ups, jobs_root):
@@ -3899,6 +3959,8 @@ def arm_metrics(arm_jobs, follow_ups, jobs_root):
                     skipped["pr_before_approve"].append(job_id)
     counts = [j["resumes"]["count"] for j in arm_jobs.values() if isinstance(j.get("resumes"), dict)
               and type(j["resumes"].get("count")) is int]
+    finished = [j for j in arm_jobs.values() if j.get("stage") in ("merged", "closed")]
+    tokens = [t for t in map(job_tokens, finished) if t is not None]
     return {"jobs": len(arm_jobs), "merged": stages.count("merged"), "closed": stages.count("closed"),
             "needs_human": stages.count("needs-human"),
             "escalated": sum(1 for j in arm_jobs.values() if escalated(j)),
@@ -3906,12 +3968,31 @@ def arm_metrics(arm_jobs, follow_ups, jobs_root):
             "changes_verdicts": sum(list(entry.values()).count("CHANGES") for j in arm_jobs.values()
                                     for entry in (j.get("rounds") or []) if isinstance(entry, dict)),
             "stuck_resumes": sum(counts),
-            "follow_ups_7d": follow_ups, "skipped_steps": skipped, "coverage_unknown": coverage_unknown}
+            "follow_ups_7d": follow_ups, "skipped_steps": skipped, "coverage_unknown": coverage_unknown,
+            "finished": len(finished), "rounds": spread(means), "tokens": spread(tokens)}
+
+
+def compare(a, b):
+    """Whether two arm_metrics dicts can be compared, and per metric whether b's median differs
+    from a's by more than the larger arm's median absolute deviation."""
+    ready = a["finished"] >= MIN_ARM_FINISHED and b["finished"] >= MIN_ARM_FINISHED
+    result = {"min_finished": MIN_ARM_FINISHED, "verdict": "compared" if ready else "inconclusive",
+              "reason": f"needs {MIN_ARM_FINISHED} finished jobs per arm: a has {a['finished']}, b has {b['finished']}"}
+    for metric in ("rounds", "tokens"):
+        sa, sb = a[metric], b[metric]
+        if not ready or sa["n"] < MIN_ARM_FINISHED or sb["n"] < MIN_ARM_FINISHED:
+            result[metric] = {"diff": None, "noise": None, "reads": "inconclusive"}
+            continue
+        diff, noise = round(sb["median"] - sa["median"], 1), max(sa["mad"], sb["mad"])
+        reads = "no difference" if abs(diff) <= noise else "b higher" if diff > 0 else "b lower"
+        result[metric] = {"diff": diff, "noise": noise, "reads": reads}
+    return result
 
 
 def experiment_cmd(sub, name):
     """Read-only per-arm outcome report for one owner-model experiment. Attributes by each
-    job's recorded experiment field, never by re-hashing. Prints JSON, writes nothing."""
+    job's recorded experiment field, never by re-hashing. Prints JSON, writes nothing. The
+    comparison block is advisory: nothing reads it."""
     if sub != "report":
         fail("usage: experiment report <name>", 2)
     if not SLUG.fullmatch(name):
@@ -3944,9 +4025,9 @@ def experiment_cmd(sub, name):
                 follow[arm]["unknown_window"] += 1
             elif (age - anchor).total_seconds() <= WINDOW_SECONDS:
                 follow[arm]["rework_of" if ref["kind"] == "rework-of" else "surfaced"].append(j["id"])
-    print(json.dumps({"name": name,
-                      "a": arm_metrics(arm_jobs["a"], follow["a"], Path(home, "jobs")),
-                      "b": arm_metrics(arm_jobs["b"], follow["b"], Path(home, "jobs"))}, indent=2))
+    a = arm_metrics(arm_jobs["a"], follow["a"], Path(home, "jobs"))
+    b = arm_metrics(arm_jobs["b"], follow["b"], Path(home, "jobs"))
+    print(json.dumps({"name": name, "a": a, "b": b, "comparison": compare(a, b)}, indent=2))
 
 
 def release_claim(home, job_id, device, session):
@@ -5683,6 +5764,76 @@ def pr_states(repo, numbers, device):
             for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
+OUTCOME_DAYS = 30
+OUTCOME_FIX_DAYS = 7
+OUTCOME_SUBJECT = re.compile(r"(?:fix|revert)", re.I)
+
+
+def pr_merge_commits(repo, numbers, device):
+    """({number: merge commit oid, or None when GitHub reports none}, None) for repo's merged pull
+    requests, from one gh api graphql call for each 50 numbers, or (None, why) as pr_states reads them."""
+    owner, name = repo.split("/")
+    oids = {}
+    for i in range(0, len(numbers), 50):
+        chunk = numbers[i:i + 50]
+        q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
+             + "".join(f"p{n}: pullRequest(number: {n}) {{ state mergeCommit {{ oid }} }} " for n in chunk) + "} }")
+        r = gh_cli("api", "graphql", "-f", "query=" + q)
+        if r is None:
+            return None, f"gh is not installed on {device}"
+        if r[0] == "timeout":
+            return None, f"gh api graphql timed out after 60 seconds on {device}"
+        try:
+            found = json.loads(r[1])["data"]["repository"]
+        except (ValueError, KeyError, TypeError):
+            found = None
+        if not isinstance(found, dict):
+            if r[0]:
+                return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
+            return None, ("gh api graphql returned no repository "
+                          f"(check the project file's repo and gh auth status on {device})")
+        for n in chunk:
+            pr = found.get(f"p{n}")
+            merged = isinstance(pr, dict) and pr.get("state") == "MERGED"
+            oid = (pr.get("mergeCommit") or {}).get("oid") if merged else None
+            oids[n] = oid if isinstance(oid, str) and COMMIT.fullmatch(oid) else None
+    return oids, None
+
+
+def outcome_of(checkout, base, oid, rework_ids):
+    """(result, evidence) for one merge commit, read from the commits on origin/<base> after it, as
+    docs/device.md "Post-merge outcomes" lists. An unknown result's evidence is its one reason."""
+    if not git(checkout, "branch", "-r", "--contains", oid, "--list", f"origin/{base}"):
+        return "unknown", [f"merge commit {oid[:12]} is not on origin/{base}"]
+    merged = int(git(checkout, "show", "-s", "--format=%ct", oid))
+    touched = set(git(checkout, "diff", "--name-only", f"{oid}^1", oid).splitlines())
+    log = git(checkout, "log", "--no-merges", "--name-only", "--format=%x1e%H%x1f%ct%x1f%B%x1f",
+              f"{oid}..refs/remotes/origin/{base}")
+    # git() strips the output, and str.strip counts \x1e and \x1f as whitespace, so the first commit
+    # loses its \x1e and a last commit with no files loses its closing \x1f.
+    commits = [(c + "\x1f").split("\x1f")[:4] for c in log.split("\x1e") if c]
+    for sha, _, body, _ in commits:
+        if f"This reverts commit {oid}" in body:
+            return "reverted", [f"commit {sha[:12]}"]
+    evidence = [f"rework-of {i}" for i in rework_ids] + [
+        f"commit {sha[:12]}" for sha, at, body, files in commits
+        if merged <= int(at) <= merged + OUTCOME_FIX_DAYS * 86400 and OUTCOME_SUBJECT.search(body.partition("\n")[0])
+        and touched & set(files.splitlines())]
+    return ("reworked", sorted(evidence)) if evidence else ("held", [])
+
+
+def outcome_checkout_problem(checkout, base, device):
+    """Why outcomes cannot read origin/<base> in checkout on device, or None once the fetch worked."""
+    path = Path(checkout)
+    if not path.is_dir():
+        return f"no folder at {checkout} on {device}"
+    top = git(path, "rev-parse", "--show-toplevel")
+    if not top or Path(top).resolve() != path.resolve():
+        return f"{checkout} is not a git checkout on {device}"
+    why = fetch_base(path, base)
+    return f"{why} in {checkout} on {device}" if why else None
+
+
 def pr_signals(repo, numbers, device):
     """({number: (head oid, pr_signal)}, None) for repo's pull requests from one gh api graphql call,
     or (None, why), as pr_states reads them."""
@@ -6775,6 +6926,40 @@ def plan_reason(spec_text, decision_text, changed, globs):
                    "matches a visible-file glob")
 
 
+def review_tier(spec_text, decision_text, protected):
+    """(tier, reason): the spec's Review tier line, raised to high by the first floor that applies.
+    The spec text never lowers a floor."""
+    if re.search(r"^## Full review[ \t]*$", decision_text, re.M):
+        return "high", "decision.md asks for a full review"
+    if protected is None:
+        return "high", "the protected paths could not be read"
+    if protected:
+        return "high", "the branch touches protected paths"
+    line = re.search(r"^Tier:\s*(low|medium|high)\s*$", markdown_section(spec_text, "Review tier") or "",
+                     re.M | re.I)
+    if not line:
+        return "high", "spec.md has no Review tier line"
+    tier = line.group(1).lower()
+    return tier, f"spec.md rates the job {tier}"
+
+
+def fetch_base(wt, base):
+    """None once origin/<base> in wt matches the remote, or why it cannot be trusted. A factory/ base is a job
+    branch a builder can push, so it is refused."""
+    if base.startswith("factory/"):
+        return f"base {base} is a factory branch"
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}", base) or ".." in base:
+        return f"base {base} is not a safe branch name"
+    # git's stderr can carry origin's URL, credentials included, so the reason leaves it out.
+    try:
+        r = subprocess.run(["git", "-C", str(wt), "fetch", "-q", "origin",
+                            f"+refs/heads/{base}:refs/remotes/origin/{base}"], capture_output=True,
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=120)
+    except subprocess.TimeoutExpired:
+        return f"could not fetch origin {base}"
+    return f"could not fetch origin {base}" if r.returncode else None
+
+
 def changed_files(wt, base):
     """The paths the worktree's branch changes since it left origin/<base>, or None on any git failure."""
     mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
@@ -6815,7 +7000,7 @@ def previous_head(folder, n):
 def review_plan_cmd(target, round_text):
     """Write SKIPPED ux and ui reviews for a round that changes nothing a person sees, and print one JSON plan.
     Any doubt (no worktree, a git failure, no Acceptance criteria section) runs all four reviewers.
-    It also lists the branch's protected paths for the approver."""
+    It also lists the branch's protected paths for the approver, and each reviewer's route for the review tier."""
     home, slug, job_id = r2_target(target, True)
     if not re.fullmatch(r"[1-9][0-9]*", round_text):
         fail("round must be a positive integer. " + REVIEW_PLAN_USAGE, 2)
@@ -6835,6 +7020,8 @@ def review_plan_cmd(target, round_text):
             fail(f"{node} is a symlink or junction; nothing was written", 6)
     if not (folder / "spec.md").is_file():
         fail(f"{folder / 'spec.md'} is missing", 4)
+    review_routes = read_review_routes(home)
+    spec_text = (folder / "spec.md").read_text(encoding="utf-8")
     decision = folder / "decision.md"
     decision_text = decision.read_text(encoding="utf-8") if decision.is_file() else ""
     n = int(round_text)
@@ -6850,7 +7037,7 @@ def review_plan_cmd(target, round_text):
         for name in SKIPPABLE_REVIEWERS)
     fixed = round_changed_files(wt, prev[1]) if passed else None
     globs = visible_globs(project_file)
-    branch = changed_files(wt, base) if wt.is_dir() else None
+    branch = changed_files(wt, base) if wt.is_dir() and not fetch_base(wt, base) else None
     protected = touched_protected(branch) if branch is not None else None
     if fixed is not None:
         hit = next(((path, g) for path in fixed for g in globs if fnmatch.fnmatchcase(path, g)), None)
@@ -6864,22 +7051,26 @@ def review_plan_cmd(target, round_text):
     elif branch is None:
         visible, reason = True, f"the diff against origin/{base} could not be read"
     else:
-        visible, reason = plan_reason((folder / "spec.md").read_text(encoding="utf-8"), decision_text, branch, globs)
+        visible, reason = plan_reason(spec_text, decision_text, branch, globs)
     if not visible:
         for path in targets:
             if path.exists():
                 fail(f"{path} already exists; nothing was written", 6)
+    tier, tier_reason = review_tier(spec_text, decision_text, protected)
+    run = list(TRACER_REVIEWERS) if visible else ["security", "code"]
+    # A low job keeps security on the medium route; a high job keeps every reviewer on the default.
+    routes = dict.fromkeys(run) if tier == "high" else {
+        r: review_routes["medium" if tier == "medium" or r == "security" else "low"] for r in run}
     if head:
         round_folder.mkdir(exist_ok=True)
-        write_atomic(str(plan_file), json.dumps({"round": n, "head": head, "protected": protected}) + "\n")
-    if visible:
-        print(json.dumps({"round": n, "run": list(TRACER_REVIEWERS), "skipped": [], "reason": reason,
-                          "protected": protected}))
-        return
-    for path in targets:
-        write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
-    print(json.dumps({"round": n, "run": ["security", "code"], "skipped": list(SKIPPABLE_REVIEWERS),
-                      "reason": reason, "protected": protected}))
+        write_atomic(str(plan_file), json.dumps({"round": n, "head": head, "protected": protected, "tier": tier,
+                                                 "routes": routes}) + "\n")
+    if not visible:
+        for path in targets:
+            write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
+    print(json.dumps({"round": n, "run": run, "skipped": [] if visible else list(SKIPPABLE_REVIEWERS),
+                      "reason": reason, "protected": protected, "tier": tier, "tier_reason": tier_reason,
+                      "routes": routes}))
 
 
 CHECKS_FILE = ".factory/checks.json"
@@ -6933,6 +7124,17 @@ def run_check(argv, cwd, log, timeout):
     return code, round(time.monotonic() - start)
 
 
+def pre_review_tail(log_text, env):
+    """The last PRE_REVIEW_TAIL lines of a failing check's log for pre-review.md: home .env values of
+    ENV_SECRET_MIN or more characters and retro_redact's patterns as [redacted], each line printable,
+    at most 300 characters, with ~ as -. Longer values go first, so one holding another leaves no suffix."""
+    for value in sorted(env.values(), key=len, reverse=True):
+        if len(value) >= ENV_SECRET_MIN:
+            log_text = log_text.replace(value, "[redacted]")
+    tail = "\n".join(line[:4000] for line in log_text.splitlines()[-PRE_REVIEW_TAIL:])
+    return [printable_line(line, 300).replace("~", "-") for line in retro_redact(tail).split("\n")]
+
+
 def pre_review_cmd(target):
     """Run the base branch's checks file in the job worktree, write pre-review.md and print one JSON line."""
     home, slug, job_id = r2_target(target, True)
@@ -6955,8 +7157,10 @@ def pre_review_cmd(target):
         return None if proc.returncode else proc.stdout
 
     head = (git("rev-parse", "HEAD") or "").strip() or None
-    text = git("show", f"origin/{base}:{CHECKS_FILE}")
-    checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
+    checks, reason = [], fetch_base(wt, base)
+    if not reason:
+        text = git("show", f"origin/{base}:{CHECKS_FILE}")
+        checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
     if reason:
         write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\nReason: {printable_line(reason, 300)}\n")
         print(json.dumps({"result": "none", "head": head, "checks": [], "reason": reason}))
@@ -6976,9 +7180,10 @@ def pre_review_cmd(target):
              f"Checks: origin/{base}:{CHECKS_FILE} at {checks_sha}", f"Logs: {logs}", "",
              "| Check | Exit | Seconds |", "| --- | --- | --- |"]
     lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} |" for r in results]
+    env = read_conf(home / ".env") if (home / ".env").exists() else {}
     for r in failed:
         log_text = (logs / f"{r['name']}.log").read_text(encoding="utf-8", errors="replace")
-        tail = [printable_line(line, 300).replace("~", "-") for line in log_text.splitlines()[-PRE_REVIEW_TAIL:]]
+        tail = pre_review_tail(log_text, env)
         lines += ["", f"## {r['name']}", "", "~~~text", *tail, "~~~"]
     write_atomic(str(out_file), "\n".join(lines) + "\n")
     print(json.dumps({"result": result, "head": head, "checks": results, "reason": None}))
@@ -7101,6 +7306,7 @@ def watch_cmd(target, *args):
         pr = board_pr(home, slug, job_id, archive=True)
         meta = frontmatter(project_files(home, slug)[0])[0]
         base = pr_base(meta, pr)
+        handled = job_handled(home, job_id)
     start = time.monotonic()
     deadline = start + (WATCH_TIMEOUT if timeout is None else timeout)
     reading, read_at, bad_before = None, start, {}
@@ -7108,7 +7314,7 @@ def watch_cmd(target, *args):
         lines = job_file_lines(folder, artifacts)
         bad = {a: lines[a] for a in artifacts if (lines.get(a) or "").strip() and not wait_valid(a, lines[a])}
         if watch_pr and time.monotonic() >= read_at:
-            reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""))
+            reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""), handled)
             read_at = time.monotonic() + PR_STATE_INTERVAL
         if artifacts and all(a in lines and wait_valid(a, lines[a]) for a in artifacts):
             event = "files"
@@ -7129,6 +7335,27 @@ def watch_cmd(target, *args):
 
 ROUND_WAIT_USAGE = "usage: round-wait <project-slug>/<job-id> <round> [--timeout S]"
 REVIEWERS = ("security", "ux", "ui", "code")
+PENDING_ROUND = {r: "pending" for r in REVIEWERS}
+
+
+def rounds_refusal(job_id, found, rounds, rewrite_round=None):
+    """Why a rounds patch cannot be written, or None. It may keep the stored rounds and append pending
+    ones; only round rewrite_round may differ from the stored entry."""
+    if not isinstance(rounds, list):
+        return f"{job_id} rounds must be a list of review rounds. Nothing was written."
+    stored = (found or {}).get("rounds")
+    stored = stored if isinstance(stored, list) else []
+    if len(rounds) < len(stored):
+        return (f"{job_id} cannot drop review rounds: the board has {len(stored)} and the patch sends "
+                f"{len(rounds)}. Nothing was written.")
+    for i, entry in enumerate(rounds):
+        if i < len(stored) and entry != stored[i] and i + 1 != rewrite_round:
+            return (f"{job_id} cannot rewrite round {i + 1} in a board patch. Only factory.py verdict and "
+                    "round-wait change a recorded round. Nothing was written.")
+        if i >= len(stored) and entry != PENDING_ROUND:
+            return (f"{job_id} cannot add round {i + 1} with verdicts. A new round starts as "
+                    f"{json.dumps(PENDING_ROUND)}. Record verdicts with factory.py verdict. Nothing was written.")
+    return None
 
 
 def round_wait_cmd(target, *args):
@@ -7166,7 +7393,7 @@ def round_wait_cmd(target, *args):
         if verdicts != written:
             rounds = board_rounds()
             rounds[n - 1] = verdicts
-            board_write(home, job_id, {"rounds": rounds}, show=False)
+            board_write(home, job_id, {"rounds": rounds}, show=False, rewrite_round=n)
             written = verdicts
         bad = {a: line for a, line in lines.items() if line.strip() and a not in valid}
         if len(valid) == len(artifacts):
@@ -7323,8 +7550,26 @@ def pr_checks(pr, required=False):
     return [], f"exited {code} with no check list" if code else "printed no check list"
 
 
+def pr_behind(pr):
+    """(behind_by, head sha, base): how many commits of its base the PR's head lacks, from GitHub's compare API."""
+    try:
+        view = json.loads(gh_pr_view(pr, "--json", "headRefOid,baseRefName"))
+    except ValueError:
+        view = None
+    sha, base = (view.get("headRefOid"), view.get("baseRefName")) if isinstance(view, dict) else (None, None)
+    if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
+            and isinstance(base, str) and re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", base)):
+        fail("gh pr view printed an unusable headRefOid or baseRefName", 5)
+    repo = GH_PR.fullmatch(pr)[1]
+    behind = gh_answer(gh_cli("api", f"repos/{repo}/compare/{base}...{sha}", "--jq", ".behind_by"),
+                       "gh api compare").strip()
+    if not re.fullmatch(r"[0-9]+", behind):
+        fail("gh api compare printed no behind_by", 5)
+    return int(behind), sha, base
+
+
 def checks_cmd(target, *args):
-    """Print each PR check as `<bucket> <name>` once none is pending, checking every 10 seconds until --timeout."""
+    """Print each PR check as `<bucket> <name>` once none is pending and the head is up to date with its base, updating a behind branch and checking every 10 seconds until --timeout."""
     home, slug, job_id = r2_target(target, True)
     if args and (args[0] != "--timeout" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
                  or int(args[1]) > 600):
@@ -7337,8 +7582,9 @@ def checks_cmd(target, *args):
     state = gh_pr_view(pr, "--json", "state", "--jq", ".state").strip()
     if state != "OPEN":
         fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
-    start = time.monotonic()
+    start = since = time.monotonic()
     usable = False
+    updated_from = seen = None
     while True:
         checks, problem = pr_checks(pr)
         if problem:
@@ -7347,20 +7593,46 @@ def checks_cmd(target, *args):
             usable = True
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
-            for c in checks:
-                print(f"{c['bucket']} {c['name']}")
             failing = [c["name"] for c in checks if c["bucket"] not in ("pass", "skipping")]
-            if failing:
-                fail("failing checks: " + ", ".join(failing), 1)
-            return
+            done = bool(failing)
+            if not failing:
+                behind, sha, base = pr_behind(pr)
+                # After an update, gh pr checks may still list the old head's checks while pr_behind
+                # already sees the new head, so exit only once an earlier reading saw the same head.
+                done = not behind and sha != updated_from and (updated_from is None or sha == seen)
+                seen = sha
+            if done:
+                for c in checks:
+                    print(f"{c['bucket']} {c['name']}")
+                if failing:
+                    fail("failing checks: " + ", ".join(failing), 1)
+                return
+            if behind and sha != updated_from:
+                n = pr.rsplit("/", 1)[1]
+                result = gh_pr("update-branch", pr, stderr=True)
+                if result is None:
+                    fail("gh is not installed", 5)
+                code, out, err = result
+                if code == "timeout":
+                    fail("gh pr update-branch timed out after 60 seconds", 5)
+                if code:
+                    fail(f"gh pr update-branch could not bring PR #{n} up to date with {base}: "
+                         f"{printable_line(err or out, 200)}. Merge {base} into the branch and push.", 6)
+                print(f"factory.py: PR #{n} was {behind} commit{'' if behind == 1 else 's'} behind {base}; "
+                      f"gh pr update-branch merged {base} into it, so checks run again on the new head.",
+                      file=sys.stderr)
+                updated_from = sha
+                since = time.monotonic()
         elapsed = time.monotonic() - start
-        if not checks and not usable and elapsed >= min(CHECKS_REGISTER, timeout):
+        waited = time.monotonic() - since
+        if not checks and not usable and waited >= min(CHECKS_REGISTER, timeout):
             fail("gh pr checks never gave a usable reply", 5)
-        if not checks and elapsed >= CHECKS_REGISTER:
+        if not checks and waited >= CHECKS_REGISTER:
             print("no checks reported")
             return
         if elapsed >= timeout:
-            fail("still pending: " + ", ".join(pending) if pending else "no checks listed yet", 3)
+            fail("still pending: " + ", ".join(pending) if pending
+                 else "still waiting for checks on the updated head" if updated_from else "no checks listed yet", 3)
         time.sleep(min(CHECKS_INTERVAL, max(0, timeout - elapsed)))
 
 
@@ -7369,10 +7641,35 @@ PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMerge
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
 PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
-                    "{isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved"
-                    " comments(first:100){nodes{authorAssociation author{__typename login}}}}}"
+                    "{isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved path"
+                    " comments(first:100){nodes{authorAssociation body author{__typename login}}}}}"
                     " latestReviews(first:100){nodes{author{__typename login}}}}}}")
 PR_STATE_INTERVAL = 30
+HANDLED_SIG = re.compile(r"(review|thread|check|conflict):[0-9a-f]{16}")
+HANDLED_CAP = 3
+HANDLED_KEEP = 32
+
+
+def handled_sig(kind, *parts):
+    """The signature babysit records for one PR item: its kind and a hash of what identifies it."""
+    return kind + ":" + hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
+def valid_handled(value):
+    """The well-formed entries of a job's handled field."""
+    if not isinstance(value, dict):
+        return {}
+    return {sig: {"count": e["count"], "at": e["at"]} for sig, e in value.items()
+            if isinstance(sig, str) and HANDLED_SIG.fullmatch(sig) and isinstance(e, dict)
+            and type(e.get("count")) is int and e["count"] > 0 and isinstance(e.get("at"), str)}
+
+
+def job_handled(home, job_id):
+    """The job's valid handled entries from the board, else {}."""
+    job = next((j for j in read_board(home)["jobs"] if j.get("id") == job_id), None)
+    return valid_handled((job or {}).get("handled"))
+
+
 BUILDKITE_API = "https://api.buildkite.com/v2"
 BUILDKITE_BUILD = re.compile(r"https://buildkite\.com/([A-Za-z0-9-]{1,100})/([A-Za-z0-9_-]{1,100})/builds/([0-9]{1,12})"
                              r"(?:#([0-9a-f-]{36}))?", re.ASCII)
@@ -7438,8 +7735,10 @@ def buildkite_log(home, check, buildkite_org):
             "tail": "\n".join(lines[-BUILDKITE_TAIL_LINES:])[-BUILDKITE_TAIL_CHARS:]}
 
 
-def pr_reading(home, pr, base, buildkite_org):
-    """One reading of the PR for a babysit session, with the next step it calls for."""
+def pr_reading(home, pr, base, buildkite_org, handled=None):
+    """One reading of the PR for a babysit session, with the next step it calls for. handled is the job's
+    handled field: a handled review or thread is skipped, and a check or conflict worked HANDLED_CAP times
+    reads as capped."""
     try:
         view = json.loads(gh_pr_view(pr, "--json", PR_STATE_FIELDS))
     except ValueError:
@@ -7482,8 +7781,25 @@ def pr_reading(home, pr, base, buildkite_org):
     replied = max([head] + [str(r.get("submittedAt") or "") for r in reviews if login(r) == author])
     human = [r for r in reviews if r.get("authorAssociation") in PR_REVIEWERS
              and login(r) != author and login(r) not in bot_logins]
-    unanswered = any(r.get("state") in ("CHANGES_REQUESTED", "COMMENTED")
-                     and str(r.get("submittedAt") or "") > replied for r in human)
+    handled = handled or {}
+    items, capped = [], []
+
+    def note(kind, label, *parts):
+        """Add one item to items or capped. False when it is a review or thread babysit already handled."""
+        sig = handled_sig(kind, *parts)
+        if kind in ("review", "thread") and sig in handled:
+            return False
+        count = handled[sig]["count"] if sig in handled else 0
+        entry = {"sig": sig, "label": printable_line(label, 100), "count": count}
+        listed_in = capped if count >= HANDLED_CAP else items
+        if entry not in listed_in:
+            listed_in.append(entry)
+        return True
+
+    unanswered = False
+    for r in human:
+        if r.get("state") in ("CHANGES_REQUESTED", "COMMENTED") and str(r.get("submittedAt") or "") > replied:
+            unanswered = note("review", login(r), login(r), str(r.get("body") or "")) or unanswered
     decision = view.get("reviewDecision") or ""
     approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
     state = str(view.get("state") or "").lower()
@@ -7495,20 +7811,40 @@ def pr_reading(home, pr, base, buildkite_org):
         comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
         if not comments or any(login(c) == author for c in comments):
             continue
-        if (comments[0].get("author") or {}).get("__typename") == "Bot":
+        bot = (comments[0].get("author") or {}).get("__typename") == "Bot"
+        if not bot and comments[0].get("authorAssociation") not in PR_REVIEWERS:
+            continue
+        path = str(thread.get("path") or "")
+        if not note("thread", path or "a review thread", path, str(comments[0].get("body") or "")):
+            continue
+        if bot:
             bots += 1
-        elif comments[0].get("authorAssociation") in PR_REVIEWERS:
+        else:
             threads += 1
     queued = in_queue or bool(view.get("autoMergeRequest"))
-    conflict = view.get("mergeStateStatus") == "DIRTY"
+    merge_state = view.get("mergeStateStatus")
+    conflict = merge_state == "DIRTY"
+    if conflict:
+        note("conflict", f"a merge conflict with {target}", target)
+    for c in listed:
+        if c["bucket"] in ("fail", "cancel"):
+            note("check", c["name"], c["name"])
+    listed_sigs = {i["sig"] for i in items + capped}
+    rearm = [s for s in dict.fromkeys(handled_sig("check", c["name"]) for c in listed
+                                      if c["bucket"] in ("pass", "skipping")) if s in handled and s not in listed_sigs]
+    if merge_state not in ("DIRTY", "UNKNOWN"):
+        rearm += [s for s in handled if s.startswith("conflict:")]
+    kinds = {i["sig"].split(":", 1)[0] for i in items}
     stacked = target != base
     if state in ("merged", "closed"):
         step = state
-    elif unanswered or bots or threads:
+    elif capped:
+        step = "capped"
+    elif kinds & {"review", "thread"}:
         step = "fix-reviews"
-    elif conflict:
+    elif "conflict" in kinds:
         step = "rebase"
-    elif checks == "fail":
+    elif "check" in kinds:
         step = "fix-ci"
     elif checks == "pending" or (checks == "none" and new):
         step = "wait"
@@ -7526,7 +7862,8 @@ def pr_reading(home, pr, base, buildkite_org):
             "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
             "base": target, "next": step, "ci_log": buildkite_log(home, failed, buildkite_org) if failed else None,
-            "threads": threads, "merge_queue": pull.get("isMergeQueueEnabled") is True}
+            "threads": threads, "merge_queue": pull.get("isMergeQueueEnabled") is True,
+            "items": items, "capped": capped, "rearm": rearm}
 
 
 def pr_state_cmd(target, *args):
@@ -7539,14 +7876,51 @@ def pr_state_cmd(target, *args):
     pr = board_pr(home, slug, job_id, archive=True)
     meta = frontmatter(project_files(home, slug)[0])[0]
     base = pr_base(meta, pr)
+    handled = job_handled(home, job_id)
     start = time.monotonic()
     while True:
-        reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""))
+        reading = pr_reading(home, pr, base, meta.get("buildkite_org", ""), handled)
         elapsed = time.monotonic() - start
         if reading["next"] not in ("wait", "wait-base") or elapsed >= wait:
             print(json.dumps(reading))
             return
         time.sleep(min(PR_STATE_INTERVAL, wait - elapsed))
+
+
+PR_HANDLED_USAGE = "usage: pr-handled <project-slug>/<job-id> [--rearm] <sig>..."
+
+
+def pr_handled_cmd(target, *args):
+    """Add 1 to the handled count of each signature and stamp its time, or with --rearm drop them,
+    keeping the newest HANDLED_KEEP entries, in one CAS write that keeps the claim."""
+    home, slug, job_id = r2_target(target, True)
+    rearm = args[0] == "--rearm"
+    sigs = args[1:] if rearm else args
+    if not 1 <= len(sigs) <= HANDLED_KEEP or not all(HANDLED_SIG.fullmatch(s) for s in sigs):
+        fail(f"give 1 to {HANDLED_KEEP} signatures like check:0123456789abcdef. " + PR_HANDLED_USAGE, 2)
+    device, session, minutes = holder(home)
+
+    def change(text):
+        data = load_board(text)
+        j = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if j is None:
+            fail(f"no job {job_id} on the board. Nothing was written.", 4)
+        if j.get("project") != slug:
+            fail(f"{job_id} belongs to {j.get('project')}, not {slug}. Nothing was written.", 2)
+        held = blocking(j, device, session, minutes)
+        if held:
+            fail(f"{held_by(job_id, held)}. Nothing was written.", 6)
+        handled = valid_handled(j.get("handled"))
+        stamp = now()
+        for sig in sigs:
+            if rearm:
+                handled.pop(sig, None)
+            else:
+                handled[sig] = {"count": handled.get(sig, {}).get("count", 0) + 1, "at": stamp}
+        j["handled"] = dict(sorted(handled.items(), key=lambda e: e[1]["at"], reverse=True)[:HANDLED_KEEP])
+        j["updated"] = data["updated"] = stamp
+        return dump_board(data), {"id": job_id, "handled": j["handled"]}
+    print(json.dumps(cas(home, "/api/board", change)))
 
 
 PR_ENQUEUE_MUTATION = ("query=mutation($id:ID!,$sha:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$sha})"
@@ -11010,7 +11384,8 @@ def audit_pushed(home):
 
 def audit_pickup_push(home, data):
     """Push this host's audit rows for each in-flight or pr-open job whose transcripts changed since
-    the last recorded push. Best effort: a failed push costs one warning, and the next pickup run retries it."""
+    the last recorded push, and refresh this host's token share. Best effort: a failed push costs one
+    warning, and the next pickup run retries it."""
     if not retro_transcripts().is_dir():
         return
     record, kept = audit_pushed(home), {}
@@ -11025,6 +11400,7 @@ def audit_pickup_push(home, data):
                 continue
             if record.get(job_id) != stamp:
                 audit_push(job_id)
+                usage_pickup_record(home, job)
             kept[job_id] = stamp
     except SystemExit as e:
         print(f"factory.py: audit push stopped (exit {e.code}); the next pickup run retries it", file=sys.stderr)
@@ -11109,8 +11485,8 @@ def usage_scan(path, main):
 
 
 def usage_transcripts(home, slug, job_id):
-    """[(path, main)] for this host's transcripts that ran in the job's worktree or whose first
-    prompt names the job folder or the job's prompt folder."""
+    """[(path, main)] for this host's transcripts that ran in the job's worktree, plus each main
+    session or subagent elsewhere whose own first prompt names the job folder or the job's prompt folder."""
     root = retro_transcripts()
     if not root.is_dir():
         return []
@@ -11120,10 +11496,12 @@ def usage_transcripts(home, slug, job_id):
     for project in sorted(p for p in root.iterdir() if p.is_dir()):
         for path in sorted(project.glob("*.jsonl")):
             subs = sorted((project / path.stem / "subagents").glob("*.jsonl"))
-            if project in worktrees or named.search(usage_prompt(path)):
+            if project in worktrees:
                 found += [(path, True)] + [(sub, False) for sub in subs]
-            else:
-                found += [(sub, False) for sub in subs if named.search(usage_prompt(sub))]
+                continue
+            if named.search(usage_prompt(path)):
+                found.append((path, True))
+            found += [(sub, False) for sub in subs if named.search(usage_prompt(sub))]
     return found
 
 
@@ -11163,6 +11541,27 @@ def usage_record(home, slug, job_id, device, totals):
     cas(home, "/api/board", change)
 
 
+def usage_pickup_record(home, job):
+    """Refresh this host's token share on a board job from pickup. Skips a job without a valid
+    project, a host without a valid device:, a scan with no tokens and an unchanged share."""
+    slug, job_id = job.get("project"), job["id"]
+    config = home / "config.md"
+    device = (frontmatter(config)[0] if config.is_file() else {}).get("device") or ""
+    if not isinstance(slug, str) or not SLUG.fullmatch(slug) or not HOST_NAME.fullmatch(device):
+        return
+    try:
+        totals = usage_totals(home, slug, job_id)
+    except Exception as e:
+        print(f"factory.py: usage: scan failed ({type(e).__name__}: {e}); nothing recorded", file=sys.stderr)
+        return
+    tokens = job.get("tokens") if isinstance(job.get("tokens"), dict) else {}
+    old = tokens.get(device) if isinstance(tokens.get(device), dict) else {}
+    if not totals["models"] or {k: v for k, v in old.items() if k != "at"} == totals:
+        return
+    usage_record(home, slug, job_id, device, totals)
+    print(f"recorded {device} tokens on {job_id}")
+
+
 def usage_cmd(*args):
     if len(args) == 2 and args[0] != "record":
         fail("usage: factory.py usage [record] <project-slug>/<job-id>", 2)
@@ -11191,6 +11590,107 @@ def usage_cmd(*args):
     if len(args) == 2:
         usage_record(home, slug, job_id, host, totals)
         print(f"recorded {host} tokens on {job_id}")
+
+
+OUTCOME_RESULTS = ("held", "reworked", "reverted", "unknown")
+
+
+def outcomes_record(home, results):
+    """Write each known result to its job's outcome in one board write, touching only jobs whose
+    result or evidence changed, and never a job's updated. Returns how many jobs changed."""
+    def change(text):
+        data = load_board(text)
+        stamp, changed = now(), 0
+        for j in data["jobs"]:
+            got = results.get(j.get("id"))
+            if not got or got[0] == "unknown":
+                continue
+            old = j.get("outcome") if isinstance(j.get("outcome"), dict) else {}
+            if (old.get("result"), old.get("evidence")) == got:
+                continue
+            j["outcome"] = {"result": got[0], "at": stamp, "evidence": got[1]}
+            changed += 1
+        if not changed:
+            return None, 0
+        data["updated"] = stamp
+        return dump_board(data), changed
+    return cas(home, "/api/board", change)
+
+
+def outcomes_cmd(*args):
+    record = bool(args) and args[0] == "record"
+    rest = args[1:] if record else args
+    if len(rest) > 1 or rest and not SLUG.fullmatch(rest[0]):
+        fail("usage: factory.py outcomes [record] [<project-slug>]", 2)
+    home = factory_home()
+    data = read_board(home)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=OUTCOME_DAYS)
+    recent = [j for j in data["jobs"] if j.get("stage") == "merged" and (stamp_of(j.get("done")) or cutoff) > cutoff]
+    orphans = sorted(str(j.get("id")) for j in recent if not isinstance(j.get("project"), str) or not j["project"])
+    jobs = [j for j in recent if isinstance(j.get("project"), str) and j["project"]
+            and (not rest or j["project"] == rest[0])]
+    skipped = f"merged jobs with no project, skipped: {', '.join(orphans)}" if orphans and not rest else None
+    if not jobs:
+        print(f"no jobs merged in the last {OUTCOME_DAYS} days")
+        if skipped:
+            print(skipped)
+        return
+    rework = {}
+    for j in data["jobs"]:
+        for ref in j.get("refs") if isinstance(j.get("refs"), list) else []:
+            if isinstance(ref, dict) and ref.get("kind") == "rework-of":
+                rework.setdefault(ref.get("id"), []).append(j["id"])
+    paths, device = read_paths(home), retro_host()
+    results, slugs = {}, sorted({j["project"] for j in jobs})
+    for slug in slugs:
+        md = project_files(home, slug)[0]
+        meta = frontmatter(md)[0] if md.exists() else {}
+        repo, base, checkout = meta.get("repo", ""), meta.get("base") or "main", paths.get(slug)
+        prs = {}
+        for j in jobs:
+            if j["project"] != slug:
+                continue
+            m = GH_PR_PARTS.fullmatch(j.get("pr") or "")
+            if not checkout:
+                results[j["id"]] = "unknown", [f"no checkout of {slug} in paths.md on {device}"]
+            elif not (m and f"{m[1]}/{m[2]}".lower() == repo.lower()):
+                results[j["id"]] = "unknown", [f"PR is not in {repo or 'the project file repo'}"]
+            else:
+                prs.setdefault(int(m[3]), []).append(j["id"])
+        if not prs:
+            continue
+        problem = outcome_checkout_problem(checkout, base, device)
+        if problem:
+            for ids in prs.values():
+                results.update(dict.fromkeys(ids, ("unknown", [problem])))
+            continue
+        oids, why = pr_merge_commits(repo, sorted(prs), device)
+        for n, ids in prs.items():
+            if why:
+                got = "unknown", [why]
+            elif not oids.get(n):
+                got = "unknown", ["no merge commit from GitHub"]
+            else:
+                got = outcome_of(checkout, base, oids[n], [r for i in ids for r in rework.get(i, [])])
+            results.update(dict.fromkeys(ids, got))
+    print(f"outcomes of jobs merged in the last {OUTCOME_DAYS} days")
+    rows = [("project",) + OUTCOME_RESULTS] + [
+        (slug,) + tuple(str(sum(results[j["id"]][0] == r for j in jobs if j["project"] == slug))
+                        for r in OUTCOME_RESULTS) for slug in slugs]
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
+    for row in rows:
+        print("  ".join([row[0].ljust(widths[0])] + [cell.rjust(w) for cell, w in zip(row[1:], widths[1:])]))
+    for slug in slugs:
+        for r in OUTCOME_RESULTS:
+            ids = sorted(j["id"] for j in jobs if j["project"] == slug and results[j["id"]][0] == r)
+            if ids:
+                print(f"{slug} {r}: " + ", ".join(
+                    f"{i} ({results[i][1][0]})" if r == "unknown" else i for i in ids))
+    if skipped:
+        print(skipped)
+    if record:
+        changed = outcomes_record(home, results)
+        print(f"recorded {changed} outcomes on the board" if changed else "outcomes unchanged; nothing written")
 
 
 def with_cloudflare_cmd(*argv):
@@ -12035,6 +12535,7 @@ COMMANDS["round-wait"] = (round_wait_cmd, 2, 4)
 COMMANDS["verdict"] = (verdict_cmd, 4, 4)
 COMMANDS["checks"] = (checks_cmd, 1, 3)
 COMMANDS["pr-state"] = (pr_state_cmd, 1, 3)
+COMMANDS["pr-handled"] = (pr_handled_cmd, 2, 34)
 COMMANDS["pr-queue"] = (pr_queue_cmd, 1, 1)
 COMMANDS["pickup"] = (pickup, 0, 5)
 COMMANDS["explore"] = (explore, 1, 3)
@@ -12053,6 +12554,7 @@ COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
 COMMANDS["audit"] = (audit_cmd, 1, 2)
 COMMANDS["usage"] = (usage_cmd, 1, 2)
+COMMANDS["outcomes"] = (outcomes_cmd, 0, 2)
 COMMANDS["with-cloudflare"] = (with_cloudflare_cmd, 0, sys.maxsize)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)

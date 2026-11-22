@@ -39,6 +39,9 @@ class PreReviewTest(IsolatedTestCase):
         self.wt = self.home / "worktrees" / "sample" / JOB
         self.wt.mkdir(parents=True)
         self.git("init", "-q")
+        self.origin = self.home / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(self.origin)], check=True)
+        self.git("remote", "add", "origin", str(self.origin))
         (self.wt / "README.md").write_text("base\n")
         self.commit()
 
@@ -55,7 +58,7 @@ class PreReviewTest(IsolatedTestCase):
 
     def base(self, checks=None, text=None):
         self.commit(checks, text)
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("push", "-q", "-f", "origin", "HEAD:refs/heads/main")
 
     def run_gate(self):
         routes = {"/api/board": (200, board())}
@@ -64,7 +67,7 @@ class PreReviewTest(IsolatedTestCase):
             return invoke(factory, ["--home", str(self.home), "pre-review", f"sample/{JOB}"])
 
     def test_no_checks_file_is_none(self):
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
         code, out, err = self.run_gate()
         self.assertEqual((code, err), (0, ""))
         result = json.loads(out)
@@ -115,6 +118,29 @@ class PreReviewTest(IsolatedTestCase):
         self.assertEqual((block[0], block[-1]), ("line 20 -x-", "line 59 -x-"))
         self.assertEqual(len((self.logs / "lint.log").read_text().splitlines()), 60)
 
+    def test_failure_tail_is_redacted(self):
+        (self.home / ".env").write_text("FACTORY_TEST_SECRET=synthetic-secret-0123456789\n")  # gitleaks:allow synthetic secret
+        leak = ("import sys\nprint('token=synthetic-secret-0123456789')\n"  # gitleaks:allow synthetic secret
+                "print('Authorization: Bearer abcdefghijklmnop123456')\nsys.exit(1)")
+        self.base([check("leak", leak)])
+        code, out, err = self.run_gate()
+        self.assertEqual(code, 1)
+        text = self.out.read_text()
+        self.assertNotIn("synthetic-secret-0123456789", text)
+        self.assertNotIn("abcdefghijklmnop123456", text)
+        self.assertIn("token=[redacted]", text)
+        self.assertIn("Authorization: [redacted]", text)
+        self.assertIn("synthetic-secret-0123456789", (self.logs / "leak.log").read_text())
+
+    def test_nested_env_values_are_redacted_longest_first(self):
+        (self.home / ".env").write_text("FACTORY_TEST_SHORT=abcdefghijkl\nFACTORY_TEST_LONG=abcdefghijklMNOP\n")
+        self.base([check("nested", "import sys\nprint('value abcdefghijklMNOP')\nsys.exit(1)")])
+        code, _, _ = self.run_gate()
+        self.assertEqual(code, 1)
+        text = self.out.read_text()
+        self.assertNotIn("MNOP", text)
+        self.assertIn("value [redacted]", text)
+
     def test_timeout_and_missing(self):
         self.base([check("slow", "import time; time.sleep(30)"),
                    {"name": "gone", "run": ["factory-test-no-such-program"]},
@@ -160,3 +186,30 @@ class PreReviewTest(IsolatedTestCase):
         code, out, err = self.run_gate()
         self.assertEqual((code, out), (6, ""))
         self.assertEqual(list(real.iterdir()), [])
+
+    def assertNone(self, reason):
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        result = json.loads(out)
+        self.assertEqual((result["result"], result["checks"], result["reason"]), ("none", [], reason))
+        self.assertIn(f"Reason: {reason}\n", self.out.read_text())
+        self.assertFalse(self.logs.exists())
+
+    def test_forged_local_base_is_refetched(self):
+        self.base([check("base", "print('base ran')")])
+        self.commit([check("forged", "raise SystemExit(3)")])
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([c["name"] for c in json.loads(out)["checks"]], ["base"])
+        self.assertFalse((self.logs / "forged.log").exists())
+
+    def test_factory_base_is_none(self):
+        self.base([check("lint", "pass")])
+        (self.home / "projects" / "sample.md").write_text("---\nrepo: example/sample\nbase: factory/x\n---\n")
+        self.assertNone("base factory/x is a factory branch")
+
+    def test_fetch_failure_is_none(self):
+        self.commit([check("lint", "pass")])
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.assertNone("could not fetch origin main")

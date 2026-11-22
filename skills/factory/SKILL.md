@@ -252,7 +252,8 @@ echo '{"stage":"review","round":1,"rounds":[{"security":"pending","ux":"pending"
 
 `null` clears a key (`{"port": null}`), and `rounds` is always sent whole. To record one
 reviewer's verdict, run `python3 "$RUNTIME" verdict "$SLUG/<id>" <N> <reviewer> <verdict>`
-instead of resending `rounds`. The job's first patch also sets `"project": "<slug>"`.
+instead of resending `rounds`. A `board` patch cannot rewrite a recorded round: it may only keep the
+stored rounds and append all-pending ones. The job's first patch also sets `"project": "<slug>"`.
 
 When `<home>/tracer.json` lists the project, a patch that sets `stage` or `rounds` also mirrors the job into Tracer, and a Tracer failure only prints one warning line. While Tracer builds a job, pickup saves its task statuses as `tracer.tasks`. All of this runs only while Settings, Pipeline, Tracer integration is On. See [integrations](references/integrations.md#tracer-mirror).
 
@@ -398,9 +399,12 @@ Every job field, with an example row and who writes it, is in [board fields](ref
 - Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
   at `pr-open` until its parent merges and it is retargeted to `$BASE`. Wait for
   checks with `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0 means
-  they passed, or the repo has none. Exit 3 means they are still pending, so run it
-  again. Exit 1 names the failing checks. Exit 4 means no open PR; 5 means gh never
-  gave a usable reply. Exit 7 means the approver escalated the job: the board marks
+  they passed, or the repo has none. When checks pass on a PR behind `$BASE`, checks
+  runs `gh pr update-branch` and waits for checks on the new head. Exit 3 means they
+  are still pending, so run it again. Exit 1 names the failing checks. Exit 4 means
+  no open PR; 5 means gh never gave a usable reply. Exit 6 means
+  `gh pr update-branch` failed, usually on a conflict: treat it as a merge conflict.
+  Exit 7 means the approver escalated the job: the board marks
   it escalated or its decision.md says ESCALATE. Nothing merges. Patch
   {"automerge": false, "escalated": true, "needs": "review and merge PR #<n>: the
   approver escalated it", "note": "escalated: checks held the merge"} and stop.
