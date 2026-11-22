@@ -634,6 +634,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .chip.PASS { background: var(--pass-bg); color: var(--pass-fg); }
   .chip.CHANGES { background: var(--changes-bg); color: var(--changes-fg); font-weight: 600; }
   .chip.SKIPPED { background: transparent; color: var(--pending-fg); outline: 1px dashed var(--pending-fg); outline-offset: -1px; }
+  .chip.unverified { background: transparent; color: var(--changes-fg); outline: 1px solid var(--changes-fg); outline-offset: -1px; }
 
   .detail {
     position: fixed; top: 0; right: 0; bottom: 0; width: min(var(--drawer-w, 760px), 100%);
@@ -1871,6 +1872,19 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
 
 const REVIEW_STATE_WORDS = { PASS: 'passed', CHANGES: 'changes requested', SKIPPED: 'skipped', pending: 'pending' };
 
+// Mirrors GROUNDING_BOARD_MAX in factory.py. Change both together.
+const GROUNDING_BOARD_MAX = 20;
+
+// Round n's unverified citations as a chip, or '' when grounding flagged none.
+function unverifiedChip(r, n) {
+  const list = Array.isArray(r?.unverified) ? r.unverified.filter((e) => typeof e === 'string') : [];
+  if (!list.length) return '';
+  const count = list.length >= GROUNDING_BOARD_MAX ? GROUNDING_BOARD_MAX + '+' : String(list.length);
+  const title = 'Round ' + n + ' grounding could not check ' + count + ' citation' + (list.length === 1 ? '' : 's') +
+    '. The R' + n + ' grounding tab has the reasons.\n' + list.join('\n');
+  return '<span class="chip unverified" title="' + esc(title) + '">' + count + ' unverified</span>';
+}
+
 function chips(rounds) {
   if (!Array.isArray(rounds) || !rounds.length) return '';
   return '<div class="rounds">' + rounds.map((r, i) =>
@@ -1879,7 +1893,7 @@ function chips(rounds) {
       const v = (r && r[k]) || 'pending';
       const cls = v === 'PASS' || v === 'CHANGES' || v === 'SKIPPED' ? v : 'pending';
       return '<span class="chip ' + cls + '" title="' + esc(k + ': ' + v) + '">' + esc(k) + '<span class="sr-only"> ' + REVIEW_STATE_WORDS[cls] + '</span></span>';
-    }).join('') + '</div>'
+    }).join('') + unverifiedChip(r, i + 1) + '</div>'
   ).join('') + '</div>';
 }
 
@@ -5467,6 +5481,7 @@ function candidates(j) {
   const list = ['spec.md', 'build.md', 'pre-review.md'];
   for (let i = 1; i <= n; i++) {
     for (const r of REVIEWERS) list.push('round-' + i + '/review-' + r + '.md');
+    list.push('round-' + i + '/grounding.md');
     list.push('rework-' + i + '.md');
   }
   list.push('rework-' + (n + 1) + '.md', 'decision.md', 'needs.md', 'answers.md', 'scratchpad.md');
@@ -6044,7 +6059,7 @@ function writeHash() {
 
 function label(name) {
   if (name === 'pre-review.md') return 'Pre-review';
-  return name.replace(/^round-(\d+)\/review-(\w+)\.md$/, 'R$1 $2').replace(/-(\d+)\.md$/, ' $1').replace(/\.md$/, '');
+  return name.replace(/^round-(\d+)\/review-(\w+)\.md$/, 'R$1 $2').replace(/^round-(\d+)\/grounding\.md$/, 'R$1 grounding').replace(/-(\d+)\.md$/, ' $1').replace(/\.md$/, '');
 }
 
 // pre-review.md's first line as a review chip class: FAIL reads like changes requested, NONE like a skipped review.
