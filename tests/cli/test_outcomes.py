@@ -239,6 +239,16 @@ class OutcomesUnknownTest(OutcomesTestCase):
         self.checkout_unknown("alpha held: 1017-add-x",
                               f"beta unknown: 1030-beta-job (no folder at {gone} on host-a)")
 
+    def test_job_without_project(self):
+        self.board["jobs"].append({"id": "1031-no-project", "stage": "merged", "done": stamp(1),
+                                   "updated": "2026-01-05T10:00:00Z", "pr": "https://github.com/example/alpha/pull/7"})
+        (code, out, err), _ = self.run_cmd()
+        self.assertEqual((code, out, err), (0, RUNNING_EXAMPLE + "merged jobs with no project, skipped: 1031-no-project\n", ""))
+        (code, _, _), puts = self.run_cmd("record")
+        self.assertEqual(code, 0)
+        saved = {j["id"]: j for j in puts[0]["jobs"]}
+        self.assertNotIn("outcome", saved["1031-no-project"])
+
 
 class OutcomesRecordTest(OutcomesTestCase):
     def test_record(self):

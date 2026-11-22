@@ -11424,10 +11424,15 @@ def outcomes_cmd(*args):
     home = factory_home()
     data = read_board(home)
     cutoff = datetime.now(timezone.utc) - timedelta(days=OUTCOME_DAYS)
-    jobs = [j for j in data["jobs"] if j.get("stage") == "merged" and (stamp_of(j.get("done")) or cutoff) > cutoff
-            and (not rest or j.get("project") == rest[0])]
+    recent = [j for j in data["jobs"] if j.get("stage") == "merged" and (stamp_of(j.get("done")) or cutoff) > cutoff]
+    orphans = sorted(str(j.get("id")) for j in recent if not isinstance(j.get("project"), str) or not j["project"])
+    jobs = [j for j in recent if isinstance(j.get("project"), str) and j["project"]
+            and (not rest or j["project"] == rest[0])]
+    skipped = f"merged jobs with no project, skipped: {', '.join(orphans)}" if orphans and not rest else None
     if not jobs:
         print(f"no jobs merged in the last {OUTCOME_DAYS} days")
+        if skipped:
+            print(skipped)
         return
     rework = {}
     for j in data["jobs"]:
@@ -11480,6 +11485,8 @@ def outcomes_cmd(*args):
             if ids:
                 print(f"{slug} {r}: " + ", ".join(
                     f"{i} ({results[i][1][0]})" if r == "unknown" else i for i in ids))
+    if skipped:
+        print(skipped)
     if record:
         changed = outcomes_record(home, results)
         print(f"recorded {changed} outcomes on the board" if changed else "outcomes unchanged; nothing written")
