@@ -37,7 +37,7 @@
                                             experiment as JSON (read-only)
   factory.py trial settle                   keep, revert, supersede or time out each open retro
                                             stage-note trial; 2 reverts pause a project's trials
-  factory.py trial resume <slug>            a human at a terminal clears that pause
+  factory.py trial resume <slug> <reason>   a person, or an agent a person asked, clears that pause
   factory.py unclaim <job-id>               release this session's claim on an idea, so it waits again
   factory.py deny-notes <job-id> [done]   print a denied job's unread notes wrapped as data, or mark them read
   factory.py pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]
