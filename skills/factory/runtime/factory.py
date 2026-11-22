@@ -25,6 +25,8 @@
   factory.py bench score <cases-file> <arm-folder>...
                                             score saved reviewer runs against labeled past defects, print JSON
                                             (offline)
+  factory.py bench cases <project-slug>
+                                            draft reviewer-benchmark cases from reverted or reworked jobs, print JSON
   factory.py ideas [--limit N] [--max-inflight N] [--project <slug>]
                                             claim the oldest ideas this device can run, print them as JSON
                                             (exit 3 when none are runnable or the cap is full)
@@ -13444,8 +13446,55 @@ def bench_arm(folder, cases):
             "missing": missing, "no_run": no_run}
 
 
+BENCH_DRAFT_USAGE = "usage: factory.py bench cases <project-slug>"
+
+
+def bench_draft(*args):
+    """bench cases <project-slug>: print draft cases, with empty defects, for the project's reverted or
+    reworked jobs, each with its PR's head commit from GitHub. Skips print on stderr."""
+    if len(args) != 1 or not SLUG.fullmatch(args[0]):
+        fail(BENCH_DRAFT_USAGE, 2)
+    slug, home = args[0], factory_home()
+    md = project_files(home, slug)[0]
+    if not md.exists():
+        fail(f"bench: no project file for {slug}", 4)
+    repo = frontmatter(md)[0].get("repo", "")
+    jobs = sorted((j for j in read_board(home)["jobs"] if j.get("project") == slug
+                   and isinstance(j.get("outcome"), dict) and j["outcome"].get("result") in ("reverted", "reworked")),
+                  key=lambda j: j["id"])
+    prs = {}
+    for j in jobs:
+        m = GH_PR_PARTS.fullmatch(j.get("pr") or "")
+        if m and f"{m[1]}/{m[2]}".lower() == repo.lower():
+            prs[j["id"]] = int(m[3])
+        else:
+            print(f"factory.py: bench cases skips {j['id']}: PR is not in {repo or 'the project file repo'}",
+                  file=sys.stderr)
+    numbers, heads = sorted(set(prs.values())), {}
+    for i in range(0, len(numbers), 50):
+        found, why = pr_states(repo, numbers[i:i + 50], retro_host())
+        if why:
+            fail(f"bench: {why}", 5)
+        heads.update({n: state[1] for n, state in found.items()})
+    cases = []
+    for j in jobs:
+        if j["id"] not in prs:
+            continue
+        head = heads.get(prs[j["id"]])
+        if isinstance(head, str) and COMMIT.fullmatch(head):
+            cases.append({"id": j["id"], "pr": j["pr"], "head": head, "source": j["outcome"]["result"],
+                          "defects": []})
+        else:
+            print(f"factory.py: bench cases skips {j['id']}: no head commit from GitHub", file=sys.stderr)
+    if not cases:
+        fail(f"bench: no reverted or reworked jobs to draft in {slug}", 3)
+    print(json.dumps({"cases": cases}, indent=2))
+
+
 def bench_cmd(*args):
     """bench score <cases-file> <arm-folder>...: score saved reviewer runs against labeled past defects."""
+    if args[:1] == ("cases",):
+        return bench_draft(*args[1:])
     if len(args) < 3 or args[0] != "score":
         fail(BENCH_USAGE, 2)
     cases = bench_cases(args[1])
