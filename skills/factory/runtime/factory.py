@@ -109,6 +109,9 @@
                                             the job is merged or closed, whatever its git state; print
                                             leftovers as JSON
                                             (--check: print only)
+  factory.py orphans                        list factory branches, open PRs, worktrees and Paseo workspaces
+                                            that no open board job owns, with a reason each, as JSON;
+                                            never removes anything
   factory.py push <project-slug>[/<job-id>] upload a project file, or a job's changed markdown and images, to R2
   factory.py pull <project-slug>[/<job-id>] download a project, or a job's changed markdown and images from R2
   factory.py idea-images <project-slug>/<job-id>
@@ -4767,6 +4770,7 @@ def pickup(*args):
                     print("factory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now", file=sys.stderr)
             retro_pickup_push(home)
             audit_pickup_push(home, data)
+            orphan_pickup_scan(home)
         retro_pickup_catchup(home, dry)
         pickup_pass(home, device, minutes, dry, limit, cap, data)
     finally:
@@ -9315,6 +9319,156 @@ def archive_workspace(target, *flags):
             fail(f"workspace {wks} archived, but agent archive failed: paseo archive {agent} exit {code}")
 
 
+ORPHAN_SCAN_FILE = "orphan-scan.json"
+ORPHAN_KINDS = ("branch", "pr", "worktree", "workspace")
+ORPHAN_NOUNS = {"branch": ("branch", "branches"), "pr": ("open PR", "open PRs"),
+                "worktree": ("worktree", "worktrees"), "workspace": ("Paseo workspace", "Paseo workspaces")}
+
+
+def orphan_reason(jobs, job_id):
+    """Why no open board job owns job_id's leftovers, or None when one does."""
+    job = next((j for j in jobs if j.get("id") == job_id), None)
+    if job is None:
+        return "no job on the board"
+    if job.get("stage") not in TERMINAL:
+        return None
+    return "job merged" if job["stage"] == "merged" else "job closed"
+
+
+def orphan_scan(home):
+    """(orphans, skipped): factory branches on origin, open factory PRs, job worktrees and factory-<id>
+    Paseo workspaces that no open board job owns. Only reads; a source that fails is one skipped line,
+    which never carries a tool's stderr."""
+    jobs = read_board(home)["jobs"]
+    ids = {j.get("id") for j in jobs}
+    orphans, skipped = [], []
+
+    def add(kind, project, job_id, name):
+        reason = orphan_reason(jobs, job_id)
+        if reason:
+            orphans.append({"kind": kind, "project": project, "job": job_id, "name": name, "reason": reason})
+
+    gh_missing = False
+    for slug, path in read_paths(home).items():
+        if not os.path.isdir(path):
+            continue
+        try:
+            r = subprocess.run(["git", "-C", path, "ls-remote", "--heads", "origin", "refs/heads/factory/*"],
+                               capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL,
+                               env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+        except subprocess.TimeoutExpired:
+            skipped.append(f"branches {slug}: git ls-remote timed out after 20 s")
+        except OSError:
+            skipped.append(f"branches {slug}: could not run git")
+        else:
+            if r.returncode:
+                skipped.append(f"branches {slug}: git ls-remote failed (exit {r.returncode})")
+            else:
+                for line in r.stdout.splitlines():
+                    ref = line.split("\t", 1)[-1]
+                    if ref.startswith("refs/heads/factory/"):
+                        name = ref[len("refs/heads/"):]
+                        add("branch", slug, name[len("factory/"):], name)
+        if gh_missing:
+            continue
+        md = project_files(home, slug)[0]
+        repo = frontmatter(md)[0].get("repo", "") if md.exists() else ""
+        if not repo:
+            skipped.append(f"prs {slug}: the project file names no repo")
+            continue
+        r = gh_cli("pr", "list", "-R", repo, "--state", "open", "--json", "number,headRefName,url", "--limit", "500")
+        if r is None:
+            gh_missing = True
+            skipped.append("prs: gh is not on PATH")
+            continue
+        try:
+            prs = json.loads(r[1]) if r[0] == 0 else None
+        except ValueError:
+            prs = None
+        if not isinstance(prs, list):
+            skipped.append(f"prs {slug}: gh pr list failed (exit {r[0]})")
+            continue
+        for pr in prs:
+            head = pr.get("headRefName") if isinstance(pr, dict) else None
+            if isinstance(head, str) and head.startswith("factory/"):
+                add("pr", slug, head[len("factory/"):], pr.get("url"))
+
+    root = home / "worktrees"
+    try:
+        if is_link(root):
+            projects = [root]
+        else:
+            projects = sorted(root.iterdir()) if root.is_dir() else []
+        for project in projects:
+            if is_link(project):
+                skipped.append(f"worktrees: {project} is a symlink or junction")
+                continue
+            for folder in sorted(project.iterdir()) if project.is_dir() else ():
+                if is_link(folder):
+                    skipped.append(f"worktrees: {folder} is a symlink or junction")
+                elif folder.is_dir():
+                    add("worktree", project.name, folder.name, str(folder))
+    except OSError as e:
+        skipped.append(f"worktrees: could not read {e.filename or root}")
+
+    if not shutil.which("paseo"):
+        skipped.append("workspaces: paseo is not on PATH")
+    else:
+        code, out = paseo_run(["workspace", "ls", "--json"])
+        try:
+            spaces = json.loads(out) if not code else None
+        except ValueError:
+            spaces = None
+        if not isinstance(spaces, list):
+            skipped.append(f"workspaces: paseo workspace ls failed (exit {code})")
+            spaces = []
+        for space in spaces:
+            cwd = space.get("cwd") if isinstance(space, dict) else None
+            base = os.path.basename(os.path.normpath(cwd)) if isinstance(cwd, str) else ""
+            if base.startswith("factory-"):
+                rest = base[len("factory-"):]
+                job_id = rest if rest in ids else re.sub(r"-\d+$", "", rest)
+                job = next((j for j in jobs if j.get("id") == job_id), {})
+                add("workspace", job.get("project"), job_id, cwd)
+
+    orphans.sort(key=lambda o: (ORPHAN_KINDS.index(o["kind"]), o["name"]))
+    return orphans, skipped
+
+
+def orphans_cmd():
+    o, s = orphan_scan(factory_home())
+    print(json.dumps({"orphans": o, "skipped": s}, indent=2))
+
+
+def orphan_summary(orphans, skipped):
+    """The one pickup line for a scan's result."""
+    if not orphans and not skipped:
+        return "orphan scan: nothing orphaned"
+    counts = [(k, sum(1 for o in orphans if o["kind"] == k)) for k in ORPHAN_KINDS]
+    kinds = ", ".join(f"{n} {ORPHAN_NOUNS[k][n != 1]}" for k, n in counts if n)
+    line = f"orphan scan: {len(orphans)} orphaned ({kinds})" if orphans else "orphan scan: nothing orphaned"
+    if skipped:
+        line += ", 1 source skipped" if len(skipped) == 1 else f", {len(skipped)} sources skipped"
+    return line + "; run factory.py orphans to list them"
+
+
+def orphan_pickup_scan(home):
+    """Run the orphan scan once per local date and print its summary line. The date is recorded
+    before the scan, so a scan that stops does not retry until the next local date."""
+    today = datetime.now().astimezone().strftime("%Y-%m-%d")
+    try:
+        record = json.loads((home / ORPHAN_SCAN_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        record = None
+    if isinstance(record, dict) and record.get("version") == 1 and record.get("date") == today:
+        return
+    write_atomic(home / ORPHAN_SCAN_FILE, json.dumps({"version": 1, "date": today}) + "\n")
+    try:
+        print(orphan_summary(*orphan_scan(home)))
+    except SystemExit as e:
+        print(f"factory.py: orphan scan stopped (exit {e.code}); it runs again tomorrow", file=sys.stderr)
+
+
 def stuck(*args):
     """Claim up to --limit jobs that a dead session left mid-loop, and print them as JSON
     for the resume schedule. Only this function writes a job's resumes."""
@@ -12399,6 +12553,7 @@ COMMANDS["clean"] = (clean_cmd, 2, 3)
 COMMANDS["deny-notes"] = (deny_notes_cmd, 1, 2)
 COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
+COMMANDS["orphans"] = (orphans_cmd, 0, 0)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["pre-review"] = (pre_review_cmd, 1, 1)

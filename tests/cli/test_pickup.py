@@ -2157,6 +2157,15 @@ class AuditPickupTest(PickupFixture):
         self.assertEqual(self.record(), {"version": 1, "jobs": {"1017-add-x": factory.audit_stamp("1017-add-x")}})
 
 
+class OrphanPickupHookTest(PickupFixture):
+    def test_pickup_calls_the_hook_once_and_dry_run_never(self):
+        hook = patch.object(factory, "orphan_pickup_scan").start()
+        self.assertEqual(self.pickup("--dry-run"), (0, f"host {DEVICE}: would launch 0\n", ""))
+        hook.assert_not_called()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        hook.assert_called_once_with(self.home)
+
+
 class CloseTest(PickupFixture):
     DECISION = "/api/jobs/alpha/042-sample-export/decision.md"
     REASON = "Duplicate of 041-sample-report"

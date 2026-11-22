@@ -15,16 +15,21 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / "skills" / "factory"
+RUNTIMES = []
 
 
 def load_runtime():
     spec = importlib.util.spec_from_file_location("factory", SKILL / "runtime/factory.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    RUNTIMES.append(module)
     return module
 
 
 class IsolatedTestCase(unittest.TestCase):
+    # Pickup's daily orphan scan reads real git, gh and paseo, so it is a no-op unless a test opts in.
+    orphan_pickup_scan = False
+
     def run(self, result=None):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
@@ -39,7 +44,10 @@ class IsolatedTestCase(unittest.TestCase):
                        GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=str(home / "gitconfig"),
                        GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.invalid",
                        GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.invalid")
-            with patch.dict(os.environ, env, clear=True):
+            with patch.dict(os.environ, env, clear=True), contextlib.ExitStack() as stack:
+                if not self.orphan_pickup_scan:
+                    for module in RUNTIMES:
+                        stack.enter_context(patch.object(module, "orphan_pickup_scan", lambda home: None))
                 return super().run(result)
 
 

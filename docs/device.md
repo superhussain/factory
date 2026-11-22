@@ -155,6 +155,7 @@ python3 <installed-skill>/runtime/factory.py sync sample
 python3 <installed-skill>/runtime/factory.py handoff sample/001-small-feature --session <printed-tag>
 python3 <installed-skill>/runtime/factory.py clean sample/001-small-feature node_modules
 python3 <installed-skill>/runtime/factory.py clean sample/001-small-feature temp
+python3 <installed-skill>/runtime/factory.py orphans
 ```
 
 Use the allocated ID, not the illustrative ID above. Claims without a supplied
@@ -172,6 +173,12 @@ scratch folder, inside the job's own worktree, never through a link, and prints
 `Temp folder:` that every role prompt names. `prompt` creates it with mode 0700 and
 stops when a link, a file or another account holds the name. It checks the name again with
 `lstat` after creating it and changes the mode through a handle that does not follow links.
+`orphans` lists `factory/*` branches on origin, open factory PRs, job worktrees under
+`<home>/worktrees` and Paseo workspaces named `factory-<id>` that no open board job owns, each
+with its reason: `no job on the board`, `job merged` or `job closed`. It prints
+`{"orphans": [...], "skipped": [...]}` and only reads; a source that fails becomes one
+`skipped` line. Pickup runs it once per local date, recorded in `<home>/orphan-scan.json`,
+and prints one `orphan scan:` summary line.
 Within one command, the runtime reuses a 200 answer from /projects.json, /api/pipeline/global or /api/pipeline/effective/<slug> for up to 60 seconds. A pipeline or project write clears it.
 
 ## Cloudflare credentials for one command
