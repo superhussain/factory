@@ -1918,10 +1918,55 @@ async function offlineLesson() {
   console.log("PASS backlog offline lesson");
 }
 
+function offlineLessonRow() {
+  const view = vm.createContext({ projectName: (j) => j.project });
+  vm.runInContext(
+    script.match(/^const LESSON_CARD_MARK = .*$/m)[0] +
+      script.match(/^function isLessonCard\([\s\S]*?^\}/m)[0] +
+      script.match(/^function inboxBacklogMeta\([\s\S]*?^\}/m)[0] +
+      "\nthis.meta = inboxBacklogMeta;",
+    view,
+  );
+  const context = [
+    "Recommend: approve",
+    "",
+    "Approve adds this bullet to sample/notes.md. No job starts.",
+    "Why it waits: The close reason names the command but not which routes need it.",
+    "",
+    "Lesson: from 001-capture, queued 2026-10-27",
+  ].join("\n");
+  const card = {
+    project: "sample",
+    feature: "Lesson: Worker route changes run pnpm test:protocol; pnpm test skips them.",
+    context,
+  };
+  const plain = {
+    project: "sample",
+    feature: "Lesson: a plain line",
+    context: "Recommend: approve",
+  };
+  const ctx = { recommend: "approved", questions: [] };
+  assert.deepEqual(
+    [...view.meta(card, ctx)],
+    [
+      "sample",
+      "Agent recommends approve",
+      "Approve adds the lesson to sample/notes.md. No job starts.",
+    ],
+  );
+  assert.deepEqual([...view.meta(plain, ctx)], ["sample", "Agent recommends approve"]);
+  assert.deepEqual(
+    [...view.meta({ project: "sample", feature: "Add PDF export" }, null)],
+    ["sample"],
+  );
+  console.log("PASS backlog offline lesson row");
+}
+
 (async () => {
   await offline();
   await offlineContext();
   await offlineLesson();
+  offlineLessonRow();
   const i = process.argv.indexOf("--browser");
   if (i >= 0) await browserTest(process.argv[i + 1]);
 })().catch((error) => {

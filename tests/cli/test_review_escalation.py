@@ -12,9 +12,9 @@ PASS = "VERDICT: PASS\n\nNothing to change.\n"
 ESCALATE = {"decision": "escalate", "confidence": 91, "threshold": 80,
             "reason": "clef-flash rated the findings as needing a person.", "model": "@cf/cloudflare/clef-flash"}
 NO_CHANGES = {"decision": "continue", "confidence": None, "threshold": None,
-              "reason": "no reviewer asked for changes", "model": None}
+              "reason": "no reviewer asked for changes", "model": None, "decider": "rule"}
 FAILED = {"decision": "continue", "confidence": None, "threshold": None,
-          "reason": "the escalation check failed", "model": None}
+          "reason": "the escalation check failed", "model": None, "decider": "rule"}
 WARN = "factory.py: review escalation check failed ({}); the review loop continues\n"
 
 
@@ -53,9 +53,15 @@ class ReviewEscalationTests(IsolatedTestCase):
     def test_sends_only_changes_reviews_and_prints_the_worker_verdict(self):
         code, out, err = self.check()
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(json.loads(out), ESCALATE)
+        self.assertEqual(json.loads(out), {**ESCALATE, "decider": "model"})
         self.assertEqual(out.count("\n"), 1)
         self.assertEqual(self.posts, [{"reviews": {"security": SECURITY, "code": CODE}}])
+
+    def test_a_worker_reply_with_decider_model_prints_the_same_verdict(self):
+        self.reply = (200, json.dumps({**ESCALATE, "decider": "model"}))
+        code, out, err = self.check()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out), {**ESCALATE, "decider": "model"})
 
     def test_cuts_each_review_to_8000_characters(self):
         long = "VERDICT: CHANGES\n" + "📊" * 9000
@@ -101,6 +107,7 @@ class ReviewEscalationTests(IsolatedTestCase):
             ((200, "not json"), "malformed reply"),
             ((200, json.dumps({**ESCALATE, "decision": "hold"})), "malformed reply"),
             ((200, json.dumps({**ESCALATE, "confidence": "91"})), "malformed reply"),
+            ((200, json.dumps({**ESCALATE, "decider": "person"})), "malformed reply"),
         ):
             self.reply = reply
             code, out, err = self.check()
