@@ -132,6 +132,11 @@ class OutcomesClassifyTest(OutcomesTestCase):
         self.git("push", "-q", "origin", "main")
         self.assertEqual(self.outcome(10), ("held", []))
 
+    def test_fix_before_the_merge_holds(self):
+        self.commit("fix x early", {"x.txt": "x fixed\n"}, T0 - 3600)
+        self.git("push", "-q", "origin", "main")
+        self.assertEqual(self.outcome(7), ("held", []))
+
     def test_riders_share_the_lead_result(self):
         self.board["jobs"].append(merged("1020-add-v", 8, refs=[{"kind": "batched-into", "id": "1018-add-y"}]))
         (code, out, _), _ = self.run_cmd()
@@ -174,6 +179,16 @@ class OutcomesUnknownTest(OutcomesTestCase):
     def test_no_merge_commit(self):
         self.unknown("alpha unknown: 1019-add-z (no merge commit from GitHub)\n", oids={**self.oids, 9: None})
 
+    def test_bad_oid(self):
+        self.board["jobs"] = self.board["jobs"][2:]
+        answer = {"data": {"repository": {"p9": {"state": "MERGED", "mergeCommit": {"oid": "--output=x"}}}}}
+        with http_fixture({"GET /api/board": (200, self.board)}) as server, \
+                patch.object(factory, "gh_cli", lambda *_: (0, json.dumps(answer))):
+            self.config(server.origin)
+            code, out, err = invoke(factory, ["outcomes"])
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("alpha unknown: 1019-add-z (no merge commit from GitHub)\n", out)
+
     def test_oid_not_on_base(self):
         self.git("checkout", "-q", "-b", "local", "main")
         stray = self.merge(11, "s.txt", T0 + 5 * DAY, push_base="local")
@@ -187,12 +202,12 @@ class OutcomesUnknownTest(OutcomesTestCase):
             calls.append(args[-1])
             numbers = [int(n) for n in re.findall(r"pullRequest\(number: (\d+)\)", args[-1])]
             return 0, json.dumps({"data": {"repository": {
-                f"p{n}": {"state": "MERGED" if n % 2 else "OPEN", "mergeCommit": {"oid": f"oid{n}"}}
+                f"p{n}": {"state": "MERGED" if n % 2 else "OPEN", "mergeCommit": {"oid": f"{n:040x}"}}
                 for n in numbers if n != 51}}})
         with patch.object(factory, "gh_cli", gh):
             found, why = factory.pr_merge_commits("example/alpha", list(range(1, 52)), "host-a")
         self.assertEqual((len(calls), why), (2, None))
-        self.assertEqual((found[1], found[2], found[51]), ("oid1", None, None))
+        self.assertEqual((found[1], found[2], found[51]), (f"{1:040x}", None, None))
 
 
 class OutcomesRecordTest(OutcomesTestCase):

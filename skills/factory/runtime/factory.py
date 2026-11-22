@@ -160,7 +160,8 @@
   factory.py usage record <project-slug>/<job-id>
                                             write those totals to the board job under tokens.<device>
   factory.py outcomes [record] [<project-slug>]
-                                            sort jobs merged in the last 30 days into held, reworked or reverted; record writes outcome
+                                            sort jobs merged in the last 30 days into held, reworked or reverted;
+                                            record writes outcome
   factory.py with-cloudflare -- <command> [<arg>...]
                                             run one command with the CLOUDFLARE_* keys of this home's .env
                                             in its environment; prints no value
@@ -5712,7 +5713,8 @@ def pr_merge_commits(repo, numbers, device):
         for n in chunk:
             pr = found.get(f"p{n}")
             merged = isinstance(pr, dict) and pr.get("state") == "MERGED"
-            oids[n] = (pr.get("mergeCommit") or {}).get("oid") if merged else None
+            oid = (pr.get("mergeCommit") or {}).get("oid") if merged else None
+            oids[n] = oid if isinstance(oid, str) and COMMIT.fullmatch(oid) else None
     return oids, None
 
 
@@ -5733,7 +5735,7 @@ def outcome_of(checkout, base, oid, rework_ids):
             return "reverted", [f"commit {sha[:12]}"]
     evidence = [f"rework-of {i}" for i in rework_ids] + [
         f"commit {sha[:12]}" for sha, at, body, files in commits
-        if int(at) <= merged + OUTCOME_FIX_DAYS * 86400 and OUTCOME_SUBJECT.search(body.partition("\n")[0])
+        if merged <= int(at) <= merged + OUTCOME_FIX_DAYS * 86400 and OUTCOME_SUBJECT.search(body.partition("\n")[0])
         and touched & set(files.splitlines())]
     return ("reworked", sorted(evidence)) if evidence else ("held", [])
 
