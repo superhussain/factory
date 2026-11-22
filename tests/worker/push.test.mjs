@@ -587,6 +587,36 @@ test("the hourly cron pushes 042-sample-retry once when its claim goes stale", a
   assert.equal(sent.length, 1);
 });
 
+test("the hourly cron still pushes 042-sample-retry when the spend pass throws", async (t) => {
+  const sent = stubFetch(t);
+  const { env, call } = setup();
+  const phone = await browser("https://fcm.googleapis.com/fcm/send/sample-cron");
+  await call("/api/push/subscriptions", { method: "PUT", body: phone.body });
+  const claim = { device: "device-a", seen: SEEN };
+  await env.BUCKET.put("board.json", JSON.stringify({ jobs: [{ ...RETRY, claim }] }));
+  const bucket = {
+    ...env.BUCKET,
+    list: (options) =>
+      options?.prefix === "projects/"
+        ? Promise.reject(new Error("R2 list failed"))
+        : env.BUCKET.list(options),
+  };
+  const warn = t.mock.method(console, "warn", () => {});
+  const { scheduled } = (await loadProduction()).default;
+  const cronEnv = { ...serverEnv, BUCKET: bucket, FACTORY_VAPID_KEY: env.FACTORY_VAPID_KEY };
+  const pending = [];
+  scheduled({ scheduledTime: at("10:17").getTime() }, cronEnv, {
+    waitUntil: (p) => pending.push(p),
+  });
+  await Promise.allSettled(pending);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, phone.body.endpoint);
+  assert.deepEqual(
+    warn.mock.calls.map((c) => c.arguments.join(" ")),
+    ["spend nudge pass failed: R2 list failed"],
+  );
+});
+
 test("the hourly cron pushes 042-sample-retry once when its wait goes stale", async (t) => {
   const sent = stubFetch(t);
   const { env, call } = setup();

@@ -95,6 +95,11 @@ class TrialHelpersTest(unittest.TestCase):
         reverted[0]["resumed"] = stamp()
         self.assertFalse(factory.trials_paused(running(reverted), "factory"))
 
+    def test_revert_failed_neither_blocks_nor_pauses(self):
+        failed = running([trial(version=5, status="revert-failed"), trial(version=6, status="revert-failed")])
+        self.assertIsNone(factory.open_trial_for(failed, "factory", "spec"))
+        self.assertFalse(factory.trials_paused(failed, "factory"))
+
     def test_trial_jobs_need_the_project_and_a_start_at_or_after_opened(self):
         t = trial(opened="2026-11-12T09:00:00Z")
         a, b = arm_ids(TRIAL, "a", 1)[0], arm_ids(TRIAL, "b", 1)[0]
@@ -332,6 +337,16 @@ class TrialSettleTest(TrialWorkerCase):
         code, out, _, _, written = self.settle(running([trial()], arm_jobs(b={"rounds": 3})), routes)
         self.assertEqual((code, out), (0, f"trial {TRIAL} revert failed: 429 retro edit cap: 2 per scope per day\n"))
         self.assertEqual(written[0]["trials"][0]["status"], "open")
+
+    def test_failed_revert_after_28_days_is_revert_failed(self):
+        routes = {REVERT_ROUTE: (400, b"note fails operator text check")}
+        old = trial(opened=stamp(days=-28))
+        code, out, _, _, written = self.settle(running([old], arm_jobs(b={"rounds": 3})), routes)
+        self.assertEqual((code, out), (0, f"trial {TRIAL} revert failed after 28 days: kept the edit: "
+                                          "400 note fails operator text check\n"))
+        record = written[0]["trials"][0]
+        self.assertEqual(record["status"], "revert-failed")
+        self.assertIsNotNone(factory.stamp_of(record["settled"]))
 
     def test_paused_autonomy_settles_nothing(self):
         code, out, err, requests, _ = self.settle(running([trial()], arm_jobs(b={"rounds": 3}), paused=True))
