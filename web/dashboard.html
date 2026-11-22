@@ -597,6 +597,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .notify-toasts[data-position="bottom-left"] { bottom: 16px; left: 16px; }
   .notify-toasts[data-position="bottom-center"] { bottom: 16px; left: 50%; transform: translateX(-50%); }
   .notify-toasts[data-position="bottom-right"] { bottom: 16px; right: 16px; }
+  .notify-toast { touch-action: pan-y; }
+  .notify-toast.dragging { user-select: none; cursor: grabbing; }
   .notify-toast .notification-link { flex: 1; min-width: 0; border-bottom: 0; }
   @media (max-width: 760px) { .notify-toasts[data-position] { left: 16px; right: 16px; width: auto; transform: none; } }
   .pr-link { font: 11px/1.3 var(--font-mono); color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 3px; }
@@ -9863,6 +9865,11 @@ for (const type of ['pointerdown', 'keydown']) document.addEventListener(type, (
 // New board and backlog events show a toast in this tab. The first read only fills toastSeen
 // and backlogSeen. Board text is agent-written, so toasts set textContent only.
 const TOAST_MAX = 3, TOAST_MS = 10000;
+// A sideways drag of TOAST_DRAG_START px takes the pointer; TOAST_DRAG_FAIL_Y px of vertical
+// movement first leaves it to the page. Release past TOAST_DISMISS_X px, or a flick of
+// TOAST_DISMISS_V px/ms the same way, slides the toast out.
+const TOAST_DRAG_START = 8, TOAST_DRAG_FAIL_Y = 12, TOAST_DISMISS_X = 80, TOAST_DISMISS_V = 0.5;
+let toastDrag = null, toastDragged = false;
 let toastSeen = null;
 let backlogSeen = null;
 function showNotifyToast(kind, href, title, meta) {
@@ -9872,6 +9879,7 @@ function showNotifyToast(kind, href, title, meta) {
   const link = document.createElement('a');
   link.className = 'notification-link';
   link.href = href;
+  link.draggable = false;
   const parts = [['chip inbox-kind', NOTIFICATION_LABELS[kind]], ['inbox-title', title], ['inbox-meta', meta]].map(([cls, text]) => {
     const span = document.createElement('span');
     span.className = cls;
@@ -9897,7 +9905,7 @@ function showNotifyToast(kind, href, title, meta) {
   while (list.children.length > TOAST_MAX) list.firstElementChild.remove();
   // A hovered or focused stack, or a hidden tab, holds every toast for another TOAST_MS.
   const expire = () => {
-    if (document.hidden || list.matches(':hover') || list.contains(document.activeElement)) setTimeout(expire, TOAST_MS);
+    if (document.hidden || list.matches(':hover') || list.contains(document.activeElement) || toastDrag?.li === li) setTimeout(expire, TOAST_MS);
     else li.remove();
   };
   setTimeout(expire, TOAST_MS);
@@ -9924,11 +9932,68 @@ $('notify-toasts').addEventListener('click', (e) => {
     }
     return;
   }
+  dismissNotifyToast(li);
+});
+function dismissNotifyToast(li) {
   const next = (li.nextElementSibling || li.previousElementSibling)?.querySelector('.notify-toast-close') || $('notifications-button');
   const hadFocus = li.contains(document.activeElement);
   li.remove();
   if (hadFocus) next.focus();
+}
+// A drag ends in a click on the link, which must not open the job.
+$('notify-toasts').addEventListener('click', (e) => {
+  if (!toastDragged) return;
+  toastDragged = false;
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
+$('notify-toasts').addEventListener('pointerdown', (e) => {
+  const li = e.target.closest('.notify-toast');
+  if (!e.isPrimary || e.button !== 0 || !li || e.target.closest('.notify-toast-close')) return;
+  toastDrag = { li, id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, lastX: e.clientX, lastT: e.timeStamp, v: 0, active: false };
 });
+$('notify-toasts').addEventListener('pointermove', (e) => {
+  const d = toastDrag;
+  if (!d || e.pointerId !== d.id) return;
+  const dx = e.clientX - d.x;
+  if (!d.active) {
+    if (Math.abs(e.clientY - d.y) >= TOAST_DRAG_FAIL_Y) { toastDrag = null; return; }
+    if (Math.abs(dx) < TOAST_DRAG_START) return;
+    d.active = true;
+    d.li.setPointerCapture(e.pointerId);
+    d.li.classList.add('dragging');
+    d.li.style.transition = 'none';
+  }
+  if (e.timeStamp > d.lastT) d.v = (e.clientX - d.lastX) / (e.timeStamp - d.lastT);
+  d.lastX = e.clientX;
+  d.lastT = e.timeStamp;
+  d.dx = dx;
+  d.li.style.transform = 'translateX(' + dx + 'px)';
+  d.li.style.opacity = Math.max(0.2, 1 - Math.abs(dx) / d.li.offsetWidth);
+});
+function endToastDrag(e) {
+  const d = toastDrag;
+  if (!d || e.pointerId !== d.id) return;
+  toastDrag = null;
+  if (!d.active) return;
+  toastDragged = true;
+  setTimeout(() => { toastDragged = false; });
+  const { li, dx } = d;
+  li.classList.remove('dragging');
+  li.style.transition = 'transform ' + SWIPE_MS + 'ms ' + SWIPE_EASE + ', opacity ' + SWIPE_MS + 'ms ' + SWIPE_EASE;
+  const out = e.type === 'pointerup' && (Math.abs(dx) >= TOAST_DISMISS_X || Math.sign(d.v) === Math.sign(dx) && Math.abs(d.v) >= TOAST_DISMISS_V);
+  if (out) {
+    li.style.transform = 'translateX(' + Math.sign(dx) * li.offsetWidth + 'px)';
+    li.style.opacity = 0;
+    setTimeout(() => { if (li.isConnected) dismissNotifyToast(li); }, SWIPE_MS);
+  } else {
+    li.style.transform = '';
+    li.style.opacity = '';
+    setTimeout(() => { li.style.transition = ''; }, SWIPE_MS);
+  }
+}
+$('notify-toasts').addEventListener('pointerup', endToastDrag);
+$('notify-toasts').addEventListener('pointercancel', endToastDrag);
 function toastBoard() {
   const seen = boardSnapshot();
   const prev = toastSeen;
