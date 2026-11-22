@@ -13183,6 +13183,8 @@ AUTONOMY_MIN_JOBS = 20
 AUTONOMY_MAX_REWORK = 0.10
 AUTONOMY_MAX_ROUNDS = 1.75
 AUTONOMY_MAX_CHANGES = 0.10
+AUTONOMY_PROMOTE_DAYS = 7
+AUTONOMY_COOLDOWN_DAYS = 14
 
 
 def job_class(job):
@@ -13224,6 +13226,44 @@ def autonomy_holds(data):
             continue
         holds.setdefault((project, cls), []).append(str(j.get("id")))
     return {key: sorted(ids) for key, ids in holds.items()}
+
+
+def autonomy_promoted(data):
+    """The board's well-formed {"<slug>/<class>": {"at", "by", "jobs", "days", "until"}} promotions."""
+    record = data.get("autonomy")
+    promoted = record.get("promoted") if isinstance(record, dict) else None
+    if not isinstance(promoted, dict):
+        return {}
+    return {k: v for k, v in promoted.items()
+            if isinstance(k, str) and k.count("/") == 1 and SLUG.fullmatch(k.split("/")[0])
+            and k.split("/")[1] in AUTONOMY_CLASSES and isinstance(v, dict)
+            and stamp_of(v.get("at")) and stamp_of(v.get("until"))}
+
+
+def autonomy_promotion(data, slug, cls):
+    """None when slug cls is not held, else {"since", "days", "jobs", "why"}; an empty why lets it be promoted."""
+    held = autonomy_holds(data).get((slug, cls))
+    if not held:
+        return None
+    reverts = [j for j in data["jobs"] if str(j.get("id")) in held and j.get("project") == slug
+               and job_class(j) == cls and isinstance(j.get("outcome"), dict)
+               and j["outcome"].get("result") == "reverted"]
+    since = max(stamp_of(j["outcome"].get("at")) or stamp_of(j.get("done")) for j in reverts)
+    current = stamp_of(now())
+    days = (current - since).days
+    cell = autonomy_cell([j for j in data["jobs"] if j.get("stage") == "merged" and j.get("project") == slug
+                          and job_class(j) == cls and (stamp_of(j.get("done")) or since) > since])
+    key = f"{slug}/{cls}"
+    record = data.get("autonomy")
+    stored = record.get("promoted") if isinstance(record, dict) else None
+    promoted = autonomy_promoted(data).get(key)
+    until = promoted and stamp_of(promoted["until"])
+    why = ([f"{days} days held, needs {AUTONOMY_PROMOTE_DAYS}"] if days < AUTONOMY_PROMOTE_DAYS else []) + \
+        ([f"cooldown until {promoted['until']}"] if until and current < until else []) + \
+        ([f"promoted record for {key} is malformed"] if isinstance(stored, dict) and key in stored and not promoted
+         else []) + \
+        (cell["why"] if cell["verdict"] != "automerge" else [])
+    return {"since": since.strftime("%Y-%m-%dT%H:%M:%SZ"), "days": days, "jobs": cell["scanned"], "why": why}
 
 
 def autonomy_hold(data, job):
