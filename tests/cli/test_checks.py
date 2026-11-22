@@ -361,11 +361,18 @@ class HeadChecksTest(IsolatedTestCase):
     def test_repeated_name_keeps_latest(self):
         result, _ = self.head(rollup(
             run("ci", conclusion="FAILURE", started="2026-01-01T00:00:10Z"), run("ci", started="2026-01-01T00:00:05Z"),
-            status("lint", "PENDING", "2026-01-01T00:00:01Z"), status("lint", "SUCCESS", "2026-01-01T00:00:02Z"),
+            status("lint", "FAILURE", "2026-01-01T00:00:01Z"), status("lint", "SUCCESS", "2026-01-01T00:00:02Z"),
             run("build", status="QUEUED", conclusion=None, started="2026-01-01T00:00:09Z"),
             run("build", started="2026-01-01T00:00:03Z")))
         self.assertEqual(result, ([{"name": "build", "bucket": "pending"}, {"name": "ci", "bucket": "fail"},
                                    {"name": "lint", "bucket": "pass"}], None))
+
+    def test_pending_run_wins_over_earlier_pass(self):
+        result, _ = self.head(rollup(
+            run("ci", started="2026-01-01T00:00:05Z"), run("ci", status="QUEUED", conclusion=None, started=None),
+            run("lint", status="IN_PROGRESS", conclusion=None, started="2026-01-01T00:00:01Z"),
+            run("lint", conclusion="FAILURE", started="2026-01-01T00:00:09Z")))
+        self.assertEqual(result, ([{"name": "ci", "bucket": "pending"}, {"name": "lint", "bucket": "pending"}], None))
 
     def test_unusable_replies(self):
         for reply, problem in ((None, "gh is not installed"), (("timeout", ""), "timed out after 60 seconds"),
