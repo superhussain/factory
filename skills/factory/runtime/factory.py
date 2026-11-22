@@ -2586,10 +2586,10 @@ def lesson_text(home, path, flag, hi):
     text = read_chat_file(path, flag).strip()
     why = check_text(text, 1, hi)
     if why:
-        fail(f"{flag} {why}; nothing was queued", 2)
+        fail(f"{flag} {why}; nothing was written", 2)
     key = env_secret(home, text)
     if key:
-        fail(f"{flag} holds this device's {key}; nothing was queued", 2)
+        fail(f"{flag} holds this device's {key}; nothing was written", 2)
     return text
 
 
@@ -2650,7 +2650,7 @@ def lesson_cmd(target, *rest):
     slug, job = lesson_target(target, LESSON_USAGE)
     home = factory_home()
     fact = lesson_text(home, flags["--fact-file"], "--fact-file", 200)
-    why = flags.get("--why-file") and lesson_text(home, flags["--why-file"], "--why-file", 300)
+    why = lesson_text(home, flags["--why-file"], "--why-file", 300) if "--why-file" in flags else None
     projects = {p["slug"] for p in json.loads(api(home, "GET", "/projects.json")[2])}
     if slug not in projects:
         fail(f"no factory project {slug}. Known projects: {', '.join(sorted(projects)) or 'none'}", 4)

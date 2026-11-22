@@ -132,15 +132,19 @@ class LessonTests(TriageFixture):
                 self.assertEqual((code, out), (2, ""))
                 if len(args) > 2:
                     self.assertEqual(err, f"factory.py: {usage}\n")
+        code, out, err = invoke(self.module, ["lesson", f"factory/{JOB}", "--fact-file", fact, "--why-file", ""])
+        self.assertEqual((code, out, err), (2, "", "factory.py: --why-file : cannot read it as UTF-8 text; "
+                                                   "nothing was changed\n"))
+        self.assertEqual((self.files, self.puts), (before, []))
         cases = [
             ({"target": "factory"}, 2, usage),
             ({"target": "factory/../x"}, 2, usage),
-            ({"fact": "x" * 201}, 2, "--fact-file must be a string of 1-200 characters; nothing was queued"),
+            ({"fact": "x" * 201}, 2, "--fact-file must be a string of 1-200 characters; nothing was written"),
             ({"fact": "See https://example.test for it."}, 2,
-             "--fact-file must not hold a code fence or a link; nothing was queued"),
+             "--fact-file must not hold a code fence or a link; nothing was written"),
             ({"fact": "the token abcdefghijklmnop leaked"}, 2,
-             "--fact-file holds this device's FACTORY_TOKEN; nothing was queued"),
-            ({"why": "x" * 301}, 2, "--why-file must be a string of 1-300 characters; nothing was queued"),
+             "--fact-file holds this device's FACTORY_TOKEN; nothing was written"),
+            ({"why": "x" * 301}, 2, "--why-file must be a string of 1-300 characters; nothing was written"),
             ({"target": f"nowhere/{JOB}"}, 4, "no factory project nowhere. Known projects: factory, sample"),
         ]
         for kwargs, status, message in cases:
