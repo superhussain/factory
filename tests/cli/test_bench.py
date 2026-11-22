@@ -265,6 +265,7 @@ sys.exit(int(os.environ.get("FAKE_EXIT", "0")))
 REVIEW = "VERDICT: CHANGES\n\n- `worker/export.js:44` drops the header row.\n"
 MODELS = {"claude-opus-5-5": {"input": 200000, "output": 20000, "cache_write": 30000, "cache_read": 999}}
 SUMMARY = "replayed {}, skipped {}, failed {} of 1 cases into opus-medium\n"
+RUNNING = "1018-add-y: running review-code ...\n"
 
 
 class BenchReplayCase(BenchCase):
@@ -339,7 +340,7 @@ class BenchReplayTest(BenchReplayCase):
     def test_running_example(self):
         code, out, err = self.replay("--role", "review-code", "--model", "claude-opus-5-5")
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, "1018-add-y: wrote review-code.md (VERDICT: CHANGES), 300 s, 250000 tokens\n"
+        self.assertEqual(out, RUNNING + "1018-add-y: wrote review-code.md (VERDICT: CHANGES), 300 s, 250000 tokens\n"
                          + SUMMARY.format(1, 0, 0))
         case_dir = self.arm / "1018-add-y"
         self.assertEqual((case_dir / "review-code.md").read_text(encoding="utf-8"), REVIEW)
@@ -408,7 +409,7 @@ class BenchReplayTest(BenchReplayCase):
     def test_claude_failure_keeps_run_json(self):
         os.environ["FAKE_EXIT"] = "3"
         code, out, err = self.replay("--role", "review-code")
-        self.assertEqual((code, out, err), (1, "1018-add-y: failed: claude exited 3, see replay.log\n"
+        self.assertEqual((code, out, err), (1, RUNNING + "1018-add-y: failed: claude exited 3, see replay.log\n"
                                             + SUMMARY.format(0, 0, 1), ""))
         case_dir = self.arm / "1018-add-y"
         self.assertFalse((case_dir / "review-code.md").exists())
@@ -419,7 +420,7 @@ class BenchReplayTest(BenchReplayCase):
     def test_no_review_written(self):
         os.environ["FAKE_NO_REVIEW"] = "1"
         code, out, err = self.replay("--role", "review-code")
-        self.assertEqual((code, out, err), (1, "1018-add-y: failed: no review-code.md with a VERDICT line, "
+        self.assertEqual((code, out, err), (1, RUNNING + "1018-add-y: failed: no review-code.md with a VERDICT line, "
                                             "see replay.log\n" + SUMMARY.format(0, 0, 1), ""))
         case_dir = self.arm / "1018-add-y"
         self.assertFalse((case_dir / "review-code.md").exists())
@@ -431,8 +432,8 @@ class BenchReplayTest(BenchReplayCase):
         cases["cases"][0]["head"] = absent
         self.cases.write_text(json.dumps(cases), encoding="utf-8")
         code, out, err = self.replay("--role", "review-code")
-        self.assertEqual((code, out, err), (1, f"1018-add-y: failed: commit {absent} is not in {self.repo} after "
-                                            "fetch\n" + SUMMARY.format(0, 0, 1), ""))
+        self.assertEqual((code, out, err), (1, RUNNING + f"1018-add-y: failed: commit {absent} is not in "
+                                            f"{self.repo} after fetch\n" + SUMMARY.format(0, 0, 1), ""))
         self.assertEqual(self.calls(), [])
 
     def test_no_merge_base(self):
@@ -440,8 +441,8 @@ class BenchReplayTest(BenchReplayCase):
         first = self.git("commit-tree", tree, "-m", "unrelated")
         self.merges = {18: self.git("commit-tree", tree, "-p", first, "-m", "unrelated merge")}
         code, out, err = self.replay("--role", "review-code")
-        self.assertEqual((code, out, err), (1, f"1018-add-y: failed: no merge base of {self.merges[18]}^1 and "
-                                            f"{self.head} in {self.repo}\n" + SUMMARY.format(0, 0, 1), ""))
+        self.assertEqual((code, out, err), (1, RUNNING + "1018-add-y: failed: no merge base of "
+                                            f"{self.merges[18]}^1 and {self.head} in {self.repo}\n" + SUMMARY.format(0, 0, 1), ""))
         self.assertEqual(self.calls(), [])
         self.assertFalse((self.arm / "1018-add-y").exists())
 

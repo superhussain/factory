@@ -13661,6 +13661,8 @@ def bench_replay(*args):
     rows = bench_replay_plan(factory_home(), cases)
     counts = {True: 0, None: 0, False: 0}
     for row in rows:
+        if not (arm / row["id"] / f"{role}.md").exists():
+            print(f"{row['id']}: running {role} ...", flush=True)
         ok, line = bench_replay_case(row, arm, role, model)
         counts[ok] += 1
         print(f"{row['id']}: {'failed: ' if ok is False else ''}{line}", flush=True)
