@@ -67,7 +67,7 @@ import {
   triageConfidence,
   triageInput,
 } from "./triage.js";
-import { spendGet } from "./spend.js";
+import { spendGet, spendNudgePass } from "./spend.js";
 
 export { BoardEvents } from "./events.js";
 
@@ -2721,12 +2721,13 @@ async function storedBoard(env) {
   }
 }
 
-// The hourly stuck and stale push. A scheduled env has no config, so it is read here for VAPID.
+// The hourly stuck, stale and spend push. A scheduled env has no config, so it is read here for VAPID.
 async function pushHourly(env, at) {
   const { jobs } = await storedBoard(env);
   return sendPushes({ ...env, config: readServerConfig(env) }, [
     ...stuckPushes(jobs, at),
     ...stalePushes(jobs, at),
+    ...(pushKey(env) ? await spendNudgePass(env, await weeklyBudgets(env), at) : []),
   ]);
 }
 
