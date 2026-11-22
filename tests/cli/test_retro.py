@@ -754,6 +754,23 @@ class RetroAggregateTest(RetroWorkerCase):
         agg = json.loads(Path(json.loads(out)["aggregate"]).read_text(encoding="utf-8"))
         self.assertEqual(agg["reviewers"], ACCEPT)
 
+    def test_closed_job_without_build_md_counts_findings_fixed(self):
+        job = {"id": "1741-trim-backlog", "project": "factory", "title": "Trim backlog", "stage": "closed",
+               "done": f"{datetime.now().date().isoformat()}T12:30:00Z",
+               "rounds": [{"security": "PASS", "ux": "SKIPPED", "ui": "SKIPPED", "code": "CHANGES"}]}
+        routes = self.window(7, {0: {"host-a": [digest_row("host-a", S1, job="1741")]}})
+        routes["GET /api/board"] = (200, {"updated": "2026-11-12T09:00:00Z", "jobs": [job],
+                                          "autonomy": {"paused": False, "projects": ["factory"], "self": []}})
+        routes["GET /api/jobs/factory/1741-trim-backlog/round-1/review-code.md"] = (
+            200, b"VERDICT: CHANGES\n\nSignature: worker/backlog.js#missing-limit-check\n"
+                 b"Signature: worker/backlog.js#unbounded-loop\n")
+        code, out, err = self.aggregate(routes)
+        self.assertEqual((code, err), (0, ""))
+        agg = json.loads(Path(json.loads(out)["aggregate"]).read_text(encoding="utf-8"))
+        self.assertEqual(agg["reviewers"]["code"], {"changes": 2, "fixed": 2, "disputed": 0, "accept_pct": 100,
+                                                    "jobs": 1, "project": "factory", "sessions": []})
+        self.assertEqual(agg["reviewers"]["security"], NO_FINDINGS)
+
     def test_latest_is_the_newest_kept_row(self):
         code, out, err = self.aggregate(self.window(7, {1: {"host-a": [digest_row("host-a", S1)]},
                                                         0: {"host-a": "not json\n",
