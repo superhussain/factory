@@ -66,6 +66,7 @@ class TriageReplayTests(IsolatedTestCase):
         self.calls = []
         self.rated = dict(EXAMPLE_RATED)
         self.rate_bodies = []
+        self.rate_status = 200
 
         def api(home, method, path, body=None, ok=(200,), headers=None, raw=False):
             self.calls.append((method, path))
@@ -84,9 +85,11 @@ class TriageReplayTests(IsolatedTestCase):
                 status, view = self.view
                 return status, {}, json.dumps(view)
             if (method, path) == ("POST", "/api/backlog/triage/rate"):
-                self.assertEqual(ok, (200,))
+                self.assertEqual(ok, (200, 404))
                 payload = json.loads(body)
                 self.rate_bodies.append(payload)
+                if self.rate_status == 404:
+                    return 404, {}, "not found"
                 return 200, {}, json.dumps({"model": MODEL,
                                             "confidences": [self.rated.get(i) for i in payload["items"]]})
             self.assertEqual((method, path), ("POST", "/api/backlog/triage/verdicts"))
@@ -256,3 +259,10 @@ class TriageReplayTests(IsolatedTestCase):
             code, out, err = invoke(self.module, ["triage", "replay", "sample", *args])
             self.assertEqual((code, out, err), (2, "", USAGE), args)
         self.assertEqual(self.calls, [])
+
+    def test_rules_file_on_an_older_worker_exits_5(self):
+        self.rules_file()
+        self.rate_status = 404
+        code, out, err = invoke(self.module, ["triage", "replay", "sample", "--rules-file", "rules.txt"])
+        self.assertEqual((code, out, err), (5, "", "factory.py: the Worker has no /api/backlog/triage/rate; "
+                                                   "deploy the current Worker\n"))

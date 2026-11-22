@@ -1841,10 +1841,12 @@ def triage_replay(slug, threshold=None, rules=None, rules_file=None):
         rated = []
         for i in range(0, len(scored), TRIAGE_BATCH_LIMIT):
             chunk = scored[i:i + TRIAGE_BATCH_LIMIT]
-            _, _, text = api(home, "POST", "/api/backlog/triage/rate",
-                             json.dumps({"rules": rules, "items": [item for item, _, _ in chunk]},
-                                        ensure_ascii=False),
-                             headers={"Content-Type": "application/json"})
+            status, _, text = api(home, "POST", "/api/backlog/triage/rate",
+                                  json.dumps({"rules": rules, "items": [item for item, _, _ in chunk]},
+                                             ensure_ascii=False),
+                                  ok=(200, 404), headers={"Content-Type": "application/json"})
+            if status == 404:
+                fail("the Worker has no /api/backlog/triage/rate; deploy the current Worker", 5)
             rated += zip(chunk, json.loads(text)["confidences"])
         scored = []
         for (item, _, decision), confidence in rated:
