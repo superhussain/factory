@@ -86,7 +86,7 @@ Builder tier follows task complexity and plan clarity under the builder selectio
 rule in Rules. A blocked run skips review. The round cap still applies first.
 
 The factory runs on its own. A human sees a job only when it escalates, hits the
-round cap, repeats a finding or failing check, churns a file, fails twice, or its review findings need a person. Everything else specs,
+round cap, repeats a finding or failing check, churns a file, fails twice, blocks twice on its environment, or its review findings need a person. Everything else specs,
 builds, reviews, merges, and waits in the build queue without asking.
 
 Read [feature](references/commands/feature.md) before step 1 of any loop run. It holds the numbered steps the other commands continue.
@@ -352,6 +352,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   | Bounded task, clear files and checks, known fix | Start on the user's configured available implementation workhorse. |
   | Unclear design, unknown root cause, tricky concurrency, or work beyond the plan | Pick an allowed stronger design, debugging, or implementation tier from the active sheet. Complexity does not waive opt-in, named-only, high-stakes, or demonstrated-failure requirements. |
   | Current builder blocks, or its verification fails twice | End that run. Assess the next allowed rung with the concrete failure evidence. Add no retries beyond the existing failure and review budgets. |
+  | Builder writes `BLOCKED-ENV:` | Same tier, one fresh builder, then `needs-human`, as [feature](references/commands/feature.md) step 3 says. |
   | Historical or quoted block, or two CHANGES rounds | Neither permanently selects the highest tier. Reassess the remaining work from the latest evidence. The review cap still stops the cycle first. |
   | An allowed stronger worker still blocks, or no permitted route can proceed | Move the job to `needs-human` with the reason. Do not loop through providers or relax restrictions. |
 

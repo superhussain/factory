@@ -67,6 +67,20 @@ characters and every pattern `retro_redact` knows becomes `[redacted]`. The full
 logs stay in the host's job temp folder and never sync. A missing or invalid file
 gives `PRE-REVIEW: NONE` and reviewers work as before.
 
+The refusal also fires on harmless keys. A linked worktree's local config is the
+main checkout's shared `.git/config`. So one `http.*` key there, such as
+`http.postBuffer` or the `http.https://github.com/.extraheader` that
+`actions/checkout` writes, makes every job's pre-review write `PRE-REVIEW: NONE`
+with `Reason: the worktree's git config sets url or http keys`. `review-plan` then
+cannot read the diff, so it rates the job tier high and keeps the ux and ui
+reviews. Find the key with
+`git -C <checkout> config --local --get-regexp '^(url|http)\.'`. An `extraheader`
+that `actions/checkout` left behind carries a GitHub credential, so unset it with
+`git -C <checkout> config --local --unset-all 'http.https://github.com/.extraheader'`
+and never move it to global config, where every repository on the host would send
+it. Move a harmless key you need, such as `http.postBuffer`, to
+`git config --global`, which the check does not read.
+
 ## Review citation check
 
 `factory.py grounding` reads each review file of a round and checks every

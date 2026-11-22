@@ -314,3 +314,139 @@ class PreReviewTest(IsolatedTestCase):
         self.git("config", "extensions.worktreeConfig", "true")
         self.git("config", "--worktree", f"url.{forged}.insteadOf", str(self.origin))
         self.assertNone("the worktree's git config sets url or http keys")
+
+    def spec(self):
+        (self.folder / "spec.md").write_text(SPEC)
+
+    def write(self, sizes):
+        for path, n in sizes.items():
+            (self.wt / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.wt / path).write_text("x\n" * n)
+        self.commit()
+
+    def test_budget_over_warns(self):
+        self.spec()
+        self.base([check("lint", "pass")])
+        self.write({"tools/a.py": 300, "tests/b.py": 300, "docs/c.md": 120, "docs/d.md": 120, "src/e.py": 120,
+                    "src/f.py": 120, "src/g.py": 120})
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        result = json.loads(out)
+        self.assertEqual(result["result"], "pass")
+        unlisted = ["docs/c.md", "docs/d.md", "src/e.py", "src/f.py", "src/g.py"]
+        self.assertEqual(result["budget"], {"result": "over", "files": 7, "lines": 1200, "expected_files": 2,
+                                            "expected_lines": 300, "file_limit": 4, "line_limit": 900,
+                                            "unlisted": unlisted, "reason": None})
+        text = self.out.read_text()
+        head = self.git("rev-parse", "HEAD")
+        self.assertIn(f"Head: {head}\nBudget: over (files 7, limit 4; lines 1200, limit 900)\nChecks: ", text)
+        section = text.split("## Diff budget\n")[1]
+        self.assertIn("| Measure | Spec estimate | Limit | Branch |\n", section)
+        self.assertIn("| Files | 2 | 4 | 7 |\n", section)
+        self.assertIn("| Lines | 300 | 900 | 1200 |\n", section)
+        self.assertIn("Files outside the spec's task list:\n", section)
+        self.assertEqual([line for line in section.splitlines() if line.startswith("- ")],
+                         [f"- `{p}`" for p in unlisted])
+
+    def test_budget_cuts_unlisted_and_fences_backticks(self):
+        self.spec()
+        self.base([check("lint", "pass")])
+        self.write({**{f"src/m{i:02}.py": 1 for i in range(21)}, "src/a`odd.py": 1})
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(len(json.loads(out)["budget"]["unlisted"]), 22)
+        bullets = [line for line in self.out.read_text().splitlines() if line.startswith("- ")]
+        self.assertEqual(len(bullets), 21)
+        self.assertEqual(bullets[:2], ["- `` src/a`odd.py ``", "- `src/m00.py`"])
+        self.assertEqual(bullets[19:], ["- `src/m18.py`", "- and 2 more"])
+
+    def test_budget_survives_non_utf8(self):
+        (self.folder / "spec.md").write_bytes(SPEC.encode() + b"\xff\xfe bad\n")
+        self.base([check("lint", "pass")])
+        (self.wt / os.fsdecode(b"bad\xff.py")).write_text("x\n")
+        self.write({"tools/a.py": 10})
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        budget = json.loads(out)["budget"]
+        self.assertEqual((budget["result"], budget["files"], budget["expected_files"]), ("within", 2, 2))
+        self.assertIn("Budget: within (files 2, limit 4; lines 11, limit 900)\n", self.out.read_text())
+
+    def test_budget_within(self):
+        self.spec()
+        self.base([check("lint", "pass")])
+        self.write({"tools/a.py": 10})
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out)["budget"]["result"], "within")
+        text = self.out.read_text()
+        self.assertIn("Budget: within (files 1, limit 4; lines 10, limit 900)\n", text)
+        self.assertNotIn("## ", text)
+
+    def assertBudgetNone(self, reason):
+        code, out, err = self.run_gate()
+        self.assertEqual(err, "")
+        self.assertEqual(json.loads(out)["budget"], {
+            "result": "none", "files": 0, "lines": 0, "expected_files": 0, "expected_lines": 0, "file_limit": 0,
+            "line_limit": 0, "unlisted": [], "reason": reason})
+        self.assertIn(f"\nBudget: none ({reason})\n", self.out.read_text())
+
+    def test_budget_none_reasons(self):
+        self.base([check("lint", "pass")])
+        self.write({"tools/a.py": 10})
+        with self.subTest("no spec"):
+            self.assertBudgetNone("the job folder has no spec.md")
+        with self.subTest("link"):
+            (self.home / "elsewhere.md").write_text(SPEC)
+            os.symlink(self.home / "elsewhere.md", self.folder / "spec.md")
+            self.assertBudgetNone("spec.md is a symlink or junction")
+            os.unlink(self.folder / "spec.md")
+        with self.subTest("no paths"):
+            (self.folder / "spec.md").write_text("## Tasks\n\n1. Step\n   - Files: `/etc/x` and `../y`\n")
+            self.assertBudgetNone("spec.md has no task Files paths")
+        self.spec()
+        with self.subTest("unrelated base"):
+            branch = self.git("rev-parse", "--abbrev-ref", "HEAD")
+            self.git("checkout", "-q", "--orphan", "unrelated")
+            self.commit()
+            self.git("push", "-q", "-f", "origin", "HEAD:refs/heads/main")
+            self.git("checkout", "-q", "-f", branch)
+            self.assertBudgetNone("the branch diff could not be read")
+        with self.subTest("fetch"):
+            (self.home / "projects" / "sample.md").write_text("---\nrepo: example/sample\nbase: factory/x\n---\n")
+            self.assertBudgetNone("the base could not be fetched")
+
+
+SPEC = """# Sample
+
+## Design
+
+- Files: `outside/design.py`
+
+## Tasks
+
+1. Tool
+   - Files: `tools/a.py`
+2. Test
+   - Files: `tests/b.py`
+
+## Risks
+
+- None.
+"""
+
+
+class BudgetPathsTest(IsolatedTestCase):
+    def test_paths(self):
+        text = ("## Design\n\n- Files: `outside.py`\n\n## Tasks\n\n1. One\n   - Files: `tools/*.py`, `docs/`\n"
+                "   - Change: `not/a/files/line.py`\n2. Two\n   - Files: `tools/*.py`, `/etc/passwd`, `../up.py`, "
+                "`a/../b.py`, `tests/t.py`\n\n## Risks\n\n- Files: `after.py`\n")
+        self.assertEqual(factory.spec_budget_paths(text), ["tools/*.py", "docs/", "tests/t.py"])
+        self.assertEqual(factory.spec_budget_paths("## Design\n\n- Files: `a.py`\n"), [])
+
+    def test_covers(self):
+        self.assertTrue(factory.budget_covers("tools/*.py", "tools/a.py"))
+        self.assertFalse(factory.budget_covers("tools/*.py", "tools/a.md"))
+        self.assertTrue(factory.budget_covers("docs/", "docs/deep/c.md"))
+        self.assertFalse(factory.budget_covers("docs/", "docsx/c.md"))
+        self.assertTrue(factory.budget_covers("tests/t.py", "tests/t.py"))
+        self.assertFalse(factory.budget_covers("tests/t.py", "tests/t.pyc"))

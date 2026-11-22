@@ -19,6 +19,9 @@
                                             message, print the job as JSON
   factory.py triage replay <project-slug> [--threshold N]
                                             score a threshold against past human backlog decisions, print JSON
+  factory.py bench score <cases-file> <arm-folder>...
+                                            score saved reviewer runs against labeled past defects, print JSON
+                                            (offline)
   factory.py ideas [--limit N] [--max-inflight N] [--project <slug>]
                                             claim the oldest ideas this device can run, print them as JSON
                                             (exit 3 when none are runnable or the cap is full)
@@ -7610,8 +7613,72 @@ def review_plan_cmd(target, round_text):
 CHECKS_FILE = ".factory/checks.json"
 PRE_REVIEW_TIMEOUT = 1800
 PRE_REVIEW_TAIL = 40
+DIFF_BUDGET_LINES_PER_FILE = 150
+DIFF_BUDGET_FILE_FACTOR = 2
+DIFF_BUDGET_LINE_FACTOR = 3
+DIFF_BUDGET_UNLISTED_MAX = 20
 PRE_REVIEW_USAGE = "usage: pre-review <project-slug>/<job-id>"
 CHECK_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,39}")
+SPEC_TASKS = re.compile(r"^## (?:\d+\.\s*)?Tasks\b[^\n]*\n(.*?)(?=^## |\Z)", re.M | re.S)
+
+
+def spec_budget_paths(text):
+    """The distinct safe path tokens from the Tasks section's - Files: lines, in first-seen order.
+    A token may carry * as an fnmatch glob."""
+    section = SPEC_TASKS.search(text + "\n")
+    paths = []
+    for line in section.group(1).splitlines() if section else []:
+        if line.strip().startswith("- Files:"):
+            for t in re.findall(r"`([^`]*)`", line):
+                if REPO_PATH.fullmatch(t.replace("*", "")) and not t.startswith("/") and ".." not in t \
+                        and t not in paths:
+                    paths.append(t)
+    return paths
+
+
+def diff_numstat(wt, base):
+    """{path: added plus deleted lines} the branch changes since origin/<base>, binary files as 0, or None on
+    any git failure."""
+    mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
+                        capture_output=True, text=True)
+    if mb.returncode:
+        return None
+    diff = subprocess.run(["git", "-C", str(wt), "diff", "--numstat", "--no-renames", "-z", mb.stdout.strip(),
+                           "HEAD"], capture_output=True, encoding="utf-8", errors="replace")
+    if diff.returncode:
+        return None
+    counts = {}
+    for record in diff.stdout.split("\0"):
+        if record:
+            added, deleted, path = record.split("\t", 2)
+            counts[path] = sum(int(n) for n in (added, deleted) if n != "-")
+    return counts
+
+
+def budget_covers(token, path):
+    """Whether a spec Files token covers a changed path: a * glob, a directory ending in /, or the exact path."""
+    if "*" in token:
+        return fnmatch.fnmatchcase(path, token)
+    return path.startswith(token) if token.endswith("/") else path == token
+
+
+def diff_budget(paths, numstat):
+    """The pre-review budget object comparing the spec's Files paths with the branch's numstat."""
+    expected_lines = len(paths) * DIFF_BUDGET_LINES_PER_FILE
+    budget = {"files": len(numstat), "lines": sum(numstat.values()), "expected_files": len(paths),
+              "expected_lines": expected_lines, "file_limit": len(paths) * DIFF_BUDGET_FILE_FACTOR,
+              "line_limit": expected_lines * DIFF_BUDGET_LINE_FACTOR,
+              "unlisted": sorted(p for p in numstat if not any(budget_covers(t, p) for t in paths)), "reason": None}
+    over = budget["files"] > budget["file_limit"] or budget["lines"] > budget["line_limit"]
+    return {"result": "over" if over else "within", **budget}
+
+
+def budget_line(budget):
+    """The Budget: line for pre-review.md."""
+    if budget["result"] == "none":
+        return f"Budget: none ({budget['reason']})"
+    return (f"Budget: {budget['result']} (files {budget['files']}, limit {budget['file_limit']}; "
+            f"lines {budget['lines']}, limit {budget['line_limit']})")
 
 
 def load_checks(text):
@@ -7712,13 +7779,28 @@ def pre_review_cmd(target):
 
     head = (git("rev-parse", "HEAD") or "").strip() or None
     checks, reason = [], fetch_base(wt, base, repo)
+    spec, paths, numstat = folder / "spec.md", [], None
+    if is_link(spec):
+        why = "spec.md is a symlink or junction"
+    elif not spec.is_file():
+        why = "the job folder has no spec.md"
+    elif not (paths := spec_budget_paths(spec.read_text(encoding="utf-8", errors="replace"))):
+        why = "spec.md has no task Files paths"
+    elif reason:
+        why = "the base could not be fetched"
+    elif (numstat := diff_numstat(wt, base)) is None:
+        why = "the branch diff could not be read"
+    budget = diff_budget(paths, numstat) if numstat is not None else {
+        "result": "none", "files": 0, "lines": 0, "expected_files": 0, "expected_lines": 0, "file_limit": 0,
+        "line_limit": 0, "unlisted": [], "reason": why}
     if not reason:
         text = git("show", f"origin/{base}:{CHECKS_FILE}")
         checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
     if reason:
-        write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\nReason: {printable_line(reason, 300)}\n")
+        write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\n{budget_line(budget)}\n"
+                                    f"Reason: {printable_line(reason, 300)}\n")
         print(json.dumps({"result": "none", "head": head, "checks": [], "reason": reason, "round": round_n,
-                          "repeats": []}))
+                          "repeats": [], "budget": budget}))
         return
     logs = make_job_temp(slug, job_id) / "pre-review"
     if is_link(logs):
@@ -7731,10 +7813,22 @@ def pre_review_cmd(target):
         results.append({"name": check["name"], "exit": code, "seconds": seconds})
     failed = [r for r in results if r["exit"] != 0]
     result = "fail" if failed else "pass"
-    lines = [f"PRE-REVIEW: {result.upper()}", "", f"Head: {head}",
+    lines = [f"PRE-REVIEW: {result.upper()}", "", f"Head: {head}", budget_line(budget),
              f"Checks: origin/{base}:{CHECKS_FILE} at {checks_sha}", f"Logs: {logs}", "",
              "| Check | Exit | Seconds |", "| --- | --- | --- |"]
     lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} |" for r in results]
+    if budget["result"] == "over":
+        lines += ["", "## Diff budget", "", "| Measure | Spec estimate | Limit | Branch |", "| --- | --- | --- | --- |",
+                  f"| Files | {budget['expected_files']} | {budget['file_limit']} | {budget['files']} |",
+                  f"| Lines | {budget['expected_lines']} | {budget['line_limit']} | {budget['lines']} |"]
+        unlisted = budget["unlisted"]
+        if unlisted:
+            lines += ["", "Files outside the spec's task list:", ""]
+            for p in unlisted[:DIFF_BUDGET_UNLISTED_MAX]:
+                p = printable_line(p, 200)
+                lines.append(f"- `` {p} ``" if "`" in p else f"- `{p}`")
+            if len(unlisted) > DIFF_BUDGET_UNLISTED_MAX:
+                lines.append(f"- and {len(unlisted) - DIFF_BUDGET_UNLISTED_MAX} more")
     env = read_conf(home / ".env") if (home / ".env").exists() else {}
     for r in failed:
         log_text = (logs / f"{r['name']}.log").read_text(encoding="utf-8", errors="replace")
@@ -7756,7 +7850,7 @@ def pre_review_cmd(target):
         write_atomic(str(record_file), json.dumps(record) + "\n")
         repeats = sorted(names & set(record.get(str(round_n - 1), [])))
     print(json.dumps({"result": result, "head": head, "checks": results, "reason": None, "round": round_n,
-                      "repeats": repeats}))
+                      "repeats": repeats, "budget": budget}))
     if failed:
         sys.exit(1)
 
@@ -11077,7 +11171,7 @@ def tracer_call(base, token, method, path, body=None, ok=(200,)):
 
 def spec_tasks(text):
     """The numbered items under the spec's Tasks section as {title, what, path or None}."""
-    section = re.search(r"^## (?:\d+\.\s*)?Tasks\b[^\n]*\n(.*?)(?=^## |\Z)", text + "\n", re.M | re.S)
+    section = SPEC_TASKS.search(text + "\n")
     if not section:
         return []
     tasks = []
@@ -12629,6 +12723,130 @@ def outcomes_cmd(*args):
         print(f"recorded {changed} outcomes on the board" if changed else "outcomes unchanged; nothing written")
 
 
+BENCH_WEIGHTS = {"high": 3, "medium": 2, "low": 1}
+BENCH_USAGE = "usage: factory.py bench score <cases-file> <arm-folder>..."
+
+
+def bench_cases(path):
+    """The validated case list of a reviewer-benchmark cases file, failing on the first bad field."""
+    if not Path(path).is_file():
+        fail(f"bench: no cases file at {path}", 4)
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        data = None
+    if not (isinstance(data, dict) and isinstance(data.get("cases"), list) and data["cases"]):
+        fail(f'bench: {path} is not a cases file: needs {{"cases": [...]}}', 2)
+    seen = set()
+    for n, c in enumerate(data["cases"], 1):
+        c = c if isinstance(c, dict) else {}
+        reason = None
+        defects = c.get("defects")
+        if not (isinstance(c.get("id"), str) and JOB_ID.fullmatch(c["id"])):
+            reason = "id must look like 1018-add-y"
+        elif c["id"] in seen:
+            reason = f"duplicate id {c['id']}"
+        elif not (isinstance(c.get("pr"), str) and GH_PR_PARTS.fullmatch(c["pr"])):
+            reason = "pr must be a GitHub pull request URL"
+        elif not (isinstance(c.get("head"), str) and COMMIT.fullmatch(c["head"])):
+            reason = "head must be a 40-character commit"
+        elif c.get("source") not in ("reverted", "reworked"):
+            reason = "source must be reverted or reworked"
+        elif not (isinstance(defects, list) and defects):
+            reason = "defects must be a non-empty list"
+        else:
+            for m, d in enumerate(defects, 1):
+                d = d if isinstance(d, dict) else {}
+                path_, lines = d.get("path"), d.get("lines")
+                if not (isinstance(path_, str) and path_ and not path_.startswith("/") and "\\" not in path_
+                        and ".." not in path_.split("/")):
+                    reason = f"defect {m}: path must be a relative repository path"
+                elif not (isinstance(lines, list) and len(lines) == 2 and all(type(x) is int for x in lines)
+                          and 1 <= lines[0] <= lines[1]):
+                    reason = f"defect {m}: lines must be [start, end] with 1 <= start <= end"
+                elif not (isinstance(d.get("severity"), str) and d["severity"] in BENCH_WEIGHTS):
+                    reason = f"defect {m}: severity must be high, medium or low"
+                if reason:
+                    break
+        if reason:
+            fail(f"bench: {path}: case {n}: {reason}", 2)
+        seen.add(c["id"])
+    return data["cases"]
+
+
+def bench_hit(defect, citations):
+    """True when a find_citations cite names the defect's path, or its basename with no folder, and a cited
+    line or span overlaps the defect's lines."""
+    start, end = defect["lines"]
+    for _, path, lines, span in citations:
+        if path != defect["path"] and ("/" in path or path != defect["path"].rsplit("/", 1)[-1]):
+            continue
+        if any(start <= n <= end for n in lines) or span and span[0] <= end and span[1] >= start:
+            return True
+    return False
+
+
+def bench_arm(folder, cases):
+    """Recall, tokens and seconds for one arm folder of saved reviews, scored against the cases."""
+    folder = Path(folder)
+    severity = {s: {"caught": 0, "of": 0} for s in BENCH_WEIGHTS}
+    weight = caught_weight = caught = tokens = runs = 0
+    seconds, missed, missing, no_run = 0.0, [], [], []
+    for c in cases:
+        case_dir = folder / c["id"]
+        if not case_dir.is_dir():
+            missing.append(c["id"])
+        citations = []
+        for review in sorted(case_dir.glob("review-*.md")) if case_dir.is_dir() else []:
+            if not review.is_file():
+                continue
+            text = review.read_text(encoding="utf-8", errors="replace")
+            if text.splitlines()[:1] == ["VERDICT: CHANGES"]:
+                citations += find_citations(text)
+        for d in c["defects"]:
+            w = BENCH_WEIGHTS[d["severity"]]
+            weight += w
+            severity[d["severity"]]["of"] += 1
+            if bench_hit(d, citations):
+                caught += 1
+                caught_weight += w
+                severity[d["severity"]]["caught"] += 1
+            else:
+                missed.append(f"{c['id']} {d['path']}:{d['lines'][0]}-{d['lines'][1]}")
+        try:
+            run = json.loads((case_dir / "run.json").read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            run = None
+        if (isinstance(run, dict) and type(run.get("seconds")) in (int, float) and 0 <= run["seconds"] < float("inf")
+                and isinstance(run.get("models"), dict)):
+            tokens += token_count(run["models"])
+            seconds += run["seconds"]
+            runs += 1
+        else:
+            no_run.append(c["id"])
+    return {"arm": folder.name, "weighted_recall": round(caught_weight / weight, 2), "caught": caught,
+            "severity": severity, "missed": missed, "tokens": tokens, "seconds": round(seconds), "runs": runs,
+            "missing": missing, "no_run": no_run}
+
+
+def bench_cmd(*args):
+    """bench score <cases-file> <arm-folder>...: score saved reviewer runs against labeled past defects."""
+    if len(args) < 3 or args[0] != "score":
+        fail(BENCH_USAGE, 2)
+    cases = bench_cases(args[1])
+    names = set()
+    for folder in args[2:]:
+        if not Path(folder).is_dir():
+            fail(f"bench: no arm folder at {folder}", 4)
+        name = Path(folder).name
+        if not re.fullmatch(r"[\w.-]+", name, re.ASCII) or name in names:
+            fail(f"bench: arm name {name} must be unique letters, digits, ., _ or -", 2)
+        names.add(name)
+    print(json.dumps({"cases": len(cases), "defects": sum(len(c["defects"]) for c in cases),
+                      "weights": BENCH_WEIGHTS, "arms": [bench_arm(folder, cases) for folder in args[2:]]},
+                     indent=2))
+
+
 AUTONOMY_DAYS = 90
 AUTONOMY_MIN_JOBS = 20
 AUTONOMY_MAX_REWORK = 0.10
@@ -13601,6 +13819,7 @@ COMMANDS["retro"] = (retro_cmd, 1, 3)
 COMMANDS["audit"] = (audit_cmd, 1, 2)
 COMMANDS["usage"] = (usage_cmd, 1, 2)
 COMMANDS["outcomes"] = (outcomes_cmd, 0, 2)
+COMMANDS["bench"] = (bench_cmd, 0, sys.maxsize)
 COMMANDS["with-cloudflare"] = (with_cloudflare_cmd, 0, sys.maxsize)
 COMMANDS["agent"] = (agent_cmd, 1, 9)
 COMMANDS["needs"] = (needs_cmd, 6, 6)

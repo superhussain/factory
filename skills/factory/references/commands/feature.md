@@ -31,6 +31,14 @@ feature.
    tier Rules selects from the spec, with its assigned dev-server port if the job
    needs one. It commits on
    the branch and writes `build.md`. Push the branch.
+   After every builder run, read the first line of its build.md run section. When it
+   starts `BLOCKED-ENV:`, start no pre-review or review round and keep the tier. Count
+   the run sections that start `BLOCKED-ENV:` since the latest rework. On one, patch
+   `{"note": "env block: <kind>: <what is missing>; one retry on the same tier"}` and
+   dispatch a fresh builder on the same tier with the line on a short line. On two, run
+   `push "$SLUG/<id>"` and patch
+   `{"stage": "needs-human", "note": "env block: <kind>: <what is missing> (builder blocked twice)", "needs": "provide the missing <kind>: <what is missing>, then run /factory rework <id> <note>"}`
+   from the latest line.
 4. Pre-review: run `python3 "$RUNTIME" hold "$SLUG/<id>"`, then
    `python3 "$RUNTIME" pre-review "$SLUG/<id>"` as a background command, and act on its
    completion notification. Exit 1 means a check failed: patch
@@ -41,7 +49,8 @@ feature.
    and do not resume the builder. A second exit 1 in one builder run counts as the Rules row for verification
    failing twice. Any other nonzero exit puts its stderr line in the board `note`, and
    the round goes ahead. A disputed-only round skips pre-review, since the head did not
-   move.
+   move. Its JSON `budget` never changes the exit code or the stage. The code reviewer
+   reads it from `pre-review.md`.
    Review round N: create `round-N/`, set stage `review`, `round` N, and append an
    all-`pending` entry to `rounds`. Before spawning anyone, run
    `python3 "$RUNTIME" review-plan "$SLUG/<id>" <N>` and run

@@ -492,6 +492,30 @@ Loop step 5 runs `factory.py repeats <slug>/<job-id> <round>` below the round ca
 | Missing round head or rewritten history | `continue` |
 | Corrupt `pre-review-failures.json` | read as `{}` and rewritten |
 
+## Diff budget
+
+`factory.py pre-review` compares the size the spec's Tasks `- Files:` lines imply with the branch's diff against `origin/<base>`. It writes a `Budget:` line after `Head:` and a `budget` object in its JSON line. When the branch is over, `pre-review.md` gets a `## Diff budget` section the code reviewer must judge. The budget only warns: it never changes the exit code or the stage.
+
+| Measure | Rule |
+| --- | --- |
+| Expected files | distinct paths in Tasks `- Files:` lines |
+| Expected lines | expected files x `DIFF_BUDGET_LINES_PER_FILE` (150) |
+| File limit | expected files x `DIFF_BUDGET_FILE_FACTOR` (2) |
+| Line limit | expected lines x `DIFF_BUDGET_LINE_FACTOR` (3) |
+| Branch | `git diff --numstat` merge-base to HEAD, added plus deleted |
+
+- The result is `over` when files exceed the file limit or lines exceed the line limit, otherwise `within`.
+- A token with `*` is an `fnmatch` glob, and a token ending in `/` covers everything under it. Absolute paths and `..` never count.
+- Binary files count 0 lines. The section lists up to 20 changed paths no token covers.
+
+| Case | Budget |
+| --- | --- |
+| No `spec.md` in the job folder | `none (the job folder has no spec.md)` |
+| `spec.md` is a link | `none (spec.md is a symlink or junction)` |
+| No usable Files path | `none (spec.md has no task Files paths)` |
+| `fetch_base` failed | `none (the base could not be fetched)` |
+| Git numstat fails | `none (the branch diff could not be read)` |
+
 ## Rollback
 
 | Scope | Rollback |

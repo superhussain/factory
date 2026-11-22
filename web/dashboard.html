@@ -7971,9 +7971,11 @@ $('board-status').addEventListener('focusin', holdBoardStatus);
 $('board-status').addEventListener('focusout', releaseBoardStatus);
 document.addEventListener('pointerdown', (e) => { if (!$('board-status').contains(e.target)) releaseBoardStatus(); });
 
-// The toast stack moves up while the status line shares its bottom slot.
+// The toast stack moves up once the status line has text, and down when it hides.
 function syncToastOffset() {
-  const h = $('board-status').offsetHeight;
+  const status = $('board-status');
+  if (!status.hidden && !status.textContent) return;
+  const h = status.offsetHeight;
   $('notify-toasts').style.setProperty('--board-status-space', h ? h + 8 + 'px' : '0px');
 }
 new ResizeObserver(syncToastOffset).observe($('board-status'));
