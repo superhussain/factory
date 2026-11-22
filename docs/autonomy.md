@@ -300,7 +300,7 @@ Retro edits never change the Babysit note.
 Each stage-note edit `retro admit` saves runs as a trial over the next jobs. After the
 PUT it appends one record to the board's `trials` list and prints
 `trial <id> opened: alternate jobs keep the old note until trial settle decides`.
-Only `retro admit`, `trial settle` and `trial resume` write `trials`.
+Only `retro admit`, `trial settle` and the Worker's resume route write `trials`.
 
 | Field | Example |
 | --- | --- |
@@ -311,14 +311,15 @@ Only `retro admit`, `trial settle` and `trial resume` write `trials`.
 | `champion`, `challenger` | the note before (`""` when none, display only) and the saved note |
 | `opened`, `status` | when the trial opened, then `open`, `kept`, `reverted`, `superseded`, `inconclusive` or `revert-failed` |
 | `settled`, `arms`, `reads` | set by `trial settle`: when it decided, each arm's job ids, and the rounds and tokens reads |
-| `revert_version`, `resumed` | the version a revert saved, and when a person ran `trial resume` |
+| `revert_version`, `resumed` | the version a revert saved, and when the resume route cleared it |
+| `resumed_by` | set by the resume route: `{"kind": "person"}` or `{"kind": "host", "by": "host-a", "instruction": "..."}`, never an email |
 
 - **Arms.** A job is in a trial when its project matches and its `started` is at or after
   `opened`. `trial_arm` hashes `<id>/<job-id>` into arm `a` or `b`, half each. While the
   trial is open, `prompt` gives an arm `a` job in the trial's stage the champion note.
   Arm `b` reads the challenger. When the stored note is no longer the challenger, nothing
   is swapped.
-- **Champion source.** The Worker does not validate board `trials`, so the champion note
+- **Champion source.** The Worker checks board `trials` only for the resume rules below, so the champion note
   that `prompt` and a revert use is read from pipeline history at `champion_version`, never
   from the record's `champion` text. A record is ignored unless its `project` is a slug, its
   `stage` is a pipeline stage, its versions are integers and its `id` is
@@ -341,7 +342,7 @@ Only `retro admit`, `trial settle` and `trial resume` write `trials`.
 A refused revert prints `trial <id> revert failed: <status> <text>` and leaves the trial
 open for the next settle until it is 28 days old. A `revert-failed` trial neither blocks
 admit nor counts toward the pause. A revert counts toward the daily retro cap. The board keeps
-open records and the newest 20 settled ones. Settle skips malformed records, including
+open records, every unresumed revert and the newest 20 other settled ones. Settle skips malformed records, including
 one whose `opened` is not a board timestamp, and drops non-dict entries from `trials`
 when it writes the board.
 - **Pause.** Two reverted trials without `resumed` pause a project's stage-note edits.
@@ -349,8 +350,16 @@ when it writes the board.
   `stage-note trials paused for <slug> after 2 reverts; a person runs trial resume <slug>`,
   and admit skips with
   `skipped edits[i]: stage-note trials are paused after 2 reverts; a person runs trial resume <slug>`.
-  `factory.py trial resume <slug>` needs a human at a terminal typing the slug. It sets
-  `resumed` on that project's reverts and prints `stage-note trials resumed for <slug>`.
+  `factory.py trial resume <slug> "<reason>"` clears the pause. A person runs it, or asks
+  an agent to run it and pass their instruction as the reason. It posts
+  `{"instruction": "<reason>"}` to `POST /api/trials/resume/<slug>`, which sets `resumed`
+  and `resumed_by` on that project's unresumed reverts. It prints
+  `stage-note trials resumed for <slug>: <n> reverts cleared`, or
+  `no unresumed reverts for <slug>; nothing changed`. Without a reason it prints usage and
+  exits 2; a Worker refusal exits 5.
+  The Worker refuses any other resume. A board write must carry every stored unresumed
+  revert unchanged (Rule A), and a written record with `resumed` or `resumed_by` must
+  equal a stored record (Rule B). Either refusal is a 400 and nothing is written.
   Settings, Pipeline lists each trial and shows a banner with the trial resume command while a project is paused.
 - **Scope.** Retro file edits are not trialled. A host on an older bundle ignores
   `trials`, so its jobs read the current note.

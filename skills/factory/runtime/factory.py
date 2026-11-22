@@ -40,7 +40,7 @@
                                             experiment as JSON (read-only)
   factory.py trial settle                   keep, revert, supersede or time out each open retro
                                             stage-note trial; 2 reverts pause a project's trials
-  factory.py trial resume <slug>            a human at a terminal clears that pause
+  factory.py trial resume <slug> <reason>   a person, or an agent a person asked, clears that pause
   factory.py unclaim <job-id>               release this session's claim on an idea, so it waits again
   factory.py deny-notes <job-id> [done]   print a denied job's unread notes wrapped as data, or mark them read
   factory.py pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]
@@ -14511,9 +14511,12 @@ def trial_settle(home):
         for t in records:
             if t.get("status") == "open" and t.get("id") in updates:
                 t.update(updates[t["id"]])
-        settled = sorted((t for t in records if t.get("status") != "open"),
+        def locked(t):
+            return t.get("status") == "reverted" and not t.get("resumed")
+        settled = sorted((t for t in records if t.get("status") != "open" and not locked(t)),
                          key=lambda t: t.get("settled") or "", reverse=True)[:TRIAL_KEEP]
-        data["trials"] = [t for t in records if t.get("status") == "open" or any(t is k for k in settled)]
+        data["trials"] = [t for t in records
+                          if t.get("status") == "open" or locked(t) or any(t is k for k in settled)]
         data["updated"] = now()
         return dump_board(data), data
     data = cas(home, "/api/board", change)
@@ -14523,30 +14526,35 @@ def trial_settle(home):
                   f"a person runs trial resume {slug}")
 
 
-def trial_resume(home, slug):
-    """A person at a terminal clears slug's stage-note trial pause by marking its reverts resumed."""
-    human_confirm(slug, f"Type {slug} to resume stage-note trials for it: ", "trial resume")
-
-    def change(text):
-        data = load_board(text)
-        stamp = now()
-        for t in data.get("trials") or []:
-            if isinstance(t, dict) and t.get("project") == slug and t.get("status") == "reverted" and not t.get("resumed"):
-                t["resumed"] = stamp
-        data["updated"] = stamp
-        return dump_board(data), None
-    cas(home, "/api/board", change)
-    print(f"stage-note trials resumed for {slug}")
+TRIAL_RESUME_ONLY = ("only a signed-in person, or a paired host passing a person's instruction, "
+                     "resumes stage-note trials")
 
 
-def trial_cmd(sub, slug=None):
+def trial_resume(home, slug, reason):
+    """Clears slug's stage-note trial pause through the Worker's resume route, which records the
+    host and the person's instruction given as reason."""
+    status, _, text = api(home, "POST", f"/api/trials/resume/{slug}", json.dumps({"instruction": reason.strip()}),
+                          ok=(200, 403), headers={"Content-Type": "application/json"})
+    if status == 403 and text.strip() == TRIAL_RESUME_ONLY:
+        fail(TRIAL_RESUME_ONLY, 5)
+    if status == 403:
+        fail(access_message(os.path.abspath(os.path.join(home, ".env"))), 5)
+    n = json.loads(text)["resumed"]
+    if n:
+        print(f"stage-note trials resumed for {slug}: {n} reverts cleared")
+    else:
+        print(f"no unresumed reverts for {slug}; nothing changed")
+
+
+def trial_cmd(sub, slug=None, reason=None):
     """Settle the board's open retro stage-note trials, or resume one project's paused trials."""
-    if not (sub == "settle" and slug is None or sub == "resume" and slug is not None and SLUG.fullmatch(slug)):
-        fail("usage: trial settle | trial resume <slug>", 2)
+    if not (sub == "settle" and slug is None and reason is None
+            or sub == "resume" and slug is not None and SLUG.fullmatch(slug) and reason is not None):
+        fail("usage: trial settle | trial resume <slug> <reason>", 2)
     if sub == "settle":
         trial_settle(factory_home())
     else:
-        trial_resume(factory_home(), slug)
+        trial_resume(factory_home(), slug, reason)
 
 
 def check_finding(f, projects, merged=()):
@@ -15017,7 +15025,7 @@ COMMANDS["suggest"] = (suggest_cmd, 2, 5)
 COMMANDS["control"] = (control_cmd, 4, 6)
 COMMANDS["routes"] = (routes_cmd, 1, 4)
 COMMANDS["experiment"] = (experiment_cmd, 2, 2)
-COMMANDS["trial"] = (trial_cmd, 1, 2)
+COMMANDS["trial"] = (trial_cmd, 1, 3)
 COMMANDS["unclaim"] = (unclaim, 1, 1)
 COMMANDS["pipeline"] = (pipeline_cmd, 1, 2)
 COMMANDS["documents"] = (documents_cmd, 1, 1)

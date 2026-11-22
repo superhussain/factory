@@ -159,6 +159,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #pipeline-effective { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--code-bg); padding: 10px 12px; border-radius: 6px; }
   #pipeline-trials-paused { background: var(--alert-bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 0 0 10px; overflow-wrap: anywhere; }
   #pipeline-trials-paused p { margin: 0; }
+  #pipeline-trials-paused code span { white-space: nowrap; }
   #pipeline-trials-table { table-layout: auto; min-width: 560px; }
   #pipeline-trials-table th, #pipeline-trials-table td { overflow-wrap: normal; }
   #pipeline-history, #settings-history { height: 160px; overflow-y: auto; padding-right: 4px; padding-bottom: 4px; scroll-padding-block: 4px; }
@@ -1070,7 +1071,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           <h4 id="pipeline-trials-heading">Stage-note trials</h4>
           <p id="pipeline-trials-help" class="muted">Retro admit opens a trial for each stage-note edit it saves. Arm a jobs keep the old note and arm b jobs read the edit. <code>factory.py trial settle</code> compares the arms and reverts an edit when b reads higher on rounds or tokens.</p>
           <div id="pipeline-trials-paused" role="status" hidden></div>
-          <div class="reference-scroll" id="pipeline-trials-wrap" tabindex="0" role="region" aria-labelledby="pipeline-trials-heading" hidden>
+          <div class="reference-scroll" id="pipeline-trials-wrap" tabindex="0" role="region" aria-label="Stage-note trials table" hidden>
             <table id="pipeline-trials-table" class="project-list">
               <thead><tr><th scope="col">Trial</th><th scope="col">Stage</th><th scope="col">Status</th><th scope="col">Jobs a / b</th><th scope="col">Rounds</th><th scope="col">Tokens</th></tr></thead>
               <tbody id="pipeline-trials-body"></tbody>
@@ -4990,8 +4991,10 @@ function renderPipelineTrials() {
     $('pipeline-trials-paused').replaceChildren(...paused.map((p) => {
       const line = document.createElement('p');
       const code = document.createElement('code');
-      code.textContent = 'factory.py trial resume ' + p;
-      line.append('Stage-note trials for ' + p + ' are paused after ' + TRIAL_PAUSE_REVERTS + ' reverts. Retro edits no ' + p + ' stage note until a person runs ', code, ' at a terminal.');
+      const reason = document.createElement('span');
+      reason.textContent = '"<reason>"';
+      code.append('factory.py trial resume ' + p + ' ', reason);
+      line.append('Stage-note trials for ' + p + ' are paused after ' + TRIAL_PAUSE_REVERTS + ' reverts. Retro edits no ' + p + ' stage note until a person runs ', code, ' or asks an agent to run it.');
       return line;
     }));
   }
