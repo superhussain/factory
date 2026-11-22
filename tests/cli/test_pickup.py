@@ -1581,6 +1581,7 @@ class PriorityTest(PickupFixture):
         patch.object(factory, "paseo_server", return_value="synthetic-server").start()
         patch.object(factory, "paseo_statuses", side_effect=lambda: self.statuses).start()
         patch.object(factory, "paseo_send", side_effect=self.send).start()
+        patch.object(factory, "awaits_permission", return_value=False).start()
 
     def send(self, agent, message):
         self.sent.append((agent, message))
@@ -1709,6 +1710,7 @@ class IdleWatchTest(PickupFixture):
         patch.object(factory, "paseo_server", return_value="synthetic-server").start()
         patch.object(factory, "paseo_statuses", side_effect=lambda: self.statuses).start()
         patch.object(factory, "paseo_send", side_effect=self.send).start()
+        patch.object(factory, "awaits_permission", return_value=False).start()
 
     def export(self, **extra):
         job = {"id": "042-sample-export", "stage": "build", "project": "alpha", "updated": "2026-01-01T10:00:00Z",
@@ -3619,6 +3621,7 @@ def babysat(job_id, project, **extra):
 class BabysitTest(PickupFixture):
     def setUp(self):
         super().setUp()
+        patch.object(factory, "awaits_permission", return_value=False).start()
         self.views["alpha"] = (200, effective("alpha", {"pickup": ON}))
 
     def argv(self, job_id, prompt):
@@ -3838,6 +3841,79 @@ class BabysitTest(PickupFixture):
                           "babysit 042-sample-export"])
         other = ["launcher", "run", "--new-workspace"]
         self.assertEqual(factory.babysit_argv(other, "042-sample-export"), other)
+
+
+class PermissionGuardTest(PickupFixture):
+    LINK = {"server": "synthetic-server", "agent": "synthetic-agent"}
+    ENDS = ((True, "waits at a permission dialog"), (None, "permission state unknown"))
+    send = PriorityTest.send
+
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.statuses = {"synthetic-agent": "idle"}
+        self.sent = []
+        self.send_ok = True
+        self.waits = False
+        patch.object(factory, "paseo_server", return_value="synthetic-server").start()
+        patch.object(factory, "paseo_statuses", side_effect=lambda: self.statuses).start()
+        patch.object(factory, "paseo_send", side_effect=self.send).start()
+        patch.object(factory, "awaits_permission", side_effect=lambda agent: self.waits).start()
+
+    def build(self, **extra):
+        self.board["jobs"] = [dict({"id": "042-sample-export", "stage": "build", "project": "alpha",
+                                    "updated": "2026-01-01T10:00:00Z", "paseo": self.LINK,
+                                    "claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"}},
+                                   **extra)]
+
+    def test_priority_nudge_skips(self):
+        for waits, end in self.ENDS:
+            with self.subTest(waits=waits):
+                self.waits = waits
+                self.build(priority={"at": "2026-01-02T12:00:00Z"})
+                line = f"skip nudge 042-sample-export alpha: agent synthetic-agent {end}\n"
+                self.assertEqual(self.pickup(), (0, line, ""))
+                self.assertEqual(self.pickup("--dry-run"), (0, line + f"host {DEVICE}: would launch 0\n", ""))
+                self.assertEqual((self.sent, self.puts()), ([], []))
+                self.assertNotIn("nudged", self.job("042-sample-export")["priority"])
+
+    def test_idle_nudge_skips_and_never_moves_to_needs_human(self):
+        for waits, end in self.ENDS:
+            with self.subTest(waits=waits):
+                self.waits = waits
+                self.build()
+                (self.home / "idle-watch.json").write_text(json.dumps({"version": 1, "jobs": {"042-sample-export": {
+                    "agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z",
+                    "since": stamp(minutes=-41)}}}), encoding="utf-8")
+                line = f"skip idle nudge 042-sample-export alpha: agent synthetic-agent {end}\n"
+                self.assertEqual(self.pickup("--dry-run"), (0, line + f"host {DEVICE}: would launch 0\n", ""))
+                for _ in range(2):
+                    self.assertEqual(self.pickup(), (0, line, ""))
+                entry = json.loads((self.home / "idle-watch.json").read_text(encoding="utf-8"))["jobs"]
+                self.assertNotIn("nudged", entry["042-sample-export"])
+                self.assertEqual((self.sent, self.puts()), ([], []))
+                self.assertEqual(self.job("042-sample-export")["stage"], "build")
+
+    def test_babysit_send_skips(self):
+        for waits, end in self.ENDS:
+            with self.subTest(waits=waits):
+                self.waits = waits
+                self.board["jobs"] = [babysat("042-sample-export", "alpha", paseo=self.LINK)]
+                line = f"skip babysit 042-sample-export alpha: agent synthetic-agent {end}\n"
+                self.assertEqual(self.pickup(), (0, line, ""))
+                self.assertEqual(self.pickup("--dry-run"), (0, line + f"host {DEVICE}: would launch 0\n", ""))
+                self.assertNotIn("claim", self.job("042-sample-export"))
+                self.assertEqual((self.sent, self.launched(), self.puts()), ([], [], []))
+
+    def test_awaits_permission_reads_paseo_inspect(self):
+        patch.stopall()
+        for (code, out), want in (((0, '{"PendingPermissions": [{"id": "p1"}]}'), True),
+                                  ((0, '{"PendingPermissions": []}'), False),
+                                  ((0, "{}"), None), ((0, '{"PendingPermissions": "none"}'), None),
+                                  ((0, "[]"), None), ((0, "not json"), None), ((1, ""), None)):
+            with self.subTest(out=out), patch.object(factory, "paseo_run", return_value=(code, out)) as run:
+                self.assertIs(factory.awaits_permission("synthetic-agent"), want)
+                run.assert_called_once_with(["inspect", "synthetic-agent", "--json"])
 
 
 HEAD = "abc1234" + "0" * 33

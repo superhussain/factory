@@ -5616,6 +5616,11 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
         elif line is None:
             ready = True
             agent, state = job_agent(j)
+            waits = awaits_permission(agent) if state == "idle" else False
+            if waits is not False:
+                print(f"skip babysit {j['id']} {j['project']}: agent {agent} "
+                      + ("waits at a permission dialog" if waits else "permission state unknown"))
+                continue
             route = pick_route(home)
             if state in ("idle", "closed"):
                 if dry:
@@ -6559,6 +6564,10 @@ def priority_nudge_pass(home, data, device, dry):
                 print(f"skip nudge {job_id}: agent {agent} is {status or 'missing'}")
             continue
         line = f"{job_id} {j.get('project')}: agent {agent}"
+        waits = awaits_permission(agent)
+        if waits is not False:
+            print(f"skip nudge {line} " + ("waits at a permission dialog" if waits else "permission state unknown"))
+            continue
         if dry:
             print(f"would nudge {line}")
             continue
@@ -6620,7 +6629,11 @@ def idle_watch_pass(home, data, device, dry):
         if "nudged" not in entry:
             if entry["since"] >= cutoff:
                 continue
-            if dry:
+            waits = awaits_permission(agent)
+            if waits is not False:
+                print(f"skip idle nudge {line} "
+                      + ("waits at a permission dialog" if waits else "permission state unknown"))
+            elif dry:
                 print(f"would nudge idle {line}")
             elif not paseo_send(agent, IDLE_NUDGE.format(id=job_id)):
                 print(f"factory.py: pickup could not nudge idle {job_id}: paseo send failed", file=sys.stderr)
@@ -9691,6 +9704,17 @@ def paseo_run(args):
     return r.returncode, r.stdout
 
 
+def awaits_permission(agent):
+    """True when paseo inspect lists pending permission requests for agent, False when it lists none,
+    None when the answer is anything else."""
+    code, out = paseo_run(["inspect", agent, "--json"])
+    try:
+        pending = json.loads(out).get("PendingPermissions") if not code else None
+    except (ValueError, AttributeError):
+        return None
+    return bool(pending) if isinstance(pending, list) else None
+
+
 def workspace_leftovers(cwd):
     """What a workspace holds that no remote, other local branch or the branch's creation point keeps, as strings."""
     def git(verb, *args):
@@ -10058,24 +10082,26 @@ def stuck(*args):
         return (job.get("stage") in IN_FLIGHT and well_formed(job) and not held(job)
                 and (not c or c.get("device") == device) and dead(job))
 
-    jobs = read_board(home)["jobs"]
-    old = read_stop_checks(home)
-    checks = {k: v for k, v in old.items()
-              if any(j.get("id") == k and j.get("stage") not in TERMINAL for j in jobs)}
     resume = {}  # {id: (stage, clear_needs)} for each new state the stop check could not explain.
-    for job in (j for j in jobs if stopped(j)):
-        state = stop_state(home, job)
-        key = stop_key(state)
-        if (checks.get(job["id"]) or {}).get("key") == key:
-            continue
-        ok, why, clear = stop_verdict(home, job, state)
-        verdict = "resume" if ok else "explained"
-        checks[job["id"]] = {"key": key, "at": now(), "verdict": verdict, "why": why}
-        print(f"stop check {job['id']}: {verdict}, {why}", file=sys.stderr)
-        if ok:
-            resume[job["id"]] = (job["stage"], clear)
-    if checks != old:
-        write_atomic(home / STOP_CHECKS_FILE, json.dumps({"version": 1, "jobs": checks}, indent=2) + "\n")
+    # Without this host's Paseo server no job counts as stopped, so the board read is skipped.
+    if server:
+        jobs = read_board(home)["jobs"]
+        old = read_stop_checks(home)
+        checks = {k: v for k, v in old.items()
+                  if any(j.get("id") == k and j.get("stage") not in TERMINAL for j in jobs)}
+        for job in (j for j in jobs if stopped(j)):
+            state = stop_state(home, job)
+            key = stop_key(state)
+            if (checks.get(job["id"]) or {}).get("key") == key:
+                continue
+            ok, why, clear = stop_verdict(home, job, state)
+            verdict = "resume" if ok else "explained"
+            checks[job["id"]] = {"key": key, "at": now(), "verdict": verdict, "why": why}
+            print(f"stop check {job['id']}: {verdict}, {why}", file=sys.stderr)
+            if ok:
+                resume[job["id"]] = (job["stage"], clear)
+        if checks != old:
+            write_atomic(home / STOP_CHECKS_FILE, json.dumps({"version": 1, "jobs": checks}, indent=2) + "\n")
 
     def change(text):
         data = load_board(text)
