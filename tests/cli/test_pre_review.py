@@ -355,6 +355,15 @@ class PreReviewTest(IsolatedTestCase):
         self.assertEqual(bullets[:2], ["- `` src/a`odd.py ``", "- `src/m00.py`"])
         self.assertEqual(bullets[19:], ["- `src/m18.py`", "- and 2 more"])
 
+    def test_budget_fences_backtick_runs(self):
+        self.spec()
+        self.base([check("lint", "pass")])
+        self.write({**{f"src/m{i}.py": 1 for i in range(4)}, "src/b``two.py": 1})
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        bullets = [line for line in self.out.read_text().splitlines() if line.startswith("- ")]
+        self.assertEqual(bullets[0], "- ``` src/b``two.py ```")
+
     def test_budget_survives_non_utf8(self):
         (self.folder / "spec.md").write_bytes(SPEC.encode() + b"\xff\xfe bad\n")
         self.base([check("lint", "pass")])

@@ -7804,7 +7804,8 @@ def pre_review_cmd(target):
             lines += ["", "Files outside the spec's task list:", ""]
             for p in unlisted[:DIFF_BUDGET_UNLISTED_MAX]:
                 p = printable_line(p, 200)
-                lines.append(f"- `` {p} ``" if "`" in p else f"- `{p}`")
+                fence = "`" * (max(map(len, re.findall("`+", p)), default=0) + 1)
+                lines.append(f"- {fence} {p} {fence}" if "`" in p else f"- `{p}`")
             if len(unlisted) > DIFF_BUDGET_UNLISTED_MAX:
                 lines.append(f"- and {len(unlisted) - DIFF_BUDGET_UNLISTED_MAX} more")
     env = read_conf(home / ".env") if (home / ".env").exists() else {}
