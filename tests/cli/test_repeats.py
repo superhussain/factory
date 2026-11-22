@@ -11,7 +11,8 @@ CODE = ("VERDICT: CHANGES\n\nThe export route skips the person check.\n"
         "Signature: worker/export.js#missing-person-check\n\nNit: rename `rowsToCsv`.\n")
 PASS = "VERDICT: PASS\n\nNothing to change.\n"
 REPEAT = {"decision": "repeat", "round": 2, "previous": 1,
-          "repeats": [{"reviewer": "code", "signature": "worker/export.js#missing-person-check"}], "churn": []}
+          "repeats": [{"reviewer": "code", "signature": "worker/export.js#missing-person-check", "first": 1}],
+          "churn": []}
 CONTINUE = {"decision": "continue", "round": 2, "previous": 1, "repeats": [], "churn": []}
 
 
@@ -66,6 +67,11 @@ class RepeatsTest(IsolatedTestCase):
         self.write(1, code=CODE.replace("VERDICT: CHANGES", "VERDICT: PASS"))
         self.assertEqual(self.check(), (0, CONTINUE, ""))
 
+    def test_a_pass_between_does_not_reset_a_signature(self):
+        self.write(2)
+        self.write(3, code=CODE)
+        self.assertEqual(self.check("3"), (0, {**REPEAT, "round": 3, "previous": 2}, ""))
+
     def test_a_bad_round_exits_2(self):
         for bad in ("0", "-1", "x", "01", "1.5", ""):
             code, out, err = self.check(bad)
@@ -96,19 +102,30 @@ class ChurnTest(IsolatedTestCase):
         return subprocess.run(["git", "-C", str(self.wt), *args], check=True, capture_output=True,
                               text=True).stdout.strip()
 
-    def build(self, skip=None):
-        """Commit once per round, changing worker/export.js in every round but skip, and record each head."""
+    def build(self, skip=None, merge_base=False):
+        """Commit once per round, changing worker/export.js in every round but skip, and record each head.
+        With merge_base, rounds 2 to 4 first merge a base branch commit that changes docs/base.md."""
         self.wt = self.dir / "worktrees" / "sample" / "042-csv-export"
         (self.wt / "worker").mkdir(parents=True)
+        (self.wt / "docs").mkdir()
         self.git("init", "-q")
         for n in range(1, 5):
             self.write(n, code=changes(SIGNATURES[n]))
+            if merge_base and n > 1:
+                self.git("checkout", "-q", "base")
+                (self.wt / "docs" / "base.md").write_text(f"base {n}\n")
+                self.git("add", "-A")
+                self.git("commit", "-q", "-m", f"base {n}")
+                self.git("checkout", "-q", "-")
+                self.git("merge", "-q", "--no-edit", "base")
             if n != skip:
                 (self.wt / "worker" / "export.js").write_text(f"// round {n}\n")
             (self.wt / f"round-{n}.md").write_text(f"round {n}\n")
             self.git("add", "-A")
             self.git("commit", "-q", "-m", f"round {n}")
             self.plan(n, self.git("rev-parse", "HEAD"))
+            if merge_base and n == 1:
+                self.git("branch", "base")
 
     def plan(self, n, head):
         (self.job / f"round-{n}" / "review-plan.json").write_text(json.dumps({"round": n, "head": head}))
@@ -155,5 +172,13 @@ class ChurnTest(IsolatedTestCase):
     def test_a_repeat_wins_over_churn(self):
         self.build()
         self.write(4, code=changes(SIGNATURES[3]))
-        repeats = [{"reviewer": "code", "signature": "worker/export.js#csv-quote-escape"}]
+        repeats = [{"reviewer": "code", "signature": "worker/export.js#csv-quote-escape", "first": 3}]
         self.assertEqual(self.check("4"), self.churned("repeat", CHURN, repeats))
+
+    def test_a_base_merge_is_not_churn(self):
+        self.build(skip=3, merge_base=True)
+        self.assertEqual(self.check("4"), self.churned())
+
+    def test_own_churn_survives_base_merges(self):
+        self.build(merge_base=True)
+        self.assertEqual(self.check("4"), self.churned("churn", CHURN))

@@ -1,5 +1,6 @@
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -136,6 +137,63 @@ class PreReviewTest(IsolatedTestCase):
         record = self.logs.parent / "pre-review-failures.json"
         self.assertEqual(json.loads(record.read_text()), {"1": ["unit"], "2": ["unit"]})
 
+    def test_failure_classes(self):
+        record = self.logs.parent / "pre-review-failures.json"
+        rows = (("budget", check("unit", "import time; time.sleep(30)"), "timeout", "budget"),
+                ("missing", {"name": "unit", "run": ["factory-test-no-such-program"]}, "missing", "structural"),
+                ("127", check("unit", "raise SystemExit(127)"), 127, "structural"),
+                ("signal", check("unit", "import os, signal; os.kill(os.getpid(), signal.SIGTERM)"),
+                 -signal.SIGTERM, "canceled"),
+                ("transient", check("unit", "print('ECONNRESET'); raise SystemExit(1)"), 1, "transient, retried"),
+                ("deterministic", check("unit", "raise SystemExit(1)"), 1, "deterministic"))
+        for row, unit, exit, cell in rows:
+            with self.subTest(row=row):
+                if record.exists():
+                    record.unlink()
+                self.base([check("lint", "pass"), unit])
+                with mock.patch.object(factory, "PRE_REVIEW_TIMEOUT", 1):
+                    code, out, err = self.run_gate()
+                self.assertEqual((code, err), (1, ""))
+                lint, result = json.loads(out)["checks"]
+                self.assertEqual((lint["class"], lint["retried"]), (None, False))
+                self.assertEqual((result["exit"], result["class"], result["retried"]),
+                                 (exit, cell.split(",")[0], cell.endswith("retried")))
+                text = self.out.read_text()
+                self.assertIn("| Check | Exit | Seconds | Class |\n| --- | --- | --- | --- |\n", text)
+                self.assertRegex(text, r"\| lint \| 0 \| \d+ \| - \|\n")
+                self.assertRegex(text, rf"\| unit \| {exit} \| \d+ \| {cell} \|\n")
+                self.assertEqual(record.exists(), row == "deterministic")
+
+    def test_a_transient_failure_is_retried_once(self):
+        marker = self.tmp / "deps-ran"
+        flaky = (f"import pathlib, sys\nmarker = pathlib.Path({str(marker)!r})\n"
+                 "if not marker.exists():\n    marker.touch()\n    print('ECONNRESET')\n    sys.exit(1)\n"
+                 "print('installed')")
+        self.base([check("deps", flaky), check("unit", "raise SystemExit(1)")])
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (1, ""))
+        deps, unit = json.loads(out)["checks"]
+        self.assertEqual((deps["exit"], deps["class"], deps["retried"]), (0, None, True))
+        self.assertEqual((unit["class"], unit["retried"]), ("deterministic", False))
+        self.assertEqual((self.logs / "deps.attempt-1.log").read_text(), "ECONNRESET\n")
+        self.assertEqual((self.logs / "deps.log").read_text(), "installed\n")
+        self.assertFalse((self.logs / "unit.attempt-1.log").exists())
+        self.assertRegex(self.out.read_text(), r"\| deps \| 0 \| \d+ \| -, retried \|\n")
+
+    def test_a_pass_between_does_not_reset_the_repeat(self):
+        record = self.logs.parent / "pre-review-failures.json"
+        self.base([check("unit", "raise SystemExit(1)")])
+        code, out, _ = self.run_gate()
+        self.assertEqual((code, json.loads(out)["repeats"]), (1, []))
+        self.base([check("unit", "pass"), check("deps", "print('ECONNRESET'); raise SystemExit(1)")])
+        code, out, _ = self.run_gate(round=1)
+        self.assertEqual((code, json.loads(out)["round"], json.loads(out)["repeats"]), (1, 2, []))
+        self.assertEqual(json.loads(record.read_text()), {"1": ["unit"]})
+        self.base([check("unit", "raise SystemExit(1)")])
+        code, out, _ = self.run_gate(round=2)
+        self.assertEqual((code, json.loads(out)["round"], json.loads(out)["repeats"]), (1, 3, ["unit"]))
+        self.assertEqual(json.loads(record.read_text()), {"1": ["unit"], "3": ["unit"]})
+
     def test_two_failures_in_one_round_are_not_a_repeat(self):
         self.base([check("unit", "raise SystemExit(1)")])
         self.run_gate(round=2)
@@ -198,12 +256,14 @@ class PreReviewTest(IsolatedTestCase):
         with mock.patch.object(factory, "PRE_REVIEW_TIMEOUT", 1):
             code, out, err = self.run_gate()
         self.assertEqual((code, err), (1, ""))
-        self.assertEqual([(c["name"], c["exit"]) for c in json.loads(out)["checks"]],
-                         [("slow", "timeout"), ("gone", "missing"), ("noexec", "missing")])
+        self.assertEqual([(c["name"], c["exit"], c["class"], c["retried"]) for c in json.loads(out)["checks"]],
+                         [("slow", "timeout", "budget", False), ("gone", "missing", "structural", False),
+                          ("noexec", "missing", "structural", False)])
         text = self.out.read_text()
-        self.assertIn("| slow | timeout |", text)
-        self.assertIn("| gone | missing |", text)
-        self.assertIn("| noexec | missing |", text)
+        self.assertRegex(text, r"\| slow \| timeout \| \d+ \| budget \|\n")
+        self.assertRegex(text, r"\| gone \| missing \| \d+ \| structural \|\n")
+        self.assertRegex(text, r"\| noexec \| missing \| \d+ \| structural \|\n")
+        self.assertFalse((self.logs.parent / "pre-review-failures.json").exists())
         self.assertEqual((self.logs / "gone.log").read_text(), "missing program: factory-test-no-such-program\n")
         self.assertEqual((self.logs / "noexec.log").read_text(), "missing program: ./README.md\n")
 

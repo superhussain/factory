@@ -96,7 +96,7 @@
                                             ask whether a review round's CHANGES findings need a person,
                                             print one JSON verdict
   factory.py repeats <project-slug>/<job-id> <round>
-                                            compare a review round's CHANGES signatures with the round before, print one JSON verdict
+                                            compare a review round's CHANGES signatures with every earlier round, print one JSON verdict
                                               and flag files changed in each of the last 3 fix rounds
   factory.py review-plan <project-slug>/<job-id> <round>
                                             skip the ux and ui reviews of a round that changes nothing a person sees, print one JSON plan
@@ -2012,7 +2012,7 @@ def build_disputes(text):
 
 
 def repeats_cmd(target, round_text):
-    """Print one JSON verdict on whether a reviewer repeats a CHANGES signature from the round before."""
+    """Print one JSON verdict on whether a reviewer repeats a CHANGES signature from any earlier round."""
     home, slug, job_id = r2_target(target, True)
     if not re.fullmatch(r"[1-9][0-9]*", round_text):
         fail("round must be a positive integer", 2)
@@ -2024,11 +2024,13 @@ def repeats_cmd(target, round_text):
         if not path.is_file():
             fail(f"{path} is missing: the round is not complete", 4)
     repeats = []
-    if n > 1:
-        before = job / f"round-{n - 1}"
-        for name in TRACER_REVIEWERS:
-            same = review_signatures(folder / f"review-{name}.md") & review_signatures(before / f"review-{name}.md")
-            repeats += [{"reviewer": name, "signature": s} for s in sorted(same)]
+    for name in TRACER_REVIEWERS:
+        now_signatures = review_signatures(folder / f"review-{name}.md")
+        first = {}
+        for k in range(n - 1, 0, -1):
+            for s in now_signatures & review_signatures(job / f"round-{k}" / f"review-{name}.md"):
+                first[s] = k
+        repeats += [{"reviewer": name, "signature": s, "first": first[s]} for s in sorted(first)]
     wt = home / "worktrees" / slug / job_id
     churn = churn_files(job, wt, n) if n >= 4 else []
     decision = "repeat" if repeats else "churn" if churn else "continue"
@@ -7505,6 +7507,19 @@ def round_changed_files(wt, head, new="HEAD"):
     return None if diff.returncode else [p for p in diff.stdout.split("\0") if p]
 
 
+def round_own_files(wt, old, new):
+    """The paths the job's own commits change from old to new, walking the first-parent chain and skipping merges,
+    or None when old is not an ancestor of new or git fails."""
+    if subprocess.run(["git", "-C", str(wt), "merge-base", "--is-ancestor", old, new],
+                      capture_output=True).returncode:
+        return None
+    log = subprocess.run(["git", "-C", str(wt), "log", "--first-parent", "--no-merges", "--no-renames", "--name-only",
+                          "-z", "--format=", f"{old}..{new}"], capture_output=True, text=True)
+    if log.returncode:
+        return None
+    return [p for p in (p.strip("\n") for p in log.stdout.split("\0")) if p]
+
+
 CHURN_ROUNDS = 3
 
 
@@ -7525,7 +7540,7 @@ def churn_files(folder, wt, n):
     heads = [round_head(folder, k) for k in range(n - CHURN_ROUNDS, n + 1)]
     if None in heads or not wt.is_dir():
         return []
-    sets = [round_changed_files(wt, old, new) for old, new in zip(heads, heads[1:])]
+    sets = [round_own_files(wt, old, new) for old, new in zip(heads, heads[1:])]
     if None in sets:
         return []
     common = set.intersection(*map(set, sets))
@@ -7738,6 +7753,28 @@ def run_check(argv, cwd, log, timeout):
     return code, round(time.monotonic() - start)
 
 
+TRANSIENT_LOG = re.compile(r"ECONNRESET|ETIMEDOUT|EAI_AGAIN|Connection reset by peer|Temporary failure in name resolution"
+                           r"|Could not resolve host|429 Too Many Requests|502 Bad Gateway|503 Service Unavailable"
+                           r"|504 Gateway Timeout")
+
+
+def failure_class(code, log):
+    """A check result's class: None on a pass, else budget, structural, canceled, transient or deterministic.
+    The transient match reads the last 65536 bytes of the log file."""
+    if code == 0:
+        return None
+    if code == "timeout":
+        return "budget"
+    if code in ("missing", 126, 127):
+        return "structural"
+    if code < 0 or code in (130, 143):
+        return "canceled"
+    with open(log, "rb") as f:
+        f.seek(max(0, f.seek(0, os.SEEK_END) - 65536))
+        tail = f.read().decode("utf-8", errors="replace")
+    return "transient" if TRANSIENT_LOG.search(tail) else "deterministic"
+
+
 def pre_review_tail(log_text, env):
     """The last PRE_REVIEW_TAIL lines of a failing check's log for pre-review.md: home .env values of
     ENV_SECRET_MIN or more characters and retro_redact's patterns as [redacted], each line printable,
@@ -7822,14 +7859,21 @@ def pre_review_cmd(target):
     checks_sha = (git("rev-parse", f"origin/{base}") or "").strip()
     results = []
     for check in checks:
-        code, seconds = run_check(check["run"], wt, logs / f"{check['name']}.log", PRE_REVIEW_TIMEOUT)
-        results.append({"name": check["name"], "exit": code, "seconds": seconds})
+        log = logs / f"{check['name']}.log"
+        code, seconds = run_check(check["run"], wt, log, PRE_REVIEW_TIMEOUT)
+        kind, retried = failure_class(code, log), False
+        if kind == "transient":
+            os.replace(log, logs / f"{check['name']}.attempt-1.log")
+            code, seconds = run_check(check["run"], wt, log, PRE_REVIEW_TIMEOUT)
+            kind, retried = failure_class(code, log), True
+        results.append({"name": check["name"], "exit": code, "seconds": seconds, "class": kind, "retried": retried})
     failed = [r for r in results if r["exit"] != 0]
     result = "fail" if failed else "pass"
     lines = [f"PRE-REVIEW: {result.upper()}", "", f"Head: {head}", budget_line(budget),
              f"Checks: origin/{base}:{CHECKS_FILE} at {checks_sha}", f"Logs: {logs}", "",
-             "| Check | Exit | Seconds |", "| --- | --- | --- |"]
-    lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} |" for r in results]
+             "| Check | Exit | Seconds | Class |", "| --- | --- | --- | --- |"]
+    lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} | {r['class'] or '-'}"
+              f"{', retried' if r['retried'] else ''} |" for r in results]
     if budget["result"] == "over":
         lines += ["", "## Diff budget", "", "| Measure | Spec estimate | Limit | Branch |", "| --- | --- | --- | --- |",
                   f"| Files | {budget['expected_files']} | {budget['file_limit']} | {budget['files']} |",
@@ -7850,8 +7894,8 @@ def pre_review_cmd(target):
         lines += ["", f"## {r['name']}", "", "~~~text", *tail, "~~~"]
     write_atomic(str(out_file), "\n".join(lines) + "\n")
     repeats = []
-    if failed:
-        names = {r["name"] for r in failed}
+    names = {r["name"] for r in failed if r["class"] == "deterministic"}
+    if names:
         record_file = make_job_temp(slug, job_id) / "pre-review-failures.json"
         try:
             record = json.loads(record_file.read_text(encoding="utf-8"))
@@ -7862,7 +7906,7 @@ def pre_review_cmd(target):
             record = {}
         record[str(round_n)] = sorted(names | set(record.get(str(round_n), [])))
         write_atomic(str(record_file), json.dumps(record) + "\n")
-        repeats = sorted(names & set(record.get(str(round_n - 1), [])))
+        repeats = sorted(names & {n for k, v in record.items() if k.isdecimal() and int(k) < round_n for n in v})
     print(json.dumps({"result": result, "head": head, "checks": results, "reason": None, "round": round_n,
                       "repeats": repeats, "budget": budget}))
     if failed:
