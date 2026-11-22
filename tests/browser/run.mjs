@@ -417,7 +417,12 @@ const CAPTURE_BACKLOG =
   "# Backlog\n\n- [ ] sample: Synthetic backlog item with a long description that runs well past three lines on a narrow card, so the board cuts it off and the drawer shows every word of it, including this closing clause\n" +
   CAPTURE_BACKLOG_CONTEXT +
   "\n- [ ] sample: Synthetic follow-on slice (sub-job-of 001-capture)   \n" +
-  "- [ ] sample: Synthetic weekly report export with date, campaign and spend columns (rework-of 004-rework-capture)\n";
+  "- [ ] sample: Synthetic weekly report export with date, campaign and spend columns (rework-of 004-rework-capture)\n" +
+  "- [ ] sample: Lesson: Worker route changes run pnpm test:protocol; pnpm test skips them.\n" +
+  "  Recommend: approve\n\n" +
+  "  Approve adds this bullet to sample/notes.md. No job starts.\n" +
+  "  Why it waits: The close reason names the command but not which routes need it.\n\n" +
+  "  Lesson: from 001-capture, queued 2026-10-27\n";
 const CAPTURE_LONG_TITLE =
   "Synthetic project with a very long title that runs well past the edge of a narrow phone screen";
 const CAPTURE_TRIAGE_ITEM = "sample: Synthetic follow-on slice (sub-job-of 001-capture)";
@@ -788,9 +793,11 @@ async function capture(outdir, referencePath) {
                   return request.respond({
                     status: 200,
                     contentType: "text/markdown",
-                    body:
-                      CAPTURE_BACKLOG +
-                      "  Depends on: sample: Synthetic follow-on slice (sub-job-of 001-capture)\n",
+                    body: CAPTURE_BACKLOG.replace(
+                      "(rework-of 004-rework-capture)\n",
+                      "(rework-of 004-rework-capture)\n" +
+                        "  Depends on: sample: Synthetic follow-on slice (sub-job-of 001-capture)\n",
+                    ),
                   });
                 if (retrosBadge && target.pathname === "/api/retros")
                   return request.respond({
@@ -1794,9 +1801,9 @@ async function capture(outdir, referencePath) {
       await page.waitForSelector("#backlog-form");
       await page.waitForSelector("#backlog-triage:not([hidden])");
     };
-    // The after side waits until the board has prefetched all three triage verdicts.
+    // The after side waits until the board has prefetched all four triage verdicts.
     const openTriagePrefetched = async (page, side) => {
-      if (side === "after") await page.waitForFunction(() => backlogTriageSeen.size === 3);
+      if (side === "after") await page.waitForFunction(() => backlogTriageSeen.size === 4);
       await page.click('.backlog-card[data-index="1"]');
       await page.waitForSelector("#backlog-form");
     };
@@ -2855,6 +2862,16 @@ async function capture(outdir, referencePath) {
     await view("backlog-answered-mobile", 390, 844, "dark", openAnswered);
     await view("backlog-rework-desktop", 1440, 900, "light", openRework);
     await view("backlog-rework-mobile", 390, 844, "dark", openRework);
+    const openLesson = async (page) => {
+      await page.evaluate(() =>
+        [...document.querySelectorAll(".backlog-card")]
+          .find((card) => card.textContent.includes("Lesson: Worker route"))
+          .click(),
+      );
+      await page.waitForSelector("#backlog-form");
+    };
+    await view("backlog-lesson-desktop", 1440, 900, "light", openLesson);
+    await view("backlog-lesson-mobile", 390, 844, "dark", openLesson);
     // Both sides refuse the approve. Only the after side shows the link.
     const openRefusal = async (page) => {
       await page.click('.backlog-card[data-index="2"]');
