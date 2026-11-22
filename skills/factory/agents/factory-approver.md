@@ -36,6 +36,13 @@ the path, the spec task that names it, and why every check stays at least as str
 A path no spec task names is ESCALATE. When `protected` is null or no plan file
 exists, apply this rule to every such file in the diff.
 
+**Plan head and tier.** Run `git rev-parse factory/<id>`. When the plan file has no
+`head`, or its `head` differs, treat `protected` as null and the plan's `tier` as
+unknown. When the tier is `low`, `medium` or unknown, and the diff touches auth,
+credentials, sandboxing, storage or state layout, a protocol or wire format, a
+migration, a dependency or a protected path, return CHANGES and put the reason under
+a `## Full review` heading, so the next round runs every reviewer on the default route.
+
 CHANGES sends the job back to the builder for one more fix round. Use it for gaps
 the builder can close:
 a UI change with no screenshots, a criterion that is only claimed when it could be

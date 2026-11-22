@@ -13,7 +13,7 @@ Credentials are covered under [Secrets stay out of configuration](#secrets-stay-
 | Connection descriptor | `.build/connection.json`, exactly `{"version":1,"api_url":...}` | Handoff to devices | `tools/deploy.py render` | `project_wrangler`; runtime `load_connection` |
 | Device config | `<home>/config.md` frontmatter | One device | Device owner | runtime `api_url`, `holder`, agents install (`*_agents_dir`) |
 | Device checkout paths | `<home>/paths.md` | One device | `init <repo>` | runtime `init`, `validate_home` |
-| Device dispatch routes | `<home>/routes.md` | One device | Device owner, by hand | runtime `read_routes`, `routes` |
+| Device dispatch routes | `<home>/routes.md` | One device | Device owner, by hand | runtime `read_routes`, `read_review_routes`, `routes` |
 | Device launchers | `<home>/launchers.json` | One device | Device owner, by hand | runtime `read_launchers`, `pickup` |
 | Device stall adapter | `<home>/stalls.json` | One device | Device owner, by hand | runtime `read_stalls`, `pickup` |
 | Device Tracer mirror | `<home>/tracer.json` | One device | Device owner, by hand | runtime `read_tracer`, `tracer` |

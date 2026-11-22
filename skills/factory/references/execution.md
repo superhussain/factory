@@ -56,6 +56,9 @@ stops the old worker, then launches a fresh builder against the same files.
   configured model family different from the builder's. An inherited model is a
   configured route only when the user's policy permits it, not evidence of
   independent review. Select another configured family or report the limitation.
+- `review-plan` prints a `routes` entry per reviewer from the host's optional
+  `review-low` and `review-medium` lines in `routes.md`. That entry beats the
+  family preference above. The builder and the approver never take a review route.
 
 The general-worker fallback applies only when a runtime cannot register named
 roles, or during an explicit bootstrap before native role installation. Then pass

@@ -240,6 +240,7 @@ PASEO_ID = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
 ADAPTER_ID = re.compile(r"[0-9a-fA-F][0-9a-fA-F-]{7,63}")
 ROUTE_MODEL = re.compile(r"[A-Za-z0-9_./:@\[\]-]{1,200}", re.ASCII)
 ROUTE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+REVIEW_ROUTE_KEYS = ("review-low", "review-medium")
 HERE = os.path.dirname(os.path.abspath(__file__))
 WINDOWS = os.name == "nt"
 FALLBACK_CA_FILE = "/etc/ssl/cert.pem"
@@ -3688,14 +3689,34 @@ def read_routes(home):
              "as <name>: <provider> <model> [<effort>]", 2)
     routes = []
     for name, value in meta.items():
-        # The optional experiment line is config, not a route.
-        if name == "experiment":
+        # The optional experiment and review lines are config, not routes.
+        if name == "experiment" or name in REVIEW_ROUTE_KEYS:
             continue
         parts = value.split()
         if not SLUG.fullmatch(name) or len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) \
                 or not ROUTE_MODEL.fullmatch(parts[1]) or parts[2:] and parts[2] not in ROUTE_EFFORTS:
             fail(f"bad route {name!r} in {path}: use <name>: <provider> <model> [<effort>]", 2)
         routes.append((name, parts[0], parts[1], parts[2] if len(parts) == 3 else None))
+    return routes
+
+
+def read_review_routes(home):
+    """{"low": route or None, "medium": route or None} from routes.md's optional review-low and review-medium
+    lines, each route {name, provider, model, effort}."""
+    path = Path(home, "routes.md")
+    meta = frontmatter(path)[0] if path.exists() else {}
+    routes = {}
+    for key in REVIEW_ROUTE_KEYS:
+        tier, value = key.split("-", 1)[1], meta.get(key)
+        if value is None:
+            routes[tier] = None
+            continue
+        parts = value.split()
+        if len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) or not ROUTE_MODEL.fullmatch(parts[1]) \
+                or parts[2:] and parts[2] not in ROUTE_EFFORTS:
+            fail(f"bad review route {key} in {path}: use {key}: <provider> <model> [<effort>]", 2)
+        routes[tier] = {"name": key, "provider": parts[0], "model": parts[1],
+                        "effort": parts[2] if len(parts) == 3 else None}
     return routes
 
 
@@ -6827,6 +6848,40 @@ def plan_reason(spec_text, decision_text, changed, globs):
                    "matches a visible-file glob")
 
 
+def review_tier(spec_text, decision_text, protected):
+    """(tier, reason): the spec's Review tier line, raised to high by the first floor that applies.
+    The spec text never lowers a floor."""
+    if re.search(r"^## Full review[ \t]*$", decision_text, re.M):
+        return "high", "decision.md asks for a full review"
+    if protected is None:
+        return "high", "the protected paths could not be read"
+    if protected:
+        return "high", "the branch touches protected paths"
+    line = re.search(r"^Tier:\s*(low|medium|high)\s*$", markdown_section(spec_text, "Review tier") or "",
+                     re.M | re.I)
+    if not line:
+        return "high", "spec.md has no Review tier line"
+    tier = line.group(1).lower()
+    return tier, f"spec.md rates the job {tier}"
+
+
+def fetch_base(wt, base):
+    """None once origin/<base> in wt matches the remote, or why it cannot be trusted. A factory/ base is a job
+    branch a builder can push, so it is refused."""
+    if base.startswith("factory/"):
+        return f"base {base} is a factory branch"
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}", base) or ".." in base:
+        return f"base {base} is not a safe branch name"
+    # git's stderr can carry origin's URL, credentials included, so the reason leaves it out.
+    try:
+        r = subprocess.run(["git", "-C", str(wt), "fetch", "-q", "origin",
+                            f"+refs/heads/{base}:refs/remotes/origin/{base}"], capture_output=True,
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=120)
+    except subprocess.TimeoutExpired:
+        return f"could not fetch origin {base}"
+    return f"could not fetch origin {base}" if r.returncode else None
+
+
 def changed_files(wt, base):
     """The paths the worktree's branch changes since it left origin/<base>, or None on any git failure."""
     mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
@@ -6867,7 +6922,7 @@ def previous_head(folder, n):
 def review_plan_cmd(target, round_text):
     """Write SKIPPED ux and ui reviews for a round that changes nothing a person sees, and print one JSON plan.
     Any doubt (no worktree, a git failure, no Acceptance criteria section) runs all four reviewers.
-    It also lists the branch's protected paths for the approver."""
+    It also lists the branch's protected paths for the approver, and each reviewer's route for the review tier."""
     home, slug, job_id = r2_target(target, True)
     if not re.fullmatch(r"[1-9][0-9]*", round_text):
         fail("round must be a positive integer. " + REVIEW_PLAN_USAGE, 2)
@@ -6887,6 +6942,8 @@ def review_plan_cmd(target, round_text):
             fail(f"{node} is a symlink or junction; nothing was written", 6)
     if not (folder / "spec.md").is_file():
         fail(f"{folder / 'spec.md'} is missing", 4)
+    review_routes = read_review_routes(home)
+    spec_text = (folder / "spec.md").read_text(encoding="utf-8")
     decision = folder / "decision.md"
     decision_text = decision.read_text(encoding="utf-8") if decision.is_file() else ""
     n = int(round_text)
@@ -6902,7 +6959,7 @@ def review_plan_cmd(target, round_text):
         for name in SKIPPABLE_REVIEWERS)
     fixed = round_changed_files(wt, prev[1]) if passed else None
     globs = visible_globs(project_file)
-    branch = changed_files(wt, base) if wt.is_dir() else None
+    branch = changed_files(wt, base) if wt.is_dir() and not fetch_base(wt, base) else None
     protected = touched_protected(branch) if branch is not None else None
     if fixed is not None:
         hit = next(((path, g) for path in fixed for g in globs if fnmatch.fnmatchcase(path, g)), None)
@@ -6916,22 +6973,26 @@ def review_plan_cmd(target, round_text):
     elif branch is None:
         visible, reason = True, f"the diff against origin/{base} could not be read"
     else:
-        visible, reason = plan_reason((folder / "spec.md").read_text(encoding="utf-8"), decision_text, branch, globs)
+        visible, reason = plan_reason(spec_text, decision_text, branch, globs)
     if not visible:
         for path in targets:
             if path.exists():
                 fail(f"{path} already exists; nothing was written", 6)
+    tier, tier_reason = review_tier(spec_text, decision_text, protected)
+    run = list(TRACER_REVIEWERS) if visible else ["security", "code"]
+    # A low job keeps security on the medium route; a high job keeps every reviewer on the default.
+    routes = dict.fromkeys(run) if tier == "high" else {
+        r: review_routes["medium" if tier == "medium" or r == "security" else "low"] for r in run}
     if head:
         round_folder.mkdir(exist_ok=True)
-        write_atomic(str(plan_file), json.dumps({"round": n, "head": head, "protected": protected}) + "\n")
-    if visible:
-        print(json.dumps({"round": n, "run": list(TRACER_REVIEWERS), "skipped": [], "reason": reason,
-                          "protected": protected}))
-        return
-    for path in targets:
-        write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
-    print(json.dumps({"round": n, "run": ["security", "code"], "skipped": list(SKIPPABLE_REVIEWERS),
-                      "reason": reason, "protected": protected}))
+        write_atomic(str(plan_file), json.dumps({"round": n, "head": head, "protected": protected, "tier": tier,
+                                                 "routes": routes}) + "\n")
+    if not visible:
+        for path in targets:
+            write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
+    print(json.dumps({"round": n, "run": run, "skipped": [] if visible else list(SKIPPABLE_REVIEWERS),
+                      "reason": reason, "protected": protected, "tier": tier, "tier_reason": tier_reason,
+                      "routes": routes}))
 
 
 CHECKS_FILE = ".factory/checks.json"
@@ -7007,8 +7068,10 @@ def pre_review_cmd(target):
         return None if proc.returncode else proc.stdout
 
     head = (git("rev-parse", "HEAD") or "").strip() or None
-    text = git("show", f"origin/{base}:{CHECKS_FILE}")
-    checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
+    checks, reason = [], fetch_base(wt, base)
+    if not reason:
+        text = git("show", f"origin/{base}:{CHECKS_FILE}")
+        checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
     if reason:
         write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\nReason: {printable_line(reason, 300)}\n")
         print(json.dumps({"result": "none", "head": head, "checks": [], "reason": reason}))

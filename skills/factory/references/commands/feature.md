@@ -48,8 +48,13 @@ feature.
    approver. Spawn only the reviewers in its
    `run` list, from `factory-review-security`, `factory-review-ux`,
    `factory-review-ui`, and `factory-review-code`, each with the pointer to its own
-   `prompt "$SLUG/<id>" review-<r> --round <N> --out` file. A non-zero exit
-   spawns all four and puts its stderr line in the board `note`.
+   `prompt "$SLUG/<id>" review-<r> --round <N> --out` file.
+   Dispatch each reviewer `<r>` on `routes.<r>` from the plan: null keeps the
+   default reviewer selection, and a route runs on its `provider`, `model` and
+   `effort` through the runtime's own model selection, recorded with `agent record`.
+   When the runtime cannot select that model, dispatch on the default and record the
+   model that ran. A disputed-only round re-runs reviewers on the default.
+   A non-zero exit spawns all four and puts its stderr line in the board `note`.
    With a stacked rider, every reviewer and the approver get `$WORKTREES/<rider-id>`
    and `factory/<rider-id>` in place of the job's worktree and branch, since that
    branch holds the whole stack.
