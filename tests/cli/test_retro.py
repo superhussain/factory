@@ -730,6 +730,45 @@ class RetroAggregateTest(RetroWorkerCase):
         self.assertEqual([r["job"] for r in lessons], [j["id"] for j in expected])
         self.assertEqual(len(lessons), factory.RETRO_LESSONS_MAX)
 
+    def test_aggregate_lists_repeated_findings(self):
+        today = datetime.now().date()
+        inside = f"{today.isoformat()}T10:00:00Z"
+        earlier = f"{(today - timedelta(days=2)).isoformat()}T10:00:00Z"
+        csv = {"round": 2, "first": 1, "reviewer": "code", "signature": "worker/export.js#missing-person-check",
+               "at": earlier}
+        zip_ = {"round": 3, "first": 1, "reviewer": "code", "signature": "worker/zip.js#missing-person-check",
+                "at": inside}
+        jobs = [{"id": "1748-export-csv", "project": "factory", "title": "Export CSV", "stage": "merged",
+                 "done": inside, "repeated": [csv]},
+                {"id": "1760-export-zip", "project": "factory", "title": "Export ZIP", "stage": "review",
+                 "repeated": [zip_]}]
+        pushed = {0: {"host-a": [digest_row("host-a", S1, job="1760")]}}
+        self.assertEqual(self.lessons(jobs, pushed), [
+            {"job": "1760-export-zip", "project": "factory", "kind": "repeated-finding", "title": "Export ZIP",
+             "reason": "code repeated worker/zip.js#missing-person-check from round 1 in round 3", "at": inside,
+             "sessions": [f"host-a/{S1}"], "reviewer": "code", "signature": "worker/zip.js#missing-person-check"},
+            {"job": "1748-export-csv", "project": "factory", "kind": "repeated-finding", "title": "Export CSV",
+             "reason": "code repeated worker/export.js#missing-person-check from round 1 in round 2",
+             "at": earlier, "sessions": [], "reviewer": "code",
+             "signature": "worker/export.js#missing-person-check"}])
+
+    def test_aggregate_skips_repeated_findings(self):
+        today = datetime.now().date()
+        inside = f"{today.isoformat()}T10:00:00Z"
+        outside = f"{(today - timedelta(days=9)).isoformat()}T10:00:00Z"
+        good = {"round": 2, "first": 1, "reviewer": "code", "signature": "worker/export.js#missing-person-check",
+                "at": inside}
+        bad = [dict(good, at=outside), dict(good, reviewer="builder"), dict(good, signature="worker/export.js"),
+               dict(good, signature="see https://example.test/x#a-b"), dict(good, round=0), dict(good, first="1"),
+               dict(good, round=True), dict(good, at=None), "code repeated it"]
+        jobs = [{"id": "1748-export-csv", "project": "factory", "title": "Export CSV", "stage": "review",
+                 "repeated": bad},
+                {"id": "1749-elsewhere", "project": "unregistered", "title": "Elsewhere", "stage": "review",
+                 "repeated": [good]},
+                {"id": "1750-not-a-list", "project": "factory", "title": "Not a list", "stage": "review",
+                 "repeated": good}]
+        self.assertEqual(self.lessons(jobs), [])
+
     def test_aggregate_counts_reviewer_accept_rate(self):
         today = datetime.now().date()
         job = {"id": "1740-cap-backlog", "project": "factory", "title": "Cap backlog", "stage": "merged",

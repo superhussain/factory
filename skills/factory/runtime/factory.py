@@ -13327,14 +13327,37 @@ def retro_red_flags(index, board, projects, rows):
     return out
 
 
+def retro_repeated(job, rows, since):
+    """A repeated-finding row for each valid entry of the job's repeated list from the window start on, at any
+    stage. sessions holds up to 5 digest refs of the job on any host."""
+    listed = job.get("repeated")
+    number = job["id"].split("-", 1)[0]
+    refs = list(dict.fromkeys(f"{r['host']}/{r['session']}" for r in rows if str(r.get("job")) == number))[:5]
+    out = []
+    for r in listed if isinstance(listed, list) else []:
+        if not (isinstance(r, dict) and r.get("reviewer") in TRACER_REVIEWERS
+                and isinstance(r.get("signature"), str) and REPEATED_SIGNATURE.fullmatch(r["signature"])
+                and all(type(r.get(k)) is int and r[k] >= 1 for k in ("round", "first"))
+                and isinstance(r.get("at"), str) and r["at"][:10] >= since):
+            continue
+        out.append({"job": job["id"], "project": job["project"], "kind": "repeated-finding",
+                    "title": printable_line(str(job.get("title", "")), 120),
+                    "reason": f"{r['reviewer']} repeated {r['signature']} from round {r['first']} in round {r['round']}",
+                    "at": r["at"], "sessions": refs, "reviewer": r["reviewer"], "signature": r["signature"]})
+    return out
+
+
 def retro_lessons(board, projects, rows, since):
-    """Closed jobs of registered projects done since the window start, newest first, at most RETRO_LESSONS_MAX.
-    A denied job gives its deny notes as reason; a job with a PR gives close.reason, else its note. A row whose
-    reason is empty or fails check_text is dropped. sessions holds up to 5 digest refs of the job on any host."""
+    """Lessons from jobs of registered projects since the window start, newest first, at most RETRO_LESSONS_MAX:
+    each valid repeated entry at any stage, plus each closed job done since then. A denied job gives its deny
+    notes as reason; a job with a PR gives close.reason, else its note. A closed row whose reason is empty or
+    fails check_text is dropped. sessions holds up to 5 digest refs of the job on any host."""
     out = []
     for j in board["jobs"]:
-        if j.get("stage") != "closed" or not isinstance(j.get("done"), str) or j["done"][:10] < since \
-                or j.get("project") not in projects:
+        if j.get("project") not in projects:
+            continue
+        out += retro_repeated(j, rows, since)
+        if j.get("stage") != "closed" or not isinstance(j.get("done"), str) or j["done"][:10] < since:
             continue
         backlog = retro_dict(j.get("backlog"))
         if backlog.get("decision") == "denied":
