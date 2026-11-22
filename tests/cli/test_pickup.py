@@ -1982,6 +1982,13 @@ class TokenCapTest(PickupFixture):
         self.totals.assert_not_called()
         self.assertEqual(self.puts(), [])
 
+    def test_negative_counts_are_skipped(self):
+        self.set_cap()
+        self.export(tokens={"host-b": {"at": "2026-01-01T09:00:00Z", "transcripts": 1,
+                                       "models": {"model-b": {"input": 0, "output": -300000, "cache_write": 0}}}})
+        self.output(1310000)
+        self.assertEqual(self.pickup(), (0, f"needs-human 042-sample-export alpha: {self.PARK}\n", ""))
+
 
 class PauseTest(PickupFixture):
     PAUSED = {"at": "2026-01-02T12:00:00Z"}

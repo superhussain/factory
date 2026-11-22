@@ -11746,9 +11746,10 @@ TOKEN_WARN_PERCENT = 80
 
 
 def token_count(models):
-    """Input, output and cache_write tokens summed over a {model: {kind: tokens}} map. cache_read is left out."""
+    """Input, output and cache_write tokens summed over a {model: {kind: tokens}} map. cache_read and
+    negative counts are left out."""
     return sum(v for counts in models.values() if isinstance(counts, dict)
-               for k, v in counts.items() if k in ("input", "output", "cache_write") and type(v) is int)
+               for k, v in counts.items() if k in ("input", "output", "cache_write") and type(v) is int and v >= 0)
 
 
 def job_token_cap(home):
